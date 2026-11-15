@@ -2,6 +2,7 @@ import type pg from 'pg';
 import type {Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
+import {appBindingOf} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
 import type {Brain,TurnReceipt} from '../brain/brain.js';
 import type {RuntimeCall} from '../runtime.js';
@@ -282,7 +283,10 @@ export class ActionContinuationRepository {
           WHERE c.run_id=$1 ORDER BY a.created_at,c.action_id`,[id])).rows;
         const text=continuationText((await ownerPrompts(this.control))['telegram.action_continued']??actionContinued,members),attempts=row.attempts+1;
         // The asking message's routing, so the answer is a reply to it in its topic; no fixed reply and no group admission.
-        const body={channel:'telegram',event_id:row.event_id,source_key:original.source_key,scope:original.scope,payload:dispatchPayload(payload,null,text),
+        // Its chat, topic and app binding as a reply's turn names them, which Hermes and the bot check against its pass (ADR-0252).
+        const app=appBindingOf(space);
+        const body={channel:'telegram',event_id:row.event_id,source_key:original.source_key,scope:original.scope,chat:scope.chat_id,space,...(app?{app}:{}),
+          payload:dispatchPayload(payload,null,text),
           text,transcripts:[],files:[],attempt:continuationAttempt(id,attempts),continuation:id,guard_mode:binding.mode};
         input={binding,principal,body};await this.prepared.allow(principal,{text});await currentTurn(this,input);
         const reference=await this.derived.record({operation_id:'action-continuation-input:'+digest(canonical(input)),source:captured.reference,

@@ -26,6 +26,28 @@ class ProfileConfigurationTests(unittest.TestCase):
                 self.assertFalse((actual/'memories/MEMORY.md').exists(),'old notes cannot silently enter the new guarded generation')
             self.assertNotEqual(paths[0],paths[1])
 
+    def test_a_topic_profile_from_before_step_2b_inherits_its_group_through_the_served_list(self):
+        # Its marker was written before markers kept their chat (ADR-0252): the group comes from the served list, as it
+        # came from the topic's id before, so the owner sees and edits the group's inherited values, not stale ones.
+        import json
+        from services.chats import Served
+        from .profile_config import inspect_profile
+        from .scopes import Scopes
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);topic='-1001000000001/topic/7';group='-1001000000001'
+            served=Served.of('123',groups=[group],topics=[(topic,group,'7')])
+            parent=root/'profiles'/Scopes.profile(group)
+            first=configure_profile(parent,'subscription-model')
+            configure_profile(parent,'subscription-model',{'agent.max_iterations':7},first['revision'])
+            revisioned=root/'profiles'/Scopes.profile(topic+':policy:3');revisioned.mkdir(parents=True)
+            (revisioned/'space.json').write_text(json.dumps({'space':topic,'revision':3,'owner':False}))
+            with patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':str(root)}):
+                self.assertEqual(inspect_profile(revisioned,'subscription-model',served)['values']['agent.max_iterations'],7)
+                self.assertNotEqual(inspect_profile(revisioned,'subscription-model')['values']['agent.max_iterations'],7,
+                                    'without the list there is nothing to name its group')
+                # A topic the list does not hold reads its own, never another chat's.
+                self.assertNotEqual(inspect_profile(revisioned,'subscription-model',Served.of('123',groups=[group]))['values']['agent.max_iterations'],7)
+
     def test_preferences_survive_turn_preparation_but_policy_cannot_change(self):
         with tempfile.TemporaryDirectory() as folder:
             profile = Path(folder)

@@ -1,11 +1,12 @@
 /** Pure helpers for the Chats page: chat names, the chat tree and the Telegram access settings. */
+import type {ChatApp, ChatAppLabel, ChatKind, ChatState} from '../../src/chat-wire';
 import {participantAllowed, switchDecision, type ParticipantRule} from './group-access';
 import {sourceDate} from './messages-format';
 
 export type Chat = {
   space_id: string;
   name: string | null;
-  kind: string;
+  kind: ChatKind | 'unknown';
   parent_space?: string | null;
   parent_name?: string | null;
   configured?: boolean;
@@ -13,41 +14,110 @@ export type Chat = {
   closed?: boolean;
   registered?: boolean;
   telegram?: {state: string; migrate_to_chat_id: string | null} | null;
+  /**
+   * From the chat directory (ADR-0252). The dashboard reads what a chat is from these fields and never works it out
+   * from its id: the id is Nocheh's own and says nothing.
+   */
+  topic_key?: string | null;
+  /** The chat's ids in its app, current first, then older ones (a group Telegram upgraded). A topic has its group's. */
+  app_ids?: ChatAppLabel[];
+  is_forum?: boolean | null;
+  /** Where Nocheh stands in the chat; a topic has its group's. */
+  state?: ChatState | null;
+  /** The owner's private chat, or one of its topics. */
+  owner?: boolean;
 };
 export type Directory = {items: Chat[]; next_cursor: string | null; total?: number};
-export type Person = {id: string; name?: string | null; username?: string | null};
-export type IdentityGroup = {id: string; name?: string | null; users?: Person[]};
+/** A person Nocheh saw in a group: whether they are in it now, and whether the group's own messages show them (they wrote
+ * there, or a message there says they joined). Someone known only from leaving or a member update has `seen` false. */
+export type Person = {
+  id: string;
+  name?: string | null;
+  username?: string | null;
+  state?: 'in' | 'left';
+  seen?: boolean;
+};
+/** A group people were seen in: its Nocheh chat id, or the Telegram id TELEGRAM_GROUP_IDS gives for a group only that
+ * list names, and its current Telegram id. */
+export type IdentityGroup = {id: string; external?: string | null; name?: string | null; users?: Person[]};
 export type AccessRule = {granted: string[]; denied: string[]};
 export type AccessMap = Record<string, AccessRule>;
+/** Looks a chat up by its Nocheh id in the chat directory; null when no chat has that id. */
+export type FindChat = (space: string | null | undefined) => Chat | null;
 
-/** A chat or topic ID: `42`, `-10042` or `-10042/topic/7`. */
-export const isSpaceId = (text: string) => /^-?[1-9]\d{0,18}(\/topic\/[1-9]\d{0,9})?$/.test(text.trim());
+/** A Telegram user ID, typed by the owner for group access. Not a chat id. */
 export const validUserId = (text: string) => /^[1-9]\d{0,18}$/.test(text.trim());
-export const parentOf = (space: string) => (space.includes('/topic/') ? space.split('/topic/')[0]! : null);
-export const topicNumber = (space: string) => Number(space.split('/topic/')[1]);
-/** A group or one of its topics: the only chats that share, are shared with or join a project. Every other
- * chat counts as private, as the server's groupSpace does (ADR-0242). */
-export const groupSpace = (space: string) => /^-[1-9]\d{0,18}(\/topic\/[1-9]\d{0,15})?$/.test(space);
-export const inferKind = (space: string) =>
-  space.includes('/topic/') ? 'topic' : space.startsWith('-') ? 'group' : 'private';
 
-/** A chat known only by its ID, for links to chats outside the loaded list. */
-export function chatFromId(space: string): Chat {
-  return {space_id: space, name: null, kind: inferKind(space), parent_space: parentOf(space)};
+/** A chat known only by its id, for links to chats outside the loaded list. Nothing is read from the id. */
+export const unknownChat = (space: string, name: string | null = null): Chat => ({
+  space_id: space,
+  name,
+  kind: 'unknown',
+  parent_space: null,
+});
+
+/** A chat's ids in an app, current first, then older ones. Labels only: shown, and matched with archive originals. */
+export const appIds = (chat: Chat | null | undefined, app: ChatApp = 'telegram'): string[] =>
+  (chat?.app_ids ?? []).filter(label => label.app === app).map(label => label.external);
+/** The id the app uses for a chat now, or null when it has none. */
+export const currentAppId = (chat: Chat | null | undefined, app: ChatApp = 'telegram'): string | null =>
+  chat?.app_ids?.find(label => label.app === app && label.state === 'current')?.external ?? null;
+const appNames: Record<ChatApp, string> = {telegram: 'Telegram', slack: 'Slack'};
+/** "Telegram ID -1001…", and "earlier -4…" for a group Telegram upgraded; null for a chat with no app id. */
+export function appIdLabel(chat: Chat | null | undefined): string | null {
+  const labels = chat?.app_ids ?? [];
+  const current = labels.find(label => label.state === 'current');
+  if (!current) return null;
+  const earlier = labels
+    .filter(label => label.state === 'old' && label.app === current.app)
+    .map(label => label.external);
+  return (
+    `${appNames[current.app] ?? current.app} ID ${current.external}` +
+    (earlier.length ? ` · earlier ${earlier.join(', ')}` : '')
+  );
 }
 
-export function chatName(chat: Chat | null | undefined, owner?: string): string {
+/** A topic's group or private chat; null for anything else. */
+export const parentOf = (chat: Chat | null | undefined): string | null =>
+  chat?.kind === 'topic' ? (chat.parent_space ?? null) : null;
+/** The group of a group or of one of its topics; null for a private chat, its topics and an unknown chat. */
+export function groupOf(chat: Chat | null | undefined, find: FindChat): string | null {
+  if (!chat) return null;
+  if (chat.kind === 'group') return chat.space_id;
+  const parent = chat.kind === 'topic' ? find(chat.parent_space) : null;
+  return parent?.kind === 'group' ? parent.space_id : null;
+}
+/**
+ * A group or one of its topics: the only chats that share, are shared with or join a project. Every other chat, one
+ * the directory doesn't know included, counts as private, as the server's chat directory does (ADR-0242, ADR-0252).
+ */
+export const isGroupChat = (chat: Chat | null | undefined, find: FindChat): boolean => groupOf(chat, find) !== null;
+/** Topics in the order their app numbers them. */
+export const byTopicKey = (a: Chat, b: Chat): number =>
+  Number(a.topic_key) - Number(b.topic_key) || String(a.topic_key ?? '').localeCompare(String(b.topic_key ?? ''));
+
+export function chatName(chat: Chat | null | undefined): string {
   if (!chat) return 'Unknown chat';
-  if (chat.kind === 'private' && owner && chat.space_id === owner) return 'You';
+  if (chat.kind === 'private' && chat.owner) return 'You';
   const name = chat.name?.trim();
   if (name) return name;
-  if (chat.kind === 'topic') return 'Topic ' + topicNumber(chat.space_id);
+  if (chat.kind === 'topic') return chat.topic_key ? 'Topic ' + chat.topic_key : 'Topic';
   if (chat.kind === 'group') return 'Unnamed group';
-  return 'Private chat ' + chat.space_id;
+  if (chat.kind === 'private') {
+    const id = currentAppId(chat);
+    return id ? 'Private chat ' + id : 'Private chat';
+  }
+  return 'Unknown chat';
 }
 
 export function kindLabel(chat: Chat): string {
-  return chat.kind === 'topic' ? 'Topic' : chat.kind === 'group' ? 'Group' : 'Private chat';
+  return chat.kind === 'topic'
+    ? 'Topic'
+    : chat.kind === 'group'
+      ? 'Group'
+      : chat.kind === 'private'
+        ? 'Private chat'
+        : 'Chat';
 }
 
 export const parseGroupIds = (text: string): string[] =>
@@ -62,6 +132,45 @@ export function serializeGroupIds(ids: string[], savedText: string): string {
   const saved = parseGroupIds(savedText);
   if (unique.length === saved.length && unique.every(id => saved.includes(id))) return savedText;
   return unique.join(',');
+}
+
+/**
+ * Until chats.state is the only source (step 2b-2), TELEGRAM_GROUP_IDS still decides which groups Nocheh serves, by
+ * their Telegram ids (ADR-0252). A group is listed when any of its Telegram ids is, an old one included.
+ */
+export const groupListed = (ids: string[], chat: Chat | null | undefined): boolean =>
+  appIds(chat).some(id => ids.includes(id));
+/**
+ * Lists a group by one of its Telegram ids, or drops every Telegram id it has had. A group already listed stays as it
+ * is. Otherwise it is listed by the id the saved list had, so turning it off and back on is no change, else by its
+ * current one.
+ */
+export function withGroupListed(ids: string[], chat: Chat, on: boolean, saved: string[] = []): string[] {
+  const own = appIds(chat);
+  if (!on) return ids.filter(id => !own.includes(id));
+  if (own.some(id => ids.includes(id))) return ids;
+  const pick = own.find(id => saved.includes(id)) ?? currentAppId(chat);
+  return pick ? [...ids, pick] : ids;
+}
+/**
+ * The TELEGRAM_GROUP_ACCESS key a group's people are kept under. Every key must be listed in TELEGRAM_GROUP_IDS, or the
+ * settings are refused, and an upgraded group may still be listed by its old id only. So: whichever of its Telegram ids
+ * already has people in `access`, else one `listed` (the group ids being saved) has, the one with `saved` people
+ * first, else its current one. Null for a chat with no Telegram id.
+ */
+export function accessKey(
+  access: AccessMap,
+  chat: Chat | null | undefined,
+  listed: string[] = [],
+  saved: AccessMap = {},
+): string | null {
+  const own = appIds(chat);
+  return (
+    own.find(id => access[id]) ??
+    own.find(id => saved[id] && listed.includes(id)) ??
+    own.find(id => listed.includes(id)) ??
+    currentAppId(chat)
+  );
 }
 
 export function parseAccess(text: string): AccessMap {
@@ -130,35 +239,30 @@ export type ChatTree = {
 };
 
 /**
- * Private chats, then groups (Nocheh-on first) with their topics under them.
- * Groups Nocheh was turned on in or has seen people in appear even before the directory lists them.
+ * Private chats (yours first), then groups (Nocheh-on first) with their topics under them. Groups people were seen
+ * in appear even before the directory lists them.
  */
 export function chatTree(
   items: Chat[],
   extraGroups: {id: string; name?: string | null}[],
-  groupIds: string[],
+  on: (chat: Chat) => boolean,
   query: string,
-  owner: string,
 ): ChatTree {
   const all = [...items];
   for (const group of extraGroups)
-    if (!all.some(item => item.space_id === group.id))
+    if (!all.some(item => item.space_id === group.id || appIds(item).includes(group.id)))
       all.push({space_id: group.id, name: group.name ?? null, kind: 'group', parent_space: null});
   const q = query.trim().toLocaleLowerCase();
   const matches = (chat: Chat) =>
     !q ||
-    [chat.space_id, chat.name, chat.parent_name, chatName(chat, owner)].some(value =>
+    [chat.space_id, chat.name, chat.parent_name, chatName(chat), ...appIds(chat)].some(value =>
       value?.toLocaleLowerCase().includes(q),
     );
   const topicsOf = (group: string) =>
-    all
-      .filter(item => item.kind === 'topic' && (item.parent_space ?? parentOf(item.space_id)) === group)
-      .sort((a, b) => topicNumber(a.space_id) - topicNumber(b.space_id));
+    all.filter(item => item.kind === 'topic' && item.parent_space === group).sort(byTopicKey);
   const privates = all
     .filter(item => item.kind === 'private' && matches(item))
-    .sort(
-      (a, b) => Number(b.space_id === owner) - Number(a.space_id === owner) || chatName(a).localeCompare(chatName(b)),
-    );
+    .sort((a, b) => Number(!!b.owner) - Number(!!a.owner) || chatName(a).localeCompare(chatName(b)));
   const groups = all
     .filter(item => item.kind === 'group')
     .map(group => {
@@ -166,12 +270,23 @@ export function chatTree(
       return {group, topics: matches(group) ? topics : topics.filter(matches)};
     })
     .filter(entry => matches(entry.group) || entry.topics.length)
-    .sort(
-      (a, b) =>
-        Number(groupIds.includes(b.group.space_id)) - Number(groupIds.includes(a.group.space_id)) ||
-        chatName(a.group).localeCompare(chatName(b.group)),
-    );
+    .sort((a, b) => Number(on(b.group)) - Number(on(a.group)) || chatName(a.group).localeCompare(chatName(b.group)));
   return {privates, groups};
+}
+
+/**
+ * The search hits a sharing rule may use: those whose chat is a source's group or one of its topics, as a topic
+ * source reads its whole group. A hit names its chat by chat_id (ADR-0252), never by the archive's raw scope; a hit
+ * with a scope but no chat is no source's.
+ */
+export function sourceHits<T extends {scope?: string; chat_id?: string | null}>(
+  hits: T[],
+  sources: string[],
+  find: FindChat,
+): T[] {
+  const base = (id: string) => parentOf(find(id)) ?? id;
+  const groups = new Set(sources.map(base));
+  return hits.filter(hit => (hit.chat_id ? groups.has(base(hit.chat_id)) : !hit.scope));
 }
 
 export const actionKindLabel: Record<string, string> = {

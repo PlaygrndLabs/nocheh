@@ -14,11 +14,11 @@ def secret(name, required=True):
 
 
 def telegram_policy():
+    """Whether Telegram is on and each group's member access. The owner, the owner's private chat and the served groups
+    come from the app's served list (ADR-0252), never from here."""
     enabled = os.environ.get('TELEGRAM_ENABLED', 'false')
     if enabled not in ('true', 'false'): raise ValueError('Invalid TELEGRAM_ENABLED')
-    return {'enabled': enabled == 'true', 'owner_id': os.environ.get('TELEGRAM_OWNER_ID') or None,
-            'group_ids': [v.strip() for v in os.environ.get('TELEGRAM_GROUP_IDS', '').split(',') if v.strip()],
-            'group_access': json.loads(os.environ.get('TELEGRAM_GROUP_ACCESS', '{}'))}
+    return {'enabled': enabled == 'true', 'group_access': json.loads(os.environ.get('TELEGRAM_GROUP_ACCESS', '{}'))}
 
 
 def parallel(name, default, high=8):

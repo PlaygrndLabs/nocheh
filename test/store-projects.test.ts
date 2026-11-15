@@ -6,6 +6,9 @@ import {initializeStoreDatabases,connectStores} from '../src/stores/connections.
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {GuardRepository} from '../src/stores/guards.js';
 import {ProjectRepository,SharingPolicyRepository} from '../src/stores/projects.js';
+import {installChatsForTest} from '../src/chats.js';
+import {legacyDirectory} from './fixture-groups.js';
+import {families} from './fixture-families.js';
 const owner={admin:true,scope:null};
 test('owner project inheritance, explicit sharing and revocation are separate, versioned and idempotent',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -15,6 +18,7 @@ test('owner project inheritance, explicit sharing and revocation are separate, v
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control);
   const guards=new GuardRepository(stores,new ArchiveRepository(stores.archive)),key='projects:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),topic=group+'/topic/17';
+  const restore=installChatsForTest(legacyDirectory([group,second,topic,second+'/topic/18'],{served:[group,second]}));
   try {
     const input={name:'Synthetic project',description:'Two conversations',state:'active',expected_revision:0,operation_id:key+':new'};
     await assert.rejects(projects.save({admin:false,scope:group},input),{code:'owner_required'});
@@ -49,24 +53,27 @@ test('owner project inheritance, explicit sharing and revocation are separate, v
     assert.ok((await projects.list(owner)).projects.some(p=>p.id===project.id));
     assert.ok((await projects.assignments(owner)).assignments.some(p=>p.space_id===topic));
     assert.ok((await sharing.list(owner)).rules.some(r=>r.id===rule.id&&!r.enabled));
-  } finally {await stores.close();}
+  } finally {restore();await stores.close();}
 });
 
-test('an owner rule never reads from or shares into a private chat, and an older or imported one is skipped',
+for(const family of families)test(`an owner rule never reads from or shares into a private chat, and an older or imported one is skipped (${family.name})`,
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
   try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control);
-  const key='private-rules:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),third=String(Number(group)-2),privateChat=String(Date.now());
+  // Chats made up as Telegram sends them, named by the family: old-shaped or digest ids (ADR-0252).
+  const key='private-rules:'+Date.now(),g=String(-Date.now()),g2=String(Number(g)-1),g3=String(Number(g)-2),p=String(Date.now()),id=family.id;
+  const group=id(g),second=id(g2),third=id(g3),privateChat=id(p),privateTopic=id(p+'/topic/5'),otherPrivate=id(p+'1');
+  const restore=installChatsForTest(family.directory([g,g2,g3,p+'/topic/5',g+'/topic/3',g+'/topic/5'],{served:[g,g2,g3]}));
   try {
     const rule={name:'Synthetic rule',enabled:true,mode:'approved',instructions:'',expected_revision:0};
-    for(const space of [privateChat,privateChat+'/topic/5','desktop:personal_chat:9']) {
+    for(const space of [privateChat,privateTopic,'desktop:personal_chat:9']) {
       await assert.rejects(sharing.save(owner,{...rule,sources:[group,space],destination:second,operation_id:key+':from:'+space}),{code:'sharing_private_chat'},space);
       await assert.rejects(sharing.save(owner,{...rule,sources:[group],destination:space,operation_id:key+':into:'+space}),{code:'sharing_private_chat'},space);
     }
-    assert.equal((await sharing.save(owner,{...rule,sources:[group,group+'/topic/3'],destination:second,operation_id:key+':groups'})).destination,second,'groups and topics share');
+    assert.equal((await sharing.save(owner,{...rule,sources:[group,id(g+'/topic/3')],destination:second,operation_id:key+':groups'})).destination,second,'groups and topics share');
 
     // Rows written before private chats were refused, or imported, are read as reading and sharing into no private chat.
     const older=digest(key+':older'),into=digest(key+':into');
@@ -75,9 +82,9 @@ test('an owner rule never reads from or shares into a private chat, and an older
       [older,JSON.stringify([group,privateChat]),third,into,JSON.stringify([group]),privateChat]);
     const [stored]=await sharing.forDestination(third);assert.equal(stored!.id,older);
     assert.equal(await sharing.covers(stored!,privateChat),false,'a private source is never read');
-    assert.equal(await sharing.covers({...stored!,sources:[privateChat+'/topic/5']},privateChat+'/topic/5'),false);
+    assert.equal(await sharing.covers({...stored!,sources:[privateTopic]},privateTopic),false);
     assert.equal(await sharing.covers(stored!,group),true);
-    assert.equal(await sharing.covers(stored!,group+'/topic/5'),false,'an owner rule reads only its exact chats, never a topic of one');
+    assert.equal(await sharing.covers(stored!,id(g+'/topic/5')),false,'an owner rule reads only its exact chats, never a topic of one');
     assert.deepEqual(await sharing.forDestination(privateChat),[],'nothing is shared into a private chat');
     const listed=new Map<string,any>();let after='';
     for(;;){const page=await sharing.list(owner,after);for(const row of page.rules)listed.set(row.id,row);if(!page.next)break;after=page.next;}
@@ -88,13 +95,13 @@ test('an owner rule never reads from or shares into a private chat, and an older
     assert.equal((await sharing.save(owner,{...saved(older),enabled:false,operation_id:key+':older-off'})).enabled,false,'an older rule can be turned off');
     assert.equal((await sharing.save(owner,{...saved(into),enabled:false,operation_id:key+':into-off'})).enabled,false,'one into a private chat too');
     await assert.rejects(sharing.save(owner,{...saved(older),expected_revision:2,operation_id:key+':older-on'}),{code:'sharing_private_chat'},'it is never turned on again');
-    await assert.rejects(sharing.save(owner,{...saved(older),enabled:false,sources:[group,privateChat,privateChat+'1'],expected_revision:2,operation_id:key+':older-more'}),{code:'sharing_private_chat'});
-    await assert.rejects(sharing.save(owner,{...saved(into),enabled:false,destination:privateChat+'1',expected_revision:2,operation_id:key+':into-other'}),{code:'sharing_private_chat'});
+    await assert.rejects(sharing.save(owner,{...saved(older),enabled:false,sources:[group,privateChat,otherPrivate],expected_revision:2,operation_id:key+':older-more'}),{code:'sharing_private_chat'});
+    await assert.rejects(sharing.save(owner,{...saved(into),enabled:false,destination:otherPrivate,expected_revision:2,operation_id:key+':into-other'}),{code:'sharing_private_chat'});
     await assert.rejects(sharing.save(owner,{...rule,enabled:false,sources:[group],destination:privateChat,operation_id:key+':new-off'}),{code:'sharing_private_chat'},'a new rule, even off, never names one');
     assert.deepEqual((await sharing.save(owner,{...saved(older),sources:[group],expected_revision:2,operation_id:key+':older-fixed'})).sources,[group],'with the private chat removed it turns on');
 
     const project=await projects.save(owner,{name:'Synthetic project',description:'',state:'active',expected_revision:0,operation_id:key+':project'});
-    for(const space of [privateChat,privateChat+'/topic/5','desktop:personal_chat:9'])
+    for(const space of [privateChat,privateTopic,'desktop:personal_chat:9'])
       await assert.rejects(projects.assign(owner,{space_id:space,mode:'assigned',project_id:project.id,expected_revision:0,operation_id:key+':assign:'+space}),{code:'project_private_chat'},space);
     assert.equal((await projects.assign(owner,{space_id:privateChat,mode:'none',expected_revision:0,operation_id:key+':none'})).mode,'none','a private chat may be kept out');
     await stores.control.query("UPDATE project_assignments SET project_id=$2,mode='assigned' WHERE space_id=$1",[privateChat,project.id]);
@@ -103,17 +110,19 @@ test('an owner rule never reads from or shares into a private chat, and an older
     assert.deepEqual([effective.own_assignment?.mode,effective.own_assignment?.project_id],['assigned',project.id],'the row is shown, so the owner can clear it');
     await projects.assign(owner,{space_id:privateChat,mode:'none',expected_revision:effective.own_assignment!.revision,operation_id:key+':clear'});
     assert.equal((await projects.effective(privateChat)).own_assignment?.mode,'none');
-  } finally {await stores.close();}
+  } finally {restore();await stores.close();}
 });
 
-test('a project never shares between its groups, lists only its served groups, and a topic always follows its group',
+for(const family of families)test(`a project never shares between its groups, lists only its served groups, and a topic always follows its group (${family.name})`,
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
   try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
-  const key='project-groups:'+Date.now(),group=String(-Date.now()),second=String(Number(group)-1),third=String(Number(group)-2),unserved=String(Number(group)-3);
-  const topic=group+'/topic/17',privateChat=String(Date.now());let n=0;
+  // Chats made up as Telegram sends them, named by the family: old-shaped or digest ids (ADR-0252).
+  const key='project-groups:'+Date.now(),g=String(-Date.now()),g2=String(Number(g)-1),g3=String(Number(g)-2),g4=String(Number(g)-3),p=String(Date.now()),id=family.id;
+  const group=id(g),second=id(g2),third=id(g3),unserved=id(g4),topic=id(g+'/topic/17'),privateChat=id(p),topicOf=(key:number)=>id(g+'/topic/'+key);let n=0;
+  const restore=installChatsForTest(family.directory([g,g2,g3,g4,g+'/topic/17',p,...Array.from({length:10},(_,i)=>g+'/topic/'+(30+i)),g+'/topic/99'],{served:[g,g2,g3]}));
   const op=(label:string)=>key+':'+label+':'+(++n);
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control,()=>[group,second,third,privateChat,topic]),sharing=new SharingPolicyRepository(stores.control);
   const assign=async(space:string,mode:'assigned'|'none'|'inherit',project:string|null=null)=>projects.assign(owner,{space_id:space,mode,
@@ -170,15 +179,16 @@ test('a project never shares between its groups, lists only its served groups, a
     // into another topic is refused and changes nothing.
     const fillers=Array.from({length:10},(_,i)=>digest(key+':filler:'+i));
     for(const [i,id] of fillers.entries())await stores.control.query(`INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision)
-      VALUES($1,'Synthetic filler','["-1"]',$2,true,'filtered','',1)`,[id,i%2?group:group+'/topic/'+(30+i)]);
-    const stored=async()=>(await stores.control.query("SELECT id,revision,enabled FROM sharing_rules WHERE destination=$1 OR starts_with(destination,$1||'/topic/') ORDER BY id",[group])).rows;
-    const kept=await stored(),eleventh={name:'One too many',sources:[second],destination:group+'/topic/99',enabled:true,mode:'filtered',instructions:'',expected_revision:0};
+      VALUES($1,'Synthetic filler','["-1"]',$2,true,'filtered','',1)`,[id,i%2?group:topicOf(30+i)]);
+    const stored=async()=>(await stores.control.query('SELECT id,revision,enabled FROM sharing_rules WHERE destination=ANY($1::text[]) ORDER BY id',
+      [[group,topic,...Array.from({length:10},(_,i)=>topicOf(30+i)),topicOf(99)]])).rows;
+    const kept=await stored(),eleventh={name:'One too many',sources:[second],destination:topicOf(99),enabled:true,mode:'filtered',instructions:'',expected_revision:0};
     await assert.rejects(sharing.save(owner,{...eleventh,operation_id:op('eleventh')}),{code:'sharing_rule_limit'});
     assert.deepEqual(await stored(),kept,'a refused rule leaves every revision unchanged');
     assert.equal((await sharing.save(owner,{...eleventh,enabled:false,operation_id:op('eleventh-off')})).enabled,false,'turned off it is kept');
-    await assert.rejects(sharing.save(owner,{...eleventh,sources:Array.from({length:101},(_,i)=>String(Number(group)-1000-i)),operation_id:op('crowd')}),
+    await assert.rejects(sharing.save(owner,{...eleventh,sources:Array.from({length:101},(_,i)=>id(String(Number(g)-1000-i))),operation_id:op('crowd')}),
       {code:'invalid_sharing_sources'},'a rule reads at most 100 chats');
     await stores.control.query('UPDATE sharing_rules SET enabled=false WHERE id=ANY($1::text[])',[fillers]);
     assert.equal((await sharing.save(owner,{...eleventh,operation_id:op('room')})).enabled,true,'with room again it turns on');
-  } finally {await stores.close();}
+  } finally {restore();await stores.close();}
 });

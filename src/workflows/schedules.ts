@@ -5,6 +5,8 @@ import {brainOperation,type Brain} from '../brain/brain.js';
 import {HttpError,object,string} from '../http.js';
 import {hash,type ExecutionAuthority} from './store.js';
 import {observation,type WorkflowOperation} from './pipeline.js';
+import {ownerChat} from '../assistant-policy.js';
+import {servedGroup} from '../spaces.js';
 
 export const scheduleWorkflowSchema=`CREATE TABLE IF NOT EXISTS workflow_schedules (
  id text PRIMARY KEY,logical_profile text NOT NULL,job_id text NOT NULL,
@@ -38,7 +40,7 @@ export async function scheduledContext(pool:pg.Pool,config:Settings,input:unknow
   const b=object(input),row=(await pool.query(`SELECT r.*,e.scope,e.payload,o.epoch,o.owner,o.admission FROM managed_runs r
     JOIN events e ON e.id=r.event_id CROSS JOIN workflow_owners o WHERE r.event_id=$1 AND e.channel='scheduler' AND o.family='schedules'`,[b.event_id])).rows[0];
   if(!row||!row.admitted||row.owner!=='inngest'||row.epoch!==b.owner_epoch||!row.admission)throw new HttpError(409,'workflow_owner_changed');
-  if(row.scope!==config.assistant.owner_id&&!config.assistant.group_ids.includes(row.scope))throw new HttpError(403,'run_scope_denied');
+  if(row.scope!==ownerChat(config.assistant)&&!servedGroup(row.scope))throw new HttpError(403,'run_scope_denied');
   const payload=JSON.parse(row.payload.toString());
   return {event_id:b.event_id,actor:'run_'+b.event_id,scope:row.scope,profile:payload.profile,logical_profile:row.logical_profile,
     conversation:'cron_'+row.job_id+'_'+String(b.event_id).slice(0,24),job_id:row.job_id,definition:payload.definition,

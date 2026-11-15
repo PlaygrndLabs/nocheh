@@ -91,6 +91,25 @@ class ResetPreservationTests(unittest.TestCase):
             self.assertEqual(self.freeze(journal), result)
             self.assertEqual(before, {path.name: path.read_bytes() for path in journal.directory.iterdir() if path.is_file()})
 
+    def test_preferences_follow_the_chats_the_configuration_snapshot_records(self):
+        # ADR-0252: a configuration snapshot with chat records names each chat by its Nocheh id: the owner's chat, a group
+        # Telegram upgraded (old id '-10', now '-1010'), a group first seen after step 2b, and their topics.
+        new, topic, other = 'b' * 64, 'c' * 64, 'd' * 64
+        rows = [{'id': '42', 'app': 'telegram', 'kind': 'private', 'parent_id': None},
+                {'id': '-10', 'app': 'telegram', 'kind': 'group', 'parent_id': None},
+                {'id': new, 'app': 'telegram', 'kind': 'group', 'parent_id': None},
+                {'id': topic, 'app': 'telegram', 'kind': 'topic', 'parent_id': '-10'},
+                {'id': other, 'app': 'telegram', 'kind': 'topic', 'parent_id': '-99'},
+                {'id': '-99', 'app': 'telegram', 'kind': 'group', 'parent_id': None}]
+        ids = [{'app': 'telegram', 'external_id': external, 'chat_id': chat, 'state': state, 'reason': None}
+               for external, chat, state in (('42', '42', 'current'), ('-10', '-10', 'old'), ('-1010', '-10', 'current'),
+                                             ('-30', new, 'current'), ('-99', '-99', 'current'))]
+        chats = reset_preservation._chats({'chats': rows, 'chat_ids': ids}, '42', ['-1010', '-30'])
+        self.assertEqual(chats, {'owner': '42', 'groups': {'-10': ['-10', '-1010'], new: ['-30']}, 'topics': {topic: '-10'}})
+        self.assertIsNone(reset_preservation._chats({'projects': []}, '42', ['-10']), 'a snapshot from before step 2b')
+        with self.assertRaisesRegex(ValueError, 'scope_changed'):
+            reset_preservation._chats({'chats': rows, 'chat_ids': ids}, '42', ['-1010', '42'])
+
     def test_incomplete_ownership_review_blocks_before_preservation_mutation(self):
         external = self.root / 'data/backups'; external.mkdir(parents=True); (external / 'unknown').write_text('UNKNOWN OWNER')
         self.preflight['external_archives'] = [reset_inventory.entry(external, 'review_archive', 'review')]

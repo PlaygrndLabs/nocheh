@@ -4,7 +4,10 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {conversationScope} from '../assistant-policy.js';
+import {conversationScope,ownerChat} from '../assistant-policy.js';
+import {chats} from '../chats.js';
+import {telegramDestination} from '../chats-telegram.js';
+import {telegramAddress,telegramTarget} from '../frontdoor/telegram.js';
 import type {RuntimeCall} from '../runtime.js';
 import {evaluate,recordEffect} from '../security/store.js';
 import type {Effect} from '../security/contract.js';
@@ -25,8 +28,10 @@ const protocol='telegram-action-v2';
 // Owner-approved memory wording uses the memory input bound; native Telegram
 // splitting preserves one action identity and rechecks authority for each chunk.
 const trustedTextLimit=12000;
-const validDestination=(value:string)=>/^-?[1-9]\d{0,18}(?:\/topic\/[1-9]\d{0,15})?$/.test(value)&&
-  (!value.includes('/topic/')||Number.isSafeInteger(Number(value.split('/topic/')[1])));
+/** A destination is a chat or topic the chat directory knows, by its chat id (ADR-0252); anything else is refused. */
+const knownChat=(value:string)=>!!chats().get(value);
+/** The chat a chat or topic belongs to. */
+const chatOf=(space:string)=>chats().parentOf(space)??space;
 type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
   scope:string|null;space:string;profile:string;destination:string;fingerprint:string;text_hash:string;guard_revision:number|null};
 /** A trusted send's identity: its workflow key, source, authorization, destination and exact text. */
@@ -133,7 +138,7 @@ export class TelegramActionRepository {
     const output=JSON.parse(result.content.toString());if(output.state!=='done')return {state:'withheld',reason:'run_not_complete'};
     const text=string(output.text,1000000);if(version.configuration.deliver!=='telegram'||!text.trim())return {state:'local'};
     if(text.length>3500)return {state:'withheld',reason:'result_exceeds_telegram_limit'};
-    const audience:Reader={admin:false,scope:row.scope===this.access.policy().owner_id?null:row.scope,space:row.space_id,
+    const audience:Reader={admin:false,scope:row.scope===ownerChat(this.access.policy())?null:row.scope,space:row.space_id,
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
     return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text});
   }
@@ -143,10 +148,14 @@ export class TelegramActionRepository {
     const sender=row?conversationScope(this.access.policy(),JSON.parse(row.payload.toString()),scope):null;
     return sender&&!sender.owner?sender.user_id:null;
   }
-  /** Groups where this person may talk to Nocheh: the owner in every group, others where granted and not denied. */
+  /** Groups where this person may talk to Nocheh, by their chat ids: the owner in every served group, others where
+   * granted and not denied under any Telegram id the group has had, so an upgrade keeps who may talk there. */
   private allowedGroups(user:string):string[] {
-    const policy=this.access.policy();
-    return policy.group_ids.filter(group=>user===policy.owner_id||!!policy.group_access?.[group]?.granted.includes(user)&&!policy.group_access[group]!.denied.includes(user));
+    const policy=this.access.policy(),directory=chats();
+    const access=(external:string)=>policy.group_access?.[external];
+    return directory.all().filter(chat=>chat.kind==='group'&&directory.served(chat.id)).filter(chat=>user===policy.owner_id||
+      chat.app_ids.some(id=>!!access(id.external)?.granted.includes(user))&&!chat.app_ids.some(id=>!!access(id.external)?.denied.includes(user)))
+      .map(chat=>chat.id);
   }
   /** Why a live group request needs no approval, or null: a post in the same
    * group, or the owner's own request for their private chat, which already
@@ -154,9 +163,9 @@ export class TelegramActionRepository {
   private groupRequest(principal:Reader,turn:{owner?:boolean;job?:string|null},destination:string,requester:string|null) {
     if(!requester||turn.owner||turn.job||!principal.scope||!principal.space||principal.purpose&&principal.purpose!=='assistant')return null;
     const policy=this.access.policy();
-    if(requester===policy.owner_id&&destination===policy.owner_id)return 'owner_private_request';
+    if(requester===policy.owner_id&&destination===ownerChat(policy))return 'owner_private_request';
     // With separate topic memory a topic is its own audience; otherwise the whole group is.
-    return (policy.topic_memory==='topic'?destination===principal.space:destination.split('/topic/')[0]===principal.scope)?'same_group_request':null;
+    return (policy.topic_memory==='topic'?destination===principal.space:chatOf(destination)===principal.scope)?'same_group_request':null;
   }
   /** A message from one group to another, or from one topic to another when
    * topics keep separate memory, is reviewed by the person who asked when they
@@ -166,7 +175,7 @@ export class TelegramActionRepository {
     const row=(await this.stores.control.query('SELECT source_reference,space_id,destination FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
     const source=row?.source_reference;if(source?.store!=='archive'||!row.space_id)return null;
     const original=await this.access.archive.verify(source);if(original.origin!=='live'||original.channel!=='telegram')return null;
-    const user=await this.requester(source.id,original.scope),target=String(row.destination).split('/topic/')[0]!;
+    const user=await this.requester(source.id,original.scope),target=chatOf(String(row.destination));
     // A same-audience post never waits, so a pending one here crosses groups or separate topics.
     if(!user||user===this.access.policy().owner_id||String(row.destination)===row.space_id||!this.allowedGroups(user).includes(target))return null;
     return {user,space:row.space_id};
@@ -180,27 +189,35 @@ export class TelegramActionRepository {
     const original=await this.access.archive.verify(source);
     if(original.origin!=='live'||original.channel!=='telegram')throw new HttpError(403,'external_effect_requires_live_turn');
     const requester=await this.requester(source.id,original.scope),groups=requester?this.allowedGroups(requester):[];
-    const titles=new Map((await this.stores.control.query("SELECT chat_id,title FROM telegram_chat_observations WHERE state='available' AND chat_id=ANY($1)",[groups])).rows
-      .map(row=>[String(row.chat_id),row.title as string|null]));
+    // A group's name once the owner has refreshed it and Telegram answered, as before step 2b: the name that refresh
+    // answered, never one a later update shows (ADR-0252; the old refresh table is only the seeder's now).
+    const titles=new Map((await this.stores.control.query(`SELECT chat_id,refreshed_title FROM chat_details
+      WHERE chat_id=ANY($1::text[]) AND refreshed_state='available' AND refreshed_title IS NOT NULL`,[groups])).rows
+      .map(row=>[row.chat_id as string,row.refreshed_title as string]));
     return {groups:groups.map(group=>({destination:group,name:titles.get(group)??null,current:group===principal.scope})),
-      note:'Use an exact ID, or CHAT_ID/topic/THREAD_ID for a topic. A message to this same group is posted without approval; a message to another group is shown to the owner to approve first.'};
+      note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. A message to this same group is posted without approval; a message to another group is shown to the owner to approve first.'};
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
     source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string,requester:string|null=null){
-    const requested=string(input.destination,64),destination=requested==='current'&&channel==='telegram'?principal.space??turn.scope:requested,text=string(input.text,3500);
-    if(!validDestination(destination)||!text.trim())throw new HttpError(400,'invalid_action');
+    // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0252).
+    const requested=string(input.destination,200),text=string(input.text,3500);
+    const destination=requested==='current'&&channel==='telegram'?principal.space??turn.scope:telegramDestination(requested,chats());
+    if(!destination||!knownChat(destination)||!text.trim())throw new HttpError(400,'invalid_action');
     const id=digest(canonical([protocol,source,binding,destination,text]));
     const proposal=await this.derived.record({operation_id:'telegram-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
       producer:'nocheh',producer_version:protocol,configuration:{destination,binding},provenance:{purpose:'exact_owner_approval'}});
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,3500);
     if(!preparedText.trim())throw new HttpError(400,'invalid_action');
+    // The request names its chat by its Nocheh id, as its space and destination do (ADR-0252): a group first seen after
+    // step 2b, or upgraded since, has no archive scope that is its id.
+    const chat=principal.scope??chatOf(principal.space??turn.scope);
     const fingerprint=digest(canonical({destination,text:preparedText})),db=await this.stores.control.connect();
     try {
       await db.query('BEGIN');await this.fence(db,binding);
       await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
-        [id,source,proposal,binding,turn.scope,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision]);
+        [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision]);
       const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
       const effect=this.effect(row);let decision=await evaluate(db,effect);
@@ -215,7 +232,7 @@ export class TelegramActionRepository {
       // A follow-up was not asked by the owner: its private chat gets nothing from it without a card (ADR-0212).
       // The freedom setting covers only what stays on the owner's private side: a message for any group or topic
       // always waits for its card in the private chat, which names that chat and shows the exact text (ADR-0244).
-      const owner=this.access.policy().owner_id,toOwner=!!owner&&destination.split('/topic/')[0]===owner;
+      const owner=ownerChat(this.access.policy()),toOwner=!!owner&&chatOf(destination)===owner;
       const group=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?this.groupRequest(principal,turn,destination,requester):null;
       const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?
         (group==='owner_private_request'&&await followUpTurn(db,principal)?null:group)??(toOwner?await ownerAutonomyGrant(db,principal,turn):null):null;
@@ -251,7 +268,7 @@ export class TelegramActionRepository {
   /** Prepare derived bytes before acquiring control locks; preparation can itself publish guard records. */
   async prepareSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string):Promise<PreparedSystemAction> {
     if(principal.admin||!principal.space||!principal.logical_profile)throw new HttpError(403,'bound_guard_context_required');
-    if(!validDestination(destination)||!text.trim()||text.length>trustedTextLimit)throw new HttpError(400,'invalid_action');
+    if(!knownChat(destination)||!text.trim()||text.length>trustedTextLimit)throw new HttpError(400,'invalid_action');
     await this.guards.assertCurrent(binding);await this.access.archive.verify(source);
     const id=systemActionId(source,binding,destination,text,key);
     const proposal=await this.derived.record({operation_id:'telegram-system-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
@@ -260,7 +277,7 @@ export class TelegramActionRepository {
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,trustedTextLimit);
     if(!preparedText.trim())throw new HttpError(400,'invalid_action');
     // The owner's own audience is stored by the owner's chat, as their requests are.
-    return {id,source,proposal,binding,scope:principal.scope??this.access.policy().owner_id,space:principal.space,profile:principal.logical_profile,destination,
+    return {id,source,proposal,binding,scope:principal.scope??ownerChat(this.access.policy()),space:principal.space,profile:principal.logical_profile,destination,
       fingerprint:digest(canonical({destination,text:preparedText})),text_hash:digest(preparedText),guard_revision:representation.revision};
   }
   /** Trusted callers commit this action and its workflow request with their own control decision. */
@@ -309,8 +326,11 @@ export class TelegramActionRepository {
   /** Trusted native sender rechecks the exact approved payload immediately before sending. */
   async authorizeDelivery(value:unknown) {
     const body=object(value),row=await this.row(string(body.id,64));
+    // The bot sends to the chat and topic the destination has in Telegram now, which storage gave it (ADR-0252).
+    const target=telegramAddress(row.destination);
     if(row.state!=='running'||body.destination!==row.destination||typeof body.text!=='string'||
-      digest(canonical({destination:body.destination,text:body.text}))!==row.fingerprint)
+      digest(canonical({destination:body.destination,text:body.text}))!==row.fingerprint||!target||
+      String(body.chat_id)!==target.chat_id||(body.topic==null?undefined:String(body.topic))!==(target.topic===undefined?undefined:String(target.topic)))
       throw new HttpError(403,'action_delivery_denied');
     await this.text(row);
     if((await evaluate(this.stores.control,this.effect(row),row.authority??'exact_owner_approval')).outcome!=='allow')
@@ -431,7 +451,12 @@ export class TelegramActionRepository {
         }catch(error){await db.query('ROLLBACK');throw error;}
       }
       let response:Record<string,unknown>;
-      try {response=await this.call('action.execute',observe?{id,observe_only:true}:{id,destination:row.destination,text:text!},observe?10000:60000);}
+      // The bot is given the destination's chat and topic in Telegram now, so a send follows a group Telegram upgraded.
+      // A destination the directory no longer knows is refused before anything is sent.
+      let target:ReturnType<typeof telegramTarget>|null=null;
+      if(!observe)try{target=telegramTarget(row.destination);}catch(error){if(!(error instanceof HttpError))throw error;}
+      try {response=observe?await this.call('action.execute',{id,observe_only:true},10000):
+        target?await this.call('action.execute',{id,destination:row.destination,...target,text:text!},60000):{state:'not_started'};}
       catch {response={state:'ambiguous'};}
       if(!observe&&response.state==='not_started') {
         // The runtime refused before recording any send intent: nothing was

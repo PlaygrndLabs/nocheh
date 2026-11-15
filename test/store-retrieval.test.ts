@@ -18,6 +18,8 @@ import {SourceRepository} from '../src/stores/retrieval.js';
 import {ProjectRepository} from '../src/stores/projects.js';
 import {observedSource} from '../src/observed-source.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
+import {chatDirectory,installChatsForTest} from '../src/chats.js';
+import {GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureChats,legacyDirectory} from './fixture-groups.js';
 
 test('source-only retrieval keeps derivative links, independent relationship lookup and generation-bound privacy',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -30,6 +32,8 @@ test('source-only retrieval keeps derivative links, independent relationship loo
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),root=await mkdtemp(join(tmpdir(),'nocheh-retrieval-'));
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:['-321','-654'],topic_memory:'topic'};
   const access=new SourceAccessRepository(stores,archive,guards,()=>policy);
+  // The chats this test reads, as the seeder makes their rows (ADR-0252).
+  const restore=installChatsForTest(legacyDirectory(['-321/topic/77','-321/topic/78','-654'],{owner:'123',served:['-321','-654']}));
   const sources=new SourceRepository(access,new AttachmentRepository(stores,archive,root),selections),owner:Reader={scope:null,admin:true},key='retrieval:'+Date.now();
   const sequence=Date.now();
   const event=(suffix:string,scope:string,message:Record<string,unknown>):Envelope=>({version:1,key:key+suffix,origin:'live',bot_id:'fixture',
@@ -118,5 +122,63 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     const unprepared=(await archive.capture(event(':off','-321',{message_id:sequence+6,chat:{id:-321,type:'group'},text:'Guard off original'}))).source.reference;
     assert.equal((await sources.read(await principal('-321'),unprepared.id)).event.text,'Guard off original');
     await assert.rejects(sources.read({...await principal('-321'),generation:'00000000-0000-0000-0000-000000000000'},unprepared.id),{code:'audience_context_changed'});
-  } finally {await guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {restore();await guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a chat first seen after step 2b is read under every Telegram id it has had, and a topic only by its row (ADR-0252)',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const admin=new pg.Pool(config);
+  try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive);
+  const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),root=await mkdtemp(join(tmpdir(),'nocheh-retrieval-ng-'));
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS],topic_memory:'topic'};
+  const access=new SourceAccessRepository(stores,archive,guards,()=>policy);
+  const sources=new SourceRepository(access,new AttachmentRepository(stores,archive,root),selections),owner:Reader={scope:null,admin:true},key='retrieval-ng:'+Date.now();
+  const restore=installChatsForTest(chatDirectory(fixtureChats(policy.group_ids)));
+  const sequence=Date.now();let n=0;
+  const capture=async(scope:string,message:Record<string,unknown>)=>{
+    const id=sequence+(++n),value:Envelope={version:1,key:key+':'+n,origin:'live',bot_id:'fixture',kind:'telegram_update',scope,source_id:String(id),revision:'1',occurred_at:null,
+      text:String(message.text??''),payload:{message:{message_id:id,chat:{id:Number(scope),type:'supergroup'},...message}}};
+    const reference=(await archive.capture(value)).source.reference;await guards.prepare(reference,'fixture',async()=>[]);return reference;
+  };
+  const principal=async(scope:string,space=scope):Promise<Reader>=>{const binding=await guards.state();return {scope,space,admin:false,generation:binding.generation,guard_epoch:binding.epoch};};
+  try {
+    await guards.reconcile();await selections.reconcile();await guards.setMode('on');
+    // NG2 before and after Telegram upgraded it: one chat, two Telegram ids.
+    const before=await capture(NG2_OLD_TG,{text:'Before the upgrade amberfjord'}),after=await capture(NG2_TG,{text:'After the upgrade amberfjord'});
+    // NG1, a forum: its General chat and its topic 7, which has a row, and topic 8, which has none.
+    const general=await capture(NG1_TG,{chat:{id:Number(NG1_TG),type:'supergroup',is_forum:true},text:'General cobaltmere'});
+    const topic=await capture(NG1_TG,{chat:{id:Number(NG1_TG),type:'supergroup',is_forum:true},message_thread_id:7,is_topic_message:true,text:'Topic cobaltmere'});
+    const unrowed=await capture(NG1_TG,{chat:{id:Number(NG1_TG),type:'supergroup',is_forum:true},message_thread_id:8,is_topic_message:true,text:'Unrowed cobaltmere'});
+    // The owner pages NG2 by its Nocheh id and gets both, the message from before the upgrade included.
+    const page=await sources.page(owner,{chat:NG2,from:'',to:'',after:'',count:50});
+    assert.deepEqual(page.items.map((item:any)=>item.source).sort(),['nocheh:event:'+before.id,'nocheh:event:'+after.id].sort());
+    assert.equal((await sources.size(owner,{chat:NG2,from:'',to:''})).records,2);
+    // A turn in NG2 reads both originals; their Telegram ids are not chats a turn can name.
+    const ng2=await principal(NG2);
+    for(const reference of [before,after])assert.equal((await sources.read(ng2,reference.id)).id,reference.id);
+    assert.deepEqual((await sources.search(ng2,'amberfjord')).map(row=>row.id).sort(),[before.id,after.id].sort());
+    assert.deepEqual(await sources.search(ng2,'cobaltmere'),[],'another group stays apart');
+    await assert.rejects(sources.page(ng2,{chat:NG1,from:'',to:'',after:'',count:50}),{code:'conversation_not_permitted'});
+    // Topics keep their own memory here: topic 7 by its row; topic 8 has no row, so nothing reads it.
+    assert.equal((await sources.read(await principal(NG1,NG1_TOPIC),topic.id)).event.text,'Topic cobaltmere');
+    await assert.rejects(sources.read(await principal(NG1,NG1_TOPIC),general.id),{code:'source_not_found'});
+    assert.equal((await sources.read(await principal(NG1),general.id)).event.text,'General cobaltmere');
+    for(const space of [NG1,NG1_TOPIC])await assert.rejects(sources.read(await principal(NG1,space),unrowed.id),{code:'source_not_found'},space);
+    assert.equal(await access.space(unrowed),null,'a topic with no row is no space');
+    assert.equal(await access.space(topic),NG1_TOPIC);assert.equal(await access.space(before),NG2);
+    // A Telegram id with no chats row at all: no seeded fixture fills it in, so this is the real miss. It is no chat,
+    // and a turn that names it, by its Telegram id or as itself, reads nothing of it (fails closed).
+    const stray='-1003000000001',lost=await capture(stray,{text:'Stray driftmoor'});
+    assert.equal(await access.space(lost),null,'an id with no row is no space');
+    const strayReader=await principal(stray);
+    await assert.rejects(sources.read(strayReader,lost.id),{code:'source_not_found'});
+    assert.deepEqual(await sources.search(strayReader,'driftmoor'),[]);
+    assert.deepEqual((await sources.page(strayReader,{chat:stray,from:'',to:'',after:'',count:50})).items,[]);
+    assert.equal((await sources.size(strayReader,{chat:stray,from:'',to:''})).records,0);
+    assert.deepEqual(await sources.search(ng2,'driftmoor'),[],'nor does any chat that has a row');
+  } finally {restore();await guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
 });

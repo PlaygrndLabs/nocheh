@@ -8,6 +8,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
+import {chatRowForTest} from './fixture-seeded-chats.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -61,13 +62,13 @@ test('allowed members post freely in their own group; everything else waits for 
     topicMemory='topic';
     const shut=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:group,text:'Another topic'}));
     assert.equal(shut.state,'proposed','with separate topic memory another topic is reviewed like another group');
-    assert.deepEqual([last('card').chat_id,last('card').topic],[group,'17'],'by the person who asked, under their request');
+    assert.deepEqual([last('card').chat_id,last('card').topic],[group,17],'by the person who asked, under their request');
     topicMemory='group';
     const across=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:other+'/topic/4',text:'For the other group'}));
     assert.equal(across.state,'proposed','a message built from one group\'s memory for another group waits for a review');
     // The person who asked, allowed in both groups, reviews it under their request in their own group and topic.
     const reviewCard=last('card');
-    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text,reviewCard.links],[group,'17','📨 Send to a Telegram group › a topic\n\nFor the other group',[]],
+    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text,reviewCard.links],[group,17,'📨 Send to a Telegram group › a topic\n\nFor the other group',[]],
       'no "Asked in" line on a card in the chat where it was asked');
     // The card is the answer: it replies to the request, and Nocheh adds nothing of its own.
     assert.equal(reviewCard.reply_to,String((await stores.archive.query('SELECT payload FROM events WHERE id=$1',[topic.id])).rows[0].payload.toString().match(/"message_id":(\d+)/)[1]));
@@ -85,10 +86,13 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(ownerAcross.state,'proposed');assert.deepEqual([last('card').chat_id,last('card').topic],['123',undefined],'the owner\'s own cross-group request comes to their private chat');
     const shutAcross=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:closed,text:'Not allowed there'}));
     assert.equal(shutAcross.state,'proposed');assert.equal(last('card').chat_id,'123','a group where the person asking is not allowed goes to the owner');
-    await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username,is_forum,migrate_to_chat_id,observed_at)
-      VALUES($1,'available','supergroup','Design team',NULL,true,NULL,now()) ON CONFLICT DO NOTHING`,[other]);
+    // The owner refreshed the other group's name (ADR-0252: on its chats row).
+    await chatRowForTest(stores.control,other,{title:'Design team',is_forum:true});
     assert.deepEqual((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups,
       [{destination:group,name:null,current:true},{destination:other,name:'Design team',current:false}],'only the groups where the person asking is allowed');
+    // A later update renaming the group does not rename it here until the owner refreshes again, as before step 2b.
+    await stores.control.query(`UPDATE chats SET title='Design',title_source='observed' WHERE id=$1`,[other]);
+    assert.equal((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups[1]!.name,'Design team');
     await assert.rejects(s.telegramActions.destinations(owner),{status:403});
     const ownerTurn=await message('owner-in-group',{},123);
     assert.equal((await s.telegramActions.destinations(await actor(ownerTurn.id,group))).groups.length,4,'the owner is allowed in every group');

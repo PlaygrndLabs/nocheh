@@ -63,14 +63,14 @@ export function SendsView() {
   );
 }
 
-/** Where a send went: the chat's name when Nocheh knows it, with its topic. */
+/** Where a send went: the chat's name when Nocheh knows it, with its topic, linked to that chat (ADR-0252). */
 function ChatName({row}: {row: ChatSend}) {
   if (!row.chat) return <span className="text-muted">—</span>;
-  const name = (row.chat_title ?? row.chat) + (row.topic != null ? ` · topic ${row.topic}` : '');
-  if (row.channel !== 'telegram') return <>{name}</>;
-  const space = row.chat + (row.topic != null ? '/topic/' + row.topic : '');
+  const topic = row.thread ?? row.topic;
+  const name = (row.chat_title ?? row.chat) + (topic != null ? ` · topic ${topic}` : '');
+  if (!row.chat_id) return <>{name}</>;
   return (
-    <a className="hover:underline" href={href('chats', {chat: space})} dir="auto">
+    <a className="hover:underline" href={href('chats', {chat: row.chat_id})} dir="auto">
       {name}
     </a>
   );

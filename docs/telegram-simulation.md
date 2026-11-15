@@ -226,6 +226,23 @@ with `editMessageText`, and answers `answerCallbackQuery` only for button
 presses the tester injected, so approval cards are pressed like a phone would;
 it keeps the link an answer opens, as for **Answer privately**. The fixture
 serves three groups, so two can share a project while the third stays in none.
+Scenarios name a chat by its Nocheh id, which the tester finds by the chat's
+Telegram id in the owner's chat list (`Fixture.chat`), never by building one
+([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)): the three groups keep their Telegram ids as
+ids, while a topic first seen during the run, and NG1 (`NEW_GROUP`), a group
+first seen after the install, have digest ids. NG1 is turned on with the
+step 2b-1 switch, `TELEGRAM_GROUP_IDS`, and then answers, reads its group from a
+topic and holds a task (`new_id_group_works_end_to_end`); it sits in P1 for the
+privacy probes and for `project_groups_stay_apart`, where its own answer reads
+only NG1 and the private answer reads it too.
+`supergroup_upgrade_keeps_history` injects Telegram's `migrate_to_chat_id` and
+`migrate_from_chat_id` messages for a basic group: the supergroup stays the same
+chat, with both Telegram ids, its project, its task and its switch, and a search
+there finds what was said before the upgrade. A second basic group, turned on in
+the same restart and posted in by no other scenario, is found upgraded by the
+owner's refresh instead (the fixture answers its old id with
+`migrate_to_chat_id`): the refresh moves it onto the new id at once, keeps the
+old one, asks again under the new id and sends nothing.
 Product scenarios cover allowed members, addressing by name, unaddressed
 messages shown once to the next reply, the fixed reply for people not allowed,
 approval cards with Approve and Reject in private chat, same-group posts,

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import {digest,type Envelope} from '../src/archive.js';
+import {canonical,digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
@@ -13,6 +13,8 @@ import {SelectionRepository} from '../src/stores/selections.js';
 import {LearnedMemoryRepository} from '../src/stores/learned.js';
 import {SourceAccessRepository} from '../src/stores/access.js';
 import {LearningContextRepository} from '../src/stores/learning-context.js';
+import {installChatsForTest} from '../src/chats.js';
+import {seededDirectory} from './fixture-seeded-chats.js';
 import {ContextualLearningRepository,terminalLearningCodes} from '../src/stores/learning-engine.js';
 import {learningResultSchema} from '../src/interpretations.js';
 import {MemoryProvenanceRepository} from '../src/stores/memory-provenance.js';
@@ -20,7 +22,7 @@ import {requestStrandedSources} from '../src/stores/native-review.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('silent Honcho learning uses authorized relationship evidence and recovers output/activation without duplicate reasoning',
- {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async t=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
   try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
@@ -28,6 +30,8 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive),guards=new GuardRepository(stores,archive);
   const key='learning:'+Date.now(),group=String(-Date.now()),space=group+'/topic/17';
   const policy:AssistantPolicy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
+  // The chats as Part A's seeder leaves a group stored before step 2b and its topics (ADR-0252).
+  t.after(installChatsForTest(seededDirectory(()=>policy)));
   const learned=new LearnedMemoryRepository(stores,archive,derived,guards),projects=new ProjectRepository(stores.control),selections=new SelectionRepository(stores,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,new EntityRepository(stores,access,projects));
   const event=(label:string,payload:any):Envelope=>({version:1,key:key+':'+label,origin:'live',bot_id:key,kind:'telegram_update',scope:group,
@@ -82,6 +86,10 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await assert.rejects(guards.state(),{code:'guard_transition_pending'});
     learned.finish=realFinish;
     const ids=await learning.run(job,detect,authority);assert.equal(ids.length,2);assert.equal(calls,1,'a saved reasoning result is never rerun after preparation or publication failure');
+    // An entry's id hashes its scope as written. A chat stored before step 2b keeps its old-shaped value as its Nocheh id,
+    // so what is learned for it keeps the id step 2 gave it, and an owner correction stays on it (ADR-0252).
+    assert.deepEqual([...ids].sort(),[digest(canonical([{kind:'conversation',id:space},'meaning','check','inferred'])),
+      digest(canonical([{kind:'conversation',id:space},'state','packet','inferred']))].sort(),'entry ids are unchanged for an old-shaped chat');
     assert.deepEqual(await learning.run(job,detect,authority),ids);
     assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='organization' AND job_id=$1",['learning:'+job])).rows[0].count,'1',
       'publishing recovery commits completion and one deterministic organization follow-up');

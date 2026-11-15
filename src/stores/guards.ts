@@ -11,6 +11,7 @@ import {revokeBeforePublication} from './publications.js';
 import {OperationRepository} from './operations.js';
 import type {Reader} from '../access.js';
 import type {PreparedContextRepository} from './prepared-context.js';
+import {refreshChatsOnEpoch} from '../chats.js';
 
 export type GuardReference=SourceReference|FileReference|DerivativeReference;
 export interface GuardBinding {generation:string;epoch:number;mode:'on'|'off'}
@@ -75,6 +76,8 @@ export class GuardRepository {
       EXISTS(SELECT 1 FROM guard_publications WHERE ${blockingPublications}) AS pending
       FROM guard_state g CROSS JOIN installation i WHERE g.singleton AND i.singleton`)).rows[0];
     if(!row||row.pending)throw new HttpError(409,'guard_transition_pending');
+    // A newer epoch than the chat directory was loaded at reloads it (ADR-0252).
+    refreshChatsOnEpoch(Number(row.epoch));
     return {generation:row.generation,epoch:Number(row.epoch),mode:row.mode};
   }
 

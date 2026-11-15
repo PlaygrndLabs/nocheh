@@ -1,6 +1,8 @@
 import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
 import {cardName} from '../action-text.js';
+import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
+import {telegramAddress,telegramChat} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import {backgroundMemberPaused,backgroundMemberSpend,backgroundMemberTexts,fillTemplate,labeledLines,ownerPrompts} from '../prompts.js';
@@ -62,7 +64,11 @@ type Spender={requester:string;scope:string;cost:number;source:any};
 type Button={text:string;callback:string};
 
 export class MemberJobSpend {
-  constructor(readonly control:pg.Pool,readonly archive:pg.Pool,readonly owner:()=>string|null,readonly call:RuntimeCall){}
+  /** `policy` names the owner twice (ADR-0252): owner_id, their account, decides whose jobs are members'; the owner's
+   *  private chat (ownerChat) is where the notices go. */
+  constructor(readonly control:pg.Pool,readonly archive:pg.Pool,readonly policy:()=>Pick<AssistantPolicy,'owner_id'|'owner_chat'>,readonly call:RuntimeCall){}
+  /** The owner's account, which decided a job the owner approved. */
+  owner():string|null {return this.policy().owner_id??null;}
   /** The pause that holds now, or null. */
   async pause():Promise<MemberPause|null> {
     const row=(await this.control.query(`SELECT paused_by,paused_at,paused_until FROM member_job_pause WHERE singleton AND ${activeSql}`)).rows[0];
@@ -112,7 +118,7 @@ export class MemberJobSpend {
     const noticeId=digest(canonical(['member-job-spend-v1',spend.day,String(notice)])),pauseId=digest(canonical(['member-job-pause-v1',spend.day,String(high)]));
     if(spend.spent>=high)await this.pauseByItself(pauseId,noticeId);
     else if(spend.spent>=notice)await this.control.query('UPDATE member_job_pause SET notice_id=$1,notice_sent=false,updated_at=now() WHERE singleton AND notice_id IS DISTINCT FROM $1',[noticeId]);
-    await this.tell(owner,spend,{notice,high,noticeId,pauseId});
+    await this.tell(spend,{notice,high,noticeId,pauseId});
   }
   /** The pause at the high mark, once a day per mark, even when two jobs' ticks see it at once. A pause the owner made
    *  already holds and gets no second notice; neither does the notice mark, which this pause's notice covers. */
@@ -128,7 +134,7 @@ export class MemberJobSpend {
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
   /** Send the notice that is due and not sent yet: the pause's while it still holds, else the notice mark's. */
-  private async tell(owner:string,spend:{spent:number;spenders:Spender[]},marks:{notice:number;high:number;noticeId:string;pauseId:string}):Promise<void> {
+  private async tell(spend:{spent:number;spenders:Spender[]},marks:{notice:number;high:number;noticeId:string;pauseId:string}):Promise<void> {
     const row=(await this.control.query(`SELECT *,${activeSql} AS active FROM member_job_pause WHERE singleton`)).rows[0];
     if(!row)return;
     const prompts=await ownerPrompts(this.control),lines=labeledLines(backgroundMemberTexts,prompts['background.member_texts']);
@@ -137,14 +143,14 @@ export class MemberJobSpend {
       if(!(row.active&&row.paused_by==='auto')){await this.control.query('UPDATE member_job_pause SET pause_sent=true WHERE singleton AND pause_id=$1',[marks.pauseId]);return;}
       const text=cut(fillTemplate(prompts['background.member_paused']??backgroundMemberPaused,{spent:cents(spend.spent),mark:cents(marks.high),
         members:await this.members(spend.spenders,lines)}),3800);
-      if(await this.send(owner,marks.pauseId,text,this.button(true,lines)))
+      if(await this.send(marks.pauseId,text,this.button(true,lines)))
         await this.control.query('UPDATE member_job_pause SET pause_sent=true,shown=$2,updated_at=now() WHERE singleton AND pause_id=$1',[marks.pauseId,{id:marks.pauseId,text}]);
       return;
     }
     if(row.notice_id!==marks.noticeId||row.notice_sent)return;
     const text=cut(fillTemplate(prompts['background.member_spend']??backgroundMemberSpend,{spent:cents(spend.spent),mark:cents(marks.notice),pause_mark:cents(marks.high),
       members:await this.members(spend.spenders,lines)}),3800);
-    if(await this.send(owner,marks.noticeId,text,this.button(!!row.active,lines)))
+    if(await this.send(marks.noticeId,text,this.button(!!row.active,lines)))
       await this.control.query('UPDATE member_job_pause SET notice_sent=true,shown=$2,updated_at=now() WHERE singleton AND notice_id=$1',[marks.noticeId,{id:marks.noticeId,text}]);
   }
   /** Pause while member jobs go on, Resume while they are paused; a label the owner made longer is cut to Telegram's 40
@@ -164,17 +170,21 @@ export class MemberJobSpend {
       const from=String(message?.from?.id??'')===row.requester?message.from:null;
       const name=cardName([from?.first_name,from?.last_name].filter(part=>typeof part==='string').join(' '))??cardName(from?.username?'@'+from.username:null)??
         fillTemplate(lines.unnamed_member!,{id:row.requester});
-      const title=String(message?.chat?.id??'')===row.scope?cardName(message.chat.title):null;
+      // The asking message's group, as the chat directory finds it under any Telegram id it has had (ADR-0252).
+      const title=telegramChat(message?.chat?.id)===row.scope?cardName(message.chat.title):null;
       named.push(fillTemplate(lines.member!,{name,group:title?`“${title}”`:lines.unnamed_group!,spent:cents(row.cost)}));
     }
     const rest=spenders.slice(NAMED);
     if(rest.length)named.push(fillTemplate(lines.more!,{count:String(rest.length),spent:cents(rest.reduce((sum,row)=>sum+row.cost,0))}));
     return named.join('\n');
   }
-  /** A notice in the owner's private chat, sent at most once by its id. A Telegram service older than these buttons
-   *  refuses them before it sends anything, so the text then goes alone. True once it went, or may have. */
-  private async send(owner:string,id:string,text:string,button:Button):Promise<boolean> {
-    const notice={id,chat_id:owner,text};let result;
+  /** A notice in the owner's private chat, sent at most once by its id, where that chat is in Telegram now; a chat the
+   *  directory does not know yet is not sent to, and the notice waits for the next check (ADR-0252). A Telegram service
+   *  older than these buttons refuses them before it sends anything, so the text then goes alone. True once it went, or
+   *  may have. */
+  private async send(id:string,text:string,button:Button):Promise<boolean> {
+    const target=telegramAddress(ownerChat(this.policy()));if(!target)return false;
+    const notice={id,...target,text};let result;
     try{result=await this.call('telegram.notice',{...notice,buttons:[button]},30000);}
     catch(error) {
       if(!(error instanceof HttpError)||error.code!=='telegram_rejected_request')return false;
@@ -188,10 +198,10 @@ export class MemberJobSpend {
     await this.control.query(paused?
       `UPDATE member_job_pause SET paused_by='owner',paused_at=CASE WHEN paused_by='owner' AND paused_until IS NULL THEN paused_at ELSE now() END,paused_until=NULL,updated_at=now() WHERE singleton`:
       'UPDATE member_job_pause SET paused_by=NULL,paused_at=NULL,paused_until=NULL,updated_at=now() WHERE singleton');
-    const owner=this.owner(),shown=(await this.control.query('SELECT shown FROM member_job_pause WHERE singleton')).rows[0]?.shown;
-    if(owner&&shown?.id&&typeof shown.text==='string') {
+    const target=this.owner()?telegramAddress(ownerChat(this.policy())):null,shown=(await this.control.query('SELECT shown FROM member_job_pause WHERE singleton')).rows[0]?.shown;
+    if(target&&shown?.id&&typeof shown.text==='string') {
       const lines=labeledLines(backgroundMemberTexts,(await ownerPrompts(this.control))['background.member_texts']);
-      const edit={id:shown.id,chat_id:owner,text:shown.text+'\n\n'+cut(paused?lines.paused!:lines.resumed!,200),edit:true};
+      const edit={id:shown.id,...target,text:shown.text+'\n\n'+cut(paused?lines.paused!:lines.resumed!,200),edit:true};
       try{await this.call('telegram.notice',{...edit,buttons:[this.button(paused,lines)]},30000);}
       catch(error){if(error instanceof HttpError&&error.code==='telegram_rejected_request')await this.call('telegram.notice',edit,30000).catch(()=>{});}
     }

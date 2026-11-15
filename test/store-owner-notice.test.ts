@@ -8,6 +8,8 @@ import type {Settings} from '../src/config.js';
 import {storageServer} from '../src/stores/server.js';
 import type {StorageServices} from '../src/stores/services.js';
 import {ActionCommandRepository} from '../src/stores/action-commands.js';
+import {chatDirectory,installChatsForTest} from '../src/chats.js';
+import {seededDirectory} from './fixture-seeded-chats.js';
 
 test('a problem notice goes to the owner’s private chat in the owner’s wording, and only the owner’s services may send one',async()=>{
   const dataDir=await mkdtemp(join(tmpdir(),'nocheh-owner-notice-'));
@@ -15,6 +17,8 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
   let owner:string|null='42',texts:Record<string,string>={};
   const services={access:{policy:()=>({owner_id:owner})},stores:{control:{query:async()=>({rows:[{texts}]})}}} as unknown as StorageServices;
   const server=storageServer(services,{token,dataDir} as Settings,async(operation,input)=>{calls.push([operation,input]);return {state:'done'};});
+  // The owner's private chat, as the directory knows it (ADR-0252): the notice goes where it is in Telegram now.
+  const restore=installChatsForTest(seededDirectory(()=>({owner_id:owner,group_ids:[]})));
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');
@@ -46,10 +50,14 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
       {id,problems,open:{kind:'web_app',url:'http://mini.example.test'}},{id,problems,open:{kind:'url',url:'javascript:alert(1)'}},{id,problems,open:{kind:'callback',url:'https://x.test'}}])
       assert.equal((await send(body)).status,400);
     assert.equal((await send({id,problems},scopeToken(token,'owner',Date.now()+60_000))).status,403,'a chat turn cannot send one');
+    // A private chat the directory has no row for is never sent to.
+    installChatsForTest(chatDirectory({chats:[],ids:[],owner_chat:null}));
+    assert.deepEqual(await (await send({id,problems})).json(),{state:'not_started',error_code:'chat_not_found'});
     owner=null;
     assert.deepEqual(await (await send({id,problems})).json(),{state:'not_started',error_code:'owner_not_set'});
     assert.equal(calls.length,5);
   }finally{
+    restore();
     await new Promise<void>(resolve=>server.close(()=>resolve()));
     await rm(dataDir,{recursive:true,force:true});
   }
@@ -57,6 +65,8 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
 
 test('Retry failed under a problem notice retries only on the owner’s press in their private chat',async()=>{
   const answers:any[]=[],queries:string[]=[];let press:any={id:'q1',data:'nr',from:{id:42},message:{chat:{id:42}}};
+  // The owner's private chat, as the directory knows it (ADR-0252).
+  const restore=installChatsForTest(seededDirectory(()=>({owner_id:'42',group_ids:[]})));
   const access={policy:()=>({owner_id:'42'}),archive:{verify:async()=>({kind:'telegram_update',origin:'live'})},
     stores:{archive:{query:async()=>({rows:[{payload:Buffer.from(JSON.stringify({callback_query:press}))}]})},
       control:{query:async(sql:string)=>{queries.push(sql);return sql.includes('owner_prompts')?{rows:[{texts:{}}]}:{rows:[]};}}}};
@@ -69,4 +79,5 @@ test('Retry failed under a problem notice retries only on the owner’s press in
   assert.equal(await actions.callback(source),true);
   assert.equal(answers[1][1].text,'Only the owner can do this.');
   assert.ok(!queries.some(sql=>sql.includes('workflow_observations')),'anyone else’s press retries nothing');
+  restore();
 });

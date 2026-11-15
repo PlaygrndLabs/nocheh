@@ -13,6 +13,7 @@ import type {BrowserDeliveryRepository} from './browser-delivery.js';
 import {ManagedExecutionRepository,managedIdentity as identity,managedEventId as eventId,type ManagedInput as Input} from './managed-execution.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {runtimeProfile} from './runtime-profile.js';
+import {ownerChat} from '../assistant-policy.js';
 export {managedStorageSchema} from './managed-execution.js';
 
 const protocol='managed-browser-v2';
@@ -27,7 +28,7 @@ export class BrowserRunRepository extends ManagedExecutionRepository {
     const status=await super.observe(input);
     if(!status.visible)return {...status,delivery:null,context:null};
     const row=await this.scoped(input);await this.current(row);
-    const context={scope:row.scope,space:row.space_id,logical_profile:row.logical_profile,owner:row.scope===this.access.policy().owner_id,
+    const context={scope:row.scope,space:row.space_id,logical_profile:row.logical_profile,owner:row.scope===ownerChat(this.access.policy()),
       generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch,native_profile:runtimeProfile(this.principal(row),row.binding)};
     if(status.state!=='done'||!status.text)return {...status,delivery:null,context};
     const original=(await this.access.stores.archive.query('SELECT source_id FROM events WHERE id=$1',[row.event_id])).rows[0];
@@ -81,7 +82,7 @@ export class BrowserRunRepository extends ManagedExecutionRepository {
       await this.profile(scope,space,profile,binding);
       const saved=(await db.query('SELECT * FROM managed_runs WHERE event_id=$1 FOR UPDATE',[id])).rows[0];
       if(saved){await db.query('COMMIT');return {owned:true,event_id:id,state:saved.state};}
-      if(scope!==this.access.policy().owner_id&&payload.revision!==binding.epoch)throw new HttpError(409,'browser_audience_changed');
+      if(scope!==ownerChat(this.access.policy())&&payload.revision!==binding.epoch)throw new HttpError(409,'browser_audience_changed');
       if((await db.query("SELECT 1 FROM managed_runs WHERE scope=$1 AND logical_profile=$2 AND conversation_id=$3 AND state IN ('captured','running')",[scope,profile,payload.conversation_id])).rowCount)
         throw new HttpError(409,'session_busy');
       await db.query(`INSERT INTO managed_runs(event_id,channel,source_reference,scope,space_id,logical_profile,conversation_id,binding,owner_epoch)

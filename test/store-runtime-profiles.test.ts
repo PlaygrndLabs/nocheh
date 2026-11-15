@@ -7,7 +7,10 @@ import pg from 'pg';
 import {digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
+import {chatRowForTest} from './fixture-seeded-chats.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {chatIdFor,installChatsForTest} from '../src/chats.js';
+import {GP1,GP1_TOPIC,GP2,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,OWNER,UNSERVED,fixtureDirectory} from './fixture-groups.js';
 
 test('native profile configuration retains stable preference identities while revoking old execution generations',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -23,26 +26,34 @@ test('native profile configuration retains stable preference identities while re
     const defaults=await s.runtimeProfiles.list(owner);assert.equal(defaults.profiles.filter(p=>p.managed).length,2);
     // Chats are listed by readable names that end with the chat's own code; the chat link (logical_profile) stays the hash.
     const code=(chat:string)=>digest(chat).slice(0,6),listed=async(chat:string)=>(await s.runtimeProfiles.list(owner)).profiles.find(p=>p.scope===chat)!;
-    const observe=(chat:string,title:string|null,username:string|null)=>stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username)
-      VALUES($1,'available','supergroup',$2,$3) ON CONFLICT(chat_id) DO UPDATE SET state='available',title=$2,username=$3`,[chat,title,username]);
+    // What an owner's refresh records on a group's chats row and details (ADR-0252).
+    const observe=(chat:string,title:string|null,username:string|null)=>chatRowForTest(stores.control,chat,{title,username});
     assert.deepEqual(defaults.profiles.map(p=>p.name),['private-chat','group-'+code('-456')],'a group never observed gets its code');
+    await chatRowForTest(stores.control,'-456',{title:'Garden Club',title_source:'observed',refreshed:false});
+    assert.equal((await listed('-456')).name,'group-'+code('-456'),'a name only captured, never refreshed, leaves the label as it was before step 2b');
     await observe('-456','Garden Club',null);
     const group=await listed('-456'),name='group-garden-club-'+code('-456');
     assert.deepEqual([group.name,group.display_name,group.logical_profile],[name,'Garden Club','nocheh-'+digest('-456').slice(0,24)]);
     assert.equal((await s.runtimeProfiles.resolve(owner,{profile:name})).native_profile,group.native_profile);
     assert.equal((await s.runtimeProfiles.resolve(owner,{profile:'nocheh-'+digest('-456').slice(0,24)})).name,name,'the chat link still finds it');
+    // Someone renames the group and a message shows the new name: the label stays the one the refresh answered, as before
+    // step 2b, until the owner refreshes again.
+    await stores.control.query(`UPDATE chats SET title='Garden',title_source='observed' WHERE id='-456'`);
+    await stores.control.query(`UPDATE chat_details SET username='garden_renamed' WHERE chat_id='-456'`);
+    assert.deepEqual([(await listed('-456')).name,(await listed('-456')).display_name],[name,'Garden Club'],'a later update never renames a profile');
+    assert.equal((await s.runtimeProfiles.resolve(owner,{profile:name})).scope,'-456');
     // These two chat IDs share their first six code characters, so the later one in the list takes a longer code.
     const older='-1000000002195',newer='-1000000006370',longer='group-garden-club-'+digest(newer).slice(0,12);assert.equal(code(older),code(newer));
     groups.push(older,newer);for(const twin of [older,newer])await observe(twin,'Garden Club',null);
     assert.deepEqual([(await listed('-456')).name,(await listed(older)).name,(await listed(newer)).name],
       [name,'group-garden-club-'+code(older),longer],'groups with one title keep their own names');
     assert.equal((await s.runtimeProfiles.resolve(owner,{profile:longer})).scope,newer);
-    groups.splice(1);await stores.control.query('DELETE FROM telegram_chat_observations WHERE chat_id=ANY($1)',[[older,newer]]);
+    groups.splice(1);for(const twin of [older,newer])await chatRowForTest(stores.control,twin,{refreshed:false});
     await observe('-456','باغ',null);assert.equal((await listed('-456')).name,'group-'+code('-456'),'a name without Latin letters keeps the code alone');
     await observe('-456','باغ','garden_club');assert.equal((await listed('-456')).name,'group-garden_club-'+code('-456'),'or uses the public username');
     for(const reserved of ['private-chat','Group-notes'])
       await assert.rejects(s.runtimeProfiles.save(owner,{name:reserved,state:'active',expected_revision:0,operation_id:key+':'+reserved}),{code:'invalid_profile_name'});
-    await stores.control.query("DELETE FROM telegram_chat_observations WHERE chat_id='-456'");
+    await chatRowForTest(stores.control,'-456',{refreshed:false});
     const primary=await s.runtimeProfiles.resolve(owner,{profile:'default'});assert.equal(primary.owner,true);assert.equal(primary.is_default,true);
     assert.equal(primary.native_profile,s.turns.profile({admin:false,scope:null,space:'123',revision:before.epoch},before));
     await assert.rejects(s.runtimeProfiles.list({admin:false,scope:null}),{status:403});
@@ -69,4 +80,33 @@ test('native profile configuration retains stable preference identities while re
     await s.runtimeProfiles.save(owner,{id:replacement.id,name:renamed.name,state:'retired',expected_revision:1,operation_id:key+':cleanup'});
     assert.equal((await stores.archive.query('SELECT count(*) FROM events')).rows[0].count,count,'configuration changes create no archive sources');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('runtime profiles come from the chat directory: old chats keep their names, new and upgraded ones are named by their chat ids',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  // The strict fixture directory (ADR-0252): GP1 stored before step 2b, NG1 first seen after it, NG2 upgraded since
+  // (its old Telegram id is its chat id's source). Nothing is made up for an id the directory does not hold.
+  const restore=installChatsForTest(fixtureDirectory([GP1,NG1_TG,NG2_TG]));
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-profiles-strict-')),owner={admin:true,scope:null};
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1,NG1_TG,NG2_TG]}),
+    runtime:async()=>{throw Error('no runtime calls');},memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
+  const named=(space:string)=>'nocheh-'+digest(space).slice(0,24);
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');
+    const managed=(await s.runtimeProfiles.list(owner)).profiles.filter(p=>p.managed);
+    assert.deepEqual(managed.map(p=>[p.scope,p.logical_profile]),[[OWNER,named(OWNER)],[GP1,named(GP1)],[NG1,named(NG1)],[NG2,named(NG2)]],
+      'the owner\'s chat and GP1 keep the names they had; NG1 and NG2 are named by their chat ids');
+    assert.ok(!managed.some(p=>[named(NG1_TG),named(NG2_TG),named(NG2_OLD_TG)].includes(p.logical_profile??'')),'never by a Telegram id');
+    assert.ok(!managed.some(p=>[GP2,UNSERVED].includes(p.scope)),'only served chats');
+    for(const [space,chat] of [[GP1_TOPIC,GP1],[NG1_TOPIC,NG1]] as const) {
+      const topic=await s.runtimeProfiles.resolve(owner,{profile:named(space),space});
+      assert.deepEqual([topic.scope,topic.space,topic.owner,topic.logical_profile],[chat,space,false,named(space)]);
+    }
+    // A topic the directory does not hold, or one of an unserved group, is refused: never made up from its id's shape.
+    for(const space of [GP1+'/topic/99',UNSERVED+'/topic/1',chatIdFor('telegram',NG1_TG,'8')])
+      await assert.rejects(s.runtimeProfiles.resolve(owner,{profile:named(space),space}),{code:'profile_scope_denied'},space);
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

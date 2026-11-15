@@ -10,6 +10,7 @@ import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {fixtureServices,type FakeCall} from './fixture-brain.js';
+import {chatRowForTest} from './fixture-seeded-chats.js';
 import {storageServer} from '../src/stores/server.js';
 import {startStorageCapture} from '../src/stores/worker.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -192,8 +193,8 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/scheduler/delivery',{event_id:scheduled.event_id})).state,'local');
     await request('/v1/memory/check',undefined,409,scheduledClaim.archive_credential);
 
-    await connected.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title) VALUES($1,'available','supergroup','Synthetic Forum')
-      ON CONFLICT(chat_id) DO UPDATE SET state='available',title='Synthetic Forum'`,[named]);
+    // The group's name as the owner's refresh records it, on its chat row (ADR-0252).
+    await chatRowForTest(connected.control,named,{title:'Synthetic Forum',is_forum:true});
     const recall=await request('/v1/memory/recall',{query:'observation',generation:'untrusted',guard_epoch:-1},200,credential);assert.equal(nativeCalls,1);
     // Each hit names its chat in words: the owner's label only for the owner's own chat, never for a private answer
     // or a chat Nocheh can't name, and no raw chat ID or profile metadata is passed on (ADR-0251).
@@ -231,8 +232,8 @@ test('separated application captures through control outages, exposes owner repo
     await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'},401,credential);
     await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'},403);
     await connected.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[proposal.id]);
-    assert.equal((await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'Synthetic approval preview'})).valid,true);
-    await request('/internal/actions/authorize',{id:proposal.id,destination:'123',text:'different message'},403);
+    assert.equal((await request('/internal/actions/authorize',{id:proposal.id,destination:'123',chat_id:'123',text:'Synthetic approval preview'})).valid,true);
+    await request('/internal/actions/authorize',{id:proposal.id,destination:'123',chat_id:'123',text:'different message'},403);
     assert.equal((await request('/v1/exports/sources?limit=1')).format,'nocheh-sources-v1');
     assert.ok(Array.isArray((await request('/v1/workflows?limit=1')).workflows));
     assert.ok(Array.isArray((await request('/v1/workflows/health')).workers));

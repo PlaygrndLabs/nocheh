@@ -5,7 +5,9 @@ import {digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {projectGroups,projectGroupsSql} from '../src/stores/project-groups.js';
 import {readSet,readSetOf,readSetParam,readSetSql,recallScope} from '../src/spaces.js';
-import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1,P1_GROUPS,P2,UNSERVED,groupsPolicy,seedGroups} from './fixture-groups.js';
+import {chatIdFor,installChatsForTest} from '../src/chats.js';
+import {BOB_CHAT,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG2,OWNER,P1,P1_GROUPS,P2,UNSERVED,fixtureChats,groupsPolicy,legacyChats,
+  seedGroups} from './fixture-groups.js';
 
 test('a project\'s groups are its served groups, never a topic, a private chat or a group it does not serve',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -44,8 +46,12 @@ test('a project\'s groups are its served groups, never a topic, a private chat o
 test('a read set selects in SQL exactly what inReadSet reads',{skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const db=new pg.Client(config);await db.connect();
-  const spaces=[GP1,GP1_TOPIC,GP1+'/topic/8',GP2,GP2+'/topic/7',GP3,GP3+'/topic/9',GP4,GP4+'/topic/1',UNSERVED,
-    OWNER,OWNER+'/topic/5','456','desktop:personal_chat:9','desktop:private_supergroup:1234567890','system','-0','-20/topic/0',GP1+'/*',GP1+'/topic/7/*',''];
+  // Both fixture families, plus topics of GP1-GP4 the seeder would have made rows for (ADR-0252).
+  const base=fixtureChats(),extra=legacyChats([GP1+'/topic/8',GP2+'/topic/7',GP3+'/topic/9',GP4+'/topic/1'],{served:GP_GROUP_IDS}),known=new Set(base.chats.map(chat=>chat.id));
+  const restore=installChatsForTest({...base,chats:[...base.chats,...extra.chats.filter(chat=>!known.has(chat.id))],ids:[...base.ids,...extra.ids.filter(row=>!known.has(row.chat_id))]});
+  const spaces=[GP1,GP1_TOPIC,GP1+'/topic/8',GP2,GP2+'/topic/7',GP3,GP3+'/topic/9',GP4,GP4+'/topic/1',UNSERVED,NG1,NG1_TOPIC,NG2,BOB_CHAT,
+    OWNER,OWNER+'/topic/5','456','desktop:personal_chat:9','desktop:private_supergroup:1234567890','system','-0','-20/topic/0',GP1+'/*',GP1+'/topic/7/*','',
+    chatIdFor('telegram',NG1_TG,'8')];
   const select=async(set:ReturnType<typeof readSet>|string[],at=2)=>(await db.query(`SELECT s FROM unnest($1::text[]) s WHERE ${readSetSql('s',at)} ORDER BY s COLLATE "C"`,
     [spaces,Array.isArray(set)?set:readSetParam(set)])).rows.map(row=>row.s);
   try {
@@ -56,11 +62,24 @@ test('a read set selects in SQL exactly what inReadSet reads',{skip:process.env.
     assert.deepEqual(await select(readSetOf(recallScope(GP1_TOPIC,'topic'))),[GP1_TOPIC],'a topic alone');
     assert.deepEqual(await select(readSetOf(recallScope(GP1,'topic'))),[GP1],'the General chat alone');
     assert.deepEqual(await select(readSet({home:GP4,exact:[GP2+'/topic/7'],whole:[GP3]})),[GP2+'/topic/7',GP3,GP3+'/topic/9']);
-    for(const space of [OWNER,'456','desktop:personal_chat:9','system'])assert.deepEqual(await select(readSetOf(recallScope(space))),[],space);
-    // A parameter written by hand with private chats and patterns in it still never selects one.
-    assert.deepEqual(await select([OWNER,OWNER+'/*','456','system','desktop:personal_chat:9',GP1+'/*/*','%','*','/*',GP4+'/topic/1']),[GP4+'/topic/1']);
+    // Digest ids: a group with its topic rows, a group with an old Telegram id, and digest and old-shaped groups together;
+    // a topic with no row is never read.
+    assert.deepEqual(await select(readSet({home:NG1_TOPIC,whole:[NG1,NG2,GP3],project:P1})),[GP3,GP3+'/topic/9',NG1,NG1_TOPIC,NG2].sort());
+    assert.deepEqual(await select(readSetOf(recallScope(NG1_TOPIC))),[NG1,NG1_TOPIC].sort());
+    assert.deepEqual(await select(readSetOf(recallScope(NG1_TOPIC,'topic'))),[NG1_TOPIC],'a digest topic alone');
+    for(const space of [OWNER,'456',BOB_CHAT,'desktop:personal_chat:9','system',chatIdFor('telegram','-1009999999999')])
+      assert.deepEqual(await select(readSetOf(recallScope(space))),[],space);
+    // The parameter is marked exact ids: a pattern written into it matches nothing, and a parameter made by hand, which
+    // skipped readSetParam, matches nothing at all, the owner's chat, Bob's and a group alike (ADR-0242).
+    assert.deepEqual(await select(['read:%','read:*','read:/*','read:'+GP1+'/*/*','read:'+GP4+'/topic/1']),[GP4+'/topic/1']);
+    assert.deepEqual(await select([OWNER,OWNER+'/topic/5','456',BOB_CHAT,'system',GP1,GP4+'/topic/1']),[],'a list by hand opens nothing');
+    assert.deepEqual(await select(['read',':'+OWNER,'READ:'+OWNER,' read:'+OWNER]),[],'only the exact mark counts');
+    // A set made by hand with private chats, unknown ids and patterns in it still never puts one in the parameter.
+    const forged={home:GP4,exact:[OWNER,OWNER+'/topic/5','456',BOB_CHAT,'system','desktop:personal_chat:9',GP1+'/*',GP4+'/topic/1'],whole:[OWNER,BOB_CHAT,'%',UNSERVED+'/topic/1'],project:null};
+    assert.deepEqual(readSetParam(forged),['read:'+GP4+'/topic/1']);
+    assert.deepEqual(await select(forged),[GP4+'/topic/1']);
     assert.deepEqual(await select([]),[]);
     const named=(await db.query(`SELECT s FROM unnest($2::text[]) s WHERE ${readSetSql('s','$1')} ORDER BY s COLLATE "C"`,[readSetParam(frozen),[GP2+'/topic/7',GP4,OWNER]])).rows;
     assert.deepEqual(named.map(row=>row.s),[GP2+'/topic/7']);
-  } finally {await db.end();}
+  } finally {restore();await db.end();}
 });

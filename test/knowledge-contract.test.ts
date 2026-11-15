@@ -2,6 +2,13 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {digest} from '../src/archive.js';
 import {parseKnowledgeProposal,learnedOrganization,organizationIdentity,proposalPrivateChats,type OrganizationProposal} from '../src/stores/knowledge-contract.js';
+import {installChatsForTest} from '../src/chats.js';
+import {BOB_CHAT,NG1,NG1_TOPIC,NG2,fixtureDirectory,legacyDirectory} from './fixture-groups.js';
+
+// The chats these tests name, as the seeder makes their rows (ADR-0252): a group and its topic, another group, the
+// owner's private chat and two of its topics. Anything else has no row and counts as private.
+const legacyChats=legacyDirectory(['-1000/topic/7','-1001','123/topic/4','123/topic/5'],{owner:'123',served:['-1000','-1001']});
+installChatsForTest(legacyChats);
 
 const source=digest('original-evidence'),project=digest('existing-project');
 const organization=():OrganizationProposal=>({kind:'organization',reason:'Evidence identifies a project',creates:[{key:'new_project',name:'Project Aurora',description:'Evidence-backed project',evidence_ids:[source]}],
@@ -107,4 +114,17 @@ test('a topic always follows its group\'s project: a proposal never gives it one
   const learned=(space_id:string)=>({space_id,project_id:project,project_key:null,expected_revision:0,reason:'This chat exists for that project',purpose_evidence:true,evidence_ids:[source]});
   assert.deepEqual(learnedOrganization({reason:'A project',creates:null,assignments:[learned(topic),learned('-1000')]})!.assignments.map(a=>a.space_id),['-1000']);
   assert.equal(learnedOrganization({reason:'Only a topic',creates:null,assignments:[learned(topic)]}),null);
+});
+
+test('chats first seen after step 2b follow the same rules from their rows, never from their ids',()=>{
+  const restore=installChatsForTest(fixtureDirectory());
+  try {
+    const assignment=(space_id:string)=>({...organization().assignments[0]!,space_id});
+    assert.deepEqual(parseKnowledgeProposal({...organization(),assignments:[assignment(NG1),assignment(NG2)]}).kind,'organization');
+    assert.throws(()=>parseKnowledgeProposal({...organization(),assignments:[assignment(NG1_TOPIC)]}),{code:'project_topic_follows_group'});
+    // Bob's private chat, and a well-formed id no chat row names, are private.
+    for(const space of [BOB_CHAT,'a'.repeat(64),'-1000'])
+      assert.throws(()=>parseKnowledgeProposal({...organization(),assignments:[assignment(space)]}),{code:'project_private_chat'},space);
+    assert.deepEqual(proposalPrivateChats(parseKnowledgeProposal({kind:'fact_grant',reason:'Share',payload:{fact_id:project,fact_revision:1,destination:BOB_CHAT,wording:'A fact'}},{stored:true})),[BOB_CHAT]);
+  }finally{restore();}
 });

@@ -37,6 +37,8 @@ import {chatToolSchema} from './chat-tools.js';
 import {promptSchema} from '../prompts.js';
 import {telegramChatSchema} from './telegram-chats.js';
 import {telegramTopicSchema} from './telegram-topics.js';
+import {chatSchema} from './chat-schema.js';
+import {chatRecordSchema} from './chats.js';
 import {sourceRetirementSchema} from './source-retirement.js';
 import {reactionStateSchema} from './reaction-state.js';
 import {knowledgeManagementSchema} from './knowledge-schema.js';
@@ -159,6 +161,8 @@ ${chatToolSchema}
 ${promptSchema}
 ${telegramChatSchema}
 ${telegramTopicSchema}
+${chatSchema}
+${chatRecordSchema}
 ${sourceRetirementSchema}
 ${reactionStateSchema}
 ${knowledgeManagementSchema}

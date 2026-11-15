@@ -8,8 +8,12 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
+import {chatRowForTest} from './fixture-seeded-chats.js';
 import {honchoEngine} from '../src/memory/honcho.js';
-import {groupSpace,groupSpaceSql,readSet} from '../src/spaces.js';
+import {groupSpace,groupSpaces,readSet} from '../src/spaces.js';
+import {installChatsForTest} from '../src/chats.js';
+import {legacyDirectory} from './fixture-groups.js';
+import {families} from './fixture-families.js';
 import {moveGroupTasks} from '../src/stores/tasks.js';
 
 const states=(counts:any)=>({open:counts.open,done:counts.done,dropped:counts.dropped});
@@ -21,6 +25,8 @@ test('the owner keeps task lists from the dashboard and their private chat; an u
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null};
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
+  const restore=installChatsForTest(legacyDirectory([group,group+'/topic/7','456'],{owner:'123',served:[group]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
@@ -132,7 +138,7 @@ test('the owner keeps task lists from the dashboard and their private chat; an u
     assert.deepEqual([moved.project_id,moved.tags,moved.people],[null,['Home'],[{id:sara,name:'Sara'}]],'the owner moves a task between lists');
     const cleared=await s.tasks.update(owner,site.id,{operation_id:key+':clear',expected_revision:site.revision+1,group:null,people:[],tags:[]});
     assert.deepEqual([cleared.group_id,cleared.people,cleared.tags],[null,[],[]],'links and tags can be cleared');
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, comments, history, reminders, archive and trash',
@@ -143,6 +149,8 @@ test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-full:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null};
   const notices:any[]=[];let telegram:'done'|'not_started'|'ambiguous'='done';
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
+  const restore=installChatsForTest(legacyDirectory([group,group+'/topic/7'],{owner:'123',served:[group]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -320,7 +328,7 @@ test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, 
     await assert.rejects(edit(synced,{external:{'Bad Name':'x'}}),{code:'invalid_task_external'});
     assert.equal((await s.tasks.list(owner,{sort:'manual'})).tasks[0].id,now.id);
     await assert.rejects(s.tasks.chatUpdate(member,now.id,{expected_revision:synced.revision,external:{}}),{code:'unknown_task_field'},'the assistant cannot set outside IDs');
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('a project chat sees a task only as it is on that project\'s board, from when it joined',
@@ -330,6 +338,8 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-board:'+Date.now(),group='-'+Date.now(),porch='-3'+Date.now();
   const owner:Reader={admin:true,scope:null};
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
+  const restore=installChatsForTest(legacyDirectory([group,porch],{owner:'123',served:[group,porch]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group,porch]}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
@@ -535,7 +545,7 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
     const bolted=await s.tasks.chatGet(member,bolt.id);
     assert.deepEqual([bolted.group_id,bolted.comments],[group,[]],'the tasks under it move to the group with it');
     assert.ok(!JSON.stringify(bolted).includes('canary-porch-'+mark)&&!JSON.stringify(bolted).includes(porch));
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('from the owner\'s private chat, a change a project\'s chats would see waits for a card that names them',
@@ -546,6 +556,8 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-card:'+Date.now();
   const group='-'+Date.now(),forum='-100'+Date.now(),other='-2'+Date.now();
   const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[];
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
+  const restore=installChatsForTest(legacyDirectory([group,forum,other,forum+'/topic/7','456'],{owner:'123',served:[group,forum,other]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group,forum,other]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -577,13 +589,13 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     const padded='-0'+group.slice(1);
     for(const space of [group,forum+'/topic/7','456',padded,padded+'/topic/7'])
       await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[space,launch]);
+    // The groups' names as the owner's refresh recorded them, and the topic name the owner gave (ADR-0252: chats rows).
     for(const [chat,title,forumChat] of [[group,'Launch team',false],[forum,'Plans team',true]] as const)
-      await stores.control.query(`INSERT INTO telegram_chat_observations(chat_id,state,chat_type,title,username,is_forum,migrate_to_chat_id,observed_at)
-        VALUES($1,'available','supergroup',$2,NULL,$3,NULL,now()) ON CONFLICT DO NOTHING`,[chat,title,forumChat]);
-    await stores.control.query("INSERT INTO telegram_topic_registrations(chat_id,topic_id,name) VALUES($1,7,'Venue')",[forum]);
+      await chatRowForTest(stores.control,chat,{title,is_forum:forumChat});
+    await chatRowForTest(stores.control,forum+'/topic/7',{title:'Venue',title_source:'owner',refreshed:false});
     // The chats a card names are the ones groupSpace counts as groups: the same test, in SQL (ADR-0242).
     const spaces=[group,forum+'/topic/7','456','123/topic/5','-0123','-0','-0123/topic/7','-12345678901234567890','-20/topic/abc','-20/topic/0','desktop:personal_chat:9','system',''];
-    assert.deepEqual((await stores.control.query(`SELECT ${groupSpaceSql('x')} AS grouped FROM unnest($1::text[]) WITH ORDINALITY u(x,n) ORDER BY n`,[spaces])).rows.map(row=>row.grouped),
+    assert.deepEqual((await stores.control.query(`SELECT x=ANY($2::text[]) AS grouped FROM unnest($1::text[]) WITH ORDINALITY u(x,n) ORDER BY n`,[spaces,groupSpaces()])).rows.map(row=>row.grouped),
       spaces.map(space=>groupSpace(space)));
     // Chats added to the project later see the list too, so every card says so (ADR-0243).
     const seenIn='👥 Seen in “Plans team” › Venue, “Launch team”. Chats you add to this project later will see it too.';
@@ -620,6 +632,8 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     for(const change of [{reminders:['2030-01-03T09:00']},{repeat:{every:1,unit:'week',from:'due'}}])
       assert.equal((await s.tasks.chatUpdate(chat,made.id,{expected_revision:started.revision,...change})).state,'proposed');
     const before=cards.length;
+    // A title a later update showed does not rename a group on a card: the owner's last refresh does, as before step 2b.
+    await stores.control.query(`UPDATE chats SET title='Launch crew',title_source='observed' WHERE id=$1`,[group]);
     const rename=await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:started.revision,title:'Book the hall',priority:0}));
     assert.equal(rename.state,'proposed');
     assert.equal(last('card').text,`📋 Change a task in the list of “Launch”\n${seenIn}\n\nTask: Book the venue\nTitle: Book the hall\nPriority: No priority`);
@@ -720,19 +734,22 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     const refused=await s.actionCommands.offer('task',await s.tasks.chatCreate(chat,long));
     assert.deepEqual([refused.state,refused.error,cards.length],['refused','task_card_too_long',count]);
     assert.deepEqual([(await s.tasks.chatCreate(chat,long)).state,await tasks('Long notes')],['refused',[]]);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('a group or topic reaches only its own tasks and the tasks set on its project, never another group\'s (ADR-0248)',
+for(const family of families)test(`a group or topic reaches only its own tasks and the tasks set on its project, never another group's (ADR-0248, ${family.name})`,
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-groups:'+Date.now(),stamp=String(Date.now()).slice(-9);
   // Two groups of project P1 and a third in none; synthetic IDs, new on every run.
-  const g1='-1001'+stamp,g2='-1002'+stamp,g3='-1003'+stamp;
+  // Telegram's ids t1-t3 (the archive keeps them); g1-g3 are the chats' Nocheh ids in this family (ADR-0252).
+  const t1='-1001'+stamp,t2='-1002'+stamp,t3='-1003'+stamp,id=family.id,g1=id(t1),g2=id(t2),g3=id(t3),at=(group:string,key:number)=>id(group+'/topic/'+key);
   const owner:Reader={admin:true,scope:null};let memory:'group'|'topic'='group';
-  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[g1,g2,g3],topic_memory:memory}),
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
+  const restore=installChatsForTest(family.directory([t1,t2,t3,...[5,6,7,8].map(topic=>t1+'/topic/'+topic),t2+'/topic/3'],{owner:'123',served:[t1,t2,t3]}));
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[t1,t2,t3],topic_memory:memory}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
   const capture=async(chat:string,from:number,text:string,name:string,topic?:number)=>{
@@ -744,7 +761,8 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
   const actor=async(source:string,scope:string|null,space:string,extra:Partial<Reader>={}):Promise<Reader>=>{
     const binding=await s.guards.state();return {admin:false,scope,space,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,...extra};
   };
-  const ask=async(chat:string,text:string,name:string,topic?:number)=>actor((await capture(chat,456,text,name,topic)).id,chat,topic===undefined?chat:chat+'/topic/'+topic);
+  // A turn in Telegram chat `chat` (topic `topic`), read as its Nocheh chat.
+  const ask=async(chat:string,text:string,name:string,topic?:number)=>actor((await capture(chat,456,text,name,topic)).id,id(chat),topic===undefined?id(chat):at(chat,topic));
   const ids=(value:any)=>value.tasks.map((item:any)=>item.id).sort();
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
@@ -756,7 +774,7 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     // In P1: a task set on the project itself, a task of each group and one of a topic of the first group.
     const shared=await s.tasks.create(owner,{operation_id:key+':shared',title:'Book the hall',scope:p1,tags:['Hall']});
     const first=await s.tasks.create(owner,{operation_id:key+':first',title:'canary-first-'+mark,scope:p1,group:g1,tags:['canary-tag-'+mark]});
-    const topical=await s.tasks.create(owner,{operation_id:key+':topic',title:'Print the menus',scope:p1,group:g1+'/topic/7'});
+    const topical=await s.tasks.create(owner,{operation_id:key+':topic',title:'Print the menus',scope:p1,group:at(t1,7)});
     const under=await s.tasks.create(owner,{operation_id:key+':under',title:'Pick the paper',parent:first.id});
     assert.deepEqual([under.project_id,under.group_id],[p1,g1],'a subtask takes its parent\'s list and group');
     await assert.rejects(s.tasks.create(owner,{operation_id:key+':astray',title:'Elsewhere',parent:first.id,group:g2}),{code:'task_parent_other_group'});
@@ -764,7 +782,7 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     await s.tasks.comment(owner,first.id,{operation_id:key+':first-note',text:'canary-note-'+mark});
 
     // The second group lists its own task and the project's, and counts and names the tags of those only.
-    const bob=await ask(g2,'What is left to do?','Bob');
+    const bob=await ask(t2,'What is left to do?','Bob');
     const listed=await s.tasks.chatList(bob);
     assert.deepEqual(ids(listed),[second.id,shared.id].sort());
     assert.deepEqual([listed.counts.open,listed.scopes.map((row:any)=>[row.id,row.open])],[2,[[p1,2]]]);
@@ -797,10 +815,10 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     const step=await s.tasks.chatCreate(bob,{title:'Stack the chairs',parent:all.id});
     assert.equal(step.group_id,null,'a subtask takes its parent\'s group');
     // A group in no project reaches no list.
-    await assert.rejects(s.tasks.chatList(await ask(g3,'Any tasks?','Bob')),{code:'task_project_required'});
+    await assert.rejects(s.tasks.chatList(await ask(t3,'Any tasks?','Bob')),{code:'task_project_required'});
 
     // The first group sees its own, its topic's and the project's tasks, never the second group's.
-    const alice=await ask(g1,'And for us?','Alice');
+    const alice=await ask(t1,'And for us?','Alice');
     assert.deepEqual(ids(await s.tasks.chatList(alice)),[shared.id,first.id,topical.id,under.id,all.id,step.id].sort());
     for(const id of unnamed)await assert.rejects(s.tasks.chatGet(alice,id),{status:404});
     await stores.control.query('DELETE FROM owner_tasks WHERE id=ANY($1)',[unnamed]);
@@ -844,31 +862,31 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
 
     // Topics: when a group's topics share what they know, a task asked in a topic belongs to that topic and the whole
     // group sees it; when each topic keeps its own, only that topic does.
-    const five=await ask(g1,'Add ordering the cake','Alice',5);
+    const five=await ask(t1,'Add ordering the cake','Alice',5);
     const cake=await s.tasks.chatCreate(five,{title:'Order the cake'});
-    assert.equal(cake.group_id,g1+'/topic/5');
-    for(const reader of [alice,await ask(g1,'Anything in six?','Alice',6)])assert.equal((await s.tasks.chatGet(reader,cake.id)).id,cake.id);
+    assert.equal(cake.group_id,at(t1,5));
+    for(const reader of [alice,await ask(t1,'Anything in six?','Alice',6)])assert.equal((await s.tasks.chatGet(reader,cake.id)).id,cake.id);
     memory='topic';
-    const general=await ask(g1,'What is open here?','Alice'),six=await ask(g1,'And here?','Alice',6);
+    const general=await ask(t1,'What is open here?','Alice'),six=await ask(t1,'And here?','Alice',6);
     for(const reader of [general,six])await assert.rejects(s.tasks.chatGet(reader,cake.id),{status:404});
     const sixList=await s.tasks.chatList(six);
     assert.deepEqual([ids(sixList),sixList.counts.open],[[shared.id,all.id,step.id].sort(),2],'the other topic lists and counts only the project\'s tasks');
     assert.ok(!(await s.tasks.chatList(general)).tasks.some((item:any)=>item.id===topical.id),'nor does the group\'s own chat see a topic\'s task');
-    assert.equal((await s.tasks.chatGet(await ask(g1,'And in five?','Alice',5),cake.id)).group_id,g1+'/topic/5');
-    await assert.rejects(s.tasks.chatCreate(five,{title:'Next door',group:g1+'/topic/6'}),{code:'task_group_denied'});
+    assert.equal((await s.tasks.chatGet(await ask(t1,'And in five?','Alice',5),cake.id)).group_id,at(t1,5));
+    await assert.rejects(s.tasks.chatCreate(five,{title:'Next door',group:at(t1,6)}),{code:'task_group_denied'});
     // The owner's card and the dashboard name exactly these chats.
     const seenBy=async(id:string,query:{scope?:string;group?:string|null}={})=>(await s.tasks.audience(owner,id,query)).chats;
-    assert.deepEqual(await seenBy(cake.id),[g1+'/topic/5'],'with its own memory, only the topic sees its task');
+    assert.deepEqual(await seenBy(cake.id),[at(t1,5)],'with its own memory, only the topic sees its task');
     memory='group';
     assert.deepEqual(await seenBy(cake.id),[g1],'sharing memory, the whole group does');
-    assert.deepEqual(await seenBy(shared.id),[g1,g2]);
+    assert.deepEqual(await seenBy(shared.id),[g1,g2].sort(),'every group of the project, in id order');
     assert.deepEqual(await s.tasks.audience(owner,shared.id,{group:g3}),{project:p1,group:g3,audience:'group',chats:[]},'a group in no project sees nothing');
     assert.deepEqual(await s.tasks.audience(owner,under.id,{group:g2}),{project:p1,group:g1,audience:'group',chats:[g1]},'a subtask keeps its parent\'s group');
     // A group's task on the list of a project its group is not in is seen by no chat, its topics included, as a topic
     // always follows its group's project (ADR-0247).
-    const tent=await s.tasks.create(owner,{operation_id:key+':tent',title:'Rent the tent',scope:p2,group:g1+'/topic/8'});
+    const tent=await s.tasks.create(owner,{operation_id:key+':tent',title:'Rent the tent',scope:p2,group:at(t1,8)});
     assert.deepEqual([await seenBy(tent.id),await seenBy(tent.id,{scope:p1})],[[],[g1]]);
-    for(const reader of [alice,await ask(g1,'Anything for the tent?','Alice',8)])await assert.rejects(s.tasks.chatGet(reader,tent.id),{status:404});
+    for(const reader of [alice,await ask(t1,'Anything for the tent?','Alice',8)])await assert.rejects(s.tasks.chatGet(reader,tent.id),{status:404});
 
     // Set on the project itself by the owner, a group's task shows the other group nothing from before.
     await s.tasks.update(owner,first.id,{operation_id:key+':open-up',expected_revision:first.revision,group:null});
@@ -894,7 +912,7 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     // the group saw; a task under them set on the project itself joins their group from then on, and another group's
     // stays on the old list at the top.
     const band=await s.tasks.chatComment(bob,second.id,{text:'Booked the band'});
-    const lights=await s.tasks.create(owner,{operation_id:key+':lights',title:'Rent the lights',scope:p1,group:g2+'/topic/3'});
+    const lights=await s.tasks.create(owner,{operation_id:key+':lights',title:'Rent the lights',scope:p1,group:at(t2,3)});
     const odd=digest(key+':odd');
     await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
       VALUES($1,'canary-odd-'||$2,'todo','open',$3,NULL,$4,'dashboard',now()-interval '1 hour')`,[odd,mark,p1,own.id]);
@@ -908,7 +926,7 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
       await db.query('UPDATE project_assignments SET project_id=$2,revision=revision+1 WHERE space_id=$1',[g2,p2]);
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
-    const after=await ask(g2,'What do we have now?','Bob');
+    const after=await ask(t2,'What do we have now?','Bob');
     assert.deepEqual(ids(await s.tasks.chatList(after)),[second.id,own.id,lights.id,odd].sort(),'its tasks moved with it, and the project\'s tasks stayed');
     const kept=await s.tasks.chatGet(after,second.id);
     assert.deepEqual([kept.project_id,kept.comments.map((item:any)=>item.body)],[p2,band.comments.map((item:any)=>item.body)],'it keeps what the group saw');
@@ -924,25 +942,29 @@ test('a group or topic reaches only its own tasks and the tasks set on its proje
     assert.deepEqual(still.activity[0].changes,{parent_id:{to:null}});
     assert.ok(!JSON.stringify(still).includes(second.id),'never naming the task it sat under');
     await assert.rejects(s.tasks.chatGet(after,cross),{status:404});
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('a group\'s move, archive or trash takes only the tasks under it that it sees; another group\'s stays where it is (ADR-0248)',
+for(const family of families)test(`a group's move, archive or trash takes only the tasks under it that it sees; another group's stays where it is (ADR-0248, ${family.name})`,
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-family:'+Date.now(),stamp=String(Date.now()).slice(-9);
-  const g1='-1001'+stamp,g2='-1002'+stamp;
+  // Telegram's ids t1 and t2 (the archive keeps them); g1 and g2 are the chats' Nocheh ids in this family (ADR-0252).
+  const t1='-1001'+stamp,t2='-1002'+stamp,g1=family.id(t1),g2=family.id(t2);
   const owner:Reader={admin:true,scope:null};
-  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[g1,g2],topic_memory:'group'}),
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
+  const restore=installChatsForTest(family.directory([t1,t2],{owner:'123',served:[t1,t2]}));
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[t1,t2],topic_memory:'group'}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
+  // A turn in Telegram chat `chat`, read as its Nocheh chat.
   const ask=async(chat:string,text:string,name:string):Promise<Reader>=>{
     const label=String(++serial),value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,source_id:label,revision:'1',occurred_at:null,text,
       payload:{message:{message_id:serial,date:1700000000,chat:{id:Number(chat),type:'supergroup'},from:{id:456,first_name:name},text}}};
     const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);
-    const binding=await s.guards.state();return {admin:false,scope:chat,space:chat,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    const binding=await s.guards.state();return {admin:false,scope:family.id(chat),space:family.id(chat),turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
   };
   const stored=async(id:string)=>(await stores.control.query(`SELECT project_id,group_id,parent_id,revision,archived_at IS NOT NULL AS archived,deleted_at IS NOT NULL AS trashed,
     project_since::text FROM owner_tasks WHERE id=$1`,[id])).rows[0];
@@ -962,7 +984,7 @@ test('a group\'s move, archive or trash takes only the tasks under it that it se
       await stores.control.query("INSERT INTO owner_task_comments(id,task_id,body,author,origin) VALUES($1,$2,'canary-'||$3||'-note','{\"kind\":\"owner\"}','dashboard')",[digest(key+':'+name+':note'),id,name]);
       return {id,below,before:await stored(id),under:await stored(below)};
     };
-    const alice=await ask(g1,'Put the hall on the whole project','Alice'),bob=await ask(g2,'What is ours?','Bob');
+    const alice=await ask(t1,'Put the hall on the whole project','Alice'),bob=await ask(t2,'What is ours?','Bob');
     // Its own task under the moving task goes with it; the second group's stays, no longer under it, where that group
     // sees it as before, with everything under it.
     const hall=await s.tasks.create(owner,{operation_id:key+':hall',title:'Book the hall',scope:p1,group:g1});
@@ -989,7 +1011,7 @@ test('a group\'s move, archive or trash takes only the tasks under it that it se
       const top=await s.tasks.create(owner,{operation_id:key+':'+name,title:'Clean the '+name,scope:p1,group:g1});
       const mine=await s.tasks.create(owner,{operation_id:key+':'+name+':mine',title:'Sweep the '+name,parent:top.id});
       const other=await legacy(name,top.id);
-      const turn=await ask(g1,'Done with the '+name,'Alice');
+      const turn=await ask(t1,'Done with the '+name,'Alice');
       await s.tasks.chatUpdate(turn,top.id,{expected_revision:top.revision,...change});
       assert.equal((await stored(mine.id))[flag],true,name+': its own task under it goes with it');
       const kept=await stored(other.id);
@@ -1008,5 +1030,5 @@ test('a group\'s move, archive or trash takes only the tasks under it that it se
     const lights=await legacy('lights',stage.id);
     await s.tasks.update(owner,stage.id,{operation_id:key+':stage-move',expected_revision:stage.revision,group:null});
     assert.deepEqual([(await stored(lights.id)).group_id,(await stored(lights.id)).parent_id],[null,stage.id]);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

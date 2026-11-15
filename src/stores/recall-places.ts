@@ -1,13 +1,13 @@
 /**
  * Where each note or past conversation that the owner's recall of Hermes's own notes finds comes from (ADR-0251), in
  * Nocheh's fixed words: the owner's private chat, a group or topic by its name, or a private answer by where it was
- * asked, the same name that answer's first line gave it (ADR-0249). Hermes says whose profile a hit is in; Nocheh names
- * it here, and the raw chat ID never goes on. Only the owner recalls across chats, and the owner can already list every
+ * asked, the same name that answer's first line gave it (ADR-0249). Hermes says whose profile a hit is in, by its Nocheh
+ * chat id; Nocheh names it here from the chat directory, never from the id's shape (ADR-0252), and no chat ID goes on. Only the owner recalls across chats, and the owner can already list every
  * chat by name, so a label shows nothing new; it only stops a group's note from reading as the owner's own.
  */
 import type pg from 'pg';
+import {chats} from '../chats.js';
 import {graphGroupLabel} from '../graph-labels.js';
-import {groupChatId,parentSpace} from '../spaces.js';
 
 type Pools={archive:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>};
 /** What Hermes says about the profile a hit is in. */
@@ -35,50 +35,70 @@ export function recallPlace(where:RecallWhere,names:ReadonlyMap<string,string>):
     return group?recallPlaceWords.answer.replace('{group}',()=>group):recallPlaceWords.answerUnknown;
   }
   if(where.owner===true)return recallPlaceWords.owner;
-  const space=typeof where.space==='string'?where.space:'',chat=parentSpace(space)??space;
-  if(!groupChatId(chat))return recallPlaceWords.unknown;
+  // The group itself, or a group topic's group; a private chat, its topics and a chat with no row name no group.
+  const space=typeof where.space==='string'?where.space:'',chat=chats().groupOf(space);
+  if(chat===null)return recallPlaceWords.unknown;
   const group=names.get(chat),title=group?`“${group}”`:recallPlaceWords.group;
   return chat===space?title:title+' › '+(names.get(space)||recallPlaceWords.topic);
 }
 
 /**
- * The names of the groups and topics among `spaces`, from what Nocheh already saved: a group's from its latest captured
- * message, else from the owner's last Telegram refresh; a topic's from its latest creation, edit or reply to its first
- * message among the group's recent messages, else from the name the owner gave it. A failed lookup leaves names out, so
- * a hit is labelled by its kind and recall never fails over a name.
+ * The names of the groups and topics among `spaces` (Nocheh chat ids), from what Nocheh already saved: a group's from
+ * its latest captured message under any Telegram id it has had, else from its chat row (the name its updates showed, or
+ * the one the owner's last Telegram refresh recorded while that refresh found the chat); a topic's from its latest
+ * creation, edit or reply to its first message among the group's recent messages, else from its topic row (the name the
+ * owner gave it, or the one Telegram last showed).
+ * A failed lookup leaves names out, so a hit is labelled by its kind and recall never fails over a name.
  */
 export async function recallNames(stores:Pools,spaces:string[]):Promise<Map<string,string>> {
-  const names=new Map<string,string>(),known=spaces.filter(space=>groupChatId(parentSpace(space)??space));
-  const groups=[...new Set(known.map(space=>parentSpace(space)??space))],topics=[...new Set(known.filter(space=>parentSpace(space)))];
+  const names=new Map<string,string>(),directory=chats();
+  const known=spaces.filter(space=>directory.groupOf(space)!==null);
+  const groups=[...new Set(known.map(space=>directory.groupOf(space)!))],topics=[...new Set(known.filter(space=>directory.kind(space)==='topic'))];
   if(!groups.length)return names;
   const set=(id:string,value:unknown)=>{const name=placeName(value);if(name)names.set(id,name);};
+  const newer=(a:{received_at:Date;id:string},b:{received_at:Date;id:string})=>
+    a.received_at.getTime()!==b.received_at.getTime()?a.received_at.getTime()>b.received_at.getTime():a.id>b.id;
   try {
-    for(const row of (await stores.control.query(`SELECT chat_id,title FROM telegram_chat_observations WHERE state='available' AND title IS NOT NULL
-      AND chat_id=ANY($1::text[])`,[groups])).rows)set(String(row.chat_id),row.title);
-    for(const row of (await stores.control.query('SELECT chat_id,topic_id,name FROM telegram_topic_registrations WHERE chat_id=ANY($1::text[])',[groups])).rows)
-      set(row.chat_id+'/topic/'+row.topic_id,row.name);
+    // A name the owner's refresh recorded counts only while that refresh found the chat, as before step 2b.
+    for(const row of (await stores.control.query(`SELECT c.id,c.title FROM chats c LEFT JOIN chat_details d ON d.chat_id=c.id
+      WHERE c.id=ANY($1::text[]) AND c.title IS NOT NULL AND (c.title_source IS DISTINCT FROM 'refreshed' OR d.refreshed_state='available')`,
+      [[...groups,...topics]])).rows)set(String(row.id),row.title);
   }catch{}
   try {
-    // A captured message names its group as the chat list does; it wins over an older refresh.
-    for(const row of (await stores.archive.query(`SELECT c.scope,e.payload FROM unnest($1::text[]) AS c(scope) CROSS JOIN LATERAL (
-      SELECT payload FROM events WHERE scope=c.scope AND channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
+    // A captured message names its group as the chat list does; it wins over the chat row. The archive keeps each
+    // original under the Telegram id the group had then, so every one it has had is read, and the latest message wins.
+    const pairs=groups.flatMap(group=>directory.rawScopes([group],'telegram').map(scope=>[group,scope] as const)),latest=new Map<string,any>();
+    for(const row of (await stores.archive.query(`SELECT c.chat,c.scope,e.payload,e.received_at,e.id FROM unnest($1::text[],$2::text[]) AS c(chat,scope)
+      CROSS JOIN LATERAL (
+      SELECT payload,received_at,id FROM events WHERE scope=c.scope AND channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
         AND CASE WHEN pg_input_is_valid(convert_from(payload,'UTF8'),'jsonb')
           THEN convert_from(payload,'UTF8')::jsonb ?| ARRAY['message','edited_message','channel_post','edited_channel_post'] ELSE false END
-      ORDER BY received_at DESC,id DESC LIMIT 1) e`,[groups])).rows)set(String(row.scope),graphGroupLabel(row.payload,String(row.scope)));
+      ORDER BY received_at DESC,id DESC LIMIT 1) e`,[pairs.map(pair=>pair[0]),pairs.map(pair=>pair[1])])).rows) {
+      const seen=latest.get(String(row.chat));if(!seen||newer(row,seen))latest.set(String(row.chat),row);
+    }
+    for(const [chat,row] of latest)set(chat,graphGroupLabel(row.payload,String(row.scope)));
   }catch{}
   if(topics.length)try {
-    // Only the group's latest 500 messages are read; a topic named nowhere there keeps the owner's name or none.
-    const pairs=topics.map(space=>space.split('/topic/') as [string,string]);
-    for(const row of (await stores.archive.query(`SELECT c.chat,c.topic,t.name FROM unnest($1::text[],$2::text[]) AS c(chat,topic) CROSS JOIN LATERAL (
-      SELECT name FROM (SELECT received_at,id,m ? 'forum_topic_edited' AS edited,coalesce(m#>>'{forum_topic_edited,name}',m#>>'{forum_topic_created,name}',
+    // Only the group's latest 500 messages under each of its Telegram ids are read; a topic named nowhere there keeps its
+    // row's name or none. The directory gives the topic's group and its key, Telegram's thread id.
+    const triples=topics.flatMap(topic=>{const key=directory.get(topic)?.topic_key;
+      return key?directory.rawScopes([topic],'telegram').map(scope=>[topic,scope,key] as const):[];}),best=new Map<string,any>();
+    for(const row of (await stores.archive.query(`SELECT c.chat,t.name,t.edited,t.received_at,t.id FROM unnest($1::text[],$2::text[],$3::text[]) AS c(chat,scope,topic)
+      CROSS JOIN LATERAL (
+      SELECT name,edited,received_at,id FROM (SELECT received_at,id,m ? 'forum_topic_edited' AS edited,coalesce(m#>>'{forum_topic_edited,name}',m#>>'{forum_topic_created,name}',
           CASE WHEN m#>>'{reply_to_message,message_id}'=c.topic THEN m#>>'{reply_to_message,forum_topic_created,name}' END) AS name
         FROM (SELECT received_at,id,coalesce(p->'message',p->'edited_message',p) AS m FROM (
           SELECT received_at,id,CASE WHEN pg_input_is_valid(convert_from(payload,'UTF8'),'jsonb') THEN convert_from(payload,'UTF8')::jsonb ELSE '{}'::jsonb END AS p
-          FROM events WHERE scope=c.chat AND channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
+          FROM events WHERE scope=c.scope AND channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
           ORDER BY received_at DESC,id DESC LIMIT 500) recent) messages
         WHERE m->>'message_thread_id'=c.topic) named
-      WHERE name IS NOT NULL ORDER BY edited DESC,received_at DESC,id DESC LIMIT 1) t`,[pairs.map(pair=>pair[0]),pairs.map(pair=>pair[1])])).rows)
-      set(row.chat+'/topic/'+row.topic,row.name);
+      WHERE name IS NOT NULL ORDER BY edited DESC,received_at DESC,id DESC LIMIT 1) t`,
+      [triples.map(item=>item[0]),triples.map(item=>item[1]),triples.map(item=>item[2])])).rows) {
+      // As within one Telegram id: an edit's name first, then the latest.
+      const seen=best.get(String(row.chat));
+      if(!seen||(row.edited!==seen.edited?row.edited===true:newer(row,seen)))best.set(String(row.chat),row);
+    }
+    for(const [topic,row] of best)set(topic,row.name);
   }catch{}
   return names;
 }

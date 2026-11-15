@@ -9,6 +9,12 @@ CREATE TABLE IF NOT EXISTS reaction_states (
  update_id bigint NOT NULL,event_id text NOT NULL,value jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(target_id,actor_id,mode)
 );
+-- ADR-0252: an app's update order is a number, not always a 64-bit integer. Each value stays as it was.
+DO $$BEGIN
+ IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='reaction_states' AND column_name='update_id' AND data_type='bigint') THEN
+  ALTER TABLE reaction_states ALTER COLUMN update_id TYPE numeric USING update_id::numeric;
+ END IF;
+END$$;
 `;
 
 /**

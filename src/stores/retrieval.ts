@@ -20,14 +20,17 @@ import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {BOX_PAGE_BUDGET,PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
-import {parentSpace,readSetGroups} from '../spaces.js';
+import {archiveScopes,parentSpace,readSetGroups,sourceChat} from '../spaces.js';
+import {chats} from '../chats.js';
+import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
-// One chat's records in time order. Telegram gives a message's own time; an assistant reply has only the time it was saved.
+// One chat's records in time order, under every id the chat has had ($1, archiveScopes: ADR-0252). Telegram gives a
+// message's own time; an assistant reply has only the time it was saved.
 const pageRecords=`FROM (SELECT id,kind,at,(extract(epoch FROM at)*1000000)::bigint AS micros FROM (SELECT id,kind,
   CASE WHEN occurred_at ~ '^[0-9]{1,12}$' THEN to_timestamp(occurred_at::bigint) ELSE received_at END AS at FROM events
-  WHERE scope=$1 AND origin<>'generated' AND kind NOT IN ('telegram_wire','import_manifest')) a) e
+  WHERE scope=ANY($1::text[]) AND origin<>'generated' AND kind NOT IN ('telegram_wire','import_manifest')) a) e
   WHERE ($2::timestamptz IS NULL OR e.at>=$2) AND ($3::timestamptz IS NULL OR e.at<$3)`;
 
 /** Embedded reply snapshots never substitute for an independently authorized target. */
@@ -50,7 +53,7 @@ export class SourceRepository {
     // An answer reader sees relations within the groups frozen in its record (ADR-0249).
     if(principal.answer!==undefined)return {kind:'reads',set:this.access.reads(principal)!};
     const scope=this.access.recall(principal);
-    return scope?{kind:'conversation',chat_id:principal.scope!,topic_id:scope.space.includes('/topic/')?scope.space.split('/topic/')[1]!:null,group:scope.group!==null}:{kind:'owner'};
+    return scope?{kind:'recall',scope}:{kind:'owner'};
   }
   async status(principal:Reader) {
     admin(principal);
@@ -191,7 +194,7 @@ export class SourceRepository {
     const hits:any[]=[];
     for(const candidate of rows.rows) {
       if(!principal.admin&&liveCopies.has(candidate.id))continue;
-      const reference=(await this.access.archive.captured(candidate.id)).reference;
+      const captured=await this.access.archive.captured(candidate.id),reference=captured.reference;
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
       const original=(await this.stores.archive.query('SELECT scope,source_id,revision,kind,origin,occurred_at,original_text,payload FROM events WHERE id=$1',[reference.id])).rows[0];
       if(!matchesArchiveFilters(original,states.get(reference.id),filters,reviews.get(reference.id)?.state))continue;
@@ -202,7 +205,8 @@ export class SourceRepository {
       if(binding&&!(await this.stores.derived.query("SELECT to_tsvector('simple',$1) @@ plainto_tsquery('simple',$2) AS matches",[text,query])).rows[0].matches)continue;
       const artifactKinds=principal.admin?(await this.stores.archive.query('SELECT kind FROM artifacts WHERE event_id=$1 ORDER BY id',[reference.id])).rows.map(row=>row.kind as string):[];
       const {payload,...fields}=original;
-      hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),...(reviews.has(reference.id)?{action_review:reviews.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
+      // `chat_id` is the Nocheh chat the hit's archive original belongs to (ADR-0252); compare chats with it, never with `scope`.
+      hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,chat_id:sourceChat(captured),...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),...(reviews.has(reference.id)?{action_review:reviews.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
         derived_id:null,text:text.slice(0,2000),truncated:text.length>2000,
         content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds),
         ...(principal.admin?{reaction_preview:reactionPreview(original.kind,JSON.parse(payload.toString())),sender:messageSender(original.kind,JSON.parse(payload.toString())),
@@ -224,7 +228,7 @@ export class SourceRepository {
   private async foundOnce(principal:Reader,ids:string[],count:number) {
     const binding=principal.admin?null:await this.audience.assert(principal);
     const liveCopies=await this.access.retirements?.liveCopies(ids)??new Set<string>();
-    const hits:{source:string;scope:string;kind:string;occurred_at:string|null;text:string;truncated?:true}[]=[];
+    const hits:{source:string;scope:string;chat_id:string|null;kind:string;occurred_at:string|null;text:string;truncated?:true}[]=[];
     for(const id of ids) {
       if(hits.length===count)break;
       if(!principal.admin&&liveCopies.has(id))continue;
@@ -237,7 +241,7 @@ export class SourceRepository {
         if(!guarded)continue;
         text=String(scopedObservation(guarded.value).text??'');
       }
-      hits.push({source:'nocheh:event:'+id,scope:captured.scope,kind:captured.kind,occurred_at:original.occurred_at,text:text.slice(0,2000),...(text.length>2000?{truncated:true as const}:{})});
+      hits.push({source:'nocheh:event:'+id,scope:captured.scope,chat_id:sourceChat(captured),kind:captured.kind,occurred_at:original.occurred_at,text:text.slice(0,2000),...(text.length>2000?{truncated:true as const}:{})});
     }
     if(binding){for(const hit of hits)await this.permitted(principal,hit.source.slice(13),binding);await this.audience.assert(principal);}
     await this.allowPrepared(principal,hits);return hits;
@@ -254,27 +258,29 @@ export class SourceRepository {
     if(principal.answer!==undefined) {
       const reads=this.access.reads(principal)!,chat=input.chat||(parentSpace(reads.home)??reads.home);
       if(!readSetGroups(reads).includes(chat))throw new HttpError(403,'conversation_not_permitted');
-      return {chat,from,to,binding};
+      return {chat,scopes:archiveScopes([chat]),from,to,binding};
     }
     if(!owner&&input.chat&&input.chat!==principal.scope)throw new HttpError(403,'conversation_not_permitted');
     // A topic is read with the rest of its group, as a group reader reads it.
     const space=principal.space?parentSpace(principal.space)??principal.space:null;
-    const chat=owner?input.chat||(principal.admin?'':space??this.access.policy().owner_id):principal.scope!;
+    const chat=owner?input.chat||(principal.admin?'':space??ownerChat(this.access.policy())??''):principal.scope!;
     if(!chat)throw new HttpError(400,'conversation_required');
-    return {chat,from,to,binding};
+    // A chat is read under every id it has had, current and old, through chat_ids (ADR-0252). The owner may also name a
+    // value no chat row holds (an unmapped import), read as it is; anyone else reads nothing of one.
+    return {chat,scopes:chats().get(chat)?archiveScopes([chat]):owner?[chat]:[],from,to,binding};
   }
   /** How much a chat, or a period of it, holds, so a big job can be sized before it starts. */
   async size(principal:Reader,input:{chat:string;from:string;to:string}) {
-    const {chat,from,to}=await this.conversation(principal,input);
+    const {chat,scopes,from,to}=await this.conversation(principal,input);
     const totals=(await this.stores.archive.query(`SELECT count(*)::integer AS records,
       count(*) FILTER (WHERE r.kind IN ('telegram_update','telegram_desktop_message','browser_input'))::integer AS messages,
       coalesce(sum(octet_length(t.original_text)),0)::bigint AS characters,min(r.at) AS first,max(r.at) AS last
-      FROM (SELECT e.id,e.kind,e.at ${pageRecords}) r JOIN events t ON t.id=r.id`,[chat,from,to])).rows[0];
+      FROM (SELECT e.id,e.kind,e.at ${pageRecords}) r JOIN events t ON t.id=r.id`,[scopes,from,to])).rows[0];
     // A photo is kept in several sizes, so files are counted by the message that has them.
     const files=(await this.stores.archive.query(`SELECT count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('document','file'))::integer AS files,
       count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('photo','image'))::integer AS images,
       count(DISTINCT a.event_id) FILTER (WHERE a.kind IN ('voice','audio','video_note'))::integer AS voice_notes
-      FROM (SELECT e.id ${pageRecords}) r JOIN artifacts a ON a.event_id=r.id`,[chat,from,to])).rows[0];
+      FROM (SELECT e.id ${pageRecords}) r JOIN artifacts a ON a.event_id=r.id`,[scopes,from,to])).rows[0];
     return {chat,records:totals.records,messages:totals.messages,characters:Number(totals.characters),
       files:files.files,images:files.images,voice_notes:files.voice_notes,
       first:totals.first?.toISOString()??null,last:totals.last?.toISOString()??null};
@@ -283,11 +289,11 @@ export class SourceRepository {
    *  without reaction updates; a message still being checked is left out and counted in `checking`. */
   async page(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number;whole?:boolean}){return afterEpoch(jobRun(principal),()=>this.pageOnce(principal,input));}
   private async pageOnce(principal:Reader,input:{chat:string;from:string;to:string;after:string;count:number;whole?:boolean}) {
-    const after=cursor(input.after),{chat,from,to,binding}=await this.conversation(principal,input),whole=!!input.whole;
+    const after=cursor(input.after),{chat,scopes,from,to,binding}=await this.conversation(principal,input),whole=!!input.whole;
     if(whole&&binding?.mode!=='on')throw new HttpError(409,'job_box_guard_off');
     const records=pageRecords,budget=whole?BOX_PAGE_BUDGET:PAGE_BUDGET;
     const rows=(await this.stores.archive.query(`SELECT id,kind,at,micros ${records} AND ($4::bigint IS NULL OR (e.micros,e.id)>($4::bigint,$5))
-      ORDER BY e.micros,e.id LIMIT 201`,[chat,from,to,after?.micros??null,after?.id??''])).rows;
+      ORDER BY e.micros,e.id LIMIT 201`,[scopes,from,to,after?.micros??null,after?.id??''])).rows;
     const liveCopies=principal.admin?new Set<string>():await this.access.retirements?.liveCopies(rows.map(row=>row.id))??new Set<string>();
     const items:Record<string,unknown>[]=[],shown:string[]=[];let last:{micros:string;id:string}|null=null,size=0,full=false,checking=0;
     for(const row of rows.slice(0,200)) {
@@ -317,7 +323,7 @@ export class SourceRepository {
     const more=full||rows.length>200;
     const position=(await this.stores.archive.query(`SELECT count(*)::integer AS total,
       count(*) FILTER (WHERE $4::bigint IS NOT NULL AND (e.micros,e.id)<=($4::bigint,$5))::integer AS through ${records}`,
-      [chat,from,to,last?.micros??after?.micros??null,last?.id??after?.id??''])).rows[0];
+      [scopes,from,to,last?.micros??after?.micros??null,last?.id??after?.id??''])).rows[0];
     if(binding){for(const id of shown)await this.permitted(principal,id,binding);await this.audience.assert(principal);}
     const result={chat,items,next:more&&last?last.micros+'-'+last.id:null,position:{through:position.through,total:position.total},complete:!more,...(whole?{checking}:{})};
     // A box copy fills the box; what box tools return from it is checked as tool output. Its pages are not kept as prepared values,

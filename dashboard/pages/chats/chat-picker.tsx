@@ -1,11 +1,13 @@
 /**
- * Choose one or more chats by name, or type an exact chat or topic ID; optionally groups and their topics only, or
- * whole groups only, as a project takes (a topic always follows its group's project, ADR-0247).
+ * Choose one or more chats by name or Telegram ID; optionally groups and their topics only, or whole groups only, as a
+ * project takes (a topic always follows its group's project, ADR-0247). What a chat is comes from the chat directory
+ * (ADR-0252): a chat is chosen from the list, never typed as an id.
  */
 import {useDeferredValue, useId, useState} from 'react';
 import {Check, X} from 'lucide-react';
 import {useResource} from '../../lib/resource';
-import {chatFromId, chatName, groupSpace, isSpaceId, kindLabel, type Chat, type Directory} from '../../lib/chats-model';
+import {useChatDirectory} from '../../lib/chat-directory';
+import {chatName, isGroupChat, kindLabel, unknownChat, type Chat, type Directory} from '../../lib/chats-model';
 import {cn} from '../../lib/utils';
 import {Input} from '../../ui/core';
 
@@ -17,7 +19,6 @@ export function ChatPicker({
   exclude = [],
   disabled,
   hint,
-  owner,
   groupsOnly,
   wholeGroups,
 }: {
@@ -28,7 +29,6 @@ export function ChatPicker({
   exclude?: string[];
   disabled?: boolean;
   hint?: string;
-  owner?: string;
   groupsOnly?: boolean;
   wholeGroups?: boolean;
 }) {
@@ -38,25 +38,25 @@ export function ChatPicker({
   const resource = useResource<Directory>(
     '/conversations?limit=100' + (deferred ? '&q=' + encodeURIComponent(deferred) : ''),
   );
-  const all = useResource<Directory>('/conversations?limit=100');
-  const allowed = (space: string) =>
-    (!groupsOnly && !wholeGroups) || (groupSpace(space) && (!wholeGroups || !space.includes('/topic/')));
-  const rows = (resource.data?.items ?? []).filter(row => !exclude.includes(row.space_id) && allowed(row.space_id));
-  const find = (space: string): Chat =>
-    rows.find(row => row.space_id === space) ??
-    all.data?.items.find(row => row.space_id === space) ??
-    chatFromId(space);
+  const all = useChatDirectory();
+  const find = (space: string | null | undefined): Chat | null =>
+    (space && resource.data?.items.find(row => row.space_id === space)) || all.find(space);
+  const allowed = (chat: Chat) =>
+    (!groupsOnly && !wholeGroups) || (isGroupChat(chat, find) && (!wholeGroups || chat.kind === 'group'));
+  const rows = (resource.data?.items ?? []).filter(row => !exclude.includes(row.space_id) && allowed(row));
   const display = (chat: Chat) =>
-    chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat, owner);
+    chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);
+  // A chosen chat the directory is still looking up is shown as loading, never as unknown.
+  const chip = (space: string) => {
+    const chat = find(space);
+    return chat ? display(chat) : all.settled(space) ? display(unknownChat(space)) : 'Loading…';
+  };
   const toggle = (space: string) => {
     if (value.includes(space)) onChange(value.filter(item => item !== space));
     else onChange(multiple ? [...value, space] : [space]);
   };
-  const exact =
-    isSpaceId(deferred) &&
-    allowed(deferred) &&
-    !rows.some(row => row.space_id === deferred) &&
-    !value.includes(deferred);
+  // A search that found only chats this picker can't take says why.
+  const refused = (resource.data?.items ?? []).filter(row => !exclude.includes(row.space_id) && !allowed(row));
 
   return (
     <div className="space-y-2">
@@ -71,12 +71,12 @@ export function ChatPicker({
               className="inline-flex max-w-full items-center gap-1 rounded-full border border-line bg-subtle py-0.5 pr-1 pl-2.5 text-xs"
             >
               <span className="truncate" dir="auto">
-                {display(find(space))}
+                {chip(space)}
               </span>
               <button
                 type="button"
                 disabled={disabled}
-                aria-label={'Remove ' + display(find(space))}
+                aria-label={'Remove ' + chip(space)}
                 className="rounded-full p-0.5 text-muted hover:bg-line hover:text-fg"
                 onClick={() => toggle(space)}
               >
@@ -91,30 +91,16 @@ export function ChatPicker({
         type="search"
         value={query}
         disabled={disabled}
-        placeholder="Search chats by name or ID"
+        placeholder="Search by name or Telegram ID"
         onChange={event => setQuery(event.target.value)}
       />
       <div className="max-h-48 overflow-y-auto rounded-lg border border-line">
         {resource.error && !resource.data ? (
-          <p className="px-3 py-2 text-[13px] text-warn">Chats couldn’t be loaded. You can still type an exact ID.</p>
+          <p className="px-3 py-2 text-[13px] text-warn">Chats couldn’t be loaded. Try again shortly.</p>
         ) : !resource.data ? (
           <p className="px-3 py-2 text-[13px] text-muted">Loading…</p>
         ) : (
           <ul role="listbox" aria-label={label} aria-multiselectable={multiple || undefined}>
-            {exact && (
-              <li>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-subtle"
-                  onClick={() => {
-                    toggle(deferred);
-                    setQuery('');
-                  }}
-                >
-                  Use the ID <span className="font-mono">{deferred}</span>
-                </button>
-              </li>
-            )}
             {rows.map(row => {
               const chosen = value.includes(row.space_id);
               return (
@@ -137,13 +123,13 @@ export function ChatPicker({
                 </li>
               );
             })}
-            {!rows.length && !exact && (
+            {!rows.length && (
               <li className="px-3 py-2 text-[13px] text-muted">
-                {wholeGroups && isSpaceId(deferred) && !allowed(deferred)
+                {deferred && refused.length && wholeGroups
                   ? 'Only whole groups can be chosen here. A topic follows its group, and a private chat never joins.'
-                  : groupsOnly && isSpaceId(deferred) && !groupSpace(deferred)
+                  : deferred && refused.length && groupsOnly
                     ? 'Only groups and topics can be chosen here, never a private chat.'
-                    : 'No chats match. Type an exact ID to use it.'}
+                    : 'No chats match. Search by name or Telegram ID.'}
               </li>
             )}
           </ul>

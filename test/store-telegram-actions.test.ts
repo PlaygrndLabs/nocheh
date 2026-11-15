@@ -10,6 +10,8 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {fixtureServices} from './fixture-brain.js';
 import {savePolicy} from '../src/security/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {installChatsForTest} from '../src/chats.js';
+import {GP1,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,OWNER,fixtureDirectory} from './fixture-groups.js';
 
 test('Telegram proposals and results stay derived, exact owner approval stays control, and uncertain delivery never resends',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -147,4 +149,52 @@ test('Telegram proposals and results stay derived, exact owner approval stays co
     const off=await actions.request(await actor(source.id),{destination:'123',text:'Guard off fixture-secret'});assert.equal((await actions.inspect(owner,off.id)).arguments.text,'Guard off fixture-secret');
     await assert.rejects(services.archive.capture({...original('generated-imposter','No'),kind:'action_result'}),{code:'original_source_required'});
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a send names its destination by chat id: unknown ids fail closed, and an approved send goes where the chat is in Telegram now',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  // The strict fixture directory (ADR-0252): GP1 stored before step 2b, NG1 first seen after it, NG2 upgraded since. An id
+  // it does not hold is not made up on the spot, as the seeded fixture would.
+  const restore=installChatsForTest(fixtureDirectory([GP1,NG1_TG,NG2_TG]));
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-telegram-destination-')),key='telegram-destination:'+Date.now();
+  const owner:Reader={admin:true,scope:null},calls:Record<string,unknown>[]=[];
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),
+    policy:()=>({enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1,NG1_TG,NG2_TG]}),
+    runtime:async(operation,input)=>{
+      if(operation==='guard.detect')return {literals:[]};
+      assert.equal(operation,'action.execute');calls.push(input);
+      assert.deepEqual(await actions.authorizeDelivery(input),{valid:true});
+      // The bot's check holds the send to where its destination is now: its old Telegram id is not it.
+      await assert.rejects(actions.authorizeDelivery({...input,chat_id:NG2_OLD_TG}),{code:'action_delivery_denied'});
+      return {state:'done'};
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  const actions=services.telegramActions,authority={owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='actions'")).rows[0].epoch)};
+  const original:Envelope={version:1,key:key+':source',origin:'live',kind:'telegram_update',bot_id:key,scope:GP1,source_id:'source',revision:'1',occurred_at:null,
+    text:'Please tell the other groups',payload:{message:{message_id:Date.now(),date:1700000000,chat:{id:Number(GP1),type:'supergroup',is_forum:false},from:{id:Number(OWNER)},text:'Please tell the other groups'}}};
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const source=(await services.capture.capture(original)).source.reference;await services.guards.prepare(source,'fixture',services.detect);
+    const binding=await services.guards.state();
+    const principal:Reader={admin:false,scope:GP1,space:GP1,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    // An id the directory does not hold, as a chat id, a Telegram id or a link, is refused before anything is proposed.
+    for(const destination of ['-1009999999999','-1009999999999/topic/3','https://t.me/c/9999999999/3',NG1+'/topic/7','b'.repeat(64)])
+      await assert.rejects(actions.request(principal,{destination,text:'Never proposed'}),{code:'invalid_action'},destination);
+    // A Telegram id or link is read once, into the chat it names: NG2 by its old Telegram id, NG1's topic by its link.
+    const upgraded=await actions.request(principal,{destination:NG2_OLD_TG,text:'To the upgraded group'});
+    const topic=await actions.request(principal,{destination:'https://t.me/c/'+NG1_TG.slice(4)+'/7',text:'To the new topic'});
+    const byId=await actions.request(principal,{destination:NG2,text:'To the upgraded group by its chat id'});
+    assert.deepEqual([(await actions.inspect(owner,upgraded.id)).arguments.destination,(await actions.inspect(owner,topic.id)).arguments.destination,
+      (await actions.inspect(owner,byId.id)).arguments.destination],[NG2,NG1_TOPIC,NG2]);
+    assert.deepEqual((await stores.control.query('SELECT DISTINCT scope FROM telegram_action_requests WHERE id=ANY($1)',[[upgraded.id,topic.id,byId.id]])).rows,
+      [{scope:GP1}],'each request names its own chat by its chat id');
+    for(const proposal of [upgraded,topic,byId]){
+      const view=await actions.inspect(owner,proposal.id);await actions.decide(owner,{id:proposal.id,fingerprint:view.fingerprint,decision:'approve'});
+      assert.equal((await actions.run(proposal.id,authority)).state,'completed');
+    }
+    // Each goes where its chat is in Telegram now: NG2 at its current id, never its old one; NG1's topic as its thread.
+    assert.deepEqual(calls.map(call=>[call.destination,call.chat_id,call.topic??null]),[[NG2,NG2_TG,null],[NG1_TOPIC,NG1_TG,7],[NG2,NG2_TG,null]]);
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

@@ -2,7 +2,8 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {groupSpace,parentSpace,validateSpace} from '../spaces.js';
+import {groupSpace,parentSpace,servedGroups,validateSpace} from '../spaces.js';
+import {chats} from '../chats.js';
 import {learningResult} from '../interpretations.js';
 import {requestWorkflow} from '../workflows/store.js';
 import type {StorePools} from './connections.js';
@@ -20,6 +21,7 @@ import {selectionId} from './selections.js';
 import type {SharingContentRepository} from './sharing.js';
 import {ProjectRepository,SharingPolicyRepository,writeProject,writeAssignment,type Assignment} from './projects.js';
 import {projectGroups} from './project-groups.js';
+import {ownerChat} from '../assistant-policy.js';
 import {foregroundReplyActive} from './automatic-publication.js';
 import {knowledgeId as id,knowledgeRevision as revision,knowledgeObject as exact,parseKnowledgeProposal,learnedOrganization,organizationIdentity,proposalPrivateChats,
  type KnowledgeProposal,type OrganizationProposal,type ReviewProposal} from './knowledge-contract.js';
@@ -101,7 +103,7 @@ export class KnowledgeManagementRepository {
   const source=await this.s.access.archive.verify(turn.reference);
   const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.reference.id])).rows[0];
   if(source.origin!=='live'||!['telegram_update','browser_input'].includes(source.kind)||intake?.transport!=='capture'||intake?.state!=='ready'||
-   turn.scope!==this.s.access.policy().owner_id)throw new HttpError(403,'owner_private_turn_required');
+   turn.scope!==ownerChat(this.s.access.policy()))throw new HttpError(403,'owner_private_turn_required');
   return {turn,source,binding:await this.s.guards.state()};
  }
 
@@ -295,12 +297,11 @@ export class KnowledgeManagementRepository {
  }
 
  private async affectedTopics(space:string,db:Pick<pg.PoolClient,'query'>):Promise<string[]>{
+  // A group's topics are its topic rows in the chat directory (ADR-0252): every topic seen in its messages or assigned.
   if(parentSpace(space))return [];
-  const observed=(await this.stores.archive.query(`SELECT DISTINCT metadata->'audience'->>'topic_id' AS topic FROM source_observations
-   WHERE metadata->'audience'->>'chat_id'=$1 AND metadata->'audience'->>'topic_state'='known'`,[space])).rows;
-  const assignments=(await db.query('SELECT space_id,mode FROM project_assignments WHERE starts_with(space_id,$1)',[space+'/topic/'])).rows;
-  const topics=new Set([...observed.filter(r=>/^[1-9]\d*$/.test(r.topic)).map(r=>space+'/topic/'+r.topic),...assignments.map(a=>a.space_id)]);
-  return [...topics].filter(topic=>!assignments.some(a=>a.space_id===topic&&a.mode!=='inherit')).sort();
+  const topics=[...chats().topicsOf(space)];
+  const assignments=(await db.query('SELECT space_id,mode FROM project_assignments WHERE space_id=ANY($1::text[])',[topics])).rows;
+  return topics.filter(topic=>!assignments.some(a=>a.space_id===topic&&a.mode!=='inherit')).sort();
  }
 
  private async matchDelegation(proposal:OrganizationProposal,input:{source:SourceReference;space:string;origin:string;binding:GuardBinding},db?:pg.PoolClient,required?:{id:string;revision:number}):Promise<OrganizationDelegation|null>{
@@ -349,7 +350,7 @@ export class KnowledgeManagementRepository {
   const ids=new Set<string>(),moved=new Set(moves.map(move=>parentSpace(move.space_id)??move.space_id));
   for(const move of moves){const {now,next}=await this.moveProjects(move,db);if(next!==now)for(const project of [now,next])if(project)ids.add(project);}
   if(!ids.size)return [];
-  const served=this.s.access.policy().group_ids??[],rows=(await db.query('SELECT id,name FROM projects WHERE id=ANY($1::text[]) ORDER BY id',[[...ids]])).rows;
+  const served=servedGroups(),rows=(await db.query('SELECT id,name FROM projects WHERE id=ANY($1::text[]) ORDER BY id',[[...ids]])).rows;
   return Promise.all(rows.map(async row=>({id:row.id as string,name:row.name as string,groups:(await projectGroups(db,row.id,served)).filter(group=>!moved.has(group))})));
  }
 

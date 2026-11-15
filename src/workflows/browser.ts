@@ -5,19 +5,20 @@ import type {Brain} from '../brain/brain.js';
 import {HttpError,object,string} from '../http.js';
 import {preparationStatus,waitForPreparation} from './preparation-status.js';
 import {guardState} from '../guarded.js';
-import {policyRevision} from '../spaces.js';
+import {policyRevision,servedGroup} from '../spaces.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority,type WorkflowState} from './store.js';
 import {observation,type WorkflowOperation} from './pipeline.js';
+import {ownerChat} from '../assistant-policy.js';
 
 async function scopedRun(client:pg.Pool|pg.PoolClient,config:Settings,input:unknown,lock=false) {
   const b=object(input),scope=string(b.scope,64),profile=string(b.profile,128);
-  if(scope!==config.assistant.owner_id&&!config.assistant.group_ids.includes(scope))throw new HttpError(403,'run_scope_denied');
+  if(scope!==ownerChat(config.assistant)&&!servedGroup(scope))throw new HttpError(403,'run_scope_denied');
   const row=(await client.query(`SELECT r.*,e.scope,e.payload,d.content FROM managed_runs r JOIN events e ON e.id=r.event_id
     LEFT JOIN derived_artifacts d ON d.id=r.result_id WHERE e.channel='browser' AND r.event_id=$1 AND e.scope=$2 ${lock?'FOR UPDATE OF r':''}`,[string(b.event_id,64),scope])).rows[0];
   if(!row)throw new HttpError(404,'captured_run_not_found');
   row.payload=JSON.parse(row.payload.toString());
   if(row.payload.profile!==profile||b.conversation!==undefined&&b.conversation!==row.payload.conversation_id)throw new HttpError(403,'run_profile_mismatch');
-  if(scope!==config.assistant.owner_id&&row.payload.revision!==await policyRevision(client))throw new HttpError(409,'browser_audience_changed');
+  if(scope!==ownerChat(config.assistant)&&row.payload.revision!==await policyRevision(client))throw new HttpError(409,'browser_audience_changed');
   return row;
 }
 

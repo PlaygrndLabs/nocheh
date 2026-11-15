@@ -10,6 +10,9 @@ import {HttpError} from '../src/http.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
+import {chatDirectory,chatIdFor,installChatsForTest} from '../src/chats.js';
+import {NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureChats} from './fixture-groups.js';
 
 test('a member\'s job cap is to the cent; members\' daily job spend gets one notice, pauses at the high mark, and a pause only holds jobs members approved',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -250,6 +253,105 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     assert.match(notices.at(-1)!.text,/past your notice mark of \$3\.60\./);
     assert.equal((await paused()).notice_sent,true);
     await s.jobs.members.retryUnsent();assert.equal(notices.length,before+1,'nothing more while every notice went');
+  } finally {
+    await s.jobs.members.setPaused(false).catch(()=>{});
+    await stores.close();await rm(root,{recursive:true,force:true});
+  }
+});
+
+// Members' job spend on chats first seen after step 2b (ADR-0252): the owner's private chat has a digest id apart from
+// the owner's account, and the member asks in NG2, a group Telegram upgraded that TELEGRAM_GROUP_IDS names by its old id.
+test('a member spend notice names a digest group by its chat, goes to the owner\'s private chat where it is in Telegram, and only the owner\'s press there resumes',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-member-spend-chats-')),key='member-spend-chats:'+Date.now();
+  // The owner's private chat as capture names it after step 2b: a digest, not the owner's account id.
+  const own=chatIdFor('telegram',OWNER),fixture=fixtureChats([...NG_GROUP_IDS]);
+  const full=chatDirectory({...fixture,owner_chat:own,chats:fixture.chats.map(chat=>chat.id===OWNER?{...chat,id:own}:chat),
+    ids:fixture.ids.map(id=>id.chat_id===OWNER?{...id,chat_id:own}:id)});
+  // The same chats before the owner's private chat has a row.
+  const ownerless=chatDirectory({...fixture,owner_chat:null,chats:fixture.chats.filter(chat=>chat.id!==OWNER),ids:fixture.ids.filter(id=>id.chat_id!==OWNER)});
+  installChatsForTest(full);
+  const rates={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0},ALICE=9;
+  const cards:Record<string,any>[]=[],notices:Record<string,any>[]=[];let updates=0;
+  const policy=():AssistantPolicy=>({enabled:true,owner_id:OWNER,owner_chat:own,group_ids:[...NG_GROUP_IDS],group_access:{[NG2_OLD_TG]:{granted:[String(ALICE)],denied:[]}},topic_memory:'group'});
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+    runtime:async(operation,input)=>{
+      if(operation==='guard.detect')return {literals:[]};
+      if(operation==='usage.price')return {rates};
+      if(operation==='run.resume')return {state:'not_found'};
+      if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
+      if(operation==='telegram.notice'){notices.push(input);return {state:'done'};}
+      assert.equal(operation,'telegram.approval');cards.push(input);
+      return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  const bot=String(Date.now()).slice(-9),owner:Reader={admin:true,scope:null};
+  const capture=async(label:string,payload:Record<string,unknown>,scope:string)=>{
+    const event:Envelope={version:1,key:payload.update_id?`telegram:${bot}:update:${payload.update_id}`:key+':'+label,origin:'live',kind:'telegram_update',bot_id:payload.update_id?bot:key,scope,source_id:payload.update_id?String(payload.update_id):label,revision:'1',occurred_at:null,text:String((payload.message as any)?.text??''),payload};
+    const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
+  };
+  let sent=100;
+  // Alice asks in NG2 under its Telegram id now; the job's chat is NG2's Nocheh id.
+  const message=(label:string)=>capture(label,{message:{message_id:++sent,date:1700000000,chat:{id:Number(NG2_TG),type:'supergroup',title:'NG2 team'},
+    from:{id:ALICE,first_name:'Alice'},text:'Please find what is still open'}},NG2_TG);
+  const press=(label:string,data:string,from:number,chat:string)=>capture(label,{update_id:++updates,callback_query:{id:'query-'+label,from:{id:from},chat_instance:'1',data,
+    message:{message_id:5,date:1700000000,chat:{id:Number(chat),type:chat===OWNER?'private':'supergroup'}}}},chat);
+  const actor=async(source:string):Promise<Reader>=>{
+    const binding=await s.guards.state();return {admin:false,scope:NG2,space:NG2,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+  };
+  const last=(kind:string)=>cards.filter(card=>card.kind===kind).at(-1)!;
+  const authority=async()=>({owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0].epoch)});
+  const step=async(id:string)=>(await stores.control.query('SELECT b.*,r.state AS run FROM background_runs b JOIN managed_runs r ON r.event_id=b.event_id WHERE b.job_id=$1 ORDER BY b.attempt DESC LIMIT 1',[id])).rows[0];
+  const tick=async(id:string)=>s.jobs.operation('job:'+id,await authority());
+  const button=(id:string,fingerprint:string,choice='a')=>'n'+choice+id.slice(0,40)+fingerprint.slice(0,16);
+  const paused=async()=>(await stores.control.query('SELECT * FROM member_job_pause WHERE singleton')).rows[0];
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');
+    // An earlier test's pause and notice are put away first: the resume edits its notice, which is not this test's.
+    await s.jobs.members.setPaused(false);notices.length=0;
+    let settings=await s.jobs.settings();
+    settings=await s.jobs.saveSettings(owner,{...settings,cost_limit_usd:5,minutes_limit:45,member_daily_jobs:20,member_notice_usd:1,member_pause_usd:1000});
+    const job=await s.jobs.start(await actor((await message('own')).id),{title:'Own read',instruction:'Read the made-up receipts.'});
+    await s.actionCommands.offer('background',job);
+    assert.equal(last('card').chat_id,NG2_TG,'the card goes where the group is in Telegram now');
+    await s.actionCommands.callback(await press('own',button(job.id,job.fingerprint),ALICE,NG2_TG));
+    // Members' spend today (the test above left some) passes the notice mark while the owner's private chat has no row:
+    // each tick of the job checks, and nothing is sent anywhere, not to the owner's account id either; the notice waits.
+    installChatsForTest(ownerless);
+    await tick(job.id);
+    const current=await step(job.id),epoch=(await authority()).epoch;
+    await s.jobs.runs.run(current.event_id,await authority());
+    const context:any=await s.jobs.runs.context({event_id:current.event_id,owner_epoch:epoch});
+    await s.jobs.runs.claim({...context,actor:context.actor});await s.jobs.runs.prepare({...context,actor:context.actor});
+    await s.jobs.runs.heartbeat({...context,actor:context.actor,progress:{tokens:{input_tokens:600000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,calls:1},unknown_calls:0}});
+    await tick(job.id);
+    assert.equal(notices.length,0,'an owner chat the directory does not know is not sent to');
+    assert.equal((await paused()).notice_sent,false);
+    // Once the directory has the owner's private chat, the retry sends it there, by its Telegram id.
+    installChatsForTest(full);
+    await s.jobs.members.retryUnsent();
+    assert.equal(notices.length,1);
+    const spend=notices[0]!;
+    assert.equal(spend.chat_id,OWNER,'the owner\'s private chat where it is in Telegram');assert.equal(spend.topic,undefined);
+    assert.ok(spend.text.includes('\n• Alice in “NG2 team”: $1.20\n'),spend.text);
+    assert.ok(![NG2,NG2_TG,NG2_OLD_TG,own].some(id=>spend.text.includes(id)),'no chat id in the notice');
+    // The pause button: Alice's press in the group, and the owner's own press in the group, change nothing; the owner's
+    // press in their private chat pauses, and the notice there says so.
+    for(const [label,from,chat] of [['alice',ALICE,NG2_TG],['owner-in-group',Number(OWNER),NG2_TG]] as const) {
+      await s.actionCommands.callback(await press(label,'njp',from,chat));
+      assert.equal(last('answer').text,'Only the owner can do this.',label);assert.equal(await s.jobs.members.pause(),null,label);
+    }
+    await s.actionCommands.callback(await press('owner-pauses','njp',Number(OWNER),OWNER));
+    assert.equal(last('answer').chat_id,OWNER);
+    assert.equal((await s.jobs.members.pause())?.by,'owner');
+    assert.deepEqual([notices.at(-1)!.chat_id,notices.at(-1)!.edit,notices.at(-1)!.id],[OWNER,true,spend.id]);
+    await s.actionCommands.callback(await press('owner-resumes','nju',Number(OWNER),OWNER));
+    assert.equal(await s.jobs.members.pause(),null);
+    await s.jobs.halt(job.id);
+    await stores.control.query("UPDATE managed_runs SET state='cancelled' WHERE event_id=$1",[current.event_id]);
+    assert.equal((await tick(job.id)).state,'cancelled');
   } finally {
     await s.jobs.members.setPaused(false).catch(()=>{});
     await stores.close();await rm(root,{recursive:true,force:true});

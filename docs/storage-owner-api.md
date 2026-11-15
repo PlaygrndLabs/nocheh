@@ -46,6 +46,17 @@ source identifiers and links do not change when a derivative is activated.
 | POST `/v1/memory/provenance` | Bounded Honcho conclusion ancestry, each conclusion's exact cited messages or derivation batch, and confirmed ingestion references |
 | GET `/v1/private-answers` | The record of Answer privately buttons, newest first, 100 a page: who asked, where, the project, the groups frozen at the tap, the state and its times; `project` keeps one project and `after` continues from an answer's id ([ADR-0249](adr/0249-answer-privately.md)) |
 
+Chat and topic values in these routes (`space`, `space_id`, `scope_id`, a rule's
+`sources` and `destination`) are Nocheh chat ids ([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)).
+They are opaque: a chat Nocheh knew before step 2b keeps the value it was stored
+under, and a chat or topic first seen later has a 64-character digest id. Never
+build or parse one; find a chat in GET `/v1/conversations`, whose `q` matches a
+chat's id, its name, its group's name and every Telegram ID it has had, current
+or old (a topic has its group's), and whose items carry `kind`, `parent_space`, `topic_key`,
+`app_ids` (each app id with `current` or `old`, so an upgraded group lists both),
+`is_forum`, `state` and `owner`. Only a group the chat directory knows, or one of
+its topics, joins a project or shares; any other id counts as a private chat.
+
 List cursors use `after`; histories use `before`. Learned filters use both
 `scope_kind=conversation|project` and `scope_id`. Sharing rules configure preparation;
 they never grant direct reads of another conversation. Provenance lists the

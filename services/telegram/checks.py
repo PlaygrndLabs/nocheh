@@ -30,19 +30,15 @@ def render_reply_citations(text):
     return SOURCE_ID.sub('the Archive', SOURCE_CITATION.sub('', text))
 
 
-def space_of(chat_id, topic):
-    return str(chat_id) + ('/topic/' + str(topic) if topic else '')
-
-
-def outbound_check(chat_id, space, authorized, cancelled=None, requests=None, markup=None):
-    """Bind every physical send to the authorized conversation, including retries.
+def outbound_check(chat_id, topic, authorized, cancelled=None, requests=None, markup=None):
+    """Bind every physical send to the authorized conversation, including retries: its Telegram chat and topic.
 
     ``requests`` records each message request admitted for transmission, so a
     failed delivery with none admitted is known not to have reached Telegram.
     ``markup`` is the one keyboard a send may carry; any other is held, and
     without one no request carries a keyboard.
     """
-    topic = int(space.split('/topic/', 1)[1]) if '/topic/' in space else None
+    topic = None if topic is None or topic == '' else int(topic)
     expected = None if markup is None else markup.to_dict() if hasattr(markup, 'to_dict') else markup
 
     def check(method, parameters):
@@ -179,26 +175,37 @@ def answer_button(button, chat_id, event_id, owner):
     return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data)]])
 
 
-def verify_turn_credential(credential, event_id, chat_id, space, owner):
-    """The turn credential Nocheh minted for this event and conversation, unexpired and signed with the service token.
+def verify_turn_credential(credential, event_id, chat_id, topic, policy):
+    """The turn credential Nocheh minted for this event and conversation, unexpired and signed with the service token,
+    and the served list it was checked against.
 
-    It binds a reply or presence to the chat and topic the turn was admitted for; whether the
-    space still allows delivery is asked separately, per request (check_delivery_policy). A private
-    answer's pass names its record and reads as the owner's private chat, never as the owner, so in
-    that chat its scope is the chat itself; anywhere else it is refused (ADR-0249)."""
+    It binds a reply or presence to the chat and topic the turn was admitted for (ADR-0252): its app binding names this
+    Telegram chat and topic, and the served list agrees that its space (a Nocheh chat id) is there now and belongs to its
+    scope: a served group, or for the owner's own turn (no scope) the owner's private chat itself, never a topic of it, as
+    Hermes runs the owner's turns only there. Whether the space still
+    allows delivery is asked separately, per request (check_delivery_policy). A private answer's pass names its record
+    and reads as the owner's private chat, never as the owner, so its scope and space are that chat; anywhere else it is
+    refused (ADR-0249)."""
     try:
         prefix,body,signature=credential.split('.')
         expected=base64.urlsafe_b64encode(hmac.new(secret('SERVICE_TOKEN').encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        if prefix!='turn' or not hmac.compare_digest(signature,expected):raise ValueError()
         claims=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
-        answer=claims.get('answer')
-        if answer is not None and (not owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):raise ValueError()
-        if (prefix!='turn' or not hmac.compare_digest(signature,expected) or claims.get('event_id')!=event_id or
-                claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(str(chat_id) if answer is not None or not owner else None) or
+        if (claims.get('event_id')!=event_id or claims.get('audience')!='nocheh-assistant' or
                 not time.time()*1000<claims['expires']<=time.time()*1000+3600000):raise ValueError()
-        if claims.get('space') is not None:
-            if claims['space']!=space or type(claims.get('revision')) is not int or claims['revision']<1:raise ValueError()
-        elif space!=str(chat_id):raise ValueError()
-        return claims
+        if claims.get('app')!={'app':'telegram','chat':str(chat_id),'topic':None if topic is None else str(topic)}:raise ValueError()
+        scope,space,answer=claims.get('scope'),claims.get('space'),claims.get('answer')
+        if not isinstance(space,str) or type(claims.get('revision')) is not int or claims['revision']<1:raise ValueError()
+        epoch=claims.get('guard_epoch')
+        # A topic first used a moment ago, or a group's new Telegram id, is only in a list read after the app recorded it.
+        served=policy.current(epoch if type(epoch) is int else None,60.0,lambda served:served.binding(space)==claims['app'])
+        if served.binding(space)!=claims['app']:raise ValueError()
+        if answer is not None:
+            if not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer) or not served.owner_chat or scope!=served.owner_chat or space!=scope:raise ValueError()
+        elif scope is None:
+            if not served.owner_chat or space!=served.owner_chat:raise ValueError()
+        elif served.group(scope)!=scope or space!=scope and served.parent(space)!=scope:raise ValueError()
+        return claims,served
     except Exception:raise ValueError('archive_capability_scope_mismatch') from None
 
 
@@ -212,7 +219,7 @@ def check_delivery_policy(credential):
 def check_action_policy(body):
     try:
         request=urllib.request.Request(archive_url()+'/internal/actions/authorize',
-            data=canonical({key:body[key] for key in ('id','destination','text')}),
+            data=canonical({key:body[key] for key in ('id','destination','chat_id','topic','text') if key in body}),
             headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
         with urllib.request.urlopen(request,timeout=10) as response:return json.loads(response.read(1024)).get('valid') is True
     except Exception:return False

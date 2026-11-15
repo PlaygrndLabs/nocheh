@@ -2,11 +2,11 @@ import {OwnerAutonomyRepository} from './owner-autonomy.js';
 import {NotionRepository} from './notion.js';
 import {ChatToolSettingsRepository} from './chat-tools.js';
 import {TaskRepository,type TaskActor} from './tasks.js';
-import {readSetOf,recallScope} from '../spaces.js';
+import {readSetOf,recallScope,servedGroups} from '../spaces.js';
 import {PromptRepository} from '../prompts.js';
 import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
-import type {AssistantPolicy} from '../assistant-policy.js';
+import {ownerChat,settleTelegramChat,type AssistantPolicy} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
 import {groupReplies,type GroupReplies} from '../telegram-addressing.js';
 import type {Brain} from '../brain/brain.js';
@@ -64,6 +64,7 @@ import {BackgroundJobRepository} from './background-jobs.js';
 import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
 import {PrivateAnswerRepository} from './private-answers.js';
+import {ChatRepository} from './chats.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -81,7 +82,10 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const access=new SourceAccessRepository(stores,archive,guards,options.policy,retirements,reactions);
   const prepared=new PreparedContextRepository(derived,guards,async(principal,binding)=>{
     try {
-      const source=(await archive.captured(principal.turnEvent!)).reference;
+      const captured=await archive.captured(principal.turnEvent!),source=captured.reference;
+      // The turn's chat as another process recorded it a moment ago (a served group's new Telegram id after an upgrade):
+      // this process, the security service included, reads it once its chat directory has looked again (ADR-0252).
+      await settleTelegramChat(captured);
       if(!await access.canRead(principal,source,binding))throw new HttpError(403,'turn_source_denied');return source;
     } catch(error) {if(!(error instanceof HttpError)||error.code!=='source_not_found')throw error;}
     const operation=(await stores.control.query("SELECT * FROM content_operations WHERE id=$1 AND kind IN ('scheduled_trigger','background_run')",[principal.turnEvent])).rows[0];
@@ -90,19 +94,21 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     await operations.verify(reference);return reference;
   },options.detectorVersion);
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
-  const projects=new ProjectRepository(stores.control,()=>options.policy().group_ids??[]),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
+  const projects=new ProjectRepository(stores.control,servedGroups),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new MemoryProvenanceRepository(stores,archive,guards,options.memoryEngine);
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
   const turns=new RuntimeTurnRepository(access,prepared);
-  const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived));
+  // Nocheh's chat records (ADR-0252): what each captured Telegram original says of its chat, its topic and its people.
+  const chats=new ChatRepository(stores,options.policy);
+  const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived),chats);
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
   const memoryMap=new MemoryMapRepository(stores,memoryAccess);
   const ownerAutonomy=new OwnerAutonomyRepository(stores.control),notion=new NotionRepository(stores.control),prompts=new PromptRepository(stores.control,options.brain);
-  const chatTools=new ChatToolSettingsRepository(stores.control,()=>options.policy().owner_id);
+  const chatTools=new ChatToolSettingsRepository(stores.control,()=>ownerChat(options.policy()));
   const telegramTopics=new TelegramTopicRepository(stores.control);
-  const telegramChats=new TelegramChatRepository(stores.control,options.runtime,()=>options.policy().group_ids??[]);
+  const telegramChats=new TelegramChatRepository(stores.control,options.runtime,chats);
   // Answer privately records: who asked, where, and the groups frozen at the tap (ADR-0249).
   const privateAnswers=new PrivateAnswerRepository(stores.control,options.policy);
   const controlledActions=new ControlledActionRepository(access,derived,guards,prepared,turns,detect);
@@ -138,7 +144,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     const space=principal.space!,project=(await projects.effective(space)).project;
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
     return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),actor:await sender(source.reference.id)};
-  },{call:options.runtime,owner:()=>options.policy().owner_id},topicMemory);
+  },{call:options.runtime,owner:()=>ownerChat(options.policy())},topicMemory);
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
@@ -146,10 +152,10 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
   jobs.stopped=async id=>{await controlledActions.stopJob(id);};
   controlledExecution.settled=id=>actionCommands.settle('controlled',id).then(()=>{},()=>{});
-  const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,telegramChats,telegramTopics,memoryAccess});
+  const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,chats,memoryAccess});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
-  return {brain:options.brain,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {brain:options.brain,chats,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,
@@ -157,11 +163,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.brain,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
-    chatSends:new ChatSendRepository(stores.control,stores.archive),
+    chatSends:new ChatSendRepository(stores.control,chats),
     privateAnswers,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env),privateAnswers),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
-    capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>options.policy().owner_id}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
+    capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>ownerChat(options.policy())}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,
     reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??''),

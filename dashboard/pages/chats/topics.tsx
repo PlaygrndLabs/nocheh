@@ -1,10 +1,12 @@
 /**
  * A forum group's topics. Telegram doesn't let bots list topics, so new ones
- * appear when used, and older quiet ones can be added by link.
+ * appear when used, and older quiet ones can be added by link. A topic is named
+ * by its group's Nocheh id and its number in Telegram, or by its link; the
+ * server finds the chats either names (ADR-0252).
  */
 import {useState} from 'react';
 import {Hash, Plus} from 'lucide-react';
-import {chatName, topicNumber, type Chat} from '../../lib/chats-model';
+import {chatName, type Chat} from '../../lib/chats-model';
 import {Badge, Button, Card, CardBody, CardHeader, Field, Input} from '../../ui/core';
 import {Dialog} from '../../ui/overlay';
 import {ActionError, chatHref, useAction} from './shared';
@@ -50,7 +52,7 @@ export function TopicsCard({group, topics}: {group: Chat; topics: Chat[]}) {
                       void action.run(
                         topic.space_id,
                         '/telegram/topics',
-                        {action: 'remove', chat_id: group.space_id, topic_id: topicNumber(topic.space_id)},
+                        {action: 'remove', chat_id: group.space_id, topic_id: Number(topic.topic_key)},
                         {success: 'Topic removed from the list.', operation: false},
                       )
                     }
@@ -77,6 +79,7 @@ function AddTopic({group, open, onOpenChange}: {group: Chat; open: boolean; onOp
   const action = useAction();
   const submit = async () => {
     const ref = link.trim();
+    // A number is the topic's own number in this group; anything else is a topic link.
     const target = /^\d+$/.test(ref) ? {chat_id: group.space_id, topic_id: Number(ref)} : {link: ref};
     const result = await action.run(
       'add',

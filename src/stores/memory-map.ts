@@ -2,6 +2,7 @@ import {admin,type Reader} from '../access.js';
 import {HttpError,string} from '../http.js';
 import type {StorePools} from './connections.js';
 import type {MemoryAccessRepository} from './memory-access.js';
+import {chats} from '../chats.js';
 
 export type MemoryMapNodeKind='person'|'project'|'conversation'|'topic'|'fact';
 export type MemoryMapEdgeKind='relationship'|'project_assignment'|'access'|'suggestion';
@@ -9,7 +10,8 @@ export interface MemoryMapNode {id:string;kind:MemoryMapNodeKind;label:string;st
 export interface MemoryMapEdge {id:string;kind:MemoryMapEdgeKind;source:string;target:string;state?:string;label?:string;authoritative:boolean;detail?:Record<string,unknown>}
 
 const cursor=(value:string)=>{if(value&&!/^[a-z_]+:[^\x00-\x1f]{1,300}$/.test(value))throw new HttpError(400,'invalid_memory_map_cursor');return value;};
-const classify=(space:string):'topic'|'conversation'=>space.includes('/topic/')?'topic':'conversation';
+/** A topic or another conversation, by its chat row (ADR-0252); a value with no row is a conversation. */
+const classify=(space:string):'topic'|'conversation'=>chats().kind(space)==='topic'?'topic':'conversation';
 
 /** Owner-only graph projection. It describes relationships and separately marks authority edges. */
 export class MemoryMapRepository {
@@ -27,8 +29,8 @@ export class MemoryMapRepository {
       detail:{revision:row.revision,project_id:row.project_id,fact_count:factCounts.get(row.id)??0,...(project?{project}:{}) ,...(input.focus===`${row.kind}:${row.id}`?{bindings:(await this.stores.control.query('SELECT binding_kind,label,state,source_object_id FROM memory_entity_bindings WHERE entity_id=$1 ORDER BY id',[row.id])).rows}:{})}});}
     const spaces=(await this.stores.control.query(`SELECT space_id AS id FROM project_assignments UNION SELECT destination FROM memory_access_requests
       UNION SELECT destination FROM memory_fact_grants UNION SELECT destination FROM sharing_rules UNION SELECT jsonb_array_elements_text(sources) FROM sharing_rules ORDER BY id LIMIT 5000`)).rows;
-    for(const row of spaces){const kind=classify(row.id),parent=row.id.includes('/topic/')?row.id.split('/topic/')[0]:null;
-      nodes.push({id:`${kind}:${row.id}`,kind,label:kind==='topic'?`Topic ${row.id.split('/topic/')[1]}`:`Conversation ${row.id}`,cluster:parent??row.id,detail:{space_id:row.id,parent,assignment:assignmentBySpace.get(row.id)??null}});}
+    for(const row of spaces){const kind=classify(row.id),chat=chats().get(row.id),parent=chat?.parent_id??null;
+      nodes.push({id:`${kind}:${row.id}`,kind,label:kind==='topic'?`Topic ${chat!.topic_key}`:`Conversation ${row.id}`,cluster:parent??row.id,detail:{space_id:row.id,parent,assignment:assignmentBySpace.get(row.id)??null}});}
     const claims=(await this.stores.derived.query(`SELECT e.*,v.revision,v.content,v.relationship_kind,v.attribution,v.uncertainty,v.retired,v.evidence,v.author,v.created_at
       FROM entity_claims e JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision ORDER BY e.id LIMIT 5000`)).rows;
     for(const row of claims){nodes.push({id:`fact:${row.id}`,kind:'fact',label:row.content,state:row.retired?'retired':'active',collapsed:false,

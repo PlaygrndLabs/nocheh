@@ -71,7 +71,7 @@ class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_notice_edit_lost_in_transit_reaches_telegram_on_the_next_try(self):
         with tempfile.TemporaryDirectory() as folder:
             root, wire = Path(folder), LostEdit()
-            gateway = TelegramService(Policy(True, '123', [], {}), '123456:synthetic', root / 'spool', root / 'state')
+            gateway = TelegramService(Policy.of(True, '123', [], {}), '123456:synthetic', root / 'spool', root / 'state')
             # The bot journals every send and edit, as the running service's does.
             capture = Capture(root / 'capture', '123456')
             gateway.bot = ExtBot('123456:synthetic', request=instrument_request(wire, capture), get_updates_request=Wire())
@@ -101,7 +101,7 @@ class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
     async def test_replies_cards_refusals_and_notices_reach_telegram_without_previews(self):
         with tempfile.TemporaryDirectory() as folder, patch('services.telegram.gateway.check_action_policy', return_value=True):
             root, wire = Path(folder), Wire()
-            gateway = TelegramService(Policy(True, '123', ['-20'], {}), '123456:synthetic', root / 'spool', root / 'state')
+            gateway = TelegramService(Policy.of(True, '123', ['-20'], {}), '123456:synthetic', root / 'spool', root / 'state')
             gateway.bot = ExtBot('123456:synthetic', request=wire, get_updates_request=Wire())
             gateway.sender = Sender(gateway.bot, pace=0)
             gateway.status, gateway.action_lock = 'connected', asyncio.Lock()
@@ -120,7 +120,7 @@ class LinkPreviewTests(unittest.IsolatedAsyncioTestCase):
                                                         'edit': True}), {'state': 'done', 'edited': True})
             self.assertEqual({key: wire.calls[-1][1].get(key) for key in ('chat_id', 'message_id', 'reply_markup')},
                              {'chat_id': 123, 'message_id': 45, 'reply_markup': None}, 'the notice that went through, without its buttons')
-            self.assertEqual(await gateway.send_action({'id': 'd' * 64, 'destination': '123', 'text': 'Member: hello https://example.test/d'}), {'state': 'done'})
+            self.assertEqual(await gateway.send_action({'id': 'd' * 64, 'destination': '123', 'chat_id': '123', 'text': 'Member: hello https://example.test/d'}), {'state': 'done'})
             self.assertTrue(await gateway.sender.send('123', 'A reply with https://example.test/e', reply_to=5))
             self.assertEqual([name for name, _ in wire.calls], ['sendMessage', 'editMessageText', 'sendMessage', 'sendMessage', 'sendMessage', 'editMessageText', 'sendMessage', 'sendMessage'],
                              'card, its settle edit, refusal, refused notice with buttons, notice without, its edit, approved send, reply')

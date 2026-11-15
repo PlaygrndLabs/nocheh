@@ -6,6 +6,7 @@ import type {SourcePortabilityRepository} from './source-portability.js';
 import {OwnerCommands} from './owner-commands.js';
 import type {SourceReference} from './archive.js';
 import type {RuntimeCall} from '../runtime.js';
+import {telegramTarget} from '../frontdoor/telegram.js';
 import {fillTemplate,importReady,ownerPrompts} from '../prompts.js';
 import {importProgress,preparedImports} from '../workflows/imports.js';
 
@@ -54,7 +55,8 @@ export class ImportRepository {
       const text=fillTemplate((await ownerPrompts(this.control))['imports.ready']??importReady,{chats:job.label||'Telegram export',
         messages:job.total.toLocaleString('en-US'),failed:failed?failed.toLocaleString('en-US'):null}).slice(0,4000);
       let result:Record<string,unknown>;
-      try{result=await this.delivery.call('telegram.notice',{id:digest('import-ready:'+job.id),chat_id:owner,text},30000);}catch{return told;}
+      // The owner's private chat where it is in Telegram now (ADR-0252); a chat the directory does not know yet waits.
+      try{result=await this.delivery.call('telegram.notice',{id:digest('import-ready:'+job.id),...telegramTarget(owner),text},30000);}catch{return told;}
       // Telegram not connected yet: try again on a later pass. An unclear send is never repeated.
       if(result.state==='not_started')return told;
       await this.control.query('UPDATE workflow_imports SET ready_notice=$2 WHERE id=$1',[job.id,result.state==='done'?'sent':'uncertain']);told++;

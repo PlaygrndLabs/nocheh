@@ -422,10 +422,13 @@ profiles' exact notes, scope markers and consistent SQLite copies, including
 committed WAL state, plus each profile's scheduled jobs (`cron/jobs.json`), staged
 inactive. `owner/` carries the owner's own records: tasks with their comments,
 reminders, people, links, files and history, project assignments, sharing rules,
-learning consent, hidden sources, topic names, edited built-in texts, Notion and
-background-work settings and each chat's tool switches. On import, nothing acts by
-itself: sharing rules arrive off, a switch that was on arrives inherited, and a
-past-due reminder arrives skipped ([ADR-0230](adr/0230-portable-export-carries-owner-work.md)).
+learning consent, hidden sources, the chats Nocheh knows with their ids and the
+names the owner gave them, edited built-in texts, Notion and background-work settings
+and each chat's tool switches. On import, nothing acts by itself: a chat arrives off,
+sharing rules arrive off, a switch that was on arrives inherited, and a past-due
+reminder arrives skipped ([ADR-0230](adr/0230-portable-export-carries-owner-work.md)).
+The chats arrive before the archive, so imported history keeps their ids
+([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)).
 The completion manifest includes sizes and SHA-256 hashes.
 Operational auth/configuration files are excluded; secrets typed into conversations
 remain part of those original conversations. This read-only export is not one

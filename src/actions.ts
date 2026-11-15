@@ -9,6 +9,7 @@ import type { RuntimeCall } from './runtime.js';
 import {evaluate,recordEffect} from './security/store.js';
 import type {Effect,Decision} from './security/contract.js';
 import { conversationScope,type AssistantPolicy } from './assistant-policy.js';
+import {isTelegramChat} from './chats-telegram.js';
 import {controlledAction,controlledList,decideControlled,revokePermission} from './controlled-actions.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
 import {forwardOrigin,forwardedCommand} from './forwarded.js';
@@ -46,7 +47,8 @@ export async function requestAction(pool:pg.Pool,principal:Reader,value:unknown)
   if(!event || (principal.scope!==null && principal.scope!==event.scope))throw new HttpError(403,'action_scope_denied');
   if(event.origin!=='live')throw new HttpError(403,'external_effect_requires_live_turn');
   const destination=requested==='current'&&event.channel==='telegram'?event.scope:requested;
-  if (!/^-?[1-9]\d{0,18}$/.test(destination) || !text.trim())throw new HttpError(400,'invalid_action');
+  // The legacy layout sends to a Telegram chat by its own id, which the Telegram adapter checks (ADR-0252).
+  if (!isTelegramChat(destination) || !text.trim())throw new HttpError(400,'invalid_action');
   const id=digest(canonical({event_id:principal.turnEvent,destination,text}));
   await ingest(pool,{version:1,key:'action-request:'+id,origin:'generated',kind:'action_request',bot_id:event.bot_id,scope:event.scope,
     source_id:id,revision:'0',occurred_at:null,text,payload:{source_event_id:principal.turnEvent,kind:'telegram_message',destination}});

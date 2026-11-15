@@ -12,6 +12,8 @@ import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {chatToolAllowed,chatToolSettings,toolSpace} from '../src/stores/chat-tools.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {chatDirectory,installChatsForTest} from '../src/chats.js';
+import {GP1,GP1_TOPIC,GP_GROUP_IDS,NG1,NG1_TOPIC,NG2,NG_GROUP_IDS,OWNER,fixtureChats,legacyDirectory} from './fixture-groups.js';
 
 /** Rows as the control table holds them, read the way the resolver reads them. */
 const table=(rows:{space_id:string;shell?:boolean|null;browser?:boolean|null;mcp?:boolean|null;revision?:number}[])=>({
@@ -19,6 +21,9 @@ const table=(rows:{space_id:string;shell?:boolean|null;browser?:boolean|null;mcp
     .map(row=>({shell:null,browser:null,mcp:null,revision:1,...row}))})}) as any;
 
 test('each switch resolves on its own: the topic, then its chat, then every chat, then on',async()=>{
+  // What a topic is comes from its chat row (ADR-0252): the chats these switches name.
+  const restore=installChatsForTest(legacyDirectory(['-10042/topic/7','-10042/topic/8','-10042/topic/9','42/topic/5'],{owner:'42',served:['-10042']}));
+  try {
   const none=await chatToolSettings(table([]),'-10042/topic/7');
   assert.deepEqual(none,{space:'-10042/topic/7',revision:0,own:{shell:null,browser:null,mcp:null},values:{shell:true,browser:true,mcp:true},
     origins:{shell:'default',browser:'default',mcp:'default'}},'with nothing saved every tool is on');
@@ -40,6 +45,26 @@ test('each switch resolves on its own: the topic, then its chat, then every chat
   assert.equal(await chatToolAllowed(rows,'mcp','-10042/topic/9','42'),true);
   assert.equal(await chatToolAllowed(rows,'mcp','-10099','42'),false);
   assert.equal(await chatToolAllowed(rows,'telegram','-10042','42'),false);
+  }finally{restore();}
+});
+
+test('a switch saved before step 2b stays as it was; chats first seen later have switches by their Nocheh ids; a chat with no row runs nothing',async()=>{
+  const snapshot=fixtureChats([...GP_GROUP_IDS,...NG_GROUP_IDS]);
+  const restore=installChatsForTest(chatDirectory(snapshot));
+  try {
+    // An OFF saved on an old-shaped topic stays OFF; the topic's chat row is what makes it a topic.
+    const rows=table([{space_id:GP1_TOPIC,shell:false},{space_id:NG1,browser:false},{space_id:NG1_TOPIC,mcp:false}]);
+    assert.equal(await chatToolAllowed(rows,'shell',GP1_TOPIC,OWNER),false);
+    assert.equal((await chatToolSettings(rows,GP1_TOPIC)).origins.shell,'topic');
+    assert.equal(await chatToolAllowed(rows,'shell',GP1,OWNER),true,'the topic\'s row is its own');
+    // A digest topic follows its digest chat, and its own row is a topic's.
+    assert.equal(await chatToolAllowed(rows,'browser',NG1_TOPIC,OWNER),false);
+    assert.deepEqual((await chatToolSettings(rows,NG1_TOPIC)).origins,{shell:'default',browser:'chat',mcp:'topic'});
+    assert.equal(await chatToolAllowed(rows,'mcp',NG2,OWNER),true);
+    // A chat or topic with no row runs nothing, however it looks: it is never read as on.
+    for(const space of ['-1009999999999',GP1+'/topic/8','f'.repeat(64)])
+      for(const tool of ['shell','browser','mcp'])assert.equal(await chatToolAllowed(table([]),tool,space,OWNER),false,space+' '+tool);
+  }finally{restore();}
 });
 
 test('the owner sets tool switches per chat and topic; Nocheh refuses and stops what they turn off',
@@ -49,6 +74,7 @@ test('the owner sets tool switches per chat and topic; Nocheh refuses and stops 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-chat-tools-')),key='chat-tools:'+Date.now(),group='-10042',topic=group+'/topic/7';
   const owner:Reader={admin:true,scope:null};let detected=0;
+  const restore=installChatsForTest(legacyDirectory([group,topic,group+'/topic/8','42/topic/5'],{owner:'42',served:[group]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
     runtime:async operation=>{if(operation==='guard.detect'){detected++;return {literals:[]};}throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const api=new OwnerStorageApi(s),a=s.controlledActions,x=s.controlledExecution;
@@ -148,5 +174,5 @@ test('the owner sets tool switches per chat and topic; Nocheh refuses and stops 
     const read=await a.propose(member,browser);await a.decide(owner,{id:read.id,fingerprint:read.fingerprint,decision:'approve'});
     const claimed=await x.claim(await host(read.id)) as any;
     assert.equal(claimed.claimed,true);assert.equal('preference' in claimed,false);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

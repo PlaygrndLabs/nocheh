@@ -3,9 +3,10 @@ import {readFile,readdir,stat,unlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
-import {graphGroupLabel} from '../graph-labels.js';
+import {chatApps,type ChatApp,type ChatDirectory} from '../chats.js';
 import {HttpError} from '../http.js';
 import {syncDirectory} from '../storage.js';
+import {currentChats,type ChatRepository} from './chats.js';
 
 /** One row per physical request a front door sent to a chat app, or refused itself. Content-free: codes and ids only. */
 export const chatSendSchema=`
@@ -29,20 +30,39 @@ CREATE TABLE IF NOT EXISTS chat_sends(
   created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS chat_sends_at ON chat_sends(at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS chat_sends_problems ON chat_sends(at DESC, id DESC) WHERE state IN ('failed','uncertain');
+-- ADR-0252: an app's thread and message ids are text (Slack's are '1700000000.000200'), and chat_id is the Nocheh chat
+-- the send went to. topic keeps its name and holds the thread. Each value stays as it was, written as text.
+DO $$BEGIN
+ IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chat_sends' AND column_name='topic' AND data_type<>'text') THEN
+  ALTER TABLE chat_sends ALTER COLUMN topic TYPE text USING topic::text;
+ END IF;
+ IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chat_sends' AND column_name='message_id' AND data_type<>'text') THEN
+  ALTER TABLE chat_sends ALTER COLUMN message_id TYPE text USING message_id::text;
+ END IF;
+END$$;
+ALTER TABLE chat_sends ADD COLUMN IF NOT EXISTS chat_id text;
 `;
 
 export const sendKinds=['reply','approved_send','approval_card','card_update','button_answer','refusal','notice','notice_update','reaction','setup','other'] as const;
 export const sendStates=['sent','failed','uncertain','not_sent'] as const;
 /** Expected no-ops, and a chat's own choice not to take reactions: listed, never counted as problems. */
 export const harmlessSendCodes=['message_not_modified','button_answer_expired','reaction_not_allowed'] as const;
-export type ChatSend={version:1;key:string;channel:string;account:string|null;at:string;kind:typeof sendKinds[number];method:string;
-  chat:string|null;topic:number|null;message_id:number|null;detail:string|null;state:typeof sendStates[number];status:number;
+/**
+ * One send record. Version 2 (ADR-0252) names the app's chat, its thread (a Telegram topic, a Slack thread) and the
+ * message as the app writes them, as text; version 1, which older front doors wrote, named the topic and message as
+ * numbers and reads as version 2.
+ */
+export type ChatSend={version:2;key:string;channel:string;account:string|null;at:string;kind:typeof sendKinds[number];method:string;
+  chat:string|null;thread:string|null;message_id:string|null;detail:string|null;state:typeof sendStates[number];status:number;
   error_code:string|null;reference:string|null;ms:number|null};
 
 const FILE=/^[a-f0-9]{64}\.json$/,MAX_BYTES=16*1024,WINDOW_HOURS=24;
 const KEY=/^send:([a-z][a-z0-9_]{0,31}):([A-Za-z0-9_.-]{0,64}):[a-f0-9]{32}$/;
 const AT=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const required=['version','key','channel','at','kind','method','state','status'],nullable=['account','chat','topic','message_id','detail','error_code','reference','ms'];
+/** An app's own chat, thread or message id: Telegram's numbers, Slack's 'C0EXAMPLE1' and '1700000000.000200'. */
+const APP_ID=/^-?[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+const required=['version','key','channel','at','kind','method','state','status'];
+const nullable={1:['account','chat','topic','message_id','detail','error_code','reference','ms'],2:['account','chat','thread','message_id','detail','error_code','reference','ms']} as const;
 /** Within this time a retry of the same send that went through recovers the attempt before it. */
 const RETRY_MINUTES=15;
 /** An attempt a later one of the same send delivered: a plain-text resend, a short rate-limit wait, a fresh retry. */
@@ -54,26 +74,39 @@ const problem=(s:string)=>`(${s}.state IN ('failed','uncertain') AND coalesce(${
   AND NOT ${recovered(s)})`;
 const text=(value:unknown,pattern:RegExp)=>typeof value==='string'&&pattern.test(value);
 const integer=(value:unknown,min:number,max:number)=>Number.isSafeInteger(value)&&(value as number)>=min&&(value as number)<=max;
+/** A version 1 number as the text version 2 holds. */
+const numberText=(value:unknown):string|null|undefined=>value===null?null:integer(value,-(2**53-1),2**53-1)?String(value):undefined;
 
 /** Accept only the closed record shape; anything else is rejected whole. An absent nullable field reads as null. */
 export function chatSend(value:unknown):ChatSend|null {
   if(!value||typeof value!=='object'||Array.isArray(value))return null;
-  const input=value as Record<string,unknown>;
-  if(Object.keys(input).some(key=>!required.includes(key)&&!nullable.includes(key))||required.some(key=>!(key in input)))return null;
-  const r={...Object.fromEntries(nullable.map(key=>[key,null])),...input} as Record<string,any>;
+  const input=value as Record<string,unknown>,version=input.version;
+  if(version!==1&&version!==2)return null;
+  const fields:readonly string[]=nullable[version];
+  if(Object.keys(input).some(key=>!required.includes(key)&&!fields.includes(key))||required.some(key=>!(key in input)))return null;
+  const r={...Object.fromEntries(fields.map(key=>[key,null])),...input} as Record<string,any>;
   const key=typeof r.key==='string'&&r.key.length<=200?KEY.exec(r.key):null;
-  if(r.version!==1||!key||!text(r.channel,/^[a-z][a-z0-9_]{0,31}$/)||key[1]!==r.channel)return null;
+  if(!key||!text(r.channel,/^[a-z][a-z0-9_]{0,31}$/)||key[1]!==r.channel)return null;
   if(r.account!==null&&(!text(r.account,/^[A-Za-z0-9_.-]{1,64}$/)||key[2]!==r.account))return null;
   if(!text(r.at,AT)||Number.isNaN(Date.parse(r.at))||new Date(r.at).toISOString()!==r.at)return null;
   if(!sendKinds.includes(r.kind)||!text(r.method,/^[A-Za-z][A-Za-z0-9_.]{0,63}$/)||!sendStates.includes(r.state))return null;
-  if(r.chat!==null&&!text(r.chat,r.channel==='telegram'?/^-?\d{1,20}$/:/^[A-Za-z0-9_-]{1,64}$/))return null;
-  for(const field of ['topic','message_id'])if(r[field]!==null&&!integer(r[field],-(2**53-1),2**53-1))return null;
+  if(r.chat!==null&&!text(r.chat,APP_ID))return null;
+  const thread=version===1?numberText(r.topic):r.thread===null||text(r.thread,APP_ID)?r.thread as string|null:undefined;
+  const message=version===1?numberText(r.message_id):r.message_id===null||text(r.message_id,APP_ID)?r.message_id as string|null:undefined;
+  if(thread===undefined||message===undefined)return null;
   // A reaction names its emoji (no letters or digits) or "clear"; every other kind carries no detail.
   if(r.detail!==null&&(r.kind!=='reaction'||!text(r.detail,/^(?:clear|[^\p{L}\p{N}\s]{1,16})$/u)))return null;
   if(!integer(r.status,0,999)||(r.state==='sent'?r.error_code!==null:r.error_code!==null&&!text(r.error_code,/^[a-z0-9_]{1,64}$/)))return null;
   if(r.reference!==null&&!text(r.reference,/^[A-Za-z0-9_.:@=+/-]{1,300}$/)||r.ms!==null&&!integer(r.ms,0,2147483647))return null;
-  return {version:1,key:r.key,channel:r.channel,account:r.account,at:r.at,kind:r.kind,method:r.method,chat:r.chat,topic:r.topic,
-    message_id:r.message_id,detail:r.detail,state:r.state,status:r.status,error_code:r.error_code,reference:r.reference,ms:r.ms};
+  return {version:2,key:r.key,channel:r.channel,account:r.account,at:r.at,kind:r.kind,method:r.method,chat:r.chat,thread,
+    message_id:message,detail:r.detail,state:r.state,status:r.status,error_code:r.error_code,reference:r.reference,ms:r.ms};
+}
+
+/** The Nocheh chat a send went to (ADR-0252): the thread's topic when it has a row, else the chat itself. */
+function sentTo(directory:ChatDirectory,channel:string,chat:string|null,thread:string|null):string|null {
+  if(!chat||!(chatApps as readonly string[]).includes(channel))return null;
+  const app=channel as ChatApp;
+  return (thread?directory.resolve(app,chat,thread):null)??directory.resolve(app,chat);
 }
 
 /** The owner's "Keep delivery logs" days, as the front doors read them: empty or 0 keeps every record. */
@@ -89,7 +122,7 @@ const cursors=new Map<string,string>();
  * send. A record that can never become valid is removed; a database outage leaves the valid ones for the next pass.
  */
 export class ChatSendRepository {
-  constructor(readonly control:pg.Pool,readonly archive?:pg.Pool){}
+  constructor(readonly control:pg.Pool,readonly chats?:Pick<ChatRepository,'labels'>){}
 
   async drain(root:string,limit=500):Promise<{recorded:number;rejected:number}> {
     const directory=join(root,'spool','sends');let names:string[];
@@ -108,12 +141,14 @@ export class ChatSendRepository {
     }
     let failure:unknown,recorded=0;
     if(records.length)try {
-      const column=<K extends keyof ChatSend>(key:K)=>records.map(record=>record[key]);
-      recorded=(await this.control.query(`INSERT INTO chat_sends(record_key,channel,account,at,kind,method,chat,topic,message_id,detail,state,status,error_code,reference,ms)
-        SELECT * FROM unnest($1::text[],$2::text[],$3::text[],$4::timestamptz[],$5::text[],$6::text[],$7::text[],$8::bigint[],$9::bigint[],$10::text[],
-          $11::text[],$12::int[],$13::text[],$14::text[],$15::int[]) ON CONFLICT(record_key) DO NOTHING`,
-        [column('key'),column('channel'),column('account'),column('at'),column('kind'),column('method'),column('chat'),column('topic'),column('message_id'),
-          column('detail'),column('state'),column('status'),column('error_code'),column('reference'),column('ms')])).rowCount??0;
+      const column=<K extends keyof ChatSend>(key:K)=>records.map(record=>record[key]),directory=await currentChats();
+      // The thread is kept in the topic column, as text.
+      recorded=(await this.control.query(`INSERT INTO chat_sends(record_key,channel,account,at,kind,method,chat,topic,message_id,detail,state,status,error_code,reference,ms,chat_id)
+        SELECT * FROM unnest($1::text[],$2::text[],$3::text[],$4::timestamptz[],$5::text[],$6::text[],$7::text[],$8::text[],$9::text[],$10::text[],
+          $11::text[],$12::int[],$13::text[],$14::text[],$15::int[],$16::text[]) ON CONFLICT(record_key) DO NOTHING`,
+        [column('key'),column('channel'),column('account'),column('at'),column('kind'),column('method'),column('chat'),column('thread'),column('message_id'),
+          column('detail'),column('state'),column('status'),column('error_code'),column('reference'),column('ms'),
+          records.map(record=>sentTo(directory,record.channel,record.chat,record.thread))])).rowCount??0;
     } catch(error){failure=error;}
     const removed=failure?rejected:[...accepted,...rejected];
     for(const name of removed)await unlink(join(directory,name)).catch(error=>{if(error?.code!=='ENOENT')throw error;});
@@ -122,31 +157,22 @@ export class ChatSendRepository {
     return {recorded,rejected:rejected.length};
   }
 
-  /** Chat names are presentation only, from what Nocheh already saved; a failed lookup leaves them out. */
-  private async titles(rows:{channel:string;chat:string|null}[]):Promise<Map<string,string>> {
-    const chats=[...new Set(rows.filter(row=>row.channel==='telegram'&&row.chat).map(row=>row.chat!))],titles=new Map<string,string>();
-    if(!chats.length)return titles;
-    try {
-      for(const row of (await this.control.query(`SELECT chat_id,title FROM telegram_chat_observations WHERE state='available' AND title IS NOT NULL
-        AND chat_id=ANY($1::text[])`,[chats])).rows)titles.set(row.chat_id,row.title);
-    } catch {}
-    // A captured message names its chat as the directory does; it wins over an older refresh.
-    if(this.archive)try {
-      for(const row of (await this.archive.query(`SELECT c.scope,e.payload FROM unnest($1::text[]) AS c(scope) CROSS JOIN LATERAL (
-        SELECT payload FROM events WHERE scope=c.scope AND channel='telegram' AND origin='live' AND kind='telegram_update'
-          AND convert_from(payload,'UTF8')::jsonb ?| ARRAY['message','edited_message','channel_post','edited_channel_post']
-        ORDER BY received_at DESC,id DESC LIMIT 1) e`,[chats])).rows) {
-        const label=graphGroupLabel(row.payload,row.scope);if(label)titles.set(row.scope,label);
-      }
-    } catch {}
-    return titles;
-  }
-
+  /**
+   * Each row's Nocheh chat (a record from before step 2b gets it from the directory now) and the chat's name, which
+   * is presentation only and comes from the chat records; a failed lookup leaves the names out.
+   */
   private async rows(rows:any[]) {
-    const titles=await this.titles(rows);
-    return rows.map(row=>({id:String(row.id),at:row.at.toISOString(),channel:row.channel,kind:row.kind,method:row.method,chat:row.chat,
-      chat_title:row.channel==='telegram'&&row.chat?titles.get(row.chat)??null:null,topic:row.topic===null?null:Number(row.topic),
-      message_id:row.message_id===null?null:Number(row.message_id),detail:row.detail,state:row.state,status:row.status,
+    const directory=await currentChats().catch(()=>null);
+    const targets=rows.map(row=>row.chat_id??(directory?sentTo(directory,row.channel,row.chat,row.topic):null) as string|null);
+    // A send into a topic is named by its chat, as before.
+    const named=targets.map(id=>id?directory?.parentOf(id)??id:null);
+    let titles=new Map<string,string>();
+    try{titles=await this.chats?.labels(named.filter((id):id is string=>!!id))??titles;}catch{}
+    return rows.map((row,index)=>({id:String(row.id),at:row.at.toISOString(),channel:row.channel,kind:row.kind,method:row.method,chat:row.chat,
+      chat_id:targets[index],chat_title:named[index]?titles.get(named[index]!)??null:null,thread:row.topic,
+      // The Telegram topic as a number, as older views read it.
+      topic:row.channel==='telegram'&&/^[0-9]{1,15}$/.test(row.topic??'')?Number(row.topic):null,
+      message_id:row.message_id,detail:row.detail,state:row.state,status:row.status,
       error_code:row.error_code,reference:row.reference,ms:row.ms,problem:row.problem===true,recovered:row.recovered===true}));
   }
 

@@ -14,7 +14,7 @@ from .capture import Capture, DISPATCH_KEY, Held, OUTBOUND_CHECK, instrument_req
 from .sends import Sends, exception_code, kind_of, not_sent_code, outcome
 
 URL = 'https://api.telegram.org/bot123456:synthetic-token/'
-FIELDS = {'version', 'key', 'channel', 'account', 'at', 'kind', 'method', 'chat', 'topic', 'message_id', 'detail',
+FIELDS = {'version', 'key', 'channel', 'account', 'at', 'kind', 'method', 'chat', 'thread', 'message_id', 'detail',
           'state', 'status', 'error_code', 'reference', 'ms'}
 EYES = '\U0001f440'
 
@@ -91,20 +91,22 @@ class HelperTests(unittest.TestCase):
             reaction = sends.answered('setMessageReaction', {'chat_id': -20, 'message_id': 7, 'reaction': [{'type': 'emoji', 'emoji': EYES}]},
                                       None, (200, b'{"ok":true,"result":true}'), 12)
             self.assertEqual(set(reaction), FIELDS)
-            self.assertEqual({key: reaction[key] for key in ('channel', 'account', 'kind', 'chat', 'message_id', 'detail', 'state', 'status', 'reference', 'ms')},
-                             {'channel': 'telegram', 'account': '123456', 'kind': 'reaction', 'chat': '-20', 'message_id': 7, 'detail': EYES,
+            self.assertEqual({key: reaction[key] for key in ('version', 'channel', 'account', 'kind', 'chat', 'message_id', 'detail', 'state', 'status', 'reference', 'ms')},
+                             {'version': 2, 'channel': 'telegram', 'account': '123456', 'kind': 'reaction', 'chat': '-20', 'message_id': '7', 'detail': EYES,
                               'state': 'sent', 'status': 200, 'reference': None, 'ms': 12})
             self.assertRegex(reaction['key'], r'^send:telegram:123456:[0-9a-f]{32}$')
             self.assertRegex(reaction['at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$')
             self.assertEqual(sends.refused('setMessageReaction', {'chat_id': -20, 'message_id': 7}, None, 'telegram_delivery_authority_revoked')['detail'], 'clear')
             edit = sends.failed('editMessageText', {'chat_id': -20, 'message_id': 9, 'text': 'synthetic'}, 'notice-edit:notice-a:b', TimedOut())
-            self.assertEqual((edit['kind'], edit['message_id'], edit['state'], edit['error_code'], edit['detail']), ('notice_update', 9, 'uncertain', 'timed_out', None))
+            self.assertEqual((edit['kind'], edit['message_id'], edit['state'], edit['error_code'], edit['detail']), ('notice_update', '9', 'uncertain', 'timed_out', None))
             answer = sends.answered('answerCallbackQuery', {'callback_query_id': '1', 'text': 'synthetic'}, 'approval-answer:1', refusal(400, 'Bad Request: query is too old'))
             self.assertEqual((answer['chat'], answer['reference'], answer['error_code']), (None, 'approval-answer:1', 'button_answer_expired'))
             general = sends.flooded('-20', 1, 'telegram:123456:update:3')
-            self.assertEqual((general['topic'], general['state'], general['error_code'], general['kind']), (None, 'not_sent', 'rate_limited', 'reply'))
+            self.assertEqual((general['thread'], general['state'], general['error_code'], general['kind']), (None, 'not_sent', 'rate_limited', 'reply'))
+            topic = sends.flooded('-20', 17, 'telegram:123456:update:3')
+            self.assertEqual((topic['chat'], topic['thread']), ('-20', '17'), 'the app\'s ids are text')
             files = list((Path(folder) / 'sends').glob('*.json'))
-            self.assertEqual(len(files), 5)
+            self.assertEqual(len(files), 6)
             for path in files:
                 record = json.loads(path.read_bytes())
                 self.assertEqual(path.name, digest(record['key']) + '.json')
@@ -165,7 +167,7 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
             await self.send(request, 'sendMessage', {'chat_id': -20, 'text': 'synthetic'}, 'action:' + 'a' * 64, self.allow)
         self.assertEqual(request.calls, ['sendMessage'])
         [record] = await self.records()
-        self.assertEqual((record['kind'], record['state'], record['message_id'], record['reference']), ('approved_send', 'sent', 8, 'action:' + 'a' * 64))
+        self.assertEqual((record['kind'], record['state'], record['message_id'], record['reference']), ('approved_send', 'sent', '8', 'action:' + 'a' * 64))
 
     async def test_a_check_refusal_is_recorded_as_not_sent_and_nothing_leaves(self):
         def revoked(method, parameters): raise Held('telegram_delivery_authority_revoked')
@@ -177,9 +179,9 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.calls, [])
         self.assertFalse((self.root / 'outbound').exists(), 'a refused request is not journaled')
         records = sorted(await self.records(), key=lambda r: r['kind'])
-        self.assertEqual([(r['kind'], r['state'], r['error_code'], r['chat'], r['topic'], r['message_id'], r['detail'], r['reference']) for r in records],
-                         [('reaction', 'not_sent', 'reaction_unbound', '-20', None, 4, EYES, None),
-                          ('reply', 'not_sent', 'authority_revoked', '-20', 17, None, None, 'telegram:123456:update:4')])
+        self.assertEqual([(r['kind'], r['state'], r['error_code'], r['chat'], r['thread'], r['message_id'], r['detail'], r['reference']) for r in records],
+                         [('reaction', 'not_sent', 'reaction_unbound', '-20', None, '4', EYES, None),
+                          ('reply', 'not_sent', 'authority_revoked', '-20', '17', None, None, 'telegram:123456:update:4')])
 
     async def test_a_reply_carries_only_its_own_keyboard_and_a_tap_answer_leaves_its_link_unrecorded(self):
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -188,7 +190,7 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         other = InlineKeyboardMarkup([[InlineKeyboardButton('Answer privately', callback_data='np' + 'b' * 32)]])
         request = instrument_request(Request((200, b'{"ok":true,"result":{"message_id":8,"text":"synthetic"}}')), self.capture)
         reply = {'chat_id': -20, 'text': 'synthetic'}
-        plain, keyed = outbound_check(-20, '-20', lambda: True), outbound_check(-20, '-20', lambda: True, markup=button)
+        plain, keyed = outbound_check(-20, None, lambda: True), outbound_check(-20, None, lambda: True, markup=button)
         for check, markup in ((plain, button), (keyed, other), (keyed, {'inline_keyboard': [[{'text': 'x', 'url': 'https://example.com'}]]})):
             with self.subTest(markup=markup), self.assertRaisesRegex(Held, 'audience_changed'):
                 await self.send(request, 'sendMessage', {**reply, 'reply_markup': getattr(markup, 'to_dict', lambda: markup)()},

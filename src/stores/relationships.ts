@@ -4,15 +4,14 @@ import {telegramMessageAudience,type ObservedAudience,type ObservedReaction} fro
 import {canonical} from '../archive.js';
 import {sourceObjectId,type SourceIdentity} from '../source-model.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
-import {inReadSet,type ReadSet} from '../spaces.js';
+import {inReadSet,inRecall,observedChat,type ReadSet,type RecallScope} from '../spaces.js';
 
-/** `group` admits every known conversation of the chat, for groups whose topics share memory. `reads` admits the
- * known conversations of a read set, for an answer reader (ADR-0249). */
-export type RelationshipAudience={kind:'owner'}|{kind:'conversation';chat_id:string;topic_id:string|null;group?:boolean}|{kind:'reads';set:ReadSet};
-const permits=(audience:RelationshipAudience,observed:ObservedAudience|null):boolean=>audience.kind==='owner'||!!observed&&
-  (audience.kind==='reads'?observed.topic_state!=='unknown'&&inReadSet(audience.set,observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id):
-  audience.chat_id===observed.chat_id&&(observed.topic_state==='known'?audience.group||audience.topic_id===observed.topic_id:
-    observed.topic_state==='none'&&(audience.group||audience.topic_id===null)));
+/** `recall` admits the known conversations of a recall scope: its own, or every conversation of its group when the
+ * group's topics share memory. `reads` admits the known conversations of a read set, for an answer reader (ADR-0249).
+ * A conversation is the Nocheh chat or topic an original's observed audience names (ADR-0252). */
+export type RelationshipAudience={kind:'owner'}|{kind:'recall';scope:RecallScope}|{kind:'reads';set:ReadSet};
+const permits=(audience:RelationshipAudience,chat:string|null):boolean=>audience.kind==='owner'||chat!==null&&
+  (audience.kind==='reads'?inReadSet(audience.set,chat):inRecall(audience.scope,chat));
 
 // Resolve the older adapter's unknown General projection from the immutable
 // full message. This changes neither archived bytes nor the saved descriptor.
@@ -47,7 +46,9 @@ export class RelationshipRepository {
     return audiences.size===1?[...audiences.values()][0]!:null;
   }
 
-  async describe(reference:SourceReference):Promise<{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string}> {
+  /** An original's observed audience as it was captured, its reaction, its object, and `chat`: the Nocheh chat or topic
+   * that audience names (observedChat), null when it is unknown or no row names it. */
+  async describe(reference:SourceReference):Promise<{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string;chat:string|null}> {
     await this.archive.verify(reference);
     const row=(await this.pool.query(`SELECT ${observationColumns},r.object_id FROM source_observations o
       JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
@@ -59,7 +60,7 @@ export class RelationshipRepository {
       const resolved=target?await this.targetAudience(target.target_id):null;
       if(resolved&&resolved.chat_id===audience?.chat_id)audience=resolved;
     }
-    return {audience,reaction:row.metadata.reaction??null,object_id:row.object_id};
+    return {audience,reaction:row.metadata.reaction??null,object_id:row.object_id,chat:audience&&audience.chat_id===row.scope?observedChat(row.channel,audience):null};
   }
 
   async observations(target:SourceIdentity,after='',limit=100):Promise<{references:SourceReference[];next:string|null}> {
@@ -84,14 +85,14 @@ export class RelationshipRepository {
     source:SourceReference|null;targets:{kind:string;identity:SourceIdentity;references:SourceReference[];unresolved:boolean;next:string|null}[];
   }> {
     const observed=await this.describe(reference);
-    if(!permits(audience,observed.audience))return {source:null,targets:[]};
+    if(!permits(audience,observed.chat))return {source:null,targets:[]};
     const rows=await this.pool.query(`SELECT r.kind,o.platform,o.namespace,o.kind AS target_kind,o.external_id FROM source_relations r
       JOIN source_objects o ON o.id=r.target_id WHERE r.event_id=$1 AND r.kind IN ('reply_to','reaction_to') ORDER BY r.kind,o.id`,[reference.id]);
     const targets=[];
     for(const row of rows.rows) {
       const identity:SourceIdentity={platform:row.platform,namespace:row.namespace,kind:row.target_kind,external_id:row.external_id};
       const page=await this.observations(identity,'',limit),references=[];
-      for(const candidate of page.references)if(permits(audience,(await this.describe(candidate)).audience))references.push(candidate);
+      for(const candidate of page.references)if(permits(audience,(await this.describe(candidate)).chat))references.push(candidate);
       // External targets are not exposed to an unauthorized conversation, even as existence metadata.
       if(audience.kind!=='owner'&&!references.length)continue;
       targets.push({kind:row.kind,identity,references,unresolved:page.references.length===0,next:page.next});

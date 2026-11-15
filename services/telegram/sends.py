@@ -34,7 +34,6 @@ REJECTIONS = ((('bot was blocked',), 'bot_blocked'), (('user is deactivated',), 
 STATUSES = {429: 'rate_limited', 401: 'unauthorized', 403: 'forbidden', 409: 'conflict'}
 HELD = frozenset({'audience_changed', 'cancelled', 'authority_revoked', 'reaction_unbound'})
 METHOD = re.compile(r'[A-Za-z][A-Za-z0-9_.]{0,63}')
-CHAT = re.compile(r'-?[0-9]{1,20}')
 BIGINT = 2 ** 63
 
 
@@ -48,6 +47,20 @@ def _number(value):
     """A positive id that fits Postgres bigint, or None."""
     if isinstance(value, str) and value.isascii() and value.isdigit(): value = int(value)
     return value if type(value) is int and 0 < value < BIGINT else None
+
+
+def _text(value):
+    """A positive id as the record's text (version 2 holds the app's ids as text), or None."""
+    number = _number(value)
+    return None if number is None else str(number)
+
+
+def _chat(value):
+    """The chat as Telegram names it: a whole number, which is negative for a group or channel, or None."""
+    if type(value) is int and not isinstance(value, bool): value = str(value)
+    if not isinstance(value, str) or not value.isascii() or not 0 < len(value) <= 20: return None
+    digits = value[1:] if value.startswith('-') else value
+    return value if digits.isdigit() and not digits.startswith('0') else None
 
 
 def outcome(status, raw):
@@ -150,13 +163,13 @@ class Sends:
         """The record, or None when there is nothing to record."""
         # "typing…" fires every few seconds and is never recorded, not even when it fails (owner, 2026-11-12).
         if not isinstance(method, str) or not METHOD.fullmatch(method) or method == 'sendChatAction': return None
-        kind, chat = kind_of(method, dispatch), str(parameters.get('chat_id'))
-        chat = chat if CHAT.fullmatch(chat) else None
-        return {'version': 1, 'key': f'send:{self.channel}:{self.account or ""}:{uuid.uuid4().hex}', 'channel': self.channel,
+        kind, chat = kind_of(method, dispatch), _chat(parameters.get('chat_id'))
+        # Version 2: the app's chat, thread and message ids as text (ADR-0252).
+        return {'version': 2, 'key': f'send:{self.channel}:{self.account or ""}:{uuid.uuid4().hex}', 'channel': self.channel,
                 'account': self.account, 'at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
-                'kind': kind, 'method': method, 'chat': chat, 'topic': _number(parameters.get('message_thread_id')),
+                'kind': kind, 'method': method, 'chat': chat, 'thread': _text(parameters.get('message_thread_id')),
                 # An edit or a reaction names the message it changes; a delivered send gets its new id from Telegram.
-                'message_id': _number(parameters.get('message_id')) or message, 'detail': detail_of(method, parameters),
+                'message_id': _text(parameters.get('message_id')) or _text(message), 'detail': detail_of(method, parameters),
                 'state': state, 'status': status if type(status) is int and 0 <= status < 1000 else 0,
                 'error_code': None if state == 'sent' else code,
                 'reference': dispatch if kind not in ('setup', 'reaction') and isinstance(dispatch, str) and len(dispatch) <= 300 else None,

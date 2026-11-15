@@ -53,8 +53,8 @@ def turn_body(update,chat='-20',text='synthetic question',topic=None,bot=BOT,sec
 def observe(body):return {'channel':'telegram','event_id':body['event_id'],'attempt':body['attempt'],'observe_only':True}
 
 
-def resolve(payload,chat):
-    message=payload['message'];topic=message.get('message_thread_id')
+def resolve(body,claims):
+    chat=body['scope'];message=body['payload']['message'];topic=message.get('message_thread_id')
     return Scope(chat,str(message['from']['id']),False,Scopes.profile(chat),chat if topic is None else chat+'/topic/'+str(topic))
 
 
@@ -295,7 +295,7 @@ class BrainTurnTests(unittest.TestCase):
         def unconfigured():raise ProviderNotConfigured()
         brain=self.brain(self.replying(),credentials=unconfigured);body=turn_body(70);brain.start(body)
         self.assertEqual({key:value for key,value in self.wait(brain,body).items() if key!='run_id'},{'state':'failed','error_code':'provider_not_configured'})
-        silent=self.brain(self.replying(),resolve=lambda payload,chat:None);body=turn_body(71);silent.start(body)
+        silent=self.brain(self.replying(),resolve=lambda body,claims:None);body=turn_body(71);silent.start(body)
         self.assertEqual({key:value for key,value in self.wait(silent,body).items() if key!='run_id'},{'state':'suppressed'})
         forged=turn_body(72,secret='another-synthetic-secret-123456');brain.start(forged);state=self.wait(brain,forged)
         self.assertEqual((state['state'],state.get('error_code')),('ambiguous','runtime_execution_interrupted'),'a refused pass never reaches the turn')
@@ -309,7 +309,7 @@ class BrainTurnTests(unittest.TestCase):
                     'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1,**extra}
             data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(SECRET.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
-        owner=lambda payload,chat:Scope(chat,'123',True,Scopes.profile(chat),chat)
+        owner=lambda body,claims:Scope(body['scope'],'123',True,Scopes.profile(body['scope']),body['scope'])
         brain=self.brain(self.replying(),resolve=owner)
         framed={'frame':'[Private answer] Asked in a Telegram group.','question_event':'c'*64}
         body=turn_body(80,chat='123',private_answer=framed);body['archive_credential']=signed(body['event_id'],answer='a'*32)

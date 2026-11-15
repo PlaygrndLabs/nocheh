@@ -92,7 +92,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         policy_check = patch('services.telegram.gateway.check_delivery_policy', side_effect=lambda _credential: self.allowed)
         policy_check.start()
         self.addCleanup(policy_check.stop)
-        self.policy = Policy(True, '123', ['-20'], {'-20': {'granted': ['456'], 'denied': []}})
+        self.policy = Policy.of(True, '123', ['-20'], {'-20': {'granted': ['456'], 'denied': []}}, topics=[('-20/topic/17', '-20', '17'), ('-20/topic/1', '-20', '1')])
         self.capture = Capture(self.root / 'spool', '123456')
         # Send records still being written land before the spool is removed.
         self.addAsyncCleanup(self.capture.sends.settle)
@@ -120,7 +120,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         event_id = digest(source_key)
         claims = {'scope': '-20', 'space': '-20' if topic is None else f'-20/topic/{topic}',
                   'revision': 1, 'event_id': event_id, 'expires': time.time() * 1000 + 600000,
-                  'audience': 'nocheh-assistant'}
+                  'audience': 'nocheh-assistant', 'app': {'app': 'telegram', 'chat': '-20', 'topic': None if topic is None else str(topic)}}
         body = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
         signature = base64.urlsafe_b64encode(hmac.new(self.secret.encode(), body.encode(), hashlib.sha256).digest()).decode().rstrip('=')
         return {'id': digest(event_id + ':' + str(attempt)), 'event_id': event_id, 'attempt': attempt, 'dispatch_key': source_key,
@@ -140,7 +140,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
     async def deliver(self, envelope, gateway=None, work=0.0):
         """Show presence while the brain works for ``work`` seconds, then deliver the reply; the outcome only."""
         gateway = gateway or self.gateway
-        chat, topic, message, credential = gateway._turn(envelope)
+        chat, topic, message, credential, _ = gateway._turn(envelope)
         if envelope.get('presence') and gateway.connected() and (gateway.typing_on or gateway.reactions_on):
             await gateway._start(envelope['id'], chat, topic, message, credential)
             await asyncio.sleep(work)
@@ -149,7 +149,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
 
     async def brain_ended(self, envelope, finish, work=0.0):
         """The brain's turn ended without a reply: presence is finished as Nocheh's core does."""
-        chat, topic, message, credential = self.gateway._turn(envelope)
+        chat, topic, message, credential, _ = self.gateway._turn(envelope)
         await self.gateway._start(envelope['id'], chat, topic, message, credential)
         await asyncio.sleep(work)
         await self.gateway._finish(envelope['id'], chat, message, credential, finish)
@@ -192,7 +192,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(self.request.delivered[0].get('message_thread_id'), (None, 1))
 
     async def test_approved_action_preserves_exact_topic_and_receipt_after_restart(self):
-        body = {'id': 'b' * 64, 'destination': '-20/topic/17', 'text': 'پیگیری تأییدشدهٔ مصنوعی'}
+        body = {'id': 'b' * 64, 'destination': '-20/topic/17', 'chat_id': '-20', 'topic': '17', 'text': 'پیگیری تأییدشدهٔ مصنوعی'}
         with patch('services.telegram.gateway.check_action_policy', return_value=True):
             self.assertEqual(await self.gateway.send_action(body), {'state': 'done'})
             self.assertEqual(await self.new_gateway().send_action(body), {'state': 'done'})
@@ -204,7 +204,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         text = 'اطلاعات تأییدشدهٔ مصنوعی برای پیگیری حافظه 🌿\n' * 150
         self.assertGreater(len(text), 4096)
         self.assertLessEqual(len(text.encode('utf-16-le')) // 2, 12000)
-        body = {'id': 'd' * 64, 'destination': '-20/topic/17', 'text': text}
+        body = {'id': 'd' * 64, 'destination': '-20/topic/17', 'chat_id': '-20', 'topic': '17', 'text': text}
         with patch('services.telegram.gateway.check_action_policy', return_value=True):
             self.assertEqual(await self.gateway.send_action(body), {'state': 'done'})
             count = len(self.request.delivered)
@@ -217,7 +217,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
     async def test_oversized_approved_wording_is_rejected_before_any_request(self):
         before = len(self.request.calls)
         with self.assertRaises(ValueError):
-            await self.gateway.send_action({'id': 'e' * 64, 'destination': '-20/topic/17', 'text': '🌿' * 6001})
+            await self.gateway.send_action({'id': 'e' * 64, 'destination': '-20/topic/17', 'chat_id': '-20', 'topic': '17', 'text': '🌿' * 6001})
         self.assertEqual(len(self.request.calls), before)
         self.assertEqual(self.request.delivered, [])
 
@@ -229,7 +229,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
     async def test_approved_topic_action_never_falls_back_to_general(self):
         self.request.respond = lambda data: (400, canonical({'ok': False, 'error_code': 400,
             'description': 'Bad Request: message thread not found'})) if data.get('message_thread_id') else None
-        body = {'id': 'c' * 64, 'destination': '-20/topic/17', 'text': 'Synthetic approved topic follow-up'}
+        body = {'id': 'c' * 64, 'destination': '-20/topic/17', 'chat_id': '-20', 'topic': '17', 'text': 'Synthetic approved topic follow-up'}
         with patch('services.telegram.gateway.check_action_policy', return_value=True):
             self.assertEqual(await self.gateway.send_action(body), {'state': 'ambiguous'})
             self.assertEqual(await self.new_gateway().send_action(body), {'state': 'ambiguous'})
@@ -327,7 +327,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
             nonlocal approved
             approved = False
         self.request.respond = revoke
-        body = {'id': 'a' * 64, 'destination': '-20', 'text': 'Synthetic approved message. ' * 20}
+        body = {'id': 'a' * 64, 'destination': '-20', 'chat_id': '-20', 'text': 'Synthetic approved message. ' * 20}
         with patch('services.telegram.gateway.check_action_policy', side_effect=lambda action: approved):
             result = await self.gateway.send_action(body)
             self.assertEqual(result['state'], 'ambiguous')
@@ -463,8 +463,8 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.deliver(self.envelope()), {'state': 'done'})
         [record] = await self.sends()
         self.assertEqual({key: value for key, value in record.items() if key not in ('key', 'at', 'ms')},
-                         {'version': 1, 'channel': 'telegram', 'account': '123456', 'kind': 'reply', 'method': 'sendMessage', 'chat': '-20',
-                          'topic': 17, 'message_id': 1001, 'detail': None, 'state': 'sent', 'status': 200, 'error_code': None,
+                         {'version': 2, 'channel': 'telegram', 'account': '123456', 'kind': 'reply', 'method': 'sendMessage', 'chat': '-20',
+                          'thread': '17', 'message_id': '1001', 'detail': None, 'state': 'sent', 'status': 200, 'error_code': None,
                           'reference': 'telegram:123456:update:1'})
         self.assertIsInstance(record['ms'], int)
         raw = b''.join(path.read_bytes() for path in (self.root / 'spool/sends').glob('*'))
@@ -478,7 +478,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.deliver(self.envelope(), work=0.05), {'state': 'done'})
         reactions = sorted((r for r in await self.sends() if r['kind'] == 'reaction'), key=lambda r: r['at'])
         self.assertEqual([(r['method'], r['chat'], r['message_id'], r['detail'], r['state'], r['reference']) for r in reactions],
-                         [('setMessageReaction', '-20', 1, '\U0001f440', 'sent', None), ('setMessageReaction', '-20', 1, '\U0001f44d', 'sent', None)])
+                         [('setMessageReaction', '-20', '1', '\U0001f440', 'sent', None), ('setMessageReaction', '-20', '1', '\U0001f44d', 'sent', None)])
         journal = b''.join(path.read_bytes() for path in (self.root / 'spool/outbound').glob('*'))
         self.assertNotIn(b'setMessageReaction', journal)
 
@@ -507,9 +507,9 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual((await self.deliver(self.envelope(identifier=2)))['state'], 'done')
         self.assertEqual(len([c for c in self.request.calls if c[0] == 'sendMessage']), 1, 'the second reply never leaves')
         records = sorted(await self.sends(), key=lambda r: r['reference'])
-        self.assertEqual([(r['kind'], r['chat'], r['topic'], r['state'], r['status'], r['error_code'], r['reference']) for r in records],
-                         [('reply', '-20', 17, 'failed', 429, 'rate_limited', 'telegram:123456:update:1'),
-                          ('reply', '-20', 17, 'not_sent', 0, 'rate_limited', 'telegram:123456:update:2')])
+        self.assertEqual([(r['kind'], r['chat'], r['thread'], r['state'], r['status'], r['error_code'], r['reference']) for r in records],
+                         [('reply', '-20', '17', 'failed', 429, 'rate_limited', 'telegram:123456:update:1'),
+                          ('reply', '-20', '17', 'not_sent', 0, 'rate_limited', 'telegram:123456:update:2')])
 
     async def test_each_try_of_a_reply_that_recovers_leaves_its_own_record(self):
         """The sender's own retries are separate requests, so each leaves one record under the same reference;

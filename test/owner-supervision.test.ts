@@ -1,38 +1,66 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {digest} from '../src/archive.js';
+import {chatDirectory,chatIdFor,type ChatIdRow,type ChatRow,type ChatSnapshot} from '../src/chats.js';
+import type {ChatListing} from '../src/stores/chats.js';
 import {OwnerSupervisionRepository,type OwnerSupervisionDependencies} from '../src/stores/owner-supervision.js';
+import {installChatsForTest} from '../src/chats.js';
+import {legacyDirectory} from './fixture-groups.js';
+
+// The chats these tests name, as the seeder makes their rows (ADR-0252): what a topic is comes from its row.
+installChatsForTest(legacyDirectory([...Array.from({length:125},(_,index)=>String(-1000-index)),'-1000/topic/7','-1000/topic/99','-9999'],{owner:'42',served:['-1000']}));
 
 const owner={admin:true,scope:null},date='2026-10-03T00:00:00.000Z';
-function repository(query:(store:string,sql:string,params:unknown[])=>any) {
+const detail=(value:Partial<ChatListing>):ChatListing=>({title_source:null,username:null,seen_at:null,closed:null,refreshed:null,...value});
+const group=(id:string,title:string|null,state:ChatRow['state']='off'):ChatRow=>({id,app:'telegram',kind:'group',parent_id:null,topic_key:null,state,title,is_forum:true,account_id:null,app_type:'supergroup'});
+const topic=(id:string,parent:string,key:string,title:string|null=null):ChatRow=>({id,app:'telegram',kind:'topic',parent_id:parent,topic_key:key,state:'off',title,is_forum:false,account_id:null,app_type:null});
+const current=(chat:string,external:string):ChatIdRow=>({app:'telegram',external_id:external,chat_id:chat,state:'current'});
+function repository(query:(store:string,sql:string,params:unknown[])=>any,snapshot:ChatSnapshot={chats:[],ids:[],owner_chat:null},details=new Map<string,ChatListing>()) {
   const queries:{store:string;sql:string}[]=[];
   const pool=(store:string)=>({query:async(sql:string,params:unknown[]=[])=>{queries.push({store,sql});assert.match(sql.trim(),/^(SELECT|WITH)\b/,'supervision reads must not mutate saved state');return {rows:await query(store,sql,params)};}});
   const services={stores:{archive:pool('archive'),control:pool('control'),derived:pool('derived')},
     projects:{effective:async(space:string)=>({space,own_assignment:null,assignment:null,project:null,inherited:false})},
     controlledActions:{inspect:async()=>{throw Error('unexpected action read');}},telegramActions:{inspect:async()=>{throw Error('unexpected Telegram read');}},
-    knowledge:{proposal:async()=>{throw Error('unexpected proposal read');}},memory:{status:async()=>({guard:{generation:'generation',epoch:4,mode:'on'},
+    knowledge:{proposal:async()=>{throw Error('unexpected proposal read');}},
+    chats:{listing:async()=>({directory:chatDirectory(snapshot),rows:details})},memory:{status:async()=>({guard:{generation:'generation',epoch:4,mode:'on'},
       connection:{attached:true,verified:true,revision:2},workspace:null,sessions:[],receipts:[],syncing:false,limited_memory:true})}} as unknown as OwnerSupervisionDependencies;
   return {value:new OwnerSupervisionRepository(services),queries,services};
 }
 
-test('conversation directory preserves exact identities, named topics, unknown names and pagination beyond 100',async()=>{
-  const {value,queries}=repository((store,sql)=>{
-    if(store==='archive')return Array.from({length:125},(_,index)=>({space_id:String(-1000-index),chat:{id:-1000-index,title:'Same display name',type:'supergroup'},observed_at:date}))
-      .concat([{space_id:'-1000/topic/7',chat:{id:-1000,title:'Same display name',type:'supergroup'},observed_at:date,topic_name:'Delivery'}] as any);
-    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:['-1000']},revision:5}];
+test('conversation directory lists chat records with exact identities, named topics, unknown values and pagination beyond 100',async()=>{
+  // Both families: old-shaped groups keep their Telegram id as their Nocheh id, newer ones have digest ids.
+  const groups=Array.from({length:125},(_,index)=>{const external=String(-1001000000100-index);return {id:index%2?chatIdFor('telegram',external):external,external};});
+  const named=chatIdFor('telegram',groups[1]!.external,'7'),unseen=chatIdFor('telegram',groups[3]!.external,'8'),seen=groups[0]!.id+'/topic/9';
+  const snapshot:ChatSnapshot={chats:[...groups.map(item=>group(item.id,'Same display name')),topic(named,groups[1]!.id,'7','Delivery'),
+    topic(unseen,groups[3]!.id,'8'),topic(seen,groups[0]!.id,'9','Seen topic')],ids:groups.map(item=>current(item.id,item.external)),owner_chat:null};
+  const details=new Map([[named,detail({title_source:'owner'})],[seen,detail({title_source:'observed',seen_at:new Date(date),closed:true})],
+    [groups[0]!.id,detail({seen_at:new Date(date),refreshed:{state:'available',to:null,at:new Date(date)}})]]);
+  const {value,queries}=repository((_store,sql)=>{
+    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:[groups[1]!.external]},revision:5}];
     if(sql.includes('project_assignments'))return [{space_id:'-9999'}];
     throw Error('unexpected query');
-  });
+  },snapshot,details);
   const first=await value.conversations(owner,{limit:100});
-  assert.equal(first.total,128);assert.equal(first.items.length,100);assert.ok(first.next_cursor);
+  // 125 groups, two listed topics (a topic nothing saw or named is left out), and the two values with no chat record.
+  assert.equal(first.total,129);assert.equal(first.items.length,100);assert.ok(first.next_cursor);
   const next=await value.conversations(owner,{limit:100,after:first.next_cursor!});
-  assert.equal(next.items.length,28);assert.equal(next.next_cursor,null);
-  assert.equal(new Set([...first.items,...next.items].map(item=>item.space_id)).size,128);
-  const topic=(await value.conversations(owner,{q:'Delivery'})).items[0]!;
-  assert.equal(topic.kind,'topic');assert.equal(topic.space_id,'-1000/topic/7');assert.equal(topic.parent_name,'Same display name');
-  assert.equal((await value.conversations(owner,{q:'-9999'})).items[0]!.name,null);
-  assert.equal((await value.conversations(owner,{q:'Same display name',limit:100})).total,126);
-  assert.ok(queries.filter(query=>query.store==='archive').every(query=>!query.sql.includes('AS payload')),'source bodies must not cross the archive projection');
+  assert.equal(next.items.length,29);assert.equal(next.next_cursor,null);
+  const all=[...first.items,...next.items];
+  assert.equal(new Set(all.map(item=>item.space_id)).size,129);assert.ok(!all.some(item=>item.space_id===unseen));
+  const delivery=(await value.conversations(owner,{q:'Delivery'})).items[0]!;
+  assert.equal(delivery.kind,'topic');assert.equal(delivery.space_id,named);assert.equal(delivery.parent_space,groups[1]!.id);
+  assert.equal(delivery.parent_name,'Same display name');assert.equal(delivery.registered,true);assert.equal(delivery.topic_key,'7');
+  assert.deepEqual(delivery.app_ids,[{app:'telegram',external:groups[1]!.external,state:'current'}]);assert.equal(delivery.observed_at,null);
+  const observed=all.find(item=>item.space_id===seen)!;
+  assert.equal(observed.closed,true);assert.equal(observed.registered,undefined);assert.equal(observed.observed_at,date);
+  const configured=all.find(item=>item.space_id===groups[1]!.id)!;assert.equal(configured.configured,true);assert.equal(configured.kind,'group');
+  assert.deepEqual(all.find(item=>item.space_id===groups[0]!.id)!.telegram,{state:'available',migrate_to_chat_id:null,observed_at:date});
+  for(const unknown of ['-9999','42']) {
+    const item=(await value.conversations(owner,{q:unknown})).items.find(entry=>entry.space_id===unknown)!;
+    assert.equal(item.name,null);assert.equal(item.kind,'unknown');assert.equal(item.configured,true);assert.deepEqual(item.app_ids,[]);
+  }
+  assert.equal((await value.conversations(owner,{q:'Same display name',limit:100})).total,127);
+  assert.equal(queries.filter(query=>query.store==='archive').length,0,'the directory is read from chat records, never from source bodies');
 });
 
 test('every supervision entry point rejects non-owner capabilities before querying',async()=>{
@@ -59,21 +87,47 @@ test('exact memory decision exposes changed fact revision as stale without recon
 });
 
 test('unknown conversation context does not inherit a parent sharing grant or equate connection with available memory',async()=>{
-  const topic='-1000/topic/99';
-  const {value}=repository((store,sql,params)=>{
-    if(store==='archive')return [];
-    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:['-1000'],group_access:{'-1000':{granted:['73'],denied:['91']}}},revision:2}];
-    if(sql.includes('SELECT space_id FROM project_assignments'))return [];
-    if(sql.includes('WHERE destination=$1')||sql.includes('p.destination=$1')||sql.includes('a.space_id=$1')||sql.includes('WHERE scopes ?'))assert.equal(params[0],topic);
-    if(sql.includes('security_policy'))return [{revision:1,document:{version:1,rules:[]}}];
-    return [];
-  });
-  const context=await value.context(owner,topic);
-  assert.equal(context.conversation.name,null);assert.equal(context.conversation.kind,'topic');
+  // A topic Nocheh knows only by its record: its group's access is keyed by the group's Telegram id.
+  const external='-1002000000001',parent=chatIdFor('telegram',external),space=chatIdFor('telegram',external,'99');
+  const snapshot:ChatSnapshot={chats:[group(parent,null,'active'),topic(space,parent,'99')],ids:[current(parent,external)],owner_chat:null};
+  const run=async(id:string)=>{
+    const {value}=repository((store,sql,params)=>{
+      if(store==='archive')return [];
+      if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:[external],group_access:{[external]:{granted:['73'],denied:['91']}}},revision:2}];
+      if(sql.includes('SELECT space_id FROM project_assignments'))return [];
+      if(sql.includes('WHERE destination=$1')||sql.includes('p.destination=$1')||sql.includes('a.space_id=$1')||sql.includes('WHERE scopes ?'))assert.equal(params[0],id);
+      if(sql.includes('destination=ANY'))assert.ok((params[0] as string[]).includes(id));
+      if(sql.includes('security_policy'))return [{revision:1,document:{version:1,rules:[]}}];
+      return [];
+    },snapshot);
+    return value.context(owner,id);
+  };
+  const context=await run(space);
+  assert.equal(context.conversation.name,null);assert.equal(context.conversation.kind,'topic');assert.equal(context.conversation.parent_space,parent);
   assert.equal(context.addressing.group_enabled,true);assert.deepEqual(context.addressing.granted,['73']);
   assert.deepEqual(context.knowledge_access.sharing_rules,[]);assert.deepEqual(context.knowledge_access.fact_grants,[]);
   assert.equal(context.memory.connection.attached,true);assert.equal(context.memory.availability,'limited');
   assert.equal(context.memory.syncing,false);assert.equal(context.organization.effective.project,null);
+  // A value no chat record names is unknown: it borrows nothing from a group its text looks like.
+  const unknown=await run(external+'/topic/99');
+  assert.equal(unknown.conversation.kind,'unknown');assert.equal(unknown.addressing.group_enabled,false);assert.deepEqual(unknown.addressing.granted,[]);
+  assert.equal(unknown.knowledge_access.owner_access,false);
+});
+
+test('a group Telegram upgraded shows the access lists under both its ids joined, deny winning, as the turn gate applies them',async()=>{
+  const before='-2000000000002',after='-1002000000002',chat=chatIdFor('telegram',before);
+  const snapshot:ChatSnapshot={chats:[group(chat,null,'active')],ids:[{app:'telegram',external_id:before,chat_id:chat,state:'old'},current(chat,after)],owner_chat:null};
+  // Alice was let in before the upgrade; Bob was let in before it and turned away after it.
+  const access={[before]:{granted:['301','302'],denied:[]},[after]:{granted:[],denied:['302']}};
+  const {value}=repository((store,sql)=>{
+    if(store==='archive')return [];
+    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:[after],group_access:access},revision:2}];
+    if(sql.includes('security_policy'))return [{revision:1,document:{version:1,rules:[]}}];
+    return [];
+  },snapshot);
+  const context=await value.context(owner,chat);
+  assert.deepEqual([context.addressing.granted,context.addressing.denied],[['301','302'],['302']]);
+  assert.equal(context.addressing.group_enabled,true);
 });
 
 test('inbox uses database totals rather than visible page length and retains exact review identity',async()=>{

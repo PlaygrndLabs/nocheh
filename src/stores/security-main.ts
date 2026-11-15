@@ -9,11 +9,14 @@ import {brokerServer} from '../security/broker.js';
 import {runtimeStores} from './runtime-pools.js';
 import {storageServices} from './services.js';
 import {storageGuardService} from './guard-service.js';
+import {servedPolicy,startChatDirectory} from './chats.js';
 import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHealth,storageHeartbeat} from './lifecycle.js';
 
 const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token}))),stores.control);
 const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
-  policy:()=>config.assistant,runtime:call,brain:brainWithPrompts(brain(config),stores.control),memoryEngine:memoryEngine(config)});
+  policy:servedPolicy(()=>config.assistant),runtime:call,brain:brainWithPrompts(brain(config),stores.control),memoryEngine:memoryEngine(config)});
+// The security service reads chats as the app records them (ADR-0252); a newer guard epoch reloads them.
+await startChatDirectory(stores.control,()=>config.assistant);
 const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',
   archive:process.env.ARCHIVE_URL??'http://nocheh-app:8780',hermes:config.hermesUrl,prepare:storageGuardService(services),
   assertActive:()=>assertStorageActive(config.dataDir),assertReady:async()=>{await assertGuardConfiguration(services.guards,config.guardMode);await services.configuration.assert(config.assistant);},health:()=>storageHealth(stores)});

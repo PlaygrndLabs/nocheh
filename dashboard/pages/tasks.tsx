@@ -8,7 +8,8 @@
 import * as React from 'react';
 import {useDeferredValue, useState} from 'react';
 import {Archive, Folder, LayoutGrid, List, ListChecks, Plus, Search, Tag} from 'lucide-react';
-import {chatName, type Directory} from '../lib/chats-model';
+import {chatName} from '../lib/chats-model';
+import {useChatDirectory} from '../lib/chat-directory';
 import {useParam, useView} from '../lib/navigation';
 import {setParams} from '../lib/routes';
 import {pageTabs, tabIds} from '../lib/page-tabs';
@@ -91,15 +92,16 @@ export default function Tasks() {
     (query ? `&q=${encodeURIComponent(query)}` : '') +
     (page ? `&after=${page * PAGE}` : '');
   const list = useResource<TaskPage>(path);
-  const chats = useResource<Directory>('/conversations?limit=100', 60000);
+  const chats = useChatDirectory(60000);
   const counts = list.data?.counts;
   const scopes = list.data?.scopes ?? [];
   const tags = list.data?.tags ?? [];
   const settings = list.data?.settings;
   const today = list.data?.today;
   const groupName = (space: string) => {
-    const chat = chats.data?.items.find(row => row.space_id === space);
-    if (!chat) return space.includes('/topic/') ? 'A topic' : 'A group';
+    // What a chat is comes from the chat directory, never from its id (ADR-0252).
+    const chat = chats.find(space);
+    if (!chat) return 'A group';
     return chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);
   };
   const [layout, setLayout] = useLayout();

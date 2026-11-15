@@ -10,6 +10,7 @@ import type {GuardBinding} from './guards.js';
 import type {LearningContextRepository} from './learning-context.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
+import {ownerChat} from '../assistant-policy.js';
 
 export const nativeReviewSchema=`
 CREATE TABLE IF NOT EXISTS native_review_jobs (
@@ -61,7 +62,8 @@ export class NativeReviewRepository {
     readonly turns:RuntimeTurnRepository,readonly brain:Brain,readonly token:string){}
   private get control(){return this.contexts.access.stores.control;}
   private actor(source:SourceReference,binding:GuardBinding):Reader {
-    const owner=this.contexts.access.policy().owner_id;if(!owner)throw new HttpError(409,'owner_review_required');
+    // The owner's private chat (ADR-0252), the space the owner's native notes are reviewed in.
+    const policy=this.contexts.access.policy(),owner=policy.owner_id?ownerChat(policy):null;if(!owner)throw new HttpError(409,'owner_review_required');
     return {admin:false,scope:null,space:owner,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,purpose:'memory-review'};
   }
   async queue(source:SourceReference):Promise<string[]> {

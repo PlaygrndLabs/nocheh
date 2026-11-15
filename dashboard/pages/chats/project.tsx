@@ -189,7 +189,7 @@ export function ProjectCard({chat, served}: {chat: Chat; served: boolean}) {
 
 /** A topic always follows its group's project: its card only says which (ADR-0247). */
 function TopicProject({chat}: {chat: Chat}) {
-  const parent = chat.parent_space ?? parentOf(chat.space_id) ?? '';
+  const parent = parentOf(chat) ?? '';
   const group = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(parent));
   const names = useChatNames();
   const project = group.data?.project ?? null;
@@ -387,7 +387,7 @@ export function PrivateChatProject({chat, yours}: {chat: Chat; yours: boolean}) 
   const never = yours ? 'Your private chat never joins a project.' : 'A private chat never joins a project.';
   if (own?.mode !== 'assigned') return <p className="px-1 text-[13px] text-muted">{never}</p>;
   const name = projects.data?.projects.find(project => project.id === own.project_id)?.name;
-  const topic = chat.space_id.includes('/topic/');
+  const topic = chat.kind === 'topic';
   return (
     <div>
       <Notice

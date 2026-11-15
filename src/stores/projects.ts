@@ -2,7 +2,8 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {groupChatId,groupSpace,parentSpace,recallCondition,validateSpace} from '../spaces.js';
+import {groupChatId,groupSpace,groupWithTopics,parentSpace,recallCondition,validateSpace} from '../spaces.js';
+import {chats} from '../chats.js';
 import {OwnerCommands} from './owner-commands.js';
 import {projectGroupsSql} from './project-groups.js';
 import {moveGroupTasks} from './tasks.js';
@@ -16,13 +17,11 @@ export interface Project {id:string;name:string;description:string;state:'active
 export interface Assignment {space_id:string;project_id:string|null;mode:'assigned'|'none'|'inherit';revision:number}
 export interface SharingRule {id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string;revision:number}
 
-const chatOf=(space:string)=>parentSpace(space)??space;
-
 /** A turn runs at most ten automatic filters (`sharing_rule_limit` in sharing.ts); an owner rule past that is refused.
  * Counted for the whole group, its General chat and every topic, whichever topic memory is set. */
 async function filteredLimit(db:Pick<pg.PoolClient,'query'>,destination:string):Promise<void> {
-  const chat=chatOf(destination),group=groupChatId(chat)?chat:null;
-  const {rows}=await db.query(`SELECT count(*)::int AS n FROM sharing_rules WHERE enabled AND mode='filtered' AND ${recallCondition('destination','$1','$2')}`,[destination,group]);
+  const group=chats().groupOf(destination);
+  const {rows}=await db.query(`SELECT count(*)::int AS n FROM sharing_rules WHERE enabled AND mode='filtered' AND ${recallCondition('destination','$1','$2')}`,[destination,groupWithTopics(group)]);
   if(rows[0].n>10)throw new HttpError(409,'sharing_rule_limit');
 }
 
@@ -60,7 +59,8 @@ export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'r
 
 export class ProjectRepository {
   private readonly commands:OwnerCommands;
-  /** `served` gives the groups Nocheh serves now (the policy's group_ids), for each project's `groups`. */
+  /** `served` gives the groups Nocheh serves now (servedGroups(): the chat directory's served groups), for each
+   * project's `groups`. */
   constructor(readonly control:pg.Pool,private readonly served:()=>readonly string[]=()=>[]){this.commands=new OwnerCommands(control);}
   async save(principal:Reader,input:unknown):Promise<Project> {
     admin(principal);const body=object(input);exact(body,['id','name','description','state','expected_revision','operation_id']);
@@ -143,7 +143,7 @@ export class SharingPolicyRepository {
    * With `group`, rules for that group's base conversation and every one of its topics apply too. */
   async forDestination(destination:string,group:string|null=null):Promise<SharingRule[]> {
     // A private chat gets nothing, even from a rule written before private chats were refused (ADR-0242).
-    return (await this.control.query(`SELECT * FROM sharing_rules WHERE ${recallCondition('destination','$1','$2')} AND enabled ORDER BY id`,[validateSpace(destination),group])).rows
+    return (await this.control.query(`SELECT * FROM sharing_rules WHERE ${recallCondition('destination','$1','$2')} AND enabled ORDER BY id`,[validateSpace(destination),groupWithTopics(group)])).rows
       .filter(rule=>groupSpace(rule.destination));
   }
   /** Whether a rule reads a conversation: only the exact groups and topics it names. It never reads a private chat,

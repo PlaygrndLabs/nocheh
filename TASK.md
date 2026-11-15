@@ -2,6 +2,223 @@
 
 <current>
 
+Members step 2b-1: Nocheh's own chat ids ([ADR-0252](docs/adr/0252-chats-get-nochehs-own-ids.md);
+owner, 2026-11-12: "I just review the tables and seems what I want if there is a important point
+or need my answer ask, else start build.", approving the Members design, whose step 2b is "Chat
+records ready for Slack"; "want ensure the db design cover slack for future"). One branch: a
+shared contract, four parts and their integration. What Nocheh serves does not change, and
+redeploying main undoes it: no stored value is rewritten and the archive is never changed.
+- Contract: the chat records (`chat_connections`, `chat_accounts`, `chats`, `chat_ids`,
+  `chat_memberships`, `chat_directory_state`), bot-free ids (`chatIdFor`), one chat id check
+  and the synchronous chat directory, which fails closed for an id it does not know
+  ([chats](test/chats.test.ts), [schema](test/store-chat-schema.test.ts),
+  [format gate](test/chat-id-format-gate.test.ts), whose allowlist now holds only adapter,
+  legacy and unrelated sites).
+- Chat records, seeding and the directory: every chat value stored before this step keeps
+  naming its chat as that chat's Nocheh id; a chat first seen later gets a digest with no bot
+  in it, and history the owner imports keeps its old ids. Each captured update records its
+  chats, topics, people and memberships, newer update wins (update order within one bot,
+  capture time across bots or after a week), and a Telegram upgrade keeps one chat with both
+  ids. At app start the seeder fills chat records, insert only, then a background loop fills
+  memberships. The app and the security service load the directory before serving and reload
+  it on a new row, a newer guard epoch or a miss. `TELEGRAM_GROUP_IDS` still decides what is
+  served, by any Telegram id a group has had, and `GET /internal/chats` gives the bot and
+  Hermes the served list. The owner's conversations, people, topics and refresh read the
+  records; send records keep the app's ids as text and name the Nocheh chat; owner records
+  and reset snapshots carry the chats, only names the owner gave travel, and a chat arrives
+  off ([records](test/store-chat-records.test.ts), [seeding](test/store-chat-seed.test.ts),
+  [directory](test/store-owner-supervision.test.ts), [refresh](test/store-telegram-chats.test.ts),
+  [topics](test/store-telegram-topics.test.ts), [strangers](test/store-strangers.test.ts),
+  [sends](test/store-chat-sends.test.ts), [portability](test/store-owner-portability.test.ts),
+  [reset](test/store-reset-setup.test.ts), [portable](services/hermes/test_portable_bundle.py),
+  [reset tools](services/hermes/test_reset_configuration.py)).
+- Reads and rules on chat rows: groups, topics, private chats, served chats, read sets,
+  private answers, tool switches and a group's tasks come from the chat records, never from
+  an id's shape, and a chat with no record is private and reads nothing. Archive reads expand
+  a chat to every Telegram id it has had, so an upgraded group keeps its history and allowed
+  people. Read sets are marked SQL parameters, a turn names its chat by its Nocheh id, and the
+  owner's chat (`owner_chat`) is kept apart from the owner's account (`owner_id`). Private
+  answers check chat kinds against the records and still accept an old-shaped value with no
+  record, so a redeployed main keeps writing. Privacy store tests run on old-shaped (GP1 to
+  GP4) and digest (NG1, NG2) chats ([spaces](test/spaces.test.ts),
+  [tasks](test/store-tasks.test.ts), [private answers](test/store-private-answers.test.ts),
+  [jobs](test/store-background-jobs.test.ts), [read sets](test/store-project-groups.test.ts),
+  [provenance](test/store-provenance.test.ts),
+  [conversation page](test/store-conversation-page.test.ts),
+  [memory rebuild](test/store-memory-rebuild.test.ts)).
+- Turns, sends and the two front doors: a turn pass carries its chat's app binding, checked by
+  storage, nocheh-telegram and Hermes. Only the Telegram front door turns Nocheh chats into
+  Telegram ids, so replies, cards, notices, owner notices and approved sends follow a group
+  Telegram upgraded, and an unknown chat is never sent to. Destinations are chat ids; a link or
+  Telegram id is read once into the chat it names. nocheh-telegram and Hermes read the served
+  list from the app, not from `.env`, and look again before refusing a chat recorded a moment
+  ago. Hermes profiles, sessions and carry keep their names, and a reset keeps preferences by
+  Nocheh chat ([front door](test/telegram-frontdoor.test.ts), [pass checks](test/access.test.ts),
+  [destinations](test/store-telegram-actions.test.ts),
+  [runtime profiles](test/store-runtime-profiles.test.ts), [bot](services/telegram/test_service.py),
+  [Hermes](services/hermes/test_scopes.py),
+  [reset preferences](services/hermes/test_preference_transfer.py)).
+- Dashboard, docs and the full tester: the dashboard reads what a chat is from
+  `/v1/conversations` and never parses an id. Chats shows a Telegram ID label, with the
+  earlier one after an upgrade, and finds a chat by name or any Telegram ID it has had (the
+  server's search matches them too); rules and organizing permissions keep a chat still being
+  looked up; an upgraded group's allowed people are saved under an id `TELEGRAM_GROUP_IDS`
+  lists ([model](test/dashboard-chats-model.test.mjs), [search](test/conversation-search.test.ts),
+  [pages](test/dashboard-pages.browser.mjs)). The full tester finds chats by their Telegram
+  IDs and adds `new_id_group_works_end_to_end` and `supergroup_upgrade_keeps_history`;
+  `project_groups_stay_apart` and the private-mark sweep run with the new-id group NG1 in P1
+  ([scenarios](tools/acceptance/product_scenarios.py), [fixture](test/test_fixture_chats.py)).
+- Integration: owner notices go to where the owner's private chat is in Telegram now; card,
+  destination and profile names come from the chat records; the app server reads a turn pass
+  for a chat recorded a moment ago again; end-to-end store tests cover the owner's search by
+  any Telegram id ([search](test/store-conversation-search.test.ts)), an upgraded group and a
+  new forum topic answered where they are in Telegram now
+  ([dispatch](test/store-telegram-dispatch-chats.test.ts)) and Answer privately on digest chat
+  ids ([button](test/store-private-button-chats.test.ts)).
+- Review fixes: a private chat a reset or an owner-record import restored gets its person back
+  at the next start or its next live message, so Answer privately works after a reset
+  ([reset](test/store-reset-setup.test.ts), [records](test/store-chat-records.test.ts));
+  runtime profile labels, destination names and a card's fallback name come from the owner's
+  last refresh, as before, not from a title a later update showed
+  ([runtime profiles](test/store-runtime-profiles.test.ts),
+  [destinations](test/store-approval-buttons.test.ts), [cards](test/store-tasks.test.ts),
+  [refresh](test/store-telegram-chats.test.ts)); preparing attachments and Telegram dispatch
+  look again for a chat recorded a moment ago before skipping its message
+  ([policy](test/assistant.test.ts)); the bot answers the owner's own turn only in the owner's
+  private chat, never in a topic of it, as Hermes does ([bot](services/telegram/test_service.py));
+  the owner's conversation context shows an upgraded group's allowed people merged over all its
+  Telegram ids, as the gate applies them ([supervision](test/owner-supervision.test.ts)); a
+  Slack thread is never a chat, so no Slack topic id is made ([chats](test/chats.test.ts)); a
+  Telegram id with no record reads nothing in a store test with no fixture filling it in
+  ([retrieval](test/store-retrieval.test.ts)). ADR-0252 now lists what a rollback to main
+  loses and every small dashboard change.
+- Full tester fixes: the first turn in a group Telegram has just upgraded is bound once the
+  security service's own chat directory has looked again, not refused once and retried
+  ([dispatch](test/store-telegram-dispatch-chats.test.ts)); an approved operation's follow-up
+  names its chat, topic and app binding as a reply's turn does, so it answers again in the chat
+  that asked ([continuations](test/store-action-continuations.test.ts)).
+- Merged with main's card and forward fixes
+  ([ADR-0250](docs/adr/0250-cards-and-forwards-say-whose-words-they-are.md)), on old-shaped and
+  digest chats: a forwarded message's line says "You" only in the owner's private chat as the
+  chat records know it, a forwarded owner command is refused there, and in a topic of a new-id
+  group it gets the owner-only refusal and no turn, a forward among the recent group messages
+  keeps its line
+  ([dispatch](test/store-telegram-dispatch-chats.test.ts),
+  [button](test/store-private-button.test.ts), [digest button](test/store-private-button-chats.test.ts)),
+  and a job card in the owner's private chat names the group and topic it was asked in from the
+  chat records ([jobs](test/store-background-jobs.test.ts)). A group's people list again shows
+  the people its messages show, as main does, and not someone whose only record is leaving; the
+  owner's people route keeps each person's standing and says whether the group's messages show
+  them, under every Telegram id the group has had ([people](test/telegram-directory.test.ts),
+  [records](test/store-chat-records.test.ts), [directory](test/test_telegram_operations.py),
+  [pages](test/dashboard-pages.browser.mjs)). That route names each group by its Nocheh chat id,
+  with every Telegram id it has had, and the dashboard's directory of people keeps that id: a
+  group past the chat list's first page is listed once and opens as itself, and a
+  `TELEGRAM_GROUP_IDS` entry naming a group by an earlier Telegram id finds that group.
+- Merged with main's fixes that lose nothing
+  ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)), on old-shaped and digest chats: a
+  recalled note names its group and topic from the chat records, the group's name or its newest
+  message under any Telegram id it has had, and a name only the owner's refresh gave counts while
+  that refresh found the group, as main does ([recall](test/recall-places.test.ts),
+  [store recall](test/store-recall-places.test.ts), [server](test/store-server.test.ts)); a live
+  recording is judged in the chat the records find, so an allowed person is not cut in a group
+  Telegram upgraded or in a new-id group, and a group the records do not know lets only the owner
+  through ([sender](test/assistant.test.ts), [voice](test/store-voice-transcription.test.ts)); a
+  member job spend notice and its Pause or Resume edit go to the owner's private chat where it is
+  in Telegram now, name each group from the records, and are not sent while the records do not
+  know that chat; only the owner's press there pauses
+  ([spend](test/store-member-job-spend.test.ts)). Hermes's locked-down container still reads
+  `GET /internal/chats` and writes nothing outside its two mounts.
+
+  Checks on the integrated branch after merging main's fixes that lose nothing: the build; node
+  unit and dashboard tests (566: 363 pass, 199 store tests skipped there, and the 4 workflow tests
+  that also fail on main); all 95 store test files on old-shaped and digest chats (237 pass, 0
+  fail); dashboard format; the dashboard browser tests (46: 44 pass, and the 2 settings-apply tests
+  that also fail on main); Python Hermes (966, 4 skipped, with the 2 environment errors that also
+  occur on main), Telegram (123) and tools (120, 2 skipped). The format gate's allowlist holds only
+  adapter, legacy and unrelated sites.
+
+  Before the merge, after the two full tester fixes, the whole full tester on the integrated
+  branch (fake Telegram Bot API and model;
+  real Telegram service, Hermes, Honcho and Inngest), in four rounds that each start with
+  `group_members`, the private-chat check in the same round as the private-mark sweep: every
+  scenario passes, those the two fixes above touch on a rerun after them, except `deleted_topic`,
+  which fails the same way on main (the bot retries a one-off "thread not found" once by design,
+  and the scenario injects only one). With `expand()` and `rawScopes()` changed to add every
+  served group, `project_groups_stay_apart` fails, a group's task list showing another group's
+  task; its search and answer gates still pass there, as a group's search reads each original only
+  for its own chat, and `new_id_group_works_end_to_end`, which has no cross-group check, passes.
+  Rollback on a fixture 2b-1 filled (a new-id group, an upgraded supergroup, their sends), with
+  main's images on the same data: main's `group_members` and dashboard pages pass, and System ›
+  Sent to apps lists every send record, those 2b-1 wrote included.
+
+  After the merge with main, at 9ac8403, the whole full tester in one run on one fixture:
+  `group_members`, then the tester's default order, which runs `group_members` again before the
+  product scenarios because `granted_participant` replaces the allowed people (91 scenarios,
+  dashboard pages and the drain check). 89 of 92 pass, `forwarded_messages_are_not_the_owners_words`
+  and every privacy gate included. `deleted_topic` fails as on main. `inbox_never_asks_about_the_owner`
+  and `memory_search_model_change_rebuilds_memory` time out only in that run: with every
+  scenario's history on one fixture about 350 Hermes native note reviews queue, the person card
+  came about 16 minutes after its messages (the wait is 10), and the Honcho memory rebuild was
+  still replaying the archive when its 15 minutes ran out. A rerun of those two with
+  `group_members` and the import passes (5 of 5). A second leak proof, a wrong `chat_ids` mapping
+  (GP2's Telegram id recorded as an earlier id of GP1's chat, as a bad upgrade link would leave
+  it, in the services image only): `project_groups_stay_apart` fails at
+  `one_reply_in_exact_conversation`, the reply to GP2's message going to GP1, and on that fixture
+  GP1's archive search returns GP2's mark, which `group_answer_uses_only_that_group` checks;
+  `group_members` and `new_id_group_works_end_to_end` pass. After merging main's fix to the
+  deleted topic check (#219), `deleted_topic` passes with `group_members` (3 of 3).
+
+  After merging main's fixes that lose nothing, at cc46249, with the services, management,
+  store-postgres and Hermes images rebuilt: one focused run on one fixture of the scenarios that
+  merge or 2b-1 touches, in the tester's default order, `group_members` first and again before the
+  product scenarios. It covers Hermes locked down, the private fact and recall, the PDF, voice, the
+  long voice cut for someone not allowed, the photo read once, the large Files upload through
+  Hermes's bound address, profiles, no refused writes, `deleted_topic`, the forward check, a note's
+  recall naming its chat, the new-id group, the private-chat check, project groups, the supergroup
+  upgrade, member job spend with its notice, pause and Resume, both approved operations' answers,
+  the private-mark sweep and every dashboard page with Hermes's Chat, Sessions and Files pages.
+  25 of 25 pass, the drain check included, with no product fix needed.
+  Pending:
+  - The full tester's waits for the person card (10 minutes) and the memory rebuild (15 minutes)
+    are too short when every scenario runs on one fixture: raise them, or keep running it in
+    rounds.
+  - 2b-2, "Only the owner adds Nocheh": adoption, leave-and-tell, the Telegram "which
+    project?" card, and the served set kept in `chats` with `TELEGRAM_GROUP_IDS` retired. It
+    waits on the owner's answer about groups Nocheh is already in that the owner never turned
+    on.
+  - A live check after merge: that the first seeding on a real archive gives every stored chat
+    value a row (no group, topic, task, rule or switch becomes unknown) and how long it took
+    (the `ms` of the `chat_records_ready` log; about 23 s per 300,000 archived events in a
+    local benchmark; the app's health check allows 120 s and `nocheh deploy` waits 180 s, after
+    which the app keeps seeding and serves when done).
+  - The rest of the rollback check, after redeploying main: reactions still work with numeric
+    update ids (System › Sent to apps is checked above). A private answer offered under 2b-1
+    then refuses (`only_asker`) until it expires within a day. Owner exports, reset snapshots
+    and undrained send records made under 2b-1 do not read on main.
+  - Owner question: a chat first seen under 2b-1 has a digest id, so after a rollback to main
+    it is served by its Telegram id without its project, tool switches (an off switch reads
+    on), rules, tasks, Answer privately or memories, until 2b-1 is deployed again; what main
+    sets for it in between is then not applied. Recommended: keep the approved digest ids and
+    accept this, as a rollback is for emergencies; the other choice keeps Telegram ids for new
+    chats until 2b-2.
+  - Live acceptance on the owner's install after merge, while Nocheh is idle (a turn in
+    flight at deploy is refused once, then retried).
+  Owner steps: small things you see change. Chats says "Telegram ID" (with the earlier one
+  after Telegram upgrades a group) and "Unknown chat" for a chat Nocheh has no record of; a
+  topic name you gave stays even
+  after Telegram shows another, and removing yours brings Telegram's back; the chat picker no
+  longer offers "Use the ID" for an id Nocheh has not seen, and searches say "name or Telegram
+  ID"; a group's Topics card shows only for a forum or a group with topics already seen;
+  asking Nocheh to
+  post to a topic it has never seen is refused until a message there, or adding the topic in
+  Chats › Topics by its link or number, makes it known (recommended: keep, it fails closed).
+  A group Telegram upgraded before this step stays two chats, as it was; later upgrades keep
+  one chat. Known limits: an upgrade whose new group's messages are captured a spool batch
+  before both upgrade messages stays two chats; a package made after this step that names a
+  group by its digest, imported where the first start already gave that group its old id,
+  does not reach the group until adoption.
+
 Security fixes, part 2: fixes that lose nothing (owner, 2026-11-14: "all yes"). One pull
 request with seven fixes, each built and reviewed on its own
 ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)):

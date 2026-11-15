@@ -1,7 +1,9 @@
 import {createServer} from 'node:http';
 import {join} from 'node:path';
-import {admin,reader} from '../access.js';
-import {outsideChat,telegramDeliveryAllowed} from '../assistant-policy.js';
+import {admin,currentReader} from '../access.js';
+import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
+import {servedChats} from '../chats.js';
+import {telegramAddress} from '../frontdoor/telegram.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
@@ -33,6 +35,7 @@ import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
+import {currentChats} from './chats.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
@@ -57,6 +60,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
       return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
     }
+    if(req.method==='GET'&&path==='/internal/chats') {
+      // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
+      // chat apart from the owner's account.
+      authorize(req,config.token);const owner=s.access.policy().owner_id;
+      return json(res,200,servedChats(await currentChats(),owner?{app:'telegram',external:owner}:null));
+    }
     if(req.method==='POST'&&path==='/internal/sources/retired') {
       // Hermes withholds retired turns from its own native history before each turn.
       authorize(req,config.token);const ids=object(await readJson(req,64*1024)).event_ids;
@@ -75,8 +84,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       return json(res,200,await s.memory.prepareRequest(body));
     }
-    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249).
-    const parsed=reader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
+    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249). A
+    // pass naming a chat another process recorded a moment ago (a new topic's first turn) is read again once this
+    // process's directory has looked again, as the broker does (ADR-0252).
+    const parsed=await currentReader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
     assertPrivateAnswerRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
     // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
@@ -104,7 +115,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
           resolved.some(note=>note!==null&&(typeof note!=='string'||!note.trim()||note.length>120||/[\r\n]/.test(note))))||
         input.edit!==undefined&&typeof input.edit!=='boolean')
         throw new HttpError(400,'invalid_owner_notice');
-      const owner=s.access.policy().owner_id;
+      // The owner's private chat (ADR-0252), not the owner's account.
+      const policy=s.access.policy(),owner=policy.owner_id?ownerChat(policy):null;
       if(!owner)return json(res,200,{state:'not_started',error_code:'owner_not_set'});
       // Open goes to the mini app's Problems page, or the dashboard; Retry failed is a button press storage handles.
       const open=input.open===undefined||input.open===null?null:object(input.open),retry=input.retry===true;
@@ -113,7 +125,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const prompts=await ownerPrompts(s.stores.control),labels=labeledLines(problemButtons,prompts['system.problem_buttons']);
       const text=fillTemplate(prompts['system.problems']??problemNotice,{problems:lines.map((line,index)=>'• '+line+(resolved?.[index]?'\n✅ '+resolved[index]:'')).join('\n')}).slice(0,4000);
       const buttons=[...(open?[{text:labels.open!.slice(0,40),[String(open.kind)]:open.url}]:[]),...(retry?[{text:labels.retry!.slice(0,40),callback:retryButton}]:[])];
-      return json(res,200,await call('telegram.notice',{id,chat_id:owner,text,...(buttons.length?{buttons}:{}),...(edit?{edit:true}:{})},30000));
+      // Sent where the owner's private chat is in Telegram now; a chat the directory does not know yet is not sent to.
+      const target=telegramAddress(owner);
+      if(!target)return json(res,200,{state:'not_started',error_code:'chat_not_found'});
+      return json(res,200,await call('telegram.notice',{id,...target,text,...(buttons.length?{buttons}:{}),...(edit?{edit:true}:{})},30000));
     }
     if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
       admin(principal);
@@ -179,14 +194,15 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const reader={admin:true,scope:null},view=ownerView[1]!,policy=s.access.policy();
       // Chats with people Nocheh doesn't serve are named by those people; the turn never sees them.
       if(view==='telegram-identities') {
-        const found=await telegramDirectory(s.stores.archive,reader,await s.telegramChats.observations());
-        return json(res,200,{...found,groups:found.groups.filter(group=>!outsideChat(policy,{origin:'live',channel:'telegram',kind:'telegram_update',scope:group.id}))});
+        // As before, a group Nocheh does not serve is left out; the directory decides, so an unknown chat is left out too.
+        const found=await telegramDirectory(s.stores.control,reader,s.stores.archive),directory=await currentChats(),all=!policy.enabled||!policy.owner_id;
+        return json(res,200,{...found,groups:found.groups.filter(group=>all||directory.served(group.id))});
       }
       if(view==='conversations')return json(res,200,await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
         limit:limit(url.searchParams.get('limit'),50,100)},await s.supervision.outsiders(policy)));
       if(view==='conversation-context') {
         const space=url.searchParams.get('space')??'';
-        if((await s.supervision.outsiders(policy)).has(space.split('/topic/')[0]!))throw new HttpError(404,'conversation_not_found');
+        if(await s.supervision.outsider(policy,space))throw new HttpError(404,'conversation_not_found');
       }
       if(view==='people')return json(res,200,await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
         after:url.searchParams.get('after')??'',state:'active'}));
@@ -417,7 +433,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.reviews.controlJob(principal,string(body.id,64),{action:body.action,expected_revision:body.expected_revision}));
     }
     if(req.method==='GET') {
-      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.archive,principal,await s.telegramChats.observations()));
+      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.control,principal,s.stores.archive));
       if(path==='/v1/search') {
         const mode=url.searchParams.get('mode')??'text';
         if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);
@@ -436,7 +452,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(path==='/v1/imports/pending') {
         // An answer reader hears only about imports into the groups of its record, not the owner's (ADR-0249).
         if(principal.answer!==undefined)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
-        const owner=principal.scope===null||principal.scope===s.access.policy().owner_id;
+        const owner=principal.scope===null||principal.scope===ownerChat(s.access.policy());
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});
       }
       if(path==='/v1/graph')return json(res,200,await s.sources.graph(principal,url.searchParams.get('scope')??'*',url.searchParams.get('after')??'',limit(url.searchParams.get('limit')),url.searchParams.get('focus')??''));

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 from .review_worker import observe
+from .scopes import Scopes
 
 
 class WorkflowObservationTests(unittest.TestCase):
@@ -12,7 +13,7 @@ class WorkflowObservationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);profile=root/'profiles'/('nocheh-'+'a'*24)
             receipt=profile/'reviews'/('b'*64);receipt.parent.mkdir(parents=True)
-            body={'id':'b'*64,'scope':'42','observe_only':True};policy=SimpleNamespace(owner='42')
+            body={'id':'b'*64,'scope':'42','observe_only':True};policy=Scopes({'enabled':True,'owner_id':'42','group_ids':[]})
             with patch('subprocess.run',side_effect=AssertionError('observation executed a worker')):
                 self.assertEqual(observe(root,policy,body),{'state':'not_found'})
                 receipt.write_text('done');self.assertEqual(observe(root,policy,body),{'state':'done'})

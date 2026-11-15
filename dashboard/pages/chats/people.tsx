@@ -2,18 +2,19 @@
 import {useState} from 'react';
 import {UserPlus} from 'lucide-react';
 import {useResource} from '../../lib/resource';
-import {isAllowed, validUserId, type IdentityGroup, type Person} from '../../lib/chats-model';
+import {appIds, isAllowed, validUserId, type Chat, type IdentityGroup, type Person} from '../../lib/chats-model';
 import {Badge, Button, Card, CardBody, CardHeader, Field, Input, Segmented} from '../../ui/core';
 import {Unsaved, type Telegram} from './shared';
 
-export function WhoCanTalk({group, telegram}: {group: string; telegram: Telegram}) {
+export function WhoCanTalk({group: chat, telegram}: {group: Chat; telegram: Telegram}) {
+  const group = chat.space_id;
   const identities = useResource<{groups: IdentityGroup[]}>('/telegram/identities', 60000);
   const [manual, setManual] = useState('');
   const [manualError, setManualError] = useState('');
-  const on = telegram.isOn(group);
-  const rule = telegram.rule(group);
-  const savedRule = telegram.savedRule(group);
-  const owner = telegram.owner;
+  const on = telegram.isOn(chat);
+  const rule = telegram.rule(chat);
+  const savedRule = telegram.savedRule(chat);
+  const owner = telegram.ownerAccount;
 
   const known = new Map<string, Person>(
     (identities.data?.groups ?? []).flatMap(item => item.users ?? []).map(user => [user.id, user]),
@@ -27,7 +28,13 @@ export function WhoCanTalk({group, telegram}: {group: string; telegram: Telegram
   };
   const people = [
     ...new Set<string>([
-      ...(identities.data?.groups.find(item => item.id === group)?.users ?? []).map(user => user.id),
+      // People this group's messages show, under its Nocheh id or any Telegram id it has had: someone whose only record is
+      // that they left, or a member update, is not listed unless a rule names them.
+      ...(identities.data?.groups ?? [])
+        .filter(item => item.id === group || appIds(chat).includes(item.id))
+        .flatMap(item => item.users ?? [])
+        .filter(user => user.seen !== false)
+        .map(user => user.id),
       ...rule.granted,
       ...rule.denied,
       ...savedRule.granted,
@@ -42,7 +49,7 @@ export function WhoCanTalk({group, telegram}: {group: string; telegram: Telegram
     const id = manual.trim();
     if (!validUserId(id)) return setManualError('A Telegram user ID is a number, like 123456789.');
     if (id === owner) return setManualError('That’s you. You can always talk to Nocheh.');
-    telegram.setPerson(group, id, true);
+    telegram.setPerson(chat, id, true);
     setManual('');
     setManualError('');
   };
@@ -98,7 +105,7 @@ export function WhoCanTalk({group, telegram}: {group: string; telegram: Telegram
                         {value: 'no', label: 'Not allowed'},
                         {value: 'yes', label: 'Allowed'},
                       ]}
-                      onChange={value => telegram.setPerson(group, id, value === 'yes')}
+                      onChange={value => telegram.setPerson(chat, id, value === 'yes')}
                     />
                   </li>
                 );

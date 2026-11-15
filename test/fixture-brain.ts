@@ -1,6 +1,7 @@
 import type {Brain,TurnEvents,TurnReceipt,TurnRef} from '../src/brain/brain.js';
 import type {StorePools} from '../src/stores/connections.js';
 import {storageServices} from '../src/stores/services.js';
+import {seedChatsForTest} from './fixture-seeded-chats.js';
 
 /** A test fake answering by operation name: the helper services' names, and for the brain the names below. */
 export type FakeCall=(operation:string,input:Record<string,unknown>,timeout?:number)=>Promise<Record<string,unknown>>;
@@ -56,6 +57,9 @@ type Options=Parameters<typeof storageServices>[1];
  * `groupReplies` says otherwise.
  */
 export function fixtureServices(stores:StorePools,options:Omit<Options,'runtime'|'brain'>&{runtime:FakeCall;brain?:Brain;telegram?:FakeCall}) {
+  // Sends and turns name chats by their ids through the chat directory (ADR-0252): a test that installs none gets one
+  // seeded from the values it uses, served by its policy.
+  seedChatsForTest(options.policy);
   const {telegram=fixtureTelegram(),...rest}=options;
   const runtime:FakeCall=(operation,input,timeout)=>turnDelivery.has(operation)?telegram(operation,input,timeout):options.runtime(operation,input,timeout);
   return storageServices(stores,{groupReplies:{mode:'all',names:['Nocheh']},...rest,runtime,brain:options.brain??fixtureBrain(options.runtime)});

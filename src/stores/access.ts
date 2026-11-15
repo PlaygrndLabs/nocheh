@@ -1,8 +1,8 @@
 import type {Reader} from '../access.js';
 import {admin} from '../access.js';
-import {outsideChat,type AssistantPolicy} from '../assistant-policy.js';
+import {outsideChat,ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {groupSpace,inReadSet,inRecall,parentSpace,readSetGroups,readSetOf,recallScope,type ReadSet,type RecallScope} from '../spaces.js';
+import {groupSpace,inReadSet,inRecall,observedChat,parentSpace,readSetGroups,readSetOf,recallScope,servedGroup,sourceChat,type ReadSet,type RecallScope} from '../spaces.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
@@ -11,6 +11,7 @@ import {OwnerCommands} from './owner-commands.js';
 import type {SourceRetirementRepository} from './source-retirement.js';
 import type {ReactionStateRepository} from './reaction-state.js';
 import {bindAnswerReads} from './private-answers.js';
+import {chats} from '../chats.js';
 
 /** Source access is independent of project membership and sharing configuration. */
 export class SourceAccessRepository {
@@ -35,12 +36,15 @@ export class SourceAccessRepository {
     // (the /start that opened it): never the rest of that chat, and nothing without its record (ADR-0249).
     const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
     if(answer&&!reads)return false;
-    const own=answer&&reference.id===principal.turnEvent&&source.scope===principal.scope;
-    if(answer?!own&&!readSetGroups(reads!).includes(source.scope):source.scope!==principal.scope)return false;
+    // An original belongs to the chat its raw scope names through chat_ids (current or old id), and to the topic its
+    // observed audience names through that chat's topic rows; an id with no row reads nothing (ADR-0252).
+    const chat=sourceChat(source);
+    const own=answer&&reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope;
+    if(chat===null||(answer?!own&&!readSetGroups(reads!).includes(chat):chat!==principal.scope))return false;
     const observed=(await this.relationships.describe(reference)).audience;
-    const space=!observed||observed.topic_state==='unknown'?null:observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id;
-    const allowed=!!observed&&observed.chat_id===source.scope&&space!==null&&
-      (answer?own?space===principal.space:inReadSet(reads!,space):observed.chat_id===principal.scope&&inRecall(this.recall(principal)!,space));
+    const space=observed&&observed.chat_id===source.scope?observedChat(source.channel,observed):null;
+    const allowed=space!==null&&(chats().parentOf(space)??space)===chat&&
+      (answer?own?space===principal.space:inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
     await this.guards.assertCurrent(binding);return allowed;
   }
   async canLearn(reference:SourceReference,binding:GuardBinding,options:{historical?:boolean}={}):Promise<boolean> {
@@ -56,12 +60,14 @@ export class SourceAccessRepository {
     if(intake?.transport==='import')return false;
     if(source.origin!=='live'||source.kind==='telegram_wire')return false;
     const policy=this.policy();if(!policy.enabled||!policy.owner_id)return false;
+    // Learned from: the owner's private chat and the groups Nocheh serves, by the chat each original belongs to (ADR-0252).
+    const chat=sourceChat(source),served=chat!==null&&(chat===ownerChat(policy)||servedGroup(chat));
     if(source.channel==='browser') {
-      if(!['browser_input','browser_delivered_message'].includes(source.kind)||source.scope!==policy.owner_id&&!policy.group_ids.includes(source.scope))return false;
+      if(!['browser_input','browser_delivered_message'].includes(source.kind)||!served)return false;
       const space=await this.space(reference);await this.guards.assertCurrent(binding);return space!==null;
     }
     if(source.channel!=='telegram'||!['telegram_update','telegram_delivered_message'].includes(source.kind))return false;
-    if(!policy.group_ids.includes(source.scope)&&source.scope!==policy.owner_id)return false;
+    if(!served)return false;
     const observed=(await this.relationships.describe(reference)).audience;
     // A reaction to an unseen forum message waits for context, never learns at group scope.
     if(!observed||observed.topic_state==='unknown')return false;
@@ -90,8 +96,11 @@ export class SourceAccessRepository {
     const observed=(await this.relationships.describe(reference)).audience;
     // Legacy owner originals can lack topic metadata; that exception cannot
     // promote a group/topic submission into a broader audience.
-    if(!observed&&source.channel==='browser'&&source.scope===this.policy().owner_id)return source.scope;
-    return !observed||observed.topic_state==='unknown'?null:observed.topic_state==='known'?observed.chat_id+'/topic/'+observed.topic_id:observed.chat_id;
+    const owner=ownerChat(this.policy());
+    if(!observed&&source.channel==='browser'&&owner!==null&&source.scope===owner)return source.scope;
+    // The chat or topic the observed audience names, through chat_ids and topic rows; null when no row names it.
+    const space=observed&&observed.chat_id===source.scope?observedChat(source.channel,observed):null;
+    return space!==null&&(chats().parentOf(space)??space)===sourceChat(source)?space:null;
   }
   /** The conversation each piece of evidence came from; null for one Nocheh cannot place. A store failure is not an
    * unknown conversation: it is thrown, so a passing outage never decides anything (ADR-0242). */
@@ -125,6 +134,6 @@ export class SourceAccessRepository {
       authority:saved?'owner':'capture_policy',transport:intake?.transport??source.origin,intake_state:intake?.state??null,updated_at:saved?.updated_at??null};
   }
   principal(space:string):Reader {
-    return {admin:false,scope:space===this.policy().owner_id?null:parentSpace(space)??space,space};
+    return {admin:false,scope:space===ownerChat(this.policy())?null:parentSpace(space)??space,space};
   }
 }

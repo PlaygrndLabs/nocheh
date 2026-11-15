@@ -2,7 +2,8 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {groupSpace,parentSpace,recallCondition,recallScope,validateSpace} from '../spaces.js';
+import {groupSpace,groupWithTopics,recallCondition,recallScope,validateSpace} from '../spaces.js';
+import {ownerChat} from '../assistant-policy.js';
 import type {SourceReference} from './archive.js';
 import type {StorePools} from './connections.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
@@ -132,7 +133,7 @@ export class MemoryAccessRepository {
       const spaces=await this.access.evidenceSpaces(fact.evidence);
       if(!spaces.length||!spaces.every(groupSpace))continue;
       const home=this.access.recall(principal)!;
-      if((await this.stores.control.query(`SELECT 1 FROM memory_fact_grants WHERE ${recallCondition('destination','$1','$3')} AND fact_id=$2 AND state='active' AND (expires_at IS NULL OR expires_at>now()) LIMIT 1`,[home.space,fact.id,home.group])).rowCount)continue;
+      if((await this.stores.control.query(`SELECT 1 FROM memory_fact_grants WHERE ${recallCondition('destination','$1','$3')} AND fact_id=$2 AND state='active' AND (expires_at IS NULL OR expires_at>now()) LIMIT 1`,[home.space,fact.id,groupWithTopics(home.group)])).rowCount)continue;
       const readable=(await Promise.all(fact.evidence.map(ref=>this.access.canRead(principal,ref,binding)))).every(Boolean);if(readable)continue;
       selected=fact;evidenceSpaces=[...new Set(spaces as string[])].sort();path=pathByEntity.get(fact.subject_entity_id)??pathByEntity.get(fact.object_entity_id??'')??[];break;
     }
@@ -147,7 +148,7 @@ export class MemoryAccessRepository {
       [id,requestHash,source,principal.space,principal.scope,logical,digest(query),selected.id,selected.revision,proposal,binding,JSON.stringify(path),JSON.stringify(selected.evidence),expires]);
     const row=(await this.stores.control.query('SELECT * FROM memory_access_requests WHERE id=$1',[id])).rows[0];
     if(setting.notify_owner&&!row.notification_action_id) {
-      const owner=this.access.policy().owner_id;if(owner)try {const action=await this.actions.approvedSystem({...principal,logical_profile:logical},source,binding,owner,
+      const owner=ownerChat(this.access.policy());if(owner)try {const action=await this.actions.approvedSystem({...principal,logical_profile:logical},source,binding,owner,
         `A memory access suggestion needs review: ${this.dashboardLink(id)}`,'memory-access-notification:'+id);
         await this.stores.control.query('UPDATE memory_access_requests SET notification_action_id=$2,updated_at=now() WHERE id=$1 AND notification_action_id IS NULL',[id,action.id]);} catch {/* The request remains durable and visible in the dashboard. */}
     }
@@ -344,7 +345,7 @@ export class MemoryAccessRepository {
     const home=this.access.recall(principal)!;
     const binding=await this.prepared.audience.assert(principal),rows=(await this.stores.control.query(`SELECT * FROM memory_fact_grants
       WHERE ${recallCondition('destination','$1','$2')} AND mode='persistent' AND state='active' AND (expires_at IS NULL OR expires_at>now()) ORDER BY id LIMIT 100`,
-      [home.space,home.group])).rows,sources=[];
+      [home.space,groupWithTopics(home.group)])).rows,sources=[];
     for(const row of rows){const text=await this.validateGrant(row,binding);if(text&&(!query.trim()||relevant(query,text)))sources.push({id:row.id,source:'nocheh:grant:'+row.id,kind:'owner_approved' as const,text,limitations:[]});if(sources.length>=10)break;}
     await this.prepared.audience.assert(principal);return {sources};
   }

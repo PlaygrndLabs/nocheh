@@ -1,11 +1,11 @@
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
-import {outsideChat,type AssistantPolicy} from '../assistant-policy.js';
-import {graphChatType,graphGroupLabel} from '../graph-labels.js';
+import {groupAccessOf,type AssistantPolicy} from '../assistant-policy.js';
+import {conversationFields,type ChatDirectory} from '../chats.js';
 import {HttpError} from '../http.js';
-import {groupChatId,parentSpace,validateSpace} from '../spaces.js';
-import type {TelegramChatRepository} from './telegram-chats.js';
-import type {TelegramTopicRepository} from './telegram-topics.js';
+import {validateSpace} from '../spaces.js';
+import type {ConversationChatFields} from '../chat-wire.js';
+import {chatLabel,type ChatRepository} from './chats.js';
 import type {StorePools} from './connections.js';
 import {carriesForward} from './guards.js';
 import {foldedNames} from './entities.js';
@@ -27,12 +27,16 @@ export interface ConversationDirectoryItem {
   closed?:boolean;
   /** The owner added this topic because the Bot API cannot list topics. */
   registered?:boolean;
+  /** From the chat directory (ADR-0252, ConversationChatFields): the dashboard reads these instead of an id's shape. */
+  topic_key:ConversationChatFields['topic_key'];app_ids:ConversationChatFields['app_ids'];is_forum:ConversationChatFields['is_forum'];
+  state:ConversationChatFields['state'];owner:ConversationChatFields['owner'];
 }
 export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
   telegramActions:Pick<TelegramActionRepository,'inspect'>;memory:Pick<NativeMemoryRepository,'status'>;
-  shared:Pick<SharingContentRepository,'inspect'>;telegramChats?:Pick<TelegramChatRepository,'observations'>;
-  telegramTopics?:Pick<TelegramTopicRepository,'registrations'>;
+  shared:Pick<SharingContentRepository,'inspect'>;
+  /** The chat records the directory is built from (ADR-0252). */
+  chats:Pick<ChatRepository,'listing'>;
   knowledge:{proposal(principal:Reader,id:string):Promise<unknown>};
   memoryAccess?:Pick<MemoryAccessRepository,'describe'>;
 }
@@ -43,6 +47,15 @@ const clean=(value:unknown):string|null=>typeof value==='string'?value.replace(/
 const identity=(id:string)=>{if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_decision_id');return id;};
 const kindOf=(kind:string):DecisionKind=>{if(!decisionKinds.includes(kind as DecisionKind))throw new HttpError(400,'invalid_decision_kind');return kind as DecisionKind;};
 function pageLimit(value:number|undefined) {if(value!==undefined&&(!Number.isSafeInteger(value)||value<1||value>100))throw new HttpError(400,'invalid_supervision_limit');return value??50;}
+/**
+ * A /v1/conversations search (ADR-0252): a chat's Nocheh id, name, its group's name, or any id it has had in its app,
+ * such as a Telegram ID, so a chat first seen after step 2b, whose Nocheh id is a digest, is found by its Telegram ID.
+ * A topic carries its group's app ids, so it is found with its group.
+ */
+export function conversationMatches(item:Pick<ConversationDirectoryItem,'space_id'|'name'|'parent_name'|'app_ids'>,q:string):boolean {
+  const query=q.toLocaleLowerCase();
+  return !query||[item.space_id,item.name,item.parent_name,...(item.app_ids??[]).map(label=>label.external)].some(value=>value?.toLocaleLowerCase().includes(query));
+}
 /** One line on what an action would do: the message, command, page or tool. */
 export function actionSummary(kind:unknown,args:unknown):string|null {
   const value=args&&typeof args==='object'?args as Record<string,unknown>:{},text=(key:string)=>typeof value[key]==='string'?value[key] as string:null;
@@ -73,36 +86,15 @@ export class OwnerSupervisionRepository {
     return row?{policy:row.document as AssistantPolicy,revision:Number(row.revision)}:null;
   }
 
-  private async directory():Promise<ConversationDirectoryItem[]> {
-    // Extract only presentation metadata in SQL: no message text, captions, or source bodies leave the archive.
-    const [observed,configured,configuration]=await Promise.all([
-      this.stores.archive.query(`WITH originals AS (
-        SELECT id,capture_sequence,received_at,scope,
-          CASE WHEN pg_input_is_valid(convert_from(payload,'UTF8'),'jsonb') THEN convert_from(payload,'UTF8')::jsonb ELSE '{}'::jsonb END AS presentation
-        FROM events WHERE channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
-      ), observations AS (
-        SELECT e.id,e.capture_sequence,e.received_at,e.scope,o.metadata->'audience' AS audience,
-          coalesce(e.presentation->'message',e.presentation->'edited_message',e.presentation->'channel_post',e.presentation->'edited_channel_post',e.presentation) AS message
-        FROM originals e LEFT JOIN source_observations o ON o.event_id=e.id
-      ), scopes AS (
-        SELECT *,scope AS space_id FROM observations
-        UNION ALL SELECT *,scope||'/topic/'||(audience->>'topic_id') AS space_id FROM observations
-          WHERE audience->>'topic_state'='known' AND audience->>'chat_id'=scope AND audience->>'topic_id' ~ '^[1-9][0-9]{0,15}$'
-      ), topics AS (SELECT DISTINCT ON (space_id) space_id,topic_name FROM (
-        -- A topic's name comes from its creation or edit service message. Every
-        -- forum topic message also carries that root message as reply_to_message.
-        SELECT space_id,capture_sequence,id,coalesce(message#>>'{forum_topic_edited,name}',message#>>'{forum_topic_created,name}',
-          CASE WHEN message#>>'{reply_to_message,message_id}'=message#>>'{message_thread_id}'
-            THEN coalesce(message#>>'{reply_to_message,forum_topic_edited,name}',message#>>'{reply_to_message,forum_topic_created,name}') END) AS topic_name
-        FROM scopes WHERE space_id LIKE '%/topic/%') named
-        WHERE topic_name IS NOT NULL ORDER BY space_id,(topic_name IS NOT NULL) DESC,capture_sequence DESC,id DESC),
-      states AS (SELECT DISTINCT ON (space_id) space_id,(message ? 'forum_topic_closed') AS closed FROM scopes
-        WHERE space_id LIKE '%/topic/%' AND (message ? 'forum_topic_closed' OR message ? 'forum_topic_reopened')
-        ORDER BY space_id,capture_sequence DESC,id DESC)
-      SELECT DISTINCT ON (s.space_id) s.space_id,s.message->'chat' AS chat,t.topic_name,s.received_at AS observed_at,st.closed
-        FROM scopes s LEFT JOIN topics t ON t.space_id=s.space_id LEFT JOIN states st ON st.space_id=s.space_id
-        -- An update with no chat object (a reaction, a member change) must not hide the title.
-        ORDER BY s.space_id,coalesce(s.message->'chat' ? 'title',false) DESC,s.capture_sequence DESC,s.id DESC`),
+  /**
+   * Every chat Nocheh knows, from its chats rows (ADR-0252): each with what the directory says of it (kind, parent,
+   * topic key, app ids, state, owner), the name and dates captures and the owner's refreshes saved, and whether
+   * anything of the owner's names it. A topic is listed once a message was seen in it, the owner named it, or
+   * something names it. A value with no chat row that something names is listed as unknown. No message text is read.
+   */
+  private async snapshot():Promise<{directory:ChatDirectory;items:ConversationDirectoryItem[]}> {
+    const [listing,configured,configuration]=await Promise.all([
+      this.services.chats.listing(),
       this.stores.control.query(`SELECT space_id FROM project_assignments
         UNION SELECT destination FROM sharing_rules UNION SELECT jsonb_array_elements_text(sources) FROM sharing_rules
         UNION SELECT jsonb_array_elements_text(scopes) FROM organization_delegations
@@ -110,56 +102,67 @@ export class OwnerSupervisionRepository {
         UNION SELECT destination FROM memory_fact_grants UNION SELECT destination FROM memory_access_requests`),
       this.assistantConfiguration(),
     ]);
+    const {directory,rows}=listing,policy=configuration?.policy;
+    // The policy holds Telegram ids; the chats they name are configured.
+    const configuredIds=new Set<string>([...configured.rows.map(row=>row.space_id).filter((id):id is string=>typeof id==='string'),
+      ...[...policy?.group_ids??[],...policy?.owner_id?[policy.owner_id]:[]].map(id=>directory.resolve('telegram',id)??id)]);
     const items=new Map<string,ConversationDirectoryItem>();
-    const item=(space:string):ConversationDirectoryItem=>({space_id:space,name:null,kind:parentSpace(space)?'topic':space.startsWith('-')?'group':/^[1-9]\d*$/.test(space)?'private':'unknown',
-      parent_space:parentSpace(space),parent_name:null,observed_at:null,configured:false});
-    for(const row of observed.rows) {
-      let space:string;try{space=validateSpace(row.space_id);}catch{continue;}
-      const value=item(space),parent=value.parent_space??space,type=graphChatType({chat:row.chat},parent);
-      value.name=value.parent_space?clean(row.topic_name):graphGroupLabel({chat:row.chat},space)??null;
-      value.kind=value.parent_space?'topic':type==='private'?'private':type?'group':value.kind;
-      value.observed_at=iso(row.observed_at);if(value.parent_space)value.closed=row.closed===true;items.set(space,value);
+    for(const chat of directory.all()) {
+      const detail=rows.get(chat.id),configuredHere=configuredIds.has(chat.id);
+      if(chat.kind==='topic'&&!detail?.seen_at&&detail?.title_source!=='owner'&&!configuredHere)continue;
+      const name=chatLabel(chat,detail?.username,chat.app_ids[0]?.external);
+      const value:ConversationDirectoryItem={space_id:chat.id,name,...conversationFields(directory,chat.id),parent_name:null,
+        observed_at:iso(detail?.seen_at),configured:configuredHere};
+      if(chat.kind==='topic'&&detail?.seen_at)value.closed=detail.closed===true;
+      if(chat.kind==='topic'&&detail?.title_source==='owner')value.registered=true;
+      if(chat.kind!=='topic'&&detail?.refreshed)value.telegram={state:detail.refreshed.state,migrate_to_chat_id:detail.refreshed.to,observed_at:iso(detail.refreshed.at)!};
+      items.set(chat.id,value);
     }
-    const configuredIds=[...configured.rows.map(row=>row.space_id),...(configuration?.policy.group_ids??[]),configuration?.policy.owner_id].filter(Boolean);
     for(const raw of configuredIds) {
+      if(items.has(raw))continue;
       let space:string;try{space=validateSpace(raw);}catch{continue;}
-      const value=items.get(space)??item(space);value.configured=true;items.set(space,value);
-      if(value.parent_space&&!items.has(value.parent_space))items.set(value.parent_space,item(value.parent_space));
-    }
-    // Topics the owner added: the Bot API cannot list topics without a message.
-    for(const topic of await this.services.telegramTopics?.registrations()??[]) {
-      let space:string;try{space=validateSpace(topic.chat_id+'/topic/'+topic.topic_id);}catch{continue;}
-      const value=items.get(space)??item(space);value.name??=topic.name;value.registered=true;items.set(space,value);
-      if(value.parent_space&&!items.has(value.parent_space))items.set(value.parent_space,item(value.parent_space));
-    }
-    // A group with no captured message is named by the owner's last Telegram refresh.
-    const refreshed=await this.services.telegramChats?.observations()??new Map();
-    for(const value of items.values()) {
-      const chat=value.parent_space?undefined:refreshed.get(value.space_id);if(!chat)continue;
-      value.name??=chat.title;value.telegram={state:chat.state,migrate_to_chat_id:chat.migrate_to_chat_id,observed_at:chat.observed_at};
+      items.set(space,{space_id:space,name:null,...conversationFields(directory,space),parent_name:null,observed_at:null,configured:true});
     }
     for(const value of items.values())if(value.parent_space)value.parent_name=items.get(value.parent_space)?.name??null;
-    return [...items.values()].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0);
+    return {directory,items:[...items.values()].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)};
   }
+  private async directory():Promise<ConversationDirectoryItem[]> {return (await this.snapshot()).items;}
 
   /**
    * Live chats with someone Nocheh doesn't serve that nothing of the owner's brought in: no import,
    * project, sharing rule or setting. Their names are written by strangers, so the owner's own turns
-   * never see them listed; the dashboard still does.
+   * never see them listed; the dashboard still does. Chats, not topics: a topic is its chat's. A chat
+   * row with no original at all (from an owner record or an older refresh) has nothing the owner
+   * brought in either, and is left out the same way.
    */
   async outsiders(policy:AssistantPolicy):Promise<Set<string>> {
-    const rows=(await this.stores.archive.query(`SELECT scope FROM events WHERE channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message')
-      AND scope ~ '^-?[1-9][0-9]{0,18}$' GROUP BY scope HAVING bool_and(origin='live')`)).rows;
-    const configured=new Set((await this.directory()).filter(item=>item.configured).map(item=>item.space_id));
-    return new Set(rows.map(row=>String(row.scope)).filter(scope=>!configured.has(scope)&&
-      outsideChat(policy,{origin:'live',channel:'telegram',kind:'telegram_update',scope})));
+    if(!policy.enabled||!policy.owner_id)return new Set();
+    const {directory,items}=await this.snapshot();
+    const candidates=items.filter(item=>(item.kind==='private'||item.kind==='group')&&!item.configured&&!directory.served(item.space_id)&&
+      !directory.isOwner(item.space_id)&&directory.get(item.space_id)?.app==='telegram');
+    const scopes=directory.rawScopes(candidates.map(item=>item.space_id),'telegram');
+    if(!candidates.length)return new Set();
+    // Only chats every original of which came live: an import is something the owner brought in.
+    const live=new Map((await this.stores.archive.query(`SELECT scope,bool_and(origin='live') AS live FROM events
+      WHERE channel='telegram' AND kind IN ('telegram_update','telegram_delivered_message') AND scope=ANY($1::text[]) GROUP BY scope`,[scopes])).rows
+      .map(row=>[String(row.scope),row.live===true]));
+    return new Set(candidates.filter(item=>{
+      const found=directory.get(item.space_id)!.app_ids.map(label=>live.get(label.external)).filter(value=>value!==undefined);
+      return found.every(Boolean);
+    }).map(item=>item.space_id));
+  }
+  /** Whether a conversation is, or is a topic of, one of the outsiders. */
+  async outsider(policy:AssistantPolicy,space:string):Promise<boolean> {
+    const found=await this.outsiders(policy);
+    if(!found.size)return false;
+    const {directory}=await this.services.chats.listing();
+    return found.has(directory.parentOf(space)??space);
   }
 
   async conversations(principal:Reader,input:PageInput={},hidden=new Set<string>()) {
     admin(principal);const limit=pageLimit(input.limit),after=input.after??'',q=input.q??'';
     if(after)validateSpace(after);if(typeof q!=='string'||q.length>200)throw new HttpError(400,'invalid_conversation_query');
-    const query=q.toLocaleLowerCase(),all=(await this.directory()).filter(item=>!hidden.has(item.parent_space??item.space_id)&&
-      (!query||[item.space_id,item.name,item.parent_name].some(value=>value?.toLocaleLowerCase().includes(query))));
+    const all=(await this.directory()).filter(item=>!hidden.has(item.parent_space??item.space_id)&&conversationMatches(item,q));
     const remaining=all.filter(item=>item.space_id>after),items=remaining.slice(0,limit);
     return {items,total:all.length,next_cursor:remaining.length>limit?items.at(-1)!.space_id:null,observed_at:new Date().toISOString(),state:'current' as const};
   }
@@ -242,10 +245,10 @@ export class OwnerSupervisionRepository {
   }
 
   async context(principal:Reader,spaceValue:string) {
-    admin(principal);const space=validateSpace(spaceValue),parent=parentSpace(space)??space;
-    const [directory,configuration,effective,rules,grants,releases,permissions,security,delegations,memory]=await Promise.all([
-      this.directory(),this.assistantConfiguration(),this.services.projects.effective(space),
-      this.stores.control.query(`SELECT * FROM sharing_rules s WHERE s.destination=$1 OR s.destination=$2 OR starts_with(s.destination,$2||'/topic/') ORDER BY s.id`,[space,parent]),
+    admin(principal);const space=validateSpace(spaceValue),{directory:chats,items:directory}=await this.snapshot(),parent=chats.parentOf(space)??space;
+    const [configuration,effective,rules,grants,releases,permissions,security,delegations,memory]=await Promise.all([
+      this.assistantConfiguration(),this.services.projects.effective(space),
+      this.stores.control.query(`SELECT * FROM sharing_rules s WHERE s.destination=ANY($1::text[]) ORDER BY s.id`,[[...new Set([space,parent,...chats.topicsOf(parent)])]]),
       this.stores.control.query('SELECT id,fact_id,fact_revision,mode,state,revision,binding,expires_at,suspended_reason FROM memory_fact_grants WHERE destination=$1 ORDER BY id',[space]),
       this.stores.control.query(`SELECT r.id,r.preview_id,r.rule_id,r.rule_revision,r.state,r.revision,r.generation,r.guard_mode,r.guard_revision,r.text_hash,r.expires_at,p.revision AS current_rule_revision,p.enabled AS rule_enabled
         FROM sharing_releases r JOIN sharing_rules p ON p.id=r.rule_id WHERE p.destination=$1 ORDER BY r.id`,[space]),
@@ -255,11 +258,15 @@ export class OwnerSupervisionRepository {
       this.stores.control.query('SELECT * FROM organization_delegations WHERE scopes ? $1 ORDER BY id',[space]),
       this.services.memory.status(),
     ]);
-    const guard=memory.guard,policy=configuration?.policy,access=policy?.group_access?.[parent],owner=space===policy?.owner_id;
+    // The policy keys a group's access by its Telegram ids, joined over every id the group has had as the turn gate joins
+    // them (groupAccessFor); the owner's private chat is the directory's.
+    const guard=memory.guard,policy=configuration?.policy,externals=chats.get(parent)?.app_ids.map(label=>label.external)??[parent];
+    const access=groupAccessOf(policy,externals),owner=space===chats.ownerChat();
     // While a group's topics share memory, a turn there reads the rules into the group and every one of its topics too.
-    const groupWide=(policy?.topic_memory??'group')==='group'&&groupChatId(parent);
+    const groupWide=(policy?.topic_memory??'group')==='group'&&chats.kind(parent)==='group';
     const sharingRules=rules.rows.filter(row=>row.destination===space||groupWide).map(row=>row.destination===space?row:{...row,through_group:true});
-    const conversation=directory.find(item=>item.space_id===space)??{space_id:space,name:null,kind:parentSpace(space)?'topic':space.startsWith('-')?'group':'private',parent_space:parentSpace(space),parent_name:directory.find(item=>item.space_id===parent)?.name??null,observed_at:null,configured:false};
+    const conversation=directory.find(item=>item.space_id===space)??{space_id:space,name:null,...conversationFields(chats,space),
+      parent_name:directory.find(item=>item.space_id===parent)?.name??null,observed_at:null,configured:false};
     const currentBinding=(binding:any)=>binding?.generation===guard.generation&&Number(binding?.epoch)===Number(guard.epoch);
     const factIds=grants.rows.map(row=>row.fact_id),facts=factIds.length?(await this.stores.derived.query('SELECT id,active_revision FROM entity_claims WHERE id=ANY($1::text[])',[factIds])).rows:[];
     const factRevisions=new Map(facts.map(row=>[row.id,row.active_revision]));
@@ -279,7 +286,7 @@ export class OwnerSupervisionRepository {
     }
     return {conversation,observed_at:new Date().toISOString(),state:configuration&&security.rows[0]?'current':'partial',
       addressing:{state:configuration?'current':'unavailable',enabled:policy?.enabled??false,owner_id:policy?.owner_id??null,
-        group_enabled:!!policy?.enabled&&!!policy.group_ids.includes(parent),granted:access?.granted??[],denied:access?.denied??[],revision:configuration?.revision??null},
+        group_enabled:!!policy?.enabled&&externals.some(id=>policy.group_ids.includes(id)),granted:access?.granted??[],denied:access?.denied??[],revision:configuration?.revision??null},
       knowledge_access:{source_scope:space,owner_access:owner,sharing_rules:sharingRules,
         fact_grants:grants.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&factRevisions.get(row.fact_id)===row.fact_revision&&row.state==='active'&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now()),authorization:'rechecked_on_use'})),
         sharing_releases:sharingReleases,

@@ -18,7 +18,38 @@ import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
+import {chatDirectory,chatIdFor,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
+/*
+ * The chat directory the preview serves (ADR-0252). Chats Nocheh knew before step 2b keep their stored value as their
+ * id ('42', '-10042', '-10042/topic/7'); a group first seen later has a digest id ('Night sky club', with a topic), and a
+ * group Telegram upgraded after that keeps its id under a new Telegram id ('Garden swap'). As the 2b-1 bridge serves
+ * them, a group is on when any of its Telegram ids is in TELEGRAM_GROUP_IDS; the owner's chat always is.
+ */
+const NEW_GROUP_TG='-10088',NEW_GROUP=chatIdFor('telegram',NEW_GROUP_TG),NEW_TOPIC=chatIdFor('telegram',NEW_GROUP_TG,'3');
+const UPGRADED_OLD_TG='-4005',UPGRADED_TG='-10099',UPGRADED=chatIdFor('telegram',UPGRADED_OLD_TG);
+const previewChats:{id:string;kind:'private'|'group';title:string|null;ids:string[];old?:string[];is_forum?:boolean;topics?:[string,string][]}[]=[
+ {id:'42',kind:'private',title:'Owner',ids:['42']},
+ {id:'73',kind:'private',title:'Mira Chen',ids:['73']},
+ {id:'-10042',kind:'group',title:'Aurora planning',ids:['-10042'],is_forum:true,topics:[['-10042/topic/7','7']]},
+ {id:'-10073',kind:'group',title:'Weekend notes',ids:['-10073']},
+ {id:'-10077',kind:'group',title:null,ids:['-10077']},
+ {id:NEW_GROUP,kind:'group',title:'Night sky club',ids:[NEW_GROUP_TG],is_forum:true,topics:[[NEW_TOPIC,'3']]},
+ {id:UPGRADED,kind:'group',title:'Garden swap',ids:[UPGRADED_TG],old:[UPGRADED_OLD_TG]},
+];
+function previewDirectory(served:readonly string[]) {
+  const chats:ChatRow[]=[],ids:ChatIdRow[]=[];
+  for(const chat of previewChats) {
+    const state=chat.id==='42'||chat.kind==='group'&&[...chat.ids,...chat.old??[]].some(id=>served.includes(id))?'active' as const:'off' as const;
+    chats.push({id:chat.id,app:'telegram',kind:chat.kind,parent_id:null,topic_key:null,state,title:chat.title,is_forum:chat.is_forum===true});
+    for(const [id,key] of chat.topics??[])chats.push({id,app:'telegram',kind:'topic',parent_id:chat.id,topic_key:key,state});
+    ids.push(...chat.ids.map(external=>({app:'telegram' as const,external_id:external,chat_id:chat.id,state:'current' as const})),
+      ...(chat.old??[]).map(external=>({app:'telegram' as const,external_id:external,chat_id:chat.id,state:'old' as const})));
+  }
+  return chatDirectory({chats,ids,owner_chat:'42'});
+}
+// The process's directory, for the real repositories the preview runs; served as the saved setting says.
+installChats(previewDirectory(['-10042']));
 const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLock(join(tmpdir(),'nocheh-preview-'+randomUUID(),'lock.json')),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
 await initialize(pool);
 await ownerLock.create('preview-password');
@@ -160,7 +191,16 @@ const conversations:any[]=[
  {space_id:'73',name:'Mira Chen',kind:'private',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
  {space_id:conversation,name:'Aurora planning',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:true},
  {space_id:topic,name:'Iceland planning',kind:'topic',parent_space:conversation,parent_name:'Aurora planning',observed_at:new Date().toISOString(),configured:false,closed:false},
+ {space_id:'-10073',name:'Weekend notes',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
+ {space_id:'-10077',name:null,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true},
+ {space_id:NEW_GROUP,name:'Night sky club',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
+ {space_id:NEW_TOPIC,name:'Meteor watch',kind:'topic',parent_space:NEW_GROUP,parent_name:'Night sky club',observed_at:new Date().toISOString(),configured:false,closed:false},
+ {space_id:UPGRADED,name:'Garden swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
 ];
+/** The directory as the saved Telegram setting serves it, installed for the repositories the preview runs. */
+const directoryNow=()=>installChats(previewDirectory(servedGroups()));
+/** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252). */
+const conversationItem=(row:any)=>({...row,...conversationFields(directoryNow(),row.space_id)});
 permissions.push({id:'6'.repeat(64),kind:'shell',scope:conversation,arguments:{command:'printf synthetic-group'},remaining:2,expires_at:new Date(Date.now()+3600000).toISOString()});
 const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true},
  source_spaces:['-10077'],audience:{space:conversation,group:conversation},post_default:false};
@@ -169,8 +209,8 @@ const memoryGrant={id:grantId,destination:topic,fact_id:factId,fact_revision:1,m
 const sharingRules:any[]=[{id:'7'.repeat(64),name:'Trip notes from the topic',enabled:true,sources:[topic],destination:conversation,mode:'approved',instructions:'',revision:1},
  // Saved before private chats were refused: Nocheh skips the private chat it still names.
  {id:'7c'.repeat(32),name:'Notes from my chat',enabled:true,sources:['42'],destination:conversation,mode:'approved',instructions:'',revision:1}];
-/** Only a group or one of its topics shares, is shared with or joins a project (ADR-0242). */
-const groupSpace=(space:string)=>/^-[1-9]\d{0,18}(\/topic\/[1-9]\d{0,15})?$/.test(space);
+/** Only a group or one of its topics shares, is shared with or joins a project (ADR-0242); the directory decides. */
+const groupSpace=(space:string)=>directoryNow().isGroup(space);
 const sharingPreviews:any[]=[{id:'8'.repeat(64),rule_id:'7'.repeat(64),rule_revision:1,state:'ready',created_at:new Date(Date.now()-7200000).toISOString(),text:'We land in Reykjavik on the 3rd and stay two nights.'}];
 const sharingReleases:any[]=[];
 const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
@@ -186,7 +226,8 @@ const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assig
 /** The groups Nocheh serves, as the saved Telegram setting lists them. */
 const servedGroups=()=>String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean);
 /** A project's served groups, as the server lists them on /projects (ADR-0247). */
-const projectGroups=(id:string)=>assignments.filter(a=>a.mode==='assigned'&&a.project_id===id&&!a.space_id.includes('/topic/')&&servedGroups().includes(a.space_id)).map(a=>a.space_id).sort();
+const projectGroups=(id:string)=>{const directory=directoryNow();
+ return assignments.filter(a=>a.mode==='assigned'&&a.project_id===id&&directory.kind(a.space_id)==='group'&&directory.served(a.space_id)).map(a=>a.space_id).sort();};
 // Memory page: learned facts, people and their facts, projects, automatic organizing, long-term memory (synthetic, in memory).
 const hx=(s:string)=>s.repeat(64/s.length),minutesAgo=(m:number)=>new Date(Date.now()-m*60000).toISOString();
 // Background jobs: one reading a chat now, one that finished with its report.
@@ -239,7 +280,7 @@ const machineCommands:any[]=[];
   started_at:minutesAgo(6-i*0.2),finished_at:minutesAgo(6-i*0.2-0.05)}));
  machineCommands.unshift(machineCommand(vm,{...job,command:'npm test 2>&1 | tail -n 40',state:'running',exit_code:null,output_sha256:null,output_bytes:0,started_at:minutesAgo(0.3),finished_at:null}));}
 // Sent to apps: content-free send records, newest first, a few of them problems (synthetic, in memory).
-const chatTitles:Record<string,string>={'42':'Owner','73':'Mira Chen',[conversation]:'Aurora planning'},harmlessSends=['message_not_modified','button_answer_expired','reaction_not_allowed'];
+const chatTitles:Record<string,string>={'42':'Owner','73':'Mira Chen',[conversation]:'Aurora planning',[NEW_GROUP_TG]:'Night sky club'},harmlessSends=['message_not_modified','button_answer_expired','reaction_not_allowed'];
 const chatSends:any[]=[];
 {const send=(minutes:number,kind:string,method:string,chat:string|null,row:any={})=>chatSends.unshift({id:String(901+chatSends.length),at:minutesAgo(minutes),channel:'telegram',kind,method,chat,
   chat_title:chat?chatTitles[chat]??null:null,topic:null,message_id:chat?300+chatSends.length:null,detail:null,state:'sent',status:200,error_code:null,reference:null,ms:180,...row});
@@ -255,6 +296,8 @@ const chatSends:any[]=[];
  send(60,'reply','sendMessage',conversation,{topic:7,reference:'telegram:1:update:60'});
  send(40,'reply','sendMessage','42',{state:'not_sent',status:0,error_code:'rate_limited',message_id:null,ms:null});
  send(25,'reaction','setMessageReaction',conversation,{detail:'👀',state:'failed',status:400,error_code:'reaction_not_allowed'});
+ // A send to a group first seen after step 2b names its chat by Telegram id; the record carries its Nocheh chat.
+ send(20,'reply','sendMessage',NEW_GROUP_TG);
  send(12,'reaction','setMessageReaction','42',{detail:'👀'});
  send(11,'reply','sendMessage','42');
  send(10,'reaction','setMessageReaction','42',{detail:'clear'});}
@@ -294,7 +337,7 @@ const honchoBudget:any={limit_cents:500,max_limit_cents:1500,revision:3,mode:'mo
 let memoryRevision=4,memoryIncludeHistory=true;
 let failedLearning=3;
 const fixtureProject=(pid?:string)=>memoryProjects.find(p=>p.id===pid)??memoryMapNodes[1].detail.project;
-function effectiveProject(space:string){const parent=space.includes('/topic/')?space.split('/topic/')[0]:null,own=assignments.find(a=>a.space_id===space)??null,inherited=!!parent||!own||own.mode==='inherit',chosen=inherited?assignments.find(a=>a.space_id===parent):own;
+function effectiveProject(space:string){const parent=directoryNow().parentOf(space),own=assignments.find(a=>a.space_id===space)??null,inherited=!!parent||!own||own.mode==='inherit',chosen=inherited?assignments.find(a=>a.space_id===parent):own;
  if(!groupSpace(space))return {space,own_assignment:own,assignment:null,project:null,inherited:false};
  return {space,own_assignment:own,assignment:chosen??null,project:chosen?.project_id?fixtureProject(chosen.project_id):null,inherited:!!chosen&&inherited};}
 const previewView=(row:any)=>({...row,input:{rule:sharingRules.find(r=>r.id===row.rule_id),sources:[{id}]},guard_revision:1,text_hash:'9'.repeat(64),current:sharingRules.find(r=>r.id===row.rule_id)?.revision===row.rule_revision,output_provenance:{fixture:true}});
@@ -364,7 +407,9 @@ const messagesFixture=(()=>{
  const preview=(rid:string)=>{const r=byId.get(rid)!;return {id:r.id,text:r.text,received_at:ago(r.minutes),content_types:contentTypes(r)};};
  const retirement=new Map<string,{retired:boolean;revision:number;history:any[]}>();
  const retire=(rid:string)=>{if(!retirement.has(rid)){const retired=!!byId.get(rid)?.retired;retirement.set(rid,{retired,revision:retired?1:0,history:retired?[{revision:1,retired:true,event_id:rid,decision_authority:'owner',created_at:ago(1400)}]:[]});}return retirement.get(rid)!;};
- const row=(m:Message)=>({id:m.id,channel:m.kind.startsWith('browser')?'browser':'telegram',scope:m.scope,source_id:'synthetic-'+m.id.slice(0,6),revision:'1',kind:m.kind,origin:'live',occurred_at:ago(m.minutes),received_at:ago(m.minutes),
+ // A hit names its Nocheh chat (ADR-0252): a Telegram original's through its Telegram id, a browser one by its scope.
+ const hitChat=(m:Message)=>m.kind.startsWith('browser')?m.scope:directoryNow().resolve('telegram',m.scope);
+ const row=(m:Message)=>({id:m.id,channel:m.kind.startsWith('browser')?'browser':'telegram',scope:m.scope,chat_id:hitChat(m),source_id:'synthetic-'+m.id.slice(0,6),revision:'1',kind:m.kind,origin:'live',occurred_at:ago(m.minutes),received_at:ago(m.minutes),
   ...(m.kind==='telegram_update'&&m.state?{assistant_state:m.state,assistant_stage:m.state==='running'?'execution':null,assistant_error:m.error??null,assistant_attempts:m.attempts??1}:{}),
   retired:retire(m.id).retired,...(m.action?{action_review:m.action}:{}),text:m.text,content_types:contentTypes(m),
   reaction_preview:m.payload.message_reaction?{change:'👍 added',actor:'Mira Chen',target:'70'}:null,reply_messages:(m.replies??[]).map(preview),transcript_preview:m.transcript??null});
@@ -527,8 +572,13 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[],managed_runs:[{event_id:id,state:'done',created_at:new Date().toISOString(),channel:'browser',profile,scope:'42'},{event_id:voiceId,state:'failed',error_code:'provider_timeout',created_at:new Date(Date.now()-86400000).toISOString(),channel:'scheduler',job_id:'morning-check',job_name:'Morning aurora check',profile,scope:'42'}]},guard_mode:'on',services:[]});
   if(route==='/settings')return json(res,200,settingsView(mode));
   if(route==='/telegram/identities')return json(res,200,{groups:[
-    {id:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
-    {id:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
+    {id:'-10042',external:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
+    {id:'-10073',external:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
+    // A group Telegram upgraded, by its Nocheh id as storage names it, with its Telegram id now: the earlier one the
+    // settings list finds this same group (ADR-0252). Sam wrote there and left; Lee's only record is that he left, so the
+    // People list leaves him out.
+    {id:UPGRADED,external:UPGRADED_TG,name:'Garden swap',users:[{id:'61',name:'Rosa',username:null,state:'in',seen:true},{id:'62',name:'Lee',username:null,state:'left',seen:false},
+      {id:'63',name:'Sam',username:null,state:'left',seen:true}]},
   ],truncated:false});
   if(route==='/jobs')return json(res,200,jobs);
   const jobRead=/^\/jobs\/([a-f0-9-]{36})$/.exec(route);
@@ -586,13 +636,14 @@ const server=createServer((req,res)=>{void(async()=>{
     confirm_required:!fromGroup,readers:fromGroup?{space:conversation,group:conversation}:null});}
   if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
   if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant,...factGrants].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
-  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),items=conversations.filter(row=>!q||[row.space_id,row.name,row.parent_name].some(value=>value?.toLocaleLowerCase().includes(q)));return json(res,200,{items,total:items.length,next_cursor:null,state:'current',observed_at:new Date().toISOString()});}
-  if(route==='/conversations/context'){const space=url.searchParams.get('space')??'',group=space.split('/topic/')[0]!,groups=String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',');
+  // A search matches a chat's name, its group's name and its Telegram ids, as the server's does.
+  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),items=conversations.map(conversationItem).filter(row=>!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)));return json(res,200,{items,total:items.length,next_cursor:null,state:'current',observed_at:new Date().toISOString()});}
+  if(route==='/conversations/context'){const space=url.searchParams.get('space')??'',directory=directoryNow(),group=directory.parentOf(space)??space;
    return json(res,200,{conversation:conversations.find(row=>row.space_id===space)??{space_id:space,name:null,kind:'unknown'},observed_at:new Date().toISOString(),state:'current',
-    addressing:{state:'current',enabled:false,owner_id:'42',group_enabled:groups.includes(group),granted:[],denied:[]},
+    addressing:{state:'current',enabled:false,owner_id:'42',group_enabled:directory.isGroup(group)&&directory.served(group),granted:[],denied:[]},
     knowledge_access:{owner_access:space==='42',sharing_rules:sharingRules.filter(rule=>rule.destination===space),fact_grants:[],sharing_releases:[],note:'Synthetic preview.'},
     external_actions:{policy:null,permissions:permissions.filter(row=>row.scope===group),note:'Synthetic preview.'},
-    organization:{effective:{project:space.startsWith(conversation)?{id:projectId,name:'Aurora field guide'}:null,inherited:space===topic},delegations:[],note:'Synthetic preview.'},
+    organization:{effective:{project:group===conversation?{id:projectId,name:'Aurora field guide'}:null,inherited:space===topic},delegations:[],note:'Synthetic preview.'},
     memory:{connection:{attached:memoryAttached,verified:true},availability:memoryAttached?'available':'unavailable',syncing:false,sessions:[],note:'Synthetic preview.'}});}
   if(route==='/sharing/rules')return json(res,200,{rules:sharingRules.map(rule=>({...rule,private_sources:[...rule.sources,rule.destination].filter(space=>!groupSpace(space))})),next:null});
   if(route==='/sharing/previews')return json(res,200,{previews:sharingPreviews.map(({text,...row})=>row),next:null});
@@ -624,7 +675,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/machines')return json(res,200,machineList(mode));
   if(route==='/chat-sends'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
    const rows=chatSends.filter(row=>(q.get('filter')!=='problems'||sendProblem(row))&&(!q.get('kind')||row.kind===q.get('kind'))&&(!before||Number(row.id)<before));
-   return json(res,200,{records:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null});}
+   // Each send names its Nocheh chat (ADR-0252), the one the dashboard links to; the app's chat id stays a label.
+   const directory=directoryNow(),named=(row:any)=>({...row,chat_id:row.chat?directory.resolve('telegram',row.chat,row.topic):null});
+   return json(res,200,{records:rows.slice(0,limit).map(named),next:rows.length>limit?rows[limit-1].id:null});}
   if(route==='/machines/commands'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
    const rows=machineCommands.filter(row=>(!q.get('machine')||row.machine_id===q.get('machine'))&&(!q.get('job')||row.job_id===q.get('job'))&&(q.get('kind')==='all'||row.kind!=='internal')&&(!before||row.id<before));
    return json(res,200,{commands:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null});}
@@ -773,7 +826,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/knowledge/proposals/'+knowledgeProposal.id+'/decide'||route==='/knowledge/proposals/'+knowledgeProposal.id+'/undo'){if(body.expected_revision!==knowledgeProposal.revision)throw new HttpError(409,'knowledge_proposal_changed');knowledgeProposal.state=route.endsWith('/undo')?'undone':body.decision==='approve'?'queued':'cancelled';knowledgeProposal.revision++;return json(res,200,{id:knowledgeProposal.id,state:knowledgeProposal.state,revision:knowledgeProposal.revision});}
   if(route==='/tools/revoke'){const item=permissions.find(p=>p.id===body.id);if(item)item.revoked_at=new Date().toISOString();return json(res,200,{ok:true});}
   if(route==='/projects/assignments'){if(body.mode==='assigned'&&!groupSpace(String(body.space_id)))throw new HttpError(400,'project_private_chat');
-   if(String(body.space_id).includes('/topic/')&&body.mode!=='inherit')throw new HttpError(400,'project_topic_follows_group');
+   if(directoryNow().kind(String(body.space_id))==='topic'&&body.mode!=='inherit')throw new HttpError(400,'project_topic_follows_group');
    if(Object.keys(body).some(key=>!['space_id','project_id','mode','expected_revision','operation_id'].includes(key)))throw new HttpError(400,'unknown_policy_field');
    const own=assignments.find(a=>a.space_id===body.space_id);if((own?.revision??0)!==body.expected_revision)throw new HttpError(409,'assignment_revision_conflict');const next={space_id:body.space_id,project_id:body.mode==='assigned'?body.project_id:null,mode:body.mode,revision:body.expected_revision+1};if(own)Object.assign(own,next);else assignments.push(next);return json(res,200,next);}
   if(route==='/memory-access/settings'){const row=memorySettings.find(r=>r.destination===body.destination);if(row?row.revision!==body.expected_revision:body.expected_revision!==1)throw new HttpError(409,'memory_access_settings_conflict');const values={suggestions:body.suggestions??null,notify_owner:body.notify_owner??null,auto_followup:body.auto_followup??null,request_ttl_seconds:body.request_ttl_seconds??null,default_grant_mode:body.default_grant_mode??null};const revision=row?row.revision+1:1;if(row)Object.assign(row,values,{revision});else memorySettings.push({destination:body.destination,...values,revision});return json(res,200,{destination:body.destination,revision});}
@@ -809,7 +862,11 @@ const server=createServer((req,res)=>{void(async()=>{
     if(saved('TELEGRAM_ENABLED')==='true')throw new HttpError(400,'telegram_running');
     return json(res,200,{bot:'@aurora_helper_bot',people:[{id:'42',name:'Owner',username:'@owner'}]});}
   if(route==='/telegram/chats/refresh')return json(res,200,{chats:String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean).map(chat_id=>({chat_id,state:'available',title:'Aurora planning',is_forum:false}))});
-  if(route==='/telegram/topics')return json(res,200,{ok:true});
+  // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0252).
+  if(route==='/telegram/topics'){
+   if(Object.keys(body).some(key=>!['action','link','chat_id','topic_id','name'].includes(key)))throw new HttpError(400,'unknown_topic_field');
+   if(!body.link&&(directoryNow().kind(String(body.chat_id))!=='group'||!Number.isSafeInteger(body.topic_id)||body.topic_id<2))throw new HttpError(400,'invalid_topic_reference');
+   return json(res,200,{ok:true});}
   // Off-site storage from one pasted credential. A token named two-accounts asks which account to use.
   if(route==='/offsite/connect'){
     if(body.provider==='cloudflare'){

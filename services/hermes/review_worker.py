@@ -16,7 +16,8 @@ def observe(root,policy,body):
     """Read a durable review receipt without login, preparation or execution."""
     import fcntl
     from .native_memory import registered_profiles
-    if not policy.owner or body.get('scope')!=policy.owner:raise ValueError('owner_review_required')
+    owner=policy.current().owner_chat
+    if not owner or body.get('scope')!=owner:raise ValueError('owner_review_required')
     if not re.fullmatch('[a-f0-9]{64}',body.get('id','')):raise ValueError('invalid_review_request')
     found=[]
     for profile in registered_profiles(root):
@@ -53,11 +54,13 @@ def observe(root,policy,body):
 
 
 def review_profile(root,policy,model,body):
-    if not policy.owner or body.get('scope') != policy.owner:
+    # The owner's private chat by its Nocheh chat id, and the owner's account, from the app's served list (ADR-0252).
+    served=policy.current();owner=served.owner_chat
+    if not owner or body.get('scope') != owner:
         raise ValueError('owner_review_required')
     if not re.fullmatch(r'[a-f0-9]{64}',body.get('id','')) or not isinstance(body.get('content'),str) or len(body['content'])>12000:
         raise ValueError('invalid_review_request')
-    scope=Scope(policy.owner,policy.owner,True,Scopes.profile(policy.owner),policy.owner)
+    scope=Scope(owner,served.owner_user() or '',True,Scopes.profile(owner),owner)
     from .environment import secret
     claims=verify_capability(body['archive_credential'],secret('SERVICE_TOKEN'),scope,body['event_id'])
     if claims.get('generation') and claims.get('purpose')!='memory-review':raise ValueError('review_capability_required')
@@ -159,11 +162,12 @@ def stopped(profile,review_id,before):
 
 
 def _review(profile,policy,model,credentials,body):
+    served=policy.current()
     env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE') if key in os.environ}
     env.update(HERMES_HOME=str(profile),GUARD_MODE=body.get('guard_mode','on'))
     transport = credentials.runtime()
     request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
-             'session_id':'review-'+body['id'],'prompts':body.get('prompts') or {},'owner':True,'chat_id':policy.owner,'user_id':policy.owner,**transport}
+             'session_id':'review-'+body['id'],'prompts':body.get('prompts') or {},'owner':True,'chat_id':served.owner_chat,'user_id':served.owner_user() or '',**transport}
     from .security_transport import isolated_enabled,scoped_transport
     module='services.hermes.assistant_turn'
     if isolated_enabled():

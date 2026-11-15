@@ -235,10 +235,13 @@ def import_all(directory,native_output,api=None,*,restore_guarded=False):
             try:os.fsync(descriptor)
             finally:os.close(descriptor)
     from tools.operations.archive.derivative_transfer import import_derivatives
+    from tools.operations.archive.owner_transfer import CHAT_TABLES,import_owner
     legacy=manifest['format']=='nocheh-portable-v1'
+    # The package's chats and their app ids come first, so each imported original finds the chat the package names
+    # (ADR-0252); a package from before them names chats by the values the archive import gives them.
+    if not legacy:import_owner(api,directory/'owner',only=CHAT_TABLES)
     sources=import_archive(api,directory/'archive',restore_guarded=restore_guarded if legacy else False)
     derivatives={'included_with_legacy_records':True,'automatic_activation':False} if legacy else import_derivatives(api,directory/'derivatives')
-    from tools.operations.archive.owner_transfer import import_owner
     owner=None if legacy else import_owner(api,directory/'owner')
     result=save(True,sources=sources,derivatives=derivatives,owner=owner,native_profiles=len(manifest['native_profiles']),honcho_included=manifest.get('honcho',{}).get('included',False))
     return {**result,'native_path':str(target),'telegram_replies':0}
