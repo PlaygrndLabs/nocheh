@@ -2,7 +2,7 @@
  * A forum group's topics. Telegram doesn't let bots list topics, so new ones
  * appear when used, and older quiet ones can be added by link. A topic is named
  * by its group's Nocheh id and its number in Telegram, or by its link; the
- * server finds the chats either names (ADR-0251).
+ * server finds the chats either names (ADR-0252).
  */
 import {useState} from 'react';
 import {Hash, Plus} from 'lucide-react';

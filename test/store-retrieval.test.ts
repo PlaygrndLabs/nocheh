@@ -32,7 +32,7 @@ test('source-only retrieval keeps derivative links, independent relationship loo
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),root=await mkdtemp(join(tmpdir(),'nocheh-retrieval-'));
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:['-321','-654'],topic_memory:'topic'};
   const access=new SourceAccessRepository(stores,archive,guards,()=>policy);
-  // The chats this test reads, as the seeder makes their rows (ADR-0251).
+  // The chats this test reads, as the seeder makes their rows (ADR-0252).
   const restore=installChatsForTest(legacyDirectory(['-321/topic/77','-321/topic/78','-654'],{owner:'123',served:['-321','-654']}));
   const sources=new SourceRepository(access,new AttachmentRepository(stores,archive,root),selections),owner:Reader={scope:null,admin:true},key='retrieval:'+Date.now();
   const sequence=Date.now();
@@ -125,7 +125,7 @@ test('source-only retrieval keeps derivative links, independent relationship loo
   } finally {restore();await guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('a chat first seen after step 2b is read under every Telegram id it has had, and a topic only by its row (ADR-0251)',
+test('a chat first seen after step 2b is read under every Telegram id it has had, and a topic only by its row (ADR-0252)',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const admin=new pg.Pool(config);

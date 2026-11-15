@@ -33,7 +33,7 @@ export class LearningContextRepository {
     if(!await this.access.canLearn(source,binding))throw new HttpError(403,'learning_consent_required');
     const observed=await this.access.relationships.describe(source),principal=this.access.principal(space);
     const audience=observed.audience;
-    // Relations within this very conversation only (its Nocheh chat or topic, ADR-0251), never its group's others.
+    // Relations within this very conversation only (its Nocheh chat or topic, ADR-0252), never its group's others.
     const relations=await this.access.relationships.context(source,audience?{kind:'recall',scope:{space,group:null}}:{kind:'owner'},30);
     const references=new Map([[source.id,source]]),limitations:string[]=[];
     for(const target of relations.targets) {

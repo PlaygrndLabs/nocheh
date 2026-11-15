@@ -1,4 +1,4 @@
-# ADR-0251: Chats get Nocheh's own ids; existing ids are kept
+# ADR-0252: Chats get Nocheh's own ids; existing ids are kept
 
 <status>
 Accepted on 2026-11-14 as step 2b-1, "Nocheh's own chat ids", of the owner's

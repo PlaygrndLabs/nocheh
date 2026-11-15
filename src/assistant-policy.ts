@@ -10,12 +10,12 @@ export interface AssistantPolicy {enabled:boolean;
   /** The owner's account: the owner's Telegram user id. Compared only with a sender (who sent, pressed or asked). */
   owner_id:string|null;
   /** Raw Telegram ids (current and old) of the served groups, for comparing archive originals only. A Nocheh chat is
-   * served when the chat directory says so (chats().served), never by finding its id here (ADR-0251). */
+   * served when the chat directory says so (chats().served), never by finding its id here (ADR-0252). */
   group_ids:string[];group_access?:Record<string,GroupAccess>;topic_memory?:TopicMemory;
   /** The owner's private chat, a Nocheh chat id: where the owner talks to Nocheh, separate from the owner's account.
    * Absent in a policy written before step 2b, where the owner's private chat is the chat named by owner_id. */
   owner_chat?:string|null}
-/** The owner's private chat (ADR-0251): policy.owner_chat, or for a policy without one the chat owner_id names. */
+/** The owner's private chat (ADR-0252): policy.owner_chat, or for a policy without one the chat owner_id names. */
 export const ownerChat=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):string|null=>policy.owner_chat===undefined?policy.owner_id:policy.owner_chat;
 /** The owner as stored rows name them: their private chat (a row's chat) and their account (who asked or decided). */
 export interface OwnerIds {chat:string|null;account:string|null}
@@ -56,7 +56,7 @@ export function assistantPolicy(path?:string):AssistantPolicy {
     owner_chat:ownerChatId as string|null};
 }
 /**
- * A served group's access lists (ADR-0251). TELEGRAM_GROUP_ACCESS names a group by a raw Telegram id, which may be the
+ * A served group's access lists (ADR-0252). TELEGRAM_GROUP_ACCESS names a group by a raw Telegram id, which may be the
  * id the group had before Telegram upgraded it, so the lists under every Telegram id the chat has had (current and old)
  * are joined; a person denied under any of them stays denied. Undefined when none names the chat.
  */
@@ -74,7 +74,7 @@ export function groupAccessOf(policy:Pick<AssistantPolicy,'group_access'>|undefi
 /**
  * Whom a live Telegram message comes from, and in which chat Nocheh may answer it: the owner in their own private
  * chat, or someone allowed in a served group. `scope` is the archive's raw Telegram chat id; chat_id is the Nocheh chat
- * it names, from the chat directory (ADR-0251), so a chat with no row is answered nowhere (ADR-0242).
+ * it names, from the chat directory (ADR-0252), so a chat with no row is answered nowhere (ADR-0242).
  */
 export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:string):{owner:boolean;chat_id:string;user_id:string}|null {
   if (!policy.enabled) return null;
@@ -97,7 +97,7 @@ export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:s
 /**
  * A live Telegram update from a chat Nocheh does not serve: a private chat with
  * anyone but the owner, a group or channel the owner has not selected, or a chat
- * the chat directory does not know (ADR-0251). It is kept as received, but never
+ * the chat directory does not know (ADR-0252). It is kept as received, but never
  * prepared, learned from or read by the assistant.
  */
 export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel:string;kind:string;scope:string}):boolean {
@@ -111,7 +111,7 @@ export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel
 /**
  * For a decision that cannot be taken back (a turn refused, a message left unprepared): when this process's chat
  * directory does not hold the Telegram chat a live original came from, waits until the loader has looked again
- * (ADR-0251). The capture that recorded the chat, a served group's new id after an upgrade, commits before its
+ * (ADR-0252). The capture that recorded the chat, a served group's new id after an upgrade, commits before its
  * workflows run, but this process may not have reloaded yet. A chat still unknown afterwards stays unknown, so the
  * caller fails closed as before.
  */

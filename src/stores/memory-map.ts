@@ -10,7 +10,7 @@ export interface MemoryMapNode {id:string;kind:MemoryMapNodeKind;label:string;st
 export interface MemoryMapEdge {id:string;kind:MemoryMapEdgeKind;source:string;target:string;state?:string;label?:string;authoritative:boolean;detail?:Record<string,unknown>}
 
 const cursor=(value:string)=>{if(value&&!/^[a-z_]+:[^\x00-\x1f]{1,300}$/.test(value))throw new HttpError(400,'invalid_memory_map_cursor');return value;};
-/** A topic or another conversation, by its chat row (ADR-0251); a value with no row is a conversation. */
+/** A topic or another conversation, by its chat row (ADR-0252); a value with no row is a conversation. */
 const classify=(space:string):'topic'|'conversation'=>chats().kind(space)==='topic'?'topic':'conversation';
 
 /** Owner-only graph projection. It describes relationships and separately marks authority edges. */

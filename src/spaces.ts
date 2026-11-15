@@ -17,7 +17,7 @@ CREATE INDEX IF NOT EXISTS memory_shares_destination ON memory_shares(destinatio
 export type SpaceMode = 'isolated' | 'approved' | 'filtered';
 export interface SpacePreferences {mode:SpaceMode; sources:string[]; privacy_instructions:string}
 export const defaults:SpacePreferences = {mode:'approved', sources:[], privacy_instructions:'Do not disclose personal relationships, health, finances, identity details, credentials, private plans, or information about other people. Release only relevant non-personal knowledge. When uncertain, omit it.'};
-// The Telegram adapter owns Telegram's own formats (ADR-0251); these stay importable from here.
+// The Telegram adapter owns Telegram's own formats (ADR-0252); these stay importable from here.
 export {telegramTopicId,desktopChannelTypes,desktopTopicId} from './chats-telegram.js';
 /**
  * The space of a captured event, for the legacy storage layout only, which refuses to start (database.ts): a Telegram
@@ -52,7 +52,7 @@ export async function backfillSpaces(db:pg.PoolClient) {
 /**
  * A conversation value as given: a Nocheh chat id, or a name that is no chat ('owner', '*', 'system', 'desktop:*').
  * Its size and characters are checked, and a value with a slash must be a well-formed chat id (isChatId, the one shared
- * check), as no name has one; what it is, and whether it is one at all, comes from the chat directory (ADR-0251), so an
+ * check), as no name has one; what it is, and whether it is one at all, comes from the chat directory (ADR-0252), so an
  * id the directory does not know is private and reads nothing.
  */
 export function validateSpace(id:unknown):string {
@@ -62,11 +62,11 @@ export function validateSpace(id:unknown):string {
 }
 /** A topic's chat, from its row; null for a group, a private chat and an id with no row. */
 export function parentSpace(id:string):string|null {return chats().parentOf(id);}
-/** Whether the chat directory holds `id` as a group itself, not one of its topics (ADR-0251). */
+/** Whether the chat directory holds `id` as a group itself, not one of its topics (ADR-0252). */
 export const groupChatId=(id:string)=>chats().kind(id)==='group';
 /**
  * Whether a conversation is a group or one of its topics, the only conversations that may share or be shared
- * with, as the chat directory holds them (ADR-0251). Everything else counts as private and fails closed: the owner's
+ * with, as the chat directory holds them (ADR-0252). Everything else counts as private and fails closed: the owner's
  * private chat and its topics, any other private chat, `desktop:*` imports, `system`, and any id with no chat row,
  * however it looks (ADR-0242).
  */
@@ -154,7 +154,7 @@ export const readSetSql=(column:string,param:number|string)=>{
 };
 
 /**
- * The Nocheh chat an archive original belongs to (ADR-0251): a Telegram original's chat by its raw id, current or
+ * The Nocheh chat an archive original belongs to (ADR-0252): a Telegram original's chat by its raw id, current or
  * old, through chat_ids; a browser or scheduler original's scope is the chat's own id. Null when no chat row names it,
  * which reads nothing.
  */

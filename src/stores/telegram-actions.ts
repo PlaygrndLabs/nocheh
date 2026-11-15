@@ -28,7 +28,7 @@ const protocol='telegram-action-v2';
 // Owner-approved memory wording uses the memory input bound; native Telegram
 // splitting preserves one action identity and rechecks authority for each chunk.
 const trustedTextLimit=12000;
-/** A destination is a chat or topic the chat directory knows, by its chat id (ADR-0251); anything else is refused. */
+/** A destination is a chat or topic the chat directory knows, by its chat id (ADR-0252); anything else is refused. */
 const knownChat=(value:string)=>!!chats().get(value);
 /** The chat a chat or topic belongs to. */
 const chatOf=(space:string)=>chats().parentOf(space)??space;
@@ -190,7 +190,7 @@ export class TelegramActionRepository {
     if(original.origin!=='live'||original.channel!=='telegram')throw new HttpError(403,'external_effect_requires_live_turn');
     const requester=await this.requester(source.id,original.scope),groups=requester?this.allowedGroups(requester):[];
     // A group's name once the owner has refreshed it and Telegram answered, as before step 2b: the name that refresh
-    // answered, never one a later update shows (ADR-0251; the old refresh table is only the seeder's now).
+    // answered, never one a later update shows (ADR-0252; the old refresh table is only the seeder's now).
     const titles=new Map((await this.stores.control.query(`SELECT chat_id,refreshed_title FROM chat_details
       WHERE chat_id=ANY($1::text[]) AND refreshed_state='available' AND refreshed_title IS NOT NULL`,[groups])).rows
       .map(row=>[row.chat_id as string,row.refreshed_title as string]));
@@ -199,7 +199,7 @@ export class TelegramActionRepository {
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
     source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string,requester:string|null=null){
-    // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0251).
+    // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0252).
     const requested=string(input.destination,200),text=string(input.text,3500);
     const destination=requested==='current'&&channel==='telegram'?principal.space??turn.scope:telegramDestination(requested,chats());
     if(!destination||!knownChat(destination)||!text.trim())throw new HttpError(400,'invalid_action');
@@ -209,7 +209,7 @@ export class TelegramActionRepository {
     await this.guards.prepareContext(proposal,protocol,principal,this.prepared,this.detect);
     const representation=await this.guards.read('derived_artifacts:'+proposal.id,binding),preparedText=string((representation.value as any).text,3500);
     if(!preparedText.trim())throw new HttpError(400,'invalid_action');
-    // The request names its chat by its Nocheh id, as its space and destination do (ADR-0251): a group first seen after
+    // The request names its chat by its Nocheh id, as its space and destination do (ADR-0252): a group first seen after
     // step 2b, or upgraded since, has no archive scope that is its id.
     const chat=principal.scope??chatOf(principal.space??turn.scope);
     const fingerprint=digest(canonical({destination,text:preparedText})),db=await this.stores.control.connect();
@@ -326,7 +326,7 @@ export class TelegramActionRepository {
   /** Trusted native sender rechecks the exact approved payload immediately before sending. */
   async authorizeDelivery(value:unknown) {
     const body=object(value),row=await this.row(string(body.id,64));
-    // The bot sends to the chat and topic the destination has in Telegram now, which storage gave it (ADR-0251).
+    // The bot sends to the chat and topic the destination has in Telegram now, which storage gave it (ADR-0252).
     const target=telegramAddress(row.destination);
     if(row.state!=='running'||body.destination!==row.destination||typeof body.text!=='string'||
       digest(canonical({destination:body.destination,text:body.text}))!==row.fingerprint||!target||

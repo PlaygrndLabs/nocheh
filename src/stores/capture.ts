@@ -33,7 +33,7 @@ export class CaptureCoordinator {
     if(previous.source_revision!==source.reference.revision||previous.payload_hash!==source.reference.input_hash)
       throw new HttpError(409,'capture_handoff_conflict');
     if(intake.transport==='capture'&&source.origin==='live')await this.reactions.capture(client,source.reference);
-    // The chats, chat ids, people and memberships the original shows (ADR-0251); a replay changes nothing. An imported
+    // The chats, chat ids, people and memberships the original shows (ADR-0252); a replay changes nothing. An imported
     // original is recorded as the owner's history, never as this installation's bot.
     const recorded=await this.chats?.capture(client,source,intake.transport==='import'?'import':'capture')??false;
     // Wire batches retain exact transport evidence; their individual updates
@@ -105,7 +105,7 @@ export async function drainSourceSpool(coordinator:CaptureCoordinator,root:strin
     } catch(error) {failures.push({name,code:error instanceof HttpError?error.code:'capture_commit_failed'});}
   }
   // Telegram updates are handed off in their update order, whatever order their files were read in: a group's upgrade
-  // message is then recorded before the new supergroup's other messages, so it stays one chat (ADR-0251).
+  // message is then recorded before the new supergroup's other messages, so it stays one chat (ADR-0252).
   const update=(item:typeof captured[number])=>{
     const order=item.sources.length===1&&item.sources[0]!.kind==='telegram_update'?Number(item.sources[0]!.reference.revision):NaN;
     return Number.isSafeInteger(order)?order:null;

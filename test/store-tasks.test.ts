@@ -25,7 +25,7 @@ test('the owner keeps task lists from the dashboard and their private chat; an u
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null};
-  // The chats this test uses, as the seeder makes their rows (ADR-0251): the owner's chat and the groups served.
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
   const restore=installChatsForTest(legacyDirectory([group,group+'/topic/7','456'],{owner:'123',served:[group]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
@@ -149,7 +149,7 @@ test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-full:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null};
   const notices:any[]=[];let telegram:'done'|'not_started'|'ambiguous'='done';
-  // The chats this test uses, as the seeder makes their rows (ADR-0251): the owner's chat and the groups served.
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
   const restore=installChatsForTest(legacyDirectory([group,group+'/topic/7'],{owner:'123',served:[group]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
@@ -338,7 +338,7 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-board:'+Date.now(),group='-'+Date.now(),porch='-3'+Date.now();
   const owner:Reader={admin:true,scope:null};
-  // The chats this test uses, as the seeder makes their rows (ADR-0251): the owner's chat and the groups served.
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
   const restore=installChatsForTest(legacyDirectory([group,porch],{owner:'123',served:[group,porch]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group,porch]}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
@@ -556,7 +556,7 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-card:'+Date.now();
   const group='-'+Date.now(),forum='-100'+Date.now(),other='-2'+Date.now();
   const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[];
-  // The chats this test uses, as the seeder makes their rows (ADR-0251): the owner's chat and the groups served.
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
   const restore=installChatsForTest(legacyDirectory([group,forum,other,forum+'/topic/7','456'],{owner:'123',served:[group,forum,other]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group,forum,other]}),
     runtime:async(operation,input)=>{
@@ -589,7 +589,7 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     const padded='-0'+group.slice(1);
     for(const space of [group,forum+'/topic/7','456',padded,padded+'/topic/7'])
       await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[space,launch]);
-    // The groups' names as the owner's refresh recorded them, and the topic name the owner gave (ADR-0251: chats rows).
+    // The groups' names as the owner's refresh recorded them, and the topic name the owner gave (ADR-0252: chats rows).
     for(const [chat,title,forumChat] of [[group,'Launch team',false],[forum,'Plans team',true]] as const)
       await chatRowForTest(stores.control,chat,{title,is_forum:forumChat});
     await chatRowForTest(stores.control,forum+'/topic/7',{title:'Venue',title_source:'owner',refreshed:false});
@@ -744,10 +744,10 @@ for(const family of families)test(`a group or topic reaches only its own tasks a
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-groups:'+Date.now(),stamp=String(Date.now()).slice(-9);
   // Two groups of project P1 and a third in none; synthetic IDs, new on every run.
-  // Telegram's ids t1-t3 (the archive keeps them); g1-g3 are the chats' Nocheh ids in this family (ADR-0251).
+  // Telegram's ids t1-t3 (the archive keeps them); g1-g3 are the chats' Nocheh ids in this family (ADR-0252).
   const t1='-1001'+stamp,t2='-1002'+stamp,t3='-1003'+stamp,id=family.id,g1=id(t1),g2=id(t2),g3=id(t3),at=(group:string,key:number)=>id(group+'/topic/'+key);
   const owner:Reader={admin:true,scope:null};let memory:'group'|'topic'='group';
-  // The chats this test uses, as the seeder makes their rows (ADR-0251): the owner's chat and the groups served.
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
   const restore=installChatsForTest(family.directory([t1,t2,t3,...[5,6,7,8].map(topic=>t1+'/topic/'+topic),t2+'/topic/3'],{owner:'123',served:[t1,t2,t3]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[t1,t2,t3],topic_memory:memory}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
@@ -951,10 +951,10 @@ for(const family of families)test(`a group's move, archive or trash takes only t
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-family:'+Date.now(),stamp=String(Date.now()).slice(-9);
-  // Telegram's ids t1 and t2 (the archive keeps them); g1 and g2 are the chats' Nocheh ids in this family (ADR-0251).
+  // Telegram's ids t1 and t2 (the archive keeps them); g1 and g2 are the chats' Nocheh ids in this family (ADR-0252).
   const t1='-1001'+stamp,t2='-1002'+stamp,g1=family.id(t1),g2=family.id(t2);
   const owner:Reader={admin:true,scope:null};
-  // The chats this test uses, as the seeder makes their rows (ADR-0251): the owner's chat and the groups served.
+  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
   const restore=installChatsForTest(family.directory([t1,t2],{owner:'123',served:[t1,t2]}));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[t1,t2],topic_memory:'group'}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});

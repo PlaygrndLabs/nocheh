@@ -453,7 +453,7 @@ Hermes's native memory review, with no external-action tools. Pause/resume contr
 operate on queued work; an interrupted native write is marked ambiguous and needs
 an explicit resume. Retrying an ambiguous review may repeat a native memory edit.
 
-A chat or topic is named by its Nocheh id ([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)):
+A chat or topic is named by its Nocheh id ([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)):
 the value it was stored under before step 2b, or a digest for one first seen later. Its link in Chats
 carries it; never build one from a Telegram ID.
 

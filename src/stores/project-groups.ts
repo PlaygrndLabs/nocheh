@@ -7,7 +7,7 @@ type Database=Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>;
  * SQL for a project's groups as a `text[]`: every group Nocheh serves that is assigned to the project itself
  * (a group-level 'assigned' row; a topic follows its group and is never listed). `project` is the SQL for the project
  * id and `served` the placeholder of a `text[]` parameter holding the served groups as the chat directory holds them
- * (servedGroups(), ADR-0251): groups themselves, so a topic, the owner's private chat or any id with no chat row is
+ * (servedGroups(), ADR-0252): groups themselves, so a topic, the owner's private chat or any id with no chat row is
  * never one of them (ADR-0242). Sorted by
  * code point, the order JavaScript's sort gives, whatever the database collation. The project's state is not
  * checked: callers that need an active project check it. Its own rows are named `project_group`, an alias no caller

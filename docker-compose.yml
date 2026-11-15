@@ -52,7 +52,7 @@ x-service: &service
     interval: 5s
     timeout: 5s
     retries: 12
-    # The first start after step 2b-1 gives every stored chat its row before the app listens (ADR-0251): about
+    # The first start after step 2b-1 gives every stored chat its row before the app listens (ADR-0252): about
     # 13,000 archive events a second, so up to three minutes in all, as long as the operations' --wait-timeout.
     start_period: 120s
 

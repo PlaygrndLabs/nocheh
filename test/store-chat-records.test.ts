@@ -96,7 +96,7 @@ test('captured updates record chats, topics, private chats, people and membershi
 
     // The owner's People list shows whom the group's own messages show, as before step 2b: Alice wrote, Carol was added and
     // Dave sent his own leave message. Erin, whom Alice removed, and Frank, known only from a member update, keep their
-    // state but are not shown (ADR-0251).
+    // state but are not shown (ADR-0252).
     const [erin,frank]=[6,7].map(person) as [string,string];
     await capture(9,{message:{message_id:15,date:9,chat,from:{id:Number(alice),first_name:'Alice'},left_chat_member:{id:Number(erin),first_name:'Erin'}}});
     await capture(10,{chat_member:{chat,from:{id:Number(alice)},date:10,old_chat_member:{status:'left',user:{id:Number(frank)}},new_chat_member:{status:'member',user:{id:Number(frank),first_name:'Frank'}}}});
@@ -125,7 +125,7 @@ test('a group Telegram upgrades keeps one chat with its old and current ids, ser
     assert.equal((await stores.control.query('SELECT count(*) FROM chat_ids WHERE external_id=ANY($1::text[])',[[old,next]])).rows[0].count,'2','no second chat');
     assert.deepEqual(saved.chats.map(row=>[row.title,row.app_type,row.state]),[['Basic upgraded','supergroup','active']]);
     // The owner's people route names it once, by its Nocheh id, with both its Telegram ids, current first: the dashboard
-    // opens it by that id, and TELEGRAM_GROUP_IDS still naming it by the earlier one finds it (ADR-0251).
+    // opens it by that id, and TELEGRAM_GROUP_IDS still naming it by the earlier one finds it (ADR-0252).
     const listed=(await telegramDirectory(stores.control,{admin:true,scope:null},stores.archive)).groups
       .filter(group=>group.id===id||[old,next].some(external=>group.telegram_ids.includes(external)));
     assert.deepEqual(listed.map(group=>[group.id,group.external,group.telegram_ids]),[[id,next,[next,old]]]);

@@ -21,7 +21,7 @@ import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../sr
 import {chatDirectory,chatIdFor,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
 /*
- * The chat directory the preview serves (ADR-0251). Chats Nocheh knew before step 2b keep their stored value as their
+ * The chat directory the preview serves (ADR-0252). Chats Nocheh knew before step 2b keep their stored value as their
  * id ('42', '-10042', '-10042/topic/7'); a group first seen later has a digest id ('Night sky club', with a topic), and a
  * group Telegram upgraded after that keeps its id under a new Telegram id ('Garden swap'). As the 2b-1 bridge serves
  * them, a group is on when any of its Telegram ids is in TELEGRAM_GROUP_IDS; the owner's chat always is.
@@ -199,7 +199,7 @@ const conversations:any[]=[
 ];
 /** The directory as the saved Telegram setting serves it, installed for the repositories the preview runs. */
 const directoryNow=()=>installChats(previewDirectory(servedGroups()));
-/** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0251). */
+/** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252). */
 const conversationItem=(row:any)=>({...row,...conversationFields(directoryNow(),row.space_id)});
 permissions.push({id:'6'.repeat(64),kind:'shell',scope:conversation,arguments:{command:'printf synthetic-group'},remaining:2,expires_at:new Date(Date.now()+3600000).toISOString()});
 const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true},
@@ -404,7 +404,7 @@ const messagesFixture=(()=>{
  const preview=(rid:string)=>{const r=byId.get(rid)!;return {id:r.id,text:r.text,received_at:ago(r.minutes),content_types:contentTypes(r)};};
  const retirement=new Map<string,{retired:boolean;revision:number;history:any[]}>();
  const retire=(rid:string)=>{if(!retirement.has(rid)){const retired=!!byId.get(rid)?.retired;retirement.set(rid,{retired,revision:retired?1:0,history:retired?[{revision:1,retired:true,event_id:rid,decision_authority:'owner',created_at:ago(1400)}]:[]});}return retirement.get(rid)!;};
- // A hit names its Nocheh chat (ADR-0251): a Telegram original's through its Telegram id, a browser one by its scope.
+ // A hit names its Nocheh chat (ADR-0252): a Telegram original's through its Telegram id, a browser one by its scope.
  const hitChat=(m:Message)=>m.kind.startsWith('browser')?m.scope:directoryNow().resolve('telegram',m.scope);
  const row=(m:Message)=>({id:m.id,channel:m.kind.startsWith('browser')?'browser':'telegram',scope:m.scope,chat_id:hitChat(m),source_id:'synthetic-'+m.id.slice(0,6),revision:'1',kind:m.kind,origin:'live',occurred_at:ago(m.minutes),received_at:ago(m.minutes),
   ...(m.kind==='telegram_update'&&m.state?{assistant_state:m.state,assistant_stage:m.state==='running'?'execution':null,assistant_error:m.error??null,assistant_attempts:m.attempts??1}:{}),
@@ -571,7 +571,7 @@ const server=createServer((req,res)=>{void(async()=>{
     {id:'-10042',external:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
     {id:'-10073',external:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
     // A group Telegram upgraded, by its Nocheh id as storage names it, with its Telegram id now: the earlier one the
-    // settings list finds this same group (ADR-0251). Sam wrote there and left; Lee's only record is that he left, so the
+    // settings list finds this same group (ADR-0252). Sam wrote there and left; Lee's only record is that he left, so the
     // People list leaves him out.
     {id:UPGRADED,external:UPGRADED_TG,name:'Garden swap',users:[{id:'61',name:'Rosa',username:null,state:'in',seen:true},{id:'62',name:'Lee',username:null,state:'left',seen:false},
       {id:'63',name:'Sam',username:null,state:'left',seen:true}]},
@@ -671,7 +671,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/machines')return json(res,200,machineList(mode));
   if(route==='/chat-sends'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
    const rows=chatSends.filter(row=>(q.get('filter')!=='problems'||sendProblem(row))&&(!q.get('kind')||row.kind===q.get('kind'))&&(!before||Number(row.id)<before));
-   // Each send names its Nocheh chat (ADR-0251), the one the dashboard links to; the app's chat id stays a label.
+   // Each send names its Nocheh chat (ADR-0252), the one the dashboard links to; the app's chat id stays a label.
    const directory=directoryNow(),named=(row:any)=>({...row,chat_id:row.chat?directory.resolve('telegram',row.chat,row.topic):null});
    return json(res,200,{records:rows.slice(0,limit).map(named),next:rows.length>limit?rows[limit-1].id:null});}
   if(route==='/machines/commands'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
@@ -854,7 +854,7 @@ const server=createServer((req,res)=>{void(async()=>{
     if(saved('TELEGRAM_ENABLED')==='true')throw new HttpError(400,'telegram_running');
     return json(res,200,{bot:'@aurora_helper_bot',people:[{id:'42',name:'Owner',username:'@owner'}]});}
   if(route==='/telegram/chats/refresh')return json(res,200,{chats:String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean).map(chat_id=>({chat_id,state:'available',title:'Aurora planning',is_forum:false}))});
-  // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0251).
+  // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0252).
   if(route==='/telegram/topics'){
    if(Object.keys(body).some(key=>!['action','link','chat_id','topic_id','name'].includes(key)))throw new HttpError(400,'unknown_topic_field');
    if(!body.link&&(directoryNow().kind(String(body.chat_id))!=='group'||!Number.isSafeInteger(body.topic_id)||body.topic_id<2))throw new HttpError(400,'invalid_topic_reference');

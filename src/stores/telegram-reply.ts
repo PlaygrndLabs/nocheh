@@ -15,7 +15,7 @@ export type ReplyFinish='answered'|'failed'|'clear';
 export const deliveryId=(event:string,attempt:number|string)=>digest(event+':'+attempt);
 
 /** The asking message, from the routed payload, in the turn's chat and topic where Telegram has them now: the front
- * door's translation of the turn's space, the same the turn pass is bound to (ADR-0251). A space with no chat row is
+ * door's translation of the turn's space, the same the turn pass is bound to (ADR-0252). A space with no chat row is
  * never sent to. */
 export function replyTarget(input:TurnInput,attempt:number|string,credential:string) {
   const message=(input.body.payload as {message?:{message_id?:unknown}})?.message??{},target=telegramTarget(input.principal.space);

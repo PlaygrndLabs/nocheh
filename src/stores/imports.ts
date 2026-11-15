@@ -55,7 +55,7 @@ export class ImportRepository {
       const text=fillTemplate((await ownerPrompts(this.control))['imports.ready']??importReady,{chats:job.label||'Telegram export',
         messages:job.total.toLocaleString('en-US'),failed:failed?failed.toLocaleString('en-US'):null}).slice(0,4000);
       let result:Record<string,unknown>;
-      // The owner's private chat where it is in Telegram now (ADR-0251); a chat the directory does not know yet waits.
+      // The owner's private chat where it is in Telegram now (ADR-0252); a chat the directory does not know yet waits.
       try{result=await this.delivery.call('telegram.notice',{id:digest('import-ready:'+job.id),...telegramTarget(owner),text},30000);}catch{return told;}
       // Telegram not connected yet: try again on a later pass. An unclear send is never repeated.
       if(result.state==='not_started')return told;

@@ -47,7 +47,7 @@ export async function requestAction(pool:pg.Pool,principal:Reader,value:unknown)
   if(!event || (principal.scope!==null && principal.scope!==event.scope))throw new HttpError(403,'action_scope_denied');
   if(event.origin!=='live')throw new HttpError(403,'external_effect_requires_live_turn');
   const destination=requested==='current'&&event.channel==='telegram'?event.scope:requested;
-  // The legacy layout sends to a Telegram chat by its own id, which the Telegram adapter checks (ADR-0251).
+  // The legacy layout sends to a Telegram chat by its own id, which the Telegram adapter checks (ADR-0252).
   if (!isTelegramChat(destination) || !text.trim())throw new HttpError(400,'invalid_action');
   const id=digest(canonical({event_id:principal.turnEvent,destination,text}));
   await ingest(pool,{version:1,key:'action-request:'+id,origin:'generated',kind:'action_request',bot_id:event.bot_id,scope:event.scope,

@@ -11,7 +11,7 @@ type Db=Pick<pg.Pool,'query'>;
 const GROUPS=100,PEOPLE=5000,AUTHORS=5000,ARRIVALS=1000;
 
 /**
- * The people in the owner's groups (ADR-0251), from the chat records capture keeps: each group's people and bots
+ * The people in the owner's groups (ADR-0252), from the chat records capture keeps: each group's people and bots
  * are chat_accounts, and who is in or left a group is chat_memberships (a person who wrote there, joined, or Telegram
  * said is a member). Bots, anonymous admins and chats posting as themselves are never people here. Names come only from
  * Telegram updates; an id remains the authority, and no message text is read.

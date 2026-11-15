@@ -37,7 +37,7 @@ export class SourceAccessRepository {
     const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
     if(answer&&!reads)return false;
     // An original belongs to the chat its raw scope names through chat_ids (current or old id), and to the topic its
-    // observed audience names through that chat's topic rows; an id with no row reads nothing (ADR-0251).
+    // observed audience names through that chat's topic rows; an id with no row reads nothing (ADR-0252).
     const chat=sourceChat(source);
     const own=answer&&reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope;
     if(chat===null||(answer?!own&&!readSetGroups(reads!).includes(chat):chat!==principal.scope))return false;
@@ -60,7 +60,7 @@ export class SourceAccessRepository {
     if(intake?.transport==='import')return false;
     if(source.origin!=='live'||source.kind==='telegram_wire')return false;
     const policy=this.policy();if(!policy.enabled||!policy.owner_id)return false;
-    // Learned from: the owner's private chat and the groups Nocheh serves, by the chat each original belongs to (ADR-0251).
+    // Learned from: the owner's private chat and the groups Nocheh serves, by the chat each original belongs to (ADR-0252).
     const chat=sourceChat(source),served=chat!==null&&(chat===ownerChat(policy)||servedGroup(chat));
     if(source.channel==='browser') {
       if(!['browser_input','browser_delivered_message'].includes(source.kind)||!served)return false;

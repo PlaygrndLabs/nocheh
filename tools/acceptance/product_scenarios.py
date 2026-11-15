@@ -105,7 +105,7 @@ class ProductScenarios(Scenarios):
 
     def serve_groups(self, *groups):
         """Turn Nocheh on in groups with the step 2b-1 switch: their Telegram ids join TELEGRAM_GROUP_IDS and the services
-        that read it restart. The app then serves every chat any of whose Telegram ids is listed (ADR-0251)."""
+        that read it restart. The app then serves every chat any of whose Telegram ids is listed (ADR-0252)."""
         names = []
         for name, service in self.f.manifest['services'].items():
             environment = service.get('environment') or {}
@@ -606,7 +606,7 @@ class ProductScenarios(Scenarios):
                                                       'skills': persona['skills'], 'revision': persona['revision']})
             _, text = self.turn(self.f.message(OWNER, 'Who are you here? [[context:'+role_mark+']]'), OWNER)
             self.gate('owner_role_reaches_private_chat', 'present' in text, answer=text)
-            # A project with OTHER_GROUP and NG1, a group first seen after step 2b (ADR-0251), and a task on its board that
+            # A project with OTHER_GROUP and NG1, a group first seen after step 2b (ADR-0252), and a task on its board that
             # the chat should see.
             project = self.f.app('/v1/projects', {'name': 'Canary project P1', 'description': '', 'state': 'active', 'expected_revision': 0,
                                                   'operation_id': 'scenario-canary-project-'+number})
@@ -713,7 +713,7 @@ class ProductScenarios(Scenarios):
 
     def project_groups_stay_apart(self):
         # Groups of one project (ADR-0247, ADR-0248, ADR-0249): OTHER_GROUP (GP1), THIRD_GROUP (GP2) and NEW_GROUP (NG1, a
-        # group first seen after step 2b, with a digest id, ADR-0251) join a new project; GROUP (GP4) stays in none. Each
+        # group first seen after step 2b, with a digest id, ADR-0252) join a new project; GROUP (GP4) stays in none. Each
         # group, and the owner's private chat, holds its own mark next to one shared search word. A group answer reads only
         # its own group: the owner's question in GP1 finds GP1's mark and its task, never GP2's mark, task, count or tag,
         # and the same question in NG1 finds NG1's mark and neither group's task. Under the owner's answer there sits Answer
@@ -775,7 +775,7 @@ class ProductScenarios(Scenarios):
             self.gate('group_task_view_shows_its_own_task', gp1_task in listed, result=listed[:300])
             self.gate('group_task_view_never_shows_another_groups_task', gp2_task not in listed and gp2_tag not in listed
                       and (tasks.get('counts') or {}).get('open') == 1, counts=tasks.get('counts'), result=listed[:300])
-            # 2b. NG1, the group with a digest id whose archive is read through its Telegram ids (ADR-0251), reads only
+            # 2b. NG1, the group with a digest id whose archive is read through its Telegram ids (ADR-0252), reads only
             # itself too: its own mark, never GP1's, GP2's or GP4's marks or tasks, though it shares their project.
             _, new_text = self.turn(self.f.message(NEW_GROUP, 'What do we have on crates? '+tools), NEW_GROUP, chunked=True)
             new_search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
@@ -852,7 +852,7 @@ class ProductScenarios(Scenarios):
             def recorded():
                 replies = self.f.app('/v1/chat-sends?kind=reply&limit=100')['records']
                 answers = self.f.app('/v1/chat-sends?kind=button_answer&limit=100')['records']
-                # A send record keeps the app's chat and message ids as text (ADR-0251), whatever the app's own type.
+                # A send record keeps the app's chat and message ids as text (ADR-0252), whatever the app's own type.
                 found = [any(item['chat'] == str(row['message']['chat']['id']) and str(item['message_id']) == str(row['message']['message_id'])
                              and item['state'] == 'sent' for item in replies) for row in (*group_replies, *private_replies)]
                 found += [any(item['reference'] == 'approval-answer:'+tap['callback_query_id'] and item['state'] == 'sent' for item in answers)
@@ -882,7 +882,7 @@ class ProductScenarios(Scenarios):
                     raise Failed('cleanup_failed')
 
     def new_id_group_works_end_to_end(self):
-        # NG1 is a group Nocheh first sees after step 2b: its Nocheh id is a digest, never its Telegram id (ADR-0251). It
+        # NG1 is a group Nocheh first sees after step 2b: its Nocheh id is a digest, never its Telegram id (ADR-0252). It
         # stays off until the owner lists it in TELEGRAM_GROUP_IDS, the step 2b-1 switch; then a reply, a topic's recall of
         # the group, a task on its project's board and a topic of its own work as in any group. Answer privately with NG1
         # is project_groups_stay_apart, where NG1 is in P1.
@@ -940,7 +940,7 @@ class ProductScenarios(Scenarios):
 
     def supergroup_upgrade_keeps_history(self):
         # Telegram upgrades a basic group to a supergroup: the supergroup has a new Telegram id, and Telegram says so in
-        # both chats (migrate_to_chat_id, migrate_from_chat_id). Nocheh keeps one chat (ADR-0251): the new id joins the old
+        # both chats (migrate_to_chat_id, migrate_from_chat_id). Nocheh keeps one chat (ADR-0252): the new id joins the old
         # one, so the group keeps its id, its project, its task and its switch, which still lists the old id only, and a
         # search in the supergroup finds what was said before the upgrade. An upgrade the owner's refresh finds instead
         # (Telegram answers with migrate_to_chat_id) moves a group onto its new id the same way, at once.

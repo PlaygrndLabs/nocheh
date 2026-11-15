@@ -26,7 +26,7 @@ const fixtureDatabase=async()=>{
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
-  // The fixture chats' rows: what each chat is comes from them, in the store as in the directory (ADR-0251).
+  // The fixture chats' rows: what each chat is comes from them, in the store as in the directory (ADR-0252).
   const stores=connectStores(config,passwords);await seedChats(stores.control);
   return {config,passwords,stores};
 };
@@ -504,7 +504,7 @@ test('an answer reader reads the groups frozen at its tap, by search and by page
   } finally {await stores.control.query('DELETE FROM private_answers');await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('chats first seen after step 2b keep their Nocheh ids in the record, and what each is comes from its chats row (ADR-0251)',
+test('chats first seen after step 2b keep their Nocheh ids in the record, and what each is comes from its chats row (ADR-0252)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const {stores}=await fixtureDatabase(),P3=digest('fixture:project:P3');
   const policy=groupsPolicy({group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS]}),answers=new PrivateAnswerRepository(stores.control,()=>policy);
@@ -535,7 +535,7 @@ test('chats first seen after step 2b keep their Nocheh ids in the record, and wh
   }
 });
 
-test('a release from before step 2b, redeployed, keeps writing its rows, and a row it wrote still taps, claims and binds (ADR-0251)',
+test('a release from before step 2b, redeployed, keeps writing its rows, and a row it wrote still taps, claims and binds (ADR-0252)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const {stores}=await fixtureDatabase(),policy=groupsPolicy(),answers=new PrivateAnswerRepository(stores.control,()=>policy);
   // A group the owner added after rolling back has no chats row; its Telegram id is old-shaped. Bob's raw id has none either.

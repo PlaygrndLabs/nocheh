@@ -8,7 +8,7 @@ import {inReadSet,inRecall,observedChat,type ReadSet,type RecallScope} from '../
 
 /** `recall` admits the known conversations of a recall scope: its own, or every conversation of its group when the
  * group's topics share memory. `reads` admits the known conversations of a read set, for an answer reader (ADR-0249).
- * A conversation is the Nocheh chat or topic an original's observed audience names (ADR-0251). */
+ * A conversation is the Nocheh chat or topic an original's observed audience names (ADR-0252). */
 export type RelationshipAudience={kind:'owner'}|{kind:'recall';scope:RecallScope}|{kind:'reads';set:ReadSet};
 const permits=(audience:RelationshipAudience,chat:string|null):boolean=>audience.kind==='owner'||chat!==null&&
   (audience.kind==='reads'?inReadSet(audience.set,chat):inRecall(audience.scope,chat));

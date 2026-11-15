@@ -25,7 +25,7 @@ from tools.acceptance.telegram_rehearsal import (TELEGRAM_SERVICE, archived_deli
 OWNER, GROUP, OTHER_GROUP, UNSELECTED_GROUP, PARTICIPANT = 123, -10042, -10043, -10099, 777
 # A third served group, so two groups can share a project while GROUP stays in none (project_groups_stay_apart).
 THIRD_GROUP = -10044
-# Groups Nocheh first sees after step 2b, so their Nocheh ids are digests (ADR-0251). NEW_GROUP (NG1) is turned on with
+# Groups Nocheh first sees after step 2b, so their Nocheh ids are digests (ADR-0252). NEW_GROUP (NG1) is turned on with
 # the 2b-1 switch and joins P1; UPGRADED_GROUP is a basic group Telegram upgrades to UPGRADED_SUPERGROUP, which Nocheh
 # learns from Telegram's service messages; REFRESHED_GROUP is one whose upgrade the owner's refresh finds. No other
 # scenario posts in either upgraded group.
@@ -139,7 +139,7 @@ const text=await response.text();if(!response.ok)throw Error('native_http_'+resp
 
     def chat(self, app_id, topic=None, seconds=60):
         """The Nocheh id of a Telegram chat, or of one of its topics, found by its Telegram id labels in the owner's chat
-        list (ADR-0251). A chat Nocheh knew before step 2b keeps its stored value as its id; one first seen later, a topic
+        list (ADR-0252). A chat Nocheh knew before step 2b keeps its stored value as its id; one first seen later, a topic
         included, has a digest id, so scenarios never build an id from Telegram's. Waits for a chat just captured."""
         external, started = str(app_id), time.monotonic()
         while True:
@@ -260,7 +260,7 @@ class Scenarios:
         return any(not str(button.get('callback_data') or '').startswith('np') for line in rows for button in line)
 
     def topic_chat(self, chat, topic):
-        """The Nocheh id of a group's topic. Nocheh learns a topic from a message in it (ADR-0251), so a topic nothing was
+        """The Nocheh id of a group's topic. Nocheh learns a topic from a message in it (ADR-0252), so a topic nothing was
         said in yet first gets a message nobody addresses."""
         try:
             return self.f.chat(chat, topic, seconds=0)
@@ -519,7 +519,7 @@ class Scenarios:
 
     def action_approval(self):
         topic, wording = 17, 'سلام تیم، جلسه ساعت ۱۷ است ✅'
-        # The destination is the topic's chat id, as the model gets it from the destinations list (ADR-0251).
+        # The destination is the topic's chat id, as the model gets it from the destinations list (ADR-0252).
         destination = self.topic_chat(GROUP, topic)
         known = {row['id'] for row in self.proposals()}
         before = len(self.f.sent())
@@ -777,7 +777,7 @@ class Scenarios:
         self.gate('unparseable_update_visible', (health.get('telegram_details') or {}).get('unparseable_updates', 0) >= 1, health=health.get('telegram_details'))
 
     def telegram_refresh_names(self):
-        # A refresh that finds a group upgraded now moves the chat onto its new Telegram id (ADR-0251); later scenarios
+        # A refresh that finds a group upgraded now moves the chat onto its new Telegram id (ADR-0252); later scenarios
         # still post in OTHER_GROUP by its id, so a refresh that finds an upgrade is checked on a group no other scenario
         # posts in, in product_scenarios.supergroup_upgrade_keeps_history.
         self.f.control({'chats': [{'id': GROUP, 'type': 'supergroup', 'title': 'Synthetic Forum Refreshed', 'is_forum': True},

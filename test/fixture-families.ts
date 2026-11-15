@@ -1,4 +1,4 @@
-// Both fixture families for store tests that make up their own chats (ADR-0251). Synthetic values only.
+// Both fixture families for store tests that make up their own chats (ADR-0252). Synthetic values only.
 import {accountIdFor,chatDirectory,chatIdFor,type ChatDirectory,type ChatIdRow,type ChatRow} from '../src/chats.js';
 import {legacyChat} from '../src/chats-telegram.js';
 import {OWNER,legacyChats,type FixtureChats} from './fixture-groups.js';

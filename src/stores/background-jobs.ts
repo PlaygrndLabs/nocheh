@@ -378,7 +378,7 @@ export class BackgroundJobRepository {
     // A direction override or a tag character can make a card read in another order than the job runs (ADR-0250).
     if(reordering(title)||reordering(instruction))throw new HttpError(400,'job_hidden_characters');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
-    // A job asked in the owner's private chat or one of its topics is the owner's chat's (ADR-0251: by its row).
+    // A job asked in the owner's private chat or one of its topics is the owner's chat's (ADR-0252: by its row).
     const owner=ownerChat(this.access.policy())!,space=principal.space!,scope=(parentSpace(space)??space)===owner?owner:turn.scope,box=body.box===true;
     // A machine only for the owner's own request, in their private chat or an active project's group; refused before anything is spent.
     const machine=body.machine===undefined?null:await this.machineFor(principal,space,requester,box,(body.machine as string).trim());

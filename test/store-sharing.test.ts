@@ -180,7 +180,7 @@ for(const family of families)test(`a group answer uses only that group: groups i
   const key='project-groups:'+Date.now(),group='-'+Date.now(),other=group+'3',token='synthetic-sharing-token-not-a-real-credential',owner:Reader={admin:true,scope:null};
   const filterInputs:string[]=[];let calls=0;
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other]};
-  // The chats as the seeder makes their rows, old-shaped or digest ids (ADR-0251); the archive keeps Telegram's ids.
+  // The chats as the seeder makes their rows, old-shaped or digest ids (ADR-0252); the archive keeps Telegram's ids.
   const id=family.id,restore=installChatsForTest(family.directory([group,other,other+'/topic/5'],{owner:'123',served:policy.group_ids}));
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{

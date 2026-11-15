@@ -100,7 +100,7 @@ class TelegramOperationsTests(unittest.TestCase):
         self.assertTrue(all('nocheh-telegram' in call.args[0] for call in run.call_args_list))
 
     def test_directory_names_groups_by_their_nocheh_id_and_keeps_who_their_messages_show(self):
-        # Storage names each group by its Nocheh id, with its Telegram ids beside it (ADR-0251). The dashboard opens a group
+        # Storage names each group by its Nocheh id, with its Telegram ids beside it (ADR-0252). The dashboard opens a group
         # by that id, so it stays the group's id here; TELEGRAM_GROUP_IDS, which names a group Telegram upgraded by its
         # earlier id, finds the group through any of its Telegram ids, and only Telegram ids are sent to Telegram.
         newer, upgraded = 'a' * 64, 'c' * 64

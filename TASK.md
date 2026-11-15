@@ -2,7 +2,7 @@
 
 <current>
 
-Members step 2b-1: Nocheh's own chat ids ([ADR-0251](docs/adr/0251-chats-get-nochehs-own-ids.md);
+Members step 2b-1: Nocheh's own chat ids ([ADR-0252](docs/adr/0252-chats-get-nochehs-own-ids.md);
 owner, 2026-11-12: "I just review the tables and seems what I want if there is a important point
 or need my answer ask, else start build.", approving the Members design, whose step 2b is "Chat
 records ready for Slack"; "want ensure the db design cover slack for future"). One branch: a
@@ -90,7 +90,7 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   Telegram ids, as the gate applies them ([supervision](test/owner-supervision.test.ts)); a
   Slack thread is never a chat, so no Slack topic id is made ([chats](test/chats.test.ts)); a
   Telegram id with no record reads nothing in a store test with no fixture filling it in
-  ([retrieval](test/store-retrieval.test.ts)). ADR-0251 now lists what a rollback to main
+  ([retrieval](test/store-retrieval.test.ts)). ADR-0252 now lists what a rollback to main
   loses and every small dashboard change.
 - Full tester fixes: the first turn in a group Telegram has just upgraded is bound once the
   security service's own chat directory has looked again, not refused once and retried

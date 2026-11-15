@@ -15,7 +15,7 @@ import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHea
 const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token}))),stores.control);
 const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:servedPolicy(()=>config.assistant),runtime:call,brain:brainWithPrompts(brain(config),stores.control),memoryEngine:memoryEngine(config)});
-// The security service reads chats as the app records them (ADR-0251); a newer guard epoch reloads them.
+// The security service reads chats as the app records them (ADR-0252); a newer guard epoch reloads them.
 await startChatDirectory(stores.control,()=>config.assistant);
 const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',
   archive:process.env.ARCHIVE_URL??'http://nocheh-app:8780',hermes:config.hermesUrl,prepare:storageGuardService(services),

@@ -75,7 +75,7 @@ test('a private answer searches Honcho only through the sessions and receipts of
   // One conversation session per place with a completed write: the asking group, its topic, another group of the project and
   // its topic, a group in no project, the owner (audience 'owner'), the owner's chat named as itself and an import.
   const places=[GP1,GP1_TOPIC,GP2,GP2+'/topic/9',GP4,GP4+'/topic/9','owner',OWNER,OWNER+'/topic/5','desktop:private_supergroup:1234567890',NG1,NG1_TOPIC];
-  // Both fixture families, plus the topics of GP1, GP2 and GP4 above as the seeder makes their rows (ADR-0251).
+  // Both fixture families, plus the topics of GP1, GP2 and GP4 above as the seeder makes their rows (ADR-0252).
   const policy=groupsPolicy(),base=fixtureChats(),known=new Set(base.chats.map(chat=>chat.id));
   const extra=legacyChats([GP2+'/topic/9',GP4+'/topic/9',GP2+'/topic/11',GP1+'/topic/12',OWNER+'/topic/5'],{served:GP_GROUP_IDS});
   const restore=installChatsForTest({...base,chats:[...base.chats,...extra.chats.filter(chat=>!known.has(chat.id))],ids:[...base.ids,...extra.ids.filter(row=>!known.has(row.chat_id))]});

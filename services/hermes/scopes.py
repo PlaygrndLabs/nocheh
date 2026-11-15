@@ -45,7 +45,7 @@ def verify_capability(credential,secret,scope,event_id):
         if 'logical_profile' in claims and (generation is None or not isinstance(claims['logical_profile'],str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',claims['logical_profile'])):raise ValueError()
         if scope.logical_profile and claims.get('logical_profile')!=scope.logical_profile:raise ValueError()
         if 'project' in claims and (not isinstance(claims['project'],str) or not re.fullmatch(r'[a-f0-9]{64}',claims['project'])):raise ValueError()
-        # A Telegram turn is bound to where its chat is in the app (ADR-0251); a job's or the dashboard's pass names none.
+        # A Telegram turn is bound to where its chat is in the app (ADR-0252); a job's or the dashboard's pass names none.
         if scope.app and claims.get('app')!={'app':scope.app[0],'chat':scope.app[1],'topic':scope.app[2]}:raise ValueError()
         return claims
     except Exception:raise ValueError('archive_capability_scope_mismatch') from None
@@ -70,7 +70,7 @@ class Scope:
 
 
 class Scopes:
-    """Who Nocheh's brain serves (ADR-0251). Whether it is on and each group's member access come from its environment;
+    """Who Nocheh's brain serves (ADR-0252). Whether it is on and each group's member access come from its environment;
     the owner, the owner's private chat and the served groups come from the app's served list (services/chats.py), by
     their Nocheh chat ids and their Telegram ids now and before. A turn's chat, space and app binding come from its
     signed pass, and its profile is built for that chat per request. A list that cannot be read serves nothing."""
@@ -166,7 +166,7 @@ class Scopes:
         """The scope of a Telegram turn: the Nocheh chat and space its pass names, checked against the update it answers.
 
         The pass's app binding must name this update's chat and topic, and the served list must agree: the update's
-        Telegram id (now or before) and topic are that space, which is where the binding says it is now (ADR-0251). The
+        Telegram id (now or before) and topic are that space, which is where the binding says it is now (ADR-0252). The
         owner's own turn (no scope) and a private answer (ADR-0249) are the owner writing in the owner's private chat;
         any other is a served group's member with access. A turn this policy does not serve is None; a pass that does not
         match its update is refused."""

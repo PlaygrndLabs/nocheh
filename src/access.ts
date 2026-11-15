@@ -15,7 +15,7 @@ export interface Reader {readonly scope:string|null; readonly admin:boolean;read
   /** The conversations an answer reader may read, resolved on the server from the frozen record for every request.
    * Never taken from a pass: a pass that names one is refused. Absent means the reader's own recall scope. */
   readonly reads?:ReadSet;
-  /** The app a turn pass is bound to (ADR-0251): its chat's current app id and topic. Signed only in a turn pass and
+  /** The app a turn pass is bound to (ADR-0252): its chat's current app id and topic. Signed only in a turn pass and
    * checked by the front door that receives the turn; storage does not require it, so job passes carry none. */
   readonly app?:AppBinding}
 /** The id of an "Answer privately" record: also the button's data after `np` and the private chat's /start parameter. */
@@ -47,7 +47,7 @@ export function reader(req:IncomingMessage,secret:string,now=Date.now()):Reader 
 /**
  * reader() for a server that can wait: a signed pass naming a chat or topic this process's chat directory does not hold
  * yet (another process recorded it a moment ago: a new forum topic's first message) is read again once the directory has
- * looked again, instead of being refused at once. Still unknown after that, it is refused as before (ADR-0251).
+ * looked again, instead of being refused at once. Still unknown after that, it is refused as before (ADR-0252).
  */
 export async function currentReader(req:IncomingMessage,secret:string,now=Date.now()):Promise<Reader> {
   let missed=false;
@@ -71,7 +71,7 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     if(claims.space!==undefined || claims.revision!==undefined){
       const space=validateSpace(claims.space);
       // A scoped pass reads as its chat, in the chat itself or one of its topics, as the chat directory says; never by
-      // the shape of an id, and a topic the directory does not know belongs to no chat (ADR-0251, fail closed).
+      // the shape of an id, and a topic the directory does not know belongs to no chat (ADR-0252, fail closed).
       if(!Number.isSafeInteger(claims.revision)||Number(claims.revision)<1)throw Error();
       if(scope!==null&&space!==scope&&chats().parentOf(space)!==scope){if(!chats().get(space))missed();throw Error();}
       policy={space,revision:claims.revision as number};
@@ -83,7 +83,7 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     if(claims.project!==undefined&&(prefix!=='turn'||typeof claims.project!=='string'||!/^[a-f0-9]{64}$/.test(claims.project)))throw Error();
     if(claims.brain!==undefined&&(prefix!=='turn'||typeof claims.brain!=='string'||!brainName.test(claims.brain)))throw Error();
     // An answer pass reads as the asker's private chat, never as the owner: its scope and space are that chat, a private
-    // chat row of the owner's (ADR-0249, ADR-0251).
+    // chat row of the owner's (ADR-0249, ADR-0252).
     if(claims.answer!==undefined&&(prefix!=='turn'||typeof claims.answer!=='string'||!answerId.test(claims.answer)||scope===null||
       !ownersPrivateChat(scope,missed)||!('space' in policy)||policy.space!==scope))throw Error();
     // What an answer may read comes from its record on the server, never from the pass.

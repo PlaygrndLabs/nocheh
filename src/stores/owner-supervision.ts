@@ -27,7 +27,7 @@ export interface ConversationDirectoryItem {
   closed?:boolean;
   /** The owner added this topic because the Bot API cannot list topics. */
   registered?:boolean;
-  /** From the chat directory (ADR-0251, ConversationChatFields): the dashboard reads these instead of an id's shape. */
+  /** From the chat directory (ADR-0252, ConversationChatFields): the dashboard reads these instead of an id's shape. */
   topic_key:ConversationChatFields['topic_key'];app_ids:ConversationChatFields['app_ids'];is_forum:ConversationChatFields['is_forum'];
   state:ConversationChatFields['state'];owner:ConversationChatFields['owner'];
 }
@@ -35,7 +35,7 @@ export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
   telegramActions:Pick<TelegramActionRepository,'inspect'>;memory:Pick<NativeMemoryRepository,'status'>;
   shared:Pick<SharingContentRepository,'inspect'>;
-  /** The chat records the directory is built from (ADR-0251). */
+  /** The chat records the directory is built from (ADR-0252). */
   chats:Pick<ChatRepository,'listing'>;
   knowledge:{proposal(principal:Reader,id:string):Promise<unknown>};
   memoryAccess?:Pick<MemoryAccessRepository,'describe'>;
@@ -48,7 +48,7 @@ const identity=(id:string)=>{if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(4
 const kindOf=(kind:string):DecisionKind=>{if(!decisionKinds.includes(kind as DecisionKind))throw new HttpError(400,'invalid_decision_kind');return kind as DecisionKind;};
 function pageLimit(value:number|undefined) {if(value!==undefined&&(!Number.isSafeInteger(value)||value<1||value>100))throw new HttpError(400,'invalid_supervision_limit');return value??50;}
 /**
- * A /v1/conversations search (ADR-0251): a chat's Nocheh id, name, its group's name, or any id it has had in its app,
+ * A /v1/conversations search (ADR-0252): a chat's Nocheh id, name, its group's name, or any id it has had in its app,
  * such as a Telegram ID, so a chat first seen after step 2b, whose Nocheh id is a digest, is found by its Telegram ID.
  * A topic carries its group's app ids, so it is found with its group.
  */
@@ -87,7 +87,7 @@ export class OwnerSupervisionRepository {
   }
 
   /**
-   * Every chat Nocheh knows, from its chats rows (ADR-0251): each with what the directory says of it (kind, parent,
+   * Every chat Nocheh knows, from its chats rows (ADR-0252): each with what the directory says of it (kind, parent,
    * topic key, app ids, state, owner), the name and dates captures and the owner's refreshes saved, and whether
    * anything of the owner's names it. A topic is listed once a message was seen in it, the owner named it, or
    * something names it. A value with no chat row that something names is listed as unknown. No message text is read.

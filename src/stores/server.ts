@@ -60,7 +60,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
     }
     if(req.method==='GET'&&path==='/internal/chats') {
-      // What the Python services may act for (ADR-0251): the served chats with their topics, and the owner's private
+      // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
       // chat apart from the owner's account.
       authorize(req,config.token);const owner=s.access.policy().owner_id;
       return json(res,200,servedChats(await currentChats(),owner?{app:'telegram',external:owner}:null));
@@ -85,7 +85,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249). A
     // pass naming a chat another process recorded a moment ago (a new topic's first turn) is read again once this
-    // process's directory has looked again, as the broker does (ADR-0251).
+    // process's directory has looked again, as the broker does (ADR-0252).
     const parsed=await currentReader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
     assertPrivateAnswerRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
@@ -114,7 +114,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
           resolved.some(note=>note!==null&&(typeof note!=='string'||!note.trim()||note.length>120||/[\r\n]/.test(note))))||
         input.edit!==undefined&&typeof input.edit!=='boolean')
         throw new HttpError(400,'invalid_owner_notice');
-      // The owner's private chat (ADR-0251), not the owner's account.
+      // The owner's private chat (ADR-0252), not the owner's account.
       const policy=s.access.policy(),owner=policy.owner_id?ownerChat(policy):null;
       if(!owner)return json(res,200,{state:'not_started',error_code:'owner_not_set'});
       // Open goes to the mini app's Problems page, or the dashboard; Retry failed is a button press storage handles.

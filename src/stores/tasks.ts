@@ -165,7 +165,7 @@ const hex=/^[a-f0-9]{64}$/;
 /** The chats that see a project's list: the groups and topics assigned to it. `groups` is the placeholder of a `text[]`
  * holding groupSpaces(), so anything the chat directory does not hold as a group or a topic of one counts as private
  * and is left out, by the same test as groupSpace, and the chats a card names are the chats that read the list
- * (ADR-0243, ADR-0251). */
+ * (ADR-0243, ADR-0252). */
 const projectChats=(project:string,groups:string)=>`(SELECT coalesce(array_agg(a.space_id ORDER BY a.space_id),'{}'::text[]) FROM project_assignments a
   WHERE a.project_id=${project} AND a.mode='assigned' AND a.space_id=ANY(${groups}::text[]))`;
 /**
@@ -329,7 +329,7 @@ export async function moveGroupTasks(db:Pick<pg.PoolClient,'query'>,group:string
   if(!groupChatId(group)||!from||!to||from===to)return 0;
   // Each task with the group it ends up in: the group of the task at the top of its family. The family takes only
   // this group's and its topics' tasks and the project's own; its topics are the topic rows the chat directory holds
-  // for it (ADR-0251), bound as $1.
+  // for it (ADR-0252), bound as $1.
   const ours=(alias:string)=>`(${alias}group_id IS NULL OR ${alias}group_id=ANY($1::text[]))`;
   const family=(await db.query(`WITH RECURSIVE down AS (
       SELECT id,group_id AS home FROM owner_tasks WHERE project_id=$2 AND parent_id IS NULL AND group_id=ANY($1::text[])
@@ -1125,7 +1125,7 @@ export class TaskRepository {
       const when=item.due_on?new Date(item.due_on+'T12:00:00Z').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})+(item.due_time?', '+item.due_time:''):null;
       const text=fillTemplate(template,{title:item.title,due:when,list:item.project,notes:item.notes?item.notes.slice(0,500):null}).slice(0,4000);
       let result:Record<string,unknown>;
-      // The owner's private chat where it is in Telegram now (ADR-0251); a chat the directory does not know yet waits.
+      // The owner's private chat where it is in Telegram now (ADR-0252); a chat the directory does not know yet waits.
       try{result=await this.delivery.call('telegram.notice',{id:item.id,...telegramTarget(owner),text},30000);}catch{return handled;}
       // Telegram not connected yet: try again on a later pass. An unclear send is never repeated.
       if(result.state==='not_started'){await this.control.query(`UPDATE owner_task_reminders SET state='pending' WHERE id=$1`,[item.id]);return handled;}

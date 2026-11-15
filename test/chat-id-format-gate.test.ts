@@ -5,7 +5,7 @@ import {join,relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 /*
- * The chat id format gate (ADR-0251). No code outside the Telegram adapter reads a chat value's Telegram shape: no
+ * The chat id format gate (ADR-0252). No code outside the Telegram adapter reads a chat value's Telegram shape: no
  * '/topic/' string handling, no -100 prefix, and no negative or positive Telegram-number pattern, in TypeScript, the
  * dashboard or Python. Code asks the chat directory (src/chats.ts) instead. The allowlist below started with every
  * site there was when step 2b began; each part deletes (or lowers) its own entries as it removes its sites, and a file

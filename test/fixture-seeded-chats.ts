@@ -1,4 +1,4 @@
-// The chat directory a store test gets when it installs none (ADR-0251). Synthetic values only.
+// The chat directory a store test gets when it installs none (ADR-0252). Synthetic values only.
 import type pg from 'pg';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {chatDirectory,chats,installChatsForTest,type Chat,type ChatAddress,type ChatApp,type ChatDirectory,type ChatKind} from '../src/chats.js';
@@ -61,7 +61,7 @@ export function seedChatsForTest(policy:()=>Policy):void {
 type Names={title?:string|null;title_source?:'observed'|'refreshed'|'owner';is_forum?:boolean;username?:string|null;refreshed?:boolean};
 /**
  * Tests only: the chats row a store test's directory names `id` by, with the name, public username and forum flag that
- * capture, an owner's refresh or the owner would have recorded there (ADR-0251). Readers of chat names (approval cards,
+ * capture, an owner's refresh or the owner would have recorded there (ADR-0252). Readers of chat names (approval cards,
  * runtime profile labels, send destinations) read these rows, not the old Telegram tables. A topic value also gets its
  * group's row. `refreshed` marks the owner's refresh as answered, as Telegram's refresh does. Names decide nothing.
  */

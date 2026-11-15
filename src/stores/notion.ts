@@ -134,7 +134,7 @@ export async function notionJobReads(db:Pick<pg.PoolClient,'query'>):Promise<boo
  * owner's exact permission. Null when it may run.
  */
 export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ownerIds:OwnerIds|string|null):Promise<string|null> {
-  // The owner's private chat (a row's chat, ADR-0251) and the owner's account (who decided). A plain string is both, as
+  // The owner's private chat (a row's chat, ADR-0252) and the owner's account (who decided). A plain string is both, as
   // before step 2b, when the owner's private chat had the owner's Telegram user id.
   const {chat:owner,account}=typeof ownerIds==='string'||!ownerIds?{chat:ownerIds,account:ownerIds}:ownerIds;
   if(!owner||!account||row.scope!==owner||(parentSpace(row.space_id)??row.space_id)!==owner)return 'notion_owner_private_only';

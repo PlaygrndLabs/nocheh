@@ -1,5 +1,5 @@
 /**
- * The Telegram adapter for chat ids (ADR-0251). Telegram's own formats are read here and nowhere else: a chat's
+ * The Telegram adapter for chat ids (ADR-0252). Telegram's own formats are read here and nowhere else: a chat's
  * numeric id, a forum topic's thread id, a t.me/c link, a Telegram Desktop export, and the frozen shape of the chat
  * values Nocheh stored before step 2b. Every other module asks the chat directory (src/chats.ts) what a chat is; it
  * never decides private, group or topic, parent or topic from the shape of an id.
@@ -28,7 +28,7 @@ export const legacyChatSource=`${telegramChat}(?:/topic/${telegramThread})?`;
  * SQL test that a text `expression` is, in the frozen old shape, a group ('group'), a group or one of its topics
  * ('group_space') or a private chat ('private'): the CHECKs a release before step 2b put on the values it writes. Only
  * for a store rule judging a value that no chats row names, so that such a release, redeployed, keeps writing its rows
- * (ADR-0251: 2b-1 is undone by redeploying). Everything Nocheh writes now has a row and is judged by it.
+ * (ADR-0252: 2b-1 is undone by redeploying). Everything Nocheh writes now has a row and is judged by it.
  */
 export function legacyShapeSql(expression:string,kind:'group'|'group_space'|'private'):string {
   if(!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(expression))throw Error('invalid_sql_expression');
@@ -124,7 +124,7 @@ export interface DestinationDirectory {
  * The chat a send names, as the model or the owner writes it: a chat id the directory knows; a t.me/c link to a group,
  * one of its topics or a message in it; or a Telegram chat id, with `/topic/<n>` for a topic as it was written before
  * step 2b. Every form ends as a chat id the directory holds; anything it does not know is null, so the send is refused
- * (ADR-0242, ADR-0251).
+ * (ADR-0242, ADR-0252).
  */
 export function telegramDestination(value:unknown,directory:DestinationDirectory):string|null {
   if(typeof value!=='string'||!value.trim()||value.length>200)return null;

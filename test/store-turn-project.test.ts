@@ -20,7 +20,7 @@ test('a turn in a chat of an active project carries that project, so the turn ge
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),key='turn-project:'+Date.now(),group='-100'+Date.now(),owner={admin:true,scope:null};
   const audience=new AudienceRepository(new GuardRepository(stores,new ArchiveRepository(stores.archive))),projects=new ProjectRepository(stores.control);
-  // The group and its topics, as the chat directory knows them (ADR-0251).
+  // The group and its topics, as the chat directory knows them (ADR-0252).
   const restore=installChatsForTest(seededDirectory(()=>({owner_id:'123',group_ids:[group]})));
   const claims=async(space:string)=>{
     const token=await audience.turn('synthetic-secret',{scope:space.split('/topic/')[0]!,space},digest(key+space),Date.now()+60000);

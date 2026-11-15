@@ -337,7 +337,7 @@ export class TelegramDispatchRepository {
   private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<{id:string;speaker:string;text:string;forwarded?:string}[]> {
     const own=(await this.archive.pool.query('SELECT scope,received_at FROM events WHERE id=$1',[source.id])).rows[0];
     if(!own)return [];
-    // Under every Telegram id the chat has had, so a group Telegram upgraded keeps the lines from before (ADR-0251).
+    // Under every Telegram id the chat has had, so a group Telegram upgraded keeps the lines from before (ADR-0252).
     const rows=(await this.archive.pool.query(`SELECT id,payload FROM events WHERE scope=ANY($1::text[]) AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live'
       AND received_at<=$3 AND received_at>$3::timestamptz-interval '12 hours' AND convert_from(payload,'UTF8')::jsonb ? 'message'
       ORDER BY received_at DESC,id DESC LIMIT 100`,[this.scopes(space,own.scope),source.id,own.received_at])).rows;
@@ -546,7 +546,7 @@ export class TelegramDispatchRepository {
       const sender=payload?.message?.from,refused=!!sender?.id&&sender.is_bot!==true&&String(sender.id)!==this.access.policy().owner_id;
       return observation('skipped','admission',0,Date.now(),refused?'not_allowed':null);
     }
-    // The Nocheh chat the update came from, and the chat or topic it was said in (ADR-0251): asked of the directory, never
+    // The Nocheh chat the update came from, and the chat or topic it was said in (ADR-0252): asked of the directory, never
     // read out of an id. Until the directory knows both, and the topic is the chat's own, the turn waits for it.
     const chat=telegramChat(String(original.scope)),space=await this.access.space(source);
     if(!space||!chat||space!==chat&&chats().parentOf(space)!==chat)return observation('waiting','admission',0,Date.now()+30000,'prerequisite');

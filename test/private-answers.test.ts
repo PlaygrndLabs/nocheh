@@ -18,7 +18,7 @@ import {readSet,readSetGroups} from '../src/spaces.js';
 import {installChatsForTest} from '../src/chats.js';
 import {GP1,GP1_TOPIC,GP2,GP3,GP4,OWNER,P1,fixtureDirectory,groupsPolicy} from './fixture-groups.js';
 
-// The fixture chats, the owner's private chat among them, as the seeder makes their rows (ADR-0251): an answer pass reads
+// The fixture chats, the owner's private chat among them, as the seeder makes their rows (ADR-0252): an answer pass reads
 // only in that chat; groupsPolicy() installs the same directory again.
 installChatsForTest(fixtureDirectory());
 

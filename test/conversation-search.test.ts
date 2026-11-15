@@ -4,7 +4,7 @@ import {conversationMatches,OwnerSupervisionRepository,type ConversationDirector
 import {chatIdFor} from '../src/chats.js';
 
 /*
- * The owner's chat search (GET /v1/conversations?q=, ADR-0251) finds a chat by its name or by any Telegram ID it has
+ * The owner's chat search (GET /v1/conversations?q=, ADR-0252) finds a chat by its name or by any Telegram ID it has
  * had. A chat seen before step 2b keeps its stored value as its id, so its id holds its Telegram ID; one first seen
  * later has a digest id, which never does, so the search reads its app ids too. The dashboard's chat pickers, its list
  * past 100 chats and its name lookups all ask this search.

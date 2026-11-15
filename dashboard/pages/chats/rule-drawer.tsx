@@ -31,7 +31,7 @@ type Release = {
   expires_at: string | null;
   created_at: string;
 };
-/** A search hit. `scope` is the archive's raw chat id; `chat_id` is the hit's Nocheh chat (ADR-0251), the one to
+/** A search hit. `scope` is the archive's raw chat id; `chat_id` is the hit's Nocheh chat (ADR-0252), the one to
  * compare with a rule's chats. */
 type Hit = {
   id: string;

@@ -13,7 +13,7 @@ import {storageServer} from '../src/stores/server.js';
 import {fixtureServices} from './fixture-brain.js';
 import {GP1,GP1_TOPIC,GP2,GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureChats,fixtureDirectory,seedChats} from './fixture-groups.js';
 
-// The owner's chat search on the real chat records (ADR-0251): a chat is found by any Telegram ID it has had, current
+// The owner's chat search on the real chat records (ADR-0252): a chat is found by any Telegram ID it has had, current
 // or old, in both id families, and a topic is found with its group; a digest id is never shown as a Telegram ID.
 test('GET /v1/conversations?q finds a chat by any Telegram ID it has had, with its topics, in both id families',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{

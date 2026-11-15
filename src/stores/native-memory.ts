@@ -42,7 +42,7 @@ export class NativeMemoryRepository {
   private get protocol(){return this.engine.protocol;}
   private get control(){return this.contexts.access.stores.control;}
   private get guards(){return this.contexts.guards;}
-  /** The owner's private chat (ADR-0251), whose memory is the owner audience. */
+  /** The owner's private chat (ADR-0252), whose memory is the owner audience. */
   private get owner(){return ownerChat(this.contexts.access.policy());}
   private audienceOf(space:string){return space===this.owner?'owner':space;}
   private principalAudience(principal:Reader){return principal.scope===null?'owner':principal.space??principal.scope;}
@@ -524,7 +524,7 @@ export class NativeMemoryRepository {
     await this.current(workspace.id);return workspace.id as string;
   }
   /** Chosen chats as memory audiences: the owner's private chat is the owner audience, and a chat includes the topics
-   * it has rows for (ADR-0251). */
+   * it has rows for (ADR-0252). */
   private chosen(spaces:unknown):string[]|null {
     if(spaces===null||spaces===undefined)return null;
     if(!Array.isArray(spaces)||spaces.length<1||spaces.length>100)throw new HttpError(400,'invalid_memory_scope');
@@ -543,7 +543,7 @@ export class NativeMemoryRepository {
   async rebuildEstimate(principal:Reader,spaces:string[]) {
     admin(principal);
     const audiences=this.chosen(spaces.length?spaces:null),workspace=await this.workspace(await this.guards.state());
-    // The served chats' originals, under every id each has had (ADR-0251): the owner's private chat and the served groups.
+    // The served chats' originals, under every id each has had (ADR-0252): the owner's private chat and the served groups.
     const owner=this.owner,scopes=archiveScopes([...(owner?[owner]:[]),...servedGroups()]);
     const saved=(await this.contexts.access.stores.archive.query(`SELECT count(*)::int AS count FROM events WHERE origin='live' AND scope=ANY($1::text[])
       AND kind=ANY('{telegram_update,telegram_delivered_message,browser_input,browser_delivered_message}'::text[])`,[scopes])).rows[0].count as number;

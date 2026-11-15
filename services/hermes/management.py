@@ -8,7 +8,7 @@ from .profile_config import configure_profile, inspect_profile
 
 def allowed_chats(policy):
     """The owner's private chat and every served group, by their Nocheh chat ids, as the app's served list has them
-    (ADR-0251)."""
+    (ADR-0252)."""
     served = policy.current()
     return [chat for chat in [served.owner_chat, *served.groups()] if chat]
 

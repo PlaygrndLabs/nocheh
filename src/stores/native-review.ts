@@ -62,7 +62,7 @@ export class NativeReviewRepository {
     readonly turns:RuntimeTurnRepository,readonly brain:Brain,readonly token:string){}
   private get control(){return this.contexts.access.stores.control;}
   private actor(source:SourceReference,binding:GuardBinding):Reader {
-    // The owner's private chat (ADR-0251), the space the owner's native notes are reviewed in.
+    // The owner's private chat (ADR-0252), the space the owner's native notes are reviewed in.
     const policy=this.contexts.access.policy(),owner=policy.owner_id?ownerChat(policy):null;if(!owner)throw new HttpError(409,'owner_review_required');
     return {admin:false,scope:null,space:owner,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,purpose:'memory-review'};
   }
