@@ -60,6 +60,7 @@ export const chatSeedColumns:readonly SeedColumn[]=[
   column('control','security_events','scope'),
   column('control','sharing_rules','destination'),column('control','sharing_rules','sources','jsonb_array'),
   column('control','telegram_action_requests','scope'),column('control','telegram_action_requests','space_id'),column('control','telegram_action_requests','destination'),
+  column('control','telegram_action_requests','card_space'),
   column('control','workflow_imports','scopes','text_array'),
   column('control','workflow_schedules','scope'),
   column('derived','learned_entries','scope_id','text',`scope_kind='conversation'`),

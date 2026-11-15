@@ -91,11 +91,12 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
       JOIN schedule_versions v ON v.id=s.version_id WHERE s.id=$1`,[match[1]])).rows[0];
     if(!row||row.cursor!==match[2])return observation('skipped','schedule');
     const binding=await this.guards.state();
-    // A schedule in a chat Nocheh no longer serves does not run, as before; the owner is told once per settings change
-    // (deselecting a group moves the epoch), not at every tick (ADR-0254).
+    // A schedule in a chat Nocheh no longer serves does not run, as before, and its retries go on so it runs once the group
+    // is selected again. The owner is told once per fire that cannot run: the cursor stays while the schedule cannot advance,
+    // whatever moves the epoch meanwhile (a reaction does, often), and moves on once it runs (ADR-0254).
     try{await this.profile(row.scope,row.scope,row.logical_profile,binding);}catch(error){
       if(error instanceof HttpError&&(error.status===403||error.status===404)&&!servedDestination(this.access.policy(),row.scope,await currentChats()))
-        await this.actions.ownerNotice(digest(canonical(['schedule-not-run-v1',row.id,row.scope,String(binding.epoch)])),'schedule_not_run',{chat:row.scope,reason:'reason_not_served'});
+        await this.actions.ownerNotice(digest(canonical(['schedule-not-run-v1',row.id,row.scope,row.cursor])),'schedule_not_run',{chat:row.scope,reason:'reason_not_served'});
       throw error;
     }
     if(binding.mode==='on')await this.guards.prepare(row.prompt_reference,this.schedules.detectorVersion,this.schedules.detect);

@@ -470,16 +470,19 @@ test('a reminder says who set it and where; people\'s reminders due together go 
     assert.equal(notices.length,1);assert.equal((await batches('uncertain')).length,1);
     assert.equal((await reminders(hall.id)).filter(item=>item.state==='uncertain').length,1);
 
-    // i. Telegram unreachable: still sending; the next pass sends the same text under the same id, though the title changed.
+    // i. Telegram unreachable for days: still sending; the next pass sends the same text under the same id, though the
+    // title changed, and the message is kept a day from when it went out, so it holds its group's turn.
     await later();notices.length=0;
     await says(await sara(),hall.id,{reminders:[soon(54)]});await backdate(hall.id);
     telegram=503;
     assert.equal(await s.tasks.remind(),0);
     assert.equal((await batches('sending')).length,1);
+    await stores.control.query("UPDATE owner_task_reminder_batches SET created_at=created_at-interval '2 days' WHERE state='sending'");
     await edit(hall.id,{title:'Book the big hall'});
     telegram='done';
     assert.equal(await s.tasks.remind(),1);
     assert.equal(notices.length,2);assert.deepEqual(notices[1],notices[0]);assert.ok(notices[1].text.endsWith(body('Book the hall','Launch')));
+    assert.equal((await batches('sent')).filter(item=>item.id===notices[0].id).length,1,'kept a day from when it went out');
     // A 500 sends the same id again, 5 tries in all; then the reminder is unclear, with a record in System › Health.
     notices.length=0;
     await edit(hall.id,{title:'Book the hall',reminders:[soon(55)]});await backdate(hall.id);
@@ -490,6 +493,37 @@ test('a reminder says who set it and where; people\'s reminders due together go 
     assert.equal((await reminders(hall.id)).at(-1)!.state,'uncertain');
     assert.deepEqual((await stores.control.query('SELECT kind,state,status,error_code,chat FROM chat_sends WHERE reference=$1',['notice:'+notices[0].id])).rows,
       [{kind:'notice',state:'uncertain',status:500,error_code:'reminder_unconfirmed',chat:'123'}]);
+    // A lost answer, then "not connected" on the resend: that try may have gone out, so the message stays sending under
+    // its id and text; a reminder due meanwhile waits for the group's next turn, and nothing goes twice.
+    await later();notices.length=0;
+    await says(await sara(),hall.id,{reminders:[soon(56)]});await backdate(hall.id);
+    telegram=503;
+    assert.equal(await s.tasks.remind(),0);
+    await says(await omid(),hall.id,{reminders:[soon(57)]});await backdate(hall.id);
+    telegram='not_started';
+    assert.equal(await s.tasks.remind(),0);
+    assert.deepEqual((await batches('sending')).map(item=>[item.id,item.tries]),[[notices[0].id,1]],'its id kept, and the try that never started not counted');
+    telegram='done';
+    assert.equal(await s.tasks.remind(),1);
+    await later();
+    assert.equal(await s.tasks.remind(),1);
+    assert.equal(notices.length,4);for(const item of notices.slice(1,3))assert.deepEqual(item,notices[0]);
+    assert.equal(notices[3].text,setBy(allowed('Omid'),family)+body('Book the hall','Launch'),'the reminder due meanwhile goes on its own');
+    // The message, its reminders and their history settle together: a stop while settling leaves them all sending, and
+    // the next pass sends the same message again.
+    await later();notices.length=0;
+    await says(await sara(),hall.id,{reminders:[soon(58)]});await backdate(hall.id);
+    const superuser=new pg.Client({...config,database:'nocheh_control'});await superuser.connect();
+    try {
+      await superuser.query(`CREATE FUNCTION reminder_settle_stop() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic_stop'; END; $$;
+        CREATE TRIGGER reminder_settle_stop BEFORE INSERT ON owner_task_activity FOR EACH ROW WHEN (NEW.origin='reminder' AND NEW.task_id='${hall.id}')
+        EXECUTE FUNCTION reminder_settle_stop()`);
+      await assert.rejects(s.tasks.remind(),/synthetic_stop/);
+      assert.deepEqual([(await batches('sending')).length,(await reminders(hall.id)).at(-1)!.state],[1,'sending']);
+    }finally{await superuser.query('DROP TRIGGER IF EXISTS reminder_settle_stop ON owner_task_activity;DROP FUNCTION IF EXISTS reminder_settle_stop()');await superuser.end();}
+    assert.equal(await s.tasks.remind(),1);
+    assert.equal(notices.length,2);assert.deepEqual(notices[1],notices[0]);
+    assert.equal((await reminders(hall.id)).at(-1)!.state,'sent');
 
     // j. Refused: failed for good, with a record; the next group and the owner's reminders still go in the same pass.
     await later();notices.length=0;
@@ -533,6 +567,23 @@ test('a reminder says who set it and where; people\'s reminders due together go 
     assert.equal(await s.tasks.remind(),2,'one sent, one skipped');
     assert.deepEqual(notices.map(item=>item.text),['\u2611\ufe0f Closed by '+allowed('Omid')+' in '+family+'\n'+body('Order the cake','Launch')]);
     assert.deepEqual((await reminders(flowers.id)).map(item=>item.state),['skipped']);
+    // A person who archives, trashes or drops what the owner already finished did not close it: the owner's reminder
+    // stays skipped, with no Closed by line, as does a subtask's the owner finished when a person archives its parent.
+    // Archiving what a person finished still names them; the owner archiving it in the dashboard takes it back.
+    notices.length=0;
+    const fix=(title:string)=>add({title,scope:launch,reminders:[soon(92)]});
+    const shelf=await fix('Fix the shelf'),tile=await fix('Fix the tile'),vase=await fix('Fix the vase'),lamp=await fix('Fix the lamp');
+    const bulb=await add({title:'Buy a bulb',parent:lamp.id,reminders:[soon(92)]}),mop=await fix('Fix the mop'),rug=await fix('Fix the rug');
+    for(const task of [shelf,tile,vase,bulb])await edit(task.id,{state:'done'});
+    await says(await omid(),shelf.id,{archived:true});await says(await omid(),tile.id,{trashed:true});await says(await omid(),vase.id,{state:'dropped'});
+    await says(await sara(),lamp.id,{archived:true});
+    await says(await omid(),mop.id,{state:'done'});await says(await sara(),mop.id,{archived:true});
+    await says(await omid(),rug.id,{state:'done'});await edit(rug.id,{archived:true});
+    for(const task of [shelf,tile,vase,lamp,bulb,mop,rug])await backdate(task.id);
+    assert.equal(await s.tasks.remind(),7,'two sent, five skipped');
+    assert.deepEqual(notices.map(item=>item.text).sort(),['\u2611\ufe0f Closed by '+allowed('Sara')+' in '+plans+'\n'+body('Fix the lamp','Launch'),
+      '\u2611\ufe0f Closed by '+allowed('Omid')+' in '+family+'\n'+body('Fix the mop','Launch')].sort());
+    for(const task of [shelf,tile,vase,bulb,rug])assert.deepEqual((await reminders(task.id)).map(item=>item.state),['skipped'],task.title);
     // A person's reminder waiting for its group's turn still goes when its task closed meanwhile; one whose task closed
     // before it came due does not.
     const gift=await add({title:'Wrap the gift',scope:launch}),card=await add({title:'Write the card',scope:launch});
@@ -554,6 +605,18 @@ test('a reminder says who set it and where; people\'s reminders due together go 
       [{set_by:'person',set_by_account_id:saraAccount,set_by_name:'Sara',set_in_chat_id:topic,set_in_group_id:group}]);
     assert.deepEqual((await stores.control.query('SELECT field,by,account_id,name,chat_id,group_id FROM owner_task_writers WHERE task_id=$1',[copy])).rows,
       [{field:'title',by:'person',account_id:omidAccount,name:'Omid',chat_id:group,group_id:group}]);
+    // Repeating from when it is done, due in a week with the owner's reminder: a person finishing it today puts that
+    // reminder on the next one at the same minute, so the time comes once, from the next one, with no Closed by line.
+    const week=(await stores.control.query(`SELECT to_char((now() AT TIME ZONE 'UTC')+interval '7 days','YYYY-MM-DD') AS day`)).rows[0].day as string;
+    const sweep=await add({title:'Sweep the yard',scope:launch,due_on:week,repeat:{every:1,unit:'week',from:'done'},reminders:[soon(96)]});
+    await says(await omid(),sweep.id,{state:'done'});
+    const yard=(await s.tasks.get(owner,sweep.id)).repeated_to as string;
+    assert.deepEqual((await reminders(yard)).map(item=>item.at),(await reminders(sweep.id)).map(item=>item.at),'moved by no days');
+    await backdate(sweep.id);await backdate(yard);notices.length=0;
+    assert.equal(await s.tasks.remind(),2,'one skipped, one sent');
+    assert.deepEqual(notices.map(item=>item.id),(await stores.control.query('SELECT id FROM owner_task_reminders WHERE task_id=$1',[yard])).rows.map(item=>item.id));
+    assert.ok(!notices[0].text.includes('Closed by'));
+    assert.deepEqual((await reminders(sweep.id)).map(item=>item.state),['skipped']);
 
     // o. Many people's reminders due never hold back the owner's: it goes in the same pass.
     const crowd=(task:string,count:number)=>stores.control.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,set_by,set_by_account_id,set_by_name,set_in_chat_id,set_in_group_id)
@@ -565,13 +628,16 @@ test('a reminder says who set it and where; people\'s reminders due together go 
     assert.equal(await s.tasks.remind(),26);
     assert.equal(notices[0].text,body('Plan the party','Launch'));assert.ok(notices[1].text.startsWith('\u{1f514} 25 reminders set in '+family+'\n\n'));
 
-    // p. 201 due in one group: at most 200 are read at once, as many as fit go, the message says how many wait, and all
-    // go in time.
+    // p. 201 due in one group from Sara, and one from Omid due after them all: at most 200 are read at once, taken by turns
+    // per setter, so Omid's is in the first message; as many as fit go, the message says how many wait, and all go in time.
     await later();notices.length=0;
     const neighbours=await add({title:'Invite the neighbours',scope:launch});await crowd(neighbours.id,201);
+    await stores.control.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,set_by,set_by_account_id,set_by_name,set_in_chat_id,set_in_group_id)
+      VALUES($1,$2,now()-interval '1 minute','person',$3,'Omid',$4,$4)`,[digest(neighbours.id+':omid'),neighbours.id,omidAccount,group]);
     const first=await s.tasks.remind(),text=notices[0].text as string;
     assert.ok(first>1&&first<200&&text.length<=4000,String(first));
-    assert.ok(text.endsWith('\u23f3 '+(201-first)+' more reminders set in '+family+' are due. They come in the next message; at most one message per group every 10 minutes.'));
+    assert.ok(text.includes(setBy(allowed('Omid'),family)+body('Invite the neighbours','Launch')),'one person\'s backlog never keeps another\'s out');
+    assert.ok(text.endsWith('\u23f3 '+(202-first)+' more reminders set in '+family+' are due. They come in the next message; at most one message per group every 10 minutes.'));
     for(let pass=0;pass<5&&(await reminders(neighbours.id)).some(item=>item.state==='pending');pass++){await later();await s.tasks.remind();}
     assert.ok((await reminders(neighbours.id)).every(item=>item.state==='sent'));
 

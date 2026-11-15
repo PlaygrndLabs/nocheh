@@ -160,10 +160,11 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
   'tasks.reminder_texts':{person:['{name}'],person_gone:['{name}'],set_by:['{who}','{place}'],written_by:['{who}','{place}','{fields}'],
     closed_by:['{who}','{place}'],merged:['{count}','{place}'],more_waiting:['{count}'],note_line:['{line}'],removed_in_group:['{count}','{times}']},
 };
-/** The owner's lines of a labeled text that drop a value Nocheh fills in. */
+/** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
+ *  Object property ('constructor', '__proto__') is just a line; a text with no such lines is not read at all. */
 const missingLines=(key:PromptKey,text:string)=>{
-  const required=labeledPlaceholders[key]??{};
-  return Object.entries(readLines(text)).filter(([name,line])=>(required[name]??[]).some(value=>!line.includes(value))).map(([name])=>name);
+  const required=Object.hasOwn(labeledPlaceholders,key)?labeledPlaceholders[key]:undefined;if(!required)return [];
+  return Object.entries(readLines(text)).filter(([name,line])=>(Object.hasOwn(required,name)?required[name]!:[]).some(value=>!line.includes(value))).map(([name])=>name);
 };
 /** labeledLines, where an owner's line that lacks a value it must keep reads as its default. */
 function checkedLines(key:PromptKey,defaults:string,text:string|undefined):Record<string,string> {

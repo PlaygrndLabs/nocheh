@@ -516,6 +516,10 @@ test('owner directory, destinations and message requests keep their routes and p
   const unserved=await run('action_request',{destination:'b'.repeat(64),text:'Synthetic note'},fake(()=>new Status(403,{error:'destination_not_served'})).context);
   assert.equal(unserved.error,'destination_not_served');assert.match(unserved.note,/^Nothing was sent and no card was made: /);assert.match(unserved.note,/Chats page/);
   assert.deepEqual(await run('action_request',{destination:'current',text:' '},fake(()=>new Status(400,{error:'invalid_action'})).context),{error:'action_request_unavailable'});
+  // 'current' from a job, a schedule or the web chat, which have no live Telegram message, is a bad request as before: the
+  // model is never told its chat is not served.
+  const current=await run('action_request',{destination:'current',text:'Post the summary here'},fake(()=>new Status(400,{error:'invalid_action'})).context);
+  assert.deepEqual(current,{error:'action_request_unavailable'});assert.ok(!JSON.stringify(current).includes('not served'));
   assert.deepEqual(await run('action_request',{destination:'current',text:'Synthetic'},fake(()=>new Status(403,{error:'made_up_code'})).context),{error:'action_request_unavailable'});
   assert.equal((await run('telegram_destinations',{},fake(()=>new Status(403)).context)).note,'Available only in a group conversation.');
 });

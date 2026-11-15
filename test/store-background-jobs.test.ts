@@ -388,7 +388,10 @@ test('a job whose group Nocheh stops serving before its report ends unreported, 
   const family=families[1]!,raw='-2'+String(Date.now()).slice(-12),chat=family.id(raw),key='background-unserved:'+Date.now();
   const restore=installChatsForTest(family.directory([raw],{owner:'123',served:[raw]}));
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-unserved-')),notices:Record<string,unknown>[]=[];
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[raw],group_access:{[raw]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  // Deselected as the owner does it: the group leaves group_ids and its access list goes with it (a list for a group not
+  // selected is refused), the restart applies the policy, which moves the epoch, and the directory turns the group off.
+  let served=true;
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:served?[raw]:[],group_access:served?{[raw]:{granted:['9'],denied:[]}}:{},topic_memory:'group' as const});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -398,6 +401,7 @@ test('a job whose group Nocheh stops serving before its report ends unreported, 
       if(operation==='telegram.notice')notices.push(input);
       return {state:'done'};
     },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  const select=async(on:boolean)=>{served=on;installChatsForTest(family.directory([raw],{owner:'123',served:on?[raw]:[]}));await s.configuration.configure(policy(),'on');};
   let sent=100;
   const message=async(label:string,from=9,text='Please find what is still open')=>{
     const payload={message:{message_id:++sent,date:1700000000,chat:{id:Number(raw),type:'supergroup'},from:{id:from,first_name:'Member'},text}};
@@ -407,34 +411,59 @@ test('a job whose group Nocheh stops serving before its report ends unreported, 
   const actor=async(source:string):Promise<Reader>=>{
     const binding=await s.guards.state();return {admin:false,scope:chat,space:chat,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
   };
-  const authority=async()=>({owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0].epoch)});
+  const authority=async(family='background')=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
   const job=async(id:string)=>(await stores.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
-  try {
-    await s.guards.reconcile();await s.guards.setMode('on');
-    const settings=await s.jobs.settings();
-    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:10,revision:settings.revision});
-    const proposed=await s.jobs.start(await actor((await message('ask')).id),{title:'Open tasks',instruction:'Find every task that is still open.'});
-    await s.jobs.decide('9',{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message('approve'));
+  const tick=async(id:string)=>(await s.jobs.operation('job:'+id,await authority())).state;
+  const reports=async(id:string)=>(await stores.control.query(`SELECT a.id,a.state,a.error_code FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
+    WHERE b.job_id=$1 ORDER BY b.part`,[id])).rows;
+  const told=(id:string)=>digest(canonical(['job-report-not-sent-v1',id]));
+  const mine:string[]=[];
+  /** A job asked in the group by `from` and approved there, whose one run finished with its report: the next tick sends it. */
+  const ran=async(label:string,from:number,title:string)=>{
+    const proposed=await s.jobs.start(await actor((await message(label+'-ask',from)).id),{title,instruction:'Find every task that is still open.'});
+    await s.jobs.decide(String(from),{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message(label+'-approve',from));
     // The tests before this one leave jobs in their slots; they end, so this one starts now.
-    await stores.control.query("UPDATE background_jobs SET state='stopped' WHERE state IN ('running','reporting') AND id<>$1",[proposed.id]);
-    assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'waiting');
+    mine.push(proposed.id);
+    await stores.control.query("UPDATE background_jobs SET state='stopped' WHERE state IN ('running','reporting') AND NOT id=ANY($1)",[mine]);
+    assert.equal(await tick(proposed.id),'waiting');
     const begun=(await stores.control.query('SELECT event_id FROM background_runs WHERE job_id=$1',[proposed.id])).rows[0].event_id;
     await s.jobs.runs.run(begun,await authority());
     const context:any=await s.jobs.runs.context({event_id:begun,owner_epoch:(await authority()).epoch});
     await s.jobs.runs.claim({...context,actor:context.actor});await s.jobs.runs.prepare({...context,actor:context.actor});
     await s.jobs.runs.finish({event_id:begun,actor:context.actor,state:'done',session:context.conversation,error_code:null,text:'Report: 2 tasks are open.'});
-    // The owner turns the group off before the report goes out: nothing is staged there, the tick ends the job instead of
-    // failing, and the owner hears of it in their private chat, since the bot may no longer edit the card in the group.
-    const back=installChatsForTest(family.directory([raw],{owner:'123',served:[]}));
-    try {
-      assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'failed');
-      const ended=await job(proposed.id);assert.deepEqual([ended.state,ended.error_code],['failed','job_report_not_delivered']);
-      assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM background_reports WHERE job_id=$1',[proposed.id])).rows[0].n,0);
-      assert.deepEqual(notices.map(notice=>[notice.id,notice.chat_id]),[[digest(canonical(['job-report-not-sent-v1',proposed.id])),'123']]);
-      assert.match(String(notices[0]!.text),/^\u26a0\ufe0f The job \u2068\u201cOpen tasks\u201d\u2069 finished, but its report was not sent to .+ \(not served now\): Nocheh does not serve that chat now\.$/);
-      assert.ok(![raw,chat].some(id=>String(notices[0]!.text).includes(id)),'no chat id in the notice');
-      assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'failed');assert.equal(notices.length,1);
-    }finally{back();}
+    return proposed.id as string;
+  };
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');await select(true);
+    const settings=await s.jobs.settings();
+    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:10,revision:settings.revision});
+    // A member's job and the owner's own, both asked in the group, finish their runs; then the owner deselects the group.
+    // Nothing is staged there and the owner hears of each in their private chat, since the bot may no longer edit a card in
+    // the group: the member's job is not ended as not permitted, nor the owner's as outdated, without a word.
+    const member=await ran('member',9,'Open tasks'),own=await ran('owner',123,'Owner tasks');
+    await select(false);
+    for(const id of [member,own]) {
+      assert.equal(await tick(id),'failed');
+      const ended=await job(id);assert.deepEqual([ended.state,ended.error_code],['failed','job_report_not_served']);
+      assert.deepEqual(await reports(id),[]);
+    }
+    assert.deepEqual(notices.map(notice=>[notice.id,notice.chat_id]),[[told(member),'123'],[told(own),'123']]);
+    assert.match(String(notices[0]!.text),/^\u26a0\ufe0f The job \u2068\u201cOpen tasks\u201d\u2069 finished, but its report was not sent to .+ \(not served now\): Nocheh does not serve that chat now\.$/);
+    assert.ok(![raw,chat].some(id=>String(notices[0]!.text).includes(id)),'no chat id in the notice');
+    for(const id of [member,own])assert.equal(await tick(id),'failed');
+    assert.equal(notices.length,2,'each job is told once');
+    // A part staged while the group was served, then closed by the deselect's settings change as a changed context, not as
+    // not served: the owner is told all the same, and the job keeps the reason.
+    await select(true);notices.length=0;
+    const staged=await ran('staged',9,'Staged tasks');
+    assert.equal(await tick(staged),'waiting');
+    const [part]=await reports(staged);assert.equal(part?.state,'approved');
+    await select(false);
+    assert.equal((await s.telegramActions.run(part.id,await authority('actions'))).state,'cancelled');
+    assert.deepEqual((await reports(staged)).map(row=>[row.state,row.error_code]),[['cancelled','action_context_changed']]);
+    assert.equal(await tick(staged),'failed');
+    assert.deepEqual([(await job(staged)).state,(await job(staged)).error_code],['failed','job_report_not_served']);
+    assert.deepEqual(notices.map(notice=>notice.id),[told(staged)]);
   } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

@@ -80,6 +80,10 @@ function shownName(who:Who,names:Names):{name:string|null;username:string|null;b
   return {name:username?labelName('@'+username):null,username,byUsername:true};
 }
 const whoKey=(who:Who)=>who.by==='owner'?'owner':who.account?'account:'+who.account:'name:'+(who.name??'');
+/** whoKey in SQL over a reminder's stored columns (`alias` such as 'r.'), so the rows read for a merge are chosen by
+ * the same turns the merge takes them in. */
+export const whoKeySql=(alias:string)=>`CASE WHEN ${alias}set_by='owner' THEN 'owner' WHEN ${alias}set_by_account_id IS NOT NULL
+  THEN 'account:'||${alias}set_by_account_id ELSE 'name:'||coalesce(${alias}set_by_name,'') END`;
 /** The keys of every name a person's name must not read like: the people allowed now and those in this message, the
  * owner's chat and every served group and topic. */
 export function nameKeys(names:Names,people:Iterable<Who>):NameKeys {

@@ -12,7 +12,7 @@ import type {AssistantPolicy} from '../assistant-policy.js';
 import {cardName} from '../action-text.js';
 import {fillLine,placeLabel,quotedName} from '../chat-labels.js';
 import {allowedAccounts} from '../destinations.js';
-import {mergedReminder,nameKeys,reminderText,setByLine,unitCut,wellFormed,type Names,type Person,type ReminderRow,type Words,type Writer} from '../task-reminder-text.js';
+import {mergedReminder,nameKeys,reminderText,setByLine,unitCut,wellFormed,whoKeySql,type Names,type Person,type ReminderRow,type Words,type Writer} from '../task-reminder-text.js';
 import {currentChats} from './chats.js';
 import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
 
@@ -113,7 +113,7 @@ CREATE INDEX IF NOT EXISTS owner_task_reminders_people ON owner_task_reminders(s
 CREATE INDEX IF NOT EXISTS owner_task_reminders_batch ON owner_task_reminders(batch_id) WHERE batch_id IS NOT NULL;
 -- People's reminders due together in one group, sent as one message (ADR-0255): the text is kept, so a resend after a
 -- lost answer sends the same message under the same id. A group gets at most one every 10 minutes; a failed one takes
--- no turn. Kept one day.
+-- no turn. Kept a day after it went out, or after it was made when it never went.
 CREATE TABLE IF NOT EXISTS owner_task_reminder_batches(
  id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{64}$'),
  group_id text NOT NULL CHECK(${chatIdSql('group_id')}),
@@ -1083,14 +1083,18 @@ export class TaskRepository {
       const family=moving?await this.descendants(db,id,'project_id=$2,group_id=$3,project_since=$4::timestamptz',[project,grouped,since]):null;
       // An approved move takes exactly the tasks under it that its card showed, as the card showed them.
       if(context.approved&&context.approved.family!==family)throw new HttpError(409,'task_request_changed');
+      // Who closed the tasks under it, read before the sweep below closes them (ADR-0255).
+      if(changes.archived&&patch.archived||changes.trashed&&patch.trashed)await this.closedFamily(db,id,context.setter);
       if(changes.archived)await this.descendants(db,id,`archived_at=${patch.archived?'now()':'NULL'}`,[]);
       if(changes.trashed)await this.descendants(db,id,`deleted_at=${patch.trashed?'now()':'NULL'}`,[]);
       // The change that brings a task into a list or a group is the first thing its chats see of it.
       // Who wrote the title, notes and due day, and who closed it, for the reminders that name them (ADR-0255).
+      // A person closes only a task still fully open: archiving, trashing or dropping one already closed keeps whoever
+      // closed it, and one the owner closed keeps no row, so its owner reminders stay skipped. The owner takes it anyway.
       const closing=!!(changes.state&&next!=='open'||changes.archived&&patch.archived||changes.trashed&&patch.trashed);
+      const wasOpen=current.state==='open'&&!current.archived_at&&!current.deleted_at;
       await this.written(db,id,context.setter,[...('title' in set?['title']:[]),...('notes' in set?['notes']:[]),
-        ...(['due_on','due_time'].some(column=>column in set)?['due']:[]),...(closing?['closed']:[])]);
-      if(changes.archived&&patch.archived||changes.trashed&&patch.trashed)await this.closedFamily(db,id,context.setter);
+        ...(['due_on','due_time'].some(column=>column in set)?['due']:[]),...(closing&&(context.setter.by!=='person'||wasOpen)?['closed']:[])]);
       if(changes.state||changes.archived||changes.trashed)await db.query(`WITH RECURSIVE down AS (SELECT $1::text AS id UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id)
         DELETE FROM owner_task_writers w USING owner_tasks t WHERE w.task_id=t.id AND w.field='closed' AND t.id IN (SELECT id FROM down)
         AND t.state='open' AND t.archived_at IS NULL AND t.deleted_at IS NULL`,[id]);
@@ -1230,10 +1234,12 @@ export class TaskRepository {
     const owner=this.delivery?.owner();
     if(!this.delivery||!owner)return 0;
     // The owner's reminder on a task that is finished, archived or in the trash needs no reminder, unless a person
-    // closed it.
+    // closed it; then too when its repeat holds the owner's reminder at the same minute, so one time never comes twice.
     let handled=(await this.control.query(`UPDATE owner_task_reminders r SET state='skipped' FROM owner_tasks t WHERE t.id=r.task_id AND r.set_by='owner' AND r.state='pending'
       AND r.remind_at<=now() AND (t.state<>'open' OR t.archived_at IS NOT NULL OR t.deleted_at IS NOT NULL)
-      AND NOT EXISTS (SELECT 1 FROM owner_task_writers w WHERE w.task_id=t.id AND w.field='closed' AND w.by='person')`)).rowCount??0;
+      AND (NOT EXISTS (SELECT 1 FROM owner_task_writers w WHERE w.task_id=t.id AND w.field='closed' AND w.by='person')
+       OR EXISTS (SELECT 1 FROM owner_task_reminders c WHERE c.task_id=t.repeated_to AND c.set_by='owner'
+        AND date_trunc('minute',c.remind_at)=date_trunc('minute',r.remind_at)))`)).rowCount??0;
     // A person's reminder is skipped only when its task closed before it came due: waiting for its turn changes nothing.
     handled+=(await this.control.query(`UPDATE owner_task_reminders r SET state='skipped' FROM owner_tasks t WHERE t.id=r.task_id AND r.set_by='person' AND r.state='pending'
       AND r.remind_at<=now() AND (t.state<>'open' AND coalesce(t.done_at,'-infinity')<=r.remind_at OR t.archived_at<=r.remind_at OR t.deleted_at<=r.remind_at)`)).rowCount??0;
@@ -1276,8 +1282,9 @@ export class TaskRepository {
       const settled=await this.settleBatch(batch.id,await this.notice(batch.id,target,batch.text),1,target);
       handled+=settled.handled;if(settled.stop)break;
     }
-    // A merged message is kept a day, far longer than any group's turn.
-    await this.control.query(`DELETE FROM owner_task_reminder_batches WHERE state<>'sending' AND created_at<now()-interval '1 day'`);
+    // A merged message is kept a day after it went out, far longer than the turn it holds, so one sent after a long
+    // outage still holds it; a refused one, which holds none, a day after it was made.
+    await this.control.query(`DELETE FROM owner_task_reminder_batches WHERE state<>'sending' AND coalesce(sent_at,created_at)<now()-interval '1 day'`);
     return handled;
   }
   /** The owner's words for reminders: the reminder lines, the chat words of the approval texts and the template. */
@@ -1286,9 +1293,9 @@ export class TaskRepository {
     return {lines:reminderLines(prompts['tasks.reminder_texts']),places:approvalLines(prompts['telegram.approval_texts']),template:prompts['tasks.reminder']??taskReminder};
   }
   /**
-   * One group's merged message, made while the group's turn is held: its due people's reminders, at most 200 at a time,
-   * as many as fit in one message, are marked sending under the message's id, and the message is kept. Null when the
-   * turn is no longer free or nothing is due.
+   * One group's merged message, made while the group's turn is held: its due people's reminders, at most 200 at a time
+   * taken by turns per setter, as many as fit in one message, are marked sending under the message's id, and the
+   * message is kept. Null when the turn is no longer free or nothing is due.
    */
   private async batch(group:string,chats:ChatDirectory,words:()=>Promise<Words>):Promise<{id:string;text:string}|null> {
     const db=await this.control.connect();
@@ -1296,10 +1303,14 @@ export class TaskRepository {
       await db.query('BEGIN');
       await db.query(`SELECT pg_advisory_xact_lock(hashtextextended('reminder-batch:'||$1::text,0))`,[group]);
       if((await db.query(`SELECT 1 WHERE EXISTS (${busy('$1::text')})`,[group])).rows.length){await db.query('ROLLBACK');return null;}
-      const due=`r.set_by='person' AND r.state='pending' AND r.remind_at<=now() AND r.set_in_group_id=$1`;
-      const rows=await this.reminderRows(db,due,[group],200,' FOR UPDATE OF r SKIP LOCKED');
+      const due=(alias:string)=>`${alias}set_by='person' AND ${alias}state='pending' AND ${alias}remind_at<=now() AND ${alias}set_in_group_id=$1`;
+      // The 200 read are chosen by the merge's own turns (whoKeySql), so one person's backlog never keeps another's out;
+      // unlocked there, they are locked below with the full condition checked again.
+      const fair=`r.id IN (SELECT f.id FROM (SELECT q.id,q.remind_at,row_number() OVER (PARTITION BY ${whoKeySql('q.')} ORDER BY q.remind_at,q.id) AS turn
+        FROM owner_task_reminders q WHERE ${due('q.')}) f ORDER BY f.turn,f.remind_at,f.id LIMIT 200)`;
+      const rows=await this.reminderRows(db,`${due('r.')} AND ${fair}`,[group],200,' FOR UPDATE OF r SKIP LOCKED');
       if(!rows.length){await db.query('ROLLBACK');return null;}
-      const total=Number((await db.query(`SELECT count(*)::int AS count FROM owner_task_reminders r WHERE ${due}`,[group])).rows[0].count);
+      const total=Number((await db.query(`SELECT count(*)::int AS count FROM owner_task_reminders r WHERE ${due('r.')}`,[group])).rows[0].count);
       const names=await this.names(db,chats,rows.flatMap(item=>[item.setter,...item.writers]));
       const {text,taken}=mergedReminder(rows,await words(),names,group,Math.max(0,total-rows.length));
       const ids=taken.map(item=>item.id).sort(),id=digest(canonical(['owner-task-reminder-batch-v1',group,...ids]));
@@ -1310,23 +1321,32 @@ export class TaskRepository {
     }catch(error){await db.query('ROLLBACK').catch(()=>{});throw error;}finally{db.release();}
   }
   /**
-   * A merged message's answer: its reminders are sent or unclear for good (never sent again); back to waiting when
-   * Telegram is not connected, the message gone so it takes no turn; failed when Telegram refused it, with a record; or
-   * still sending for the same id again, unclear after 5 tries with a record.
+   * A merged message's answer: its reminders are sent or unclear for good (never sent again); on its first try, back to
+   * waiting when Telegram is not connected, the message gone so it takes no turn; failed when Telegram refused it, with a
+   * record; or still sending for the same id again, unclear after 5 tries with a record. A resend Telegram is not
+   * connected for stays sending under its id and text: the try whose answer was lost may have gone out. The message,
+   * its reminders and their history change together.
    */
   private async settleBatch(id:string,sent:Outcome,tries:number,target:{chat_id:string}):Promise<{handled:number;stop:boolean}> {
     if(sent.kind==='not_started'){
-      await this.control.query(`UPDATE owner_task_reminders SET state='pending',batch_id=NULL WHERE batch_id=$1 AND state='sending'`,[id]);
-      await this.control.query('DELETE FROM owner_task_reminder_batches WHERE id=$1',[id]);
+      if(tries>1)await this.control.query('UPDATE owner_task_reminder_batches SET tries=greatest(tries-1,0) WHERE id=$1',[id]);
+      else await this.control.query(`WITH b AS (DELETE FROM owner_task_reminder_batches WHERE id=$1 RETURNING id)
+        UPDATE owner_task_reminders SET state='pending',batch_id=NULL WHERE batch_id IN (SELECT id FROM b) AND state='sending'`,[id]);
       return {handled:0,stop:true};
     }
     const state=sent.kind==='done'?'sent':sent.kind==='ambiguous'?'uncertain':sent.kind==='refused'?'failed':sent.kind==='retry'&&tries>=5?'uncertain':null;
     if(!state)return {handled:0,stop:sent.kind==='stop'};
-    const when=`CASE WHEN $2::text='failed' THEN NULL ELSE now() END`;
-    await this.control.query(`UPDATE owner_task_reminder_batches SET state=$2,sent_at=${when} WHERE id=$1`,[id,state]);
-    const rows=(await this.control.query(`UPDATE owner_task_reminders SET state=$2,sent_at=${when} WHERE batch_id=$1 AND state='sending' RETURNING task_id`,[id,state])).rows;
+    const when=`CASE WHEN $2::text='failed' THEN NULL ELSE now() END`,db=await this.control.connect();
+    let rows:{task_id:string}[];
+    try {
+      await db.query('BEGIN');
+      await db.query(`UPDATE owner_task_reminder_batches SET state=$2,sent_at=${when} WHERE id=$1`,[id,state]);
+      rows=(await db.query(`UPDATE owner_task_reminders SET state=$2,sent_at=${when} WHERE batch_id=$1 AND state='sending' RETURNING task_id`,[id,state])).rows;
+      for(const item of rows)await this.record(db,item.task_id,{kind:'nocheh'},'reminder',state==='failed'?{reminder_failed:true}:{reminded:true});
+      await db.query('COMMIT');
+    }catch(error){await db.query('ROLLBACK').catch(()=>{});throw error;}finally{db.release();}
+    // A remote record, best effort, once the state it tells of is kept.
     if(sent.kind==='refused'||sent.kind==='retry')await this.problem(id,target,state==='failed'?'failed':'uncertain',sent.status);
-    for(const item of rows)await this.record(this.control,item.task_id,{kind:'nocheh'},'reminder',state==='failed'?{reminder_failed:true}:{reminded:true});
     return {handled:rows.length,stop:false};
   }
   /** One notice to the owner, and what its answer means for the reminder. */
@@ -1443,10 +1463,14 @@ export class TaskRepository {
       ON CONFLICT(task_id,field) DO UPDATE SET by=excluded.by,account_id=excluded.account_id,name=excluded.name,chat_id=excluded.chat_id,group_id=excluded.group_id,at=now()`,
       [id,fields,...writerColumns(setter)]);
   }
-  /** Everything under a task that is archived or trashed with it was closed by the same setter. */
+  /** Everything under a task that is archived or trashed with it was closed by the same setter; run before the sweep.
+   * A person closes only those still fully open and never takes an earlier closer's place; the owner takes them all. */
   private async closedFamily(db:pg.PoolClient,id:string,setter:Setter) {
     const down='WITH RECURSIVE down AS (SELECT id FROM owner_tasks WHERE parent_id=$1 UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id)';
     if(setter.chat===null){await db.query(`${down} DELETE FROM owner_task_writers WHERE field='closed' AND task_id IN (SELECT id FROM down)`,[id]);return;}
+    if(setter.by==='person'){await db.query(`${down} INSERT INTO owner_task_writers(task_id,field,by,account_id,name,chat_id,group_id) SELECT t.id,'closed',$2,$3,$4,$5,$6
+      FROM owner_tasks t WHERE t.id IN (SELECT id FROM down) AND t.state='open' AND t.archived_at IS NULL AND t.deleted_at IS NULL ON CONFLICT(task_id,field) DO NOTHING`,
+      [id,...writerColumns(setter)]);return;}
     await db.query(`${down} INSERT INTO owner_task_writers(task_id,field,by,account_id,name,chat_id,group_id) SELECT id,'closed',$2,$3,$4,$5,$6 FROM down
       ON CONFLICT(task_id,field) DO UPDATE SET by=excluded.by,account_id=excluded.account_id,name=excluded.name,chat_id=excluded.chat_id,group_id=excluded.group_id,at=now()`,
       [id,...writerColumns(setter)]);

@@ -165,8 +165,8 @@ test('a send names its destination by chat id: unknown and unserved ids fail clo
   // Who the owner allows in which group, by Telegram id; a test changes it as the owner would. A change due as the bot
   // asks its last check, just before it sends.
   let access:Record<string,{granted:string[];denied:string[]}>={},atDelivery:(()=>void)|null=null;
-  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),
-    policy:()=>({enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1,NG1_TG,NG2_TG],group_access:access}),
+  const policy=()=>({enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1,NG1_TG,NG2_TG],group_access:access});
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       assert.equal(operation,'action.execute');calls.push(input);
@@ -239,8 +239,9 @@ test('a send names its destination by chat id: unknown and unserved ids fail clo
     const waiting=await actions.request(principal,{destination:BOB_CHAT,text:'Waiting for the owner'});
     access={};const card=await actions.inspect(owner,waiting.id);
     const decision={id:waiting.id,fingerprint:card.fingerprint,decision:'approve',operation_id:key+':removed-while-waiting'};
-    assert.deepEqual(await actions.decide(owner,decision),{id:waiting.id,state:'cancelled',revision:card.revision+1});
-    assert.deepEqual(await actions.decide(owner,decision),{id:waiting.id,state:'cancelled',revision:card.revision+1},'a repeated press answers the same');
+    const notServed={id:waiting.id,state:'cancelled',revision:card.revision+1,error_code:'destination_not_served'};
+    assert.deepEqual(await actions.decide(owner,decision),notServed);
+    assert.deepEqual(await actions.decide(owner,decision),notServed,'a repeated press answers the same');
     assert.deepEqual(await closed(waiting.id),['cancelled','destination_not_served']);
     assert.equal((await actions.run(waiting.id,authority)).state,'cancelled');assert.equal(calls.length,sent);
     // Removed between the start and the bot's own check: the bot refuses, and the send keeps the reason.
@@ -265,6 +266,29 @@ test('a send names its destination by chat id: unknown and unserved ids fail clo
       assert.deepEqual(await closed(lost.id),['cancelled','destination_not_served']);
       assert.equal((await actions.run(lost.id,authority)).state,'cancelled');assert.equal(calls.length,sent);
     }finally{back();}
+    // A settings change while cards waited: the restart that applies it moves the epoch, so neither send can go out as
+    // asked. Approving closes each with its reason, instead of leaving live buttons that fail on every press (ADR-0254).
+    const configure=()=>services.configuration.configure(policy(),'on');
+    const asked=async()=>{const now=await services.guards.state();return {...principal,generation:now.generation,guard_epoch:now.epoch,revision:now.epoch};};
+    allowBob();await configure();
+    const toGroup=await actions.request(await asked(),{destination:NG2,text:'Asked before a settings change'});
+    const toPerson=await actions.request(await asked(),{destination:BOB_CHAT,text:'Asked before Bob was removed'});
+    assert.deepEqual([toGroup.state,toPerson.state],['proposed','proposed']);
+    // A change that keeps both chats served, Bob allowed in NG2 too: the context changed, and the card says so.
+    access={[GP1]:{granted:[BOB],denied:[]},[NG2_TG]:{granted:[BOB],denied:[]}};await configure();
+    const stale=await actions.inspect(owner,toGroup.id);sent=calls.length;
+    assert.deepEqual(await actions.decide(owner,{id:toGroup.id,fingerprint:stale.fingerprint,decision:'approve'}),
+      {id:toGroup.id,state:'cancelled',revision:stale.revision+1,error_code:'action_context_changed'});
+    assert.deepEqual(await closed(toGroup.id),['cancelled','action_context_changed']);
+    assert.equal((await actions.run(toGroup.id,authority)).state,'cancelled');assert.equal(calls.length,sent);
+    // Bob removed by the next change: that is said first, though the epoch moved too; /approve answers as a press does.
+    access={};await configure();
+    const command=`/approve ${toPerson.id}`,typed:Envelope={...original,key:key+':approve-removed',scope:OWNER,source_id:'approve-removed',text:command,
+      payload:{message:{message_id:Date.now(),date:1700000000,chat:{id:Number(OWNER),type:'private'},from:{id:Number(OWNER)},text:command}}};
+    const typedSource=(await services.capture.capture(typed)).source.reference;await services.guards.prepare(typedSource,'fixture',services.detect);
+    assert.match((await services.actionCommands.controlReply(typedSource))!,/Approved, but not sent: Nocheh does not serve that chat now\.$/);
+    assert.deepEqual(await closed(toPerson.id),['cancelled','destination_not_served']);
+    assert.equal((await actions.run(toPerson.id,authority)).state,'cancelled');assert.equal(calls.length,sent);
   }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
@@ -285,5 +309,26 @@ test('an owner notice names the chat in the owner\'s fixed words, quotes only na
     // A name's own braces and quotes show plain, so it can neither be filled in nor close the quotes code adds.
     assert.equal(sent[1]!.text,'\u26a0\ufe0f The job \u2068\u201cPlan [chat] \'x\'\u201d\u2069 finished, but its report was not sent to group \u2068\u201cGP1\u201d\u2069 \u203a a topic: Nocheh does not serve that chat now.');
     assert.equal(sent[2]!.text,'\u26a0\ufe0f A scheduled task in your private chat finished, but its result was not sent: your settings changed while it ran. It runs again at its next time.');
+  }finally{restore();}
+});
+
+test('\'current\' in a turn with no live Telegram message stays a bad request, never a claim that its chat is not served (ADR-0254)',async()=>{
+  const restore=installChatsForTest(fixtureDirectory([GP1]));
+  const policy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1],group_access:{}},binding={generation:'g',epoch:1,mode:'on' as const};
+  // A job's or a schedule's turn roots in a control operation, the web chat's in a browser message; neither has a Telegram
+  // chat for 'current' to name. Nothing past the refusal is reached, so nothing else is wired.
+  let root:Record<string,string>={store:'control',kind:'operation',id:'c'.repeat(64),input_hash:'d'.repeat(64)};
+  const actions=new TelegramActionRepository({control:{query:async()=>({rows:[]})}} as any,
+    {policy:()=>policy,archive:{verify:async()=>({origin:'live',channel:'browser'})}} as any,null as any,{state:async()=>binding} as any,
+    {root:async()=>root} as any,{binding:async()=>({scope:GP1,logical_profile:'fixture',owner:false,job:'job-fixture'})} as any,
+    async()=>{throw Error('nothing is sent');},async()=>[]);
+  const principal:Reader={admin:false,scope:GP1,space:GP1,turnEvent:'e'.repeat(64),generation:'g',guard_epoch:1,revision:1};
+  try {
+    for(const turn of ['a job or a schedule','the web chat']) {
+      await assert.rejects(actions.request(principal,{destination:'current',text:'Post the summary here'}),{status:400,code:'invalid_action'},turn);
+      // A chat named outright that Nocheh does not serve is still refused as such.
+      await assert.rejects(actions.request(principal,{destination:UNSERVED,text:'Post the summary there'}),{status:403,code:'destination_not_served'},turn);
+      root={store:'archive',id:'f'.repeat(64),input_hash:'a'.repeat(64)};
+    }
   }finally{restore();}
 });

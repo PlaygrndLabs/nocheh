@@ -110,6 +110,16 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
   assert.equal(reminderLines(stored['tasks.reminder_texts']).set_by,'\u{1f464} Set by {who} in {place}');
 });
 
+test('a line named like an Object property is just a line: a save of it is checked as any other, and a stored one reads the defaults',()=>{
+  assert.equal(promptProblem('reply.common','constructor: x'),null);
+  assert.equal(promptProblem('telegram.approval_texts','__proto__: y\nconstructor: z\nsent: Sent!'),null);
+  assert.equal(promptProblem('tasks.reminder_texts','constructor: y\nset_by: Hi'),'prompt_placeholder_missing','the other lines are still checked');
+  const approval=approvalLines('__proto__: y'),reminder=reminderLines('constructor: y');
+  for(const [name,line] of Object.entries(approvalLines(undefined)))assert.equal(approval[name as never],line,name);
+  for(const [name,line] of Object.entries(reminderLines(undefined)))assert.equal(reminder[name as never],line,name);
+  assert.equal(Object.getPrototypeOf(approval),Object.prototype,'a __proto__ line never replaces the prototype');
+});
+
 test('Answer privately has its own editable texts: the button, its popups and the private answer’s first line (ADR-0249)',()=>{
   for(const key of ['reply.private','telegram.private_answer','telegram.private_answer_texts'])assert.ok((promptKeys as readonly string[]).includes(key),key);
   const lines=privateAnswerLines('');

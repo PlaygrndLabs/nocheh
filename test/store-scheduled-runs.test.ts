@@ -90,12 +90,16 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.equal(notices[0].chat_id,'123');
     assert.match(notices[0].text,/^⚠\ufe0f A scheduled task in .* \(not served now\) finished, but its result was not sent: Nocheh does not serve that chat now\.$/);
     assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM telegram_action_requests WHERE source_reference->>\'id\'=$1',[unserved.event_id])).rows[0].n,0);
-    // Its next time does not run either, as before; the owner is told once until the settings change.
+    // Its next time does not run either, as before, and its retries go on. The owner is told once for that fire, though the
+    // epoch moves between retries, as a reaction in any served group moves it.
     notices.length=0;
     const trigger=storageWorkflowOperations(s,runtime).schedules!,fire='schedule:'+unserved.schedule+':'+digest(unserved.job);
-    for(let tick=0;tick<2;tick++)await assert.rejects(trigger(fire,await authority()),(error:any)=>[403,404].includes(error.status),'tick '+tick);
-    const notRun=digest(canonical(['schedule-not-run-v1',unserved.schedule,'-123',String((await s.guards.state()).epoch)]));
-    assert.deepEqual([...new Set(notices.map(notice=>notice.id))],[notRun]);
+    for(let tick=0;tick<3;tick++) {
+      if(tick)await stores.control.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton');
+      await assert.rejects(trigger(fire,await authority()),(error:any)=>[403,404].includes(error.status),'tick '+tick);
+    }
+    const notRun=digest(canonical(['schedule-not-run-v1',unserved.schedule,'-123',digest(unserved.job)]));
+    assert.deepEqual([...new Set(notices.map(notice=>notice.id))],[notRun],'one notice for the fire, whatever the epoch');
     assert.match(notices[0].text,/did not run: Nocheh does not serve that chat now\. It runs again once you select that group/);
     groups=['-123'];notices.length=0;mode='running';
     const epoch=await capture();await s.guards.setMode('off');assert.equal((await run(epoch.event_id)).state,'cancelled');

@@ -210,10 +210,11 @@ export class TelegramActionRepository {
     source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string,requester:string|null=null){
     // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0252), and
     // either must be a chat Nocheh serves (ADR-0254). An unknown chat and one not served answer alike, so nothing is learned
-    // by asking.
+    // by asking. A turn with no live Telegram message (a job, a schedule, the web chat) has no 'current': a bad request as
+    // before, never a claim that its chat is not served.
     const requested=string(input.destination,200),text=string(input.text,3500),directory=await currentChats();
-    const destination=requested==='current'&&channel==='telegram'?principal.space??turn.scope:telegramDestination(requested,directory);
-    if(!text.trim())throw new HttpError(400,'invalid_action');
+    if(!text.trim()||requested==='current'&&channel!=='telegram')throw new HttpError(400,'invalid_action');
+    const destination=requested==='current'?principal.space??turn.scope:telegramDestination(requested,directory);
     if(!destination||!servedDestination(this.access.policy(),destination,directory))throw new HttpError(403,'destination_not_served');
     const id=digest(canonical([protocol,source,binding,destination,text]));
     const proposal=await this.derived.record({operation_id:'telegram-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
@@ -380,17 +381,25 @@ export class TelegramActionRepository {
       const prior=(await db.query('SELECT * FROM telegram_action_decisions WHERE operation_id=$1',[operation])).rows[0];
       if(prior) {
         if(prior.request_hash!==hash)throw new HttpError(409,'action_decision_conflict');
-        await db.query('COMMIT');return {id,state:current.state,revision:current.revision};
+        await db.query('COMMIT');return {id,state:current.state,revision:current.revision,...(current.state==='cancelled'?{error_code:current.error_code as string|null}:{})};
       }
       if(body.expected_revision!==undefined&&body.expected_revision!==current.revision)throw new HttpError(409,'action_revision_changed');
       if(current.state!=='proposed')throw new HttpError(409,'action_already_started_or_closed');
-      if(body.decision==='approve'){await this.fence(db,current.binding);await this.text(current);
-        // A chat Nocheh stopped serving while the card waited: the approval is kept, the send is closed, and the card says why.
-        if(!servedDestination(this.access.policy(),current.destination,await currentChats())) {
+      if(body.decision==='approve') {
+        // A send that can never go out now is closed, its approval kept, so the press, /approve and the card say why instead of
+        // buttons that fail on every press (ADR-0254). An unserved chat is asked first: the settings change that deselects a
+        // group also moves the epoch. A pending publication passes, so it stays an error.
+        let closed:string|null=servedDestination(this.access.policy(),current.destination,await currentChats())?null:'destination_not_served';
+        if(!closed)try{await this.fence(db,current.binding);await this.text(current);}catch(error){
+          if(!(error instanceof HttpError)||!['action_context_changed','guard_context_changed','action_proposal_changed','action_delivery_denied'].includes(error.code))throw error;
+          closed=error.code==='guard_context_changed'?'action_context_changed':error.code;
+        }
+        if(closed) {
           const revision=current.revision+1;
-          await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='destination_not_served',revision=$2,decision_reference=$3,updated_at=now() WHERE id=$1",[id,revision,source??null]);
+          await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code=$4,revision=$2,decision_reference=$3,updated_at=now() WHERE id=$1",[id,revision,source??null,closed]);
           await db.query("INSERT INTO telegram_action_decisions(operation_id,request_hash,action_id,decision,revision,source_reference) VALUES($1,$2,$3,'approve',$4,$5)",[operation,hash,id,revision,source??null]);
-          await db.query('COMMIT');return {id,state:'cancelled',revision};
+          // The reason rides along for the dashboard; the press and /approve read it from the row.
+          await db.query('COMMIT');return {id,state:'cancelled',revision,error_code:closed};
         }
       }
       const state=body.decision==='approve'?'approved':'rejected',revision=current.revision+1;

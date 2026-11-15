@@ -46,9 +46,14 @@ words and name rules reminders share.
 - `owner_task_writers` keeps, per task and field (`title`, `notes`, `due`,
   `closed`), who last wrote it anywhere but the owner's private chat or the
   dashboard, and where. The owner there takes a field back by writing it; a
-  task open again loses its `closed` row; archiving or trashing marks the
-  tasks under it closed by the same writer. A repeat copy keeps its
-  reminders' setters and the writers of its title, notes and due day.
+  task open again loses its `closed` row. A person closes only a task still
+  fully open (open, not archived, not in the trash): archiving, trashing or
+  dropping one already closed records nothing, so whoever closed it stays and
+  one the owner closed keeps no row. Archiving or trashing marks the tasks
+  under it closed by the same writer: all of them for the owner; for a person
+  only those still fully open, never in an earlier closer's place. A repeat
+  copy keeps its reminders' setters and the writers of its title, notes and
+  due day.
 
 ## Lists and limits
 
@@ -105,18 +110,23 @@ words and name rules reminders share.
 ## Delivery
 
 - **The owner's reminders** come one message each, at their time, as before.
-  On a task a person finished, archived or trashed they are sent with the
-  `closed_by` line; only a task the owner closed skips them.
+  On a task a person closed (finished, archived or trashed while it was open)
+  they are sent with the `closed_by` line, unless the task repeated and its
+  next one holds an owner's reminder at the same minute:
+  that time then comes once, from the next one. A task the owner closed skips
+  them, also when a person archives, trashes or drops it afterwards.
 - **People's reminders** due in one group come merged into one message: at most
   one message per group every 10 minutes, counted from the last one sent or
   unclear; a refused one takes no turn. Each message takes the group's due
   reminders round-robin by who set them, so one person's many never hold back
-  another's, as many as fit and always at least one. It has a `merged` header
-  when it holds more than one, then one `set_by` line per setter and place, and
-  a `more_waiting` line when more are due. The message is kept and sent again
-  unchanged under the same id after a lost answer. A person's reminder is
-  skipped only when its task closed before it came due; waiting for its turn
-  never drops it.
+  another's, as many as fit and always at least one; at most 200 due are read
+  at a time, chosen by the same turns. It has a `merged` header when it holds
+  more than one, then one `set_by` line per setter and place, and a
+  `more_waiting` line when more are due. The message is kept and sent again
+  unchanged under the same id after a lost answer, and kept a day after it went
+  out, so one sent after a long outage still holds its group's turn. A person's
+  reminder is skipped only when its task closed before it came due; waiting for
+  its turn never drops it.
 - **Worst-case delay.** The first message for a quiet group goes within one
   pass of the worker (15 seconds or less). Each further message waits 10
   minutes, so with a backlog the k-th message leaves about 10 × (k − 1)
@@ -124,14 +134,17 @@ words and name rules reminders share.
   make about 5 messages, and the last arrives about 40 minutes late. Nothing is
   dropped, and nothing is cut beyond the 500 characters of notes.
 - **Answers.** Sent is sent; unclear is `uncertain` and never sent again; "not
-  connected yet" puts it back to wait. A refusal Telegram gives before
-  anything is sent marks it `failed` and the next one goes on. A conflict or a
-  server error tries the same id again, up to 5 tries, then `uncertain`.
-  Transport errors and rate limits end the pass, as before, and the same id is
-  sent on a later pass, which the bot's receipts make safe. A `failed` or
-  `uncertain` end writes a send record (`reminder_refused`,
-  `reminder_unconfirmed`), so it shows in System › Health and, as a notice
-  kind, never causes another notice.
+  connected yet" on a message's first try puts it back to wait. On a merged
+  message's resend it ends the pass and the message stays sending under its id
+  and text, since the try whose answer was lost may have gone out. A refusal
+  Telegram gives before anything is sent marks it `failed` and the next one
+  goes on. A conflict or a server error tries the same id again, up to 5
+  tries, then `uncertain`. Transport errors and rate limits end the pass, as
+  before, and the same id is sent on a later pass, which the bot's receipts
+  make safe. A merged message, its reminders and their history settle in one
+  transaction. A `failed` or `uncertain` end then writes a send record
+  (`reminder_refused`, `reminder_unconfirmed`), so it shows in System › Health
+  and, as a notice kind, never causes another notice.
 - The owner's task view gives each reminder `{at, state, set_by, source}`,
   `source` being the same `set_by` line Telegram shows, or null; the drawer
   shows it, and "Not sent" for `failed`. A group's view gives
@@ -172,6 +185,9 @@ words and name rules reminders share.
   owner's reminders on a task a person closed are sent with the `closed_by`
   line, while the owner's own closing still skips them (before, any closing
   skipped them); and the `removed_in_group` notice.
+- The review added that when a repeating task's next one holds the owner's
+  reminder at the same minute, that time comes once, from the next one, so one
+  occurrence never arrives twice.
 - In a development database, reminders pending before this change read as the
   owner's.
 - **Residuals:**

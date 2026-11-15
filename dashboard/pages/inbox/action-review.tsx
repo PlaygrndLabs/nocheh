@@ -53,9 +53,10 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
     if (typeof action.revision === 'number') body.expected_revision = action.revision;
     const done = await command.run(telegram ? '/tools/telegram-decision' : '/tools/decide', body, decision);
     if (!done) return;
-    // The chat stopped being one Nocheh serves after the card was made: the send was closed, not approved.
+    // The send was closed, not approved: its chat stopped being served, or its context, text or follow-up grant changed
+    // after the card was made. The result names which.
     if (telegram && decision === 'approve' && (done as {state?: unknown}).state === 'cancelled') {
-      toast(problemText('destination_not_served'), 'bad');
+      toast(problemText((done as {error_code?: string}).error_code ?? 'destination_not_served'), 'bad');
       onClose();
       return;
     }

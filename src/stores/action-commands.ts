@@ -78,8 +78,10 @@ type ChatFacts={title:string|null;username:string|null;forum:boolean|null;messag
 /** A person as a send card names them (labelName), and their public username, for a link to them. */
 type Person={name:string|null;username:string|null};
 /** What one send card reads once (ADR-0254): every served group's facts, the served groups each allowed person is in,
- *  the people it may name, and the name keys a name must not share, each with whose it is. */
-type SendNames={allowed:ReadonlyMap<string,readonly string[]>;facts:Map<string,ChatFacts>;people:Map<string,Person>;keys:[string,string][]};
+ *  the people it may name, the name keys a name must not share, each with whose it is, each named served group's key,
+ *  and, once a group needs them, the projects of the served groups. */
+type SendNames={allowed:ReadonlyMap<string,readonly string[]>;facts:Map<string,ChatFacts>;people:Map<string,Person>;keys:[string,string][];
+  groups:Map<string,string>;projects?:Promise<Map<string,string>>};
 /** The chat a chat or topic belongs to, asked of the chat directory (ADR-0252). */
 const chatOf=(space:string)=>chats().parentOf(space)??space;
 /** A topic's key in its app (Telegram's thread id), or null for a chat. */
@@ -219,27 +221,29 @@ export class ActionCommandRepository {
   /** What a send card reads once: the facts of every served group, the people allowed in them and `account` (the
    *  person a send goes to), and the name keys of every served group, allowed person and the owner's chat. */
   private async sendNames(directory:ChatDirectory,account:string|null):Promise<SendNames> {
-    const allowed=allowedAccounts(this.access.policy(),directory),keys:[string,string][]=[];
+    const allowed=allowedAccounts(this.access.policy(),directory),keys:[string,string][]=[],named=new Map<string,string>();
     const groups=directory.all().filter(chat=>chat.kind==='group'&&directory.served(chat.id)).map(chat=>chat.id);
     const facts=new Map(await Promise.all(groups.map(async group=>[group,await this.chat(group)] as const)));
     const people=await this.people([...new Set([...allowed.keys(),...account?[account]:[]])],directory);
-    for(const [group,found] of facts){const name=labelName(found.title);if(name!==null)keys.push(['group:'+group,nameKey(name)]);}
+    for(const [group,found] of facts){const name=labelName(found.title);if(name!==null){keys.push(['group:'+group,nameKey(name)]);named.set(group,nameKey(name));}}
     for(const [id,person] of people)if(person.name!==null&&allowed.has(id))keys.push(['person:'+id,nameKey(person.name)]);
     const owner=labelName(directory.get(directory.ownerChat()??'')?.title);if(owner!==null)keys.push(['owner',nameKey(owner)]);
-    return {allowed,facts,people,keys};
+    return {allowed,facts,people,keys,groups:named};
   }
-  /** The name of the project a group is assigned to, as a label shows it, or null. */
-  private async projectName(group:string):Promise<string|null> {
-    return labelName((await this.access.stores.control.query(`SELECT p.name FROM project_assignments a JOIN projects p ON p.id=a.project_id
-      WHERE a.space_id=$1 AND a.mode='assigned'`,[group])).rows[0]?.name);
+  /** The name of the project each of `groups` is assigned to, as a label shows it, by group; one with none is left out. */
+  private async projectNames(groups:readonly string[]):Promise<Map<string,string>> {
+    const rows=groups.length?(await this.access.stores.control.query(`SELECT a.space_id,p.name FROM project_assignments a JOIN projects p ON p.id=a.project_id
+      WHERE a.space_id=ANY($1::text[]) AND a.mode='assigned'`,[groups])).rows:[];
+    return new Map(rows.flatMap(row=>{const name=labelName(row.name);return name===null?[]:[[String(row.space_id),name] as const];}));
   }
   /**
    * A send's chat on its card (ADR-0254): the kind of chat in the owner's fixed words, and only a name someone chose, in
    * the quotes and isolates code adds, linked to its chat or bold. A person's private chat says which served group the
    * owner allowed them in. A name that reads like another served group's, an allowed person's or the owner's chat's gets
    * its chat's short id, the one the dashboard's chat list shows; a group on a card in the owner's private chat gets its
-   * project instead, when it has one. `compact` names a person alone, for a card that is too long otherwise. A group or
-   * topic Nocheh does not serve now says so after it.
+   * project instead, when that project tells it apart from every served group that reads alike. `compact` names a person
+   * without the groups they are allowed in, for a card that is too long otherwise; a name that reads like another's keeps
+   * its short id even so. A group or topic Nocheh does not serve now says so after it.
    */
   private async sendPlace(space:string,line:Record<ApprovalText,string>,mark:Mark,at:{ownerCard:boolean;compact:boolean},
     cache:{names?:Promise<SendNames>}):Promise<string> {
@@ -257,16 +261,22 @@ export class ActionCommandRepository {
       if(name===null)return short(mark(line.unnamed_group,url),id);
       const label=named(quotedName(name),url);
       if(!twin('group:'+id,name))return fillLine(line.group_chat,{name:label});
-      // A project's name stays in the owner's private chat: never on a card in a group.
-      const project=at.ownerCard?await this.projectName(id):null;
-      return fillLine(line.group_chat,{name:project?fillLine(line.name_project,{name:label,project:quotedName(project)}):short(label,id)});
+      // A project's name stays in the owner's private chat: never on a card in a group. It tells this group apart only when
+      // no other served group that reads alike is in a project of the same name; a person or the owner's chat reads apart by
+      // its words. The served groups' projects are read once per card.
+      const projects=at.ownerCard?await (known.projects??=this.projectNames([...new Set([...known.groups.keys(),id])])):null;
+      const project=projects?.get(id)??null,alike=nameKey(name);
+      const apart=project!==null&&[...known.groups].every(([other,otherKey])=>{
+        const theirs=other===id||otherKey!==alike?undefined:projects!.get(other);return theirs===undefined||nameKey(theirs)!==nameKey(project);});
+      return fillLine(line.group_chat,{name:apart?fillLine(line.name_project,{name:label,project:quotedName(project)}):short(label,id)});
     };
     if(row.kind==='private') {
       const account=row.account_id,person=account?known.people.get(account):undefined,name=person?person.name:labelName(row.title);
       const url=person?.username?telegramLink(null,person.username,[]):null;
       let label=name===null?fillLine(line.unnamed_person,{id:chatShortId(chat)}):named(quotedName(name),url);
-      if(at.compact)return fillLine(line.person_chat_other,{name:label});
+      // The short id comes first, so a card too long for the groups still says which of two alike people it goes to.
       if(name!==null&&twin('person:'+account,name))label=short(label,chat);
+      if(at.compact)return fillLine(line.person_chat_other,{name:label});
       // A settle after the owner took their access away names no group.
       const groups=account?known.allowed.get(account)??[]:[];
       if(!groups.length)return fillLine(line.person_chat_other,{name:label});
@@ -288,6 +298,17 @@ export class ActionCommandRepository {
     const reviewer=kind==='telegram'?await this.telegram.reviewer(id):null,owner=ownerChat(this.access.policy());
     if(!reviewer)return owner?{space:owner}:null;
     return {space:reviewer.space,reviewer:reviewer.user};
+  }
+  /** Where an action's card is: a send's chat or topic as offer() kept it (`posted`), so its decision settles there after its
+   *  reviewer may no longer review it or its destination is no longer served (ADR-0254); otherwise where it would go now.
+   *  `reviewed` says it is not the owner's private chat, so the card names no project and no "Asked in" line. */
+  private async cardPlace(kind:ActionKind,id:string,posted?:string|null):Promise<{space:string;reviewed:boolean}|null> {
+    if(posted)return {space:posted,reviewed:chatOf(posted)!==ownerChat(this.access.policy())};
+    const place=await this.place(kind,id);return place&&{space:place.space,reviewed:!!place.reviewer};
+  }
+  /** The chat or topic a send's card was posted in, or null. */
+  private async posted(id:string):Promise<string|null> {
+    return (await this.access.stores.control.query('SELECT card_space FROM telegram_action_requests WHERE id=$1',[id])).rows[0]?.card_space??null;
   }
   /** A background job's run or a scheduled task that asked for an operation, by the job's name; a scheduled task with the
    *  chat it runs for, when `chat` names it. */
@@ -324,7 +345,7 @@ export class ActionCommandRepository {
         const destination=await this.sendPlace(String(action.arguments.destination),line,mark,{ownerCard:!reviewed,compact},cache);
         return linked(fillTemplate(texts.card.replace(controls,''),{destination,origin,text}),urls);
       };
-      // A card too long with a person's full line names the person alone; one still too long waits in the Inbox.
+      // A card too long with a person's full line names the person without the groups they are allowed in (keeping the short id when their name reads like another's); one still too long waits in the Inbox.
       let card=await render(false);
       if(card.text.length>cardLimit-outcomeRoom)card=await render(true);
       if(card.text.length>cardLimit-outcomeRoom&&!decided)return null;
@@ -400,6 +421,9 @@ export class ActionCommandRepository {
       const asked=await this.asked(row.source_reference);
       const here=asked&&asked.space===place.space?asked.message??null:null;
       const choices:[ApprovalText,string][]=(kind==='controlled'&&card.rules&&ruleChoices(row))||[['approve','a'],['reject','d']];
+      // A send's card keeps its chat before it is posted, so a post whose answer is lost still settles where it went; the
+      // first one stays, as the gateway keeps only a card's first post.
+      if(kind==='telegram')await control.query('UPDATE telegram_action_requests SET card_space=$2 WHERE id=$1 AND card_space IS NULL',[result.id,place.space]);
       const sent=await this.post(place.space,{kind:'card',...(here?{reply_to:here}:{}),id:result.id,
         text:card.text,links:card.links,buttons:choices.map(([label,choice])=>[card.line[label].slice(0,40),'n'+choice+result.id.slice(0,40)+card.fingerprint.slice(0,16)])});
       if(sent?.state!=='done')return result;
@@ -623,8 +647,8 @@ export class ActionCommandRepository {
       const listed=kind==='controlled'?await this.listCard({member:id}):null;
       if(listed)return await this.settle('list',listed.card.id);
       const table=kind==='telegram'?'telegram_action_requests':'controlled_actions';
-      const row=(await this.access.stores.control.query(`SELECT source_reference FROM ${table} WHERE id=$1`,[id])).rows[0];
-      const place=row?await this.place(kind,id):null,card=place?await this.card(kind,id,row.source_reference,!!place.reviewer,true):null,outcome=card?this.outcome(kind,card.state,card.line,card.code,card.started,card.resolution):null;
+      const row=(await this.access.stores.control.query(`SELECT source_reference${kind==='telegram'?',card_space':''} FROM ${table} WHERE id=$1`,[id])).rows[0];
+      const place=row?await this.cardPlace(kind,id,row.card_space):null,card=place?await this.card(kind,id,row.source_reference,place.reviewed,true):null,outcome=card?this.outcome(kind,card.state,card.line,card.code,card.started,card.resolution):null;
       // Names and texts changed since the card was sent can make it longer; a decided card has no buttons, so its end may be cut.
       const kept=card&&outcome?cut(card,cardLimit-outcome.length-3):null;
       if(place&&kept&&outcome)await this.post(place.space,{kind:'settle',id,text:`${kept.text}\n\n${outcome}`,links:kept.links,...seenIn(seen,place.space)});
@@ -661,8 +685,9 @@ export class ActionCommandRepository {
     if(data[1]==='s'){await answer(line.changed);return true;}
     if(action?.kind==='list'&&presser===policy.owner_id)return this.listPressed(action.id,data[1]==='a',chat,query.id,source,seen);
     const reviewer=action?.kind==='telegram'?(await this.telegram.reviewer(action.id))?.user:undefined;
-    // The owner decides any card; the person who asked decides only their own card in their group.
-    const reviewing=async()=>{const place=await this.place('telegram',action!.id);return !!home&&!!place&&home===chatOf(place.space);};
+    // The owner decides any card; the person who asked decides only their own card in their group, where it was posted, and
+    // only while they may review it now.
+    const reviewing=async()=>{const place=await this.cardPlace('telegram',action!.id,await this.posted(action!.id));return !!home&&!!place&&home===chatOf(place.space);};
     if(!policy.owner_id||presser!==policy.owner_id&&!(reviewer&&presser===reviewer&&await reviewing())){
       await answer(reviewer?line.only_requester:line.only_owner);return true;}
     if(!action){await answer(line.changed);return true;}

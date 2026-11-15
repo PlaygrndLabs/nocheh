@@ -64,11 +64,21 @@ Nocheh serves. Keeps [ADR-0159](0159-group-members-post-freely-and-approvals-go-
   machine lines, memory follow-ups, schedule results): a destination that is
   not served is refused with 403 `destination_not_served`. An unknown id and
   an unserved one answer alike, so asking teaches nothing about which chats
-  exist. Only an empty text keeps 400 `invalid_action`.
-- **Approval**: approving a card whose chat Nocheh stopped serving while it
-  waited keeps the decision, closes the send as cancelled with
-  `destination_not_served`, and returns its id, so the dashboard and `/approve`
-  settle the card.
+  exist. Only an empty text, or a `current` in a turn with no live Telegram
+  message (a job, a schedule, the web chat), keeps 400 `invalid_action`: such
+  a turn is never told its chat is not served.
+- **Approval**: approving a card whose send can never go out now keeps the
+  decision, closes the send as cancelled with its reason, and returns its id,
+  revision and `error_code`: the press and `/approve` say why, the card
+  settles instead of keeping buttons that fail on every press, and the
+  dashboard gets the reason with the answer. A
+  chat Nocheh stopped serving while the card waited is checked first and
+  closes it with `destination_not_served`, since the settings change that
+  deselects a group also moves the epoch; otherwise a context that moved on
+  since it was asked closes it with `action_context_changed`, a changed
+  proposal with `action_proposal_changed`, and a follow-up whose grant ended
+  with `action_delivery_denied`. A pending publication passes, so it stays a
+  refusal to try again.
 - **Run**: an approved send whose chat is no longer served, or no longer known,
   is cancelled with `destination_not_served` before it starts, instead of
   waiting for a chat that never comes back.
@@ -95,17 +105,28 @@ Nocheh serves. Keeps [ADR-0159](0159-group-members-post-freely-and-approvals-go-
   `/approve`: `not_sent` ("🚫 Approved, but not sent: {reason}") with
   `reason_not_served`, or `reason_changed` for a changed context or a refused
   delivery. A Reject the owner pressed still reads as rejected. A cancelled or
-  refused send settles its card instead of staying at "Sending now".
+  refused send settles its card instead of staying at "Sending now", in the
+  chat or topic where its card was posted (`card_space` on
+  `telegram_action_requests`, kept before posting), even once its destination
+  is no longer served or the person who asked may no longer review it; whether
+  they may review it now decides only whether their press counts.
 - The owner gets one notice in the private chat, in the owner's editable words,
   when a scheduled task's result is not sent (its chat is not served, keyed per
   run; or the settings changed while it ran, `reason_settings_changed`), when a
   schedule cannot run because its chat is not served (keyed by schedule, chat
-  and guard epoch, so it repeats only after a settings change), and when a
-  job's report cannot reach the chat it was asked in (not for a job asked in
-  the owner's chat, which is always served). Such a job ends
-  `job_report_not_delivered` instead of failing every tick. A notice is cut to
-  Telegram's limit at a whole character; one that fails shows in System ›
-  Health and never causes another.
+  and the fire that cannot run, its cursor: the cursor stays while the
+  schedule cannot advance, so its retries, which go on so it runs once the
+  group is selected again, send nothing more whatever moves the epoch; it moves
+  on once the schedule runs), and when a job's report cannot reach the chat it
+  was asked in (not for a job asked in the owner's chat, which is always
+  served). That is asked before the member and epoch checks, which a deselect
+  also fails, and also when a part staged before it was closed as a changed
+  context. Such a job ends `job_report_not_served` instead of failing every
+  tick, and System › Jobs says its chat is not served; a report lost any other
+  way, which may even have arrived, keeps `job_report_not_delivered` and reads
+  only as not delivered. A machine job's report to the owner goes on as
+  before. A notice is cut to Telegram's limit at a whole character; one that
+  fails shows in System › Health and never causes another.
 
 ## The card
 
@@ -131,15 +152,19 @@ Nocheh serves. Keeps [ADR-0159](0159-group-members-post-freely-and-approvals-go-
 - A name whose key (`nameKey`: the UTS #39 skeleton, lower-cased, skeleton
   again) equals another served group's, an allowed person's or the owner's
   chat's gets a suffix: on a card in the owner's private chat, a group's
-  project (`name_project`); otherwise the chat's short id (`name_id`,
-  "{name} (…{id})"). A project's name never shows on a card in a group. The
-  short id, `chatShortId`, is a hash of the chat's id (four hex characters of
-  `sha256(['chat-label-v1', id])`), never a piece of it; the dashboard's Chats
-  page shows the same one after a group's or a person's name, and a person's
-  @username with its link.
-- The message on the card shows its hidden characters written out
-  (`visible`), so the owner approves what will be sent. A card too long with a
-  person's full line names the person alone; one still too long goes to the
+  project (`name_project`), when it has one and no other served group whose
+  name reads alike is in a project whose name reads alike (the served groups'
+  projects are read once per card; a person or the owner's chat that reads
+  alike does not count, since its fixed words set it apart); otherwise the
+  chat's short id (`name_id`, "{name} (…{id})"). A project's name never shows
+  on a card in a group. The short id, `chatShortId`, is a hash of the chat's id
+  (four hex characters of `sha256(['chat-label-v1', id])`), never a piece of
+  it; the dashboard's Chats page shows the same one after a group's or a
+  person's name, and a person's @username with its link.
+- The message on the card shows its hidden characters written out (`visible`),
+  so the owner approves what will be sent. A card too long with a person's full
+  line names the person without the groups they are allowed in, keeping the
+  short id when their name reads like another's; one still too long goes to the
   existing "review in the dashboard Inbox" path. A decided card, which has no
   buttons, is cut to fit instead.
 - A saved approval or reminder line that drops a value Nocheh fills in, such
@@ -165,7 +190,8 @@ Nocheh serves. Keeps [ADR-0159](0159-group-members-post-freely-and-approvals-go-
   select is refused with no card, and the asker is told the chat is not one
   Nocheh serves. Selecting the group, or allowing the person in a selected
   group, on the Chats page serves it. An unknown destination answers 403
-  `destination_not_served` where it answered 400 `invalid_action`.
+  `destination_not_served` where it answered 400 `invalid_action`; a
+  `current` with no live Telegram message still answers 400.
 - "Tell Bob privately" keeps working when Bob is allowed in a selected group,
   always through the owner's card. Posts to the same group, to another group,
   to the owner's chat and its topics, job reports, machine lines, memory
