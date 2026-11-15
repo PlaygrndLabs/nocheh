@@ -379,6 +379,69 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
   } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
+test('a job card in the owner\'s private chat names the group and topic it was asked in, by the chat directory, in both families (ADR-0250, ADR-0251)',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const base=Date.now();
+  for(const [index,family] of families.entries()) {
+    // A forum group and its topic, written as Telegram sends them; their Nocheh ids are the family's.
+    const raw='-100'+String(base+index).slice(-12),thread=raw+'/topic/7',group=family.id(raw),topic=family.id(thread),key='background-origin:'+family.name+':'+base;
+    const restore=installChatsForTest(family.directory([raw,thread],{owner:'123',served:[raw]}));
+    const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-origin-'));
+    const priced={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0},cards:Record<string,any>[]=[];let rates:Record<string,number|null>=priced;
+    const policy=()=>({enabled:true,owner_id:'123',group_ids:[raw],group_access:{[raw]:{granted:['8'],denied:[]}},topic_memory:'group' as const});
+    const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+      runtime:async(operation,input)=>{
+        if(operation==='guard.detect')return {literals:[]};
+        if(operation==='usage.price')return {rates};
+        if(operation==='run.resume')return {state:'not_found'};
+        if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
+        if(operation==='telegram.approval'){cards.push(input);return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};}
+        return {state:'done'};
+      },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+    let sent=100;
+    // A member's message in the topic, as Telegram sends it: the topic's first message names it.
+    const ask=async(label:string)=>{
+      const text='Please sum up this topic';
+      const payload={message:{message_id:++sent,date:1700000000,chat:{id:Number(raw),type:'supergroup',title:'Made-up team',is_forum:true},from:{id:8,first_name:'Member'},
+        message_thread_id:7,is_topic_message:true,reply_to_message:{message_id:7,date:1700000000,chat:{id:Number(raw),type:'supergroup'},forum_topic_created:{name:'Launch'}},text}};
+      const event:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:raw,source_id:label,revision:'1',occurred_at:null,text,payload};
+      const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
+    };
+    const actor=async(source:string):Promise<Reader>=>{
+      const binding=await s.guards.state();return {admin:false,scope:group,space:topic,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    };
+    try {
+      await s.guards.reconcile();await s.guards.setMode('on');
+      const settings=await s.jobs.settings();
+      await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:10,revision:settings.revision});
+      const first=await ask('unpriced');
+      assert.deepEqual([(await s.turns.binding(await actor(first.id))).scope,(await actor(first.id)).space],[group,topic],family.name+': the turn names the group and its topic');
+      // On a model with no price, the member's job waits for the owner: its card goes to the owner's private chat and says
+      // where it was asked, the group and topic named from the directory's rows, never from the id.
+      rates={input:null,output:null,cache_read:null,cache_write:null,request:null};
+      const unpriced=await s.jobs.start(await actor(first.id),{title:'Topic notes',instruction:'Sum up the made-up topic.'});
+      assert.equal(unpriced.approver,'owner');assert.equal((await stores.control.query('SELECT space_id FROM background_jobs WHERE id=$1',[unpriced.id])).rows[0].space_id,topic);
+      await s.actionCommands.offer('background',unpriced);
+      const away=cards.filter(card=>card.kind==='card').at(-1)!;
+      assert.equal(away.chat_id,'123',family.name);
+      assert.match(away.text,/^🗂 Background job: Topic notes\n💬 Asked in “Made-up team” › Launch\n/,family.name+': '+away.text.slice(0,120));
+      assert.ok(![raw,group,topic].some(id=>away.text.includes(id)),family.name+': no chat id on the card');
+      // A priced job the member approves has its card in the topic, under the request: it does not say where it was asked.
+      rates=priced;
+      const second=await ask('priced');
+      const own=await s.jobs.start(await actor(second.id),{title:'Topic summary',instruction:'Sum up the made-up topic again.'});
+      assert.equal(own.approver,'requester');
+      await s.actionCommands.offer('background',own);
+      const here=cards.filter(card=>card.kind==='card').at(-1)!;
+      assert.deepEqual([here.chat_id,here.topic,here.reply_to],[raw,7,String(sent)],family.name+': the card goes where the topic is in Telegram');
+      assert.doesNotMatch(here.text,/💬 Asked in/,family.name);
+    } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
+  }
+});
+
 test('the byte budget follows the cheapest prompt rate',()=>{
   const rates={input:2,output:10,cache_read:0.2,cache_write:null,request:null};
   assert.equal(byteBudget(5,rates),Math.floor(5/(0.2/1e6)*12));

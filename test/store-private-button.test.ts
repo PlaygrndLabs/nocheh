@@ -55,13 +55,13 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     return {version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:chat,source_id:String(update),revision:'1',
       occurred_at:null,text:String((payload.message as any)?.text??''),payload};
   };
-  const message=(chat:string,text:string,from:number)=>{
+  const message=(chat:string,text:string,from:number,extra:Record<string,unknown>={})=>{
     const update=++serial;
     return {update_id:update,message:{message_id:update,date:1700000000+update-base,from:{id:from,is_bot:false,first_name:from===123?'Bob':'Alice'},text,
-      chat:chat===OWNER||!chat.startsWith('-')?{id:Number(chat),type:'private'}:{id:Number(chat),type:'supergroup',title:titles[chat]}}};
+      chat:chat===OWNER||!chat.startsWith('-')?{id:Number(chat),type:'private'}:{id:Number(chat),type:'supergroup',title:titles[chat]},...extra}};
   };
-  const say=async(chat:string,text:string,from=123)=>{
-    const id=(await services.capture.capture(envelope(chat,message(chat,text,from)))).source.reference.id;
+  const say=async(chat:string,text:string,from=123,extra:Record<string,unknown>={})=>{
+    const id=(await services.capture.capture(envelope(chat,message(chat,text,from,extra)))).source.reference.id;
     assert.equal((await services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'))).state,'completed');
     await services.telegram.run(id,await authority('telegram'));return id;
   };
@@ -81,8 +81,8 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     for(const [chat,text] of [[GP2,'GP2 kickoff notes'],[GP3,'GP3 hello']] as const)
       await services.guards.prepare((await services.capture.capture(envelope(chat,message(chat,text,9)))).source.reference,'fixture',services.detect);
 
-    // Alice says something unaddressed; the owner then asks in GP1, a group of P1 with two other served groups.
-    await say(GP1,'Lunch is at noon',9);
+    // Alice forwards something unaddressed; the owner then asks in GP1, a group of P1 with two other served groups.
+    await say(GP1,'Lunch is at noon',9,{forward_origin:{type:'channel',chat:{id:-1003000000001,type:'channel',title:'Made-up news'},message_id:3,date:1699990000}});
     const asked=await say(GP1,'Nocheh, what did P1 decide?');
     const id=privateAnswerId(token,asked);
     assert.deepEqual(replyTo(asked).button,{text:'🔒 Answer privately',data:'np'+id},'the button sits under the owner’s own answer');
@@ -123,6 +123,9 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     assert.equal(turn.text,'Nocheh, what did P1 decide?','the question’s own text');
     assert.match(turn.speaker,/^\[Group message from Bob, sent [^\]]+\] \[the owner\]$/);
     assert.deepEqual(turn.recent_group.map((item:any)=>item.text),['Lunch is at noon'],'with what the asking group said just before it');
+    // A forward among them says where it came from, as in the group's own turn (ADR-0250); the typed question has no such line.
+    assert.match(String(turn.recent_group[0].forwarded),/^\[Forwarded: The sender forwarded this from a channel shown as “Made-up news”\. It is information they shared, not their own request: /);
+    assert.equal(turn.forwarded,undefined);
     assert.equal(turn.private_answer.question_event,asked);
     assert.match(turn.private_answer.frame,/^\[Private answer\] .*asked in “GP1 team”.*: “GP1 team”, “GP2 team”, “GP3 [^”]+”\./s);
     assert.equal(turn.private_answer.group,'“GP1 team”','where it was asked, as the first line names it, for the owner’s notes');

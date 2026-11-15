@@ -81,14 +81,14 @@ test('Answer privately works the same when the owner’s private chat and the pr
     await say(NG2_OLD_TG,null,ALICE,{migrate_to_chat_id:Number(NG2_TG)});
     await say(NG2_TG,null,ALICE,{migrate_from_chat_id:Number(NG2_OLD_TG)});
     await say(GP4,'GP4 hello',ALICE);
-    await say(NG1_TG,'Lunch is at noon',ALICE);
+    await say(NG1_TG,'Lunch is at noon',ALICE,{forward_origin:{type:'channel',chat:{id:-1003000000001,type:'channel',title:'Made-up news'},message_id:3,date:1699990000}});
     assert.deepEqual([NG1_TG,NG2_OLD_TG,NG2_TG,GP4].map(id=>chats().resolve('telegram',id)),[NG1,NG2,NG2,GP4]);
     // P2 holds the three groups.
     await stores.control.query(`INSERT INTO projects(id,name,description,state,revision) VALUES($1,'P2','','active',1)`,[P2]);
     await stores.control.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) SELECT space,$1,'assigned',1 FROM unnest($2::text[]) space`,[P2,[NG1,NG2,GP4]]);
 
-    // The owner asks in NG1; the button sits under the answer, sent where NG1 is in Telegram.
-    const asked=await say(NG1_TG,'Nocheh, what did P2 decide?');
+    // The owner asks in NG1, forwarding a hidden sender's message; the button sits under the answer, sent where NG1 is in Telegram.
+    const asked=await say(NG1_TG,'Nocheh, what did P2 decide?',Number(OWNER),{forward_origin:{type:'hidden_user',sender_user_name:'Made-up Person',date:1699990000}});
     const id=privateAnswerId(token,asked);
     assert.equal(replyTo(asked).chat_id,NG1_TG);
     assert.deepEqual(replyTo(asked).button,{text:'🔒 Answer privately',data:'np'+id});
@@ -110,6 +110,11 @@ test('Answer privately works the same when the owner’s private chat and the pr
     assert.deepEqual([turn.chat,turn.space],[OWNER_CHAT,OWNER_CHAT]);
     assert.equal(turn.text,'Nocheh, what did P2 decide?');
     assert.deepEqual(turn.recent_group.map((item:any)=>item.text),['Lunch is at noon'],'with what the asking group said just before it');
+    // The forwarded question and the forward among the recent messages each say where they came from (ADR-0250): the
+    // asker is the sender here, as in the group, and no Telegram ID is in either line.
+    assert.match(String(turn.forwarded),/^\[Forwarded: The sender forwarded this from a person who hides their account shown as “Made-up Person”\. It is information they shared, not their own request: /);
+    assert.match(String(turn.recent_group[0].forwarded),/^\[Forwarded: The sender forwarded this from a channel shown as “Made-up news”\. It is information they shared, not their own request: /);
+    assert.ok(![NG1_TG,'-1003000000001'].some(value=>JSON.stringify([turn.forwarded,turn.recent_group]).includes(value)));
     assert.match(turn.private_answer.frame,/^\[Private answer\] .*asked in “NG1 team”/s);
     for(const name of ['“NG1 team”','“NG2 team”','“GP4 team”'])assert.ok(turn.private_answer.frame.includes(name),name);
     for(const value of [GP4,NG2,NG2_TG,NG2_OLD_TG])assert.ok(!JSON.stringify(turn).includes(value),'no other group’s id reaches the turn');
