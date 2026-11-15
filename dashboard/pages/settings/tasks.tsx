@@ -88,7 +88,7 @@ export function TaskSettingsPanel() {
   const chats = useChatDirectory(60000);
   const feedback = useFeedback();
   const groupName = (space: string) => {
-    // What a chat is comes from the chat directory, never from its id (ADR-0250).
+    // What a chat is comes from the chat directory, never from its id (ADR-0251).
     const chat = chats.find(space);
     if (!chat) return 'a group';
     return chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);

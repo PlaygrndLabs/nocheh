@@ -309,7 +309,7 @@ test('a background job is started with one call, approved on its card, runs as o
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, from the request to the run (ADR-0250)',
+test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, from the request to the run (ADR-0251)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}

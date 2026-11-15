@@ -1,5 +1,5 @@
 /**
- * The chat directory as the dashboard reads it (ADR-0250): every chat with what it is (private chat, group or topic,
+ * The chat directory as the dashboard reads it (ADR-0251): every chat with what it is (private chat, group or topic,
  * its group, its app ids, whether it is the owner's), from /conversations. Nothing here works anything out from a
  * chat's id. The first 100 chats are loaded; a chat past them is looked up by itself, once, so it is still named. A
  * lookup that fails is asked again a little later: until one answers, the chat is not settled, which is not the same

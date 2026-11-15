@@ -92,7 +92,7 @@ test('people and projects keep stable identity, attributed evidence, connected r
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),guards=new GuardRepository(stores,archive);
   const stamp=String(Date.now()),atlasGroup='-'+stamp,privateGroup='-'+String(Number(stamp)+1),userBase=Number(stamp.slice(-7))*10,owner:Reader={admin:true,scope:null};
   const policy=()=>({enabled:true,owner_id:'42',group_ids:[atlasGroup,privateGroup]});
-  // The chats as Part A's seeder leaves groups stored before step 2b (ADR-0250).
+  // The chats as Part A's seeder leaves groups stored before step 2b (ADR-0251).
   t.after(installChatsForTest(seededDirectory(policy)));
   const access=new SourceAccessRepository(stores,archive,guards,policy);
   const projects=new ProjectRepository(stores.control),entities=new EntityRepository(stores,access,projects);

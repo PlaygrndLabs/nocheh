@@ -297,7 +297,7 @@ export class KnowledgeManagementRepository {
  }
 
  private async affectedTopics(space:string,db:Pick<pg.PoolClient,'query'>):Promise<string[]>{
-  // A group's topics are its topic rows in the chat directory (ADR-0250): every topic seen in its messages or assigned.
+  // A group's topics are its topic rows in the chat directory (ADR-0251): every topic seen in its messages or assigned.
   if(parentSpace(space))return [];
   const topics=[...chats().topicsOf(space)];
   const assignments=(await db.query('SELECT space_id,mode FROM project_assignments WHERE space_id=ANY($1::text[])',[topics])).rows;

@@ -21,7 +21,7 @@ const table=(rows:{space_id:string;shell?:boolean|null;browser?:boolean|null;mcp
     .map(row=>({shell:null,browser:null,mcp:null,revision:1,...row}))})}) as any;
 
 test('each switch resolves on its own: the topic, then its chat, then every chat, then on',async()=>{
-  // What a topic is comes from its chat row (ADR-0250): the chats these switches name.
+  // What a topic is comes from its chat row (ADR-0251): the chats these switches name.
   const restore=installChatsForTest(legacyDirectory(['-10042/topic/7','-10042/topic/8','-10042/topic/9','42/topic/5'],{owner:'42',served:['-10042']}));
   try {
   const none=await chatToolSettings(table([]),'-10042/topic/7');

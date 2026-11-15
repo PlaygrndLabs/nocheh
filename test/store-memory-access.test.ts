@@ -138,7 +138,7 @@ for(const family of families)test(`canary: what the owner says about a member in
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-memory-canary-'));
   const key='memory-canary:'+Date.now(),group='-'+Date.now(),owner:Reader={admin:true,scope:null},mark='zephyrquill';
   const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group]};
-  // The group as the seeder makes its row, old-shaped or a digest id (ADR-0250); the archive keeps Telegram's id.
+  // The group as the seeder makes its row, old-shaped or a digest id (ADR-0251); the archive keeps Telegram's id.
   const chat=family.id(group),restore=installChatsForTest(family.directory([group],{owner:'123',served:policy.group_ids}));
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async operation=>operation==='guard.detect'?{literals:[]}:{state:'done'},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});

@@ -423,7 +423,7 @@ and each chat's tool switches. On import, nothing acts by itself: a chat arrives
 sharing rules arrive off, a switch that was on arrives inherited, and a past-due
 reminder arrives skipped ([ADR-0230](adr/0230-portable-export-carries-owner-work.md)).
 The chats arrive before the archive, so imported history keeps their ids
-([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)).
+([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)).
 The completion manifest includes sizes and SHA-256 hashes.
 Operational auth/configuration files are excluded; secrets typed into conversations
 remain part of those original conversations. This read-only export is not one

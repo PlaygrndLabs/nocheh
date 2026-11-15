@@ -37,7 +37,7 @@ export type ChatContext = {
 
 export function ChatDetail({space, telegram}: {space: string; telegram: Telegram}) {
   const chat = useChat(space);
-  // What the chat is comes from the chat directory, never from its id (ADR-0250).
+  // What the chat is comes from the chat directory, never from its id (ADR-0251).
   const parentId = parentOf(chat);
   const parentChat = useChat(parentId ?? '');
   const parent = parentId ? parentChat : null;

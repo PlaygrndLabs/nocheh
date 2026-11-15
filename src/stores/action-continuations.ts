@@ -283,7 +283,7 @@ export class ActionContinuationRepository {
           WHERE c.run_id=$1 ORDER BY a.created_at,c.action_id`,[id])).rows;
         const text=continuationText((await ownerPrompts(this.control))['telegram.action_continued']??actionContinued,members),attempts=row.attempts+1;
         // The asking message's routing, so the answer is a reply to it in its topic; no fixed reply and no group admission.
-        // Its chat, topic and app binding as a reply's turn names them, which Hermes and the bot check against its pass (ADR-0250).
+        // Its chat, topic and app binding as a reply's turn names them, which Hermes and the bot check against its pass (ADR-0251).
         const app=appBindingOf(space);
         const body={channel:'telegram',event_id:row.event_id,source_key:original.source_key,scope:original.scope,chat:scope.chat_id,space,...(app?{app}:{}),
           payload:dispatchPayload(payload,null,text),

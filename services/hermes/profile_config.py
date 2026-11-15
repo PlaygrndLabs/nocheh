@@ -120,7 +120,7 @@ def inherited_config(profile, config, job=None, policy=None, chat=None, served=N
             from .scopes import Scopes
             base=policy_root(profile)/'profiles'/Scopes.profile(binding['space'])/'config.yaml'
             # A topic inherits its chat's: the chat the turn names, else the one its marker keeps, else (a marker written
-            # before step 2b keeps none) the one the served list puts it in (ADR-0250).
+            # before step 2b keeps none) the one the served list puts it in (ADR-0251).
             chat=chat or binding.get('chat') or (served.chat_of(binding.get('space')) if served is not None else None)
             parent=policy_root(profile)/'profiles'/Scopes.profile(chat)/'config.yaml' if isinstance(chat,str) and chat else None
             source=base if base.is_file() or parent is None else parent

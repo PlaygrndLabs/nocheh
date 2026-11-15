@@ -8,7 +8,7 @@ export {chatApps,chatIdStates,chatKinds,chatStates};
 export type {AppBinding,ChatApp,ChatAppLabel,ChatIdState,ChatKind,ChatState,ConversationChatFields,ServedChats};
 
 /*
- * Nocheh's own chat ids (ADR-0250).
+ * Nocheh's own chat ids (ADR-0251).
  *
  * Every chat Nocheh knows is a chats row whose id never changes. A chat value stored before step 2b stays, unchanged,
  * as that chat's id (the Telegram adapter's legacyChat reads it once, when the seeder makes its row). A chat first seen

@@ -58,7 +58,7 @@ test('the owner re-runs Honcho memory for chosen chats, retries failed learning 
     const before=await live(first),otherBefore=await live(second);
     assert.ok(before.length>=2&&otherBefore.length>=1);
     // Writes whose audience is an old-shaped chat value stay valid: step 2b names those chats by the same strings, so a
-    // sweep after a guard epoch rebuilds no session and Honcho is asked to delete nothing (ADR-0250).
+    // sweep after a guard epoch rebuilds no session and Honcho is asked to delete nothing (ADR-0251).
     const swept=await services.memory.sweep('',await services.guards.state());
     assert.equal(swept.rebuilt,0,'no session is rebuilt');
     assert.deepEqual([await live(first),await live(second)],[before,otherBefore]);

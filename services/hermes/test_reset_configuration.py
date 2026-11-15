@@ -13,7 +13,7 @@ from tools.acceptance import reset_quiescence
 
 
 def chat(id, kind, parent=None, state='off'):
-    """A chats row as the snapshot reads it (ADR-0250); a topic's key is the end of its old value or a fixture key."""
+    """A chats row as the snapshot reads it (ADR-0251); a topic's key is the end of its old value or a fixture key."""
     return {'id': id, 'app': 'telegram', 'kind': kind, 'parent_id': parent, 'topic_key': id.rsplit('/', 1)[-1] if parent else None,
             'app_type': None, 'title': None, 'title_source': None, 'is_forum': False, 'state': state}
 
@@ -95,7 +95,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertFalse(rules['-20']['enabled']); self.assertEqual(rules['-20']['mode'], 'approved')
         self.assertFalse(rules['-30']['enabled']); self.assertEqual(rules['-30']['mode'], 'approved')
         self.assertTrue(all(set(row) == {'id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions'} for row in rules.values()))
-        # Each chat the setup names keeps its old value as its id, served as the setup says (ADR-0250).
+        # Each chat the setup names keeps its old value as its id, served as the setup says (ADR-0251).
         self.assertEqual([(row['id'], row['kind'], row['state']) for row in converted['chats']],
                          [('-10', 'group', 'active'), ('-20', 'group', 'active'), ('-30', 'group', 'active'), ('-40', 'group', 'off'),
                           ('-50', 'group', 'off'), ('42', 'private', 'active')])
@@ -197,7 +197,7 @@ class ResetConfigurationTests(unittest.TestCase):
             configuration.validate({**old, 'configuration': {**values, 'chats': []}})
 
     def test_the_snapshot_carries_each_chat_and_decides_kinds_from_its_rows(self):
-        # Version 2 carries the chats and their app ids (ADR-0250): a digest id is a group or topic by its row, and an id
+        # Version 2 carries the chats and their app ids (ADR-0251): a digest id is a group or topic by its row, and an id
         # with no row counts as private, however it looks.
         query = Mock(return_value=json.dumps(self.values))
         result = configuration.snapshot(query, 'original-only-v1')

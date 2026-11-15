@@ -26,7 +26,7 @@ import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
-// One chat's records in time order, under every id the chat has had ($1, archiveScopes: ADR-0250). Telegram gives a
+// One chat's records in time order, under every id the chat has had ($1, archiveScopes: ADR-0251). Telegram gives a
 // message's own time; an assistant reply has only the time it was saved.
 const pageRecords=`FROM (SELECT id,kind,at,(extract(epoch FROM at)*1000000)::bigint AS micros FROM (SELECT id,kind,
   CASE WHEN occurred_at ~ '^[0-9]{1,12}$' THEN to_timestamp(occurred_at::bigint) ELSE received_at END AS at FROM events
@@ -205,7 +205,7 @@ export class SourceRepository {
       if(binding&&!(await this.stores.derived.query("SELECT to_tsvector('simple',$1) @@ plainto_tsquery('simple',$2) AS matches",[text,query])).rows[0].matches)continue;
       const artifactKinds=principal.admin?(await this.stores.archive.query('SELECT kind FROM artifacts WHERE event_id=$1 ORDER BY id',[reference.id])).rows.map(row=>row.kind as string):[];
       const {payload,...fields}=original;
-      // `chat_id` is the Nocheh chat the hit's archive original belongs to (ADR-0250); compare chats with it, never with `scope`.
+      // `chat_id` is the Nocheh chat the hit's archive original belongs to (ADR-0251); compare chats with it, never with `scope`.
       hits.push({id:reference.id,source:'nocheh:event:'+reference.id,...fields,chat_id:sourceChat(captured),...(states.has(reference.id)?{assistant_state:states.get(reference.id)}:{}),...(reviews.has(reference.id)?{action_review:reviews.get(reference.id)}:{}),original_text:undefined,representation:binding?.mode==='on'?'guarded':'original',
         derived_id:null,text:text.slice(0,2000),truncated:text.length>2000,
         content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds),
@@ -265,7 +265,7 @@ export class SourceRepository {
     const space=principal.space?parentSpace(principal.space)??principal.space:null;
     const chat=owner?input.chat||(principal.admin?'':space??ownerChat(this.access.policy())??''):principal.scope!;
     if(!chat)throw new HttpError(400,'conversation_required');
-    // A chat is read under every id it has had, current and old, through chat_ids (ADR-0250). The owner may also name a
+    // A chat is read under every id it has had, current and old, through chat_ids (ADR-0251). The owner may also name a
     // value no chat row holds (an unmapped import), read as it is; anyone else reads nothing of one.
     return {chat,scopes:chats().get(chat)?archiveScopes([chat]):owner?[chat]:[],from,to,binding};
   }

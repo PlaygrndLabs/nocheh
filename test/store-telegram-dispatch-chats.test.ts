@@ -14,7 +14,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
 import {GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG1_TOPIC_KEY,NG2,NG2_OLD_TG,NG2_TG,OWNER} from './fixture-groups.js';
 
-// Dispatch on chats first seen after step 2b (ADR-0250), as the running service has them: capture records each chat and
+// Dispatch on chats first seen after step 2b (ADR-0251), as the running service has them: capture records each chat and
 // this process's directory reloads, so no chat here is seeded. NG2 is served by the Telegram id the owner configured
 // before Telegram upgraded it; its turns read what was said under either id, and every reply goes where the chat or
 // topic is in Telegram now.

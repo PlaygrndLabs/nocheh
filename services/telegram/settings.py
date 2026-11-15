@@ -44,7 +44,7 @@ def archive_url():
 
 
 class Policy:
-    """Who the bot serves (ADR-0250). Whether it is on and each group's member access come from its environment; the
+    """Who the bot serves (ADR-0251). Whether it is on and each group's member access come from its environment; the
     owner, the owner's private chat and the served groups come from the app's served list (services/chats.py), by
     their Telegram ids now and before. A list that cannot be read serves nothing."""
     def __init__(self, enabled, group_access, served=None):

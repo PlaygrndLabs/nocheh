@@ -26,7 +26,7 @@ test('native profile configuration retains stable preference identities while re
     const defaults=await s.runtimeProfiles.list(owner);assert.equal(defaults.profiles.filter(p=>p.managed).length,2);
     // Chats are listed by readable names that end with the chat's own code; the chat link (logical_profile) stays the hash.
     const code=(chat:string)=>digest(chat).slice(0,6),listed=async(chat:string)=>(await s.runtimeProfiles.list(owner)).profiles.find(p=>p.scope===chat)!;
-    // What an owner's refresh records on a group's chats row and details (ADR-0250).
+    // What an owner's refresh records on a group's chats row and details (ADR-0251).
     const observe=(chat:string,title:string|null,username:string|null)=>chatRowForTest(stores.control,chat,{title,username});
     assert.deepEqual(defaults.profiles.map(p=>p.name),['private-chat','group-'+code('-456')],'a group never observed gets its code');
     await chatRowForTest(stores.control,'-456',{title:'Garden Club',title_source:'observed',refreshed:false});
@@ -87,7 +87,7 @@ test('runtime profiles come from the chat directory: old chats keep their names,
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
-  // The strict fixture directory (ADR-0250): GP1 stored before step 2b, NG1 first seen after it, NG2 upgraded since
+  // The strict fixture directory (ADR-0251): GP1 stored before step 2b, NG1 first seen after it, NG2 upgraded since
   // (its old Telegram id is its chat id's source). Nothing is made up for an id the directory does not hold.
   const restore=installChatsForTest(fixtureDirectory([GP1,NG1_TG,NG2_TG]));
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-profiles-strict-')),owner={admin:true,scope:null};

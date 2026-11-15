@@ -16,7 +16,7 @@ import {privateAnswerId,type PrivateAnswer} from '../src/stores/private-answers.
 import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
 import {GP4,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,OWNER,P2,fixtureChats,seedChats} from './fixture-groups.js';
 
-// The Answer privately button (ADR-0249) on chats first seen after step 2b (ADR-0250): the owner's private chat, the
+// The Answer privately button (ADR-0249) on chats first seen after step 2b (ADR-0251): the owner's private chat, the
 // asking group NG1 and NG2, a group Telegram upgraded, all have digest ids that capture gave them; GP4 was stored before
 // and keeps its Telegram value as its id. The button, the tap, the /start and the answer name chats by their Nocheh ids,
 // and every send goes where the chat is in Telegram now.

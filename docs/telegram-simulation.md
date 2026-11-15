@@ -228,7 +228,7 @@ it keeps the link an answer opens, as for **Answer privately**. The fixture
 serves three groups, so two can share a project while the third stays in none.
 Scenarios name a chat by its Nocheh id, which the tester finds by the chat's
 Telegram id in the owner's chat list (`Fixture.chat`), never by building one
-([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)): the three groups keep their Telegram ids as
+([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)): the three groups keep their Telegram ids as
 ids, while a topic first seen during the run, and NG1 (`NEW_GROUP`), a group
 first seen after the install, have digest ids. NG1 is turned on with the
 step 2b-1 switch, `TELEGRAM_GROUP_IDS`, and then answers, reads its group from a

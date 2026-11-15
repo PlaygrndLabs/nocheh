@@ -15,7 +15,7 @@ import {chatIdFor} from '../dist/src/chats.js';
 
 const port = Number(process.env.NOCHEH_DASHBOARD_PORT || 18900 + Math.floor(Math.random() * 500));
 const origin = `http://127.0.0.1:${port}`;
-/** The preview's chats with Nocheh's own ids (ADR-0250): a group first seen after step 2b, its topic, and a group
+/** The preview's chats with Nocheh's own ids (ADR-0251): a group first seen after step 2b, its topic, and a group
  * Telegram upgraded later, which keeps the id it got under its first Telegram id. */
 const NEW_GROUP = chatIdFor('telegram', '-10088'),
   NEW_TOPIC = chatIdFor('telegram', '-10088', '3'),
@@ -1303,7 +1303,7 @@ test('a project shares nothing between its groups, and a group joins one only af
   await search.fill('Meteor watch');
   await drawer.getByText('Only whole groups can be chosen here.', {exact: false}).waitFor();
   // Adding a group names the groups already there first, then private answers, then the task list. A group is found
-  // by its Telegram ID too, and chosen from the list: an id is never typed in (ADR-0250).
+  // by its Telegram ID too, and chosen from the list: an id is never typed in (ADR-0251).
   await search.fill('-10073');
   assert.equal(await drawer.getByRole('button', {name: /Use the ID/}).count(), 0);
   await drawer.getByRole('option', {name: /Weekend notes/}).click();
@@ -1753,7 +1753,7 @@ test('a group Telegram upgraded stays on by its earlier ID, and an older topic i
   });
   await page.goto(origin + '/#chats?chat=' + encodeURIComponent(UPGRADED));
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
-  // Someone allowed there is kept under the Telegram ID the list has, as the settings require (ADR-0250).
+  // Someone allowed there is kept under the Telegram ID the list has, as the settings require (ADR-0251).
   const saved = [];
   await page.route(/\/api\/nocheh\/settings$/, route => {
     if (route.request().method() !== 'POST') return route.fallback();
@@ -1877,7 +1877,7 @@ test('a sharing rule finds messages from its groups by their chat, a new-id grou
 });
 
 test('a rule keeps a source the chat directory is still looking up, and saving waits for it', async () => {
-  // Past the first 100 chats a source is looked up by itself (ADR-0250). Until that lookup answers, the source is
+  // Past the first 100 chats a source is looked up by itself (ADR-0251). Until that lookup answers, the source is
   // neither a group nor private: it stays chosen, and Save waits. A failed lookup is asked again, never taken as unknown.
   const rule = {
     id: '5f'.repeat(32),
@@ -2040,7 +2040,7 @@ test('sent to apps lists each send with its outcome, and Health opens the ones t
     await table.getByRole('link', {name: 'Aurora planning · topic 7'}).first().getAttribute('href'),
     '#chats?chat=-10042%2Ftopic%2F7',
   );
-  // A send names its chat (ADR-0250): a group first seen after step 2b links to its own id.
+  // A send names its chat (ADR-0251): a group first seen after step 2b links to its own id.
   assert.equal(
     await table.getByRole('link', {name: 'Night sky club'}).getAttribute('href'),
     '#chats?chat=' + NEW_GROUP,

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS chat_sends(
   created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS chat_sends_at ON chat_sends(at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS chat_sends_problems ON chat_sends(at DESC, id DESC) WHERE state IN ('failed','uncertain');
--- ADR-0250: an app's thread and message ids are text (Slack's are '1700000000.000200'), and chat_id is the Nocheh chat
+-- ADR-0251: an app's thread and message ids are text (Slack's are '1700000000.000200'), and chat_id is the Nocheh chat
 -- the send went to. topic keeps its name and holds the thread. Each value stays as it was, written as text.
 DO $$BEGIN
  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chat_sends' AND column_name='topic' AND data_type<>'text') THEN
@@ -48,7 +48,7 @@ export const sendStates=['sent','failed','uncertain','not_sent'] as const;
 /** Expected no-ops, and a chat's own choice not to take reactions: listed, never counted as problems. */
 export const harmlessSendCodes=['message_not_modified','button_answer_expired','reaction_not_allowed'] as const;
 /**
- * One send record. Version 2 (ADR-0250) names the app's chat, its thread (a Telegram topic, a Slack thread) and the
+ * One send record. Version 2 (ADR-0251) names the app's chat, its thread (a Telegram topic, a Slack thread) and the
  * message as the app writes them, as text; version 1, which older front doors wrote, named the topic and message as
  * numbers and reads as version 2.
  */
@@ -102,7 +102,7 @@ export function chatSend(value:unknown):ChatSend|null {
     message_id:message,detail:r.detail,state:r.state,status:r.status,error_code:r.error_code,reference:r.reference,ms:r.ms};
 }
 
-/** The Nocheh chat a send went to (ADR-0250): the thread's topic when it has a row, else the chat itself. */
+/** The Nocheh chat a send went to (ADR-0251): the thread's topic when it has a row, else the chat itself. */
 function sentTo(directory:ChatDirectory,channel:string,chat:string|null,thread:string|null):string|null {
   if(!chat||!(chatApps as readonly string[]).includes(channel))return null;
   const app=channel as ChatApp;

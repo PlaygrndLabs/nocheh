@@ -33,7 +33,7 @@ export class RuntimeProfileRepository {
   private get control(){return this.access.stores.control;}
   /** The owner's account, which owns the named profiles. */
   private owner(){const id=this.access.policy().owner_id;if(!id)throw new HttpError(409,'owner_profile_unavailable');return id;}
-  /** The owner's private chat, whose profile is the default (ADR-0250: its chat id, not the owner's account). */
+  /** The owner's private chat, whose profile is the default (ADR-0251: its chat id, not the owner's account). */
   private ownerChat(){const id=ownerChat(this.access.policy());if(!id)throw new HttpError(409,'owner_profile_unavailable');return id;}
   /** The served groups, by chat id, in the order the policy names them, then any other the directory serves. */
   private groups():string[] {
@@ -42,7 +42,7 @@ export class RuntimeProfileRepository {
       ...directory.all().map(chat=>chat.id).filter(group)])];
   }
   private entry(space:string,binding:GuardBinding,custom?:any,label?:Label){
-    // A profile's name and session are made from its chat id, unchanged for a chat stored before step 2b (ADR-0250).
+    // A profile's name and session are made from its chat id, unchanged for a chat stored before step 2b (ADR-0251).
     const owner=this.ownerChat(),directory=chats(),chat=directory.parentOf(space)??space;
     if(chat!==owner&&!(directory.kind(chat)==='group'&&directory.served(chat)))throw new HttpError(403,'profile_scope_denied');
     const audience:Reader={admin:false,scope:chat===owner?null:chat,space,revision:binding.epoch};
@@ -56,7 +56,7 @@ export class RuntimeProfileRepository {
    * profile; the chat link stays its logical_profile, so a renamed group keeps its profile. */
   private async labels(owner:string,groups:string[],taken:Set<string>):Promise<Map<string,Label>>{
     // A group is named once the owner has refreshed it and Telegram answered, as before step 2b: by the name and public
-    // username that refresh answered, never one a later update shows (ADR-0250; the old refresh table is only the
+    // username that refresh answered, never one a later update shows (ADR-0251; the old refresh table is only the
     // seeder's now). A group never refreshed keeps its code.
     const seen=new Map((await this.control.query(`SELECT chat_id,refreshed_title,refreshed_username FROM chat_details
       WHERE chat_id=ANY($1::text[]) AND refreshed_state='available'`,[groups])).rows

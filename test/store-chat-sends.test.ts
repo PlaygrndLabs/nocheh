@@ -28,7 +28,7 @@ test('a send record has a closed, content-free shape',()=>{
   const {thread:_thread,...older}=valid;
   assert.deepEqual(chatSend({...older,version:1,topic:7,message_id:7}),{...valid,thread:'7',message_id:'7'});
   assert.equal(chatSend({...older,version:1,topic:'7',message_id:7}),null,'version 1 numbers stay numbers');
-  // An app other than Telegram names its chat, thread and message its own way (ADR-0250).
+  // An app other than Telegram names its chat, thread and message its own way (ADR-0251).
   const slack=record({channel:'slack',key:'send:slack:T0EXAMPLE:'+'b'.repeat(32),account:'T0EXAMPLE',chat:'C0EXAMPLE1',
     thread:'1700000000.000200',message_id:'1700000000.000300'});
   assert.deepEqual(chatSend(slack),slack);
@@ -108,7 +108,7 @@ test('send records drain once from the spool, list newest first with chat names,
     assert.deepEqual(await sends.drain(root,4),{recorded:4,rejected:0},'one pass takes at most its limit');
     assert.deepEqual(await sends.drain(root),{recorded:rows.length-4,rejected:0});
     // Names come from the chat records: a captured message's title, or the owner's refresh; a chat Nocheh never saw
-    // stays unnamed. Each send names its Nocheh chat, found by the chat's Telegram id (ADR-0250).
+    // stays unnamed. Each send names its Nocheh chat, found by the chat's Telegram id (ADR-0251).
     const capture=new CaptureCoordinator(new ArchiveRepository(stores.archive),stores.control,undefined,chats);
     for(const [scope,title,id] of [[group,'Captured name',1],[other,'Other group',2]] as const) {
       const event:Envelope={version:1,key:'chat-sends:'+now+':'+id,origin:'live',kind:'telegram_update',bot_id:'4242',scope,source_id:String(id),revision:'1',occurred_at:null,

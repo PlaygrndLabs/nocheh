@@ -247,7 +247,7 @@ export function useCommand() {
   return {busy, error, run, clear: () => setError('')};
 }
 
-/** Chat names, for saying where something happens. What a chat is comes from the chat directory (ADR-0250). */
+/** Chat names, for saying where something happens. What a chat is comes from the chat directory (ADR-0251). */
 export function useChatNames(): (space: string | null | undefined) => string {
   const chats = useChatDirectory(60000);
   return (space: string | null | undefined) => {

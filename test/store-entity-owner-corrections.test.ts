@@ -20,7 +20,7 @@ test('owner entity decisions survive automatic identity and claim refresh',
   await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive);
   const guards=new GuardRepository(stores,archive),stamp=Date.now(),group='-'+stamp,owner:Reader={admin:true,scope:null};let sequence=0;
   const policy:AssistantPolicy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
-  // The chats as Part A's seeder leaves a group stored before step 2b (ADR-0250).
+  // The chats as Part A's seeder leaves a group stored before step 2b (ADR-0251).
   t.after(installChatsForTest(seededDirectory(()=>policy)));
   const entities=new EntityRepository(stores,access,new ProjectRepository(stores.control));
   const capture=async(actor:number,name:string)=>{

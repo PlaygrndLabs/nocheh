@@ -1,4 +1,4 @@
-"""The tester finds a chat's Nocheh id by its Telegram id labels in the owner's chat list (ADR-0250), never by building
+"""The tester finds a chat's Nocheh id by its Telegram id labels in the owner's chat list (ADR-0251), never by building
 one from a Telegram id: chats Nocheh first sees after step 2b, and their topics, have digest ids."""
 import unittest
 from unittest.mock import patch

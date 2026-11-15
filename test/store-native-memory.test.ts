@@ -15,7 +15,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {installChatsForTest} from '../src/chats.js';
 import {legacyDirectory} from './fixture-groups.js';
 
-/** The chats the recall and search cases below name, as the seeder makes their rows (ADR-0250). */
+/** The chats the recall and search cases below name, as the seeder makes their rows (ADR-0251). */
 const recallChats=()=>legacyDirectory(['-100','-100/topic/3','-200'],{owner:'123',served:['-100','-200']});
 
 test('reply context reads Honcho on arrival, limits other audiences to their own session and reuses identical guarded results',async()=>{
@@ -168,7 +168,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.deepEqual(await memory.search(group,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
   assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,filters:{session_id:{in:sessions}}}});
   assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
-  // The group is bound as its id and its topics' ids, from the chat rows (ADR-0250).
+  // The group is bound as its id and its topics' ids, from the chat rows (ADR-0251).
   const topics=['-100','-100/topic/3'];
   assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3',topics,null],[workspace,'B'.repeat(21),'-100/topic/3',topics,null],
     [workspace,'C'.repeat(21),'-100/topic/3',topics,null]],'a hit counts only with its own receipt, in this audience or its group');
@@ -179,7 +179,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
     reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
   queries.length=0;
   assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
-  // Its groups are bound as their ids and their topics' ids, from the chat rows (ADR-0250).
+  // Its groups are bound as their ids and their topics' ids, from the chat rows (ADR-0251).
   // The read set reaches the provenance query whole, and SQL takes its ids only as marked read set entries.
   const frozen=['-100','-100/topic/3','-200'].map(id=>'read:'+id);
   assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);

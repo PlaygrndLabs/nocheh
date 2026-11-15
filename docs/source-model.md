@@ -86,7 +86,7 @@ Unrecognized legacy event kinds use conservative event-level identities.
 
 An original's `scope` stays the chat id its app gave it, such as a Telegram chat
 id, after Nocheh gives the chat its own id and after Telegram upgrades a group to
-a new id ([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)). A read finds the chat an original belongs to
+a new id ([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)). A read finds the chat an original belongs to
 when it runs, through the control store's `chat_ids` (current and old ids alike),
 and its topic through the observation's audience; no original is rewritten and no
 per-event chat index is kept. A scope that no chat id names belongs to no chat,

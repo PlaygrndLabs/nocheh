@@ -91,7 +91,7 @@ test('a reply goes to the asking message in its topic, with the brain\'s and the
   try {
     const event='e'.repeat(64),input={binding:{} as any,principal:{admin:false,scope:GP1,space:GP1_TOPIC,turnEvent:event} as any,
       body:{event_id:event,payload:{update_id:9,message:{message_id:41,chat:{id:Number(GP1),type:'supergroup'}}}}};
-    // The chat's Telegram id now and the topic's key there, from the chat directory (ADR-0250).
+    // The chat's Telegram id now and the topic's key there, from the chat directory (ADR-0251).
     assert.deepEqual(replyTarget(input,'c1-x','pass'),{id:digest(event+':c1-x'),event_id:event,attempt:'c1-x',chat_id:GP1,message_id:'41',topic:Number(GP1_TOPIC_KEY),archive_credential:'pass'});
     assert.equal(deliveryId(event,2),digest(event+':2'));
     assert.equal(replyTarget({...input,principal:{...input.principal,space:GP1}},1,'p').topic,undefined);

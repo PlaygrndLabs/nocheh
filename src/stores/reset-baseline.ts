@@ -74,7 +74,7 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
     throw Error('reset_baseline_request_invalid');
   if(!Array.isArray(request.profile_commands))throw Error('reset_baseline_request_invalid');
   const configuration=snapshot.configuration,profileCount=configuration.runtime_profiles.length;
-  // A version 2 snapshot's chats and app ids, with one connection for each app they name (ADR-0250).
+  // A version 2 snapshot's chats and app ids, with one connection for each app they name (ADR-0251).
   const chatApps=new Set([...configuration.chats??[],...configuration.chat_ids??[]].map(row=>row.app));
   const [archive,derived,control]=await Promise.all([counts(stores.archive,'archive'),counts(stores.derived,'derived'),counts(stores.control,'control')]);
   only(archive,{});only(derived,{});

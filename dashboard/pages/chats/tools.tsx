@@ -44,7 +44,7 @@ export function toolOrigin(origin: Origin, topic: boolean): string {
 
 /**
  * `parent` is what the switches fall back to: a topic's group, '*' (every chat) for a chat, and nothing for '*'
- * itself. The caller knows it from the chat directory (ADR-0250).
+ * itself. The caller knows it from the chat directory (ADR-0251).
  */
 export function ToolSwitches({
   space,

@@ -6,7 +6,7 @@ import {answerId,currentReader,reader,scopeToken,turnToken} from '../src/access.
 import {chatDirectory,chatIdFor,chats,installChats,installChatsForTest,setChatLoader} from '../src/chats.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,GP2,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,OWNER,fixtureChats,fixtureDirectory} from './fixture-groups.js';
 
-// Both fixture families, as the chat directory knows them: reader() asks it what a space and a scope are (ADR-0250).
+// Both fixture families, as the chat directory knows them: reader() asks it what a space and a scope are (ADR-0251).
 installChatsForTest(fixtureDirectory());
 
 const secret='synthetic-service-token-only-for-tests',event='e'.repeat(64),answer='a'.repeat(32),later=()=>Date.now()+60000;

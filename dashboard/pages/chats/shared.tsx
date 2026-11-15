@@ -35,7 +35,7 @@ export const memoryRequestsHref = href('inbox', {kind: 'memory_access'});
  * The Telegram settings that decide where Nocheh answers and who may talk to it.
  * Changes are drafts in the shared settings store; the bottom save bar saves and applies them.
  * Until step 2b-2, TELEGRAM_GROUP_IDS still lists the groups Nocheh serves by their Telegram ids, and
- * TELEGRAM_GROUP_ACCESS keeps a group's people under one of them (ADR-0250); a chat is passed whole, never its id.
+ * TELEGRAM_GROUP_ACCESS keeps a group's people under one of them (ADR-0251); a chat is passed whole, never its id.
  */
 export function useTelegram() {
   const settings = useSettings();

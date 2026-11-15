@@ -37,7 +37,7 @@ export class AudienceRepository {
       (await control.query<{id:string;state:string}>('SELECT id,state FROM projects WHERE id=$1',[principal.reads!.project])).rows[0]??null:
       (await new ProjectRepository(control).effective(principal.space)).project;
     // The app the turn's chat lives in, as the front door that receives the turn checks it: the chat's current app id
-    // and topic now, so a reply follows a group Telegram upgraded (ADR-0250). A chat the directory does not address
+    // and topic now, so a reply follows a group Telegram upgraded (ADR-0251). A chat the directory does not address
     // gets none, and no front door accepts a turn without it; storage itself does not require it, so job passes work.
     const app=appBindingOf(principal.space);
     return turnToken(secret,principal.scope,expires,eventId,{space:principal.space,revision:binding.epoch,

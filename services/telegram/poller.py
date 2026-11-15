@@ -45,7 +45,7 @@ class Poller:
         service.identity = {'bot_id': str(me.id), 'username': me.username, 'first_name': me.first_name}
         service.status = 'connected'
         if self.menu is None or self.menu.done():
-            # Every Telegram id a served group has had, from the app's served list (ADR-0250).
+            # Every Telegram id a served group has had, from the app's served list (ADR-0251).
             groups = (await asyncio.to_thread(service.policy.current)).served_externals()
             self.menu = asyncio.ensure_future(clear_command_menu(bot, groups))
 

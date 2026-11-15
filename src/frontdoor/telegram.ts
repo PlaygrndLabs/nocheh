@@ -3,7 +3,7 @@ import { runtimeOperations, type RuntimeAdapter, type RuntimeOperation } from '.
 import { chats, type AppBinding, type ChatDirectory } from '../chats.js';
 
 /*
- * The front door's translation between Nocheh's chats and Telegram's own ids (ADR-0250), in one place. Storage names a
+ * The front door's translation between Nocheh's chats and Telegram's own ids (ADR-0251), in one place. Storage names a
  * chat by its Nocheh id everywhere; every call that sends to a chat (a reply, presence, an approved send, a card, a notice,
  * a reminder) is given that chat's current Telegram id and topic here, so sends follow a group Telegram upgraded. An
  * incoming Telegram id is turned into its Nocheh chat here too. A chat the directory does not know is never sent to
@@ -28,7 +28,7 @@ export function telegramTarget(chat: string | null | undefined, directory: ChatD
   if (!target) throw new HttpError(409, 'chat_not_found');
   return target;
 }
-/** The app binding a turn pass carries for a chat or topic (ADR-0250): its current app id and topic key, or null. */
+/** The app binding a turn pass carries for a chat or topic (ADR-0251): its current app id and topic key, or null. */
 export function appBindingOf(space: string | null | undefined, directory: ChatDirectory = chats()): AppBinding | null {
   const address = directory.appIds(space);
   return address ? {app: address.app, chat: address.chat, topic: address.topic} : null;

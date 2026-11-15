@@ -27,7 +27,7 @@ class ProfileConfigurationTests(unittest.TestCase):
             self.assertNotEqual(paths[0],paths[1])
 
     def test_a_topic_profile_from_before_step_2b_inherits_its_group_through_the_served_list(self):
-        # Its marker was written before markers kept their chat (ADR-0250): the group comes from the served list, as it
+        # Its marker was written before markers kept their chat (ADR-0251): the group comes from the served list, as it
         # came from the topic's id before, so the owner sees and edits the group's inherited values, not stale ones.
         import json
         from services.chats import Served

@@ -104,7 +104,7 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     const credential=reader({headers:{authorization:'Bearer '+body.archive_credential}} as any,token);
     assert.deepEqual(pick(credential,'scope','space','turnEvent'),{scope:group,space:group+'/topic/17',turnEvent:asked.id},'the credential is the asking member\'s');
     // It names its chat, topic and app binding as a reply's turn does, the same binding its pass carries: Hermes and the bot
-    // refuse a turn whose body and pass disagree, or that names no binding (ADR-0250).
+    // refuse a turn whose body and pass disagree, or that names no binding (ADR-0251).
     assert.deepEqual([body.chat,body.space,body.app,credential.app],[group,group+'/topic/17',...Array(2).fill({app:'telegram',chat:group,topic:'17'})]);
     // While it runs, reactions and learning wait, as for a reply.
     const running=await row(one.id);

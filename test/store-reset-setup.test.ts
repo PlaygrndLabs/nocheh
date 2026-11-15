@@ -110,7 +110,7 @@ test('reset setup restores only current configuration under a new generation and
     await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'foreign','active',1)",['d'.repeat(64)]);
     await assert.rejects(restoreResetSetup(stores,input),/target_changed/);
     // A version 1 snapshot, taken before step 2b, names chats by their old values: it restores none, and the seeder
-    // gives each value its row, with the same id, when the app starts (ADR-0250).
+    // gives each value its row, with the same id, when the app starts (ADR-0251).
     assert.deepEqual(await chatRows(stores.control),{chats:[],chat_ids:[]});
     await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001','-1002']}).seed();
     assert.deepEqual((await chatRows(stores.control)).chats.map(row=>[row.id,row.kind,row.parent_id,row.state]),

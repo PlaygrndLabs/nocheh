@@ -1,4 +1,4 @@
-// Chat shapes shared by storage, the Python services and the dashboard (ADR-0250). No imports: the dashboard reads
+// Chat shapes shared by storage, the Python services and the dashboard (ADR-0251). No imports: the dashboard reads
 // these as types, and the values here are the only spelling of each chat word.
 
 /** The chat apps Nocheh can be added to. Telegram is the only front door in step 2b; Slack is designed for. */
@@ -25,7 +25,7 @@ export type ChatIdState=typeof chatIdStates[number];
 export interface ChatAppLabel {app:ChatApp;external:string;state:ChatIdState}
 
 /**
- * The app a turn pass is bound to (ADR-0250): the chat's current id in that app, and the topic key there (a Telegram
+ * The app a turn pass is bound to (ADR-0251): the chat's current id in that app, and the topic key there (a Telegram
  * forum topic's thread id as text), or null. Signed in a turn pass beside the Nocheh scope and space; the front door
  * that receives the turn checks it against its own update.
  */

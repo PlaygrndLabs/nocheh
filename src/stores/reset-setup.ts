@@ -14,12 +14,12 @@ import {SourceAccessRepository} from './access.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 
 type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids:string[];group_access?:Record<string,GroupAccess>};
-/** A chats row in a reset snapshot (ADR-0250): a name only when the owner gave it. */
+/** A chats row in a reset snapshot (ADR-0251): a name only when the owner gave it. */
 type SnapshotChat={id:string;app:ChatApp;kind:ChatRow['kind'];parent_id:string|null;topic_key:string|null;app_type:string|null;
   title:string|null;title_source:'owner'|null;is_forum:boolean;state:ChatRow['state']};
 type SnapshotChatId={app:ChatApp;external_id:string;chat_id:string;state:ChatIdRow['state'];reason:'migrated'|'id_changed'|null};
 /**
- * Version 2 (ADR-0250) carries the chats and their app ids, so every value names the same chat after the reset; a
+ * Version 2 (ADR-0251) carries the chats and their app ids, so every value names the same chat after the reset; a
  * version 1 snapshot, taken before step 2b, names chats by their old values and still restores (the stores' seeder
  * gives them rows when the app starts).
  */
@@ -229,7 +229,7 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     const defaultAccess=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time'}];
     if(!same(current.memory_access_settings,defaultAccess)&&!same(current.memory_access_settings,configuration.memory_access_settings))throw Error('reset_setup_target_changed');
     for(const [name,rows] of Object.entries(current))if(name!=='memory_access_settings'&&(rows as unknown[]).length&&!same(rows,(configuration as any)[name]))throw Error('reset_setup_target_changed');
-    // The chats come first, each with its own id and app ids, so every value below names the same chat (ADR-0250).
+    // The chats come first, each with its own id and app ids, so every value below names the same chat (ADR-0251).
     const existingChats=await chatRows(db),desiredChats=sortedChats(configuration);
     if((existingChats.chats.length||existingChats.chat_ids.length)&&!same(existingChats,desiredChats))throw Error('reset_setup_target_changed');
     if(!existingChats.chats.length&&desiredChats.chats.length) {

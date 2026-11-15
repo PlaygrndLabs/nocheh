@@ -92,7 +92,7 @@ class ResetPreservationTests(unittest.TestCase):
             self.assertEqual(before, {path.name: path.read_bytes() for path in journal.directory.iterdir() if path.is_file()})
 
     def test_preferences_follow_the_chats_the_configuration_snapshot_records(self):
-        # ADR-0250: a configuration snapshot with chat records names each chat by its Nocheh id: the owner's chat, a group
+        # ADR-0251: a configuration snapshot with chat records names each chat by its Nocheh id: the owner's chat, a group
         # Telegram upgraded (old id '-10', now '-1010'), a group first seen after step 2b, and their topics.
         new, topic, other = 'b' * 64, 'c' * 64, 'd' * 64
         rows = [{'id': '42', 'app': 'telegram', 'kind': 'private', 'parent_id': None},

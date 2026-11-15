@@ -47,7 +47,7 @@ source identifiers and links do not change when a derivative is activated.
 | GET `/v1/private-answers` | The record of Answer privately buttons, newest first, 100 a page: who asked, where, the project, the groups frozen at the tap, the state and its times; `project` keeps one project and `after` continues from an answer's id ([ADR-0249](adr/0249-answer-privately.md)) |
 
 Chat and topic values in these routes (`space`, `space_id`, `scope_id`, a rule's
-`sources` and `destination`) are Nocheh chat ids ([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)).
+`sources` and `destination`) are Nocheh chat ids ([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)).
 They are opaque: a chat Nocheh knew before step 2b keeps the value it was stored
 under, and a chat or topic first seen later has a 64-character digest id. Never
 build or parse one; find a chat in GET `/v1/conversations`, whose `q` matches a

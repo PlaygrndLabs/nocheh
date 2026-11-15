@@ -63,7 +63,7 @@ for(const family of families)test(`an owner rule never reads from or shares into
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),projects=new ProjectRepository(stores.control),sharing=new SharingPolicyRepository(stores.control);
-  // Chats made up as Telegram sends them, named by the family: old-shaped or digest ids (ADR-0250).
+  // Chats made up as Telegram sends them, named by the family: old-shaped or digest ids (ADR-0251).
   const key='private-rules:'+Date.now(),g=String(-Date.now()),g2=String(Number(g)-1),g3=String(Number(g)-2),p=String(Date.now()),id=family.id;
   const group=id(g),second=id(g2),third=id(g3),privateChat=id(p),privateTopic=id(p+'/topic/5'),otherPrivate=id(p+'1');
   const restore=installChatsForTest(family.directory([g,g2,g3,p+'/topic/5',g+'/topic/3',g+'/topic/5'],{served:[g,g2,g3]}));
@@ -119,7 +119,7 @@ for(const family of families)test(`a project never shares between its groups, li
   try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
-  // Chats made up as Telegram sends them, named by the family: old-shaped or digest ids (ADR-0250).
+  // Chats made up as Telegram sends them, named by the family: old-shaped or digest ids (ADR-0251).
   const key='project-groups:'+Date.now(),g=String(-Date.now()),g2=String(Number(g)-1),g3=String(Number(g)-2),g4=String(Number(g)-3),p=String(Date.now()),id=family.id;
   const group=id(g),second=id(g2),third=id(g3),unserved=id(g4),topic=id(g+'/topic/17'),privateChat=id(p),topicOf=(key:number)=>id(g+'/topic/'+key);let n=0;
   const restore=installChatsForTest(family.directory([g,g2,g3,g4,g+'/topic/17',p,...Array.from({length:10},(_,i)=>g+'/topic/'+(30+i)),g+'/topic/99'],{served:[g,g2,g3]}));

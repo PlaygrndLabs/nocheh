@@ -57,7 +57,7 @@ type Options=Parameters<typeof storageServices>[1];
  * `groupReplies` says otherwise.
  */
 export function fixtureServices(stores:StorePools,options:Omit<Options,'runtime'|'brain'>&{runtime:FakeCall;brain?:Brain;telegram?:FakeCall}) {
-  // Sends and turns name chats by their ids through the chat directory (ADR-0250): a test that installs none gets one
+  // Sends and turns name chats by their ids through the chat directory (ADR-0251): a test that installs none gets one
   // seeded from the values it uses, served by its policy.
   seedChatsForTest(options.policy);
   const {telegram=fixtureTelegram(),...rest}=options;

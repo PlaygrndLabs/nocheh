@@ -147,7 +147,7 @@ test('a send names its destination by chat id: unknown ids fail closed, and an a
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
-  // The strict fixture directory (ADR-0250): GP1 stored before step 2b, NG1 first seen after it, NG2 upgraded since. An id
+  // The strict fixture directory (ADR-0251): GP1 stored before step 2b, NG1 first seen after it, NG2 upgraded since. An id
   // it does not hold is not made up on the spot, as the seeded fixture would.
   const restore=installChatsForTest(fixtureDirectory([GP1,NG1_TG,NG2_TG]));
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-telegram-destination-')),key='telegram-destination:'+Date.now();

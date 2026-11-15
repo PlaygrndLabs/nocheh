@@ -174,7 +174,7 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
     """The turn credential Nocheh minted for this event and conversation, unexpired and signed with the service token,
     and the served list it was checked against.
 
-    It binds a reply or presence to the chat and topic the turn was admitted for (ADR-0250): its app binding names this
+    It binds a reply or presence to the chat and topic the turn was admitted for (ADR-0251): its app binding names this
     Telegram chat and topic, and the served list agrees that its space (a Nocheh chat id) is there now and belongs to its
     scope: a served group, or for the owner's own turn (no scope) the owner's private chat itself, never a topic of it, as
     Hermes runs the owner's turns only there. Whether the space still

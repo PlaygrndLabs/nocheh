@@ -5,7 +5,7 @@ import {parseKnowledgeProposal,learnedOrganization,organizationIdentity,proposal
 import {installChatsForTest} from '../src/chats.js';
 import {BOB_CHAT,NG1,NG1_TOPIC,NG2,fixtureDirectory,legacyDirectory} from './fixture-groups.js';
 
-// The chats these tests name, as the seeder makes their rows (ADR-0250): a group and its topic, another group, the
+// The chats these tests name, as the seeder makes their rows (ADR-0251): a group and its topic, another group, the
 // owner's private chat and two of its topics. Anything else has no row and counts as private.
 const legacyChats=legacyDirectory(['-1000/topic/7','-1001','123/topic/4','123/topic/5'],{owner:'123',served:['-1000','-1001']});
 installChatsForTest(legacyChats);

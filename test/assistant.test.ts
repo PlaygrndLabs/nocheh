@@ -18,7 +18,7 @@ import {preparationStatus} from '../src/workflows/preparation-status.js';
 import {requestAction,controlReply,executeApproved} from '../src/actions.js';
 
 const policy={enabled:true,owner_id:'123',group_ids:['-20','-30']};
-// The chats these tests use, as the seeder makes their rows from the policy (ADR-0250).
+// The chats these tests use, as the seeder makes their rows from the policy (ADR-0251).
 installChatsForTest(policyDirectory(policy,['456','-99']));
 const update=(chat:number,user:number,type='group')=>({update_id:1,message:{message_id:7,chat:{id:chat,type},from:{id:user,is_bot:false},text:'exact Aws 😃\r\n '}});
 test('only owner private messages receive owner scope; selected groups stay group-local even for the owner',()=>{
@@ -40,7 +40,7 @@ test('group participants need an explicit grant and a deny overrides it',()=>{
   assert.equal(conversationScope(denied,update(-20,123),'-20')?.owner,false);
 });
 
-test('a chat is answered by its chat row: digest chats, upgraded groups and access under an old id (ADR-0250)',()=>{
+test('a chat is answered by its chat row: digest chats, upgraded groups and access under an old id (ADR-0251)',()=>{
   const restore=installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS]));
   try {
     const served:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS],group_access:{}};

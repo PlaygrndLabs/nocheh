@@ -15,7 +15,7 @@ export type Chat = {
   registered?: boolean;
   telegram?: {state: string; migrate_to_chat_id: string | null} | null;
   /**
-   * From the chat directory (ADR-0250). The dashboard reads what a chat is from these fields and never works it out
+   * From the chat directory (ADR-0251). The dashboard reads what a chat is from these fields and never works it out
    * from its id: the id is Nocheh's own and says nothing.
    */
   topic_key?: string | null;
@@ -79,7 +79,7 @@ export function groupOf(chat: Chat | null | undefined, find: FindChat): string |
 }
 /**
  * A group or one of its topics: the only chats that share, are shared with or join a project. Every other chat, one
- * the directory doesn't know included, counts as private, as the server's chat directory does (ADR-0242, ADR-0250).
+ * the directory doesn't know included, counts as private, as the server's chat directory does (ADR-0242, ADR-0251).
  */
 export const isGroupChat = (chat: Chat | null | undefined, find: FindChat): boolean => groupOf(chat, find) !== null;
 /** Topics in the order their app numbers them. */
@@ -126,7 +126,7 @@ export function serializeGroupIds(ids: string[], savedText: string): string {
 
 /**
  * Until chats.state is the only source (step 2b-2), TELEGRAM_GROUP_IDS still decides which groups Nocheh serves, by
- * their Telegram ids (ADR-0250). A group is listed when any of its Telegram ids is, an old one included.
+ * their Telegram ids (ADR-0251). A group is listed when any of its Telegram ids is, an old one included.
  */
 export const groupListed = (ids: string[], chat: Chat | null | undefined): boolean =>
   appIds(chat).some(id => ids.includes(id));
@@ -266,7 +266,7 @@ export function chatTree(
 
 /**
  * The search hits a sharing rule may use: those whose chat is a source's group or one of its topics, as a topic
- * source reads its whole group. A hit names its chat by chat_id (ADR-0250), never by the archive's raw scope; a hit
+ * source reads its whole group. A hit names its chat by chat_id (ADR-0251), never by the archive's raw scope; a hit
  * with a scope but no chat is no source's.
  */
 export function sourceHits<T extends {scope?: string; chat_id?: string | null}>(

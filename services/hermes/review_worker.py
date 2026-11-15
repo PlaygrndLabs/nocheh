@@ -54,7 +54,7 @@ def observe(root,policy,body):
 
 
 def review_profile(root,policy,model,body):
-    # The owner's private chat by its Nocheh chat id, and the owner's account, from the app's served list (ADR-0250).
+    # The owner's private chat by its Nocheh chat id, and the owner's account, from the app's served list (ADR-0251).
     served=policy.current();owner=served.owner_chat
     if not owner or body.get('scope') != owner:
         raise ValueError('owner_review_required')

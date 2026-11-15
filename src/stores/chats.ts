@@ -8,7 +8,7 @@ import {HttpError} from '../http.js';
 import type {CapturedSource} from './archive.js';
 
 /**
- * Chat records that the directory itself does not decide on (ADR-0250), next to the contract's chat tables:
+ * Chat records that the directory itself does not decide on (ADR-0251), next to the contract's chat tables:
  * - chat_details: what the owner's directory shows of a chat and never decides access with. seen_at is the latest
  *   captured message in the chat (in a topic, in that topic), closed whether a topic's latest open or close message
  *   closed it, username the chat's public name, observed_title the last name an update showed (kept beside a topic
@@ -80,7 +80,7 @@ export async function ensureAccount(db:Db,connection:string,person:Pick<Telegram
 }
 /**
  * Names the person of each Telegram private chat whose row names none: a chat a reset restored or an owner record
- * brought, which carry no account (ADR-0250). A Telegram private chat's id is its person's user id, so its current id
+ * brought, which carry no account (ADR-0251). A Telegram private chat's id is its person's user id, so its current id
  * names the person, as when Nocheh first records the chat. `chat` limits this to one chat. A person another private
  * chat already names keeps that one. Returns how many chats it named.
  */
@@ -96,7 +96,7 @@ export async function namePrivateChats(db:Db,chat?:string):Promise<number> {
   }
   return named;
 }
-/** The 2b-1 bridge (ADR-0250): a group is served when any of its Telegram ids, current or old, is in TELEGRAM_GROUP_IDS,
+/** The 2b-1 bridge (ADR-0251): a group is served when any of its Telegram ids, current or old, is in TELEGRAM_GROUP_IDS,
  * and the owner's private chat is served. Step 2b-2 moves this decision onto chats.state itself. */
 const servedState=(policy:Pick<AssistantPolicy,'group_ids'|'owner_id'>,kind:'private'|'group',externals:readonly string[]):ChatState=>
   kind==='group'?externals.some(id=>policy.group_ids.includes(id))?'active':'off':externals.includes(policy.owner_id??'')?'active':'off';
@@ -144,7 +144,7 @@ async function present(db:Db,chat:string,order:UpdateOrder|null,values:{title?:s
 }
 
 /**
- * Nocheh's chat records (ADR-0250): the chats, chat ids, people and memberships a Telegram update shows, recorded as
+ * Nocheh's chat records (ADR-0251): the chats, chat ids, people and memberships a Telegram update shows, recorded as
  * each update is taken in. It calls nothing and decides nothing: a new chat is served only as the 2b-1 bridge says,
  * and the directory snapshot (chats()) reads these rows.
  */
@@ -175,7 +175,7 @@ export class ChatRepository {
    * `transport` is how the original came in: taken in live ('capture'), or brought in by the owner from another
    * installation ('import', with the origin it had there). Only a live capture names this installation's bot. An
    * imported chat Nocheh has no row for is the owner's own history from before: it gets the id its old stored value
-   * had, as the seeder gives one, so the derivatives and owner records imported with it name it (ADR-0250).
+   * had, as the seeder gives one, so the derivatives and owner records imported with it name it (ADR-0251).
    */
   private async record(db:Db,source:CapturedSource,transport:'capture'|'import'):Promise<boolean> {
     const event=(await this.stores.archive.query(`SELECT e.payload,e.received_at,e.bot_id,(SELECT o.metadata->'audience'->>'topic_id' FROM source_observations o
@@ -410,7 +410,7 @@ export async function assertChatDirectory(db:Db):Promise<void> {
 }
 
 /**
- * Keeps this process's chat directory (chats()) current (ADR-0250). It loads every chats and chat_ids row at start; a
+ * Keeps this process's chat directory (chats()) current (ADR-0251). It loads every chats and chat_ids row at start; a
  * guard epoch newer than the snapshot's reloads it, and a lookup that finds no row reloads it when the directory
  * revision has moved, checked at most once every `interval` ms. A load that fails, or rows that break the schema's
  * rules, leave the previous directory in place.
@@ -458,7 +458,7 @@ export async function reloadChats():Promise<void> {await active?.load().catch(fa
 export async function currentChats():Promise<ChatDirectory> {return active?active.current():chats();}
 
 /**
- * The assistant policy as this process serves it (ADR-0250): the configured policy, with the owner's private chat as
+ * The assistant policy as this process serves it (ADR-0251): the configured policy, with the owner's private chat as
  * the directory names it, and group_ids holding every Telegram id (current and old) of the served groups, so
  * comparisons with archive originals still find a group Telegram upgraded. Recomputed only when the directory or the
  * configured policy changes.

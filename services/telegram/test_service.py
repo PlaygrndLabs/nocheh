@@ -313,7 +313,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len(self.sent()), 2)
 
     def test_a_topic_recorded_after_the_list_was_read_is_answered_on_its_first_turn(self):
-        # A new forum topic moves no guard epoch (ADR-0250): the list held since before it was recorded is read again (at
+        # A new forum topic moves no guard epoch (ADR-0251): the list held since before it was recorded is read again (at
         # most once a second) when a pass names a space it does not hold, instead of refusing until the list ages out.
         from services.chats import Served, ServedList
         before = served_policy().current()

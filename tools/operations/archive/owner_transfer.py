@@ -66,7 +66,7 @@ def validate_owner(directory):
     return manifest
 
 
-# The chats and their app ids (ADR-0250): a portable import brings them before the archive, so each imported
+# The chats and their app ids (ADR-0251): a portable import brings them before the archive, so each imported
 # original finds the chat its package names and every later record means the same chat here.
 CHAT_TABLES = ('chats', 'chat_ids')
 

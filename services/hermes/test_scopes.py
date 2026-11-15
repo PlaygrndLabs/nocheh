@@ -26,7 +26,7 @@ JOB_MACHINE_TOOLS=JOB_BOX_TOOLS-{'execute_code'}
 
 
 def turn(update,scopes,scope=None,**changes):
-    """A Telegram turn as storage sends it to Hermes, with the claims of its pass (ADR-0250): the chat and space by their
+    """A Telegram turn as storage sends it to Hermes, with the claims of its pass (ADR-0251): the chat and space by their
     Nocheh ids, and where the chat is in Telegram now. The owner's own turn in a private chat has no scope claim."""
     message=update['message'];external=str(message['chat']['id']);topic=topic_id(message);served=scopes.current()
     chat=served.resolve(external) or external
@@ -100,7 +100,7 @@ class ScopeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):verify_capability(signed({**named_claims,'project':invalid}),secret,a,event)
 
     def test_a_chat_keeps_its_profile_and_session_by_its_nocheh_id(self):
-        # ADR-0250: a chat stored before step 2b keeps its Telegram id as its chat id, so its profile, its topic's space and
+        # ADR-0251: a chat stored before step 2b keeps its Telegram id as its chat id, so its profile, its topic's space and
         # its session cursor keep the names they had; a group Telegram upgraded keeps them under its new Telegram id, and
         # a chat first seen after step 2b has its own.
         from services.durable import digest
@@ -147,7 +147,7 @@ class ScopeTests(unittest.TestCase):
             self.assertIsInstance(Scopes.load(None).served,ServedList)
 
     def test_a_topic_recorded_after_the_list_was_read_is_served_on_its_first_turn(self):
-        # A new forum topic, or a group's new Telegram id, moves no guard epoch (ADR-0250): the turn's pass names a space
+        # A new forum topic, or a group's new Telegram id, moves no guard epoch (ADR-0251): the turn's pass names a space
         # the list read a moment ago does not hold, so the list is read again (at most once a second) before deciding.
         from services.chats import ServedList
         topic=('d'*64,'-20','77')

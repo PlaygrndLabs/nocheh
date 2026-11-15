@@ -216,7 +216,7 @@ def _post_shutdown_rebound(journal, preflight):
 
 
 def _chats(configuration, owner, groups):
-    """The chats whose preferences a reset keeps, by their Nocheh ids (ADR-0250), from the configuration snapshot's chat
+    """The chats whose preferences a reset keeps, by their Nocheh ids (ADR-0251), from the configuration snapshot's chat
     records: the owner's private chat, each served group with every Telegram id it has had, and their topics. None for
     a snapshot without them (the legacy layout, or one taken before step 2b): there each value is its own chat's id."""
     rows, ids = configuration.get('chats'), configuration.get('chat_ids')

@@ -25,7 +25,7 @@ test('a chat with more than 100 learned rules keeps learning with the owner\'s a
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive),guards=new GuardRepository(stores,archive);
   const key='rule-catalog:'+Date.now(),group=String(-Date.now()),space=group+'/topic/17';
   const policy:AssistantPolicy={enabled:true,owner_id:'42',group_ids:[group]},access=new SourceAccessRepository(stores,archive,guards,()=>policy);
-  // The chats as Part A's seeder leaves a group stored before step 2b and its topics (ADR-0250).
+  // The chats as Part A's seeder leaves a group stored before step 2b and its topics (ADR-0251).
   t.after(installChatsForTest(seededDirectory(()=>policy)));
   const learned=new LearnedMemoryRepository(stores,archive,derived,guards),projects=new ProjectRepository(stores.control),selections=new SelectionRepository(stores,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,new EntityRepository(stores,access,projects));

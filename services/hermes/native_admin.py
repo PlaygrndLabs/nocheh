@@ -65,7 +65,7 @@ class Administration:
     def binding(self,name):
         if self.profile_catalog:
             return self.profile_catalog.validate(self.profile_catalog.resolve(name))
-        # The owner's private chat and the served groups by their Nocheh chat ids, from the app's served list (ADR-0250).
+        # The owner's private chat and the served groups by their Nocheh chat ids, from the app's served list (ADR-0251).
         served=self.policy.current();owner,account=served.owner_chat,served.owner_user() or ''
         if not owner:raise ValueError('owner_profile_unavailable')
         if not name or name in ('default','current'):name=Scopes.profile(owner)

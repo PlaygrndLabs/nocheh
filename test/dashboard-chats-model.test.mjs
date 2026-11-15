@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 
 /*
- * The Chats page reads what a chat is from the chat directory's fields on /conversations (ADR-0250), never from its
+ * The Chats page reads what a chat is from the chat directory's fields on /conversations (ADR-0251), never from its
  * id: an id is Nocheh's own, a stored value for a chat seen before step 2b and a digest for one seen later.
  */
 const compiled = await build({

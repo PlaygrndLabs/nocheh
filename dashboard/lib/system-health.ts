@@ -50,7 +50,7 @@ export type ChatSend = {
   /** The app's own chat id, as the send went out: a label. */
   chat: string | null;
   chat_title: string | null;
-  /** The Nocheh chat (or topic) the send went to, when Nocheh knows it (ADR-0250): the one to link to. */
+  /** The Nocheh chat (or topic) the send went to, when Nocheh knows it (ADR-0251): the one to link to. */
   chat_id?: string | null;
   /** The topic in the app: a Telegram thread id, or a Slack thread. */
   topic?: number | string | null;

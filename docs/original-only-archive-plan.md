@@ -605,7 +605,7 @@ snapshot's `chats` and `chat_ids` rows, so a chat first seen after step 2b and a
 group Telegram upgraded keep their preferences. A snapshot taken before step 2b
 (`v1`) still restores; only for it, and for a configuration snapshot without
 chat rows, are topic spaces read from their stored form
-([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)).
+([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)).
 
 The coordinator must hold maintenance exclusion, snapshot the control catalog,
 retain the configuration-only manifest durably, and call `verify_source` before

@@ -20,7 +20,7 @@ test('delegated organization only creates projects; every move asks the owner, n
   const owner={admin:true,scope:null},key='organization:'+Date.now(),group='-'+Date.now(),other=String(Number(group)-1),topic=group+'/topic/99';let sequence=0;
   const s=fixtureServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,other]}),
    runtime:async operation=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
-  // The chats as Part A's seeder leaves them, the topic whose task moves with its group included (ADR-0250).
+  // The chats as Part A's seeder leaves them, the topic whose task moves with its group included (ADR-0251).
   assert.equal(parentSpace(topic),group);assert.equal(parentSpace(other+'/topic/5'),other);
   const knowledge=s.knowledge as any;
   // Model-provider and reply-delivery setup are outside this storage fixture. Keep all proposal,

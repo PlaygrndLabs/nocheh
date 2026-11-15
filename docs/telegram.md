@@ -27,7 +27,7 @@ are examples; use the discovered values. The ignored `.env`
 holds the policy. To disable the assistant, set `TELEGRAM_ENABLED=false` and run `up`.
 
 Nocheh keeps its own record of every chat and names each by an id of its own
-([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)); a group Telegram upgrades to a
+([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)); a group Telegram upgrades to a
 supergroup stays the same chat under its new Telegram id. At each start the app serves
 the groups `TELEGRAM_GROUP_IDS` lists, by any Telegram id they have had, and the owner's
 private chat. `nocheh-telegram` and Hermes read which chats are served from the app, not
@@ -151,7 +151,7 @@ sent), the HTTP status, a reason code such as `bot_blocked` or
 never holds text, buttons, links, the token or Telegram's own error wording.
 Records go to `spool/sends`, and `nocheh-app` moves them into the control
 database's `chat_sends` table, adding the Nocheh chat the Telegram chat and
-topic belong to ([ADR-0250](adr/0250-chats-get-nochehs-own-ids.md)). A record names
+topic belong to ([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)). A record names
 the topic by its thread as text, so a record from another chat app fits the same
 shape. They are not journal entries, archive messages or delivery receipts, and
 nothing reads them to decide a send.

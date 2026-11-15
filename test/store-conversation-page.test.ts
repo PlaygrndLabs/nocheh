@@ -65,7 +65,7 @@ test('a conversation is read in time order, page by page, only by those who may 
   }finally{await s.guards.setMode('on');await stores.close();}
 });
 
-test('a group Telegram upgraded after step 2b keeps its id, and its messages from before the upgrade still page and search (ADR-0250)',
+test('a group Telegram upgraded after step 2b keeps its id, and its messages from before the upgrade still page and search (ADR-0251)',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},check=new pg.Pool(config);
   try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}

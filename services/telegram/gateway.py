@@ -37,7 +37,7 @@ ERROR_NAME = re.compile(r'[A-Za-z_]{1,64}')
 
 def topic_of(value):
     """A forum topic id or None; 1 is the forum's General topic. Storage sends Telegram's thread id, the number its topic
-    key names (ADR-0250); the key as text is taken too."""
+    key names (ADR-0251); the key as text is taken too."""
     if value is None or value == '': return None
     if isinstance(value, str) and value.isascii() and value.isdigit() and value[0] != '0' and len(value) <= 16: value = int(value)
     if type(value) is not int or not 0 < value <= 9007199254740991: raise ValueError('invalid_topic')
@@ -186,7 +186,7 @@ class TelegramService:
         topic = topic_of(body.get('topic'))
         credential = body.get('archive_credential')
         if not isinstance(credential, str): raise ValueError('invalid_turn')
-        # The pass's app binding names this chat and topic, and the served list agrees its space is there now (ADR-0250).
+        # The pass's app binding names this chat and topic, and the served list agrees its space is there now (ADR-0251).
         _, served = verify_turn_credential(credential, event, chat, topic, self.policy)
         return chat, topic, message, credential, served
 
@@ -362,7 +362,7 @@ class TelegramService:
         return self.call(self.send_action(body))
 
     async def send_action(self, body):
-        # Storage names the destination by its chat id and gives the Telegram chat and topic it is at now (ADR-0250); the
+        # Storage names the destination by its chat id and gives the Telegram chat and topic it is at now (ADR-0251); the
         # app checks both again before the send (check_action_policy).
         chat_id, destination = str(body.get('chat_id') or ''), body.get('destination')
         if (not HEX.fullmatch(str(body.get('id', ''))) or not CHAT.fullmatch(chat_id) or not isinstance(destination, str) or not 0 < len(destination) <= 200
@@ -408,7 +408,7 @@ class TelegramService:
         """
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         chat,topic=str(body.get('chat_id','')),str(body.get('topic') or '')
-        # The owner's private chat, or a served group and one of its topics, where each is in Telegram now (ADR-0250).
+        # The owner's private chat, or a served group and one of its topics, where each is in Telegram now (ADR-0251).
         known=lambda served:chat==served.owner_external() or served.resolve(chat,topic or None) is not None
         served=await asyncio.to_thread(self.policy.current,None,5.0,known)
         owner=bool(chat) and chat==served.owner_external()
@@ -517,7 +517,7 @@ class TelegramService:
         about the chat is sent. Nocheh's core has already decided the message addressed the bot."""
         chat,user,message,topic=(str(body.get(key) or '') for key in ('chat_id','user_id','message_id','topic'))
         personal=body.get('private') is True
-        # A served group where it is in Telegram now, by the app's served list (ADR-0250).
+        # A served group where it is in Telegram now, by the app's served list (ADR-0251).
         served=await asyncio.to_thread(self.policy.current,None,5.0,None if personal else lambda served:served.resolve(chat) is not None)
         group=None if personal else served.group(served.resolve(chat))
         if (not HEX.fullmatch(str(body.get('event_id',''))) or (chat!=user or topic if personal else group is None or served.address(group)[0]!=chat) or
@@ -554,7 +554,7 @@ class TelegramService:
         the text is the owner's template filled in by storage, sent at most once.
         With edit, a notice this service sent is edited in place instead, such as to mark a cleared problem."""
         chat=str(body.get('chat_id') or '')
-        # Only the owner's private chat, where it is in Telegram now (ADR-0250).
+        # Only the owner's private chat, where it is in Telegram now (ADR-0251).
         owner=(await asyncio.to_thread(self.policy.current)).owner_external()
         if not HEX.fullmatch(str(body.get('id',''))) or not owner or chat!=owner:raise ValueError('notice_chat_not_allowed')
         text=body.get('text')

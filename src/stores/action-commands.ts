@@ -58,7 +58,7 @@ const editing=new Map<string,Promise<void>>();
 /** The card a button was pressed on, as Telegram names it. A card whose send lost its answer has no saved message
  *  id, yet still reached the chat; the press names it, so its decision can still be shown (the gateway checks it). */
 type Seen={chat:string;message:string}|undefined;
-/** The chat a chat or topic belongs to, asked of the chat directory (ADR-0250). */
+/** The chat a chat or topic belongs to, asked of the chat directory (ADR-0251). */
 const chatOf=(space:string)=>chats().parentOf(space)??space;
 /** A topic's key in its app (Telegram's thread id), or null for a chat. */
 const topicKey=(space:string)=>chats().get(space)?.topic_key??null;
@@ -103,7 +103,7 @@ export class ActionCommandRepository {
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
   }
   /** A card, or its decision, for a chat or topic: sent where that chat is in Telegram now, so it follows a group Telegram
-   *  upgraded; a chat the directory does not know gets nothing (ADR-0250). */
+   *  upgraded; a chat the directory does not know gets nothing (ADR-0251). */
   private async post(space:string|null|undefined,input:Record<string,unknown>,timeout=15000) {
     const target=telegramAddress(space);
     return target?this.approval({...input,...target},timeout):null;
@@ -129,7 +129,7 @@ export class ActionCommandRepository {
       task:prompts['telegram.approval_task']??approvalTask,line:approvalLines(prompts['telegram.approval_texts'])};
   }
   /** A group's name, public username, topic flag and latest message, from its captured messages under every Telegram id it
-   *  has had, else the owner's last refresh, else its chat row and details; and its Telegram id now, for links (ADR-0250). */
+   *  has had, else the owner's last refresh, else its chat row and details; and its Telegram id now, for links (ADR-0251). */
   private async chat(chat:string) {
     const external=telegramAddress(chat)?.chat_id??null,scopes=telegramScopes(chat);
     const facts={title:null as string|null,username:null as string|null,forum:null as boolean|null,message:null as string|null,external};
@@ -523,7 +523,7 @@ export class ActionCommandRepository {
     const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
     // Telegram fills in the pressed message; only one that carries this very button names this card's message.
     const carries=(query.message?.reply_markup?.inline_keyboard??[]).flat().some((button:any)=>button?.callback_data===query.data);
-    // The pressed message's chat, as a chat id: Telegram names it by its id there now (ADR-0250).
+    // The pressed message's chat, as a chat id: Telegram names it by its id there now (ADR-0251).
     const home=telegramChat(chat),message=String(query.message?.message_id??''),seen:Seen=carries&&home&&/^[1-9]\d{0,15}$/.test(message)?{chat:home,message}:undefined;
     // Allow here and Always allow are only an operation's buttons, and only the owner's (ADR-0214).
     if(['c','w'].includes(data[1]!)&&action&&action.kind!=='controlled'){await answer(line.changed);return true;}

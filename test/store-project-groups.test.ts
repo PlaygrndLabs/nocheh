@@ -46,7 +46,7 @@ test('a project\'s groups are its served groups, never a topic, a private chat o
 test('a read set selects in SQL exactly what inReadSet reads',{skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const db=new pg.Client(config);await db.connect();
-  // Both fixture families, plus topics of GP1-GP4 the seeder would have made rows for (ADR-0250).
+  // Both fixture families, plus topics of GP1-GP4 the seeder would have made rows for (ADR-0251).
   const base=fixtureChats(),extra=legacyChats([GP1+'/topic/8',GP2+'/topic/7',GP3+'/topic/9',GP4+'/topic/1'],{served:GP_GROUP_IDS}),known=new Set(base.chats.map(chat=>chat.id));
   const restore=installChatsForTest({...base,chats:[...base.chats,...extra.chats.filter(chat=>!known.has(chat.id))],ids:[...base.ids,...extra.ids.filter(row=>!known.has(row.chat_id))]});
   const spaces=[GP1,GP1_TOPIC,GP1+'/topic/8',GP2,GP2+'/topic/7',GP3,GP3+'/topic/9',GP4,GP4+'/topic/1',UNSERVED,NG1,NG1_TOPIC,NG2,BOB_CHAT,
