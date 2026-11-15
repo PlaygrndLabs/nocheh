@@ -58,7 +58,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'sharing.group_filter',
     title: 'Group sharing filter',
-    hint: 'Decides what private knowledge may be shared with a group. Your privacy rules from Settings are added after it.',
+    hint: 'Decides what private knowledge a sharing rule set to Filter automatically may pass on to a group. That rule’s privacy notes are added after it. It sees only the words that were searched for, at most the 12 longest and in sorted order, never the question as it was asked.',
   },
   {
     key: 'telegram.not_allowed',

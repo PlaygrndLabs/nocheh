@@ -476,6 +476,17 @@ class ProductScenarios(Scenarios):
         for question in ('یادداشت‌هایت را می‌بینی؟', 'و حالا؟'):
             _, text = self.turn(self.f.message(OWNER, question+' [[notes:NOTEMARK52]]'), OWNER)
             self.gate('note_reaches_later_turn', 'present' in text, answer=text)
+        # Recall names the chat each note came from (ADR-0251): the owner's own note as the private chat, and a note
+        # saved in a group by that group's name.
+        recalled = lambda: [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]['result']
+        self.turn(self.f.message(OWNER, 'کجا نوشتی؟ [[recall:NOTEMARK52]]'), OWNER)
+        own = recalled()
+        self.gate('recall_names_your_private_chat', 'NOTEMARK52' in own and 'Your private chat' in own, result=own[:400])
+        self.turn(self.f.message(OTHER_GROUP, 'note this [[tool:memory {"target":"memory","operations":[{"action":"add","content":"GROUPMARK52: the group keeps synthetic notes."}]}]]'), OTHER_GROUP)
+        self.turn(self.f.message(OWNER, 'از گروه چه یادداشتی هست؟ [[recall:GROUPMARK52]]'), OWNER)
+        found = recalled()
+        self.gate('recall_hit_names_its_chat', 'GROUPMARK52: the group keeps' in found and 'Synthetic Forum '+str(OTHER_GROUP) in found,
+                  result=found[:400])
 
     def reaction_keeps_group_name(self):
         # A reaction as the latest update must not lose the group's name.

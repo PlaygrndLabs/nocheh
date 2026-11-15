@@ -40,6 +40,7 @@ import {MACHINE_BODY} from './machines.js';
 import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
+import {withRecallPlaces} from './recall-places.js';
 import {readSetGroups} from '../spaces.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
@@ -407,7 +408,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
       const input=object(await readJson(req)),binding=await s.guards.state();
       if(!principal.admin)await s.turns.binding(principal);
-      return result(await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation}));
+      // Each hit says in words which chat it came from, never by its raw ID (ADR-0251).
+      return result(await withRecallPlaces(s.stores,await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation})));
     }
     if(path==='/v1/memory/reviews'&&req.method==='GET'){admin(principal);return json(res,200,await s.reviews.list(principal,url.searchParams.get('after')??''));}
     if(path==='/v1/memory/reviews/control'&&req.method==='POST') {
