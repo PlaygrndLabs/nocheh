@@ -744,9 +744,10 @@ export class BackgroundJobRepository {
     if(row.state==='done')return observation('completed','delivery');
     if(row.state==='stopped')return observation('cancelled','assistant');
     if(row.state==='failed')return observation('failed','assistant',0,Date.now(),'workflow_execution_failed');
-    // Each tick of a running job a member approved looks at what members spent today: the owner's notice at the notice
-    // mark, member jobs paused at the high mark. It never fails the tick (ADR-0251).
-    if(['running','reporting'].includes(row.state)&&memberDecided(row,this.access.policy().owner_id))await this.members.check();
+    // Each tick of a job a member approved looks at what members spent today: the owner's notice at the notice mark,
+    // member jobs paused at the high mark. A job that waits ticks too, so a notice that failed to send is tried again
+    // while member jobs are held and none runs. It never fails the tick (ADR-0251).
+    if(['approved','running','reporting'].includes(row.state)&&memberDecided(row,this.access.policy().owner_id))await this.members.check();
     if((await this.control.query("SELECT 1 FROM workflow_owners WHERE family='background' AND owner=$1 AND epoch=$2 AND admission",[authority.owner,authority.epoch])).rowCount===0)
       return observation('waiting','admission',0,Date.now()+30000,'owner_paused');
     if(row.state==='approved') {

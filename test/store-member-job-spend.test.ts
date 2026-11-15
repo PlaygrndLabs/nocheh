@@ -19,7 +19,7 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-member-spend-')),key='member-spend:'+Date.now(),group='-'+Date.now();
   // The reply model's made-up rates in USD per million tokens.
   const rates={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0};
-  const cards:Record<string,any>[]=[],notices:Record<string,any>[]=[];let updates=0,oldGateway=false;
+  const cards:Record<string,any>[]=[],notices:Record<string,any>[]=[];let updates=0,oldGateway=false,offline=false;
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9','8'],denied:[]}},topic_memory:'group' as const});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
@@ -30,6 +30,8 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
       if(operation==='telegram.notice') {
         // A Telegram service older than the Pause and Resume buttons refuses them before it sends anything.
         if(oldGateway&&input.buttons)throw new HttpError(400,'telegram_rejected_request');
+        // The Telegram service is reconnecting: nothing is sent.
+        if(offline)return {state:'not_started',error_code:'telegram_not_connected'};
         notices.push(input);return {state:'done'};
       }
       assert.equal(operation,'telegram.approval');cards.push(input);
@@ -209,6 +211,32 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     await tick(own.id);
     assert.equal(notices.at(-1)!.buttons,undefined);assert.match(notices.at(-1)!.text,/spent \$4\.00 today \(UTC\), past your notice mark of \$3\.50\./);
     oldGateway=false;
+
+    // A pause notice that did not go is sent on the tick of a member job it holds, when no member job runs any more.
+    offline=true;
+    settings=await s.jobs.saveSettings(owner,{...settings,member_pause_usd:3.9});
+    await tick(own.id);
+    assert.deepEqual([(await s.jobs.members.pause())?.by,(await paused()).pause_sent],['auto',false],'paused, and the owner not told yet');
+    for(const id of [own.id,later.id]) {
+      await s.jobs.halt(id);
+      await stores.control.query("UPDATE managed_runs SET state='cancelled' WHERE event_id=$1",[(await step(id)).event_id]);
+      assert.equal((await tick(id)).state,'cancelled');
+    }
+    const waits=await s.jobs.start(await actor((await message('waits')).id),{title:'Waiting read',instruction:'Read the made-up lists.'});
+    await s.actionCommands.offer('background',waits);
+    await s.actionCommands.callback(await press('waits',button(waits.id,waits.fingerprint),9));
+    assert.equal((await tick(waits.id)).state,'waiting');
+    assert.equal((await paused()).pause_sent,false,'still not told while Telegram is away');
+    offline=false;
+    const told=notices.length;
+    assert.equal((await tick(waits.id)).state,'waiting');
+    assert.deepEqual([(await job(waits.id)).held,await step(waits.id)],[true,undefined],'held: no run starts');
+    assert.equal(notices.length,told+1,'the held job\'s tick sends the pause notice');
+    assert.ok(notices.at(-1)!.text.startsWith('⏸ Member jobs are paused until 00:00 UTC: jobs that members approved themselves spent $4.00 today, past your high mark of $3.90.'),notices.at(-1)!.text);
+    assert.deepEqual(notices.at(-1)!.buttons,[{text:'▶\ufe0f Resume member jobs',callback:'nju'}]);
+    assert.equal((await paused()).pause_sent,true);
+    await tick(waits.id);assert.equal(notices.length,told+1,'it is sent once');
+    await s.jobs.halt(waits.id);assert.equal((await tick(waits.id)).state,'cancelled');
   } finally {
     await s.jobs.members.setPaused(false).catch(()=>{});
     await stores.close();await rm(root,{recursive:true,force:true});

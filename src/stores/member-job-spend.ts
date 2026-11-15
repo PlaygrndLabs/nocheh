@@ -92,10 +92,11 @@ export class MemberJobSpend {
     const {notice,high}=await this.marks(),spend=owner?await this.today(owner):{day:'',spent:0,spenders:[]};
     return {day:spend.day,spent_usd:Math.round(spend.spent*100)/100,notice_usd:notice,pause_usd:high,paused:await this.pause()};
   }
-  /** Look at today's spend after a member job's tick: the notice at the notice mark, the pause at the high mark. Never
-   *  throws, so it never fails a job's tick; a check that fails is made again on the next one. */
+  /** Look at today's spend on a member job's tick, held ones' too: the notice at the notice mark, the pause at the high
+   *  mark. Never throws, so it never fails a job's tick; a check that fails, or a notice that did not go, is made again on
+   *  the next one. */
   async check():Promise<void> {
-    try{await this.checkNow();}catch{/* The next tick of a running member job checks again. */}
+    try{await this.checkNow();}catch{/* The next tick of a member job, held or running, checks again. */}
   }
   private async checkNow():Promise<void> {
     const owner=this.owner();if(!owner)return;
