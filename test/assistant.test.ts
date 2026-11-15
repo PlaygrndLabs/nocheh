@@ -138,6 +138,10 @@ test('real PostgreSQL: action proposals require a bound turn; only a captured ow
     const ownerMessage={...update(123,123,'private'),message:{...update(123,123,'private').message,text:'/approve '+action.id}};
     const historical=await ingest(pool,{...input,key:'action:historical-approval',origin:'import',scope:'123',payload:ownerMessage});
     assert.equal(await controlReply(pool,policy,historical.id),null);
+    // A forwarded command is never run, even one the owner forwards from their own earlier message (ADR-0250).
+    const forwarded=await ingest(pool,{...input,key:'action:forwarded-approval',scope:'123',payload:{...ownerMessage,message:{...ownerMessage.message,forward_origin:{type:'user',sender_user:{id:123},date:1}}}});
+    assert.equal(await controlReply(pool,policy,forwarded.id),'Forwarded commands are ignored. Type it or use the card.');
+    assert.equal((await pool.query('SELECT state FROM action_requests')).rows[0].state,'proposed');
     const owner=await ingest(pool,{...input,key:'action:owner-approval',scope:'123',payload:ownerMessage});
     const approved=await controlReply(pool,policy,owner.id);assert.match(approved!,/approved/);
     assert.equal(await controlReply(pool,policy,owner.id),approved);

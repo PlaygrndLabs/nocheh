@@ -90,7 +90,7 @@ test('the GitHub copy has its own instruction text, card line and card answers, 
   assert.equal(lines.repo_removed,'🚫 Withdrawn: its GitHub copy was removed. Nothing runs.');
   assert.equal(fillTemplate(lines.repo!,{repo_name:'example-org/widgets',repo_branch:'main',repo_commit:'3f2a91c',repo_copied:'2026-11-04 10:12 UTC',repo_size:'18 MB, 1,204 files'}),
     'It reads a copy of example-org/widgets, main at 3f2a91c, copied 2026-11-04 10:12 UTC (18 MB, 1,204 files). What it reads is secret-checked before the model sees it, and reading code adds to its cost. Your GitHub key stays outside the box.');
-  assert.equal(fillTemplate(backgroundCard,{title:'T',size:'1 message',minutes:'2',cost:'about $0.10',cost_limit:'$5.0',minutes_limit:'45',unpriced:null,checked:null,notion:null,box:null,repo:null,machine:null,steps:null,instruction:'I'}),
+  assert.equal(fillTemplate(backgroundCard,{title:'T',size:'1 message',minutes:'2',cost:'about $0.10',cost_limit:'$5.0',minutes_limit:'45',unpriced:null,checked:null,notion:null,box:null,repo:null,machine:null,steps:null,origin:null,instruction:'I'}),
     '🗂 Background job: T\n📏 1 message\n⏱ About 2 min, about $0.10\n🛑 Stops at $5.0 or 45 min, not counting the secret check\n\nI','a job without a copy shows no 📦 line');
 });
 
@@ -108,8 +108,9 @@ test('a machine job has its own instruction text, which must keep the plan, and 
     'The login may be the owner\'s own: never stop or change the owner\'s programs, and start no server or daemon the owner may also use (such as tmux, a build tool\'s daemon or an editor), unless the plan says so.'].join('\n'));
   const lines=labeledLines(backgroundTexts,undefined);
   assert.equal(fillTemplate(lines.machine!,{machine_name:'build-vm',machine_login:'nocheh',machine_address:'192.0.2.10'}),
-    'It works on build-vm (nocheh@192.0.2.10) over SSH: one approval covers every command it runs there. Stop ends the programs it started there.');
-  assert.equal(lines.steps,'Plan:');assert.equal(lines.machine_off,'🚫 Withdrawn: its machine was turned off or changed. Nothing runs.');
+    'It works on build-vm (nocheh@192.0.2.10) over SSH: one approval lets it run any command nocheh can run there. The plan guides it but does not limit it, '+
+    'and what it reads can change what it does. Stop ends the programs it started there, but not ones the system started for it, such as with open or brew services.');
+  assert.equal(lines.steps,'Plan (a guide, not a limit):');assert.equal(lines.machine_off,'🚫 Withdrawn: its machine was turned off or changed. Nothing runs.');
   // A machine job asked in a group reports to the owner's private chat, where its card is; the group gets one line naming nothing of it.
   assert.equal(lines.running,'⏳ Approved. It runs now and reports here when done.');
   assert.equal(lines.running_elsewhere,'⏳ Approved. It runs now and reports in the chat where it was asked.');
@@ -118,6 +119,6 @@ test('a machine job has its own instruction text, which must keep the plan, and 
   assert.equal(lines.limited_private,'⏱ The job you asked for here stopped at its limit. A short note is in your private chat.');
   assert.equal(labeledLines(backgroundTexts,'done: Done.').report_private,lines.report_private,'an older saved text keeps the new lines\' defaults');
   assert.equal(fillTemplate(backgroundCard,{title:'T',size:'1 message',minutes:'2',cost:'about $0.10',cost_limit:'$5.0',minutes_limit:'45',unpriced:null,checked:null,notion:null,box:null,repo:null,
-    machine:'It works on build-vm.',steps:'Plan:\n1. One\n2. Two',instruction:'I'}),
-    '🗂 Background job: T\n📏 1 message\n⏱ About 2 min, about $0.10\n🛑 Stops at $5.0 or 45 min, not counting the secret check\n🖥 It works on build-vm.\n📋 Plan:\n1. One\n2. Two\n\nI');
+    machine:'It works on build-vm.',steps:'Plan:\n1. One\n2. Two',origin:'“Made-up group” › Builds',instruction:'I'}),
+    '🗂 Background job: T\n💬 Asked in “Made-up group” › Builds\n📏 1 message\n⏱ About 2 min, about $0.10\n🛑 Stops at $5.0 or 45 min, not counting the secret check\n🖥 It works on build-vm.\n📋 Plan:\n1. One\n2. Two\n\nI');
 });

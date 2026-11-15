@@ -25,6 +25,7 @@ import {ManagedExecutionRepository,managedEventId,type ManagedInput} from './man
 import {machineJob,machinePin,machineReady,machineTokenSet,type MachinePin} from './machines.js';
 import {followUpTurn} from './owner-autonomy.js';
 import {ProjectRepository} from './projects.js';
+import {reordering,visible} from '../action-text.js';
 
 export const backgroundJobSchema=`
 CREATE TABLE IF NOT EXISTS background_settings (
@@ -191,9 +192,13 @@ export function planSteps(value:unknown):string[] {
   if(!Array.isArray(value)||value.length<1||value.length>12)throw new HttpError(400,'invalid_job_request');
   return value.map(step=>{
     const text=typeof step==='string'?step.replace(/\s+/g,' ').trim().replace(unstorable,'\ufffd'):'';
-    if(!text||text.length>200)throw new HttpError(400,'invalid_job_request');return text;
+    if(!text||text.length>200)throw new HttpError(400,'invalid_job_request');
+    if(reordering(text))throw new HttpError(400,'job_hidden_characters');return text;
   });
 }
+/** A job's instruction as its card shows it and the fingerprint covers it: no-break spaces read as spaces and no space
+ *  ends a line, so nothing on the card differs from what runs without showing. */
+const instructionText=(value:string)=>value.replace(/[\u00a0\u2007\u202f]/g,' ').replace(/[ \t]+(?=\n|$)/g,'').trim();
 /** A heartbeat's progress, strictly: the run's token counts and calls without usage, and its to-do list when it changed. */
 export function runProgress(value:unknown):RunProgress {
   const body=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null,tokens=runTokens(body?.tokens);
@@ -315,7 +320,7 @@ export class BackgroundJobRepository {
     if(!changed.rowCount)throw new HttpError(409,'configuration_conflict');
     return this.settings();
   }
-  private async row(id:unknown){
+  async row(id:unknown){
     const row=(await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[managedEventId(id)])).rows[0];
     if(!row)throw new HttpError(404,'job_not_found');return row;
   }
@@ -368,8 +373,10 @@ export class BackgroundJobRepository {
       body.box!==undefined&&typeof body.box!=='boolean'||body.repo!==undefined&&(typeof body.repo!=='string'||!body.repo||body.repo.length>140)||
       body.machine!==undefined&&(typeof body.machine!=='string'||!body.machine.trim()||body.machine.length>40)||(body.machine===undefined)!==(body.steps===undefined))
       throw new HttpError(400,'invalid_job_request');
-    const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=string(body.instruction,8000).trim(),steps=body.steps===undefined?null:planSteps(body.steps);
+    const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=instructionText(string(body.instruction,8000)),steps=body.steps===undefined?null:planSteps(body.steps);
     if(!title||!instruction)throw new HttpError(400,'invalid_job_request');
+    // A direction override or a tag character can make a card read in another order than the job runs (ADR-0250).
+    if(reordering(title)||reordering(instruction))throw new HttpError(400,'job_hidden_characters');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
     // A job asked in the owner's private chat or one of its topics is the owner's chat's (ADR-0251: by its row).
     const owner=ownerChat(this.access.policy())!,space=principal.space!,scope=(parentSpace(space)??space)===owner?owner:turn.scope,box=body.box===true;
@@ -455,34 +462,37 @@ export class BackgroundJobRepository {
     if(!row)return null;
     try{return (await this.proposal(row)).title;}catch(error){if(error instanceof HttpError)return null;throw error;}
   }
-  /** The card a person approves: the exact instruction, what it reads and what it may cost. */
-  async card(id:string) {
-    const row=await this.row(id),{text,lines}=await this.cardText(row,await this.proposal(row));
+  /** The card a person approves: the exact instruction, what it reads and what it may cost, and `origin`, where it was
+   *  asked, when the card is not in that chat. */
+  async card(id:string,origin:string|null=null) {
+    const row=await this.row(id),{text,lines}=await this.cardText(row,await this.proposal(row),origin);
     const waiting=row.state==='approved'&&Number((await this.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count)>=RUNNING_JOBS;
     return {row,text,fingerprint:row.fingerprint,state:row.state,waiting,lines};
   }
   /** A card's text from a job's values and the exact proposal it shows; also for a job not yet recorded. */
-  private async cardText(row:any,shown:{title:string;instruction:string}) {
+  private async cardText(row:any,shown:{title:string;instruction:string},origin:string|null=null) {
     const prompts=await ownerPrompts(this.control),estimate=row.estimate;
     const lines=labeledLines(backgroundTexts,prompts['background.texts']);
     const period=estimate.from||estimate.to?[estimate.from??'…',estimate.to??'…'].join(' – '):null;
-    const values:Record<string,string|null|undefined>={title:shown.title,instruction:shown.instruction,
+    // What the asker wrote shows one character at a time: a hidden one is written out where it stands (ADR-0250).
+    const values:Record<string,string|null|undefined>={title:visible(shown.title),instruction:visible(shown.instruction,true),
       size:[sizeLine(estimate),period].filter(Boolean).join(', '),minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
       // Without a price only the time limit applies, and the card says so instead of a cost limit.
-      cost_limit:jobPriced(row.rates)?money(Number(row.cost_limit_usd)):null,unpriced:jobPriced(row.rates)?null:lines.unpriced,minutes_limit:String(row.minutes_limit),origin:null,
+      cost_limit:jobPriced(row.rates)?money(Number(row.cost_limit_usd)):null,unpriced:jobPriced(row.rates)?null:lines.unpriced,minutes_limit:String(row.minutes_limit),origin,
       notion:row.notion_reads?lines.notion_reads:null,box:row.box?(row.repo?lines.box_repo:lines.box):null,
       // From the job's own pin, so a card settled after Remove still shows what was asked.
       repo:row.repo?fillTemplate(lines.repo!,{repo_name:row.repo.name,repo_branch:row.repo.branch,repo_commit:row.repo.commit.slice(0,7),
         repo_copied:row.repo.copied_at.slice(0,16).replace('T',' ')+' UTC',repo_size:Math.ceil(row.repo.bytes/1e6)+' MB, '+count(row.repo.files,'file','files')}):null,
       // From the job's own pin too, and the plan exactly as approved.
       machine:row.machine?fillTemplate(lines.machine!,{machine_name:row.machine.name,machine_login:row.machine.login,machine_address:row.machine.address}):null,
-      steps:row.steps?.length?lines.steps+'\n'+numbered(row.steps):null,
+      steps:row.steps?.length?lines.steps+'\n'+numbered(row.steps.map((step:string)=>visible(step))):null,
       checked:[lines.checked,row.requester?lines.member_limit:null].filter(Boolean).join(' ')||null};
-    // What the job may do without asking is always on its card: a saved card without the line, or whose line
-    // is left out for another missing value, gets it at the end.
+    // Where it was asked, when the card is elsewhere, and what the job may do without asking are always on its card: a
+    // saved card without the line, or whose line is left out for another missing value, gets it at the end. The place
+    // line, at most two names of 64 characters, fits in the room CARD_LIMIT leaves below Telegram's limit.
     const template=prompts['background.card']??backgroundCard,kept=template.split('\n').filter(line=>lineKept(line,values));
     // A forced cost line carries the time limit too, when a saved card left it out with the cost limit's line.
-    const missing=[['unpriced','🛑'],['notion','📒'],['box','🧰'],['repo','📦'],['machine','🖥'],['steps','📋']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+' {'+name+'}'+
+    const missing=[['origin','💬'],['unpriced','🛑'],['notion','📒'],['box','🧰'],['repo','📦'],['machine','🖥'],['steps','📋']].filter(([name])=>values[name!]&&!kept.some(line=>line.includes('{'+name+'}'))).map(([name,icon])=>icon+(name==='origin'?' Asked in':'')+' {'+name+'}'+
       (name==='unpriced'&&!kept.some(line=>line.includes('{minutes_limit}'))?' ({minutes_limit} min)':''));
     return {text:fillTemplate(missing.length?template+'\n\n'+missing.join('\n'):template,values),lines};
   }

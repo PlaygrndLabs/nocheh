@@ -170,7 +170,7 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     await stores.control.query(`UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton`);
     const said='Read the made-up weather page for the coming week. '.repeat(9).trim();
     const summed=await ask(await message('summed'),'browser',{url:'https://weather.example.com/summed'},said);
-    assert.match(summed.card.text,/📝 Read the made-up weather/);assert.ok(summed.card.text.endsWith(ruleNote));
+    assert.match(summed.card.text,/📝 AI says: Read the made-up weather/);assert.ok(summed.card.text.endsWith(ruleNote));
     const longNote='made-up note '.repeat(400).slice(0,4096-300-(summed.card.text.length-ruleNote.length)+40);
     await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',[JSON.stringify({'telegram.approval_texts':'rule_note: 👥 '+longNote})]);
     const dropped=await ask(await message('dropped'),'browser',{url:'https://weather.example.com/droppd'},said);
@@ -178,7 +178,7 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     // A note that would not fit even without the summary takes nothing from the card: it keeps its summary and offers no rule.
     await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',[JSON.stringify({'telegram.approval_texts':'rule_note: 👥 '+'made-up note '.repeat(300)})]);
     const kept=await ask(await message('kept'),'browser',{url:'https://weather.example.com/kept'},said);
-    assert.match(kept.card.text,/📝 Read the made-up weather/);assert.doesNotMatch(kept.card.text,/made-up note/);assert.deepEqual(choices(kept.card),['na','nd']);
+    assert.match(kept.card.text,/📝 AI says: Read the made-up weather/);assert.doesNotMatch(kept.card.text,/made-up note/);assert.deepEqual(choices(kept.card),['na','nd']);
     await stores.control.query(`UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton`);
     // A dashboard run for the group has no Telegram message to point to; its card still names the chat a rule would cover.
     const dashboardRun=(await s.capture.capture({version:1,key:JSON.stringify(['browser',group,'made-up-profile','made-up-run',key]),channel:'browser',origin:'live',

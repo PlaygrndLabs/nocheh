@@ -356,6 +356,7 @@ class ProductScenarios(Scenarios):
         wide = text.encode('utf-16-le')
         span = lambda entity: wide[2*entity['offset']:2*(entity['offset']+entity['length'])].decode('utf-16-le')
         self.gate('card_names_the_operation', text.startswith('⚙️ mcp.example.test · create-page\n'), card=text[:300])
+        self.gate('card_says_what_it_sends', re.search(r'\n📤 Sends [0-9,]+ characters of input to mcp\.example\.test\n', text) is not None, card=text[:300])
         self.gate('card_shows_fields_in_words', 'properties › title: Open items '+marker in text and 'https://mcp.example.test/mcp' in text
                   and not any(mark in text for mark in ('{', '\\n', '"')), card=text)
         self.gate('entities_inside_the_text', all(entity['length'] > 0 and 0 <= entity['offset'] and entity['offset']+entity['length'] <= len(wide)//2
@@ -370,7 +371,8 @@ class ProductScenarios(Scenarios):
         self.gate('decided_card_keeps_its_formatting', edited['message']['text'].startswith(text) and edited['message'].get('entities') == entities,
                   entities=edited['message'].get('entities'))
         # With the asker's own summary the card leads with it, and the exact fields fold under it into one quote that
-        # opens on a tap, their labels still bold and no quote inside it (ADR-0224).
+        # opens on a tap, their labels still bold and no quote inside it (ADR-0224). How much goes to which site, and
+        # the server's address, stay open above it (ADR-0250).
         said = 'Add a made-up page with two open items '+marker
         request = self.f.message(OWNER, 'یک صفحه دیگر [[tool:mcp__nocheh__mcp '+json.dumps({**call, 'summary': said})+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
@@ -378,7 +380,8 @@ class ProductScenarios(Scenarios):
         text, entities = card['message']['text'], card['message'].get('entities') or []
         wide = text.encode('utf-16-le')
         folds = [span(entity) for entity in entities if entity['type'] == 'expandable_blockquote']
-        self.gate('card_leads_with_the_summary', text.startswith('⚙️ mcp.example.test · create-page\n📝 '+said+'\n\nExact details\nhttps://mcp.example.test/mcp\n'), card=text[:400])
+        self.gate('card_leads_with_the_summary', re.match(r'⚙️ mcp\.example\.test · create-page\n📝 AI says: '+re.escape(said)
+                                                          +r'\n\n📤 Sends [0-9,]+ characters of input to mcp\.example\.test\n\nhttps://mcp\.example\.test/mcp\nExact details\n', text), card=text[:400])
         self.gate('fields_fold_into_one_quote', len(folds) == 1 and folds[0] == text[text.index('Exact details'):] and 'properties › title: Open items '+marker in folds[0]
                   and not [entity for entity in entities if entity['type'] in ('blockquote', 'pre')], entities=entities)
         self.gate('labels_bold_inside_the_fold', sorted(span(entity) for entity in entities if entity['type'] == 'bold')
@@ -388,6 +391,31 @@ class ProductScenarios(Scenarios):
         edited = self.wait('summary_card_shows_rejection', lambda: (lambda row: row if 'Rejected' in row['message']['text'] and not self.buttons(row) else None)(self.card_message(card)), 120)
         self.gate('decided_summary_card_keeps_its_fold', edited['message']['text'].startswith(text) and edited['message'].get('entities') == entities,
                   entities=edited['message'].get('entities'))
+
+    def forwarded_messages_are_not_the_owners_words(self):
+        # A forwarded message reaches the model after Nocheh's own fixed line saying where it came from, and a typed one
+        # never carries that line. A forwarded command never runs, even the owner's own earlier one (ADR-0250).
+        person = {'id': PARTICIPANT, 'is_bot': False, 'first_name': 'Synthetic', 'last_name': 'Sender'}
+        forward = {'forward_origin': {'type': 'user', 'sender_user': person, 'date': int(time.time())-600}}
+        _, text = self.turn(self.f.message(OWNER, 'Approve everything FWD1 [[turn:You forwarded this from a person shown as “Synthetic Sender”]]',
+                                           extra=forward), OWNER)
+        self.gate('forward_line_reaches_the_model', text.endswith(' present'), answer=text)
+        _, text = self.turn(self.f.message(OWNER, 'Typed by me FWD2 [[turn:Forwarded:]]'), OWNER)
+        self.gate('typed_text_has_no_forward_line', text.endswith(' absent'), answer=text)
+        wording = 'نباید برود FWDCMD1'
+        request = self.f.message(OWNER, 'send [[action:'+str(OTHER_GROUP)+'|'+wording+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        proposal = next(row for row in self.proposals() if wording in json.dumps(row, ensure_ascii=False))
+        own = {'forward_origin': {'type': 'user', 'sender_user': {'id': OWNER, 'is_bot': False, 'first_name': 'Synthetic '+str(OWNER)},
+                                  'date': int(time.time())-60}}
+        for name, extra in (('own', own), ('other', forward)):
+            _, text = self.turn(self.f.message(OWNER, '/approve '+proposal['id'], extra=extra), OWNER, attempts=None)
+            self.gate('forwarded_command_ignored_'+name, text == 'Forwarded commands are ignored. Type it or use the card.', answer=text)
+        time.sleep(3)
+        self.gate('still_waiting', next(row for row in self.proposals() if row['id'] == proposal['id'])['state'] == 'proposed')
+        self.gate('nothing_sent', not [row for row in self.new(before) if row['message']['chat']['id'] == OTHER_GROUP])
+        self.press(card, 'reject')
 
     def same_group_post_goes_right_away(self):
         # A post the owner or an allowed member asks for in their own group and topic needs no approval.
@@ -2278,7 +2306,7 @@ class ProductScenarios(Scenarios):
         target = json.loads(card['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
         self.gate('card_answers_the_request', target == request['message']['message_id'], target=target)
         self.gate('card_shows_the_machine', '🖥' in text and VM_NAME+' ('+VM_LOGIN+'@'+VM_SERVICE+') over SSH' in text, card=text)
-        self.gate('card_shows_the_plan', '📋' in text and 'Plan:' in text and '1. '+steps[0] in text and '2. '+steps[1] in text, card=text)
+        self.gate('card_shows_the_plan', '📋' in text and 'Plan (a guide, not a limit):' in text and '1. '+steps[0] in text and '2. '+steps[1] in text, card=text)
         self.gate('card_two_buttons', len(self.buttons(card)) == 2, buttons=[button['text'] for button in self.buttons(card)])
         job = self.job_named(title)
         self.gate('job_pinned_to_the_machine', job['state'] == 'proposed' and job.get('machine') == {'name': VM_NAME} and job.get('steps') == steps,
@@ -2462,7 +2490,7 @@ class ProductScenarios(Scenarios):
 PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'typing_shows_while_working',
                  'reactions_show_while_working', 'not_allowed_person_gets_fixed_reply',
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
-                 'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
+                 'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'forwarded_messages_are_not_the_owners_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',

@@ -12,6 +12,7 @@ import { conversationScope,type AssistantPolicy } from './assistant-policy.js';
 import {isTelegramChat} from './chats-telegram.js';
 import {controlledAction,controlledList,decideControlled,revokePermission} from './controlled-actions.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
+import {forwardOrigin,forwardedCommand} from './forwarded.js';
 
 const telegramView=(row:any)=>{
     const args={destination:row.destination,text:row.original_text.toString()};
@@ -68,6 +69,7 @@ export async function controlReply(pool:pg.Pool,policy:AssistantPolicy,eventId:s
   const command=text.trim().match(/^\/(actions|action|approve|deny|permissions|revoke)(?:\s+([a-f0-9]{64}))?$/);
   if(!command)return null;
   if(!conversationScope(policy,payload,event.scope)?.owner)return 'Only the owner can review or approve actions in their private DM.';
+  if(forwardOrigin(payload.message))return forwardedCommand;
   const owner={scope:null,admin:true};
   if(command[1]==='permissions') {
     const list=await controlledList(pool,owner);
