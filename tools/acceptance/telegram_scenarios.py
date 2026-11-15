@@ -644,7 +644,9 @@ class Scenarios:
     def deleted_topic(self):
         topic = 19
         before = len(self.f.sent())
-        self.f.control({'faults': [{'method': 'sendMessage', 'code': 400, 'description': 'Bad Request: message thread not found'}]})
+        # The sender retries a one-off "thread not found" once, so a topic that is really gone refuses both sends.
+        gone = {'method': 'sendMessage', 'code': 400, 'description': 'Bad Request: message thread not found'}
+        self.f.control({'faults': [gone, dict(gone)]})
         update = self.f.message(GROUP, 'تاپیکی که حذف می‌شود', topic=topic)
         self.f.inject(update)
         row = self.finished(self.captured(update), seconds=400)
@@ -653,6 +655,8 @@ class Scenarios:
         calls = [call for call in self.f.telegram()['calls'] if call['method'] == 'sendMessage' and call['parameters'].get('message_thread_id') is not None
                  and int(call['parameters']['message_thread_id']) == topic]
         self.gate('every_attempt_kept_topic', bool(calls) and all(int(call['parameters']['chat_id']) == GROUP for call in calls), attempts=len(calls))
+        left = [fault for fault in self.f.telegram()['faults'] if fault['method'] == 'sendMessage']
+        self.gate('no_refusal_left_for_later_sends', not left, left=len(left))
         self.gate('rejected_by_telegram', row['state'] == 'suppressed' and row['error'] == 'telegram_rejected', state=row['state'], error=row['error'])
 
     def polling_outage(self):
