@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import subprocess
 import tarfile
 import tempfile
@@ -128,10 +129,13 @@ class SnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);snapshot=root/'snapshot';snapshot.mkdir();state=root/'restored'
             (snapshot/'archive.dump').write_bytes(b'dump')
+            # Every real snapshot holds the dashboard home's config, so restore extracts into admin/dashboard/home.
+            members={'hermes/auth.json':b'{"synthetic":"login"}','admin/dashboard/home/config.yaml':b'model: example\n',
+                     'spool/brain-turns/example.json':b'{}','files/example':b'synthetic'}
             with tarfile.open(snapshot/'state.tar.gz','w:gz') as tar:
-                raw=b'{"synthetic":"login"}';info=tarfile.TarInfo('state/hermes/auth.json');info.size=len(raw)
-                tar.addfile(info,io.BytesIO(raw))
-            manifest={'version':1,'tables':{'events':'exact-hash'},'files':{'hermes/auth.json':{}}}
+                for name,raw in members.items():
+                    info=tarfile.TarInfo('state/'+name);info.size=len(raw);tar.addfile(info,io.BytesIO(raw))
+            manifest={'version':1,'tables':{'events':'exact-hash'},'files':{name:{} for name in members}}
             starts=[]
             def run(command,**kwargs):
                 if command[:3]==['docker','volume','inspect']:return SimpleNamespace(returncode=1)
@@ -140,7 +144,8 @@ class SnapshotTests(unittest.TestCase):
                     for name in ('spool/.restore-inactive','workflows/inactive','hermes/scheduler-inactive','admin/tools/inactive','hermes/auth.restore-pending.json'):
                         self.assertTrue((state/name).is_file(),name)
                     # Hermes's two mounted folders exist before any service starts, so Docker never makes them as root.
-                    for name in ('spool/brain-turns','admin/dashboard/home'):
+                    # Their parents are 0700 too, also those extraction reaches first: admin/dashboard holds the token.
+                    for name in ('files','spool','spool/brain-turns','hermes','admin','admin/dashboard','admin/dashboard/home'):
                         self.assertEqual((state/name).stat().st_mode&0o777,0o700,name)
                     self.assertFalse((state/'hermes/auth.json').exists())
                     self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())
@@ -162,7 +167,9 @@ class SnapshotTests(unittest.TestCase):
                  patch('tools.operations.installation.workspaces.listed',return_value=[]),\
                  patch('tools.operations.installation.workspaces.checkout_settings',return_value=None),\
                  patch('tools.operations.installation.operations.subprocess.run',side_effect=run):
-                result=restore(snapshot,state,'nocheh-test-restore',18980)
+                mask=os.umask(0o022)
+                try:result=restore(snapshot,state,'nocheh-test-restore',18980)
+                finally:os.umask(mask)
                 # A restore never takes a workspace's name, so never its off-site folder either.
                 with self.assertRaisesRegex(ValueError,'is a workspace'):restore(snapshot,root/'state-personal','nocheh-personal',18990)
             self.assertEqual(len(starts),2);self.assertFalse(result['executors_active'])

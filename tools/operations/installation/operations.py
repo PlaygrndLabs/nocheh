@@ -261,13 +261,14 @@ def restore(snapshot,state,project,port):
     elif set(workspaces.ports({'NOCHEH_PORT':str(port)}).values())&taken:raise ValueError('Restore ports are used by a workspace; pass another --port')
     manifest=validate_snapshot(snapshot)
     state.mkdir(parents=True,mode=0o700)
+    # Before extraction: its mkdir(parents=True) would give admin, admin/dashboard and spool the default mode.
+    runtime_folders(state)
     with tarfile.open(snapshot/'state.tar.gz','r:gz') as tar:
         for member in tar:
             destination=state/PurePosixPath(member.name).relative_to('state')
             destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             with tar.extractfile(member) as source,destination.open('xb') as target: shutil.copyfileobj(source,target)
             destination.chmod(0o600)
-    runtime_folders(state)
     # Machine keys are never in a snapshot: the restored machines need a new key and test before a job may use them.
     for directory in ('secrets','machines'): (state/directory).mkdir(exist_ok=True,mode=0o700)
     # Retain the saved settings, but don't activate a duplicate Hermes credential owner.
