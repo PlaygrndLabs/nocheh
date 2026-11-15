@@ -428,14 +428,20 @@ services:
     image: sosedoff/pgweb:0.17.0@sha256:a5256d416e2e8b92d69a4459058e3eca33a9f075d8325491644411d0bc3bd70b
     profiles: [tools]
     restart: unless-stopped
+    # It never serves without the login ./bin/nocheh db makes; the browser asks for it once (ADR-0251).
+    entrypoint: [/bin/sh, -c, 'if [ -z "$$PGWEB_AUTH_PASS" ]; then echo "The database viewer needs its login: run ./bin/nocheh db." >&2; exit 64; fi; exec /usr/bin/pgweb "$$@"', pgweb]
     command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
     environment:
       PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@nocheh-db:5432/nocheh?sslmode=disable
+      # pgweb asks for this login on every page, so a page on another site can't read it through the loopback port.
+      PGWEB_AUTH_USER: owner
+      PGWEB_AUTH_PASS: ${NOCHEH_VIEWER_WEB_PASSWORD:-}
     ports: ["127.0.0.1:${NOCHEH_VIEWER_PORT:-8782}:8081"]
     depends_on:
       nocheh-db: {condition: service_healthy}
     healthcheck:
-      test: [CMD, curl, --fail, --silent, --output, /dev/null, http://127.0.0.1:8081/]
+      # Healthy only while it asks for the login: a viewer that answers without one never is.
+      test: [CMD-SHELL, "test \"$$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8081/)\" = 401"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -558,6 +564,8 @@ services:
     environment:
       TELEGRAM_BOT_ID: ${TELEGRAM_BOT_ID:-}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+      # The same .env setting the dashboard reads when it checks a phone's sign-in again (ADR-0251).
+      TELEGRAM_TEST_ENVIRONMENT: ${TELEGRAM_TEST_ENVIRONMENT:-}
       NOCHEH_DASHBOARD_HOST: nocheh-dashboard
       NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
       NOCHEH_MINI_APP_PORT: '8788'

@@ -1135,10 +1135,12 @@ class BoxWiringTests(unittest.TestCase):
                     patch.object(cli,'compose_command',return_value=['docker','compose']),patch('tools.acceptance.subscription.setup.checkout'),\
                     patch('tools.development.live_dev.main',side_effect=lambda *args:calls.append(['live_dev',*args]) or 0),\
                     patch.object(cli,'development_box_token',side_effect=lambda:calls.append(['box_token'])),\
+                    patch('tools.operations.installation.database_viewer.refresh',side_effect=lambda *args:calls.append(['viewer_refresh']) or 0),\
                     patch.object(cli.subprocess,'call',side_effect=lambda arguments,**_:calls.append(arguments) or int(arguments[:2]==['docker','build'] and failing in arguments)):
                 return cli.main(),calls
         # The launcher looks for its image as it starts, so up builds the box image before the stack.
-        self.assertEqual(run('up'),(0,[box_build,['docker','compose','up','-d','--build','--wait','--wait-timeout','180'],tools_build]))
+        # A database viewer left running then gets its login (ADR-0251).
+        self.assertEqual(run('up'),(0,[box_build,['docker','compose','up','-d','--build','--wait','--wait-timeout','180'],tools_build,['viewer_refresh']]))
         self.assertEqual(run('up',failing='nocheh-box:local'),(1,[box_build]),'a box image that does not build stops up before the stack starts')
         self.assertEqual(run('build'),(0,[['docker','compose','build'],box_build,tools_build]))
         # Approved shell commands and page reads run in the tool image, so make dev builds it too.

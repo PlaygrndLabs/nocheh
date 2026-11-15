@@ -11,10 +11,22 @@ import {useFeedback} from '../../ui/overlay';
 import {errorWords, when} from '../memory/shared';
 
 type Session = {kind: 'browser' | 'phone'; created_at: number; last_seen_at: number; current: boolean};
-type OwnerLock = {password_set: boolean; changed_at: number | null; paused_until: number | null; sessions: Session[]};
+/** A sign-in pause in force: the browser's, or the phone of one Telegram account. Each counts its own wrong passwords. */
+type Pause = {who: 'browser' | 'phone'; telegram_id?: string; paused_until: number};
+type OwnerLock = {
+  password_set: boolean;
+  changed_at: number | null;
+  paused_until: number | null;
+  pauses?: Pause[];
+  sessions: Session[];
+};
 
 const at = (time: number) => when(new Date(time).toISOString());
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const pausedWords = (pauses: Pause[]) =>
+  `Sign-in is paused after too many wrong passwords: ${pauses
+    .map(pause => (pause.who === 'browser' ? 'in the browser' : 'on the phone') + ' until ' + at(pause.paused_until))
+    .join('; ')}. Run ./bin/nocheh dashboard --clear-pause to end it now.`;
 
 export function PasswordSettings() {
   const lock = useResource<OwnerLock>('/owner-lock');
@@ -132,8 +144,8 @@ export function PasswordSettings() {
         <SettingRow
           title="Signed in elsewhere"
           description={
-            data.paused_until
-              ? `Sign-in is paused after too many wrong passwords, until ${at(data.paused_until)}.`
+            data.pauses?.length
+              ? pausedWords(data.pauses)
               : others.length
                 ? `${count(browsers, 'other browser', 'other browsers')} and ${count(phones, 'phone', 'phones')}. Last used ${at(others[0]!.last_seen_at)}.`
                 : 'Only this browser is signed in.'

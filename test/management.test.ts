@@ -7,7 +7,8 @@ import {join, resolve} from 'node:path';
 import {spawn, spawnSync, type ChildProcess} from 'node:child_process';
 import {createServer, get as httpGet} from 'node:http';
 import {once} from 'node:events';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,generateKeyPairSync,sign} from 'node:crypto';
+import {OwnerLock,FREE_TRIES} from '../src/owner-lock.js';
 
 test('upload paths cannot escape a job or use ambiguous directory components', () => {
   for (const path of ['/tmp/private','../private','export/../private','export\\private','a//b','a/./b','a\0b']) {
@@ -62,7 +63,7 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
   };
   const stop=async()=>{if(child&&child.exitCode===null){const done=once(child,'exit');child.kill('SIGTERM');await done;}};
   try {
-    const setup=spawnSync('python3',['-c',"import sys; from pathlib import Path; from tools.operations.installation.configuration import initialize,write_env,env_path; s=Path(sys.argv[1]); v=initialize(s); v['NOCHEH_PORT']=sys.argv[2]; write_env(env_path(s),v)",state,String(archivePort)],{cwd:resolve('.')});
+    const setup=spawnSync('python3',['-c',"import sys; from pathlib import Path; from tools.operations.installation.configuration import initialize,write_env,env_path; s=Path(sys.argv[1]); v=initialize(s); v['NOCHEH_PORT']=sys.argv[2]; v['TELEGRAM_BOT_TOKEN']='5550001:'+'A'*35; v['TELEGRAM_OWNER_ID']='4242'; write_env(env_path(s),v)",state,String(archivePort)],{cwd:resolve('.')});
     assert.equal(setup.status,0,setup.stderr.toString());
     const budgetSetup=spawnSync('python3',['-c',"import sys; from pathlib import Path; from services.honcho.meter import Ledger; p=Path(sys.argv[1])/'honcho/ledger/budget.sqlite'; p.parent.mkdir(parents=True,exist_ok=True); Ledger(p).enable_monthly()",state],{cwd:resolve('.')});
     assert.equal(budgetSetup.status,0,budgetSetup.stderr.toString());
@@ -120,15 +121,34 @@ test('owner HTTP: denied origins, durable upload/preview, cancelled import resum
     assert.equal(created.status,200);assert.match(created.headers.get('set-cookie')??'',/^nocheh_session=[A-Za-z0-9_-]{43}; HttpOnly; SameSite=Strict; Path=\/; Max-Age=2592000$/);
     const wrong=await fetch(login,{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"guess-guess"}'});
     assert.equal(wrong.status,401);assert.equal(wrong.headers.get('set-cookie'),null);
+    // The browser's own wrong passwords pause it; the owner's ./bin/nocheh dashboard --clear-pause ends the pause.
+    for(let miss=2;miss<=FREE_TRIES;miss++)assert.equal((await fetch(login,{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"guess-guess"}'})).status,miss<FREE_TRIES?401:429);
+    assert.equal((await fetch(login,{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"river-lamp-42"}'})).status,429);
+    assert.equal(typeof (await (await fetch(login)).json() as any).paused_until,'number');
+    assert.deepEqual((await request('/owner-lock')).pauses.map((pause:any)=>pause.who),['browser']);
+    assert.deepEqual(await request('/owner-lock/clear-pause',{}),{cleared:1});
+    assert.deepEqual(await (await fetch(login)).json(),{state:'sign_in',paused_until:null});
+    // The dashboard checks a phone's Telegram launch data again before any password: without it, or forged, no try counts.
+    const miniSignIn=base.replace('/api/plugins/nocheh','/api/nocheh/mini-app/sign-in');
+    const phoneTry=(launch?:string)=>fetch(miniSignIn,{method:'POST',headers:{'Content-Type':'application/json',...(launch?{'X-Telegram-Init-Data':launch}:{})},body:'{"password":"guess-guess"}'});
+    const missing=await phoneTry();assert.equal(missing.status,401);assert.deepEqual(await missing.json(),{error:'telegram_launch_required'});
+    const fields={auth_date:String(Math.floor(Date.now()/1000)),user:JSON.stringify({id:4242,first_name:'Owner'})};
+    const signed='5550001:WebAppData\n'+Object.entries(fields).sort(([a],[b])=>a<b?-1:1).map(([k,v])=>k+'='+v).join('\n');
+    const forged=new URLSearchParams({...fields,hash:'0'.repeat(64),signature:sign(null,Buffer.from(signed),generateKeyPairSync('ed25519').privateKey).toString('base64url')}).toString();
+    for(let attempt=0;attempt<=FREE_TRIES;attempt++){const answer=await phoneTry(forged);assert.equal(answer.status,401);assert.deepEqual(await answer.json(),{error:'telegram_launch_invalid'});}
+    assert.deepEqual((await request('/owner-lock')).pauses,[],'refused launch data never reaches the password count');
     const signedIn=await fetch(login,{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"river-lamp-42"}'});
     const sessionCookie=signedIn.headers.get('set-cookie')!.split(';')[0]!;
     const root=await fetch(page,{headers:{Cookie:sessionCookie}});
     const csrf=/window.__NOCHEH_CSRF__="([^"]+)"/.exec(await root.text())![1]!;
-    // A phone's session reaches only the mini app's routes.
-    const phone=(await (await fetch(base.replace('/api/plugins/nocheh','/api/nocheh/mini-app/sign-in'),{method:'POST',headers:{'Content-Type':'application/json'},body:'{"password":"river-lamp-42"}'})).json() as any).token;
+    // A phone's session reaches only the mini app's routes. Only Telegram can sign launch data the dashboard accepts,
+    // so this phone signs in through the password lock directly.
+    const phone=(await new OwnerLock(join(state,'admin/owner-lock.json')).signIn('river-lamp-42','phone:4242')).token;
+    assert.equal((await fetch(base+'/owner-lock/clear-pause',{method:'POST',headers:{'X-Nocheh-Mini-Session':phone}})).status,404);
     assert.equal((await fetch(base+'/settings/apply',{method:'POST',headers:{'X-Nocheh-Mini-Session':phone}})).status,404);
     assert.equal((await fetch(base+'/owner-lock',{headers:{'X-Nocheh-Mini-Session':phone}})).status,404);
     assert.equal((await fetch(base+'/status',{headers:{'X-Nocheh-Mini-Session':'b'.repeat(43)}})).status,401);
+    assert.equal((await fetch(base+'/owner-lock/clear-pause',{method:'POST',headers:{Cookie:sessionCookie,'X-Nocheh-CSRF':csrf,'Content-Type':'application/json'},body:'{}'})).status,404,'only the installation token clears a pause');
     const controlPath='/workflows/'+'a'.repeat(64)+'/retry';
     assert.equal((await fetch(base+controlPath,{method:'POST',headers:{Cookie:sessionCookie,'Content-Type':'application/json'},body:'{"revision":1}'})).status,403);
     assert.equal((await fetch(base+controlPath,{method:'POST',headers:{Cookie:sessionCookie,'X-Nocheh-CSRF':csrf,Origin:'https://untrusted.example'},body:'{"revision":1}'})).status,403);

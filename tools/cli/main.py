@@ -384,6 +384,10 @@ def main():
     if result == 0: result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
     for name in {'up':('tools',),'build':('box','tools')}.get(args.command,()):
         if result==0: result=build_image(name, env)
+    if args.command == 'up' and result == 0:
+        # A database viewer left running gets its login (ADR-0251); a problem there is reported and leaves up's result.
+        from tools.operations.installation.database_viewer import refresh as refresh_viewer
+        refresh_viewer(STATE, command, ROOT)
 
     return result
 

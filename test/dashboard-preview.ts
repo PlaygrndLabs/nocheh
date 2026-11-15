@@ -476,7 +476,8 @@ const server=createServer((req,res)=>{void(async()=>{
  if(phoneRoute){const body=await readJson(req) as any;
   if(phoneRoute==='check')return json(res,200,{state:await ownerLock.check(body.token,'phone')});
   if(phoneRoute==='sign-out'){await ownerLock.signOut(body.token);return json(res,200,{ok:true});}
-  try{return json(res,200,await ownerLock.signIn(body.password,'phone'));}catch(error:any){return json(res,error.status??503,{error:error.code,until:error.until,tries_left:error.tries_left});}}
+  // The preview has no Telegram launch data to check; its phone is the synthetic owner's.
+  try{return json(res,200,await ownerLock.signIn(body.password,'phone:42'));}catch(error:any){return json(res,error.status??503,{error:error.code,until:error.until,tries_left:error.tries_left});}}
  const phone=req.headers['x-nocheh-mini-session'];
  if(typeof phone==='string'){if(await ownerLock.check(phone,'phone')!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');}
  else sessions.authorize(req,req.method!=='GET');
