@@ -752,9 +752,9 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
             <p className="text-sm font-medium">Voice notes</p>
             <p className="text-[13px] text-muted">
               Turns voice notes and audio files into text, which is checked for secrets like typed text. Needs OpenAI or
-              a gateway that offers the same transcription models. From people you haven’t allowed in a group, only
-              the first 15 minutes are turned into text; the whole recording is kept, and a message’s More details ›
-              Make a new reading of a file turns all of it into text.
+              a gateway that offers the same transcription models. From people you haven’t allowed in a group, only the
+              first 15 minutes are turned into text; the whole recording is kept, and a message’s More details › Make a
+              new reading of a file turns all of it into text.
             </p>
           </div>
           <Field
