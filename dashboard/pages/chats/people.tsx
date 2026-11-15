@@ -28,10 +28,13 @@ export function WhoCanTalk({group: chat, telegram}: {group: Chat; telegram: Tele
   };
   const people = [
     ...new Set<string>([
-      // People seen here, listed by the group's Nocheh id or any of its Telegram ids.
-      ...(identities.data?.groups.find(item => item.id === group || appIds(chat).includes(item.id))?.users ?? []).map(
-        user => user.id,
-      ),
+      // People this group's messages show, under its Nocheh id or any Telegram id it has had: someone whose only record is
+      // that they left, or a member update, is not listed unless a rule names them.
+      ...(identities.data?.groups ?? [])
+        .filter(item => item.id === group || appIds(chat).includes(item.id))
+        .flatMap(item => item.users ?? [])
+        .filter(user => user.seen !== false)
+        .map(user => user.id),
       ...rule.granted,
       ...rule.denied,
       ...savedRule.granted,

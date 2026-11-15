@@ -194,7 +194,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       // Chats with people Nocheh doesn't serve are named by those people; the turn never sees them.
       if(view==='telegram-identities') {
         // As before, a group Nocheh does not serve is left out; the directory decides, so an unknown chat is left out too.
-        const found=await telegramDirectory(s.stores.control,reader),directory=await currentChats(),all=!policy.enabled||!policy.owner_id;
+        const found=await telegramDirectory(s.stores.control,reader,s.stores.archive),directory=await currentChats(),all=!policy.enabled||!policy.owner_id;
         return json(res,200,{...found,groups:found.groups.filter(group=>all||directory.served(group.id))});
       }
       if(view==='conversations')return json(res,200,await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
@@ -431,7 +431,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.reviews.controlJob(principal,string(body.id,64),{action:body.action,expected_revision:body.expected_revision}));
     }
     if(req.method==='GET') {
-      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.control,principal));
+      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.control,principal,s.stores.archive));
       if(path==='/v1/search') {
         const mode=url.searchParams.get('mode')??'text';
         if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);

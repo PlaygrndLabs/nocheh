@@ -99,6 +99,25 @@ class TelegramOperationsTests(unittest.TestCase):
             admin_operations.run(Path(folder), 'restart', '11111111-1111-4111-8111-111111111111')
         self.assertTrue(all('nocheh-telegram' in call.args[0] for call in run.call_args_list))
 
+    def test_directory_names_groups_by_their_telegram_id_and_keeps_who_their_messages_show(self):
+        # Storage names a group first seen after step 2b by its digest, with its Telegram id beside it (ADR-0251).
+        archive = {'groups': [
+            {'id': '-1001000000001', 'external': '-1001000000001', 'name': 'Aurora planning', 'users': [
+                {'id': '73', 'name': 'Mira Chen', 'username': '@mira', 'state': 'in', 'seen': True},
+                {'id': '95', 'name': 'Lee', 'username': None, 'state': 'left', 'seen': False}]},
+            {'id': 'a' * 64, 'external': '-1002000000001', 'name': 'Night sky club', 'users': [
+                {'id': '91', 'name': 'Nia', 'username': None, 'state': 'left', 'seen': True}]},
+            {'id': 'b' * 64, 'external': None, 'name': 'Gone', 'users': []}], 'truncated': False}
+        values = {'TELEGRAM_GROUP_IDS': '-1002000000001', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '123', 'TELEGRAM_GROUP_ACCESS': '{}'}
+        with patch.object(telegram_directory, 'load', return_value=values):
+            result = telegram_directory.directory(None, archive=archive)
+        self.assertEqual(result, {'groups': [
+            {'id': '-1001000000001', 'name': 'Aurora planning', 'users': [
+                {'id': '95', 'name': 'Lee', 'username': None, 'state': 'left', 'seen': False},
+                {'id': '73', 'name': 'Mira Chen', 'username': '@mira', 'state': 'in', 'seen': True}]},
+            {'id': '-1002000000001', 'name': 'Night sky club', 'users': [{'id': '91', 'name': 'Nia', 'username': None, 'state': 'left', 'seen': True}]}],
+            'truncated': False})
+
     def test_setup_makes_the_bot_folder_private(self):
         with tempfile.TemporaryDirectory() as folder:
             state = Path(folder)

@@ -28,7 +28,15 @@ export type Chat = {
   owner?: boolean;
 };
 export type Directory = {items: Chat[]; next_cursor: string | null; total?: number};
-export type Person = {id: string; name?: string | null; username?: string | null};
+/** A person Nocheh saw in a group: whether they are in it now, and whether the group's own messages show them (they wrote
+ * there, or a message there says they joined). Someone known only from leaving or a member update has `seen` false. */
+export type Person = {
+  id: string;
+  name?: string | null;
+  username?: string | null;
+  state?: 'in' | 'left';
+  seen?: boolean;
+};
 export type IdentityGroup = {id: string; name?: string | null; users?: Person[]};
 export type AccessRule = {granted: string[]; denied: string[]};
 export type AccessMap = Record<string, AccessRule>;

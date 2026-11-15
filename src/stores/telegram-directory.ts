@@ -1,18 +1,26 @@
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 
-type Person={id:string;name:string|null;username:string|null;state:'in'|'left'};
+/** A person in a group: their Telegram user id, name and state there, and whether the group's own messages show them. */
+type Person={id:string;name:string|null;username:string|null;state:'in'|'left';seen:boolean};
 /** A group: its Nocheh chat id, its current Telegram id, its name, and the people Nocheh saw in it. */
 type Group={id:string;external:string|null;name:string|null;users:Person[]};
-const GROUPS=100,PEOPLE=5000;
+type Db=Pick<pg.Pool,'query'>;
+const GROUPS=100,PEOPLE=5000,AUTHORS=5000,ARRIVALS=1000;
 
 /**
  * The people in the owner's groups (ADR-0251), from the chat records capture keeps: each group's people and bots
  * are chat_accounts, and who is in or left a group is chat_memberships (a person who wrote there, joined, or Telegram
  * said is a member). Bots, anonymous admins and chats posting as themselves are never people here. Names come only from
  * Telegram updates; an id remains the authority, and no message text is read.
+ *
+ * `seen` says whether the group's own messages show the person, under any Telegram id the group has had: they wrote
+ * there, or a message there says they joined. Those are the people the owner's People list shows, as it did before
+ * step 2b; someone whose only record is that they left, or a member update, keeps their state here but is not listed.
+ * It is read from the archive's author relations and the ids in join messages, as before step 2b, when `archive` is
+ * given; without it every person counts as seen.
  */
-export async function telegramDirectory(control:pg.Pool,principal:Reader):Promise<{groups:Group[];truncated:boolean}> {
+export async function telegramDirectory(control:Db,principal:Reader,archive:Db|null=null):Promise<{groups:Group[];truncated:boolean}> {
   admin(principal);
   // A group appears once Nocheh saw a message there or anyone in it, as when it was read from the archive.
   const groupRows=(await control.query(`SELECT c.id,c.title,d.username,i.external_id FROM chats c
@@ -27,8 +35,33 @@ export async function telegramDirectory(control:pg.Pool,principal:Reader):Promis
     JOIN chat_accounts a ON a.id=m.account_id WHERE a.kind='human' AND m.chat_id=ANY($1::text[])
     ORDER BY m.chat_id,a.external_id LIMIT ${PEOPLE+1}`,[groups.map(group=>group.id)])).rows;
   const byGroup=new Map(groups.map(group=>[group.id,group]));
+  const shown=archive?await seenPeople(control,archive,groups.map(group=>group.id)):null;
   for(const row of people.slice(0,PEOPLE))byGroup.get(row.chat_id)?.users.push({id:row.external_id,name:row.display_name??null,
-    username:row.username?'@'+row.username:null,state:row.state});
+    username:row.username?'@'+row.username:null,state:row.state,seen:!shown||shown.people.has(row.chat_id+'\n'+row.external_id)});
   for(const group of groups)group.users.sort((a,b)=>(a.name??a.username??a.id).localeCompare(b.name??b.username??b.id));
-  return {groups,truncated:groupRows.length>GROUPS||people.length>PEOPLE};
+  return {groups,truncated:groupRows.length>GROUPS||people.length>PEOPLE||!!shown?.truncated};
+}
+
+/** Who each group's own live messages show, as `chat id + "\n" + Telegram user id`: the authors of its messages (not of
+ *  its reactions) and the people its join messages name, under every Telegram id the group has had. Only ids and which
+ *  kind of update it is are read. */
+async function seenPeople(control:Db,archive:Db,chats:string[]):Promise<{people:Set<string>;truncated:boolean}> {
+  const ids=(await control.query(`SELECT i.chat_id,i.external_id FROM chat_ids i JOIN chat_connections n ON n.id=i.connection_id AND n.app='telegram'
+    WHERE i.chat_id=ANY($1::text[])`,[chats])).rows;
+  const chatOf=new Map<string,string>(ids.map(row=>[row.external_id as string,row.chat_id as string])),scopes=[...chatOf.keys()],people=new Set<string>();
+  if(!scopes.length)return {people,truncated:false};
+  const authors=(await archive.query(`SELECT DISTINCT e.scope,o.external_id FROM source_relations r JOIN source_objects o ON o.id=r.target_id
+    JOIN events e ON e.id=r.event_id WHERE r.kind='authored_by' AND o.platform='telegram' AND o.namespace='bot-api' AND o.kind='actor'
+      AND e.channel='telegram' AND e.origin='live' AND e.kind='telegram_update' AND e.scope=ANY($1::text[])
+      AND convert_from(e.payload,'UTF8')::jsonb ?| ARRAY['message','edited_message','channel_post','edited_channel_post'] LIMIT ${AUTHORS+1}`,[scopes])).rows;
+  for(const row of authors.slice(0,AUTHORS))people.add(chatOf.get(row.scope)+'\n'+row.external_id);
+  const arrivals=(await archive.query(`SELECT e.scope,convert_from(e.payload,'UTF8')::jsonb #> '{message,new_chat_members}' AS members FROM events e
+    WHERE e.channel='telegram' AND e.origin='live' AND e.kind='telegram_update' AND e.scope=ANY($1::text[])
+      AND (convert_from(e.payload,'UTF8')::jsonb #> '{message,new_chat_members}') IS NOT NULL
+    ORDER BY e.received_at DESC,e.id DESC LIMIT ${ARRIVALS+1}`,[scopes])).rows;
+  for(const row of arrivals.slice(0,ARRIVALS))for(const member of Array.isArray(row.members)?row.members.slice(0,100):[]) {
+    const id=member&&typeof member==='object'&&member.is_bot!==true?member.id:null;
+    if(Number.isSafeInteger(id)&&id>0)people.add(chatOf.get(row.scope)+'\n'+String(id));
+  }
+  return {people,truncated:authors.length>AUTHORS||arrivals.length>ARRIVALS};
 }

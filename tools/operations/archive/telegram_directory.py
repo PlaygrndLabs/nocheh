@@ -58,13 +58,19 @@ def directory(state, archive=None, bot_api=_bot_api):
     for observed in archive.get('groups', []):
         if not isinstance(observed, dict):
             continue
-        identifier = _id(observed.get('id'), GROUP)
+        # A group by its Telegram id now: its Nocheh id is that value only for a group stored before step 2b (ADR-0251).
+        identifier = _id(observed.get('external'), GROUP) or _id(observed.get('id'), GROUP)
         if not identifier:
             continue
         users = {}
         for user in observed.get('users', []):
             person = _person(user) if isinstance(user, dict) else None
             if person:
+                # Whether they are in the group, and whether its own messages show them: the People list shows only those.
+                if user.get('state') in ('in', 'left'):
+                    person['state'] = user['state']
+                if isinstance(user.get('seen'), bool):
+                    person['seen'] = user['seen']
                 users[person['id']] = person
         groups[identifier] = {'id': identifier, 'name': _clean(observed.get('name')) or None, 'users': users}
     token = values['TELEGRAM_BOT_TOKEN']

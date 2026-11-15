@@ -570,6 +570,11 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/telegram/identities')return json(res,200,{groups:[
     {id:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
     {id:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
+    // A group Telegram upgraded, by its Telegram id now and, with nobody in it, by the earlier one the settings list. Sam wrote
+    // there and left; Lee's only record is that he left, so the People list leaves him out (ADR-0251).
+    {id:UPGRADED_TG,name:'Garden swap',users:[{id:'61',name:'Rosa',username:null,state:'in',seen:true},{id:'62',name:'Lee',username:null,state:'left',seen:false},
+      {id:'63',name:'Sam',username:null,state:'left',seen:true}]},
+    {id:UPGRADED_OLD_TG,name:null,users:[]},
   ],truncated:false});
   if(route==='/jobs')return json(res,200,jobs);
   const jobRead=/^\/jobs\/([a-f0-9-]{36})$/.exec(route);

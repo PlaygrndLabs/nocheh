@@ -1753,6 +1753,11 @@ test('a group Telegram upgraded stays on by its earlier ID, and an older topic i
   });
   await page.goto(origin + '/#chats?chat=' + encodeURIComponent(UPGRADED));
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
+  // Its People list shows whom its own messages show, under either of its Telegram IDs; someone whose only record is
+  // that they left is not listed, as before step 2b (ADR-0251).
+  for (const name of ['Rosa', 'Sam'])
+    await page.getByRole('radiogroup', {name: `Can ${name} talk to Nocheh`}).waitFor();
+  assert.equal(await page.getByRole('radiogroup', {name: 'Can Lee talk to Nocheh'}).count(), 0);
   // Someone allowed there is kept under the Telegram ID the list has, as the settings require (ADR-0251).
   const saved = [];
   await page.route(/\/api\/nocheh\/settings$/, route => {

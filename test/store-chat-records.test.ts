@@ -17,6 +17,7 @@ import {legacyChatValue} from '../src/chats-telegram.js';
 import {drainSourceSpool} from '../src/stores/capture.js';
 import {ChatSeeder} from '../src/stores/chat-seed.js';
 import {OwnerPortabilityRepository,type OwnerRecord} from '../src/stores/owner-portability.js';
+import {telegramDirectory} from '../src/stores/telegram-directory.js';
 
 const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000};
 async function open():Promise<StorePools> {
@@ -92,6 +93,18 @@ test('captured updates record chats, topics, private chats, people and membershi
     // A replay of every original (a reconcile pass after a lost commit) changes nothing.
     for(const source of sources)await coordinator.handoff(source);
     assert.deepEqual(await records(stores.control,[id,bobChat]),saved);
+
+    // The owner's People list shows whom the group's own messages show, as before step 2b: Alice wrote, Carol was added and
+    // Dave sent his own leave message. Erin, whom Alice removed, and Frank, known only from a member update, keep their
+    // state but are not shown (ADR-0251).
+    const [erin,frank]=[6,7].map(person) as [string,string];
+    await capture(9,{message:{message_id:15,date:9,chat,from:{id:Number(alice),first_name:'Alice'},left_chat_member:{id:Number(erin),first_name:'Erin'}}});
+    await capture(10,{chat_member:{chat,from:{id:Number(alice)},date:10,old_chat_member:{status:'left',user:{id:Number(frank)}},new_chat_member:{status:'member',user:{id:Number(frank),first_name:'Frank'}}}});
+    await capture(11,{message_reaction:{chat,message_id:10,user:{id:Number(frank),first_name:'Frank'},date:11,old_reaction:[],new_reaction:[{type:'emoji',emoji:'👍'}]}});
+    const listed=(await telegramDirectory(stores.control,{admin:true,scope:null},stores.archive)).groups.find(group=>group.id===id)!;
+    assert.equal(listed.external,group);
+    assert.deepEqual(listed.users.map(user=>[user.id,user.state,user.seen]).sort(),
+      [[alice,'in',true],[carol,'left',true],[dave,'left',true],[erin,'left',false],[frank,'in',false]].sort(),'a reaction is not a message');
   }finally{await stores.close();}
 });
 
