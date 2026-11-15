@@ -11,8 +11,8 @@ import {restoredInactive,storageHeartbeat} from './lifecycle.js';
 import type {StorageServices} from './services.js';
 
 export function startStorageCapture(s:StorageServices,config:Settings,interval=1000) {
-  const status:Record<string,string>={capture:'starting',sends:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting',imports:'starting',voices:'starting',machines:'starting',answers:'starting'};
-  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,started=new Date(),timingsExpired=0,sendsExpired=0,remindersChecked=0,importsChecked=0,voicesChecked=0,machinesChecked=0,answersExpired=0;
+  const status:Record<string,string>={capture:'starting',sends:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting',imports:'starting',voices:'starting',machines:'starting',answers:'starting',members:'starting'};
+  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,started=new Date(),timingsExpired=0,sendsExpired=0,remindersChecked=0,importsChecked=0,voicesChecked=0,machinesChecked=0,answersExpired=0,membersChecked=0;
   const jobs:Record<string,()=>Promise<unknown>>={
     capture:()=>drainSourceSpool(s.capture,config.dataDir),
     // The front doors' send records, in their own stage so an outage here never holds up source capture.
@@ -46,6 +46,8 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
     // Answer privately buttons nobody used, taps without /start and answers never delivered expire, checked hourly; the
     // rows stay as the record (ADR-0249).
     answers:async()=>{if(Date.now()-answersExpired<3600000)return;await s.privateAnswers.expire();answersExpired=Date.now();},
+    // A member spend or pause notice that did not go is sent again, also when no member job ticks any more that day.
+    members:async()=>{if(Date.now()-membersChecked<60000)return;membersChecked=Date.now();await s.jobs.members.retryUnsent();},
   };
   const stop=startLoops(Object.fromEntries(Object.entries(jobs).map(([stage,run])=>[stage,async()=>{
     if(restoredInactive(config.dataDir)){status[stage]='inactive';return;}

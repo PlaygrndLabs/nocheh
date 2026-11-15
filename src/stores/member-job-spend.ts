@@ -98,6 +98,13 @@ export class MemberJobSpend {
   async check():Promise<void> {
     try{await this.checkNow();}catch{/* The next tick of a member job, held or running, checks again. */}
   }
+  /** A notice due today that did not go, tried again from the storage worker each minute, so the owner hears of it even
+   *  when no member job ticks again that day (ADR-0251). Nothing runs while every notice went. */
+  async retryUnsent():Promise<void> {
+    const due=(await this.control.query(`SELECT 1 FROM member_job_pause WHERE singleton AND updated_at>=${dayStart}
+      AND ((notice_id IS NOT NULL AND NOT notice_sent) OR (pause_id IS NOT NULL AND NOT pause_sent))`)).rowCount;
+    if(due)await this.check();
+  }
   private async checkNow():Promise<void> {
     const owner=this.owner();if(!owner)return;
     const {notice,high}=await this.marks(),spend=await this.today(owner);

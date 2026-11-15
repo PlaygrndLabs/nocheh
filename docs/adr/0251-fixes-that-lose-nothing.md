@@ -109,7 +109,8 @@ Member job spend
 - Past the notice mark the owner gets one private Telegram notice a day with
   Pause; past the pause mark member jobs pause until 00:00 UTC and the owner gets
   a notice with Resume. Every tick of a member job, held or running, checks the
-  spend and sends a notice that failed again, once per day and mark.
+  spend, and a notice that did not go is sent again, once per day and mark, on
+  the next tick or from the storage worker within a minute.
 - A pause is a hold: approved member jobs wait, with a card line, and start when
   it ends. Nothing is refused. The owner's jobs and member jobs the owner
   approved never wait. The owner pauses and resumes from the notice or the

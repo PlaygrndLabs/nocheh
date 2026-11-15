@@ -237,6 +237,19 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     assert.equal((await paused()).pause_sent,true);
     await tick(waits.id);assert.equal(notices.length,told+1,'it is sent once');
     await s.jobs.halt(waits.id);assert.equal((await tick(waits.id)).state,'cancelled');
+
+    // A notice that fails on the last member job's own check goes from the storage worker, with no member job left.
+    offline=true;
+    settings=await s.jobs.saveSettings(owner,{...(await s.jobs.settings()),member_notice_usd:3.6,member_pause_usd:1000});
+    await s.jobs.members.check();
+    assert.equal((await paused()).notice_sent,false,'not told while Telegram is away');
+    offline=false;
+    const before=notices.length;
+    await s.jobs.members.retryUnsent();
+    assert.equal(notices.length,before+1,'the retry sends it');
+    assert.match(notices.at(-1)!.text,/past your notice mark of \$3\.60\./);
+    assert.equal((await paused()).notice_sent,true);
+    await s.jobs.members.retryUnsent();assert.equal(notices.length,before+1,'nothing more while every notice went');
   } finally {
     await s.jobs.members.setPaused(false).catch(()=>{});
     await stores.close();await rm(root,{recursive:true,force:true});
