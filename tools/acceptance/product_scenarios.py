@@ -298,6 +298,72 @@ class ProductScenarios(Scenarios):
         listed = self.f.conversations()
         self.gate('dashboard_still_lists_it', any(any(label.get('external') == str(STRANGER) for label in item.get('app_ids') or []) for item in listed))
 
+    # Sends go only to chats Nocheh serves (ADR-0254) -------------------------------------------
+
+    def known_chat(self, app_id, update):
+        """The Nocheh id of a chat a scenario sends to. stranger_in_private_gets_one_reply records the stranger's private
+        chat and the unselected group first; a run of a later scenario on its own records the chat with `update` here."""
+        try:
+            return self.f.chat(app_id, seconds=0)
+        except Failed:
+            self.f.inject(update)
+            self.finished(self.captured(update))
+            return self.f.chat(app_id)
+
+    def refused_send(self, app_id, update, label):
+        """The owner asks for a message to a chat Nocheh knows but does not serve. The data tool answers that the chat is
+        not served and how the owner can serve it; no card is made, nothing waits for approval, and nothing reaches the
+        chat. A chat Nocheh has no record of answers the same way, so asking teaches nothing."""
+        chat = self.known_chat(app_id, update)
+        wording = 'نباید برسد '+label+str(self.f.ids())
+        before = len(self.f.sent())
+        _, text = self.turn(self.f.message(OWNER, 'بفرست [[action:'+chat+'|'+wording+']]'), OWNER)
+        self.gate('told_not_served', 'destination_not_served' in text and 'Nothing was sent' in text and 'Chats page' in text, answer=text[:500])
+        self.gate('no_card', not self.cards(before), cards=len(self.cards(before)))
+        self.gate('nothing_waits_for_approval', not [row for row in self.proposals() if wording in json.dumps(row, ensure_ascii=False)])
+        time.sleep(5)
+        # A stranger's once-a-day reply to their own earlier message is not this send.
+        reached = [row for row in self.new(before) if row['message']['chat']['id'] == app_id and row['message'].get('text') != PRIVATE_NOT_ALLOWED]
+        self.gate('nothing_reached_the_chat', not reached, texts=[(row['message'].get('text') or '')[:100] for row in reached])
+        self.gate('wording_never_sent', not [row for row in self.new(before) if wording in (row['message'].get('text') or '')])
+
+    def send_to_stranger_refused(self):
+        # A stranger who started the bot has a private chat Nocheh knows, but serves no one there: a message for it is refused.
+        self.refused_send(STRANGER, self.stranger(text='سلام'), 'SENDSTRANGER')
+
+    def send_to_unselected_group_refused(self):
+        # A group the owner never selected has a chat row once someone writes there, but Nocheh does not serve it.
+        outside = self.f.message(UNSELECTED_GROUP, 'سلام', sender=STRANGER, extra={'chat': {'id': UNSELECTED_GROUP, 'type': 'supergroup', 'title': 'STRANGERGROUP61'}})
+        self.refused_send(UNSELECTED_GROUP, outside, 'SENDUNSELECTED')
+
+    def send_to_allowed_person_private(self):
+        # MEMBER is allowed in GROUP and OTHER_GROUP, so their private chat is served, but only through the owner's card. The
+        # card says it is a person's private chat and which selected group the owner allowed them in, quoting only names.
+        hello = self.f.message(MEMBER, 'سلام', sender=MEMBER)
+        self.f.inject(hello)
+        self.finished(self.captured(hello))
+        chat = self.f.chat(MEMBER)
+        wording = 'پیام خصوصی برای عضو PRIVSEND'+str(self.f.ids())
+        request = self.f.message(OWNER, 'به او خصوصی بفرست [[action:'+chat+'|'+wording+']] [[after:silent]]')
+        _, before = self.silent_turn(request, OWNER)
+        card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
+        text = card['message']['text']
+        self.gate('card_names_a_private_chat', text.startswith('📨 Send to private chat with '), card=text[:300])
+        self.gate('card_names_the_groups_they_are_allowed_in', '(a person you allowed in group ' in text and ' and 1 more)' in text, card=text[:300])
+        self.gate('card_shows_exact_message', wording in text, card=text[-300:])
+        self.gate('only_the_owner_gets_a_card', [row['message']['chat']['id'] for row in self.cards(before)] == [OWNER])
+        sent = lambda: [row for row in self.new(before) if row['message']['chat']['id'] == MEMBER and row['message'].get('text') == wording]
+        self.gate('nothing_sent_before_approval', not sent())
+        answer = self.press(card, 'approve')
+        self.gate('press_answered_as_approved', 'Approved' in (answer.get('text') or ''), answer=answer.get('text'))
+        self.wait('sent_to_their_private_chat', sent, 180)
+        time.sleep(5)
+        # MEMBER's own private message may have had the once-a-day reply; it is counted apart.
+        refusals = [row for row in self.new(before) if row['message']['chat']['id'] == MEMBER and row['message'].get('text') == PRIVATE_NOT_ALLOWED]
+        self.gate('sent_once', len(sent()) == 1, count=len(sent()), refusals=len(refusals))
+        edited = self.wait('card_shows_outcome', lambda: (lambda row: row if row.get('edits') and not self.buttons(row) else None)(self.card_message(card)), 120)
+        self.gate('outcome_on_card', 'Approved' in edited['message']['text'] and wording in edited['message']['text'], card=edited['message']['text'][-300:])
+
     # Approvals ------------------------------------------------------------------------
 
     def owner_private_card_and_approve(self):
@@ -1297,8 +1363,9 @@ class ProductScenarios(Scenarios):
 
     # Tasks ---------------------------------------------------------------------------------------
 
-    def task_tool(self, arguments, chat=OWNER, topic=None):
-        _, text = self.turn(self.f.message(chat, 'کارها [[tool:mcp__nocheh__tasks '+json.dumps(arguments, ensure_ascii=False)+']]', topic=topic), chat, topic)
+    def task_tool(self, arguments, chat=OWNER, topic=None, sender=OWNER):
+        _, text = self.turn(self.f.message(chat, 'کارها [[tool:mcp__nocheh__tasks '+json.dumps(arguments, ensure_ascii=False)+']]', sender=sender, topic=topic),
+                            chat, topic)
         final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]
         try:
             return json.loads(final['result'])
@@ -1328,6 +1395,118 @@ class ProductScenarios(Scenarios):
     def tasks_not_in_unrelated_group(self):
         result = self.task_tool({'action': 'list'}, chat=GROUP, topic=TEAM_TOPIC)
         self.gate('no_task_list_in_group_without_project', 'TASK1' not in json.dumps(result, ensure_ascii=False), result=str(result)[:300])
+
+    @staticmethod
+    def minute(at):
+        """A reminder time on a whole minute, as the task tools take it."""
+        return at.strftime('%Y-%m-%dT%H:%MZ')
+
+    def reminder_rows(self, tasks):
+        """Who set each reminder of these tasks and its state, as 'setter:state' sorted; the ids are the app's own task ids."""
+        listed = ','.join("'"+task+"'" for task in tasks if re.fullmatch(r'[0-9a-f]{64}', task or ''))
+        return self.f.query('nocheh_control', "SELECT coalesce(string_agg(set_by||':'||state,',' ORDER BY set_by,state),'') FROM owner_task_reminders "
+                            "WHERE task_id IN ("+(listed or "''")+")")
+
+    def member_reminder_says_who_set_it(self):
+        # Reminders say who set them (ADR-0255). GROUP joins a project for this scenario. The owner's reminder A on a
+        # project task, set on the dashboard, stays when MEMBER's list in TEAM_TOPIC leaves it out, and arrives at its time
+        # as before, with no line above it. MEMBER's reminder on that task and GUEST's on a task of their own, due in the
+        # same minute, reach the owner's private chat naming each as a person the owner allowed and where they set it, at
+        # most one message for the group every 10 minutes. The exact merge is the store test's; here every row must be
+        # sent before the scenario ends.
+        number = str(self.f.ids())
+        mark_x, mark_y = 'WHOSETX'+number, 'WHOSETY'+number
+        group = self.f.chat(GROUP)
+        assignment, failed, tasks, rows = None, None, [], {}
+        try:
+            project = self.f.app('/v1/projects', {'name': 'Reminder setters '+number, 'description': '', 'state': 'active', 'expected_revision': 0,
+                                                  'operation_id': 'scenario-reminder-setters-'+number})
+            own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(group, safe=''))['own_assignment']
+            assignment = self.f.app('/v1/projects/assignments', {'space_id': group, 'project_id': project['id'], 'mode': 'assigned',
+                                                                 'expected_revision': own['revision'] if own else 0,
+                                                                 'operation_id': 'scenario-reminder-setters-assign-'+number})
+            self.memory_settled()
+            # People's two reminders share one minute, so they are due together; the owner's comes a minute later.
+            base = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+            people_at, owner_at = self.minute(base+timedelta(minutes=5)), self.minute(base+timedelta(minutes=6))
+            before = len(self.f.sent())
+            created = self.f.app('/v1/tasks', {'operation_id': 'scenario-reminder-setters-task-'+number, 'title': 'Pack the tent '+mark_x,
+                                               'scope': project['id'], 'reminders': [owner_at]})
+            task_x = created.get('task', created)['id']
+            tasks.append(task_x)
+            detail = self.f.app('/v1/tasks/'+task_x)
+            changed = self.task_tool({'action': 'update', 'id': task_x, 'expected_revision': detail.get('task', detail)['revision'], 'reminders': [people_at]},
+                                     chat=GROUP, topic=TEAM_TOPIC, sender=MEMBER)
+            self.gate('member_told_the_owners_reminder_stays', bool(changed.get('reminders_kept')), result=str(changed)[:400])
+            self.gate('owners_reminder_survives_the_member_edit', self.reminder_rows([task_x]) == 'owner:pending,person:pending',
+                      rows=self.reminder_rows([task_x]))
+            added = self.task_tool({'action': 'add', 'title': 'Bring the lamp '+mark_y, 'reminders': [people_at]}, chat=GROUP, sender=GUEST)
+            task_y = added.get('task', added).get('id')
+            self.gate('guest_task_added', bool(task_y), result=str(added)[:300])
+            tasks.append(task_y)
+            # The owner's view names who set each reminder, in the words Telegram will show.
+            detail = self.f.app('/v1/tasks/'+task_x)
+            reminders = detail.get('task', detail).get('reminders') or []
+            by_owner = [item for item in reminders if item.get('set_by') == 'owner']
+            by_person = [item for item in reminders if item.get('set_by') == 'person']
+            self.gate('owner_view_names_who_set_it', len(by_owner) == 1 and by_owner[0].get('source') is None and len(by_person) == 1
+                      and 'Set by' in (by_person[0].get('source') or '') and 'a person you allowed' in (by_person[0].get('source') or ''),
+                      reminders=reminders)
+
+            def settled():
+                rows['now'] = self.reminder_rows(tasks)
+                return rows['now'] == 'owner:sent,person:sent,person:sent'
+            self.wait('every_reminder_sent', settled, 1500, 5)
+            time.sleep(3)
+            about = [row for row in self.replies(before, OWNER) if mark_x in (row['message'].get('text') or '') or mark_y in (row['message'].get('text') or '')]
+            mine = [row['message']['text'] for row in about if 'Set by' not in row['message']['text']]
+            theirs = sorted((row for row in about if 'Set by' in row['message']['text']), key=lambda row: row['message']['date'])
+            texts = [row['message']['text'] for row in theirs]
+            self.current['observed'] = {'people_messages': [text[:600] for text in texts]}
+            self.gate('owners_reminder_arrives_as_before', len(mine) == 1 and mine[0].startswith('⏰ Pack the tent '+mark_x)
+                      and not any(sign in mine[0] for sign in ('\U0001f464', '✏', '☑')), owner=mine)
+            self.gate('people_reminders_name_who_set_them', bool(texts) and all('a person you allowed' in text for text in texts)
+                      and sum(text.count('Set by') for text in texts) == 2, texts=[text[:300] for text in texts])
+            self.gate('each_people_reminder_once', sum(text.count(mark_x) for text in texts) == 1 and sum(text.count(mark_y) for text in texts) == 1)
+            self.gate('member_reminder_names_the_topic', any('›' in text for text in texts), texts=[text[:300] for text in texts])
+            dates = [row['message']['date'] for row in theirs]
+            self.gate('at_most_one_message_per_group_in_10_minutes', all(later-earlier >= 595 for earlier, later in zip(dates, dates[1:])), dates=dates)
+        except Exception as error:
+            failed = error
+            if rows:
+                self.current.setdefault('observed', {})['reminders'] = rows.get('now')
+            raise
+        finally:
+            # GROUP leaves the project again, as later scenarios expect.
+            if assignment:
+                try:
+                    self.f.app('/v1/projects/assignments', {'space_id': group, 'mode': 'none', 'expected_revision': assignment['revision'],
+                                                            'operation_id': 'scenario-reminder-setters-unassign-'+number})
+                    self.memory_settled()
+                except Exception as error:
+                    self.current['cleanup_problems'] = [type(error).__name__+':'+str(error)[:200]]
+                    if failed is None:
+                        raise Failed('cleanup_failed')
+
+    def reminder_with_split_emoji_arrives(self):
+        # Notes are cut at 500 characters. A cut inside an emoji used to leave half a character, which Telegram refuses;
+        # the reminder then stayed 'sending' and held back every later one. The cut keeps whole characters now, so this
+        # reminder arrives, and so does a later one (ADR-0255).
+        number = str(self.f.ids())
+        split, later = 'SPLITMARK'+number, 'AFTERSPLIT'+number
+        base = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        before, tasks = len(self.f.sent()), []
+        for title, notes, at in (('Split notes '+split, 'a'*499+'\U0001f600', base+timedelta(minutes=1)), ('Later one '+later, None, base+timedelta(minutes=2))):
+            body = {'operation_id': 'scenario-'+title.split()[-1].lower(), 'title': title, 'reminders': [self.minute(at)]}
+            if notes:
+                body['notes'] = notes
+            created = self.f.app('/v1/tasks', body)
+            tasks.append(created.get('task', created)['id'])
+        arrived = self.wait('split_reminder_arrives', lambda: [row for row in self.replies(before, OWNER) if split in (row['message'].get('text') or '')], 300)
+        text = arrived[0]['message']['text']
+        self.gate('notes_cut_at_a_whole_character', text.endswith('\n'+'a'*499) and '�' not in text, ending=text[-40:])
+        self.wait('later_reminder_arrives', lambda: [row for row in self.replies(before, OWNER) if later in (row['message'].get('text') or '')], 300)
+        self.gate('both_sent', self.reminder_rows(tasks) == 'owner:sent,owner:sent', rows=self.reminder_rows(tasks))
 
     # Reading a chat --------------------------------------------------------------------------------------
 
@@ -2490,11 +2669,13 @@ class ProductScenarios(Scenarios):
 PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'typing_shows_while_working',
                  'reactions_show_while_working', 'not_allowed_person_gets_fixed_reply',
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
+                 'send_to_stranger_refused', 'send_to_unselected_group_refused', 'send_to_allowed_person_private',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'forwarded_messages_are_not_the_owners_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',
-                 'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'chat_is_read_in_order',
+                 'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group',
+                 'member_reminder_says_who_set_it', 'reminder_with_split_emoji_arrives', 'chat_is_read_in_order',
                  'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
                  'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
