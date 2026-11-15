@@ -130,13 +130,13 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   ([spend](test/store-member-job-spend.test.ts)). Hermes's locked-down container still reads
   `GET /internal/chats` and writes nothing outside its two mounts.
 
-  Checks on the integrated branch after merging main: the build; node unit and dashboard tests
-  (544: 346 pass, 194 store tests skipped there, and the 4 workflow tests that also fail on
-  main); all 93 store test files on old-shaped and digest chats (231 pass, 0 fail); dashboard
-  format; the dashboard browser tests (46: 44 pass, and the 2 settings-apply tests that also fail
-  on main); Python Hermes (921, with the 2 environment errors that also occur on main), Telegram
-  (122) and tools (120, 2 skipped). The format gate's allowlist holds only adapter, legacy and
-  unrelated sites.
+  Checks on the integrated branch after merging main's fixes that lose nothing: the build; node
+  unit and dashboard tests (566: 363 pass, 199 store tests skipped there, and the 4 workflow tests
+  that also fail on main); all 95 store test files on old-shaped and digest chats (237 pass, 0
+  fail); dashboard format; the dashboard browser tests (46: 44 pass, and the 2 settings-apply tests
+  that also fail on main); Python Hermes (966, 4 skipped, with the 2 environment errors that also
+  occur on main), Telegram (123) and tools (120, 2 skipped). The format gate's allowlist holds only
+  adapter, legacy and unrelated sites.
 
   Before the merge, after the two full tester fixes, the whole full tester on the integrated
   branch (fake Telegram Bot API and model;
