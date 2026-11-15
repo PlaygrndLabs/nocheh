@@ -1294,9 +1294,10 @@ class ProductScenarios(Scenarios):
                 and [button['callback_data'] for button in self.buttons(row)] == [callback]]
 
     def member_job(self, title, nonce):
-        """A member asks in the group for a job of one priced answer ($1.50005 at the fixture's rates) and approves it on its
+        """A member asks in the group for a job of two priced answers ($3.0001 at the fixture's rates) and approves it on its
         card there. Returns the card, the press's answer and the sent count before the request."""
-        instruction = 'Report at once, run '+nonce+' [[usage:30000]] [[delay:3]]'
+        # The fake model prices only scripted answers: the to-do call and the report, $1.50005 each.
+        instruction = 'Report at once, run '+nonce+' [[usage:30000]] [[delay:3]] '+self.todo(('Write the report', 'in_progress'))
         _, before = self.silent_turn(self.member_job_request('کار عضو '+nonce, {'title': title, 'instruction': instruction, **self.EMPTY}), GROUP, TEAM_TOPIC)
         card = self.wait('member_job_card_in_the_group', lambda: self.cards(before, GROUP), 120)[0]
         self.gate('member_approves_it_and_no_card_goes_to_the_owner', 'Stops at $5.00' in card['message']['text'] and not self.owner_cards(before),
@@ -1308,7 +1309,7 @@ class ProductScenarios(Scenarios):
         # notice with Pause; past the high mark member jobs pause by themselves with a notice that has Resume. While paused a
         # member still asks and approves in the group, no card goes to the owner, and the approved job waits; the owner's own
         # job does not. Only the owner's Resume in their private chat ends the pause, and the held job then starts. The marks
-        # are set just above what members spent today, so each priced answer of $1.50005 crosses one.
+        # are set just above what members spent today, so each member job of $3.0001 crosses one.
         access = next(json.loads(service['environment']['TELEGRAM_GROUP_ACCESS']) for service in self.f.manifest['services'].values()
                       if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment'])
         if access != ACCESS:

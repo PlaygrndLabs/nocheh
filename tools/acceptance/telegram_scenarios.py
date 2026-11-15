@@ -784,18 +784,24 @@ class Scenarios:
     def files_upload_over_1mb(self):
         # The Files page's upload over 1 MB is spooled through /tmp, now memory: it is kept whole in the profile's
         # workspace, listed, downloaded unchanged and deleted.
-        script = """import crypto from 'node:crypto';
+        # Hermes's own file routes accept only its bound address as Host, as the dashboard's proxy sends it.
+        script = """import crypto from 'node:crypto';import http from 'node:http';
 const folder='nocheh-tester-'+process.argv[1],name='large-upload.bin',file=folder+'/'+name;
-const call=async(path,options={})=>{const response=await fetch('http://hermes:8785'+path,{...options,
-headers:{'X-Hermes-Session-Token':process.env.SERVICE_TOKEN,...(options.headers||{})},signal:AbortSignal.timeout(120000)});
-if(!response.ok)throw Error('native_http_'+response.status+':'+(await response.text()).slice(0,300));return response;};
+const call=(path,{method='GET',body=null,headers={}}={})=>new Promise((resolve,reject)=>{
+const request=http.request({host:'hermes',port:8785,path,method,timeout:120000,headers:{host:'127.0.0.1:8785',
+'X-Hermes-Session-Token':process.env.SERVICE_TOKEN,...headers,...(body?{'content-length':body.length}:{})}},response=>{
+const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>{const data=Buffer.concat(chunks);
+response.statusCode>=400?reject(Error('native_http_'+response.statusCode+':'+data.toString().slice(0,300))):resolve(data);});});
+request.on('timeout',()=>request.destroy(Error('native_timeout')));request.on('error',reject);if(body)request.write(body);request.end();});
 const content=crypto.randomBytes(1536*1024),form=new FormData();
 form.append('file',new Blob([content]),name);form.append('path',file);form.append('overwrite','true');
-await call('/api/files/upload-stream?profile=default',{method:'POST',body:form});
-const listed=await (await call('/api/files?profile=default&path='+encodeURIComponent(folder))).json();
-const downloaded=Buffer.from(await (await call('/api/files/download?profile=default&path='+encodeURIComponent(file))).arrayBuffer());
-await call('/api/files?profile=default',{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({path:folder,recursive:true})});
-const after=await (await call('/api/files?profile=default')).json();
+const encoded=new Request('http://upload.invalid/',{method:'POST',body:form});
+await call('/api/files/upload-stream?profile=default',{method:'POST',body:Buffer.from(await encoded.arrayBuffer()),
+headers:{'content-type':encoded.headers.get('content-type')}});
+const listed=JSON.parse(await call('/api/files?profile=default&path='+encodeURIComponent(folder)));
+const downloaded=await call('/api/files/download?profile=default&path='+encodeURIComponent(file));
+await call('/api/files?profile=default',{method:'DELETE',headers:{'content-type':'application/json'},body:Buffer.from(JSON.stringify({path:folder,recursive:true}))});
+const after=JSON.parse(await call('/api/files?profile=default'));
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
 console.log(JSON.stringify({bytes:content.length,sent:digest(content),received:digest(downloaded),
 listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),left:after.entries.some(entry=>entry.name===folder)}));"""
