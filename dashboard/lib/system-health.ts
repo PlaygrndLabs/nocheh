@@ -1,7 +1,15 @@
 /** Pure reading of `GET /monitoring`: work counts and the list of things that need a look. */
 import type {Tone} from '../ui/core';
 import {href} from './routes';
-import {count, routeName, sendKinds, serviceName, telegramReason, telegramStates} from './system-format';
+import {
+  count,
+  operationError,
+  routeName,
+  sendKinds,
+  serviceName,
+  telegramReason,
+  telegramStates,
+} from './system-format';
 
 export type WorkCounts = {
   available: boolean;
@@ -50,7 +58,7 @@ export type ChatSend = {
   /** The app's own chat id, as the send went out: a label. */
   chat: string | null;
   chat_title: string | null;
-  /** The Nocheh chat (or topic) the send went to, when Nocheh knows it (ADR-0251): the one to link to. */
+  /** The Nocheh chat (or topic) the send went to, when Nocheh knows it (ADR-0252): the one to link to. */
   chat_id?: string | null;
   /** The topic in the app: a Telegram thread id, or a Slack thread. */
   topic?: number | string | null;
@@ -105,6 +113,60 @@ export function sendIssue(m: any): (Issue & {link: string; action: string}) | nu
     link: href('system', {view: 'sends', filter: 'problems'}),
     action: 'Review',
   };
+}
+
+/** One file, more files, and what reading one is, for each of Hermes's readers. */
+const readerWords: Record<string, [string, string, string]> = {
+  document: ['file', 'files', 'read'],
+  image: ['image', 'images', 'read'],
+  voice: ['recording', 'recordings', 'transcribed'],
+};
+
+/** Backups and off-site copies that didn't happen, from monitoring's counts; each opens System › Backups,
+ * where the Telegram notice's Open button leads too (ADR-0251). */
+export function backupIssues(m: any): Issue[] {
+  const b = m?.backups;
+  if (!b || b.unavailable) return [];
+  const n = (value: unknown) => (typeof value === 'number' && value > 0 ? value : 0);
+  const link = href('system', {view: 'backups'});
+  const list: Issue[] = [];
+  const add = (tone: Tone, text: string, detail: string) => list.push({tone, text, detail, link, action: 'Backups'});
+  const failed = n(b.failed);
+  if (failed)
+    add(
+      'bad',
+      failed === 1 ? 'The last backup didn’t finish' : `The last ${failed} backups didn’t finish`,
+      `${operationError(b.reason ?? 'backup_failed')} Older backups are kept.`,
+    );
+  const unreadable = n(b.unreadable);
+  if (unreadable)
+    add(
+      'warn',
+      `The newest backup left out ${unreadable} ${unreadable === 1 ? 'file or folder' : 'files or folders'}`,
+      'A command made them unreadable in its workspace.',
+    );
+  const skipped = n(b.skipped_days);
+  if (skipped)
+    add(
+      'warn',
+      skipped === 1 ? 'The automatic backup was skipped' : `Automatic backups were skipped ${skipped} days in a row`,
+      'Not enough free disk space.',
+    );
+  const offsite = n(b.offsite_failed);
+  if (offsite)
+    add(
+      'bad',
+      offsite === 1 ? 'The off-site copy failed' : `The last ${offsite} off-site copies failed`,
+      operationError(b.offsite_reason ?? 'offsite_failed'),
+    );
+  const left = n(b.offsite_skipped);
+  if (left)
+    add(
+      'warn',
+      left === 1 ? 'The off-site copy was skipped' : `Off-site copies of ${left} backups were skipped`,
+      'Not enough free disk space.',
+    );
+  return list;
 }
 
 export function issues(m: any): Issue[] {
@@ -194,6 +256,22 @@ export function issues(m: any): Issue[] {
       action: 'Usage',
     });
   }
+  // Files Hermes's readers couldn't read today because a write failed in its locked-down container (ADR-0251).
+  const readers: any[] = Array.isArray(m.reader_problems) ? m.reader_problems : [];
+  for (const row of readers) {
+    const [one, many, verb] = readerWords[row.reader] ?? ['file', 'files', 'read'];
+    list.push({
+      tone: 'warn',
+      text: `${row.label}: ${row.failed} ${row.failed === 1 ? one : many} couldn’t be ${verb} today`,
+      detail:
+        (row.failure === 'temp_full'
+          ? 'Hermes’s temporary space was full. Restarting Hermes empties it.'
+          : 'Hermes’s locked-down container refused a file write.') +
+        ` The originals are kept: Make a new version on a message’s page ${verb === 'read' ? 'reads' : 'transcribes'} one again.`,
+      link: href('messages'),
+      action: 'Messages',
+    });
+  }
   const spool = m.archive?.archive?.spool_failures;
   if (Array.isArray(spool) && spool.length)
     list.push({
@@ -203,5 +281,6 @@ export function issues(m: any): Issue[] {
     });
   const sends = sendIssue(m);
   if (sends) list.push(sends);
+  list.push(...backupIssues(m));
   return list;
 }

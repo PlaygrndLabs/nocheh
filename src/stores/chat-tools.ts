@@ -5,7 +5,7 @@ import {parentSpace,validateSpace} from '../spaces.js';
 import {chatIdSql,chats} from '../chats.js';
 
 /** The owner's tool switches per chat: one row for every chat ('*'), a chat, or a topic, by its Nocheh chat id
- * (ADR-0251; a value stored before step 2b is its chat's id unchanged, so every OFF stays OFF). NULL inherits. */
+ * (ADR-0252; a value stored before step 2b is its chat's id unchanged, so every OFF stays OFF). NULL inherits. */
 export const chatToolSchema=`
 CREATE TABLE IF NOT EXISTS chat_tool_settings (
  space_id text PRIMARY KEY,
@@ -23,7 +23,7 @@ export type ToolOrigin='default'|'every_chat'|'chat'|'topic';
 export type ChatToolSettings={space:string;revision:number;own:Record<ChatTool,boolean|null>;values:Record<ChatTool,boolean>;origins:Record<ChatTool,ToolOrigin>};
 
 /** The space whose switches apply: the owner's private chat (`owner`, ownerChat(policy)) and its topics are all the
- * owner's chat. A topic is found by its row (ADR-0251). */
+ * owner's chat. A topic is found by its row (ADR-0252). */
 export function toolSpace(space:string,owner:string|null):string {
   return owner&&(parentSpace(space)??space)===owner?owner:space;
 }
@@ -54,7 +54,7 @@ export async function chatToolSettings(db:Pick<pg.PoolClient,'query'>,space:stri
 
 /** Whether an operation of this kind may be asked for or run in this space now. A Notion call is kind mcp. `owner` is
  * the owner's private chat. A space with no chat row runs nothing: a topic must be found under its chat to inherit that
- * chat's switches, so one the directory does not hold is refused rather than read as ON (ADR-0251, fail closed). */
+ * chat's switches, so one the directory does not hold is refused rather than read as ON (ADR-0252, fail closed). */
 export async function chatToolAllowed(db:Pick<pg.PoolClient,'query'>,kind:string,space:string,owner:string|null,lock=false):Promise<boolean> {
   if(!chatTools.includes(kind as ChatTool))return false;
   const own=toolSpace(space,owner);if(!chats().get(own))return false;

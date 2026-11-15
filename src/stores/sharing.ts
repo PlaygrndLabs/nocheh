@@ -121,6 +121,17 @@ export class SharingContentRepository {
     if(/nocheh:(?:event|artifact|derivative):|\/v1\/(?:sources|derivatives|artifacts)\//.test(text)||input.sources.some(s=>text.includes(s.id)))
       throw new HttpError(503,'privacy_citation_rejected');
   }
+  /**
+   * The words the filter model gets in place of the question (ADR-0251): the lexemes of the same parser and configuration
+   * that plainto_tsquery searches with, so tag-shaped text and punctuation drop out and every word must appear in a matched
+   * message. At most the 12 longest, the earlier one first on a tie, so short words and digits give way to the useful ones
+   * and Persian words count like any other; then sorted, so the asker's word order never reaches the model either.
+   */
+  private async searchWords(query:string):Promise<string> {
+    const row=(await this.stores.archive.query(`SELECT coalesce(string_agg(word,' ' ORDER BY word COLLATE "C"),'') AS words FROM (
+      SELECT lexeme AS word FROM unnest(to_tsvector('simple',$1::text)) ORDER BY char_length(lexeme) DESC,positions[1],lexeme COLLATE "C" LIMIT 12) chosen`,[query])).rows[0];
+    return String(row?.words??'');
+  }
   /** Durable model output is checkpointed before guarding and the completion receipt. */
   async finish(id:string):Promise<void> {
     const lock=await this.stores.control.connect();let held=false;
@@ -140,7 +151,8 @@ export class SharingContentRepository {
             const space=await this.access.space(input.sources[0]!);
             const actor:Reader={admin:false,scope:null,space:space!,turnEvent:input.sources[0]!.id,purpose:'filter',generation:binding.generation,guard_epoch:binding.epoch};
             await this.prepared.allow(actor,input.candidates);
-            const payload=await this.prepared.prepare(actor,{query:input.query,instructions:input.rule.instructions,candidates:input.candidates},this.detect) as Record<string,unknown>;
+            // The model sees only the words searched for, never the asker's sentence; the saved input keeps the raw query (ADR-0251).
+            const payload=await this.prepared.prepare(actor,{query:await this.searchWords(input.query),instructions:input.rule.instructions,candidates:input.candidates},this.detect) as Record<string,unknown>;
             const credential=await this.prepared.audience.turn(this.serviceToken,actor,actor.turnEvent!,Date.now()+180000);
             await this.validate(input,binding);
             const response=await this.call('memory.filter',{...payload,archive_credential:credential},120000);

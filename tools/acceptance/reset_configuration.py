@@ -12,7 +12,7 @@ import uuid
 from tools.operations.installation import configuration
 from tools.acceptance import reset_protocol, reset_quiescence
 
-# Version 2 (ADR-0251) carries the chats and their app ids, so every value names the same chat after the reset. A
+# Version 2 (ADR-0252) carries the chats and their app ids, so every value names the same chat after the reset. A
 # version 1 snapshot, taken before step 2b, still validates and restores: its values name chats in the old way.
 FORMAT = 'nocheh-reset-configuration-v2'
 FORMATS = ('nocheh-reset-configuration-v1', FORMAT)
@@ -38,7 +38,7 @@ ORIGINAL = {
                  ('id', 'name', 'description', 'state')),
     # A topic always follows its group's project (ADR-0247). A store the stores have not started at this version can
     # still hold a topic's own choice; starting them turns it into "follows its group", so it is read that way here.
-    # Whether a row names a topic is its chat's row (ADR-0251).
+    # Whether a row names a topic is its chat's row (ADR-0252).
     'project_assignments': ("SELECT a.space_id,"
                             "CASE WHEN t.id IS NOT NULL THEN NULL ELSE a.project_id END AS project_id,"
                             "CASE WHEN t.id IS NOT NULL THEN 'inherit' ELSE a.mode END AS mode "
@@ -55,7 +55,7 @@ ORIGINAL = {
     'chat_tool_settings': ('SELECT space_id,shell,browser,mcp FROM chat_tool_settings ORDER BY space_id',
                            ('space_id', 'shell', 'browser', 'mcp')),
     'runtime_profiles': ("SELECT id,name,owner_id FROM runtime_profiles WHERE state='active' ORDER BY id", ('id', 'name', 'owner_id')),
-    # Every chat with its app ids (ADR-0251): what each value names. A name only when the owner gave it (a topic's);
+    # Every chat with its app ids (ADR-0252): what each value names. A name only when the owner gave it (a topic's);
     # names Telegram showed are content and are seen again after the reset.
     'chats': ("SELECT c.id,n.app,c.kind,c.parent_id,c.topic_key,c.app_type,"
               "CASE WHEN c.title_source='owner' THEN c.title END AS title,"
@@ -69,7 +69,7 @@ ORIGINAL = {
 
 
 # Chat values stored before step 2b, in the legacy layout or a version 1 snapshot: a Telegram chat id, or it and one
-# of its topics. They are read once here, to convert them; the stores read them only in their seeder (ADR-0251).
+# of its topics. They are read once here, to convert them; the stores read them only in their seeder (ADR-0252).
 LEGACY_SPACE = re.compile(r'(-?[1-9][0-9]{0,18})(?:/topic/([1-9][0-9]{0,15}))?')
 
 
@@ -98,7 +98,7 @@ def legacy_chats(values, served=()):
 
 
 class Chats:
-    """The snapshot's chats (ADR-0251): what each value names. A value with no row counts as private."""
+    """The snapshot's chats (ADR-0252): what each value names. A value with no row counts as private."""
     def __init__(self, rows):
         self.rows = {row['id']: row for row in rows}
 
@@ -194,7 +194,7 @@ def snapshot(query, layout):
     There are no archive/derived reads, old configuration revisions, event
     grants, pending effects, prepared contexts or released sharing content.
     """
-    # The chats tables are there once the stores started at this version (ADR-0251); before that the read fails, and
+    # The chats tables are there once the stores started at this version (ADR-0252); before that the read fails, and
     # the reset stops before anything is erased.
     fields = []
     for name, (sql, _) in catalog(layout).items():
@@ -288,7 +288,7 @@ def original_only(snapshot_value, values, preferences, reset_id):
                                     'default_grant_mode': 'one_time'}],
         'chat_tool_settings': [],
         'runtime_profiles': sorted(runtime_profiles, key=lambda row: row['id'])}}
-    # Each chat the converted setup names keeps its old value as its id (ADR-0251).
+    # Each chat the converted setup names keeps its old value as its id (ADR-0252).
     rules = converted['configuration']['sharing_rules']
     converted['configuration']['chats'], converted['configuration']['chat_ids'] = legacy_chats(
         [*groups, owner, *(space for row in rules for space in [*row['sources'], row['destination']])], served={*groups, owner})

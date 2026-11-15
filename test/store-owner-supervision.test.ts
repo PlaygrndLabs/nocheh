@@ -20,7 +20,7 @@ test('stored owner directory and decisions span every page without turning reads
     const services=fixtureServices(stores,{dataDir:'/tmp',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group,second]}),
       runtime:async(operation)=>{assert.equal(operation,'guard.detect');detectorCalls++;return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('read projection must not call Honcho');})});
     const view=new OwnerSupervisionRepository({...services,knowledge:{proposal:async()=>{throw Error('not used');}}});
-    // Both chat id families (ADR-0251): the two groups and topic 19 were stored before step 2b and keep their Telegram
+    // Both chat id families (ADR-0252): the two groups and topic 19 were stored before step 2b and keep their Telegram
     // values as their ids; topic 21 and a third group are first seen now and get digest ids.
     const topic19=group+'/topic/19',topic21=chatIdFor('telegram',group,'21');
     const all=async()=>{const items:ConversationDirectoryItem[]=[];let after='';

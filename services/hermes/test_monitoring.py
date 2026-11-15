@@ -25,6 +25,37 @@ class MonitoringTests(unittest.TestCase):
                          'Memory notes (synthetic-model): 1 model call failed today: 1 the provider was overloaded (HTTP 529).')
         self.assertEqual(found[0]['ok'], 1, 'the call that worked, so the notice can say when the model works again')
 
+    def test_files_a_reader_could_not_write_reach_health_and_the_notice_as_one_line_each(self):
+        import sqlite3
+        from datetime import datetime, timezone
+        from services.hermes import usage
+        from tools.operations.provider import problems
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as state:
+            self.assertEqual(monitoring.reader_problems(state, now), [], 'like model calls, no tracker yet is nothing counted')
+            path = Path(state) / 'hermes/usage/usage.sqlite'
+            path.parent.mkdir(parents=True)
+            old = sqlite3.connect(str(path))
+            old.execute(usage.SCHEMA)
+            old.close()
+            self.assertEqual(monitoring.reader_problems(state, now), [], 'a tracker from before the readers were counted')
+            for failure in ('temp_full', 'temp_full', 'read_only'):
+                usage.reader_failed('image', failure, path=path, now=now.timestamp())
+            usage.reader_done('image', path=path, now=now.timestamp())
+            usage.reader_done('voice', path=path, now=now.timestamp())
+            usage.reader_failed('document', 'temp_full', path=path, now=now.timestamp() - 86400)
+            rows = monitoring.reader_problems(state, now)
+            models = monitoring.model_problems(state, now)
+        self.assertEqual(rows, [{'day': '2026-10-13', 'reader': 'image', 'label': 'Images', 'failure': 'temp_full', 'failed': 2, 'ok': 1},
+                                {'day': '2026-10-13', 'reader': 'image', 'label': 'Images', 'failure': 'read_only', 'failed': 1, 'ok': 1}],
+                         'only today, only failures, and a reader with none has no row')
+        self.assertEqual(models, [], 'no model call')
+        found = problems.problems({'reader_problems': rows}, models, '2026-10-13')
+        self.assertEqual([(problem['kind'], problem['count'], problem['ok']) for problem in found], [('reader', 2, 1), ('reader', 1, 1)])
+        self.assertEqual(problems.text(found[1], 1),
+                         'Images: 1 image couldn’t be read today because Hermes’s locked-down container refused a file write. '
+                         'The originals are kept: Make a new version on a message’s page reads one again.')
+
     def test_github_flags_come_from_the_app_file_without_its_key(self):
         from tools.operations.connections import secret_file
         pem='-----BEGIN RSA PRIVATE KEY-----\nMONITOR'+'x'*40+'\n-----END RSA PRIVATE KEY-----\n'
@@ -40,6 +71,20 @@ class MonitoringTests(unittest.TestCase):
             self.assertNotIn('MONITOR',json.dumps(result))
             secret_file.path(state,'github').unlink()
             self.assertEqual(monitoring.github_flags(state),{'connected':False,'reconnect':False})
+
+    def test_backups_reach_health_as_counts_and_codes_without_names(self):
+        from tools.operations.installation import backup_schedule
+        from tools.operations.installation.configuration import DEFAULTS
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)
+            backup_schedule.record_backup(state,'running')
+            backup_schedule.record_backup(state,'failed',error='backup_unsupported_link',path='hermes/private-name')
+            with patch.object(monitoring,'load',return_value=dict(DEFAULTS)),patch.object(monitoring,'compose',return_value=(['docker'],{})),\
+                 patch.object(monitoring.subprocess,'check_output',return_value=''),patch.object(monitoring.API,'call',side_effect=ConnectionError('down')):
+                result=monitoring.status(state)
+        self.assertEqual((result['backups']['failed'],result['backups']['reason']),(1,'backup_unsupported_link'))
+        self.assertNotIn('private-name',json.dumps(result))
+
 
     def test_partial_outage_retains_model_routes_and_safe_telegram_incident(self):
         with tempfile.TemporaryDirectory() as folder:

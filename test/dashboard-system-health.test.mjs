@@ -40,6 +40,33 @@ const sends = (extra = {}) => ({
   ...extra,
 });
 
+test('files a locked-down reader could not read say why and how to read them again', () => {
+  const found = issues({
+    reader_problems: [
+      {day: '2026-11-14', reader: 'document', label: 'Documents', failure: 'temp_full', failed: 2, ok: 0},
+      {day: '2026-11-14', reader: 'voice', label: 'Voice notes', failure: 'read_only', failed: 1, ok: 3},
+    ],
+  });
+  assert.deepEqual(found, [
+    {
+      tone: 'warn',
+      text: 'Documents: 2 files couldn’t be read today',
+      detail:
+        'Hermes’s temporary space was full. Restarting Hermes empties it. The originals are kept: Make a new version on a message’s page reads one again.',
+      link: '#messages',
+      action: 'Messages',
+    },
+    {
+      tone: 'warn',
+      text: 'Voice notes: 1 recording couldn’t be transcribed today',
+      detail:
+        'Hermes’s locked-down container refused a file write. The originals are kept: Make a new version on a message’s page transcribes one again.',
+      link: '#messages',
+      action: 'Messages',
+    },
+  ]);
+});
+
 test('failed sends to chat apps need a look and open the Problems list', () => {
   const one = issues(
     monitoring(
@@ -106,4 +133,42 @@ test('each send reads in plain words, and what storage doesn’t count as a prob
     sendReason({state: 'failed', error_code: 'formatting_rejected', recovered: true}),
     'Formatting rejected; sent on a retry',
   );
+});
+
+test('backups and off-site copies that did not happen need a look and open System › Backups', () => {
+  const counts = {
+    failed: 0,
+    reason: null,
+    unreadable: 0,
+    skipped_days: 0,
+    offsite_failed: 0,
+    offsite_reason: null,
+    offsite_skipped: 0,
+  };
+  assert.deepEqual(issues({backups: counts}), []);
+  assert.deepEqual(issues({backups: {unavailable: true}}), []);
+  const found = issues({
+    backups: {
+      ...counts,
+      failed: 2,
+      reason: 'backup_unsupported_link',
+      unreadable: 1,
+      skipped_days: 1,
+      offsite_failed: 1,
+      offsite_reason: 'offsite_low_disk',
+      offsite_skipped: 3,
+    },
+  });
+  assert.deepEqual(
+    found.map(issue => [issue.tone, issue.text, issue.link, issue.action]),
+    [
+      ['bad', 'The last 2 backups didn’t finish', '#system?view=backups', 'Backups'],
+      ['warn', 'The newest backup left out 1 file or folder', '#system?view=backups', 'Backups'],
+      ['warn', 'The automatic backup was skipped', '#system?view=backups', 'Backups'],
+      ['bad', 'The off-site copy failed', '#system?view=backups', 'Backups'],
+      ['warn', 'Off-site copies of 3 backups were skipped', '#system?view=backups', 'Backups'],
+    ],
+  );
+  assert.match(found[0].detail, /^A file link outside a command workspace stopped the backup\..* Older backups are kept\.$/);
+  assert.equal(found[3].detail, 'Not enough free disk space to make the encrypted copy. Free some space, then try again.');
 });

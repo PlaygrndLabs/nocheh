@@ -43,7 +43,7 @@ class ScriptedBrainTests(unittest.TestCase):
                         and 'fact PRIVFACT91' in final['content'])
         owner=self.brain.respond(request(message('user','[[owner:conversations]]'),tools=('mcp__nocheh__owner_read',)))
         self.assertEqual(owner,{'tool':'mcp__nocheh__owner_read','arguments':{'view':'conversations'}})
-        # A destination is a chat id from the destinations list, opaque to the brain (ADR-0251).
+        # A destination is a chat id from the destinations list, opaque to the brain (ADR-0252).
         action=self.brain.respond(request(message('user','[[action:'+'c3'*32+'|exact text]]')))
         self.assertEqual(action['arguments'],{'destination':'c3'*32,'text':'exact text'})
 

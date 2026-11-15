@@ -61,13 +61,21 @@ export const leaveTasksText = (project: string) =>
 export const moveTasksText = (from: string, to: string) =>
   `Its tasks, and its topics’ tasks, move with it from ${from} to ${to}.`;
 
+/**
+ * What each way of sharing does. The filter is a model that people can steer: what anyone writes in these chats, a
+ * question in the receiving group or a message in a source group, can talk it into passing on more (ADR-0251).
+ */
 export const modeText: Record<Rule['mode'], {label: string; hint: string}> = {
   approved: {label: 'I approve each text', hint: 'You write or check the exact text before the chat can use it.'},
   filtered: {
     label: 'Filter automatically',
-    hint: 'Nocheh passes on what’s relevant and holds back anything private or uncertain.',
+    hint: 'Nocheh tries to hold back private things, but people in these chats can talk it into passing more. For private talk, use “I approve each text”.',
   },
 };
+
+/** Privacy notes only steer the filter; a rule where the owner approves each text never reads them. */
+const privacyNotesHint = 'Anything Nocheh shouldn’t pass on. It tries to hold these back.';
+export const unusedNotesText = '(used only by Filter automatically)';
 
 /** The body that saves a rule; also used to turn a rule on or off. */
 export function ruleBody(rule: Omit<Rule, 'id' | 'revision'> & {id?: string}, revision: number) {
@@ -179,16 +187,19 @@ export function RuleDialog({
           />
           <p className="text-xs text-muted">{modeText[mode].hint}</p>
         </div>
-        <Field label="Privacy notes (optional)" htmlFor="rule-notes" hint="Anything Nocheh must never pass on.">
-          <Textarea
-            id="rule-notes"
-            value={instructions}
-            maxLength={4000}
-            rows={3}
-            dir="auto"
-            onChange={event => setInstructions(event.target.value)}
-          />
-        </Field>
+        {/* Only the filter reads the notes. Hidden for a rule you approve, they are still kept and saved with it. */}
+        {mode === 'filtered' && (
+          <Field label="Privacy notes (optional)" htmlFor="rule-notes" hint={privacyNotesHint}>
+            <Textarea
+              id="rule-notes"
+              value={instructions}
+              maxLength={4000}
+              rows={3}
+              dir="auto"
+              onChange={event => setInstructions(event.target.value)}
+            />
+          </Field>
+        )}
         <div className="flex items-center justify-between gap-4">
           <label htmlFor="rule-on" className="text-sm font-medium">
             Rule is on

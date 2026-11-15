@@ -106,7 +106,7 @@ class PreferenceTransferTests(unittest.TestCase):
                 self.assertFalse((actual / 'memories').exists())
 
     def test_chats_first_seen_after_step_2b_and_upgraded_groups_keep_their_preferences(self):
-        # ADR-0251: the reset's configuration names its chats by their Nocheh ids. A topic first seen after step 2b in the
+        # ADR-0252: the reset's configuration names its chats by their Nocheh ids. A topic first seen after step 2b in the
         # old group '-10' has a digest id, a group first seen after step 2b ('-30' in the setup) is a digest too, and the
         # group '-20' Telegram upgraded to '-1020' keeps its old id as its chat id.
         topic, new_group, new_topic = 'a' * 64, 'b' * 64, 'c' * 64

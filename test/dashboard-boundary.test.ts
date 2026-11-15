@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm,readdir} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,rm,readdir,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {createServer,request as httpRequest,type Server} from 'node:http';
@@ -16,6 +16,12 @@ test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',
     assert.equal(req.headers['x-forwarded-prefix'],'/hermes');assert.equal(req.headers.cookie,undefined);
     if(req.url==='/nocheh'){
       res.writeHead(200,{'content-type':'text/html'});res.end(`<html><head><script>window.__HERMES_SESSION_TOKEN__="${secret}";</script></head><body>Native navigation</body></html>`);
+    }else if(req.url==='/chat'){
+      res.writeHead(200,{'content-type':'text/html; charset=utf-8'});
+      res.end(`<html><head><SCRIPT type="module" crossorigin src="/hermes/assets/index-a1.js"></SCRIPT><script>window.__HERMES_SESSION_TOKEN__="${secret}";window.__HERMES_BASE_PATH__="/hermes";</script></head><body><div id="root"></div></body></html>`);
+    }else if(req.url==='/api/preview'){
+      // HTML from anywhere but Hermes's own pages, such as a file shown inline.
+      res.writeHead(200,{'content-type':'text/html'});res.end(`<html><head><script>window.__HERMES_SESSION_TOKEN__="${secret}";</script></head><body>Shown file</body></html>`);
     }else{res.writeHead(200,{'content-type':'application/json'});res.end('{"native":true}');}
   });
   let upgrades=0;
@@ -54,6 +60,40 @@ test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',
     const nativeHtml=await(await fetch(base+'/hermes/nocheh',{headers:{cookie}})).text();
     assert.match(nativeHtml,/Native navigation/);assert.ok(!nativeHtml.includes(secret));assert.ok(nativeHtml.includes(csrf));assert.match(nativeHtml,/__HERMES_AUTH_REQUIRED__=true/);
     assert.equal((await fetch(base+'/hermes/api/config',{headers:{cookie}})).status,200);
+    // Hermes's own pages carry the reported script rules with a new nonce each time, on every script (ADR-0251).
+    const nonces:string[]=[];
+    for(let open=0;open<2;open++){
+      const chat=await fetch(base+'/hermes/chat',{headers:{cookie}}),body=await chat.text();
+      const policy=chat.headers.get('content-security-policy-report-only')??'';
+      const nonce=/^script-src 'self' 'nonce-([A-Za-z0-9+/]{22}==)'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-uri \/api\/nocheh\/csp-report$/.exec(policy)?.[1];
+      assert.ok(nonce,policy);nonces.push(nonce);
+      assert.equal(chat.headers.get('content-security-policy'),null,'only reported for now');
+      assert.equal(body.match(/<script\b/gi)?.length,3);assert.equal(body.split(`<script nonce="${nonce}"`).length+body.split(`<SCRIPT nonce="${nonce}"`).length-2,3,body);
+      assert.ok(body.includes(`window.__HERMES_SESSION_TOKEN__=${JSON.stringify(csrf)};`)&&!body.includes(secret));
+      assert.match(body,new RegExp(`<script nonce="${nonce.replace(/[+/]/g,'\\$&')}">window.__HERMES_AUTH_REQUIRED__=true;</script></head>`));
+    }
+    assert.notEqual(nonces[0],nonces[1]);
+    // Any other HTML from Hermes runs no script, and gets neither Hermes's token nor the dashboard's value.
+    const other=await fetch(base+'/hermes/api/preview',{headers:{cookie}}),otherBody=await other.text();
+    assert.equal(other.headers.get('content-security-policy'),"script-src 'none'; sandbox");
+    assert.equal(other.headers.get('content-security-policy-report-only'),null);
+    assert.ok(!otherBody.includes(secret)&&!otherBody.includes(csrf)&&!otherBody.includes('nonce=')&&!otherBody.includes('__HERMES_AUTH_REQUIRED__'),otherBody);
+    assert.match(otherBody,/window\.__HERMES_SESSION_TOKEN__="";/);
+    // The browser's reports come without a session and are only counted: rule, blocked site and page path, no page text.
+    const report=(body:string,headers:Record<string,string>={})=>fetch(base+'/api/nocheh/csp-report',{method:'POST',headers:{'Content-Type':'application/csp-report',...headers},body});
+    const sample={'csp-report':{'document-uri':base+'/hermes/chat?ticket=private-ticket','effective-directive':'script-src-elem','blocked-uri':'inline','script-sample':'window.privateText=1'}};
+    assert.equal((await report(JSON.stringify(sample))).status,204);
+    assert.equal((await report(JSON.stringify(sample),{Origin:'null','Sec-Fetch-Site':'same-origin'})).status,204,'a no-referrer page may send Origin null');
+    assert.equal((await report(JSON.stringify({...sample,padding:'x'.repeat(9*1024)}))).status,413);
+    assert.equal((await report(JSON.stringify(sample),{Origin:'https://untrusted.example'})).status,403);
+    assert.equal((await report(JSON.stringify(sample),{Origin:'null','Sec-Fetch-Site':'cross-site'})).status,403,'never from another site');
+    assert.equal((await fetch(base+'/api/nocheh/jobs',{method:'POST',headers:{cookie,Origin:'null'},body:'{}'})).status,403,'Origin null is only for reports');
+    const saved=join(state,'admin/dashboard/csp-reports.json');
+    let counted='';for(let i=0;i<100&&!counted;i++){counted=await readFile(saved,'utf8').catch(()=>'');if(!counted)await new Promise(r=>setTimeout(r,50));}
+    const reports=JSON.parse(counted);
+    assert.equal(reports.total,2);
+    assert.deepEqual(reports.kinds.map(({directive,blocked,page,count}:any)=>({directive,blocked,page,count})),[{directive:'script-src-elem',blocked:'inline',page:'/hermes/chat',count:2}]);
+    assert.ok(!counted.includes('privateText')&&!counted.includes('private-ticket'));
     assert.equal((await fetch(base+'/hermes/api/config',{method:'PUT',headers:{cookie},body:'{}'})).status,403);
     assert.equal((await fetch(base+'/hermes/api/config',{method:'PUT',headers:{cookie,'X-Hermes-Session-Token':csrf},body:'{}'})).status,200);
     const ticket=await(await fetch(base+'/hermes/api/auth/ws-ticket',{method:'POST',headers:{cookie,Origin:base}})).json() as {ticket:string};

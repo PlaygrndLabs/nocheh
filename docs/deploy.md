@@ -304,12 +304,17 @@ image tags. Backups are private local directories
 under ignored `data/backups/`; they contain original data and credentials. Keep
 their access permissions when copying them. Generated plugin symlinks are recorded
 and recreated by the integration. Native `.cache/uv` dependency caches are recorded
-as excluded and rebuilt when needed; other unknown state symlinks fail the backup.
+as excluded and rebuilt when needed. A link inside a profile's workspace, current or
+retired, is kept as a link: it is listed with its target, never followed, and made last
+on restore. Any other unknown state symlink stops the backup with
+`backup_unsupported_link`. FIFOs, sockets and devices are skipped and listed, and
+workspace entries a command made unreadable are left out and listed.
 
 Restore requires a new state directory and a new Compose database volume. It
 validates every saved file before extraction, restores the database, compares all
-table fingerprints, and starts the same images. Unsafe archive paths, links,
-missing files and checksum mismatches fail validation. A report is written under
+table fingerprints, and starts the same images. Unsafe archive paths, links that
+are not listed or point elsewhere, anything below a link, missing files and checksum
+mismatches fail validation. A report is written under
 the restored state's `reports/` directory. The restored Telegram policy is
 disabled; a saved native Hermes login is held outside its active path.
 `spool/.restore-inactive`, `admin/tools/inactive` and `hermes/scheduler-inactive`
@@ -423,7 +428,7 @@ and each chat's tool switches. On import, nothing acts by itself: a chat arrives
 sharing rules arrive off, a switch that was on arrives inherited, and a past-due
 reminder arrives skipped ([ADR-0230](adr/0230-portable-export-carries-owner-work.md)).
 The chats arrive before the archive, so imported history keeps their ids
-([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)).
+([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)).
 The completion manifest includes sizes and SHA-256 hashes.
 Operational auth/configuration files are excluded; secrets typed into conversations
 remain part of those original conversations. This read-only export is not one

@@ -10,6 +10,7 @@ import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {fixtureServices,type FakeCall} from './fixture-brain.js';
+import {chatRowForTest} from './fixture-seeded-chats.js';
 import {storageServer} from '../src/stores/server.js';
 import {startStorageCapture} from '../src/stores/worker.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -29,6 +30,14 @@ test('separated application captures through control outages, exposes owner repo
   }});
   const stores:StorePools={...connected,archive:unavailable(connected.archive,()=>archiveDown),control:unavailable(connected.control,()=>controlDown)};
   const policy={enabled:true,owner_id:'123',group_ids:['-42']};let nativeCalls=0;
+  // A group with a known name for the recall labels, its own on every run so nothing else names it.
+  const named='-'+Date.now()+'7',where=(space:unknown,owner=false,answer=false,group?:string)=>({space,owner,answer,...(group?{answer_group:group}:{})});
+  const recalled=[{profile:'p-owner',...where('123',true),kind:'native_note',file:'MEMORY.md',text:'Juniper owner note',citations:[]},
+    {profile:'p-group',...where(named),kind:'native_note',file:'MEMORY.md',text:'Juniper group note',citations:[]},
+    {profile:'p-topic',...where(named+'/topic/9'),kind:'native_session',session:'s1',text:'Juniper topic talk'},
+    {profile:'p-answer',...where('123',false,true,'“Synthetic Forum”'),kind:'native_session',session:'s2',text:'Juniper answer'},
+    {profile:'p-answer-old',...where('123',false,true),kind:'native_session',session:'s3',text:'Juniper older answer'},
+    {profile:'p-unknown',...where(null),kind:'native_note',file:'USER.md',text:'Juniper unknown',citations:[]}];
   const runtime:FakeCall=async(operation,input)=>{
     if(operation==='status')return {ok:true};
     if(operation==='telegram.status')return {ok:true,telegram:'connected',telegram_details:{state:'connected'}};
@@ -36,7 +45,7 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','reply.private':'Private answer','memory.limited':'Limited',
       'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images'}};
     if(operation.startsWith('persona.')||operation==='config.read')return {operation,input};
-    if(operation==='memory.recall'){nativeCalls++;assert.equal(input.generation,(await services.guards.state()).generation);assert.equal(input.guard_epoch,(await services.guards.state()).epoch);return {hits:[]};}
+    if(operation==='memory.recall'){nativeCalls++;assert.equal(input.generation,(await services.guards.state()).generation);assert.equal(input.guard_epoch,(await services.guards.state()).epoch);return {hits:recalled,truncated:false,next_profile:null};}
     throw Error('unexpected external operation');
   };
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,serviceToken:token,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no native provider calls');})});
@@ -184,7 +193,18 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/scheduler/delivery',{event_id:scheduled.event_id})).state,'local');
     await request('/v1/memory/check',undefined,409,scheduledClaim.archive_credential);
 
-    await request('/v1/memory/recall',{query:'observation',generation:'untrusted',guard_epoch:-1},200,credential);assert.equal(nativeCalls,1);
+    // The group's name as the owner's refresh records it, on its chat row (ADR-0252).
+    await chatRowForTest(connected.control,named,{title:'Synthetic Forum',is_forum:true});
+    const recall=await request('/v1/memory/recall',{query:'observation',generation:'untrusted',guard_epoch:-1},200,credential);assert.equal(nativeCalls,1);
+    // Each hit names its chat in words: the owner's label only for the owner's own chat, never for a private answer
+    // or a chat Nocheh can't name, and no raw chat ID or profile metadata is passed on (ADR-0251).
+    assert.deepEqual(recall.hits.map((hit:any)=>[hit.profile,hit.place]),[['p-owner','Your private chat'],['p-group','“Synthetic Forum”'],
+      ['p-topic','“Synthetic Forum” › a topic'],['p-answer','Private answer asked in “Synthetic Forum”'],['p-answer-old','A private answer'],
+      ['p-unknown','A chat Nocheh can’t name']]);
+    assert.ok(!JSON.stringify(recall).includes(named));
+    assert.ok(recall.hits.every((hit:any)=>['space','owner','answer','answer_group'].every(key=>!(key in hit))));
+    assert.equal(recall.hits[1].text,'Juniper group note');
+    await connected.control.query('DELETE FROM telegram_chat_observations WHERE chat_id=$1',[named]);
     const proposal=await request('/v1/action-requests',{destination:'current',text:'Synthetic approval preview'},200,credential);
     const tool=await request('/v1/tools/propose',{kind:'shell',arguments:{command:'pwd'}},200,credential);
     assert.equal((await request('/v1/tools/actions/'+tool.id)).arguments.command,'pwd');

@@ -62,7 +62,7 @@ def prepare_profile(root,scope,model):
     # project's, else the groups default (ADR-0249).
     materialize(root, profile, None if scope.answer else scope.chat_id, scope.project, audience(scope))
     from .native_memory import save_receipt
-    # The marker keeps the chat beside its space, so what a topic inherits never comes from the shape of its id (ADR-0251).
+    # The marker keeps the chat beside its space, so what a topic inherits never comes from the shape of its id (ADR-0252).
     save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'chat':scope.chat_id,'revision':scope.revision,'owner':scope.owner,
         'guard_epoch':scope.guard_epoch,'generation':scope.generation,'purpose':scope.purpose,'logical_profile':scope.logical_profile,
         **({'answer':scope.answer} if scope.answer else {})}))

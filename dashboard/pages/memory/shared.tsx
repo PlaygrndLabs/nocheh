@@ -114,7 +114,7 @@ export type Conversation = Chat;
 
 /**
  * Chat names by their id, for showing a chat instead of a number, and what each chat is, from the chat directory
- * (ADR-0251): never from the id.
+ * (ADR-0252): never from the id.
  */
 export function useChats() {
   const chats = useChatDirectory(60000);

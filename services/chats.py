@@ -1,4 +1,4 @@
-"""The chats Nocheh serves, as the app tells the Python services (ADR-0251).
+"""The chats Nocheh serves, as the app tells the Python services (ADR-0252).
 
 GET {ARCHIVE_URL}/internal/chats, behind the service token, lists every served chat with its topics and the owner's
 private chat, by their Nocheh chat ids, each with its ids in its app (the current one and older ones, such as a group's

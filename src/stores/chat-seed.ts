@@ -5,7 +5,7 @@ import {legacyChat,legacyChatValue} from '../chats-telegram.js';
 import {bumpChatRevision,ensureConnection,namePrivateChats,startChatDirectory,type ChatRepository} from './chats.js';
 
 /*
- * The chat seeder (ADR-0251). Every chat value Nocheh stored before step 2b stays, unchanged, as that chat's Nocheh id:
+ * The chat seeder (ADR-0252). Every chat value Nocheh stored before step 2b stays, unchanged, as that chat's Nocheh id:
  * the seeder gives each one a chats row (and a chat_ids row for its Telegram id), and only inserts. The one value it
  * fills in on a row already there is a private chat's person where the row names none (a chat a reset restored or an
  * owner record brought; namePrivateChats). It never changes a value already set and never deletes a row anywhere, so
@@ -310,7 +310,7 @@ const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms).unref
 const failure=(event:string,error:unknown)=>console.warn(JSON.stringify({event,code:(error as {code?:string})?.code??'unknown'}));
 
 /**
- * The app's start for chat records (ADR-0251), before anything captures or runs: every chat already stored gets its
+ * The app's start for chat records (ADR-0252), before anything captures or runs: every chat already stored gets its
  * row (the seeder), chats are served as TELEGRAM_GROUP_IDS says (the 2b-1 bridge), and this process loads its chat
  * directory. A store that is not up yet is tried again; after `attempts` the start fails, and the service restarts.
  * Then memberships are filled in from the archive in the background, in batches, until they reach the seeder's place.

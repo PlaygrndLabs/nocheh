@@ -77,7 +77,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const transcription=options.transcription??voiceTranscription(options.runtime),extraction=documentExtraction(options.runtime);
   // Voice notes archived before transcription was set up keep their readings; an earlier request still completes.
   const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction,...(options.transcription?[]:[archivedVoice()])]);
-  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction);
+  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction,options.policy);
   const retirements=new SourceRetirementRepository(stores,archive);
   const reactions=new ReactionStateRepository(archive,stores.control);
   const access=new SourceAccessRepository(stores,archive,guards,options.policy,retirements,reactions);
@@ -85,7 +85,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     try {
       const captured=await archive.captured(principal.turnEvent!),source=captured.reference;
       // The turn's chat as another process recorded it a moment ago (a served group's new Telegram id after an upgrade):
-      // this process, the security service included, reads it once its chat directory has looked again (ADR-0251).
+      // this process, the security service included, reads it once its chat directory has looked again (ADR-0252).
       await settleTelegramChat(captured);
       if(!await access.canRead(principal,source,binding))throw new HttpError(403,'turn_source_denied');return source;
     } catch(error) {if(!(error instanceof HttpError)||error.code!=='source_not_found')throw error;}
@@ -100,7 +100,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
   const turns=new RuntimeTurnRepository(access,prepared);
-  // Nocheh's chat records (ADR-0251): what each captured Telegram original says of its chat, its topic and its people.
+  // Nocheh's chat records (ADR-0252): what each captured Telegram original says of its chat, its topic and its people.
   const chats=new ChatRepository(stores,options.policy);
   const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived),chats);
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);

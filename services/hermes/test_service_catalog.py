@@ -29,6 +29,31 @@ class ServiceCatalogTests(unittest.TestCase):
         listed={name for name,*_ in CATALOG}
         self.assertEqual({name for name,service in compose.items() if 'reset' not in (service.get('profiles') or [])}-listed,set())
 
+    def test_hermes_runs_locked_down_and_mounts_only_the_state_it_uses(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        hermes=compose['hermes']
+        self.assertEqual((hermes['read_only'],hermes['tmpfs'],hermes['cap_drop'],hermes['security_opt']),
+                         (True,['/tmp:size=1g,mode=1777'],['ALL'],['no-new-privileges:true']))
+        # On-first-use installs stay on: they go to Hermes's own mounted folder, not the read-only image.
+        self.assertEqual(hermes['environment']['HOME'],'/tmp/home')
+        self.assertNotIn('HERMES_DISABLE_LAZY_INSTALLS',hermes['environment'])
+        state='${NOCHEH_STATE_DIR:-./data/local}'
+        self.assertEqual(hermes['volumes'],[state+'/admin/dashboard/home:/dashboard-state/home',
+                                            state+'/hermes:/workspace/data/local/hermes',state+'/reports:/reports',
+                                            state+'/files:/data/files:ro',state+'/spool/brain-turns:/data/spool/brain-turns'])
+        # Not the dashboard's token beside its home, nor the rest of the spool, such as incoming Telegram updates.
+        sources={volume.split(':')[0].removeprefix(state+'/') for volume in hermes['volumes']}
+        self.assertFalse(sources&{'admin','admin/dashboard','spool'})
+        self.assertEqual(hermes['environment']['NOCHEH_DASHBOARD_HOME'],'/dashboard-state/home')
+        # make dev keeps its mounted home and the base service's lockdown.
+        class Loader(yaml.SafeLoader):pass
+        Loader.add_constructor('!reset',lambda loader,node:None)
+        development=yaml.load((ROOT/'docker-compose.dev.yml').read_text(),Loader=Loader)['services']['hermes']
+        self.assertEqual(development['environment']['HOME'],'/workspace/data/local/hermes')
+        self.assertFalse({'read_only','tmpfs','cap_drop','security_opt','cap_add'}&set(development))
+
     def test_the_telegram_bot_is_the_only_service_given_the_token_and_waits_only_for_the_app(self):
         import yaml
         from tools.operations.installation.configuration import ROOT

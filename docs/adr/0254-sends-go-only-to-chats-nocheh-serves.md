@@ -12,8 +12,8 @@ nothing that works today is lost. Amends
 private chat of a person the owner allowed in a selected group is a send
 destination, always behind the owner's card. Builds on
 [ADR-0250](0250-cards-and-forwards-say-whose-words-they-are.md) (names on cards)
-and [ADR-0251](0251-chats-get-nochehs-own-ids.md) (the chat directory), and
-narrows ADR-0251's "a destination is a chat the directory knows" to a chat
+and [ADR-0252](0252-chats-get-nochehs-own-ids.md) (the chat directory), and
+narrows ADR-0252's "a destination is a chat the directory knows" to a chat
 Nocheh serves. Keeps [ADR-0159](0159-group-members-post-freely-and-approvals-go-private.md),
 [ADR-0161](0161-requesters-review-their-own-cross-group-messages.md) and
 [ADR-0092](0092-exact-topic-action-destinations.md). The reminders half is

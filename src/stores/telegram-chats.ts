@@ -27,7 +27,7 @@ const states=['available','migrated','not_member','not_found'];
 const appTypes=new Set(['private','group','supergroup','channel']);
 
 /**
- * Current chat presentation read from Telegram only on an explicit owner refresh (ADR-0251): the served groups' names
+ * Current chat presentation read from Telegram only on an explicit owner refresh (ADR-0252): the served groups' names
  * (unless a captured update already named them), Telegram's own word for each and whether it has topics, written to
  * their chats rows. Directory reads use what is saved and never call Telegram. A chat id stays the authority; a name
  * never grants access, and a refresh never changes whether a chat is served. A group Telegram moved to a new id (an

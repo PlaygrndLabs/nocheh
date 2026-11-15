@@ -23,7 +23,7 @@ import {assertChatDirectory,bumpChatRevision,ensureConnection,reloadChats} from 
  * A reminder keeps who set it and where, and a task who last wrote it where, by account (ADR-0255); the names people
  * wrote for themselves stay out, and so do people's merged reminders, which are a send log.
  *
- * Chats (ADR-0251): a chat keeps its Nocheh id, so every row naming it means the same chat here. A record exported
+ * Chats (ADR-0252): a chat keeps its Nocheh id, so every row naming it means the same chat here. A record exported
  * before step 2b names chats by the old values and carries topic names as telegram_topic_registrations; on import
  * each chat it names gets its row the way the seeder gives one, and a topic name becomes that topic's row.
  */
@@ -186,7 +186,7 @@ export class OwnerPortabilityRepository {
           }
           const same=(await db.query(`SELECT (SELECT to_jsonb(x) FROM json_populate_record(NULL::${record.table},$1::json) x)-$${definition.key.length+2}::text[]
             =to_jsonb(t)-$${definition.key.length+2}::text[] AS same FROM ${record.table} t WHERE ${match}`,[JSON.stringify(row),...record.key,columns.filter(name=>!present.includes(name))])).rows[0];
-          // A chat row from elsewhere must leave a directory every process can still load (ADR-0251).
+          // A chat row from elsewhere must leave a directory every process can still load (ADR-0252).
           if(inserted&&(record.table==='chats'||record.table==='chat_ids')){
             await assertChatDirectory(db).catch(error=>{throw error instanceof HttpError?new HttpError(400,'invalid_owner_record_value'):error;});
             await bumpChatRevision(db);chatsAdded=true;

@@ -2,7 +2,7 @@
 
 <current>
 
-Members step 2b-1: Nocheh's own chat ids ([ADR-0251](docs/adr/0251-chats-get-nochehs-own-ids.md);
+Members step 2b-1: Nocheh's own chat ids ([ADR-0252](docs/adr/0252-chats-get-nochehs-own-ids.md);
 owner, 2026-11-12: "I just review the tables and seems what I want if there is a important point
 or need my answer ask, else start build.", approving the Members design, whose step 2b is "Chat
 records ready for Slack"; "want ensure the db design cover slack for future"). One branch: a
@@ -90,7 +90,7 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   Telegram ids, as the gate applies them ([supervision](test/owner-supervision.test.ts)); a
   Slack thread is never a chat, so no Slack topic id is made ([chats](test/chats.test.ts)); a
   Telegram id with no record reads nothing in a store test with no fixture filling it in
-  ([retrieval](test/store-retrieval.test.ts)). ADR-0251 now lists what a rollback to main
+  ([retrieval](test/store-retrieval.test.ts)). ADR-0252 now lists what a rollback to main
   loses and every small dashboard change.
 - Full tester fixes: the first turn in a group Telegram has just upgraded is bound once the
   security service's own chat directory has looked again, not refused once and retried
@@ -115,14 +115,28 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   with every Telegram id it has had, and the dashboard's directory of people keeps that id: a
   group past the chat list's first page is listed once and opens as itself, and a
   `TELEGRAM_GROUP_IDS` entry naming a group by an earlier Telegram id finds that group.
+- Merged with main's fixes that lose nothing
+  ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)), on old-shaped and digest chats: a
+  recalled note names its group and topic from the chat records, the group's name or its newest
+  message under any Telegram id it has had, and a name only the owner's refresh gave counts while
+  that refresh found the group, as main does ([recall](test/recall-places.test.ts),
+  [store recall](test/store-recall-places.test.ts), [server](test/store-server.test.ts)); a live
+  recording is judged in the chat the records find, so an allowed person is not cut in a group
+  Telegram upgraded or in a new-id group, and a group the records do not know lets only the owner
+  through ([sender](test/assistant.test.ts), [voice](test/store-voice-transcription.test.ts)); a
+  member job spend notice and its Pause or Resume edit go to the owner's private chat where it is
+  in Telegram now, name each group from the records, and are not sent while the records do not
+  know that chat; only the owner's press there pauses
+  ([spend](test/store-member-job-spend.test.ts)). Hermes's locked-down container still reads
+  `GET /internal/chats` and writes nothing outside its two mounts.
 
-  Checks on the integrated branch after merging main: the build; node unit and dashboard tests
-  (544: 346 pass, 194 store tests skipped there, and the 4 workflow tests that also fail on
-  main); all 93 store test files on old-shaped and digest chats (231 pass, 0 fail); dashboard
-  format; the dashboard browser tests (46: 44 pass, and the 2 settings-apply tests that also fail
-  on main); Python Hermes (921, with the 2 environment errors that also occur on main), Telegram
-  (122) and tools (120, 2 skipped). The format gate's allowlist holds only adapter, legacy and
-  unrelated sites.
+  Checks on the integrated branch after merging main's fixes that lose nothing: the build; node
+  unit and dashboard tests (566: 363 pass, 199 store tests skipped there, and the 4 workflow tests
+  that also fail on main); all 95 store test files on old-shaped and digest chats (237 pass, 0
+  fail); dashboard format; the dashboard browser tests (46: 44 pass, and the 2 settings-apply tests
+  that also fail on main); Python Hermes (966, 4 skipped, with the 2 environment errors that also
+  occur on main), Telegram (123) and tools (120, 2 skipped). The format gate's allowlist holds only
+  adapter, legacy and unrelated sites.
 
   Before the merge, after the two full tester fixes, the whole full tester on the integrated
   branch (fake Telegram Bot API and model;
@@ -154,6 +168,17 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   GP1's archive search returns GP2's mark, which `group_answer_uses_only_that_group` checks;
   `group_members` and `new_id_group_works_end_to_end` pass. After merging main's fix to the
   deleted topic check (#219), `deleted_topic` passes with `group_members` (3 of 3).
+
+  After merging main's fixes that lose nothing, at cc46249, with the services, management,
+  store-postgres and Hermes images rebuilt: one focused run on one fixture of the scenarios that
+  merge or 2b-1 touches, in the tester's default order, `group_members` first and again before the
+  product scenarios. It covers Hermes locked down, the private fact and recall, the PDF, voice, the
+  long voice cut for someone not allowed, the photo read once, the large Files upload through
+  Hermes's bound address, profiles, no refused writes, `deleted_topic`, the forward check, a note's
+  recall naming its chat, the new-id group, the private-chat check, project groups, the supergroup
+  upgrade, member job spend with its notice, pause and Resume, both approved operations' answers,
+  the private-mark sweep and every dashboard page with Hermes's Chat, Sessions and Files pages.
+  25 of 25 pass, the drain check included, with no product fix needed.
   Pending:
   - The full tester's waits for the person card (10 minutes) and the memory rebuild (15 minutes)
     are too short when every scenario runs on one fixture: raise them, or keep running it in
@@ -193,6 +218,41 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   before both upgrade messages stays two chats; a package made after this step that names a
   group by its digest, imported where the first start already gave that group its old id,
   does not reach the group until adoption.
+
+Security fixes, part 2: fixes that lose nothing (owner, 2026-11-14: "all yes"). One pull
+request with seven fixes, each built and reviewed on its own
+([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)):
+- Hermes runs with a read-only root, a 1 GiB memory `/tmp`, no capabilities and no new
+  privileges, and mounts only the folders it writes, never the dashboard's token or the rest
+  of the spool. Mounted folders are made at 0700 first, also on restore. On-first-use
+  installs stay on. A file read that fails for a full `/tmp` or a refused write is counted and
+  gives a notice ([compose](services/hermes/test_service_catalog.py),
+  [readers](services/hermes/test_document_text.py), [notices](services/hermes/test_problem_notices.py)).
+- Backups keep a workspace's links as links, skip special files, leave out and list what a
+  command made unreadable, and every backup or off-site copy that fails, is skipped or leaves
+  something out gives a notice ([backups](services/hermes/test_operations.py),
+  [schedule](services/hermes/test_backup_schedule.py), [off-site](services/hermes/test_offsite.py)).
+- A photo is read once, at its largest size. A live recording from someone not allowed is
+  transcribed up to its first 15 minutes, cut by its decoded sound
+  ([voice](services/hermes/test_voice_text.py), [preparation](test/store-voice-transcription.test.ts)).
+- Member jobs are capped to the cent; a daily notice mark and a holding pause mark
+  ([spend](test/store-member-job-spend.test.ts), [jobs](test/store-background-jobs.test.ts)).
+- The sharing filter sees only the search words; sharing and Notion texts say what they do;
+  recalled notes name their chat ([sharing](test/store-sharing.test.ts),
+  [recall](test/recall-places.test.ts)).
+- An AI finding never masks request structure, and a finding from a batch of several texts
+  is shared only once a check of that text alone confirms it
+  ([detection](test/store-prepared-context.test.ts), [copies](test/guarded.test.ts)).
+- Hermes's pages get a Report-Only script policy, the database viewer a login, and sign-in
+  pauses count per person ([dashboard](test/dashboard-boundary.test.ts),
+  [viewer](services/hermes/test_database_viewer.py), [sign-in](test/mini-app.test.ts)).
+
+  Unit, dashboard, store (525 in the fixture) and Hermes Python checks pass. The cloud tester's
+  new and affected scenarios pass: the locked-down Hermes, a large upload, documents, photos,
+  voice notes and the 15-minute cut, member job spend, recall labels, secrets, private marks and
+  every dashboard page. Pending: a look on the owner's install after the update. Owner steps:
+  run `./bin/nocheh db` once if the database viewer was running; the browser then asks for its
+  login.
 
 Security fixes, part 1: cards and forwarded messages (owner, 2026-11-14: "all yes", approving
 the fixes of the prompt-injection review with what each one loses). One pull request, the
@@ -2191,6 +2251,13 @@ Earlier upgrades are in [task history](docs/task-history.md).
 </verification>
 
 <pending>
+
+Security fixes, part 2 follow-ups ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)):
+about a week after installing, check `./bin/nocheh diagnose` for `hermes_page_script_reports`
+(none) and a passing tester run, then turn the Hermes page script policy from Report-Only to
+enforced in one commit. Later: a re-read of a cut recording when its sender is allowed, one
+shared name cleaner for cards, forwards and recall labels, and a notice when an off-site
+restore check fails.
 
 Silent learning (October 10): on the owner's development installation with
 Claude through Honcho, seven `interpret` jobs failed after 9 to 10 attempts

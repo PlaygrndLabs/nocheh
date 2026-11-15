@@ -38,7 +38,7 @@ export function topicReference(input:Record<string,unknown>):{chat:string;topic_
 
 /**
  * The Bot API cannot list a forum's topics. A topic that has neither a message nor a captured creation or edit is
- * unknown to Nocheh until the owner adds it by its link or id (ADR-0251): the owner's name goes on the topic's chats
+ * unknown to Nocheh until the owner adds it by its link or id (ADR-0252): the owner's name goes on the topic's chats
  * row, which a name Telegram shows later never replaces. A topic grants no access, and the row stays when the owner
  * removes it from the list, so whatever names it keeps meaning the same topic.
  */

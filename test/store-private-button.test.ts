@@ -88,7 +88,7 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     assert.deepEqual(replyTo(asked).button,{text:'🔒 Answer privately',data:'np'+id},'the button sits under the owner’s own answer');
     assert.equal(Buffer.byteLength(replyTo(asked).button.data),34,'within Telegram’s 64 bytes of callback data');
     assert.deepEqual((({from_chat_id,project_id,asker_account_id,state,read_chats})=>({from_chat_id,project_id,asker_account_id,state,read_chats}))(await row(id)),
-      {from_chat_id:GP1,project_id:P1,asker_account_id:accountIdFor('telegram',OWNER),state:'offered',read_chats:null},'the asker is kept as a chat_accounts id (ADR-0251)');
+      {from_chat_id:GP1,project_id:P1,asker_account_id:accountIdFor('telegram',OWNER),state:'offered',read_chats:null},'the asker is kept as a chat_accounts id (ADR-0252)');
     assert.equal((await services.privateAnswers.offer({id,question_event:asked,from_chat_id:GP1,project_id:P1,asker_account_id:OWNER})).id,id,
       'a retried reply offers the same button');
 

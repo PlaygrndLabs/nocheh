@@ -35,6 +35,47 @@ class NativeMemoryTests(unittest.TestCase):
             self.assertEqual({h['kind'] for h in result['hits']},{'native_note','native_session'})
             with self.assertRaises(ValueError):recall(root,{'query':'Juniper','profile':'../../secret'})
 
+    def test_each_recalled_hit_says_whose_profile_it_is_in(self):
+        # Nocheh turns these into the label of the chat a hit came from (ADR-0251). A private answer's profile names the
+        # owner's private chat but is never the owner's (ADR-0249), with or without the receipt of where it was asked.
+        from hermes_state import SessionDB
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            profiles={'owner':{'space':'123','owner':True},'group':{'space':'-20/topic/4','owner':False},
+                       'answer':{'space':'123','owner':False,'answer':'a'*32},'answer-old':{'space':'123','owner':False,'answer':'b'*32}}
+            for name,metadata in profiles.items():
+                profile=root/'profiles'/Scopes.profile(name);(profile/'memories').mkdir(parents=True)
+                (profile/'memories/MEMORY.md').write_text('Juniper note in '+name)
+                (profile/'space.json').write_text(json.dumps({**metadata,'generation':'new','guard_epoch':4}))
+                db=SessionDB(profile/'state.db');db.create_session('session-'+name,source='telegram')
+                db.append_message('session-'+name,role='user',content='Juniper talk in '+name);db.close()
+            (root/'profiles'/Scopes.profile('answer')/'answer.json').write_text(json.dumps({'group':'“Synthetic Forum”','at':'2026-01-02T03:04:05+00:00'}))
+            nothing_retired=lambda ids:{'revision':'0:','retired':[],'answered':[]}
+            result=recall(root,{'query':'Juniper','limit':20,'generation':'new','guard_epoch':4},retirements=nothing_retired)
+            where={}
+            for hit in result['hits']:
+                where.setdefault(hit['profile'],set()).add(json.dumps({key:hit.get(key) for key in ('space','owner','answer','answer_group')},sort_keys=True))
+            expected={'owner':{'space':'123','owner':True,'answer':False,'answer_group':None},
+                      'group':{'space':'-20/topic/4','owner':False,'answer':False,'answer_group':None},
+                      'answer':{'space':'123','owner':False,'answer':True,'answer_group':'“Synthetic Forum”'},
+                      'answer-old':{'space':'123','owner':False,'answer':True,'answer_group':None}}
+            self.assertEqual(where,{Scopes.profile(name):{json.dumps(value,sort_keys=True)} for name,value in expected.items()},
+                             'every note and session hit of a profile says the same')
+            self.assertEqual(len(result['hits']),8)
+            self.assertNotIn('answer_at',json.dumps(result))
+
+    def test_recall_without_space_metadata_names_no_owner(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for name,marker in (('plain',False),('named',True)):
+                profile=root/'profiles'/(name if marker else Scopes.profile(name));(profile/'memories').mkdir(parents=True)
+                (profile/'memories/MEMORY.md').write_text('Juniper '+name)
+                if marker:(profile/'nocheh-owner-profile.json').write_text('{"scope":"owner"}')
+            nothing_retired=lambda ids:{'revision':'0:','retired':[],'answered':[]}
+            hits={hit['text']:hit for hit in recall(root,{'query':'Juniper'},retirements=nothing_retired)['hits']}
+            self.assertEqual((hits['Juniper plain']['space'],hits['Juniper plain']['owner'],hits['Juniper plain']['answer']),(None,False,False))
+            self.assertEqual((hits['Juniper named']['owner'],hits['Juniper named']['answer']),(True,False),'an owner-named profile is the owner\'s')
+
     def test_native_review_waits_for_actual_completion_and_denies_extra_tools(self):
         from agent import background_review as native
         original=native.build_cache_parity_fork

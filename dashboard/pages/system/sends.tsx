@@ -63,7 +63,7 @@ export function SendsView() {
   );
 }
 
-/** Where a send went: the chat's name when Nocheh knows it, with its topic, linked to that chat (ADR-0251). */
+/** Where a send went: the chat's name when Nocheh knows it, with its topic, linked to that chat (ADR-0252). */
 function ChatName({row}: {row: ChatSend}) {
   if (!row.chat) return <span className="text-muted">—</span>;
   const topic = row.thread ?? row.topic;

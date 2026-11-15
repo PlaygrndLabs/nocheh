@@ -12,7 +12,7 @@ minutes; no daily cap, and no reminder is ever dropped. Amends
 skipped and sent), [ADR-0230](0230-portable-export-carries-owner-work.md) (the
 export carries who set a reminder), [ADR-0248](0248-tasks-follow-data-access.md)
 (a group's view of a reminder) and
-[ADR-0251](0251-chats-get-nochehs-own-ids.md) (new chat columns). The sends
+[ADR-0252](0252-chats-get-nochehs-own-ids.md) (new chat columns). The sends
 half is [ADR-0254](0254-sends-go-only-to-chats-nocheh-serves.md), whose chat
 words and name rules reminders share.
 </status>
@@ -42,7 +42,7 @@ words and name rules reminders share.
   Both are null for the owner's private chat, the dashboard, the mini app, the
   API and a card the owner approved. A person whose account cannot be told is
   allowed and named "someone you allowed". The new chat columns are registered
-  for seeding as ADR-0251 requires.
+  for seeding as ADR-0252 requires.
 - `owner_task_writers` keeps, per task and field (`title`, `notes`, `due`,
   `closed`), who last wrote it anywhere but the owner's private chat or the
   dashboard, and where. The owner there takes a field back by writing it; a

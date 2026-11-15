@@ -15,7 +15,7 @@ from .policy_config import effective, validate
 from .profile_config import PREFERENCES, atomic_yaml, resolved
 from .scopes import Scopes
 
-# Version 2 (ADR-0251) names the chats it keeps preferences for by their Nocheh ids, with each served group's Telegram
+# Version 2 (ADR-0252) names the chats it keeps preferences for by their Nocheh ids, with each served group's Telegram
 # ids, so a chat first seen after step 2b (a digest id) and a group Telegram upgraded keep theirs. A version 1 snapshot,
 # taken before step 2b, still validates and restores: its values name chats in the old way.
 FORMAT = 'nocheh-runtime-preferences-v2'
@@ -120,7 +120,7 @@ def _id(value):
 
 
 def _legacy_chats(owner, groups, spaces):
-    """The chats of an installation that never ran step 2b, or of a version 1 snapshot (ADR-0251): every value is its
+    """The chats of an installation that never ran step 2b, or of a version 1 snapshot (ADR-0252): every value is its
     chat's id, and a served group's topic is named after its group. Read once, here, to find which spaces are topics."""
     topics = {}
     for space in spaces:
@@ -156,7 +156,7 @@ def capture(root, policy, catalog=None):
     The caller must fence changes to both the filesystem and that catalog.
     `policy.owner` and `policy.groups` are the Telegram ids the setup names; `policy.chats`, when the configuration
     snapshot has chat records, the chats they name by their Nocheh ids ({'owner', 'groups': {chat: [Telegram ids]},
-    'topics': {topic: chat}}), else None for a source whose values name their chats in the old way (ADR-0251).
+    'topics': {topic: chat}}), else None for a source whose values name their chats in the old way (ADR-0252).
     """
     if not isinstance(policy.owner, str) or not policy.owner:
         raise ValueError('owner_required')

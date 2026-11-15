@@ -22,7 +22,7 @@ def _id(value, pattern):
 
 
 def _chat(value):
-    """A Nocheh chat id, as storage names a chat: opaque, printable, no whitespace, bounded. Never parsed (ADR-0251)."""
+    """A Nocheh chat id, as storage names a chat: opaque, printable, no whitespace, bounded. Never parsed (ADR-0252)."""
     return value if isinstance(value, str) and 0 < len(value) <= 200 and all(32 < ord(c) != 127 for c in value) else ''
 
 
@@ -60,7 +60,7 @@ def directory(state, archive=None, bot_api=_bot_api):
     if not isinstance(archive, dict):
         archive = {'groups': [], 'truncated': False}
     # A group storage knows keeps its Nocheh chat id, which is how the dashboard opens it; its Telegram ids, current and
-    # older, only match TELEGRAM_GROUP_IDS and name it to Telegram (ADR-0251). A group only that list names is named by
+    # older, only match TELEGRAM_GROUP_IDS and name it to Telegram (ADR-0252). A group only that list names is named by
     # the Telegram id it gives. Nocheh ids and Telegram ids are kept apart and never compared.
     groups, by_telegram = {}, {}
     for observed in archive.get('groups', []):

@@ -71,7 +71,7 @@ test('someone Nocheh does not serve costs no download or model call, is never re
     const member=await capture({id:Number(group),type:'supergroup',title:'Ours'},777);
     assert.notEqual((await operations.preparation!(member.id,await epoch('preparation'))).waiting_reason,'not_allowed');
     // Strangers name their own chats, so the owner's turns never see those chats listed; the dashboard does. Each is a
-    // chat record, with the Nocheh id it was first seen under (ADR-0251).
+    // chat record, with the Nocheh id it was first seen under (ADR-0252).
     const chat=async(external:string)=>(await stores.control.query('SELECT chat_id FROM chat_ids WHERE external_id=$1',[external])).rows[0]?.chat_id as string;
     const [first,second,elsewhere,mine,ours]=await Promise.all(['555','556',unselected,'123',group].map(chat));
     assert.equal(first,chatIdFor('telegram','555'));

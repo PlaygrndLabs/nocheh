@@ -8,7 +8,7 @@ const hex=(column:string)=>`${column} ~ '^[a-f0-9]{64}$'`;
 const appId=(column:string)=>`${column} ~ '^[A-Za-z0-9._:-]{1,128}$'`;
 
 /**
- * Nocheh's chat records (ADR-0251), in the control store. Every table is created only if missing and nothing here
+ * Nocheh's chat records (ADR-0252), in the control store. Every table is created only if missing and nothing here
  * rewrites a row, so the control bootstrap runs again as a no-op. Ids are made by src/chats.ts: chats.id is a chat
  * value stored before step 2b, unchanged, or chatIdFor(); connection and account ids are digests with no bot in them.
  *

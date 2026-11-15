@@ -1,5 +1,5 @@
 /**
- * Part of the Telegram adapter for chat ids (ADR-0251): what one captured Telegram update says about its chat, its
+ * Part of the Telegram adapter for chat ids (ADR-0252): what one captured Telegram update says about its chat, its
  * topic, the people in it and an upgrade to a supergroup. Pure: it reads the update as Telegram sent it and decides
  * nothing; the chat records store (src/stores/chats.ts) turns these facts into chats, chat_ids, accounts and
  * memberships. Telegram's own id formats stay in src/chats-telegram.ts.

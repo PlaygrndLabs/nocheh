@@ -24,7 +24,7 @@ import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
 /*
- * The chat directory the preview serves (ADR-0251). Chats Nocheh knew before step 2b keep their stored value as their
+ * The chat directory the preview serves (ADR-0252). Chats Nocheh knew before step 2b keep their stored value as their
  * id ('42', '-10042', '-10042/topic/7'); a group first seen later has a digest id ('Night sky club', with a topic), and a
  * group Telegram upgraded after that keeps its id under a new Telegram id ('Garden swap'). As the 2b-1 bridge serves
  * them, a group is on when any of its Telegram ids is in TELEGRAM_GROUP_IDS; the owner's chat always is.
@@ -213,7 +213,7 @@ const conversations:any[]=[
 ];
 /** The directory as the saved Telegram setting serves it, installed for the repositories the preview runs. */
 const directoryNow=()=>installChats(previewDirectory(servedGroups()));
-/** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0251). */
+/** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252). */
 const conversationItem=(row:any)=>({...row,...conversationFields(directoryNow(),row.space_id)});
 permissions.push({id:'6'.repeat(64),kind:'shell',scope:conversation,arguments:{command:'printf synthetic-group'},remaining:2,expires_at:new Date(Date.now()+3600000).toISOString()});
 const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true},
@@ -267,7 +267,10 @@ const backgroundJobs:any[]=[
   {id:hx('9f'),title:'Rotate the logs on build-vm',state:'proposed',chat:'42',asked_in:'42',attempts:0,ended:null,cost_usd:0,cost_limit_usd:5,priced:true,minutes_limit:45,
    estimate:{minutes:5,cost_usd:0.1},todo:[],started_at:null,finished_at:null,created_at:minutesAgo(2),error_code:null,machine:{name:'build-vm'},
    steps:['Set up logrotate for ~/projects/garden-site/logs'],machine_cleanup:null}];
-let jobLimits={cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,box_tools:true,revision:0};
+let jobLimits={cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,member_notice_usd:20,member_pause_usd:100,box_tools:true,revision:0};
+// What jobs members approved themselves spent today, and the pause of member jobs (ADR-0251).
+let memberPause:{by:'owner'|'auto';since:string;until:string|null}|null=null;
+const memberSpend=()=>({day:new Date().toISOString().slice(0,10),spent_usd:23.4,notice_usd:jobLimits.member_notice_usd,pause_usd:jobLimits.member_pause_usd,paused:memberPause});
 // Machines: the preview stands in for Nocheh's machine service with made-up machines, keys and commands. Test fails only for an
 // address ending in .invalid; the key it shows is a fingerprint of the name, so a new host key shows only after Trust a new host key.
 const fingerprint=(text:string)=>createHash('sha256').update(text).digest('base64').replace(/=+$/,'');
@@ -418,7 +421,7 @@ const messagesFixture=(()=>{
  const preview=(rid:string)=>{const r=byId.get(rid)!;return {id:r.id,text:r.text,received_at:ago(r.minutes),content_types:contentTypes(r)};};
  const retirement=new Map<string,{retired:boolean;revision:number;history:any[]}>();
  const retire=(rid:string)=>{if(!retirement.has(rid)){const retired=!!byId.get(rid)?.retired;retirement.set(rid,{retired,revision:retired?1:0,history:retired?[{revision:1,retired:true,event_id:rid,decision_authority:'owner',created_at:ago(1400)}]:[]});}return retirement.get(rid)!;};
- // A hit names its Nocheh chat (ADR-0251): a Telegram original's through its Telegram id, a browser one by its scope.
+ // A hit names its Nocheh chat (ADR-0252): a Telegram original's through its Telegram id, a browser one by its scope.
  const hitChat=(m:Message)=>m.kind.startsWith('browser')?m.scope:directoryNow().resolve('telegram',m.scope);
  const row=(m:Message)=>({id:m.id,channel:m.kind.startsWith('browser')?'browser':'telegram',scope:m.scope,chat_id:hitChat(m),source_id:'synthetic-'+m.id.slice(0,6),revision:'1',kind:m.kind,origin:'live',occurred_at:ago(m.minutes),received_at:ago(m.minutes),
   ...(m.kind==='telegram_update'&&m.state?{assistant_state:m.state,assistant_stage:m.state==='running'?'execution':null,assistant_error:m.error??null,assistant_attempts:m.attempts??1}:{}),
@@ -532,7 +535,8 @@ const server=createServer((req,res)=>{void(async()=>{
  if(phoneRoute){const body=await readJson(req) as any;
   if(phoneRoute==='check')return json(res,200,{state:await ownerLock.check(body.token,'phone')});
   if(phoneRoute==='sign-out'){await ownerLock.signOut(body.token);return json(res,200,{ok:true});}
-  try{return json(res,200,await ownerLock.signIn(body.password,'phone'));}catch(error:any){return json(res,error.status??503,{error:error.code,until:error.until,tries_left:error.tries_left});}}
+  // The preview has no Telegram launch data to check; its phone is the synthetic owner's.
+  try{return json(res,200,await ownerLock.signIn(body.password,'phone:42'));}catch(error:any){return json(res,error.status??503,{error:error.code,until:error.until,tries_left:error.tries_left});}}
  const phone=req.headers['x-nocheh-mini-session'];
  if(typeof phone==='string'){if(await ownerLock.check(phone,'phone')!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');}
  else sessions.authorize(req,req.method!=='GET');
@@ -585,7 +589,7 @@ const server=createServer((req,res)=>{void(async()=>{
     {id:'-10042',external:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
     {id:'-10073',external:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
     // A group Telegram upgraded, by its Nocheh id as storage names it, with its Telegram id now: the earlier one the
-    // settings list finds this same group (ADR-0251). Sam wrote there and left; Lee's only record is that he left, so the
+    // settings list finds this same group (ADR-0252). Sam wrote there and left; Lee's only record is that he left, so the
     // People list leaves him out.
     {id:UPGRADED,external:UPGRADED_TG,name:'Garden swap',users:[{id:'61',name:'Rosa',username:null,state:'in',seen:true},{id:'62',name:'Lee',username:null,state:'left',seen:false},
       {id:'63',name:'Sam',username:null,state:'left',seen:true}]},
@@ -680,12 +684,12 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/github')return json(res,200,githubStatus());
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
   if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
-  if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs});
+  if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs,members:memberSpend()});
   if(route==='/background-jobs/settings')return json(res,200,jobLimits);
   if(route==='/machines')return json(res,200,machineList(mode));
   if(route==='/chat-sends'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
    const rows=chatSends.filter(row=>(q.get('filter')!=='problems'||sendProblem(row))&&(!q.get('kind')||row.kind===q.get('kind'))&&(!before||Number(row.id)<before));
-   // Each send names its Nocheh chat (ADR-0251), the one the dashboard links to; the app's chat id stays a label.
+   // Each send names its Nocheh chat (ADR-0252), the one the dashboard links to; the app's chat id stays a label.
    const directory=directoryNow(),named=(row:any)=>({...row,chat_id:row.chat?directory.resolve('telegram',row.chat,row.topic):null});
    return json(res,200,{records:rows.slice(0,limit).map(named),next:rows.length>limit?rows[limit-1].id:null});}
   if(route==='/machines/commands'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
@@ -767,8 +771,12 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
   if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
   if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');
-    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),
+    const notice=body.member_notice_usd===undefined?jobLimits.member_notice_usd:Number(body.member_notice_usd),high=body.member_pause_usd===undefined?jobLimits.member_pause_usd:Number(body.member_pause_usd);
+    if(!(high>=notice))throw new HttpError(400,'invalid_settings');
+    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),member_notice_usd:notice,member_pause_usd:high,
       box_tools:typeof body.box_tools==='boolean'?body.box_tools:jobLimits.box_tools,revision:jobLimits.revision+1};return json(res,200,jobLimits);}
+  if(route==='/background-jobs/member-pause'){if(typeof body.paused!=='boolean')throw new HttpError(400,'invalid_member_pause');
+    memberPause=body.paused?{by:'owner',since:memberPause?.by==='owner'?memberPause.since:new Date().toISOString(),until:null}:null;return json(res,200,memberSpend());}
   if(route==='/machines/settings'){if(body.revision!==machineControl.revision)throw new HttpError(409,'configuration_conflict');
     machineControl={enabled:body.enabled===true,revision:machineControl.revision+1};return json(res,200,machineList(mode));}
   if(route==='/machines'){if(mode==='unavailable')throw new HttpError(400,'machine_unavailable');
@@ -870,7 +878,7 @@ const server=createServer((req,res)=>{void(async()=>{
     if(saved('TELEGRAM_ENABLED')==='true')throw new HttpError(400,'telegram_running');
     return json(res,200,{bot:'@aurora_helper_bot',people:[{id:'42',name:'Owner',username:'@owner'}]});}
   if(route==='/telegram/chats/refresh')return json(res,200,{chats:String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean).map(chat_id=>({chat_id,state:'available',title:'Aurora planning',is_forum:false}))});
-  // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0251).
+  // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0252).
   if(route==='/telegram/topics'){
    if(Object.keys(body).some(key=>!['action','link','chat_id','topic_id','name'].includes(key)))throw new HttpError(400,'unknown_topic_field');
    if(!body.link&&(directoryNow().kind(String(body.chat_id))!=='group'||!Number.isSafeInteger(body.topic_id)||body.topic_id<2))throw new HttpError(400,'invalid_topic_reference');

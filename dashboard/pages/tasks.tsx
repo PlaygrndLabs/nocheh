@@ -99,7 +99,7 @@ export default function Tasks() {
   const settings = list.data?.settings;
   const today = list.data?.today;
   const groupName = (space: string) => {
-    // What a chat is comes from the chat directory, never from its id (ADR-0251).
+    // What a chat is comes from the chat directory, never from its id (ADR-0252).
     const chat = chats.find(space);
     if (!chat) return 'A group';
     return chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);

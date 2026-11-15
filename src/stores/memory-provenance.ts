@@ -29,7 +29,7 @@ export class MemoryProvenanceRepository {
   }
   /** Sessions a read set may read (ADR-0249): those of every conversation of the set with completed writes, newest
    * first. Never the owner's sessions or a private chat's, whatever the set holds: only the groups and topics the chat
-   * directory holds are bound (readSetParam, ADR-0251). */
+   * directory holds are bound (readSetParam, ADR-0252). */
   async readSetSessions(workspace:string,reads:ReadSet,limit=1000):Promise<string[]> {
     return (await this.stores.control.query(`SELECT s.session_id FROM memory_sessions s WHERE s.workspace=$1 AND ${readSetSql('s.audience',2)}
       AND EXISTS(SELECT 1 FROM memory_ingestion_receipts r WHERE r.session_id=s.session_id AND r.retired_at IS NULL AND r.state='done')

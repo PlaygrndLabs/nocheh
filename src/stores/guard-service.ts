@@ -23,11 +23,11 @@ export function storageGuardService(services:StorageServices) {
       const hash=digest(canonical({destination:destination.href,payload:body.payload,binding}));
       const operation=await services.operations.record({key:'service-guard:'+hash,kind:'service_guard',scope:'system',input_hash:hash});
       const actor:Reader={admin:false,scope:'system',space:'system',turnEvent:operation.id,generation:binding.generation,guard_epoch:binding.epoch};
-      const payload=await internal.prepare(actor,body.payload,services.detect);
+      const payload=await internal.prepare(actor,body.payload,services.detect,{request:true});
       await services.guards.assertCurrent(binding);return {guarded:binding.mode==='on',payload};
     }
     await services.turns.binding(principal);
-    const payload=await services.prepared.prepare(principal,body.payload,services.detect);
+    const payload=await services.prepared.prepare(principal,body.payload,services.detect,{request:true});
     await services.turns.assertAudience(principal);return {guarded:true,payload};
   };
 }

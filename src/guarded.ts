@@ -62,19 +62,42 @@ export function textValues(value:unknown):string[] {
   if(value!==null && typeof value==='object')return Object.entries(value).flatMap(([k,v])=>[k,...textValues(v)]);
   return [];
 }
-export function replaceValues(value:unknown,replacements:Map<string,string>):unknown {
-  if(typeof value==='string')return replacements.get(value)??value;
-  if(Array.isArray(value))return value.map(v=>replaceValues(v,replacements));
-  if(value!==null && typeof value==='object') {
-    const out:Record<string,unknown>=Object.create(null);
-    for(const [key,item] of Object.entries(value)) {
-      const changed=replacements.get(key)??key;
-      if(Object.hasOwn(out,changed))throw new HttpError(422,'guarded_key_collision');
-      out[changed]=replaceValues(item,replacements);
+/** String fields whose values are a model request's structure, not its content: who speaks, a block's type, a tool's or
+ *  speaker's name, the model, and the ids a provider gives a tool call and its result (ADR-0251). */
+export const requestFields:ReadonlySet<string>=new Set(['role','type','name','model','id','tool_use_id','tool_call_id','call_id']);
+/** How a payload's structure is written instead of its guarded copy: every object key, and the string values of `fields`
+ *  outside a tool call's `input` arguments, which hold data like any other text (the same rule as inspectRequest). */
+export interface Structure {text:(value:string)=>string;fields?:ReadonlySet<string>}
+
+/** Writes each string of `value` through `content`, and its structure through `structure.text`. */
+function rewriteStrings(value:unknown,content:(text:string)=>string,structure:Structure):unknown {
+  const replace=(value:unknown,literal:boolean):unknown=>{
+    if(typeof value==='string')return content(value);
+    if(Array.isArray(value))return value.map(v=>replace(v,literal));
+    if(value!==null && typeof value==='object') {
+      const record=value as Record<string,unknown>,out:Record<string,unknown>=Object.create(null);
+      for(const [key,item] of Object.entries(record)) {
+        const changed=structure.text(key);
+        if(Object.hasOwn(out,changed))throw new HttpError(422,'guarded_key_collision');
+        out[changed]=typeof item==='string'&&!literal&&structure.fields?.has(key)?structure.text(item):
+          replace(item,literal||(record.type==='tool_use'&&key==='input'));
+      }
+      return out;
     }
-    return out;
-  }
-  return value;
+    return value;
+  };
+  return replace(value,false);
+}
+export function replaceValues(value:unknown,replacements:Map<string,string>,structure?:Structure):unknown {
+  const content=(text:string)=>replacements.get(text)??text;
+  return rewriteStrings(value,content,structure??{text:content});
+}
+/** The strings `value` carries only as structure, under the rule of `Structure` with these `fields`: a finding never masks them. */
+export function structureOnly(value:unknown,fields?:ReadonlySet<string>):Set<string> {
+  const structure=new Set<string>(),content=new Set<string>();
+  rewriteStrings(value,text=>{content.add(text);return text;},{...(fields?{fields}:{}),text:text=>{structure.add(text);return text;}});
+  for(const text of content)structure.delete(text);
+  return structure;
 }
 
 async function sourceInput(client:pg.PoolClient,source:{kind:string;source_id:string}) {
@@ -148,8 +171,11 @@ export async function prepareValues(client:pg.PoolClient,items:{id:string;input:
       await client.query('COMMIT');
     }catch(error){await client.query('ROLLBACK');throw error;}
   }
+  // Object keys are the source's structure, such as a runtime context's `text` field: a finding never masks them, only the
+  // fixed secret patterns do, so a finding that is part of a key cannot break the guarded copy (ADR-0251).
+  const keys:Structure={text:text=>mask(text,patternSpans(text)).text};
   return new Map([...sources].map(([id,{input,pieces}])=>
-    [id,replaceValues(input,new Map([...pieces].map(([value,parts])=>[value,parts.map(part=>prepared.get(key(id,part))!).join('')])))]));
+    [id,replaceValues(input,new Map([...pieces].map(([value,parts])=>[value,parts.map(part=>prepared.get(key(id,part))!).join('')])),keys)]));
 }
 
 export async function prepareGuarded(pool:pg.Pool,detect:(text:string)=>Promise<unknown>,version=DETECTOR_VERSION,count=10,eventId:string|null=null,authority:ExecutionAuthority) {

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { HttpError, object } from './http.js';
 import { chats, chatsAfterMiss, isChatId } from './chats.js';
-import { isTelegramChat } from './chats-telegram.js';
+import { isTelegramAccount, isTelegramChat } from './chats-telegram.js';
 
 export interface GroupAccess {granted:string[];denied:string[]}
 /** Whether every topic of a group shares one memory ('group', the default) or each topic keeps its own ('topic'). */
@@ -10,12 +10,12 @@ export interface AssistantPolicy {enabled:boolean;
   /** The owner's account: the owner's Telegram user id. Compared only with a sender (who sent, pressed or asked). */
   owner_id:string|null;
   /** Raw Telegram ids (current and old) of the served groups, for comparing archive originals only. A Nocheh chat is
-   * served when the chat directory says so (chats().served), never by finding its id here (ADR-0251). */
+   * served when the chat directory says so (chats().served), never by finding its id here (ADR-0252). */
   group_ids:string[];group_access?:Record<string,GroupAccess>;topic_memory?:TopicMemory;
   /** The owner's private chat, a Nocheh chat id: where the owner talks to Nocheh, separate from the owner's account.
    * Absent in a policy written before step 2b, where the owner's private chat is the chat named by owner_id. */
   owner_chat?:string|null}
-/** The owner's private chat (ADR-0251): policy.owner_chat, or for a policy without one the chat owner_id names. */
+/** The owner's private chat (ADR-0252): policy.owner_chat, or for a policy without one the chat owner_id names. */
 export const ownerChat=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):string|null=>policy.owner_chat===undefined?policy.owner_id:policy.owner_chat;
 /** The owner as stored rows name them: their private chat (a row's chat) and their account (who asked or decided). */
 export interface OwnerIds {chat:string|null;account:string|null}
@@ -56,7 +56,7 @@ export function assistantPolicy(path?:string):AssistantPolicy {
     owner_chat:ownerChatId as string|null};
 }
 /**
- * A served group's access lists (ADR-0251). TELEGRAM_GROUP_ACCESS names a group by a raw Telegram id, which may be the
+ * A served group's access lists (ADR-0252). TELEGRAM_GROUP_ACCESS names a group by a raw Telegram id, which may be the
  * id the group had before Telegram upgraded it, so the lists under every Telegram id the chat has had (current and old)
  * are joined; a person denied under any of them stays denied. Undefined when none names the chat.
  */
@@ -74,7 +74,7 @@ export function groupAccessOf(policy:Pick<AssistantPolicy,'group_access'>|undefi
 /**
  * Whom a live Telegram message comes from, and in which chat Nocheh may answer it: the owner in their own private
  * chat, or someone allowed in a served group. `scope` is the archive's raw Telegram chat id; chat_id is the Nocheh chat
- * it names, from the chat directory (ADR-0251), so a chat with no row is answered nowhere (ADR-0242).
+ * it names, from the chat directory (ADR-0252), so a chat with no row is answered nowhere (ADR-0242).
  */
 export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:string):{owner:boolean;chat_id:string;user_id:string}|null {
   if (!policy.enabled) return null;
@@ -95,9 +95,35 @@ export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:s
 }
 
 /**
+ * Whether a captured Telegram message, new or edited, was sent by the owner or by someone the owner allowed in that
+ * selected group (granted and not denied). Telegram does not say who an anonymous admin is, nor who wrote a post in a
+ * channel's or group's own name (sender_chat), so neither counts as allowed, nor as the owner; neither do bots, other
+ * updates and senders it cannot identify (ADR-0251). Unlike conversationScope, it reads edits and does not depend on
+ * Telegram replies being on. `scope` is the archive's raw Telegram chat id; the group is the chat the directory finds
+ * for it, served and with its access lists under every Telegram id it has had, so a chat with no row allows only the
+ * owner (ADR-0252).
+ */
+export function allowedSender(policy:AssistantPolicy,payload:unknown,scope:string):boolean {
+  if(payload===null||typeof payload!=='object'||Array.isArray(payload))return false;
+  const update=payload as Record<string,unknown>,found=update.message??update.edited_message;
+  if(found===null||typeof found!=='object'||Array.isArray(found))return false;
+  const message=found as Record<string,unknown>,chat=message.chat as Record<string,unknown>|undefined,sender=message.from as Record<string,unknown>|undefined;
+  if(message.sender_chat!==undefined&&message.sender_chat!==null)return false;
+  if(!chat||typeof chat!=='object'||!sender||typeof sender!=='object'||sender.is_bot===true)return false;
+  const user=typeof sender.id==='number'||typeof sender.id==='string'?String(sender.id):'';
+  if(!isTelegramAccount(user)||String(chat.id)!==scope)return false;
+  if(policy.owner_id!==null&&user===policy.owner_id)return true;
+  if(!['group','supergroup'].includes(String(chat.type)))return false;
+  const directory=chats(),id=isTelegramChat(scope)?directory.resolve('telegram',scope):null;
+  if(id===null||directory.kind(id)!=='group'||!directory.served(id))return false;
+  const access=groupAccessFor(policy,id);
+  return !!access&&access.granted.includes(user)&&!access.denied.includes(user);
+}
+
+/**
  * A live Telegram update from a chat Nocheh does not serve: a private chat with
  * anyone but the owner, a group or channel the owner has not selected, or a chat
- * the chat directory does not know (ADR-0251). It is kept as received, but never
+ * the chat directory does not know (ADR-0252). It is kept as received, but never
  * prepared, learned from or read by the assistant.
  */
 export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel:string;kind:string;scope:string}):boolean {
@@ -111,7 +137,7 @@ export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel
 /**
  * For a decision that cannot be taken back (a turn refused, a message left unprepared): when this process's chat
  * directory does not hold the Telegram chat a live original came from, waits until the loader has looked again
- * (ADR-0251). The capture that recorded the chat, a served group's new id after an upgrade, commits before its
+ * (ADR-0252). The capture that recorded the chat, a served group's new id after an upgrade, commits before its
  * workflows run, but this process may not have reloaded yet. A chat still unknown afterwards stays unknown, so the
  * caller fails closed as before.
  */

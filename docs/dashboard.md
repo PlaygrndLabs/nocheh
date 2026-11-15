@@ -10,6 +10,7 @@ then run:
 ./bin/nocheh dashboard
 ./bin/nocheh dashboard --no-open
 ./bin/nocheh dashboard --stop
+./bin/nocheh dashboard --clear-pause
 ```
 
 Nocheh opens at <http://127.0.0.1:8783/> for the `personal` workspace; `./bin/nocheh workspaces`
@@ -118,13 +119,36 @@ Settings › Privacy & data › Password changes the password after asking for t
 current one; every other browser and phone then signs in again. Sign out
 everywhere else ends every other session at once. After five wrong passwords in
 a row, sign-in pauses for 15 minutes, and each further wrong password doubles
-the pause, up to a day; one count covers browsers and phones.
+the pause, up to a day. Each person counts on their own: the browser sign-in, and
+the phone sign-in of each Telegram account, so wrong passwords in one never pause
+another. The dashboard checks a phone's Telegram launch data again before it tries
+the password, with the bot and owner it reads from `.env` each time; a sign-in
+without valid launch data is refused and never counts. A pause also refuses the
+right password, and the browser's pause refuses password changes; browsers and
+phones already signed in keep working. Settings › Password shows each pause in force.
+`./bin/nocheh dashboard --clear-pause` ends every pause and forgets the wrong
+passwords counted so far, with the installation token, so a pause never means
+removing the password file.
 
 The dashboard keeps a scrypt hash of the password and SHA-256 hashes of the
 session tokens in `admin/owner-lock.json` in its state folder. The browser
 receives an HttpOnly, SameSite=Strict session cookie, and a CSRF value derived
 from it. A forgotten password is reset by stopping the dashboard, removing that
 file, and creating a new password on the next visit.
+
+## Hermes page script rules
+
+Hermes's own pages under `/hermes/` (Chat, Sessions, Files and the assistant
+console) carry a `Content-Security-Policy-Report-Only` header: scripts only from
+the dashboard's address and the inline scripts named by a nonce that is new for
+each response. It leaves out `connect-src`, so Chat's live connections work in
+every browser. The rules are reported, not enforced, for now. The browser posts
+what they would block to `/api/nocheh/csp-report`; the dashboard keeps only a count
+and, per kind, the rule, the blocked site and the page path, never page text, in
+`admin/dashboard/csp-reports.json`. `./bin/nocheh diagnose` shows them under
+`hermes_page_script_reports`, and the tester fails on any report. Any other HTML
+from Hermes gets `script-src 'none'; sandbox`, enforced, and neither Hermes's
+session token nor the dashboard's CSRF value.
 
 ## Native browser chat
 
@@ -453,7 +477,7 @@ Hermes's native memory review, with no external-action tools. Pause/resume contr
 operate on queued work; an interrupted native write is marked ambiguous and needs
 an explicit resume. Retrying an ambiguous review may repeat a native memory edit.
 
-A chat or topic is named by its Nocheh id ([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)):
+A chat or topic is named by its Nocheh id ([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)):
 the value it was stored under before step 2b, or a digest for one first seen later. Its link in Chats
 carries it; never build one from a Telegram ID.
 

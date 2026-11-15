@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS sharing_rules_destination ON sharing_rules(destinatio
 ALTER TABLE projects DROP COLUMN IF EXISTS sharing_enabled,DROP COLUMN IF EXISTS sharing_mode;
 ALTER TABLE project_assignments DROP COLUMN IF EXISTS share_into;
 -- A topic always follows its group's project (ADR-0247): a topic's own choice saved earlier becomes "follows its group".
--- Which rows are topics comes from their chats rows (ADR-0251), never from the id; the chat records are made later in
+-- Which rows are topics comes from their chats rows (ADR-0252), never from the id; the chat records are made later in
 -- the control schema, so a fresh store has neither and skips this.
 DO $$BEGIN
  IF to_regclass('chats') IS NOT NULL THEN

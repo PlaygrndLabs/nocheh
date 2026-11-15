@@ -67,6 +67,16 @@ type Schedule = {
   keep: number;
   next_at: string | null;
   skipped?: string | null;
+  /** Less free space than another backup needs; Back up now still runs. */
+  low_disk?: boolean | null;
+};
+/** How the latest backups ended (ADR-0251). Names are escaped by the server and shown only here. */
+type BackupHealth = {
+  failed: number;
+  reason?: string | null;
+  path?: string | null;
+  unreadable: number;
+  unreadable_paths?: string[];
 };
 const taskName = (job: Job) =>
   job.automatic
@@ -135,7 +145,12 @@ function DownloadButton({job, size = 'sm'}: {job: Job; size?: 'sm' | 'md'}) {
 
 export function BackupsView() {
   const jobs = useResource<Job[]>('/jobs', 5000);
-  const listing = useResource<{backups: Backup[]; schedule?: Schedule; offsite?: OffsiteStatus}>('/operations', 10000);
+  const listing = useResource<{
+    backups: Backup[];
+    schedule?: Schedule;
+    offsite?: OffsiteStatus;
+    health?: BackupHealth;
+  }>('/operations', 10000);
   const {toast, confirm} = useFeedback();
   const [busy, setBusy] = useState<Action | ''>('');
   const [problem, setProblem] = useState<{action: Action; text: string} | null>(null);
@@ -149,6 +164,7 @@ export function BackupsView() {
   const backups = listing.data?.backups ?? [];
   const schedule = listing.data?.schedule;
   const offsite = listing.data?.offsite;
+  const health = listing.data?.health;
 
   const start = async (action: Action, options?: Record<string, unknown>) => {
     setBusy(action);
@@ -251,18 +267,26 @@ export function BackupsView() {
           'Back up now',
           'Saves messages, files, settings and the assistant’s state on this machine, including keys. The SSH keys of your machines in Settings › Machines stay out.',
           'Back up now',
-          schedule && (
-            <p className="mt-3 text-xs text-muted">
-              {schedule.enabled
-                ? `Every day at ${schedule.time} (${schedule.time_zone.replace(/_/g, ' ')}), keeping the last ${schedule.keep}.` +
-                  (schedule.next_at ? ` Next ${dateTime(schedule.next_at)}.` : '')
-                : 'Automatic backups are off.'}{' '}
-              {schedule.skipped === 'low_disk' && 'The last one was skipped: not enough free disk space. '}
-              <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
-                Change
-              </a>
-            </p>
-          ),
+          <>
+            {schedule && (
+              <p className="mt-3 text-xs text-muted">
+                {schedule.enabled
+                  ? `Every day at ${schedule.time} (${schedule.time_zone.replace(/_/g, ' ')}), keeping the last ${schedule.keep}.` +
+                    (schedule.next_at ? ` Next ${dateTime(schedule.next_at)}.` : '')
+                  : 'Automatic backups are off.'}{' '}
+                {schedule.skipped === 'low_disk' && 'The last one was skipped: not enough free disk space. '}
+                <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
+                  Change
+                </a>
+              </p>
+            )}
+            {schedule?.low_disk && (
+              <Notice tone="warn" className="mt-3">
+                Free disk space is low. Back up now still runs, but the backup may fill the disk.
+              </Notice>
+            )}
+            <BackupHealthNotice health={health} />
+          </>,
         )}
         {card(
           'restore',
@@ -344,6 +368,47 @@ export function BackupsView() {
         onRestore={(backup, port) => start('restore', {backup, port})}
       />
       <JobDrawer tasks={tasks} />
+    </>
+  );
+}
+
+/** Why the latest backups didn't finish, and what a command made unreadable, with the entries they name. */
+function BackupHealthNotice({health}: {health: BackupHealth | undefined}) {
+  if (!health) return null;
+  const paths = health.unreadable_paths ?? [];
+  return (
+    <>
+      {health.failed > 0 && (
+        <Notice
+          tone="bad"
+          className="mt-3"
+          title={
+            health.failed === 1 ? 'The last backup didn’t finish' : `The last ${health.failed} backups didn’t finish`
+          }
+        >
+          {operationError(health.reason ?? 'backup_failed')} Older backups are kept.
+          {health.path && (
+            <span className="mt-1 block break-all font-mono text-xs">
+              {health.reason === 'backup_unsupported_link' ? 'Link: ' : 'At: '}
+              {health.path}
+            </span>
+          )}
+        </Notice>
+      )}
+      {health.unreadable > 0 && (
+        <Notice tone="warn" className="mt-3">
+          The newest backup left out {count(health.unreadable)} {health.unreadable === 1 ? 'entry' : 'entries'} that a
+          command made unreadable in its workspace. Make them readable again to back them up.
+          {paths.map((path, index) => (
+            <span key={index} className="mt-1 block break-all font-mono text-xs">
+              {path}
+            </span>
+          ))}
+          {health.unreadable > paths.length && (
+            <span className="mt-1 block text-xs">…and {count(health.unreadable - paths.length)} more.</span>
+          )}
+        </Notice>
+      )}
     </>
   );
 }

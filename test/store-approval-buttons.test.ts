@@ -89,7 +89,7 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(ownerAcross.state,'proposed');assert.deepEqual([last('card').chat_id,last('card').topic],['123',undefined],'the owner\'s own cross-group request comes to their private chat');
     const shutAcross=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(topic.id,group+'/topic/17'),{destination:closed,text:'Not allowed there'}));
     assert.equal(shutAcross.state,'proposed');assert.equal(last('card').chat_id,'123','a group where the person asking is not allowed goes to the owner');
-    // The owner refreshed the other group's name (ADR-0251: on its chats row).
+    // The owner refreshed the other group's name (ADR-0252: on its chats row).
     await chatRowForTest(stores.control,other,{title:'Design team',is_forum:true});
     assert.deepEqual((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups,
       [{destination:group,name:null,current:true},{destination:other,name:'Design team',current:false}],'only the groups where the person asking is allowed');
@@ -359,7 +359,7 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-send-cards-')),key='send-cards:'+Date.now();
-  // The fixture's chats, GP1 and GP3 served (ADR-0251), installed before the services so they keep them; Bob's private chat
+  // The fixture's chats, GP1 and GP3 served (ADR-0252), installed before the services so they keep them; Bob's private chat
   // is known, and served only while the owner allows him in a served group (ADR-0254).
   const restore=installChatsForTest(fixtureDirectory([GP1,GP3]));
   const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],executed:Record<string,any>[]=[];let updates=0,sent=100;

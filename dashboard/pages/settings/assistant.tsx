@@ -122,7 +122,7 @@ function Limits() {
     setChanges({});
     setRevision(null);
   }, [scope]);
-  // Named from the chat directory; a chat it doesn't know is never named by its id (ADR-0251).
+  // Named from the chat directory; a chat it doesn't know is never named by its id (ADR-0252).
   const chatLabel = (id: string, owner: boolean) =>
     owner ? 'Your private chat' : chatName(chats.find(id) ?? unknownChat(id));
   const data = prefs.data && (!scope || prefs.data.scope === scope) ? prefs.data : null;

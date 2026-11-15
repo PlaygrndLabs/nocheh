@@ -230,6 +230,23 @@ class ResetInitializationTests(unittest.TestCase):
             self.assertFalse((journal.directory / 'layout.json').exists())
             self.assertEqual(configuration.env_path(self.state).read_bytes(), before)
 
+    def test_empty_baseline_allows_only_an_empty_brain_turn_folder_in_the_spool(self):
+        # Any ./bin/nocheh command makes Hermes's brain-turn folder again (ADR-0251); empty, it is no content.
+        (self.state / 'files').mkdir(); (self.state / 'spool/.restore-inactive').touch()
+        (self.state / 'hermes/profiles').mkdir(); (self.state / 'hermes/scheduler-inactive').touch()
+        (self.state / 'hermes/nocheh-policy.yaml').write_text('version: 1\n')
+        memory = self.root / 'memory'
+        empty = reset_baseline._native_files(self.state, memory)
+        (self.state / 'spool/brain-turns').mkdir(mode=0o700)
+        self.assertEqual(reset_baseline._native_files(self.state, memory), empty)
+        (self.state / 'spool/brain-turns/synthetic.result').write_text('{}')
+        with self.assertRaisesRegex(RuntimeError, 'spool_not_empty'):
+            reset_baseline._native_files(self.state, memory)
+        (self.state / 'spool/brain-turns/synthetic.result').unlink(); (self.state / 'spool/brain-turns').rmdir()
+        (self.state / 'spool/brain-turns').symlink_to(self.root)
+        with self.assertRaisesRegex(RuntimeError, 'spool_not_empty'):
+            reset_baseline._native_files(self.state, memory)
+
     def test_empty_baseline_retires_private_artifacts_and_rejects_cache_content(self):
         fake = FakeDocker(self.root, self.state, self.project, self.command[3],
                           self.state / 'admin/reset/setup.json')

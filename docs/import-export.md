@@ -56,7 +56,7 @@ avoids guessing Telegram's different export/Bot API identifiers and accidentally
 sharing imported private history with a group. The mapping is an owner operation.
 A mapping names Telegram chat ids, the ids the archive keeps; the chat directory
 finds the Nocheh chat a mapped scope belongs to, under its current or an older
-Telegram id ([ADR-0251](adr/0251-chats-get-nochehs-own-ids.md)). Owner record exports carry the chat
+Telegram id ([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)). Owner record exports carry the chat
 records (`chats`, `chat_ids`), so a restore keeps every chat's id.
 
 Native exports contain `manifest.json`, `events.ndjson`, and content-addressed

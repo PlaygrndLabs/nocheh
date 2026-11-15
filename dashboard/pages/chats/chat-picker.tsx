@@ -1,7 +1,7 @@
 /**
  * Choose one or more chats by name or Telegram ID; optionally groups and their topics only, or whole groups only, as a
  * project takes (a topic always follows its group's project, ADR-0247). What a chat is comes from the chat directory
- * (ADR-0251): a chat is chosen from the list, never typed as an id.
+ * (ADR-0252): a chat is chosen from the list, never typed as an id.
  */
 import {useDeferredValue, useId, useState} from 'react';
 import {Check, X} from 'lucide-react';

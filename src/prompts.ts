@@ -13,7 +13,8 @@ import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.
 export const promptKeys=['reply.common','reply.owner','reply.group','reply.private','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
   'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','tasks.reminder_texts','imports.ready','system.problems','system.problem_buttons','images.read',
-  'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine'] as const;
+  'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
+  'background.member_spend','background.member_paused','background.member_texts'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -254,12 +255,14 @@ export const backgroundCard='🗂 Background job: {title}\n💬 Asked in {origin
  *  sealed box, GitHub copy, machine and plan lines. running_elsewhere is the running line of a card that is not in the chat
  *  where the job reports, which the owner's private chat holds for a member's job the owner approves. report_private and
  *  limited_private are the one line a group gets when a job on the owner's machine asked there ends: its report or note
- *  goes to the owner's private chat, and the line names no machine, plan or report. */
+ *  goes to the owner's private chat, and the line names no machine, plan or report. paused is what the card of a job a
+ *  member approved says while member jobs are paused: it waits to start (ADR-0251). */
 export const backgroundTexts=['running: ⏳ Approved. It runs now and reports here when done.',
   'running_elsewhere: ⏳ Approved. It runs now and reports in the chat where it was asked.','queued: ⏳ Approved. It starts when a running job finishes.',
   'done: ✅ Done. The report is in the chat.','limited: ⏱ Stopped at its limit. A short note of what is done and left is in the chat.',
   'stopped: 🚫 Stopped. Nothing more runs.','stopping: ⏳ Stopping. Nothing more runs.','failed: ⚠️ It stopped because of a problem. See Background work in the dashboard.',
-  'rejected: ❌ Rejected. Nothing ran.','checked: Starting it already used one secret check.',"unpriced: Cost can't be measured for this model: only the time limit applies",
+  'rejected: ❌ Rejected. Nothing ran.','paused: ⏸ Approved. Member jobs are paused for now; it starts when they resume.',
+  'checked: Starting it already used one secret check.',"unpriced: Cost can't be measured for this model: only the time limit applies",
   'member_limit: It counts toward the daily limit of the person who asked, unless it is rejected.','notion_reads: It can read your Notion without asking. Changes still ask you.',
   'box: It can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads.',
   'box_repo: It can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads and the GitHub copy below.',
@@ -269,6 +272,22 @@ export const backgroundTexts=['running: ⏳ Approved. It runs now and reports he
   'steps: Plan (a guide, not a limit):','machine_off: 🚫 Withdrawn: its machine was turned off or changed. Nothing runs.',
   'report_private: ✅ Done: the job you asked for here finished. Its report is in your private chat.',
   'limited_private: ⏱ The job you asked for here stopped at its limit. A short note is in your private chat.'].join('\n');
+/** The owner's notice when jobs that members approved themselves pass the notice mark in a UTC day (ADR-0251): {spent}
+ *  is what they spent today, {mark} the notice mark, {pause_mark} the high mark and {members} one line for each member in
+ *  each group. Its button pauses member jobs. */
+export const backgroundMemberSpend=['💸 Jobs that members approved themselves spent {spent} today (UTC), past your notice mark of {mark}.','{members}','',
+  'Pause holds approved member jobs that have not started until you resume them. Members can still ask and approve, running jobs finish, and your own jobs never wait. '+
+  'At {pause_mark} today, member jobs pause by themselves until 00:00 UTC.'].join('\n');
+/** The owner's notice when member jobs paused by themselves at the high mark, until 00:00 UTC (ADR-0251). {spent},
+ *  {mark} (the high mark) and {members} as in the spend notice. Its button resumes member jobs. */
+export const backgroundMemberPaused=['⏸ Member jobs are paused until 00:00 UTC: jobs that members approved themselves spent {spent} today, past your high mark of {mark}.','{members}','',
+  'Members can still ask and approve. Approved member jobs start when the pause ends or when you tap Resume; running jobs finish, and your own jobs never wait.'].join('\n');
+/** One "name: text" line each for the member lines of those notices, their Pause and Resume buttons, and the short
+ *  answers to a press, which the notice then shows under its text. */
+export const backgroundMemberTexts=['member: • {name} in {group}: {spent}','more: • {count} more: {spent}','unnamed_member: member {id}','unnamed_group: a group',
+  'pause: ⏸ Pause member jobs','resume: ▶\ufe0f Resume member jobs',
+  'paused: ⏸ Member jobs are paused until you resume them. Approved ones wait to start; running ones finish.',
+  'resumed: ▶\ufe0f Member jobs resumed. Approved ones start shortly.','only_owner: Only the owner can do this.'].join('\n');
 /** The first line of a private answer, before the question (ADR-0249): {group} is the group or topic where it was asked,
  * {groups} every group the answer may read, the asking one included. Group and topic names lose their brackets and
  * control characters, so no one can write a line that looks like it. */
@@ -293,7 +312,8 @@ const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learni
   'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,
   'telegram.private_answer':privateAnswerFrame,'telegram.private_answer_texts':privateAnswerTexts,'tasks.reminder':taskReminder,'tasks.reminder_texts':reminderTexts,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
-  'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine};
+  'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine,
+  'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

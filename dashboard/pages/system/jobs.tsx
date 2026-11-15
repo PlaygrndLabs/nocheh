@@ -1,11 +1,12 @@
 /**
  * Background jobs: long work the agent proposed and someone approved, such as
- * reading a whole chat. Shown live with each job's to-do list, with Stop; and
- * the owner's limits and sealed box switch for them, saved with the Save
- * button at the top.
+ * reading a whole chat. Shown live with each job's to-do list, with Stop, and
+ * what jobs members approved themselves spent today, with Pause and Resume; and
+ * the owner's limits, spend marks and sealed box switch for them, saved with the
+ * Save button at the top.
  */
 import {useState} from 'react';
-import {Check, Circle, CircleDot, ScrollText, Square} from 'lucide-react';
+import {Check, Circle, CircleDot, Pause, Play, ScrollText, Square} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {useDraftSource} from '../../lib/drafts';
 import {cleanupLine, machineErrorPhrase} from '../../lib/machines';
@@ -55,11 +56,23 @@ export type Job = {
   steps: string[] | null;
   /** Ending what a stopped machine job left running on its machine: pending, then done or failed. */
   machine_cleanup: 'pending' | 'done' | 'failed' | null;
+  /** Approved by a member while member jobs are paused: it waits to start. */
+  held?: boolean;
+};
+/** What jobs members approved themselves spent today (UTC), the owner's two marks, and the pause of member jobs. */
+export type MemberSpend = {
+  day: string;
+  spent_usd: number;
+  notice_usd: number;
+  pause_usd: number;
+  paused: {by: 'owner' | 'auto'; since: string; until: string | null} | null;
 };
 type Limits = {
   cost_limit_usd: number;
   minutes_limit: number;
   member_daily_jobs: number;
+  member_notice_usd: number;
+  member_pause_usd: number;
   box_tools: boolean;
   revision: number;
 };
@@ -78,7 +91,8 @@ export const jobStates: Record<string, [string, Tone]> = {
 const open = new Set(['proposed', 'approved', 'running', 'reporting']);
 // Stop ends a machine job's programs only once it has started; before that nothing ran there.
 const started = new Set(['running', 'reporting']);
-const money = (value: number) => '$' + (value < 10 ? value.toFixed(2) : value.toFixed(0));
+// Cents show whenever there are any, so a cap such as $12.40 never reads as less than it is.
+const money = (value: number) => '$' + (value < 10 || !Number.isInteger(value) ? value.toFixed(2) : value.toFixed(0));
 
 /** What a job has done and what it may still spend, in one line. */
 export function jobProgress(job: Job): string {
@@ -124,6 +138,50 @@ function Plan({steps, open}: {steps: string[]; open: boolean}) {
   );
 }
 
+/** What jobs members approved themselves spent today, against the owner's marks, with Pause or Resume. A pause holds
+ *  approved member jobs before they start; members still ask and approve, and the owner's own jobs never wait. */
+export function MemberSpendRow({
+  spend,
+  busy,
+  onPause,
+}: {
+  spend: MemberSpend;
+  busy: boolean;
+  onPause: (paused: boolean) => void;
+}) {
+  const paused = spend.paused;
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3"
+      aria-label="Member jobs today"
+    >
+      <div className="min-w-0 text-[13px]">
+        <p>
+          Jobs members approved themselves spent <span className="font-medium">{money(spend.spent_usd)}</span> today
+          (UTC). Notice at {money(spend.notice_usd)}, pause at {money(spend.pause_usd)}.
+        </p>
+        {paused && (
+          <p className="text-warn">
+            {paused.by === 'auto'
+              ? `Member jobs paused by themselves until ${dateTime(paused.until)}.`
+              : `Member jobs paused by you since ${dateTime(paused.since)}.`}{' '}
+            Approved ones wait to start; running ones finish.
+          </p>
+        )}
+      </div>
+      {paused ? (
+        <Button size="sm" variant="primary" busy={busy} onClick={() => onPause(false)}>
+          <Play aria-hidden /> Resume member jobs
+        </Button>
+      ) : (
+        <Button size="sm" variant="secondary" busy={busy} onClick={() => onPause(true)}>
+          <Pause aria-hidden /> Pause member jobs
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function TodoList({items}: {items: Todo[]}) {
   if (!items.length) return null;
   return (
@@ -148,7 +206,7 @@ function TodoList({items}: {items: Todo[]}) {
 }
 
 export function BackgroundJobs() {
-  const jobs = useResource<{jobs: Job[]}>('/background-jobs', 5000);
+  const jobs = useResource<{jobs: Job[]; members?: MemberSpend}>('/background-jobs', 5000);
   const chatName = useChatNames();
   const {confirm, toast} = useFeedback();
   const [busy, setBusy] = useState('');
@@ -179,6 +237,18 @@ export function BackgroundJobs() {
       setBusy('');
     }
   };
+  const pauseMembers = async (paused: boolean) => {
+    setBusy('members');
+    try {
+      await apiPost('/background-jobs/member-pause', {paused});
+      toast(paused ? 'Member jobs are paused until you resume them.' : 'Member jobs resumed.');
+      await refreshResources();
+    } catch {
+      toast(paused ? 'Couldn’t pause member jobs.' : 'Couldn’t resume member jobs.', 'bad');
+    } finally {
+      setBusy('');
+    }
+  };
   const list = jobs.data?.jobs ?? [];
   return (
     <Card>
@@ -187,6 +257,13 @@ export function BackgroundJobs() {
         description="Long work the assistant asked to do, such as reading a whole chat. Each one runs after Approve on its card in Telegram and sends its report to the chat where it was asked."
       />
       <div className="mt-3 border-t border-line">
+        {jobs.data?.members && (
+          <MemberSpendRow
+            spend={jobs.data.members}
+            busy={busy === 'members'}
+            onPause={paused => void pauseMembers(paused)}
+          />
+        )}
         {jobs.error && !jobs.data ? (
           <LoadError what="background jobs" className="m-5" onRetry={() => void refreshResources()} />
         ) : !jobs.data ? (
@@ -198,7 +275,9 @@ export function BackgroundJobs() {
         ) : (
           <ul className="divide-y divide-line" aria-label="Background jobs">
             {list.map(job => {
-              const [label, tone] = jobStates[job.state] ?? [job.state, 'neutral'];
+              const [label, tone] = job.held
+                ? (['Approved, waiting: member jobs paused', 'warn'] as [string, Tone])
+                : (jobStates[job.state] ?? [job.state, 'neutral']);
               const cleanup = job.machine ? cleanupLine(job.machine_cleanup, job.machine.name) : null;
               return (
                 <li key={job.id} className="px-5 py-3">
@@ -273,7 +352,7 @@ const fields: {
   {
     key: 'cost_limit_usd',
     title: 'Cost limit per job (US dollars)',
-    hint: 'A job is told to write its report at 80% of this cost and stopped at it. A member’s job estimated above it waits for your approval.',
+    hint: 'A job is told to write its report at 80% of this cost and stopped at it. A job estimated higher may use up to 1.5x its estimate, to the cent: a member’s own job at most $7.50 with a $5 limit. A member’s job estimated above it waits for your approval.',
     min: 0.5,
     max: 1000,
     step: 0.5,
@@ -293,6 +372,22 @@ const fields: {
     min: 0,
     max: 100,
     step: 1,
+  },
+  {
+    key: 'member_notice_usd',
+    title: 'Member jobs: notice at (US dollars a day)',
+    hint: 'When jobs members approved themselves spend this much in a UTC day, you get one Telegram notice with a Pause button. Nothing changes unless you tap it.',
+    min: 0.5,
+    max: 10000,
+    step: 0.5,
+  },
+  {
+    key: 'member_pause_usd',
+    title: 'Member jobs: pause at (US dollars a day)',
+    hint: 'Past this in a UTC day, member jobs pause by themselves until 00:00 UTC. Members still ask and approve; approved jobs wait to start, running ones finish, and your own jobs never wait.',
+    min: 0.5,
+    max: 10000,
+    step: 0.5,
   },
 ];
 
@@ -328,11 +423,15 @@ export function BackgroundJobLimits() {
         cost_limit_usd: Number(value('cost_limit_usd')),
         minutes_limit: Number(value('minutes_limit')),
         member_daily_jobs: Number(value('member_daily_jobs')),
+        member_notice_usd: Number(value('member_notice_usd')),
+        member_pause_usd: Number(value('member_pause_usd')),
         box_tools: box,
         revision: revision ?? data.revision,
       };
       if (fields.some(field => !(body[field.key] >= field.min && body[field.key] <= field.max)))
         throw new Error('Keep each job limit within its range, then save again.');
+      if (body.member_pause_usd < body.member_notice_usd)
+        throw new Error('Set the member jobs’ pause mark at or above their notice mark, then save again.');
       try {
         await apiPost('/background-jobs/settings', body);
         reset();
@@ -352,7 +451,7 @@ export function BackgroundJobLimits() {
     <Card>
       <CardHeader
         title="Background jobs"
-        description="Limits for long work the assistant runs after Approve, such as reading a whole chat. A job approved with a higher estimate gets half again over its estimate."
+        description="Limits for long work the assistant runs after Approve, such as reading a whole chat. A job approved with a higher estimate gets half again over its estimate. The two member marks count what jobs members approved themselves spend in a UTC day."
       />
       <div className="mt-3 border-t border-line">
         {saved.error && !data ? (

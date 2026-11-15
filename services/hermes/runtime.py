@@ -67,6 +67,12 @@ BRAIN = None
 
 def configure():
     PROFILE_HOME.mkdir(parents=True, exist_ok=True)
+    # The locked-down container's HOME is /tmp/home, empty after each restart (ADR-0251); tools that expect their
+    # home to exist find it. Under make dev it is the mounted state folder, which exists.
+    home = os.environ.get('HOME', '')
+    if os.path.isabs(home):
+        with contextlib.suppress(OSError):
+            Path(home).mkdir(parents=True, exist_ok=True, mode=0o700)
     config = PROFILE_HOME / "config.yaml"
     if not config.exists():
         # Voice notes are archived without transcription.

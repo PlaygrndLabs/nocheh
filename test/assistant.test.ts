@@ -8,9 +8,9 @@ import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {digest,ingest,type Envelope} from '../src/archive.js';
 import {immutableFile} from '../src/storage.js';
-import {assistantPolicy,conversationScope,groupAccessFor,outsideChat,settleTelegramChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
+import {allowedSender,assistantPolicy,conversationScope,groupAccessFor,outsideChat,settleTelegramChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
 import {installChats,installChatsForTest,setChatLoader} from '../src/chats.js';
-import {BOB,BOB_CHAT,GP1,GP_GROUP_IDS,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureDirectory,policyDirectory} from './fixture-groups.js';
+import {BOB,BOB_CHAT,GP1,GP2,GP_GROUP_IDS,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,UNSERVED,fixtureDirectory,policyDirectory} from './fixture-groups.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
 import {dispatchCommitted,storedTranscripts} from '../src/assistant.js';
 import {fixtureBrain} from './fixture-brain.js';
@@ -18,7 +18,7 @@ import {preparationStatus} from '../src/workflows/preparation-status.js';
 import {requestAction,controlReply,executeApproved} from '../src/actions.js';
 
 const policy={enabled:true,owner_id:'123',group_ids:['-20','-30']};
-// The chats these tests use, as the seeder makes their rows from the policy (ADR-0251).
+// The chats these tests use, as the seeder makes their rows from the policy (ADR-0252).
 installChatsForTest(policyDirectory(policy,['456','-99']));
 const update=(chat:number,user:number,type='group')=>({update_id:1,message:{message_id:7,chat:{id:chat,type},from:{id:user,is_bot:false},text:'exact Aws 😃\r\n '}});
 test('only owner private messages receive owner scope; selected groups stay group-local even for the owner',()=>{
@@ -40,7 +40,7 @@ test('group participants need an explicit grant and a deny overrides it',()=>{
   assert.equal(conversationScope(denied,update(-20,123),'-20')?.owner,false);
 });
 
-test('a chat is answered by its chat row: digest chats, upgraded groups and access under an old id (ADR-0251)',()=>{
+test('a chat is answered by its chat row: digest chats, upgraded groups and access under an old id (ADR-0252)',()=>{
   const restore=installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS]));
   try {
     const served:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS],group_access:{}};
@@ -95,6 +95,62 @@ test('a chat recorded a moment ago is looked up again before its message is judg
     // A chat still unknown after the second look stays outside (fail closed).
     await settleTelegramChat(live('-41'));assert.equal(looked,2);assert.equal(outsideChat(served,live('-41')),true);
   }finally{setChatLoader(null);restore();}
+});
+
+test('an allowed sender is the owner or a granted, not denied person in that selected group, in new and edited messages alike',()=>{
+  const granted={...policy,group_access:{'-20':{granted:['456'],denied:[]}}};
+  const edited=(chat:number,user:number)=>({update_id:2,edited_message:{...update(chat,user).message,edit_date:9}});
+  assert.equal(allowedSender(policy,update(123,123,'private'),'123'),true,'the owner in their private chat');
+  assert.equal(allowedSender(policy,update(-20,123),'-20'),true,'the owner in a group');
+  assert.equal(allowedSender(policy,edited(-20,123),'-20'),true,'the owner\'s edit');
+  assert.equal(allowedSender(granted,update(-20,456),'-20'),true,'a granted person');
+  assert.equal(allowedSender(granted,edited(-20,456),'-20'),true,'a granted person\'s edit');
+  assert.equal(allowedSender(policy,update(-20,456),'-20'),false,'someone not granted');
+  assert.equal(allowedSender(granted,update(-30,456),'-30'),false,'granted in another group only');
+  assert.equal(allowedSender({...policy,group_access:{'-20':{granted:['456'],denied:['456']}}},update(-20,456),'-20'),false,'a deny wins');
+  // A group no longer selected: the directory, which follows TELEGRAM_GROUP_IDS, no longer serves it (ADR-0252).
+  const unselected={...granted,group_ids:['-30']},restore=installChatsForTest(policyDirectory(unselected,['-20','456','-99']));
+  try{assert.equal(allowedSender(unselected,update(-20,456),'-20'),false,'a group no longer selected');}finally{restore();}
+  assert.equal(allowedSender(policy,update(123,456,'private'),'123'),false,'a stranger in private');
+  // Telegram's stand-ins for an anonymous admin and for a channel posting in the group.
+  const anonymous={update_id:3,message:{message_id:8,chat:{id:-20,type:'supergroup'},from:{id:1000001,is_bot:true},sender_chat:{id:-20,type:'supergroup'}}};
+  const channel={update_id:4,message:{message_id:9,chat:{id:-20,type:'supergroup'},from:{id:1000002,is_bot:true},sender_chat:{id:-1005,type:'channel'}}};
+  assert.equal(allowedSender(policy,anonymous,'-20'),false,'an anonymous admin, who may be the owner');
+  assert.equal(allowedSender(policy,channel,'-20'),false,'a channel post');
+  assert.equal(allowedSender(policy,{update_id:5,message:{...update(-20,123).message,sender_chat:{id:-1005,type:'channel'}}},'-20'),false,'a post in a channel\'s name, even from the owner');
+  assert.equal(allowedSender(policy,{update_id:6,message:{...update(-20,123).message,from:{id:123,is_bot:true}}},'-20'),false,'a bot');
+  assert.equal(allowedSender(policy,{update_id:7,channel_post:{message_id:1,chat:{id:-20,type:'channel'}}},'-20'),false,'another kind of update');
+  assert.equal(allowedSender(policy,{update_id:8,message:{message_id:1,chat:{id:-20,type:'group'}}},'-20'),false,'no sender');
+  assert.equal(allowedSender(policy,update(-20,123),'-30'),false,'a message from another chat');
+  assert.equal(allowedSender(policy,null,'-20'),false);
+  assert.equal(allowedSender({...policy,enabled:false},update(-20,123),'-20'),true,'it does not depend on replies being on');
+});
+
+test('an allowed sender is judged in the chat the directory finds: digest groups, upgraded groups and access under an old id (ADR-0252)',()=>{
+  installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS]));
+  try {
+    const served:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS],
+      group_access:{[GP1]:{granted:[BOB],denied:[]},[NG1_TG]:{granted:[BOB],denied:[]},[NG2_OLD_TG]:{granted:[BOB],denied:[]}}};
+    const voice=(chat:string,user:string,type='supergroup')=>({update_id:1,message:{message_id:7,chat:{id:Number(chat),type},from:{id:Number(user),is_bot:false},voice:{file_id:'v1',duration:1200}}});
+    // Bob is allowed in an old-shaped group, a digest group, and an upgraded group under its new and its old Telegram id.
+    for(const raw of [GP1,NG1_TG,NG2_TG,NG2_OLD_TG])assert.equal(allowedSender(served,voice(raw,BOB),raw),true,raw);
+    assert.equal(allowedSender(served,voice(GP2,BOB),GP2),false,'granted in other groups only');
+    // A deny under the upgraded group's new id wins over the grant under its old one, wherever the message comes from.
+    const denied={...served,group_access:{...served.group_access,[NG2_TG]:{granted:[],denied:[BOB]}}};
+    for(const raw of [NG2_TG,NG2_OLD_TG])assert.equal(allowedSender(denied,voice(raw,BOB),raw),false,raw);
+    // A group the directory does not serve, or has no row for, allows only the owner (fail closed).
+    const stray='-1009999999999',listed={...served,group_ids:[...served.group_ids,UNSERVED,stray],
+      group_access:{...served.group_access,[UNSERVED]:{granted:[BOB],denied:[]},[stray]:{granted:[BOB],denied:[]}}};
+    assert.equal(allowedSender(listed,voice(UNSERVED,BOB),UNSERVED),false,'a group the directory does not serve');
+    assert.equal(allowedSender(listed,voice(stray,BOB),stray),false,'a group with no row');
+    assert.equal(allowedSender(listed,voice(stray,OWNER),stray),true,'the owner, wherever they write');
+    assert.equal(allowedSender(served,voice(BOB,BOB,'private'),BOB),false,'a member in their own private chat');
+    // The directory, which follows TELEGRAM_GROUP_IDS, decides what is served: a digest group it no longer serves.
+    installChatsForTest(fixtureDirectory([...GP_GROUP_IDS]));
+    assert.equal(allowedSender(served,voice(NG1_TG,BOB),NG1_TG),false,'a digest group no longer served');
+    assert.equal(allowedSender(served,voice(GP1,BOB),GP1),true);
+    assert.equal(NG1.length,64);assert.equal(NG2.length,64);
+  }finally{installChatsForTest(policyDirectory(policy,['456','-99']));}
 });
 
 test('the owner listed as a person allowed or denied in a group stops the services from starting',async()=>{

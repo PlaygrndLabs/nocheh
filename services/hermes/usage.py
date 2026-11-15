@@ -9,6 +9,7 @@ Nocheh calls every provider through the OpenAI-compatible API, so Hermes's
 table, keyed by provider, never prices a Claude model. Nocheh prices Claude
 on the Anthropic provider itself, only where Hermes has no price.
 """
+import errno
 import os
 import re
 import sqlite3
@@ -39,6 +40,18 @@ SCHEMA = ('CREATE TABLE IF NOT EXISTS usage_daily(day TEXT NOT NULL, part TEXT N
 # recordings voice-note transcription was sent.
 ADDED = {'refused': 'INTEGER NOT NULL DEFAULT 0', 'hidden': 'INTEGER NOT NULL DEFAULT 0', 'reasons': "TEXT NOT NULL DEFAULT '{}'",
          'audio_seconds': 'REAL NOT NULL DEFAULT 0', 'causes': "TEXT NOT NULL DEFAULT '{}'", 'stopped': 'INTEGER NOT NULL DEFAULT 0'}
+# Files Hermes's readers could not read because a write failed in the locked-down container (ADR-0251), per UTC day
+# and reader: `temp_full` when its memory /tmp had no room left, `read_only` when the container refused a write
+# outside its folders. `done` counts the reads that worked, so a notice can say when reading works again. These are
+# not model calls, so they never reach usage_daily. Codes and counts only.
+READERS = ('document', 'image', 'voice')
+WRITE_FAILURES = ('temp_full', 'read_only')
+READER_SCHEMA = ('CREATE TABLE IF NOT EXISTS reader_daily(day TEXT NOT NULL, reader TEXT NOT NULL, '
+                 'done INTEGER NOT NULL DEFAULT 0, temp_full INTEGER NOT NULL DEFAULT 0, read_only INTEGER NOT NULL DEFAULT 0, '
+                 'PRIMARY KEY(day,reader))')
+WRITE_ERRORS = {errno.ENOSPC: 'temp_full', errno.EDQUOT: 'temp_full', errno.EROFS: 'read_only'}
+# Room a read needs in /tmp besides a copy of its file, below which a failed read is taken as /tmp being full.
+TEMP_MARGIN = 8 * 1024 * 1024
 # Why a run failed. Codes only: never the provider's message or any content.
 REASONS = ('refused', 'rate_limited', 'key_rejected', 'model_not_found', 'too_long', 'timed_out',
            'provider_error', 'interrupted', 'empty_answer', 'bad_answer', 'nocheh_error', 'unknown')
@@ -419,11 +432,71 @@ def connect(path=None):
     db = sqlite3.connect(str(path), timeout=10, isolation_level=None)
     db.execute('PRAGMA journal_mode=WAL')
     db.execute(SCHEMA)
+    db.execute(READER_SCHEMA)
     present = {row[1] for row in db.execute('PRAGMA table_info(usage_daily)')}
     for name, kind in ADDED.items():
         if name not in present:
             db.execute(f'ALTER TABLE usage_daily ADD COLUMN {name} {kind}')
     return db
+
+
+def write_failure(error):
+    """`temp_full` or `read_only` when an exception, or one it was raised from, is a write that found no room or a
+    read-only file system; else None. Read from the error number only, never from an error's text, which a file
+    being read can choose."""
+    pending, seen = [error], set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, OSError) and current.errno in WRITE_ERRORS:
+            return WRITE_ERRORS[current.errno]
+        pending += [current.__cause__, current.__context__]
+    return None
+
+
+def temp_full(folder, size=0):
+    """Whether the file system of a reader's temporary folder has no room left for a copy of the file it read: a
+    failed read is then taken as /tmp being full, whatever the reader said."""
+    try:
+        found = os.statvfs(folder)
+    except OSError:
+        return False
+    return found.f_bavail * found.f_frsize < size + TEMP_MARGIN
+
+
+def reader_failed(reader, failure, path=None, now=None):
+    """Count one file a reader could not read because a write failed. Never fails the work."""
+    if failure in WRITE_FAILURES:
+        _reader(reader, failure, path, now)
+
+
+def reader_done(reader, path=None, now=None):
+    """Count one read that worked, so a reader's notice line can clear. Never fails the work."""
+    _reader(reader, 'done', path, now)
+
+
+def _reader(reader, column, path, now):
+    if reader not in READERS or column not in ('done', *WRITE_FAILURES):
+        return
+    moment = datetime.fromtimestamp(now or time.time(), timezone.utc)
+    day = moment.strftime('%Y-%m-%d')
+    target = Path(path or DATABASE)
+    if not target.parent.parent.is_dir():
+        return  # Not inside a Hermes installation, such as a unit test.
+    try:
+        db = connect(target)
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('INSERT INTO reader_daily(day,reader) VALUES(?,?) ON CONFLICT DO NOTHING', (day, reader))
+            db.execute(f'UPDATE reader_daily SET {column}={column}+1 WHERE day=? AND reader=?', (day, reader))
+            db.execute('DELETE FROM reader_daily WHERE day<?', ((moment - timedelta(days=RETENTION_DAYS)).strftime('%Y-%m-%d'),))
+            db.execute('COMMIT')
+        finally:
+            db.close()
+    except (OSError, sqlite3.Error):
+        pass
 
 
 def record(part, usage, model, failed=False, provider=None, path=None, now=None, refused=False, reason=None, cause=None):

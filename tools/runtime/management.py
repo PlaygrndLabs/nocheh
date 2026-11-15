@@ -78,6 +78,10 @@ def dispatch(body):
         query = urlencode({key:request[key] for key in ('profile', 'job') if request.get(key)})
         path = ('/api/nocheh/preferences' if request.get('profile') and not request.get('job') else '/api/nocheh/policy') + '?' + query
         return call(state, path, request if body.get('write') else None, 'PUT' if body.get('write') else 'GET')
+    if operation == 'mini_app.launch_check':
+        # What the dashboard checks a phone's Telegram launch data with: the bot's public ID, never its token.
+        from tools.operations.installation.mini_app import launch_check
+        return launch_check(load(state))
     if operation == 'native.connection':
         from tools.operations.installation.configuration import native_endpoint
         host,port=native_endpoint(state)
@@ -90,13 +94,15 @@ def dispatch(body):
         return api_call(path,body.get('body'),'memory_operation_unavailable')
     if operation == 'operations.list':
         from tools.operations.installation.admin_operations import backups
-        from tools.operations.installation.backup_schedule import status
+        from tools.operations.installation.backup_schedule import status, health
         from tools.operations.installation import offsite
         from tools.operations.installation.configuration import load as load_settings
-        schedule=status(state);automatic=set(schedule.pop('automatic'));remote=offsite.status(state,load_settings(state))
+        values=load_settings(state)
+        schedule=status(state);automatic=set(schedule.pop('automatic'));remote=offsite.status(state,values)
         sent=remote.pop('sent')
+        # With the entry a failed backup names, escaped, which only this page shows (ADR-0251).
         return {'backups':[{**row,'automatic':row['id'] in automatic,'offsite':any(row['id'] in key for key in sent)} for row in backups(state)],
-                'schedule':schedule,'offsite':remote}
+                'schedule':schedule,'offsite':remote,'health':health(state,values,details=True)}
     if operation == 'backups.due':
         from tools.operations.installation.backup_schedule import due
         return due(state)

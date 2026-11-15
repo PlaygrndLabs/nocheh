@@ -125,7 +125,7 @@ test('owner data travels with its types, and nothing imported acts by itself',
     // Any other column a store no longer has is still refused.
     await assert.rejects(to.restore(owner,[sealed('project_assignments',['-10073'],{space_id:'-10073',project_id:null,mode:'none',revision:1,unknown:true})]),/invalid_owner_record_fields/);
 
-    // Chats (ADR-0251): every chat a record names has its row here, keeping its id, off until this installation serves it.
+    // Chats (ADR-0252): every chat a record names has its row here, keeping its id, off until this installation serves it.
     const chatRows=async(pool:pg.Pool)=>(await pool.query('SELECT id,kind,parent_id,topic_key,title,title_source,state FROM chats')).rows
       .sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
     assert.deepEqual((await chatRows(target)).map(row=>[row.id,row.kind,row.parent_id,row.state]),

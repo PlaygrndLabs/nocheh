@@ -64,9 +64,9 @@ class ProductScenarios(Scenarios):
                     and item['message']['message_id'] == row['message']['message_id'])
 
     def press(self, row, choice, presser=OWNER):
-        """A tap on Approve, Reject, Allow here, Always allow, a job's Stop or Answer privately, delivered like Telegram's
-        callback_query."""
-        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns', 'here': 'nc', 'always': 'nw', 'private': 'np'}[choice]
+        """A tap on Approve, Reject, Allow here, Always allow, a job's Stop, Answer privately, or Pause or Resume member jobs
+        on a notice, delivered like Telegram's callback_query."""
+        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns', 'here': 'nc', 'always': 'nw', 'private': 'np', 'pause': 'njp', 'resume': 'nju'}[choice]
         data = next(button['callback_data'] for button in self.buttons(row) if button['callback_data'].startswith(prefix))
         number = self.f.ids()
         query = {'id': 'cb'+str(number), 'from': {'id': presser, 'is_bot': False, 'first_name': 'Synthetic '+str(presser)},
@@ -105,7 +105,7 @@ class ProductScenarios(Scenarios):
 
     def serve_groups(self, *groups):
         """Turn Nocheh on in groups with the step 2b-1 switch: their Telegram ids join TELEGRAM_GROUP_IDS and the services
-        that read it restart. The app then serves every chat any of whose Telegram ids is listed (ADR-0251)."""
+        that read it restart. The app then serves every chat any of whose Telegram ids is listed (ADR-0252)."""
         names = []
         for name, service in self.f.manifest['services'].items():
             environment = service.get('environment') or {}
@@ -578,6 +578,17 @@ class ProductScenarios(Scenarios):
         for question in ('یادداشت‌هایت را می‌بینی؟', 'و حالا؟'):
             _, text = self.turn(self.f.message(OWNER, question+' [[notes:NOTEMARK52]]'), OWNER)
             self.gate('note_reaches_later_turn', 'present' in text, answer=text)
+        # Recall names the chat each note came from (ADR-0251): the owner's own note as the private chat, and a note
+        # saved in a group by that group's name.
+        recalled = lambda: [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]['result']
+        self.turn(self.f.message(OWNER, 'کجا نوشتی؟ [[recall:NOTEMARK52]]'), OWNER)
+        own = recalled()
+        self.gate('recall_names_your_private_chat', 'NOTEMARK52' in own and 'Your private chat' in own, result=own[:400])
+        self.turn(self.f.message(OTHER_GROUP, 'note this [[tool:memory {"target":"memory","operations":[{"action":"add","content":"GROUPMARK52: the group keeps synthetic notes."}]}]]'), OTHER_GROUP)
+        self.turn(self.f.message(OWNER, 'از گروه چه یادداشتی هست؟ [[recall:GROUPMARK52]]'), OWNER)
+        found = recalled()
+        self.gate('recall_hit_names_its_chat', 'GROUPMARK52: the group keeps' in found and 'Synthetic Forum '+str(OTHER_GROUP) in found,
+                  result=found[:400])
 
     def reaction_keeps_group_name(self):
         # A reaction as the latest update must not lose the group's name.
@@ -672,7 +683,7 @@ class ProductScenarios(Scenarios):
                                                       'skills': persona['skills'], 'revision': persona['revision']})
             _, text = self.turn(self.f.message(OWNER, 'Who are you here? [[context:'+role_mark+']]'), OWNER)
             self.gate('owner_role_reaches_private_chat', 'present' in text, answer=text)
-            # A project with OTHER_GROUP and NG1, a group first seen after step 2b (ADR-0251), and a task on its board that
+            # A project with OTHER_GROUP and NG1, a group first seen after step 2b (ADR-0252), and a task on its board that
             # the chat should see.
             project = self.f.app('/v1/projects', {'name': 'Canary project P1', 'description': '', 'state': 'active', 'expected_revision': 0,
                                                   'operation_id': 'scenario-canary-project-'+number})
@@ -779,7 +790,7 @@ class ProductScenarios(Scenarios):
 
     def project_groups_stay_apart(self):
         # Groups of one project (ADR-0247, ADR-0248, ADR-0249): OTHER_GROUP (GP1), THIRD_GROUP (GP2) and NEW_GROUP (NG1, a
-        # group first seen after step 2b, with a digest id, ADR-0251) join a new project; GROUP (GP4) stays in none. Each
+        # group first seen after step 2b, with a digest id, ADR-0252) join a new project; GROUP (GP4) stays in none. Each
         # group, and the owner's private chat, holds its own mark next to one shared search word. A group answer reads only
         # its own group: the owner's question in GP1 finds GP1's mark and its task, never GP2's mark, task, count or tag,
         # and the same question in NG1 finds NG1's mark and neither group's task. Under the owner's answer there sits Answer
@@ -841,7 +852,7 @@ class ProductScenarios(Scenarios):
             self.gate('group_task_view_shows_its_own_task', gp1_task in listed, result=listed[:300])
             self.gate('group_task_view_never_shows_another_groups_task', gp2_task not in listed and gp2_tag not in listed
                       and (tasks.get('counts') or {}).get('open') == 1, counts=tasks.get('counts'), result=listed[:300])
-            # 2b. NG1, the group with a digest id whose archive is read through its Telegram ids (ADR-0251), reads only
+            # 2b. NG1, the group with a digest id whose archive is read through its Telegram ids (ADR-0252), reads only
             # itself too: its own mark, never GP1's, GP2's or GP4's marks or tasks, though it shares their project.
             _, new_text = self.turn(self.f.message(NEW_GROUP, 'What do we have on crates? '+tools), NEW_GROUP, chunked=True)
             new_search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
@@ -918,7 +929,7 @@ class ProductScenarios(Scenarios):
             def recorded():
                 replies = self.f.app('/v1/chat-sends?kind=reply&limit=100')['records']
                 answers = self.f.app('/v1/chat-sends?kind=button_answer&limit=100')['records']
-                # A send record keeps the app's chat and message ids as text (ADR-0251), whatever the app's own type.
+                # A send record keeps the app's chat and message ids as text (ADR-0252), whatever the app's own type.
                 found = [any(item['chat'] == str(row['message']['chat']['id']) and str(item['message_id']) == str(row['message']['message_id'])
                              and item['state'] == 'sent' for item in replies) for row in (*group_replies, *private_replies)]
                 found += [any(item['reference'] == 'approval-answer:'+tap['callback_query_id'] and item['state'] == 'sent' for item in answers)
@@ -948,7 +959,7 @@ class ProductScenarios(Scenarios):
                     raise Failed('cleanup_failed')
 
     def new_id_group_works_end_to_end(self):
-        # NG1 is a group Nocheh first sees after step 2b: its Nocheh id is a digest, never its Telegram id (ADR-0251). It
+        # NG1 is a group Nocheh first sees after step 2b: its Nocheh id is a digest, never its Telegram id (ADR-0252). It
         # stays off until the owner lists it in TELEGRAM_GROUP_IDS, the step 2b-1 switch; then a reply, a topic's recall of
         # the group, a task on its project's board and a topic of its own work as in any group. Answer privately with NG1
         # is project_groups_stay_apart, where NG1 is in P1.
@@ -1006,7 +1017,7 @@ class ProductScenarios(Scenarios):
 
     def supergroup_upgrade_keeps_history(self):
         # Telegram upgrades a basic group to a supergroup: the supergroup has a new Telegram id, and Telegram says so in
-        # both chats (migrate_to_chat_id, migrate_from_chat_id). Nocheh keeps one chat (ADR-0251): the new id joins the old
+        # both chats (migrate_to_chat_id, migrate_from_chat_id). Nocheh keeps one chat (ADR-0252): the new id joins the old
         # one, so the group keeps its id, its project, its task and its switch, which still lists the old id only, and a
         # search in the supergroup finds what was said before the upgrade. An upgrade the owner's refresh finds instead
         # (Telegram answers with migrate_to_chat_id) moves a group onto its new id the same way, at once.
@@ -1667,6 +1678,104 @@ class ProductScenarios(Scenarios):
         self.gate('cost_notice_seen', third is not None and fourth is not None and
                   any(event.get('directive') == 'notice' and event.get('kind') == 'cost' for event in events[third:fourth]), third=third, fourth=fourth)
         self.limit_ending('Priced JOB3', 'cost', before, card, found, runs)
+
+    def member_job_request(self, text, job):
+        """A member's message in the group's topic asking for a job, its directives escaped as in job_request."""
+        encoded = json.dumps({'action': 'start', **job}).replace(']]', '\\u005d\\u005d')
+        return self.f.message(GROUP, text+' [[tool:mcp__nocheh__background_job '+encoded+']] [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
+
+    def owner_cards(self, before):
+        """Approval cards in the owner's private chat; a notice's Pause or Resume button does not make one."""
+        return [row for row in self.cards(before, OWNER) if any(button['callback_data'].startswith(('na', 'nd')) for button in self.buttons(row))]
+
+    def member_notices(self, before, callback):
+        """Notices in the owner's private chat whose one button is Pause (njp) or Resume (nju) member jobs, as shown now."""
+        return [row for row in self.new(before) if row['message']['chat']['id'] == OWNER
+                and [button['callback_data'] for button in self.buttons(row)] == [callback]]
+
+    def member_job(self, title, nonce):
+        """A member asks in the group for a job of two priced answers ($3.0001 at the fixture's rates) and approves it on its
+        card there. Returns the card, the press's answer and the sent count before the request."""
+        # The fake model prices only scripted answers: the to-do call and the report, $1.50005 each.
+        instruction = 'Report at once, run '+nonce+' [[usage:30000]] [[delay:3]] '+self.todo(('Write the report', 'in_progress'))
+        _, before = self.silent_turn(self.member_job_request('کار عضو '+nonce, {'title': title, 'instruction': instruction, **self.EMPTY}), GROUP, TEAM_TOPIC)
+        card = self.wait('member_job_card_in_the_group', lambda: self.cards(before, GROUP), 120)[0]
+        self.gate('member_approves_it_and_no_card_goes_to_the_owner', 'Stops at $5.00' in card['message']['text'] and not self.owner_cards(before),
+                  card=card['message']['text'][:400])
+        return card, self.press(card, 'approve', presser=MEMBER), before
+
+    def background_job_member_spend(self):
+        # What jobs members approved themselves spend in a UTC day (ADR-0251). Past the owner's notice mark the owner gets one
+        # notice with Pause; past the high mark member jobs pause by themselves with a notice that has Resume. While paused a
+        # member still asks and approves in the group, no card goes to the owner, and the approved job waits; the owner's own
+        # job does not. Only the owner's Resume in their private chat ends the pause, and the held job then starts. The marks
+        # are set just above what members spent today, so each member job of $3.0001 crosses one.
+        access = next(json.loads(service['environment']['TELEGRAM_GROUP_ACCESS']) for service in self.f.manifest['services'].values()
+                      if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment'])
+        if access != ACCESS:
+            self.current['recreated'] = self.apply_access(ACCESS)
+        settings = self.f.app('/v1/background-jobs/settings')
+        keys = ('cost_limit_usd', 'minutes_limit', 'member_daily_jobs', 'member_notice_usd', 'member_pause_usd')
+
+        def save(**changes):
+            current = self.f.app('/v1/background-jobs/settings')
+            return self.f.app('/v1/background-jobs/settings', {**{key: current[key] for key in keys}, **changes, 'revision': current['revision']})
+        spent = lambda: self.f.app('/v1/background-jobs')['members']['spent_usd']
+        above = lambda value: round(value+1, 2)
+        nonce = str(self.f.ids())
+        try:
+            self.gate('no_pause_to_start_with', self.f.app('/v1/background-jobs/member-pause', {'paused': False})['paused'] is None)
+            notice = above(spent())
+            saved = save(cost_limit_usd=5, member_daily_jobs=100, member_notice_usd=notice, member_pause_usd=round(notice+50, 2))
+            self.gate('marks_saved', [saved['member_notice_usd'], saved['member_pause_usd']] == [notice, round(notice+50, 2)], saved=saved)
+            # The first job crosses the notice mark: one notice with Pause, naming the member and the group.
+            _, _, before = self.member_job('Member spend JOB14 '+nonce, nonce+'A')
+            self.job_ended('Member spend JOB14 '+nonce, 300)
+            spend = self.wait('spend_notice_with_pause', lambda: self.member_notices(before, 'njp'), 120)
+            text = spend[0]['message']['text']
+            self.gate('spend_notice_says_who_and_the_marks', len(spend) == 1 and text.startswith('💸 Jobs that members approved themselves spent $')
+                      and 'past your notice mark of $%.2f' % notice in text and 'Synthetic %d in “Synthetic Forum %d”: $' % (MEMBER, GROUP) in text, notice=text)
+            self.gate('nothing_paused_by_a_notice', self.f.app('/v1/background-jobs')['members']['paused'] is None)
+            # The second job crosses the high mark: member jobs pause by themselves until 00:00 UTC, with Resume.
+            high = above(spent())
+            save(member_pause_usd=high)
+            _, _, before = self.member_job('Member spend JOB15 '+nonce, nonce+'B')
+            self.job_ended('Member spend JOB15 '+nonce, 300)
+            pause = self.wait('pause_notice_with_resume', lambda: self.member_notices(before, 'nju'), 120)[0]
+            self.gate('pause_notice_says_until_midnight', pause['message']['text'].startswith('⏸ Member jobs are paused until 00:00 UTC')
+                      and 'past your high mark of $%.2f' % high in pause['message']['text'], notice=pause['message']['text'])
+            held = self.f.app('/v1/background-jobs')['members']['paused']
+            midnight = (datetime.now(timezone.utc)+timedelta(days=1)).strftime('%Y-%m-%dT00:00:00.000Z')
+            self.gate('paused_by_itself_until_midnight', held and held['by'] == 'auto' and held['until'] == midnight, paused=held, midnight=midnight)
+            # While paused the member still asks and approves; the job waits, approved, and its card says why.
+            title = 'Member spend JOB16 '+nonce
+            card, answer, before = self.member_job(title, nonce+'C')
+            self.wait('card_says_member_jobs_are_paused', lambda: 'Member jobs are paused for now' in self.card_message(card)['message']['text'], 60, 1)
+            self.gate('the_member_can_still_stop_it', self.stop_button(card), answer=answer.get('text'))
+            # The owner's own job runs meanwhile.
+            mine = 'Owner during pause JOB17 '+nonce
+            _, owned = self.silent_turn(self.job_request('کار من '+nonce, {'title': mine, 'instruction': 'Report at once, run '+nonce+'D', **self.EMPTY}), OWNER)
+            self.press(self.wait('owner_job_card', lambda: self.owner_cards(owned), 120)[0], 'approve')
+            self.gate('owner_job_never_waits', self.job_ended(mine, 300)['state'] == 'done')
+            job = self.job_named(title)
+            self.gate('member_job_held', job['state'] == 'approved' and job.get('held') is True and not self.job_runs(job['id']), job=job)
+            # Only the owner's press in their private chat resumes.
+            other = self.press(self.card_message(pause), 'resume', presser=MEMBER)
+            self.gate('a_member_cannot_resume', other.get('text') == 'Only the owner can do this.', answer=other.get('text'))
+            self.gate('still_paused', self.f.app('/v1/background-jobs')['members']['paused'] is not None)
+            resumed = self.press(self.card_message(pause), 'resume')
+            self.gate('owner_resumes', (resumed.get('text') or '').startswith('▶\ufe0f Member jobs resumed'), answer=resumed.get('text'))
+            self.wait('notice_says_resumed_and_offers_pause', lambda: self.card_message(pause)['message']['text'].endswith('▶\ufe0f Member jobs resumed. Approved ones start shortly.')
+                      and [button['callback_data'] for button in self.buttons(self.card_message(pause))] == ['njp'], 60, 1)
+            found = self.job_ended(title, 300)
+            self.gate('held_job_ran_after_resume', found['state'] == 'done' and found.get('held') is False and len(self.job_runs(found['id'])) == 1, job=found)
+            self.gate('card_no_longer_says_paused', 'Member jobs are paused' not in self.card_message(card)['message']['text'], card=self.card_message(card)['message']['text'])
+            # Past the high mark again that day, nothing pauses after the owner's Resume, and no more notices come.
+            self.gate('no_new_pause_after_resume', self.f.app('/v1/background-jobs')['members']['paused'] is None)
+            self.gate('no_more_notices', not self.member_notices(before, 'njp') and not self.member_notices(before, 'nju'))
+        finally:
+            self.f.app('/v1/background-jobs/member-pause', {'paused': False})
+            save(**{key: settings[key] for key in keys})
 
     @staticmethod
     def docker(*arguments):
@@ -2676,7 +2785,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group',
                  'member_reminder_says_who_set_it', 'reminder_with_split_emoji_arrives', 'chat_is_read_in_order',
-                 'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
+                 'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_member_spend', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
                  'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit', 'machine_job_runs_after_one_approval', 'machine_job_refused_for_members_and_stopped',

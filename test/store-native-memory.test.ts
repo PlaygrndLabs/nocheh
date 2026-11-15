@@ -15,7 +15,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {installChatsForTest} from '../src/chats.js';
 import {legacyDirectory} from './fixture-groups.js';
 
-/** The chats the recall and search cases below name, as the seeder makes their rows (ADR-0251). */
+/** The chats the recall and search cases below name, as the seeder makes their rows (ADR-0252). */
 const recallChats=()=>legacyDirectory(['-100','-100/topic/3','-200'],{owner:'123',served:['-100','-200']});
 
 test('reply context reads Honcho on arrival, limits other audiences to their own session and reuses identical guarded results',async()=>{
@@ -168,7 +168,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.deepEqual(await memory.search(group,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
   assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,filters:{session_id:{in:sessions}}}});
   assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
-  // The group is bound as its id and its topics' ids, from the chat rows (ADR-0251).
+  // The group is bound as its id and its topics' ids, from the chat rows (ADR-0252).
   const topics=['-100','-100/topic/3'];
   assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3',topics,null],[workspace,'B'.repeat(21),'-100/topic/3',topics,null],
     [workspace,'C'.repeat(21),'-100/topic/3',topics,null]],'a hit counts only with its own receipt, in this audience or its group');
@@ -179,7 +179,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
     reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
   queries.length=0;
   assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
-  // Its groups are bound as their ids and their topics' ids, from the chat rows (ADR-0251).
+  // Its groups are bound as their ids and their topics' ids, from the chat rows (ADR-0252).
   // The read set reaches the provenance query whole, and SQL takes its ids only as marked read set entries.
   const frozen=['-100','-100/topic/3','-200'].map(id=>'read:'+id);
   assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);
@@ -240,7 +240,11 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
   let loseReply=true,rejectWrite=false,sequence=0;const ownerApproved='Owner-approved password=visible123',descendants:string[]=[],active=new Map<string,Set<string>>();
   const priorities:unknown[]=[];
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
-    runtime:async(_operation,input)=>{priorities.push(input.priority);return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};},
+    runtime:async(_operation,input)=>{
+      priorities.push(input.priority);const text=String(input.text);
+      // A steered check flags the request's own structure words.
+      return {literals:text.includes('saffronpass')?['saffronpass']:text.includes('Steered recall')?['user','fixture-recall-model'].filter(word=>text.includes(word)):[]};
+    },
     memoryEngine:honchoEngine(async(path,body:any,method)=>{
       calls.push({path,body,...(method?{method}:{})});
       const session=/^\/v3\/workspaces\/([^/]+)\/sessions(?:\/([^/?]+))?/.exec(path);
@@ -368,6 +372,11 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     await assert.rejects(services.memory.prepareRequest({workspace,route:'/v1/embeddings',background:'yes',payload:{input:'text'}}),{code:'invalid_memory_priority'});
     const callCount=calls.length;
     await assert.rejects(services.memory.prepareRequest({workspace,route:'/unsupported',payload:{input:'text'}}),{code:'memory_route_denied'});assert.equal(calls.length,callCount);
+    // Honcho's model requests keep their roles and model when the check flags them, so learning and recall still reach the provider (ADR-0251).
+    const steered=(await services.memory.prepareRequest({workspace,route:'/v1/chat/completions',background:true,payload:{model:'fixture-recall-model',
+      messages:[{role:'system',content:'Steered recall for the user.'},{role:'user',content:'Which note was it?'}]}})).payload as any;
+    assert.equal(steered.model,'fixture-recall-model');assert.deepEqual(steered.messages.map((message:any)=>message.role),['system','user']);
+    assert.deepEqual(Object.keys(steered.messages[1]).sort(),['content','role']);assert.equal(steered.messages[1].content,'Which note was it?');
 
     await swept();const principal=await actor(question.id),context=await services.memory.context(principal);
     assert.equal(context.limited_memory,false);assert.ok(!JSON.stringify(context).includes('saffronpass'));assert.ok(JSON.stringify(context).includes('representation_has_no_exact_citations'));

@@ -137,9 +137,14 @@ def approval_links(links,length):
     return entities or None
 
 
+# Presses on the owner's notices that storage handles: Retry failed under a problem notice, and Pause or Resume under a
+# notice about members' job spend (ADR-0251). Storage acts only on the owner's own press in their private chat.
+NOTICE_CALLBACKS=('nr','njp','nju')
+
+
 def notice_buttons(buttons):
-    """One row of buttons under a problem notice: open a page in the mini app or a browser, or
-    the Retry failed press that storage handles. Anything else is refused."""
+    """One row of buttons under a notice in the owner's private chat: open a page in the mini app or a browser, or a
+    press that storage handles (NOTICE_CALLBACKS). Anything else is refused."""
     if buttons is None:return None
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
     if not isinstance(buttons,list) or not 0<len(buttons)<=3:raise ValueError('invalid_notice')
@@ -150,7 +155,7 @@ def notice_buttons(buttons):
         web,url,callback=button.get('web_app'),button.get('url'),button.get('callback')
         if isinstance(web,str) and len(web)<=512 and re.fullmatch(r'https://\S+',web):row.append(InlineKeyboardButton(label,web_app=WebAppInfo(web)))
         elif isinstance(url,str) and len(url)<=512 and re.fullmatch(r'https?://\S+',url):row.append(InlineKeyboardButton(label,url=url))
-        elif callback=='nr':row.append(InlineKeyboardButton(label,callback_data=callback))
+        elif callback in NOTICE_CALLBACKS:row.append(InlineKeyboardButton(label,callback_data=callback))
         else:raise ValueError('invalid_notice')
     return InlineKeyboardMarkup([row])
 
@@ -174,7 +179,7 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
     """The turn credential Nocheh minted for this event and conversation, unexpired and signed with the service token,
     and the served list it was checked against.
 
-    It binds a reply or presence to the chat and topic the turn was admitted for (ADR-0251): its app binding names this
+    It binds a reply or presence to the chat and topic the turn was admitted for (ADR-0252): its app binding names this
     Telegram chat and topic, and the served list agrees that its space (a Nocheh chat id) is there now and belongs to its
     scope: a served group, or for the owner's own turn (no scope) the owner's private chat itself, never a topic of it, as
     Hermes runs the owner's turns only there. Whether the space still

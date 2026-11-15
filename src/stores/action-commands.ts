@@ -7,7 +7,7 @@ import {allowedAccounts} from '../destinations.js';
 import {telegramAddress,telegramChat,telegramScopes} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import {approvalAction,approvalCard,approvalLines,approvalTask,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
+import {approvalAction,approvalCard,approvalLines,approvalTask,backgroundMemberTexts,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
 import {cardName,controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,visible,type Link,type OperationText} from '../action-text.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
 import {forwardOrigin,forwardedCommand} from '../forwarded.js';
@@ -19,6 +19,7 @@ import type {SourceAccessRepository} from './access.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import {closedStates,type BackgroundJobRepository} from './background-jobs.js';
+import {memberPause,memberResume} from './member-job-spend.js';
 import type {TaskRepository} from './tasks.js';
 import type {PrivateAnswerRepository} from './private-answers.js';
 import {currentChats} from './chats.js';
@@ -79,7 +80,7 @@ type Person={name:string|null;username:string|null};
 /** What one send card reads once (ADR-0254): every served group's facts, the served groups each allowed person is in,
  *  the people it may name, and the name keys a name must not share, each with whose it is. */
 type SendNames={allowed:ReadonlyMap<string,readonly string[]>;facts:Map<string,ChatFacts>;people:Map<string,Person>;keys:[string,string][]};
-/** The chat a chat or topic belongs to, asked of the chat directory (ADR-0251). */
+/** The chat a chat or topic belongs to, asked of the chat directory (ADR-0252). */
 const chatOf=(space:string)=>chats().parentOf(space)??space;
 /** A topic's key in its app (Telegram's thread id), or null for a chat. */
 const topicKey=(space:string)=>chats().get(space)?.topic_key??null;
@@ -124,7 +125,7 @@ export class ActionCommandRepository {
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
   }
   /** A card, or its decision, for a chat or topic: sent where that chat is in Telegram now, so it follows a group Telegram
-   *  upgraded; a chat the directory does not know gets nothing (ADR-0251). */
+   *  upgraded; a chat the directory does not know gets nothing (ADR-0252). */
   private async post(space:string|null|undefined,input:Record<string,unknown>,timeout=15000) {
     const target=telegramAddress(space);
     return target?this.approval({...input,...target},timeout):null;
@@ -150,7 +151,7 @@ export class ActionCommandRepository {
       task:prompts['telegram.approval_task']??approvalTask,line:approvalLines(prompts['telegram.approval_texts'])};
   }
   /** A group's name, public username, topic flag and latest message, from its captured messages under every Telegram id it
-   *  has had, else the owner's last refresh, else its chat row and details; and its Telegram id now, for links (ADR-0251). */
+   *  has had, else the owner's last refresh, else its chat row and details; and its Telegram id now, for links (ADR-0252). */
   private async chat(chat:string):Promise<ChatFacts> {
     const external=telegramAddress(chat)?.chat_id??null,scopes=telegramScopes(chat);
     const facts:ChatFacts={title:null,username:null,forum:null,message:null,external};
@@ -485,7 +486,7 @@ export class ActionCommandRepository {
   /** Where a job was asked, for its card in another chat: a member's or a machine job's card in the owner's private chat
    *  says which group and topic, in plain text, as an operation's card does. Null when the card is in that chat. */
   private async jobOrigin(id:string):Promise<string|null> {
-    // The job's chat or topic is a chat id: its group comes from the chat directory, never from the id (ADR-0251).
+    // The job's chat or topic is a chat id: its group comes from the chat directory, never from the id (ADR-0252).
     const row=await this.jobs!.row(id),space=String(row.space_id),chat=chatOf(space);
     if(chat===ownerChat(this.access.policy())||chatOf((await this.jobPlace(row)).space)===chat)return null;
     const {line}=await this.texts(),asked=await this.asked(row.source_reference);
@@ -523,7 +524,8 @@ export class ActionCommandRepository {
     // A card in another chat than the one the job reports to does not say the report comes here. A job on the owner's machine
     // reports to the owner's private chat, wherever it was asked (ADR-0244).
     const away=(row.machine?ownerChat(this.access.policy()):chatOf(String(row.space_id)))!==chatOf(place.space);
-    const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines[away?'running_elsewhere':'running']:card.lines[state];
+    // A job a member approved while member jobs are paused waits to start, which its card says (ADR-0251).
+    const outcome=state==='approved'&&card.paused?card.lines.paused:state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines[away?'running_elsewhere':'running']:card.lines[state];
     const buttons=['approved','running','reporting'].includes(state)?[[line.stop.slice(0,40),'ns'+id.slice(0,40)+card.fingerprint.slice(0,16)]]:null;
     if(outcome)await this.post(place.space,{kind:'settle',id,text:`${card.text}\n\n${outcome}`,links:[],...(buttons?{buttons}:{}),...seenIn(seen,place.space)});
     if(['done','failed','limited'].includes(state)&&!row.cancel_requested)await this.offerList(row);
@@ -635,6 +637,7 @@ export class ActionCommandRepository {
     const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
     const query=row?JSON.parse(row.payload.toString()).callback_query:null,data=typeof query?.data==='string'?query.data.match(buttonData):null;
     if(query?.data===retryButton&&typeof query.id==='string')return this.retryPressed(query);
+    if((query?.data===memberPause||query?.data===memberResume)&&typeof query.id==='string')return this.memberJobsPressed(query,query.data===memberPause);
     const privately=typeof query?.data==='string'?answerButton.exec(query.data):null;
     if(privately&&typeof query.id==='string')return this.answerPressed(privately[1]!,query,source);
     if(!data||typeof query.id!=='string')return false;
@@ -649,7 +652,7 @@ export class ActionCommandRepository {
     const action=found.length===1&&found[0].fingerprint.startsWith(data[3])?found[0]:null,presser=String(query.from?.id??'');
     // Telegram fills in the pressed message; only one that carries this very button names this card's message.
     const carries=(query.message?.reply_markup?.inline_keyboard??[]).flat().some((button:any)=>button?.callback_data===query.data);
-    // The pressed message's chat, as a chat id: Telegram names it by its id there now (ADR-0251).
+    // The pressed message's chat, as a chat id: Telegram names it by its id there now (ADR-0252).
     const home=telegramChat(chat),message=String(query.message?.message_id??''),seen:Seen=carries&&home&&/^[1-9]\d{0,15}$/.test(message)?{chat:home,message}:undefined;
     // Allow here and Always allow are only an operation's buttons, and only the owner's (ADR-0214).
     if(['c','w'].includes(data[1]!)&&action&&action.kind!=='controlled'){await answer(line.changed);return true;}
@@ -774,6 +777,20 @@ export class ActionCommandRepository {
       reply=retried?fillTemplate(labels.retried!,{count:String(retried)}):labels.nothing!;
     }
     await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:reply.slice(0,200)},10000);
+    return true;
+  }
+  /** Pause or Resume under a notice about members' job spend: only the owner's press in their private chat changes
+   *  anything (ADR-0251). The notice then shows the answer and offers the other button. */
+  private async memberJobsPressed(query:any,paused:boolean):Promise<boolean> {
+    const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),owner=ownerChat(policy);
+    const lines=labeledLines(backgroundMemberTexts,(await ownerPrompts(this.access.stores.control))['background.member_texts']);
+    let reply=lines.only_owner!;
+    // The owner's own press (their account), in their private chat (its chat id), as for Retry failed.
+    if(this.jobs&&owner&&policy.owner_id&&String(query.from?.id??'')===policy.owner_id&&telegramChat(chat)===owner) {
+      await this.jobs.members.setPaused(paused);
+      reply=paused?lines.paused!:lines.resumed!;
+    }
+    await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(reply).slice(0,200).join('')},10000);
     return true;
   }
   async controlReply(source:SourceReference):Promise<string|null> {

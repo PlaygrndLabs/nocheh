@@ -12,7 +12,7 @@ import {projectGroups,projectGroupsSql} from './project-groups.js';
  * One row per "Answer privately" button Nocheh offered (ADR-0249): who asked, where, in which project, which groups
  * the answer may read and what became of it. The groups (`read_chats`, whole groups) are frozen when the button is
  * tapped, so a later change can't widen an old answer. Columns are named like the Members data design. Chats are
- * Nocheh chat ids (ADR-0251); the asker is a chat_accounts id, or the Telegram user id a row written before step 2b
+ * Nocheh chat ids (ADR-0252); the asker is a chat_accounts id, or the Telegram user id a row written before step 2b
  * holds; `member_id` null is the owner. Rows are the record: expiry changes their state and never deletes them.
  */
 export const privateAnswerSchema=`
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS private_answers (
  revision integer NOT NULL DEFAULT 1 CHECK(revision>0),
  CHECK(state NOT IN ('pressed','answered') OR read_chats IS NOT NULL)
 );
--- Chats are Nocheh chat ids and the asker a chat_accounts id (ADR-0251). Every value a row holds already passes:
+-- Chats are Nocheh chat ids and the asker a chat_accounts id (ADR-0252). Every value a row holds already passes:
 -- a stored Telegram value is its chat's id unchanged, and an older row's asker its Telegram user id.
 ALTER TABLE private_answers DROP CONSTRAINT IF EXISTS private_answers_from_chat_id_check;
 ALTER TABLE private_answers ADD CONSTRAINT private_answers_from_chat_id_check CHECK(${chatIdSql('from_chat_id')});
@@ -48,7 +48,7 @@ ALTER TABLE private_answers ADD CONSTRAINT private_answers_read_chats_check CHEC
   AND array_position(read_chats,NULL) IS NULL AND ${chatIdListSql('read_chats')});
 ALTER TABLE private_answers DROP CONSTRAINT IF EXISTS private_answers_reply_chat_id_check;
 ALTER TABLE private_answers ADD CONSTRAINT private_answers_reply_chat_id_check CHECK(${chatIdSql('reply_chat_id')});
--- What each chat is comes from its chats row, never from its id (ADR-0251): the asking place is a group or one of a
+-- What each chat is comes from its chats row, never from its id (ADR-0252): the asking place is a group or one of a
 -- group's topics, every frozen chat is a group itself, and the reply chat is a private chat. This release never writes
 -- a chat with no row (it refuses one first). A value no row names is judged by step 2's CHECKs on its frozen old shape
 -- (legacyShapeSql), so a release from before step 2b, redeployed, goes on writing its rows (2b-1 is undone by

@@ -164,7 +164,7 @@ class Sends:
         # "typing…" fires every few seconds and is never recorded, not even when it fails (owner, 2026-11-12).
         if not isinstance(method, str) or not METHOD.fullmatch(method) or method == 'sendChatAction': return None
         kind, chat = kind_of(method, dispatch), _chat(parameters.get('chat_id'))
-        # Version 2: the app's chat, thread and message ids as text (ADR-0251).
+        # Version 2: the app's chat, thread and message ids as text (ADR-0252).
         return {'version': 2, 'key': f'send:{self.channel}:{self.account or ""}:{uuid.uuid4().hex}', 'channel': self.channel,
                 'account': self.account, 'at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
                 'kind': kind, 'method': method, 'chat': chat, 'thread': _text(parameters.get('message_thread_id')),

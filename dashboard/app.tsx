@@ -437,7 +437,7 @@ function Login({mode}: {mode: 'create' | 'sign_in'}) {
           ? `Wrong password. ${value.tries_left} ${value.tries_left === 1 ? 'try' : 'tries'} left before a pause.`
           : 'Wrong password.'
         : value?.error === 'sign_in_paused'
-          ? `Too many wrong passwords. Try again in ${minutes(Number(value.until))}.`
+          ? `Too many wrong passwords. Try again in ${minutes(Number(value.until))}, or run ./bin/nocheh dashboard --clear-pause.`
           : value?.error === 'password_empty'
             ? 'Enter a password.'
             : value?.error === 'password_too_long'
