@@ -103,6 +103,9 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     assert.equal(body.asynchronous,true);
     const credential=reader({headers:{authorization:'Bearer '+body.archive_credential}} as any,token);
     assert.deepEqual(pick(credential,'scope','space','turnEvent'),{scope:group,space:group+'/topic/17',turnEvent:asked.id},'the credential is the asking member\'s');
+    // It names its chat, topic and app binding as a reply's turn does, the same binding its pass carries: Hermes and the bot
+    // refuse a turn whose body and pass disagree, or that names no binding (ADR-0250).
+    assert.deepEqual([body.chat,body.space,body.app,credential.app],[group,group+'/topic/17',...Array(2).fill({app:'telegram',chat:group,topic:'17'})]);
     // While it runs, reactions and learning wait, as for a reply.
     const running=await row(one.id);
     assert.deepEqual(pick(running,'state','attempts','run_id'),{state:'running',attempts:1,run_id:one.id});assert.ok(running.binding.generation);
@@ -207,6 +210,9 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     const free=await privately('free'),freed=await operation(free,'printf made-up-free',null);
     assert.equal(freed.state,'approved');assert.match(freed.message,/Its answer will follow here/);
     await ran(freed.id);await asking(free,'done');started={state:'running'};assert.equal((await follow(freed.id)).state,'running');
+    const ownTurn=starts.at(-1),ownPass=reader({headers:{authorization:'Bearer '+ownTurn.archive_credential}} as any,token);
+    assert.deepEqual([ownTurn.chat,ownTurn.space,ownTurn.app,ownPass.scope,ownPass.app],['123','123',{app:'telegram',chat:'123',topic:null},null,{app:'telegram',chat:'123',topic:null}],
+      'the owner\'s follow-up is bound to the owner\'s private chat');
     const steered=await operation(free,'printf made-up-steered',null);
     assert.equal(steered.state,'proposed','no owner request started the follow-up');assert.match(steered.message,/Approve and Reject buttons/);
     const note=await s.telegramActions.request(await actor(free,null),{destination:group,text:'Made-up note from the owner\'s memory'});
