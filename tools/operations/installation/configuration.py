@@ -313,6 +313,21 @@ def machine_folder(state):
     (Path(state) / 'machines').mkdir(exist_ok=True, mode=0o700)
 
 
+# The state folders services mount, each made one level at a time: mkdir(parents=True) would give a parent, such as
+# admin/dashboard with the dashboard's token, the default mode. Hermes mounts only spool/brain-turns and
+# admin/dashboard/home (ADR-0251).
+RUNTIME_FOLDERS = ('files', 'spool', 'spool/brain-turns', 'hermes', 'telegram', 'reports',
+                   'admin', 'admin/dashboard', 'admin/dashboard/home')
+
+
+def runtime_folders(state):
+    """The folders the services mount, at 0700, so Docker never makes one as root. A folder that exists keeps its mode."""
+    state = Path(state)
+    state.mkdir(parents=True, exist_ok=True)
+    for name in RUNTIME_FOLDERS:
+        (state / name).mkdir(exist_ok=True, mode=0o700)
+
+
 def initialize(state, workspace=None):
     """`workspace` names a new workspace (ADR-0245). A folder keeps its name: one with settings and no name is `personal`."""
     state = Path(state).resolve()
@@ -324,8 +339,7 @@ def initialize(state, workspace=None):
             raise workspaces.WorkspaceError(f'This folder is already the workspace {current}. '
                                             f'Rename it with ./bin/nocheh workspace rename {workspace}, or make another one with '
                                             f'./bin/nocheh workspace new {workspace}.')
-    for name in ('files', 'spool', 'hermes', 'telegram', 'reports'): (state / name).mkdir(parents=True, exist_ok=True, mode=0o700)
-    github_folders(state); machine_folder(state)
+    runtime_folders(state); github_folders(state); machine_folder(state)
     values = dict(DEFAULTS)
     values.update(existing)
     if workspace: values['NOCHEH_WORKSPACE'] = workspace

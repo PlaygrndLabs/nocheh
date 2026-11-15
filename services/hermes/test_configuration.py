@@ -63,6 +63,30 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(initialize(state)['NOCHEH_GUARD_MODE'],'on')
             self.assertEqual(read_env(env_path(state))['NOCHEH_GUARD_MODE'],'on')
             with self.assertRaises(ValueError):validate(values)
+    def test_setup_and_make_dev_make_every_mounted_folder_private_one_level_at_a_time(self):
+        import stat
+        import tools.cli.main as cli
+        from tools.operations.installation.configuration import DEFAULTS, generate
+        # Hermes mounts only spool/brain-turns and admin/dashboard/home; Docker would make a missing one as root, and
+        # admin/dashboard holds the dashboard's token, so no parent may get the default mode either.
+        folders=('files','spool','spool/brain-turns','hermes','telegram','reports','admin','admin/dashboard','admin/dashboard/home')
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)/'state';initialize(state)
+            for name in folders:
+                with self.subTest(name=name):
+                    self.assertEqual(stat.S_IMODE((state/name).stat().st_mode),0o700)
+            (state/'admin/dashboard/home/config.yaml').write_text('dashboard: {font: system-mono}\n')
+            initialize(state)
+            self.assertTrue((state/'admin/dashboard/home/config.yaml').is_file(),'a folder that exists is left as it is')
+            # make dev runs on the operating .env without initialize().
+            root=Path(folder)/'main';root.mkdir()
+            write_env(root/'.env',generate({**DEFAULTS,'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'123456789','TELEGRAM_BOT_TOKEN':'made-up-bot-token',
+                                            'NOCHEH_HONCHO_DATABASE_VOLUME':'made-up_honcho_database','NOCHEH_HONCHO_REDIS_VOLUME':'made-up_honcho_redis'}))
+            with patch('tools.development.live_dev.operating_root',return_value=root):cli.development_box_token()
+            for name in folders:
+                with self.subTest(dev=name):
+                    self.assertEqual(stat.S_IMODE((root/'data/local'/name).stat().st_mode),0o700)
+
     def test_literal_roundtrip_and_private_permissions(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'.env'
@@ -260,6 +284,26 @@ class ConfigurationTests(unittest.TestCase):
             for key,bad in [('NOCHEH_LOG_MAX_SIZE','0m'),('NOCHEH_LOG_MAX_SIZE','10'),('NOCHEH_LOG_MAX_SIZE','10mb'),
                             ('NOCHEH_LOG_MAX_FILES','0'),('NOCHEH_LOG_MAX_FILES','1000'),('NOCHEH_LOG_MAX_FILES','')]:
                 with self.assertRaises(ValueError,msg=key+'='+bad):validate({**values,key:bad})
+
+    def test_the_database_viewer_asks_for_its_own_login_on_the_default_network(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        viewer=compose['pgweb-archive']
+        # The login comes from the environment, never the command line, and pgweb asks for it on every page.
+        self.assertEqual({key:viewer['environment'][key] for key in ('PGWEB_AUTH_USER','PGWEB_AUTH_PASS')},
+                         {'PGWEB_AUTH_USER':'owner','PGWEB_AUTH_PASS':'${NOCHEH_VIEWER_WEB_PASSWORD:-}'})
+        self.assertFalse([part for part in viewer['command']+viewer['entrypoint'] if 'auth' in part.lower() and 'PGWEB_AUTH_PASS' not in part])
+        self.assertEqual(viewer['entrypoint'][:2],['/bin/sh','-c']);self.assertIn('[ -z "$$PGWEB_AUTH_PASS" ]',viewer['entrypoint'][2])
+        self.assertIn('exec /usr/bin/pgweb "$$@"',viewer['entrypoint'][2])
+        self.assertIn('--readonly',viewer['command']);self.assertIn('--lock-session',viewer['command'])
+        # Healthy only while it answers 401 without the login.
+        self.assertEqual(viewer['healthcheck']['test'][0],'CMD-SHELL');self.assertRegex(viewer['healthcheck']['test'][1],r'%\{http_code\}.*" = 401$')
+        # It keeps its restart policy and stays on the default network, with its port on loopback only.
+        self.assertEqual(viewer['restart'],'unless-stopped');self.assertNotIn('networks',viewer)
+        self.assertEqual(viewer['ports'],['127.0.0.1:${NOCHEH_VIEWER_PORT:-8782}:8081'])
+        # The mini app and the dashboard read the same test-servers setting.
+        self.assertEqual(compose['nocheh-miniapp']['environment']['TELEGRAM_TEST_ENVIRONMENT'],'${TELEGRAM_TEST_ENVIRONMENT:-}')
 
     def test_owner_sets_parallel_runs_and_replies_and_replies_never_exceed_runs(self):
         import yaml

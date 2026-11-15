@@ -1,15 +1,18 @@
 """Images read by Hermes's own vision tool for Nocheh's preparation step."""
 import base64
+import errno
 import json
 import subprocess
 import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from services.hermes import image_text, prompts, usage
+from tools.operations.provider import usage as provider_usage
 
 ROUTE = {'NOCHEH_IMAGE_ROUTE_URL': 'https://images.example.test/v1', 'NOCHEH_IMAGE_ROUTE_KEY': 'synthetic-image-key',
          'NOCHEH_IMAGE_ROUTE_MODEL': 'vision-model', 'NOCHEH_IMAGE_ROUTE_PROVIDER': 'gateway'}
@@ -87,6 +90,39 @@ class ImageTextTests(unittest.TestCase):
         with patch.dict('os.environ', ROUTE), patch.object(image_text.subprocess, 'run', side_effect=run):
             image_text.read_image({'bytes_base64': body['bytes_base64']})
         self.assertEqual(seen['hint'], {'prompt': prompts.DEFAULTS['images.read']})
+
+    def test_a_write_that_found_no_room_is_counted_for_the_notice_never_as_a_model_call(self):
+        full = OSError(errno.ENOSPC, 'No space left on device')
+        modules, _ = hermes({'success': True, 'analysis': 'x'})
+        with patch.dict(sys.modules, modules), patch.object(image_text.Path, 'write_bytes', side_effect=full):
+            self.assertEqual(image_text.answer(b'x', {'prompt': 'Read it.'}), {'state': 'unreadable', 'write_failure': 'temp_full'})
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode()}
+        child = lambda answer: subprocess.CompletedProcess([], 0, json.dumps(answer).encode(), b'')
+        seen = {}
+
+        def run(command, **options):
+            seen.update(options['env'])
+            return child({'state': 'unreadable', 'write_failure': 'temp_full'})
+        with tempfile.TemporaryDirectory() as state, patch.dict('os.environ', ROUTE):
+            target = Path(state) / 'hermes/usage/usage.sqlite'
+            target.parent.mkdir(parents=True)
+            with patch.object(usage, 'DATABASE', target):
+                with patch.object(image_text.subprocess, 'run', side_effect=run):
+                    self.assertEqual(image_text.read_image(body), {'state': 'unreadable'}, 'the image gets today’s status')
+                with patch.object(image_text.tempfile, 'TemporaryDirectory', side_effect=full), \
+                        patch.object(image_text.subprocess, 'run') as never:
+                    self.assertEqual(image_text.read_image(body), {'state': 'unreadable'})
+                    never.assert_not_called()
+                # A provider's failure stays one, to be tried again, even while /tmp is short of room.
+                with patch.object(image_text.subprocess, 'run', return_value=child({'state': 'failed', 'reason': 'provider_error'})), \
+                        patch.object(usage, 'temp_full', return_value=True):
+                    self.assertEqual(image_text.read_image(body), {'state': 'failed', 'reason': 'provider_error'})
+                calls = usage.rows('2000-01-01', target)
+            day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            readers = provider_usage.reader_rows(state, day)
+        self.assertEqual(readers, [{'day': day, 'reader': 'image', 'done': 0, 'temp_full': 2, 'read_only': 0}])
+        self.assertEqual([(row['part'], row['runs'], row['failed']) for row in calls], [('image', 1, 1)],
+                         'only the provider’s failure is a model call')
 
     def test_a_hung_child_is_a_failure_to_retry(self):
         body = {'bytes_base64': base64.b64encode(b'synthetic').decode()}

@@ -1,15 +1,19 @@
 """Voice notes transcribed by Hermes's own transcriber for Nocheh's preparation step."""
 import base64
+import errno
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from services.hermes import usage, voice_text
+from tools.operations.provider import usage as provider_usage
 
 ROUTE = {'NOCHEH_TRANSCRIPTION_ROUTE_URL': 'https://transcribe.example.test/v1', 'NOCHEH_TRANSCRIPTION_ROUTE_KEY': 'synthetic-voice-key',
          'NOCHEH_TRANSCRIPTION_ROUTE_MODEL': 'gpt-transcribe', 'NOCHEH_TRANSCRIPTION_ROUTE_PROVIDER': 'openai',
@@ -91,6 +95,117 @@ class VoiceTextTests(unittest.TestCase):
                          [('transcription', 'gpt-transcribe', 1, 90.4, 1)])
         self.assertAlmostEqual(rows[0]['cost_usd'], 91 / 60 * 0.0045)
 
+    def test_a_part_asked_for_is_cut_first_and_only_the_cut_reaches_the_transcriber(self):
+        steps = []
+
+        def cut(path, seconds, target):
+            steps.append(('cut', Path(path).name, Path(path).read_bytes(), seconds))
+            Path(target).write_bytes(b'first part')
+            return True
+
+        def read(result, length, **hint):
+            module = transcriber(result)
+            original = module.transcribe_audio
+            module.transcribe_audio = lambda path: (steps.append(('transcribe', Path(path).name)), original(path))[1]
+            steps.clear()
+            with patch.dict(sys.modules, {'tools.transcription_tools': module}), patch.object(voice_text, 'cut', side_effect=cut), \
+                    patch.object(voice_text, 'duration', return_value=length):
+                found = voice_text.read(b'synthetic audio', {'name': '', 'mime_type': '', 'kind': 'voice', **hint})
+            return found, module.calls
+
+        # Telegram says five seconds; the sender sets that, so the part asked for is cut anyway.
+        found, calls = read({'success': True, 'transcript': 'Synthetic note'}, 900.0065, duration=5, first_seconds=900)
+        self.assertEqual(found, {'state': 'done', 'text': 'Synthetic note', 'seconds': 900.0065, 'cut': True})
+        self.assertEqual(steps, [('cut', 'voice.ogg', b'synthetic audio', 900), ('transcribe', 'first.ogg')], 'the cut comes first')
+        self.assertEqual(calls, [('first.ogg', b'first part')], 'the transcriber hears only the cut')
+        found, _ = read({'success': True, 'transcript': 'Synthetic note'}, 312.4, first_seconds=900)
+        self.assertEqual(found, {'state': 'done', 'text': 'Synthetic note', 'seconds': 312.4}, 'a shorter recording is whole')
+        found, _ = read({'success': True, 'transcript': ' '}, 900.0, first_seconds=900)
+        self.assertEqual(found, {'state': 'silent', 'seconds': 900.0, 'cut': True})
+        found, _ = read({'success': True, 'transcript': 'Synthetic note'}, None, first_seconds=900)
+        self.assertEqual(found, {'state': 'done', 'text': 'Synthetic note', 'seconds': 900, 'cut': True},
+                         'an unmeasured cut counts as the whole part, and as cut')
+        found, _ = read({'success': False, 'error': 'API error: Error code: 503 - busy'}, 900.0, first_seconds=900)
+        self.assertEqual(found, {'state': 'failed', 'reason': 'provider_error', 'cause': 'overloaded:503', 'seconds': 900.0})
+        found, _ = read({'success': True, 'transcript': 'Synthetic note'}, 61.2)
+        self.assertEqual((found, steps), ({'state': 'done', 'text': 'Synthetic note', 'seconds': 61.2}, [('transcribe', 'voice.ogg')]),
+                         'without a part asked for, nothing is cut')
+        module = transcriber({'success': True, 'transcript': 'never'})
+        with patch.dict(sys.modules, {'tools.transcription_tools': module}), patch.object(voice_text, 'cut', return_value=False):
+            self.assertEqual(voice_text.read(b'synthetic audio', {'name': '', 'mime_type': '', 'kind': 'voice', 'first_seconds': 900}),
+                             {'state': 'failed', 'reason': 'nocheh_error', 'cause': 'audio_cut', 'seconds': 0})
+        self.assertEqual(module.calls, [], 'a recording that cannot be cut is never sent whole')
+
+    def test_the_part_reaches_the_child_and_usage_never_counts_the_senders_length(self):
+        seen = []
+
+        def child(answer):
+            def run(command, **options):
+                seen.append(json.loads(command[-1]))
+                return subprocess.CompletedProcess(command, 0, answer, b'')
+            return run
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'kind': 'voice', 'duration': 5, 'first_seconds': 900}
+        with tempfile.TemporaryDirectory() as state, patch.dict('os.environ', ROUTE):
+            target = Path(state) / 'usage.sqlite'
+            with patch.object(usage, 'DATABASE', target):
+                with patch.object(voice_text.subprocess, 'run', side_effect=child(b'{"state": "done", "text": "Synthetic", "seconds": 900.0, "cut": true}')):
+                    self.assertEqual(voice_text.transcribe(body), {'state': 'done', 'text': 'Synthetic', 'cut': True})
+                self.assertEqual(seen[-1], {'name': '', 'mime_type': '', 'kind': 'voice', 'duration': 5, 'first_seconds': 900})
+                with patch.object(voice_text.subprocess, 'run', side_effect=child(b'{"state": "done", "text": "Synthetic", "seconds": 12.0, "cut": false}')):
+                    self.assertEqual(voice_text.transcribe(body), {'state': 'done', 'text': 'Synthetic'})
+                with patch.object(voice_text.subprocess, 'run', side_effect=child(b'Traceback')):
+                    self.assertEqual(voice_text.transcribe(body), {'state': 'failed', 'reason': 'nocheh_error'})
+                rows = usage.rows('2000-01-01', target)
+            self.assertEqual([(row['runs'], row['failed'], row['audio_seconds']) for row in rows], [(3, 1, 900.0 + 12.0 + 900)],
+                             'a broken child counts the part asked for, never the five seconds the sender stated')
+            refused = []
+            for value in (0, 86401, 1.5, True, '900'):
+                with patch.object(usage, 'DATABASE', Path(state) / 'refused.sqlite'), patch.object(voice_text.subprocess, 'run') as run:
+                    refused.append(voice_text.transcribe({**body, 'first_seconds': value}))
+                    run.assert_not_called()
+            self.assertEqual(refused, [{'state': 'failed', 'reason': 'nocheh_error'}] * 5, 'a part asked for wrongly is never read whole')
+            failed = usage.rows('2000-01-01', Path(state) / 'refused.sqlite')
+            self.assertEqual(failed[0]['failed'], 5, 'each refusal is counted, so the owner is told')
+
+    @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg is not installed here')
+    def test_ffmpeg_cuts_by_decoded_samples_and_keeps_only_the_sound(self):
+        def make(*arguments):
+            subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', *arguments], check=True, timeout=120)
+
+        def heard(path):
+            # Seconds of sound the provider would hear: the decoded samples counted one by one, at 1 kHz, whatever the
+            # file's timestamps say.
+            samples = subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', path,
+                                      '-ac', '1', '-ar', '1000', '-f', 'u8', '-'], capture_output=True, check=True, timeout=120)
+            return len(samples.stdout) / 1000
+        with tempfile.TemporaryDirectory() as work:
+            long, stated, round_video, junk = (str(Path(work, name)) for name in ('long.wav', 'stated.mka', 'round.mp4', 'junk.ogg'))
+            # Twenty minutes of a quiet tone at a low rate, so the file stays small.
+            make('-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=4000:duration=1200', '-ac', '1', '-c:a', 'pcm_u8', long)
+            # The same twenty minutes, copied with its timestamps scaled down, so the file states about two minutes.
+            make('-itsscale', '0.1', '-i', long, '-c', 'copy', stated)
+            self.assertLess(voice_text.duration(stated), 130, 'the copy states a short length')
+            self.assertGreater(heard(stated), 1199, 'and still holds all twenty minutes of sound')
+            for source in (long, stated):
+                target = str(Path(work, Path(source).stem + '.ogg'))
+                self.assertTrue(voice_text.cut(source, 900, target), source)
+                length = voice_text.duration(target)
+                self.assertTrue(899.9 <= length <= 900.05, (source, length))
+            # What the provider hears from the short-stated copy is fifteen minutes too, never the whole twenty.
+            sound = heard(str(Path(work, 'stated.ogg')))
+            self.assertTrue(899.9 <= sound <= 900.05, sound)
+            # A round video: the picture is left out and only the sound is kept.
+            make('-f', 'lavfi', '-i', 'testsrc=size=64x64:rate=5:duration=12', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=12',
+                 '-c:v', 'mpeg4', '-c:a', 'aac', '-shortest', round_video)
+            target = str(Path(work, 'round.ogg'))
+            self.assertTrue(voice_text.cut(round_video, 5, target))
+            streams = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', target],
+                                     capture_output=True, text=True, check=True).stdout.split()
+            self.assertEqual(streams, ['audio'])
+            self.assertTrue(4.9 <= voice_text.duration(target) <= 5.05)
+            Path(junk).write_bytes(b'OggS' + bytes(range(256)) * 8)
+            self.assertFalse(voice_text.cut(junk, 900, str(Path(work, 'junk-cut.ogg'))))
+
     def test_a_hung_or_broken_child_is_a_failure_to_retry_and_oversized_audio_is_never_sent(self):
         body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'kind': 'voice'}
         with patch.dict('os.environ', ROUTE):
@@ -101,6 +216,39 @@ class VoiceTextTests(unittest.TestCase):
             with patch.object(voice_text, 'LIMIT', 3), patch.object(voice_text.subprocess, 'run') as run:
                 self.assertEqual(voice_text.transcribe(body), {'state': 'too_large'})
                 run.assert_not_called()
+
+    def test_a_refused_write_is_counted_for_the_notice_never_as_a_model_call(self):
+        refused = OSError(errno.EROFS, 'Read-only file system')
+        with patch.dict(sys.modules, {'tools.transcription_tools': transcriber({'success': True, 'transcript': 'x'})}), \
+                patch.object(voice_text.Path, 'write_bytes', side_effect=refused):
+            self.assertEqual(voice_text.answer(b'x', {'name': 'a.ogg', 'mime_type': '', 'kind': ''}),
+                             {'state': 'failed', 'reason': 'nocheh_error', 'write_failure': 'read_only'})
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'kind': 'voice'}
+        child = lambda answer: subprocess.CompletedProcess([], 0, json.dumps(answer).encode(), b'')
+        seen = {}
+
+        def run(command, **options):
+            seen.update(options['env'])
+            return child({'state': 'failed', 'reason': 'nocheh_error', 'write_failure': 'read_only'})
+        with tempfile.TemporaryDirectory() as state, patch.dict('os.environ', ROUTE):
+            target = Path(state) / 'hermes/usage/usage.sqlite'
+            target.parent.mkdir(parents=True)
+            with patch.object(usage, 'DATABASE', target):
+                with patch.object(voice_text.subprocess, 'run', side_effect=run):
+                    self.assertEqual(voice_text.transcribe(body), {'state': 'failed', 'reason': 'nocheh_error'},
+                                     'the recording gets today’s status')
+                # A failure nobody explains, while /tmp has no room for the recording, failed for want of room.
+                with patch.object(voice_text.subprocess, 'run', return_value=child({'state': 'failed', 'reason': 'unknown'})), \
+                        patch.object(usage, 'temp_full', return_value=True):
+                    voice_text.transcribe(body)
+                with patch.object(voice_text.subprocess, 'run', return_value=child({'state': 'done', 'text': 'Synthetic', 'seconds': 2})):
+                    voice_text.transcribe(body)
+                calls = usage.rows('2000-01-01', target)
+            day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            readers = provider_usage.reader_rows(state, day)
+        self.assertEqual(readers, [{'day': day, 'reader': 'voice', 'done': 1, 'temp_full': 1, 'read_only': 1}])
+        self.assertEqual([(row['part'], row['runs'], row['failed']) for row in calls], [('transcription', 1, 0)],
+                         'only the transcription that reached the model is a model call')
 
 
 if __name__ == '__main__':

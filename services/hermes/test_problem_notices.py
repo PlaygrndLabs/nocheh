@@ -28,6 +28,12 @@ def sending(**kinds):
                                         'chat_sends': {'window_hours': 24, 'problems': sum(kinds.values()), 'problem_kinds': kinds}}}
 
 
+def reading(failed, ok=0, reader='document', failure='temp_full', day=TODAY):
+    """Monitoring's rows of files a Hermes reader could not read because a write failed, as reader_problems gives them."""
+    rows = [{'day': day, 'reader': reader, 'label': problems.READERS[reader][0], 'failure': failure, 'failed': failed, 'ok': ok}]
+    return {**monitoring(), 'reader_problems': rows if failed else []}
+
+
 def refusals(failed, refused, hidden=0):
     return [{'day': TODAY, 'part': 'guard', 'label': 'Secret check', 'provider': 'anthropic', 'model': 'synthetic-model',
              'failed': failed, 'refused': refused, 'hidden': hidden}]
@@ -148,6 +154,11 @@ class ProblemNoticeTests(unittest.TestCase):
         own = {**refusals(2, 0)[0], 'reasons': {'nocheh_error': 2}, 'causes': {'nocheh_error:detector_contract_rejected': 2}}
         self.assertEqual(problems.why(own), '2 Nocheh’s own error (detector contract rejected)',
                          'a refusal of Nocheh’s own says which, never that the provider rejected the call')
+        cut = {**refusals(1, 0)[0], 'part': 'transcription', 'label': 'Voice notes', 'reasons': {'nocheh_error': 1},
+               'causes': {'nocheh_error:audio_cut': 1}}
+        self.check(NOW, usage=[cut])
+        self.assertEqual(self.sent[-1]['problems'], ['Voice notes (synthetic-model): 1 model call failed today: 1 Nocheh’s own error (audio cut).'],
+                         'a recording that could not be cut to the part read for someone not allowed is told')
 
     def test_only_todays_model_failures_count(self):
         found = problems.problems(monitoring(), refusals(1, 1), TODAY)
@@ -312,6 +323,46 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual([p for p in problems.problems({**monitoring(), 'github': connected}, [], TODAY) if p['kind'] == 'github'], [],
                          'a connected app gives no notice: its key never expires')
 
+    def test_each_backup_that_does_not_finish_is_news_and_a_finished_one_marks_it_fixed(self):
+        backups = lambda **counts: {**monitoring(), 'backups': {'failed': 0, 'reason': None, 'unreadable': 0, 'skipped_days': 0,
+                                                                  'offsite_failed': 0, 'offsite_reason': None, 'offsite_skipped': 0, **counts}}
+        self.check(NOW, backups())
+        self.check(NOW + 120, backups(failed=1, reason='backup_unsupported_link'))
+        self.assertEqual(self.sent[-1]['problems'],
+                         ['The last backup didn’t finish (a file link outside a command workspace). Older backups are kept.'])
+        self.check(NOW + 240, backups(failed=1, reason='backup_unsupported_link'))
+        self.assertEqual(len(self.sent), 1, 'one notice for one backup')
+        # The next day's backup fails too: news again.
+        self.check(NOW + 86400, backups(failed=2, reason='backup_unsupported_link'))
+        self.assertEqual(self.sent[-1]['problems'],
+                         ['Backups stopped: the last 2 didn’t finish (a file link outside a command workspace). Older backups are kept.'])
+        # Backups that could not be read leave the line open.
+        self.check(NOW + 86520, {**monitoring(), 'backups': {'unavailable': True}})
+        self.assertEqual(self.edits, [])
+        self.check(NOW + 86640, backups())
+        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Fixed at 12:04 UTC']))
+
+    def test_backup_and_off_site_lines_never_name_a_file(self):
+        found = problems.problems({**monitoring(), 'backups': {'failed': 3, 'reason': 'backup_disk_full', 'unreadable': 2, 'skipped_days': 2,
+                                                               'offsite_failed': 1, 'offsite_reason': 'offsite_low_disk', 'offsite_skipped': 1,
+                                                               'path': 'hermes/private-name'}}, [], TODAY)
+        lines = [problems.text(problem, problem['count']) for problem in found if problem['kind'].startswith(('backup', 'offsite'))]
+        self.assertEqual(lines, [
+            'Backups stopped: the last 3 didn’t finish (the disk filled up). Older backups are kept.',
+            'The newest backup left out 2 files or folders that a command made unreadable in its workspace. See System › Backups.',
+            'Automatic backups were skipped 2 days in a row: not enough free disk space.',
+            'The off-site copy of the newest backup failed (not enough free disk space).',
+            'The off-site copy of the newest backup was skipped: not enough free disk space.'])
+        self.assertNotIn('private-name', ''.join(lines))
+        one = problems.problems({**monitoring(), 'backups': {'failed': 1, 'reason': 'something_new', 'skipped_days': 1, 'offsite_failed': 2,
+                                                             'offsite_reason': 'offsite_storage_AccessDenied', 'offsite_skipped': 3}}, [], TODAY)
+        self.assertEqual([problems.text(problem, problem['count']) for problem in one if problem['kind'].startswith(('backup', 'offsite'))], [
+            'The last backup didn’t finish (see System › Backups). Older backups are kept.',
+            'Today’s automatic backup was skipped: not enough free disk space.',
+            'The last 2 off-site copies failed (see System › Backups).',
+            'The off-site copies of the last 3 backups were skipped: not enough free disk space.'])
+
+
     def test_failed_sends_to_chat_apps_repeat_at_most_once_an_hour_only_when_worse_and_clear_at_zero(self):
         self.check(NOW, sending(reaction=1))
         self.assertEqual(self.sent[-1]['problems'], ['1 send to a chat app failed in the last day.'])
@@ -350,6 +401,51 @@ class ProblemNoticeTests(unittest.TestCase):
         self.assertEqual(self.edits, [], 'a summary that could not be read clears nothing')
         self.check(NOW + 3820, sending(reply=2))
         self.assertEqual(len(self.sent), 1, 'the same failed sends, after checks that could not read them')
+
+    def test_files_a_reader_could_not_write_repeat_hourly_only_when_more_and_clear_once_one_is_read(self):
+        self.check(NOW, reading(1))
+        line = ('Documents: 1 file couldn’t be read today because Hermes’s temporary space was full. Restarting Hermes empties it. '
+                'The originals are kept: Make a new version on a message’s page reads one again.')
+        self.assertEqual(self.sent[-1]['problems'], [line])
+        self.check(NOW + 600, reading(3))
+        self.assertEqual(len(self.sent), 1, 'more, but within the quiet hour')
+        self.check(NOW + 3700, reading(3))
+        self.assertEqual(self.sent[-1]['problems'], [line.replace('1 file', '3 files')])
+        self.check(NOW + 7400, reading(3))
+        self.assertEqual(len(self.sent), 2, 'no more, so not repeated')
+        self.check(NOW + 7520, reading(3, ok=1))
+        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Working again since 14:05 UTC']))
+        # A refusal by the locked-down container, and a voice note, say so.
+        found = problems.problems(reading(2, reader='voice', failure='read_only'), [], TODAY)
+        self.assertEqual([problems.text(problem, 2) for problem in found if problem['kind'] == 'reader'], [
+            'Voice notes: 2 recordings couldn’t be transcribed today because Hermes’s locked-down container refused a file write. '
+            'The originals are kept: Make a new version on a message’s page transcribes one again.'])
+
+    def test_a_reader_line_is_only_todays_and_a_new_day_starts_its_own(self):
+        self.assertEqual([p for p in problems.problems(reading(2, day='2026-10-27'), [], TODAY) if p['kind'] == 'reader'], [],
+                         'yesterday’s files are not today’s')
+        self.assertEqual([p for p in problems.problems(reading(2, failure='synthetic'), [], TODAY) if p['kind'] == 'reader'], [],
+                         'a failure Nocheh has no words for is no line')
+        self.check(NOW, reading(2))
+        tomorrow, day = NOW + 86400, '2026-10-29'
+        self.check(tomorrow, reading(1, day=day))
+        self.assertEqual(self.check(tomorrow + 120, reading(1, day=day))['state'], 'nothing_new')
+        self.assertEqual(self.sent[-1]['problems'], [
+            'Documents: 1 file couldn’t be read today because Hermes’s temporary space was full. Restarting Hermes empties it. '
+            'The originals are kept: Make a new version on a message’s page reads one again.'], 'counted from zero again')
+        self.assertEqual(self.edits, [], 'like a model’s calls, yesterday’s line stays as it was')
+        self.check(tomorrow + 240, reading(1, ok=1, day=day))
+        self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Working again since 12:04 UTC']))
+
+    def test_one_file_a_reader_could_not_write_is_one_line_and_not_a_model_call(self):
+        self.check(NOW, reading(1, reader='image'), usage=[])
+        self.assertEqual(self.sent[-1]['problems'], [
+            'Images: 1 image couldn’t be read today because Hermes’s temporary space was full. Restarting Hermes empties it. '
+            'The originals are kept: Make a new version on a message’s page reads one again.'])
+        self.assertNotIn('readers', problems.readable({**monitoring(), 'reader_problems': {'unavailable': True}}))
+        self.check(NOW + 120, {**monitoring(), 'reader_problems': {'unavailable': True}})
+        self.check(NOW + 3800, reading(1, reader='image'))
+        self.assertEqual((len(self.sent), self.edits), (1, []), 'counts that could not be read clear nothing and are not news again')
 
 
 if __name__ == '__main__':

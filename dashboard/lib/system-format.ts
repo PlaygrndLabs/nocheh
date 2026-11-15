@@ -330,6 +330,7 @@ export function jobOutcome(job: {kind: string; state: string; error?: string | n
 }
 
 const offsiteErrors: Record<string, string> = {
+  offsite_failed: 'The copy didn’t reach the storage.',
   offsite_not_configured: 'Off-site copies are off. Turn them on in Settings › Privacy & data.',
   offsite_no_backup: 'There is no finished backup to copy yet.',
   offsite_no_copy: 'No off-site copy was found in the bucket.',
@@ -370,7 +371,17 @@ const offsiteErrors: Record<string, string> = {
   offsite_backblaze_unreachable: 'Backblaze couldn’t be reached. Check the internet connection and try again.',
 };
 
+/** Why a backup didn't finish (ADR-0251). Older backups are always kept. */
+const backupErrors: Record<string, string> = {
+  backup_unsupported_link:
+    'A file link outside a command workspace stopped the backup. Remove the link that System › Backups names, then back up again.',
+  backup_disk_full: 'The disk filled up during the backup. Free some space, then back up again.',
+  backup_interrupted: 'The backup was stopped before it finished, for example by a restart.',
+  backup_failed: 'The backup didn’t finish. Run a service check for details.',
+};
+
 export function operationError(code: string): string {
+  if (code in backupErrors) return backupErrors[code]!;
   if (code === 'wait_for_active_jobs') return 'Another task is running. Try again when it finishes.';
   if (code === 'installation_maintenance') return 'A backup is running. Try again when it finishes.';
   if (code === 'operation_denied') return 'That task isn’t allowed.';

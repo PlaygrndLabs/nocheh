@@ -98,6 +98,8 @@ def files(state, memory, config_path, blockers):
                  **{name: ('delegate', '') for name in ('admin', 'hermes', 'honcho', 'telegram')}})
     area(state / 'admin', {**{name: ('erase', 'installation_content_and_receipts') for name in ('backups', 'exports', 'jobs', 'tools', 'workflows', 'dashboard', 'downloads')},
                            'applied.json': ('erase', 'stale_applied_configuration_revision'),
+                           # How the last backup ended: it describes the backups a reset erases (ADR-0251).
+                           'backup-health.json': ('erase', 'installation_content_and_receipts'),
                            'settings.lock': ('preserve', 'configuration_advisory_lock'),
                            'reset': ('preserve', 'reset_coordinator_journal'), 'restores': ('review_restore', 'separate_restore_ownership_required')})
     native = state / 'hermes'

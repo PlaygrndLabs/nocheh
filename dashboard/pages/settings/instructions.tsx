@@ -58,7 +58,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'sharing.group_filter',
     title: 'Group sharing filter',
-    hint: 'Decides what private knowledge may be shared with a group. Your privacy rules from Settings are added after it.',
+    hint: 'Decides what private knowledge a sharing rule set to Filter automatically may pass on to a group. That rule’s privacy notes are added after it. It sees only the words that were searched for, at most the 12 longest and in sorted order, never the question as it was asked.',
   },
   {
     key: 'telegram.not_allowed',
@@ -163,7 +163,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'background.texts',
     title: 'Background job card answers',
-    hint: 'One “name: text” line each for what a decided job card says: running, running_elsewhere (the running line of a card in your private chat for a job asked in another chat), queued, stopping, done, limited, stopped, failed and rejected. checked and member_limit make the card’s secret check line, unpriced its line for a model without a price, notion_reads its Notion line and box its sealed box line. box_repo is the sealed box line of a job that reads a GitHub copy, repo its copy line with {repo_name}, {repo_branch}, {repo_commit}, {repo_copied} and {repo_size}, and repo_removed what a card says when Remove withdrew it. machine is the line of a job that works on one of your machines, with {machine_name}, {machine_login} and {machine_address}; steps is the heading of its plan; machine_off is what a card says when its machine was turned off or changed. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for what a decided job card says: running, running_elsewhere (the running line of a card in your private chat for a job asked in another chat), queued, paused (a job a member approved while member jobs are paused), stopping, done, limited, stopped, failed and rejected. checked and member_limit make the card’s secret check line, unpriced its line for a model without a price, notion_reads its Notion line and box its sealed box line. box_repo is the sealed box line of a job that reads a GitHub copy, repo its copy line with {repo_name}, {repo_branch}, {repo_commit}, {repo_copied} and {repo_size}, and repo_removed what a card says when Remove withdrew it. machine is the line of a job that works on one of your machines, with {machine_name}, {machine_login} and {machine_address}; steps is the heading of its plan; machine_off is what a card says when its machine was turned off or changed. A line you remove keeps its default.',
   },
   {
     key: 'background.box',
@@ -179,6 +179,21 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     key: 'background.machine',
     title: 'Background job: your machine',
     hint: 'Added to each run of a job that works on one of your machines over SSH: that its terminal and file tools run there, the plan you approved, and what it must never do there. {machine_name}, {machine_login}, {machine_address} and {steps} are filled in.',
+  },
+  {
+    key: 'background.member_spend',
+    title: 'Member jobs: spend notice',
+    hint: 'Sent to your private chat, with a Pause button, once a UTC day when jobs members approved themselves pass your notice mark (Settings › Assistant › Background jobs). {spent} is what they spent today, {mark} the notice mark, {pause_mark} the mark where member jobs pause by themselves, and {members} one line for each member in each group.',
+  },
+  {
+    key: 'background.member_paused',
+    title: 'Member jobs: paused by themselves',
+    hint: 'Sent to your private chat, with a Resume button, when member jobs pause by themselves past your pause mark, until 00:00 UTC. {spent}, {mark} (the pause mark) and {members} are filled in as in the spend notice.',
+  },
+  {
+    key: 'background.member_texts',
+    title: 'Member jobs: notice lines and buttons',
+    hint: 'One “name: text” line each: member is a line of {members} with {name}, {group} and {spent}; more sums the rest with {count} and {spent}; unnamed_member ({id}) and unnamed_group stand in for a missing name; pause and resume are the buttons; paused and resumed answer a press and are added under the notice; only_owner answers anyone else. A line you remove keeps its default.',
   },
 ];
 

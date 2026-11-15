@@ -48,6 +48,19 @@ class DashboardOperationsTests(unittest.TestCase):
                          [('user:alice','group:123'),('project:work','group:123')])
         self.assertEqual(graph['bounds'],{'collections':0,'users':1,'projects':1,'groups':1,'messages':0,'truncated':True})
 
+    def test_a_failed_backup_names_its_fixed_code_and_nothing_else(self):
+        job='11111111-1111-4111-8111-111111111111'
+        for stdout,expected in (('{"error": "backup_unsupported_link"}\n','backup_unsupported_link'),
+                                ('{"error": "backup_disk_full"}','backup_disk_full'),
+                                ('{"error": "hermes/private-name"}','operation_failed'),
+                                ('{"error": "operation_denied"}','operation_failed'),
+                                ('Traceback (most recent call last):\n  synthetic','operation_failed'),('','operation_failed')):
+            with self.subTest(stdout=stdout),tempfile.TemporaryDirectory() as folder,\
+                 patch('tools.operations.installation.admin_operations.subprocess.run') as command:
+                command.return_value.returncode=1;command.return_value.stdout=stdout
+                with self.assertRaisesRegex(ValueError,'^'+expected+'$'):run(Path(folder),'backup',job)
+
+
     def test_operations_fixed_destinations_and_inactive_restore(self):
         job='11111111-1111-4111-8111-111111111111';backup='22222222-2222-4222-8222-222222222222'
         with tempfile.TemporaryDirectory() as folder,patch('tools.operations.installation.admin_operations.subprocess.run') as command:

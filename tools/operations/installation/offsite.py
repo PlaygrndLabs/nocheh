@@ -387,8 +387,25 @@ def due(state, values):
     if not finished: return {'due': False}
     record = read_record(state)
     if finished[0][0] in record['sent'] or finished[0][0] in record.get('attempted', []): return {'due': False}
-    if not _room(state, _size(finished[0][2])): return {'due': False, 'skipped': 'low_disk'}
+    if not _room(state, _size(finished[0][2])):
+        # Counted once for each backup left without a copy, so each one is news to the owner (ADR-0251).
+        skipped = record.get('skipped') if isinstance(record.get('skipped'), dict) else {}
+        if skipped.get('backup') != finished[0][0]:
+            count = skipped.get('count') if type(skipped.get('count')) is int else 0
+            record['skipped'] = {'reason': 'low_disk', 'at': _now().isoformat(), 'backup': finished[0][0], 'count': count + 1}
+            write_record(state, record)
+        return {'due': False, 'skipped': 'low_disk'}
     return {'due': True}
+
+
+def _failed(state, backup, error, tried=True):
+    """Records a copy that did not reach the storage. Copies that failed in a row are counted until one is sent;
+    one that was tried ends a run of copies skipped for low disk."""
+    record = read_record(state)
+    if tried: record.pop('skipped', None)
+    record['failed_in_row'] = (record['failed_in_row'] if type(record.get('failed_in_row')) is int else 0) + 1
+    record['last'] = {'state': 'failed', 'at': _now().isoformat(), 'backup': backup, 'error': _code(error)}
+    write_record(state, record)
 
 
 def send(state, values, opener=None):
@@ -398,7 +415,9 @@ def send(state, values, opener=None):
     finished = _finished(state)
     if not finished: raise OffsiteError('offsite_no_backup')
     backup, created_at, path = finished[0]
-    if not _room(state, _size(path)): raise OffsiteError('offsite_low_disk')
+    if not _room(state, _size(path)):
+        # Not tried, so the schedule still sends this backup once there is room; but the owner hears about it.
+        error = OffsiteError('offsite_low_disk'); _failed(state, backup, error, tried=False); raise error
     record = read_record(state); record['attempted'] = (record.get('attempted', []) + [backup])[-50:]
     record['last'] = {'state': 'running', 'at': _now().isoformat(), 'backup': backup}; write_record(state, record)
     work = Path(state) / 'admin/offsite-work'; work.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -423,7 +442,7 @@ def send(state, values, opener=None):
                     if str(error) != LOCKED: raise
                     locked += 1
         except OffsiteError as error: prune_error = str(error)
-        record = read_record(state)
+        record = read_record(state); record.pop('skipped', None); record['failed_in_row'] = 0
         record['sent'][backup] = {'key': key, 'at': _now().isoformat(), 'bytes': size}
         record['sent'] = dict(sorted(record['sent'].items(), key=lambda item: item[1]['at'])[-100:])
         extra = {**({'locked': locked} if locked else {}), **({'prune_error': prune_error} if prune_error else {})}
@@ -431,9 +450,7 @@ def send(state, values, opener=None):
         write_record(state, record)
         return {'status': 'offsite_sent', 'backup': backup, 'key': key, 'bytes': size, 'removed': removed, **extra}
     except Exception as error:
-        record = read_record(state)
-        record['last'] = {'state': 'failed', 'at': _now().isoformat(), 'backup': backup, 'error': _code(error)}
-        write_record(state, record); raise
+        _failed(state, backup, error); raise
     finally:
         if copy.exists(): copy.unlink()
 

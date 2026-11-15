@@ -428,14 +428,20 @@ services:
     image: sosedoff/pgweb:0.17.0@sha256:a5256d416e2e8b92d69a4459058e3eca33a9f075d8325491644411d0bc3bd70b
     profiles: [tools]
     restart: unless-stopped
+    # It never serves without the login ./bin/nocheh db makes; the browser asks for it once (ADR-0251).
+    entrypoint: [/bin/sh, -c, 'if [ -z "$$PGWEB_AUTH_PASS" ]; then echo "The database viewer needs its login: run ./bin/nocheh db." >&2; exit 64; fi; exec /usr/bin/pgweb "$$@"', pgweb]
     command: [--bind=0.0.0.0, --listen=8081, --readonly, --lock-session, --no-ssh, --skip-open]
     environment:
       PGWEB_DATABASE_URL: postgres://nocheh_viewer:${NOCHEH_VIEWER_PASSWORD:-}@nocheh-db:5432/nocheh?sslmode=disable
+      # pgweb asks for this login on every page, so a page on another site can't read it through the loopback port.
+      PGWEB_AUTH_USER: owner
+      PGWEB_AUTH_PASS: ${NOCHEH_VIEWER_WEB_PASSWORD:-}
     ports: ["127.0.0.1:${NOCHEH_VIEWER_PORT:-8782}:8081"]
     depends_on:
       nocheh-db: {condition: service_healthy}
     healthcheck:
-      test: [CMD, curl, --fail, --silent, --output, /dev/null, http://127.0.0.1:8081/]
+      # Healthy only while it asks for the login: a viewer that answers without one never is.
+      test: [CMD-SHELL, "test \"$$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8081/)\" = 401"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -558,6 +564,8 @@ services:
     environment:
       TELEGRAM_BOT_ID: ${TELEGRAM_BOT_ID:-}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+      # The same .env setting the dashboard reads when it checks a phone's sign-in again (ADR-0251).
+      TELEGRAM_TEST_ENVIRONMENT: ${TELEGRAM_TEST_ENVIRONMENT:-}
       NOCHEH_DASHBOARD_HOST: nocheh-dashboard
       NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
       NOCHEH_MINI_APP_PORT: '8788'
@@ -608,10 +616,18 @@ services:
     init: true
     restart: unless-stopped
     stop_grace_period: 120s
+    # Locked down (ADR-0251): Hermes writes only its mounted folders and /tmp. /tmp is memory, emptied at each
+    # restart; readers clean up after every file, and a full /tmp or a refused write reaches the problem notice.
+    read_only: true
+    tmpfs: ['/tmp:size=1g,mode=1777']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     ports: ["127.0.0.1:${NOCHEH_NATIVE_ADMIN_PORT:-8785}:8785"]
     environment:
       NOCHEH_STORAGE_LAYOUT: original-only-v1
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
+      # Caches only; make dev keeps its mounted home instead (docker-compose.dev.yml).
+      HOME: /tmp/home
       NOCHEH_DASHBOARD_HOME: /dashboard-state/home
       NOCHEH_BROWSER_CHAT: '1'
       # Chat scopes for routing turns; polling and sending belong to nocheh-telegram.
@@ -648,12 +664,14 @@ services:
       NOCHEH_TRANSCRIPTION_ROUTE_PRICE: ${NOCHEH_TRANSCRIPTION_ROUTE_PRICE:-}
       ARCHIVE_URL: http://nocheh-app:8780
       GUARD_URL: http://nocheh-security:8786
+    # Only the folders Hermes uses: the dashboard's look (not its token) and its own brain-turn journal (not the
+    # rest of the spool). ./bin/nocheh makes them at 0700, so Docker never makes them as root.
     volumes:
-      - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard:/dashboard-state
+      - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard/home:/dashboard-state/home
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes:/workspace/data/local/hermes
       - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
       - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
-      - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool/brain-turns:/data/spool/brain-turns
     depends_on:
       nocheh-app: {condition: service_healthy}
       nocheh-security: {condition: service_healthy}
