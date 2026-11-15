@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {actionContinued,approvalCard,approvalLines,approvalTask,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,learningInstruction,learningPrompt,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,withPrompts} from '../src/prompts.js';
+import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,withPrompts} from '../src/prompts.js';
 import {brainSummary} from '../src/brain/brain.js';
 import {fixtureBrain,type FakeCall} from './fixture-brain.js';
 
@@ -60,6 +60,54 @@ test('approval card templates leave out a line whose value is missing and keep d
   // A group's task set on its project itself says that every group of the project gets it.
   assert.equal(fillTemplate(approvalLines('').task_move_project,{project:'“P1”'}),'Set a task on “P1” itself, for every group in it');
   assert.equal(fillTemplate(approvalLines('').task_move_project_family,{project:'“P1”',count:'2'}),'Set a task, with 2 under it, on “P1” itself, for every group in it');
+});
+
+test('sends and reminders name chats and people in fixed lines the owner can edit, which must keep their values (ADR-0254, ADR-0255)',async()=>{
+  const lines=approvalLines(undefined);
+  assert.deepEqual({group_chat:lines.group_chat,topic_name:lines.topic_name,person_chat:lines.person_chat,person_chat_more:lines.person_chat_more,
+    person_chat_other:lines.person_chat_other,unnamed_person:lines.unnamed_person,unknown_chat:lines.unknown_chat,not_served:lines.not_served,
+    name_project:lines.name_project,name_id:lines.name_id,not_sent:lines.not_sent,reason_not_served:lines.reason_not_served,
+    reason_settings_changed:lines.reason_settings_changed,schedule_not_sent:lines.schedule_not_sent,schedule_not_run:lines.schedule_not_run,
+    job_report_not_sent:lines.job_report_not_sent},{group_chat:'group {name}',topic_name:'topic {name}',
+    person_chat:'private chat with {name} (a person you allowed in {group})',
+    person_chat_more:'private chat with {name} (a person you allowed in {group} and {count} more)',person_chat_other:'private chat with {name}',
+    unnamed_person:'a person \u2026{id}',unknown_chat:'a chat Nocheh no longer knows',not_served:'(not served now)',name_project:'{name} of project {project}',
+    name_id:'{name} (\u2026{id})',not_sent:'\u{1f6ab} Approved, but not sent: {reason}',reason_not_served:'Nocheh does not serve that chat now.',
+    reason_settings_changed:'your settings changed while it ran. It runs again at its next time.',
+    schedule_not_sent:'\u26a0\ufe0f A scheduled task in {chat} finished, but its result was not sent: {reason}',
+    schedule_not_run:'\u26a0\ufe0f A scheduled task in {chat} did not run: {reason} It runs again once you select that group on the dashboard Chats page.',
+    job_report_not_sent:'\u26a0\ufe0f The job {title} finished, but its report was not sent to {chat}: {reason}'});
+  assert.deepEqual([lines.private_chat,lines.topic,lines.unnamed_group,lines.unnamed_topic,lines.general_topic],['your private chat','\u203a {topic}','a Telegram group','a topic','General'],
+    'the chat words a card has today stay');
+  assert.equal(fillTemplate(lines.not_sent,{reason:lines.reason_not_served}),'\u{1f6ab} Approved, but not sent: Nocheh does not serve that chat now.');
+  assert.ok((promptKeys as readonly string[]).includes('tasks.reminder_texts'));
+  assert.deepEqual(reminderLines(undefined),{you:'you',person:'{name}, a person you allowed',person_gone:'{name}, a person you no longer allow',
+    unnamed_person:'someone you allowed',set_by:'\u{1f464} Set by {who} in {place}',written_by:'\u270f\ufe0f Last written by {who} in {place}: {fields}',
+    field_title:'title',field_notes:'notes',field_due:'due day',closed_by:'\u2611\ufe0f Closed by {who} in {place}',merged:'\u{1f514} {count} reminders set in {place}',
+    more_waiting:'\u23f3 {count} more reminders set in {place} are due. They come in the next message; at most one message per group every 10 minutes.',
+    note_line:'\u2506 {line}',
+    removed_in_group:'\u{1f5d1}\ufe0f A message from you in {place} removed {count} reminders on {title} that were set elsewhere: {times}. If you did not mean to, add them again in the dashboard.'});
+  // An empty line keeps its default; an edited one is used.
+  assert.equal(reminderLines('set_by:\nyou: me').set_by,reminderLines('').set_by);assert.equal(reminderLines('you: me').you,'me');
+  assert.equal(approvalLines('group_chat:').group_chat,'group {name}');assert.equal(approvalLines('group_chat: the group {name}').group_chat,'the group {name}');
+  // A save that drops a value Nocheh fills in on one of these lines is refused; one stored before reads that line's default.
+  assert.equal(promptProblem('tasks.reminder_texts','set_by: Hi'),'prompt_placeholder_missing');
+  assert.equal(promptProblem('tasks.reminder_texts','set_by: {who} was in {place}\nyou: me'),null);
+  assert.equal(promptProblem('tasks.reminder_texts','more_waiting: {count} more are due.'),null,'more_waiting needs only its count');
+  assert.equal(reminderLines('set_by: Hi\nyou: me').set_by,'\u{1f464} Set by {who} in {place}');assert.equal(reminderLines('set_by: Hi\nyou: me').you,'me','the other lines stay');
+  assert.equal(promptProblem('telegram.approval_texts','person_chat: private chat with {name}'),'prompt_placeholder_missing','the groups a person is allowed in are always named');
+  assert.equal(approvalLines('person_chat: private chat with {name}\nsent: Sent!').person_chat,lines.person_chat);
+  assert.equal(promptProblem('telegram.approval_texts','sent: Sent!\ntopic: in a topic'),null,'lines a card has today keep their freedom');
+  assert.equal(promptProblem('tasks.reminder_texts',reminderTexts),null);assert.equal(promptProblem('telegram.approval_texts',approvalTexts),null);
+  for(const [key,required] of Object.entries(labeledPlaceholders))for(const [name,values] of Object.entries(required!)) {
+    const line=(key==='tasks.reminder_texts'?reminderLines(''):approvalLines(''))[name as never] as string|undefined;
+    assert.ok(line&&values.every(value=>line.includes(value)),`${key} ${name}: its default keeps its values`);
+  }
+  // A stored text with such a line is still read, so the owner's other lines stay.
+  const control={query:async()=>({rows:[{texts:{'telegram.approval_texts':'sent: Sent!\nnot_sent: Nope','tasks.reminder_texts':'set_by: Hi'}}]})} as any;
+  const stored=await ownerPrompts(control);
+  assert.equal(approvalLines(stored['telegram.approval_texts']).sent,'Sent!');assert.equal(approvalLines(stored['telegram.approval_texts']).not_sent,lines.not_sent);
+  assert.equal(reminderLines(stored['tasks.reminder_texts']).set_by,'\u{1f464} Set by {who} in {place}');
 });
 
 test('Answer privately has its own editable texts: the button, its popups and the private answer’s first line (ADR-0249)',()=>{

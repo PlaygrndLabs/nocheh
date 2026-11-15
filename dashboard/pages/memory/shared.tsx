@@ -45,6 +45,10 @@ export function errorWords(error: unknown): string {
     task_start_time_needs_day: 'Choose a start day before a start time.',
     task_reminder_past: 'A new reminder has to be in the future.',
     invalid_task_reminder: 'Choose a day and time for each reminder.',
+    task_reminder_limit:
+      'A task keeps up to 10 reminders of your own, and one save can add at most 10. Remove one first.',
+    invalid_task_reminders: 'These reminder times could not be saved. Check the list and try again.',
+    destination_not_served: 'Nocheh doesn’t serve that chat now. Select the group on the Chats page first.',
     invalid_task_repeat: 'Check how often the task repeats.',
     task_parent_cycle: 'A task can’t sit under itself or under one of its own subtasks.',
     task_parent_other_list: 'A subtask stays in its parent’s list. Take it out from under its parent first.',

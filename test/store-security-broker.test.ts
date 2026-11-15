@@ -21,11 +21,12 @@ test('three-store broker binds original and scheduled turns, isolates generation
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-broker-')),key='broker:'+Date.now(),token='synthetic-service-token-only-for-tests';
-  let detectors=0,revocation=false;const calls:{url:string;body:unknown}[]=[];
+  let detectors=0,revocation=false,refuse=(_url:string):Response|null=>null;const calls:{url:string;body:unknown}[]=[];
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-321']}),
     runtime:async(_operation,input)=>{detectors++;return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no native provider');})});
   const mock:typeof fetch=async(url,init)=>{
     calls.push({url:String(url),body:init?.body?JSON.parse(String(init.body)):null});
+    const refused=refuse(String(url));if(refused)return refused;
     if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:'https://gateway.example.test/v1',api_mode:'chat_completions',api_key:'synthetic-credential',model_context_length:100000});
     if(revocation)return new Response(new ReadableStream({start(controller){
       controller.enqueue(new TextEncoder().encode('data: first\n\n'));
@@ -102,6 +103,22 @@ test('three-store broker binds original and scheduled turns, isolates generation
     assert.equal((await request('/v1/guard',{destination:'https://fixture.example',payload:{text:'Administrative saffronpass'}},token)).status,200);
     const adminGuard=(await stores.control.query("SELECT id FROM content_operations WHERE kind='service_guard' ORDER BY created_at DESC LIMIT 1")).rows[0];
     assert.ok(adminGuard);assert.ok((await stores.derived.query("SELECT 1 FROM derived_artifacts WHERE operation_reference->>'id'=$1",[adminGuard.id])).rowCount!>0);
+    // A message request is told that its chat is not one Nocheh serves, and a task change why a reminder time was not saved
+    // (ADR-0254, ADR-0255); any other code, a code from another route's list, or a server error stays opaque.
+    const relayed=async(path:string,body:unknown)=>{const answer=await request(path,body);return {status:answer.status,body:await answer.json()};};
+    const answering=(path:string,status:number,error:string)=>{refuse=url=>new URL(url).pathname===path?Response.json({error},{status}):null;};
+    answering('/v1/action-requests',403,'destination_not_served');
+    assert.deepEqual(await relayed('/v1/action-requests',{destination:'b'.repeat(64),text:'Synthetic note'}),{status:403,body:{error:'destination_not_served'}});
+    answering('/v1/owner/tasks',400,'task_reminder_limit');
+    assert.deepEqual(await relayed('/v1/owner/tasks',{title:'Synthetic',reminders:['2030-01-04T09:00']}),{status:400,body:{error:'task_reminder_limit'}});
+    answering('/v1/owner/tasks/'+'c'.repeat(64),400,'task_reminder_past');
+    assert.deepEqual(await relayed('/v1/owner/tasks/'+'c'.repeat(64),{expected_revision:1,reminders:['2001-01-01T09:00']}),{status:400,body:{error:'task_reminder_past'}});
+    for(const [path,status,error] of [['/v1/action-requests',403,'made_up_refusal'],['/v1/action-requests',400,'task_reminder_limit'],['/v1/owner/tasks',400,'destination_not_served'],
+      ['/v1/action-requests',503,'destination_not_served'],['/v1/owner/tasks',500,'task_reminder_limit']] as const) {
+      answering(path,status,error);
+      assert.deepEqual(await relayed(path,{title:'Synthetic',destination:'current',text:'Synthetic'}),{status,body:{error:'scoped_archive_unavailable'}},path+' '+status+' '+error);
+    }
+    refuse=()=>null;
     revocation=true;
     const streaming=await request('/v1/chat/completions',payload);await assert.rejects(streaming.text());
     revocation=false;const previousDetectors=detectors,offActor=await principal(source.reference.id);

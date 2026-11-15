@@ -2,9 +2,19 @@
 import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
-import {appIdLabel, byTopicKey, chatName, isGroupChat, parentOf, type Chat} from '../../lib/chats-model';
+import {
+  appIdLabel,
+  byTopicKey,
+  chatName,
+  isGroupChat,
+  parentOf,
+  shortIdLabel,
+  telegramProfile,
+  type Chat,
+} from '../../lib/chats-model';
 import {Button, Card, CardBody, CardHeader, LoadError} from '../../ui/core';
 import {AllowedActions} from './actions';
+import {ShortId} from './chat-list';
 import {MemoryCard} from './memory';
 import {WhoCanTalk} from './people';
 import {NochehHere} from './presence';
@@ -59,6 +69,8 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
   const tools = owner || on || (chat.kind === 'topic' && telegram.isOn(parent ?? chat));
   const where = owner ? 'your private chat' : chatName(chat);
   const label = appIdLabel(chat);
+  const short = shortIdLabel(chat);
+  const profile = telegramProfile(chat);
 
   return (
     <div className="space-y-4">
@@ -66,9 +78,12 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         <ArrowLeft aria-hidden /> All chats
       </Button>
       <header className="min-w-0">
-        <h2 className="truncate text-lg font-semibold" dir="auto">
-          {owner ? 'Your private chat' : chatName(chat)}
-        </h2>
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h2 className="truncate text-lg font-semibold" dir="auto">
+            {owner ? 'Your private chat' : chatName(chat)}
+          </h2>
+          {short && <ShortId value={short} />}
+        </div>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-muted">
           <span>
             {chat.kind === 'topic' ? (
@@ -88,6 +103,20 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
               'Private chat'
             )}
           </span>
+          {profile && (
+            <>
+              <span aria-hidden>·</span>
+              <a
+                href={profile.href}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-accent-text hover:underline"
+                dir="ltr"
+              >
+                {profile.handle}
+              </a>
+            </>
+          )}
           {label && (
             <>
               <span aria-hidden>·</span>

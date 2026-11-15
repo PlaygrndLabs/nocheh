@@ -26,6 +26,12 @@ export type Chat = {
   state?: ChatState | null;
   /** The owner's private chat, or one of its topics. */
   owner?: boolean;
+  /** The chat's short label (ADR-0254): the one a send card, a notice or a reminder line adds after a name that reads
+   * like another's. A hash of the chat's id, so it says nothing of the id. */
+  short_id?: string;
+  /** A person's public Telegram username, without its @, when the server gives one; checked there by the one username
+   * rule (src/chats-telegram.ts). */
+  username?: string | null;
 };
 export type Directory = {items: Chat[]; next_cursor: string | null; total?: number};
 /** A person Nocheh saw in a group: whether they are in it now, and whether the group's own messages show them (they wrote
@@ -108,6 +114,23 @@ export function chatName(chat: Chat | null | undefined): string {
     return id ? 'Private chat ' + id : 'Private chat';
   }
   return 'Unknown chat';
+}
+
+/**
+ * '…' and the short id after a group's or a person's name, the same one a send card, a notice or a reminder line adds to
+ * tell apart names that read alike (ADR-0254), so the owner can check which chat a card means. A topic's card names its
+ * group's, and the owner's own chat needs none: null for those and for a chat without one.
+ */
+export function shortIdLabel(chat: Chat | null | undefined): string | null {
+  if (!chat?.short_id || chat.owner || (chat.kind !== 'group' && chat.kind !== 'private')) return null;
+  return '…' + chat.short_id;
+}
+
+/** A person's public Telegram profile, as a send card links it: '@username' and its t.me address. Null for any other
+ * chat and for a person with no username. */
+export function telegramProfile(chat: Chat | null | undefined): {handle: string; href: string} | null {
+  const name = chat?.kind === 'private' && !chat.owner ? chat.username?.trim() : null;
+  return name ? {handle: '@' + name, href: 'https://t.me/' + encodeURIComponent(name)} : null;
 }
 
 export function kindLabel(chat: Chat): string {

@@ -46,12 +46,19 @@ export function chatIdFor(app:ChatApp,external:string|readonly string[],topic?:s
 }
 /** The id of an app's one connection (UNIQUE(app)); it holds no bot either, so a new bot keeps the connection. */
 export const connectionIdFor=(app:ChatApp):string=>{if(!isApp(app))throw new HttpError(400,'invalid_chat_app');return sha256(canonicalList(['connection',app]));};
+/** Account ids already hashed: a send check maps every allowed person of every served group to their account. */
+const accounts=new Map<string,string>();
 /** The id of a person or bot account in an app: the Telegram user id, or a Slack user in its team. */
 export function accountIdFor(app:ChatApp,external:string,team=''):string {
   if(!isApp(app)||typeof external!=='string'||!externalPattern.test(external)||typeof team!=='string'||team&&!externalPattern.test(team))
     throw new HttpError(400,'invalid_account_reference');
-  return sha256(canonicalList(['account',app,team,external]));
+  const at=[app,team,external].join('\n'),known=accounts.get(at);if(known)return known;
+  if(accounts.size>=10000)accounts.clear();
+  const id=sha256(canonicalList(['account',app,team,external]));accounts.set(at,id);return id;
 }
+/** A chat's short label, shown after a name that reads like another's on a card, a notice and the dashboard's chat list.
+ * Always a hash of the id, never a piece of it, so it says nothing of the chat's id in its app. */
+export const chatShortId=(id:string):string=>sha256(canonicalList(['chat-label-v1',id])).slice(0,4);
 
 /** A Nocheh chat id: a digest, or a value stored before step 2b in its frozen shape. The one shared check. */
 const chatIdSource=`[a-f0-9]{64}|${legacyChatSource}`;
@@ -290,10 +297,10 @@ export function installChatsForTest(source:ChatDirectory|ChatSnapshot):()=>void 
 /** A directory's answer for one /v1/conversations item (Part A fills the item, the dashboard reads it). */
 export function conversationFields(directory:ChatDirectory,id:string):ConversationChatFields {
   const chat=directory.get(id);
-  if(!chat)return {kind:'unknown',parent_space:null,topic_key:null,app_ids:[],is_forum:null,state:null,owner:false};
+  if(!chat)return {kind:'unknown',parent_space:null,topic_key:null,app_ids:[],is_forum:null,state:null,owner:false,short_id:chatShortId(id)};
   const base=chat.kind==='topic'?directory.get(chat.parent_id)!:chat;
   return {kind:chat.kind,parent_space:chat.parent_id,topic_key:chat.topic_key,app_ids:base.app_ids.map(label=>({...label})),
-    is_forum:base.is_forum,state:base.state,owner:chat.owner};
+    is_forum:base.is_forum,state:base.state,owner:chat.owner,short_id:chatShortId(id)};
 }
 /** GET /internal/chats from a directory: every served chat with its topics, and the owner's private chat. */
 export function servedChats(directory:ChatDirectory,ownerAccount:{app:ChatApp;external:string}|null):ServedChats {

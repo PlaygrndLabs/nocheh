@@ -52,6 +52,8 @@ export interface ConversationChatFields {
   app_ids:ChatAppLabel[];is_forum:boolean|null;state:ChatState|null;
   /** The owner's private chat, or one of its topics. */
   owner:boolean;
+  /** The chat's short label (chatShortId), the same one a card or notice adds after a name that reads like another's. */
+  short_id:string;
 }
 
 /** A /search hit's chat: the Nocheh chat of the hit's archive original (its raw scope and topic, through chat_ids),

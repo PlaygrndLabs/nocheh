@@ -103,14 +103,20 @@ export function desktopTopicId(scope:string,body:Record<string,any>):number|unde
   return Number.isSafeInteger(topic)&&topic>0?topic:undefined;
 }
 
+/** A Telegram public username (4 to 32 letters, digits and underscores, starting with a letter), trimmed and without
+ * its @; null for anything else. The one rule for a t.me link and for a person shown by username. */
+export function telegramUsername(value:unknown):string|null {
+  const name=typeof value==='string'?value.trim():'';
+  return /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(name)?name:null;
+}
 /**
  * A t.me address of a chat, a topic or a message, from the chat's current Telegram id (`external`): by the chat's public
  * username, or else a private supergroup's t.me/c address, which works only for its members and needs a topic or a
  * message. Null where Telegram has none, such as a basic group. `path` holds Telegram's own topic and message numbers.
  */
 export function telegramLink(external:string|null|undefined,username:string|null,path:(string|null|undefined)[]):string|null {
-  const parts=path.filter((part):part is string=>!!part&&/^[1-9][0-9]{0,15}$/.test(part));
-  if(username&&/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username))return ['https://t.me/'+username,...parts].join('/');
+  const parts=path.filter((part):part is string=>!!part&&/^[1-9][0-9]{0,15}$/.test(part)),name=telegramUsername(username);
+  if(name)return ['https://t.me/'+name,...parts].join('/');
   const internal=typeof external==='string'?/^-100([1-9][0-9]{0,15})$/.exec(external)?.[1]:undefined;
   return internal&&parts.length?['https://t.me/c/'+internal,...parts].join('/'):null;
 }

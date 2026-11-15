@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import pg from 'pg';
-import {digest,type Envelope} from '../src/archive.js';
+import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
@@ -376,6 +376,64 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
     // The member stops their own running job from the same chat: the run is asked to end.
     assert.equal((await s.jobs.stop(await actor((await message('stop')).id),{id:proposed.id})).state,'stopping');
     assert.equal((await job(proposed.id)).cancel_requested,true);
+  } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a job whose group Nocheh stops serving before its report ends unreported, and the owner is told once (ADR-0254)',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const family=families[1]!,raw='-2'+String(Date.now()).slice(-12),chat=family.id(raw),key='background-unserved:'+Date.now();
+  const restore=installChatsForTest(family.directory([raw],{owner:'123',served:[raw]}));
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-unserved-')),notices:Record<string,unknown>[]=[];
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[raw],group_access:{[raw]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+    runtime:async(operation,input)=>{
+      if(operation==='guard.detect')return {literals:[]};
+      if(operation==='usage.price')return {rates:{input:2,output:10,cache_read:0.2,cache_write:2.5,request:0}};
+      if(operation==='run.resume')return {state:'not_found'};
+      if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
+      if(operation==='telegram.notice')notices.push(input);
+      return {state:'done'};
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  let sent=100;
+  const message=async(label:string,from=9,text='Please find what is still open')=>{
+    const payload={message:{message_id:++sent,date:1700000000,chat:{id:Number(raw),type:'supergroup'},from:{id:from,first_name:'Member'},text}};
+    const event:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:raw,source_id:label,revision:'1',occurred_at:null,text,payload};
+    const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
+  };
+  const actor=async(source:string):Promise<Reader>=>{
+    const binding=await s.guards.state();return {admin:false,scope:chat,space:chat,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+  };
+  const authority=async()=>({owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0].epoch)});
+  const job=async(id:string)=>(await stores.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
+  try {
+    await s.guards.reconcile();await s.guards.setMode('on');
+    const settings=await s.jobs.settings();
+    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:10,revision:settings.revision});
+    const proposed=await s.jobs.start(await actor((await message('ask')).id),{title:'Open tasks',instruction:'Find every task that is still open.'});
+    await s.jobs.decide('9',{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message('approve'));
+    // The tests before this one leave jobs in their slots; they end, so this one starts now.
+    await stores.control.query("UPDATE background_jobs SET state='stopped' WHERE state IN ('running','reporting') AND id<>$1",[proposed.id]);
+    assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'waiting');
+    const begun=(await stores.control.query('SELECT event_id FROM background_runs WHERE job_id=$1',[proposed.id])).rows[0].event_id;
+    await s.jobs.runs.run(begun,await authority());
+    const context:any=await s.jobs.runs.context({event_id:begun,owner_epoch:(await authority()).epoch});
+    await s.jobs.runs.claim({...context,actor:context.actor});await s.jobs.runs.prepare({...context,actor:context.actor});
+    await s.jobs.runs.finish({event_id:begun,actor:context.actor,state:'done',session:context.conversation,error_code:null,text:'Report: 2 tasks are open.'});
+    // The owner turns the group off before the report goes out: nothing is staged there, the tick ends the job instead of
+    // failing, and the owner hears of it in their private chat, since the bot may no longer edit the card in the group.
+    const back=installChatsForTest(family.directory([raw],{owner:'123',served:[]}));
+    try {
+      assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'failed');
+      const ended=await job(proposed.id);assert.deepEqual([ended.state,ended.error_code],['failed','job_report_not_delivered']);
+      assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM background_reports WHERE job_id=$1',[proposed.id])).rows[0].n,0);
+      assert.deepEqual(notices.map(notice=>[notice.id,notice.chat_id]),[[digest(canonical(['job-report-not-sent-v1',proposed.id])),'123']]);
+      assert.match(String(notices[0]!.text),/^\u26a0\ufe0f The job \u2068\u201cOpen tasks\u201d\u2069 finished, but its report was not sent to .+ \(not served now\): Nocheh does not serve that chat now\.$/);
+      assert.ok(![raw,chat].some(id=>String(notices[0]!.text).includes(id)),'no chat id in the notice');
+      assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'failed');assert.equal(notices.length,1);
+    }finally{back();}
   } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

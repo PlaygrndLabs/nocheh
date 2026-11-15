@@ -14,6 +14,11 @@ export const memoryRoutes={recall:'/v1/memory/longterm/recall',search:'/v1/memor
 /** What a job request may be told to correct; any other refusal stays opaque. The broker relays exactly these. */
 export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
   'job_machine_not_allowed','job_machine_not_found','job_card_too_long','job_hidden_characters']);
+/** What a message request may be told: the chat is not one Nocheh serves (ADR-0254). The broker relays exactly these. */
+export const actionErrors=new Set(['destination_not_served']);
+/** What a task change may be told about its reminders, so the person can be asked for another time (ADR-0255). The broker
+ * relays exactly these. */
+export const taskErrors=new Set(['task_reminder_past','task_reminder_limit','invalid_task_reminders','invalid_task_reminder']);
 /** What the owner must do first, for a refusal the brain cannot correct by itself. */
 const jobNotes:Record<string,string>={job_machine_not_found:'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '+
   'there until the test passes. In the owner\'s private chat action=status lists the machines and whether each is ready; a group never lists them, so ask the owner for the exact name.'};
@@ -171,11 +176,15 @@ async function archiveRead(args:Value,context:ToolContext) {
   }catch{return text({error:'archive_source_unavailable'});}
 }
 
+// An unknown chat and one Nocheh does not serve answer alike: the note names the remedies, not the chat.
+const NOT_SERVED={error:'destination_not_served',note:'Nothing was sent and no card was made: Nocheh posts only in the owner\'s private chat and its topics, '+
+  'the owner\'s selected groups and their topics, and the private chats of people the owner allowed in those groups. Tell the person who asked, in one '+
+  'short sentence, that this chat is not one Nocheh serves. The owner can select a group on the dashboard Chats page, or allow a person in a selected group there.'};
 async function actionRequest(args:Value,context:ToolContext) {
   try {
     if(!own(args,'destination')||!own(args,'text'))throw new Error('invalid_action_request');
     return text(await request(context,'/v1/action-requests',{destination:args.destination,text:args.text}));
-  }catch{return text({error:'action_request_unavailable'});}
+  }catch(error){return text(code(error)==='destination_not_served'?NOT_SERVED:{error:'action_request_unavailable'});}
 }
 
 async function destinations(_args:Value,context:ToolContext) {
@@ -196,6 +205,10 @@ async function ownerRead(args:Value,context:ToolContext) {
   }catch{return text({error:'owner_read_unavailable',note:'Available only in the owner private conversation.'});}
 }
 
+const UNREAD='Nothing was changed: a reminder time could not be read. Send a list of times such as 2026-11-20T09:00.';
+const TASK_NOTES:Record<string,string>={task_reminder_past:'Nothing was changed: a new reminder must be in the future. Ask for a later time.',
+  task_reminder_limit:'Nothing was changed: each person keeps at most 10 reminders of their own on a task, and one change adds at most 10. Remove one first.',
+  invalid_task_reminders:UNREAD,invalid_task_reminder:UNREAD};
 const taskFields=['title','notes','status','state','priority','start_on','start_time','due_on','due_time','repeat','parent','scope','group','people','assignees','tags',
   'properties','reminders','blocked_by','related','attachments'];
 const pick=(args:Value,keys:readonly string[])=>Object.fromEntries(keys.filter(key=>own(args,key)).map(key=>[key,args[key]]));
@@ -223,6 +236,9 @@ async function tasks(args:Value,context:ToolContext) {
     }
     return text({error:'invalid_task_action'});
   }catch(error) {
+    // A reminder time that cannot be saved says how to ask again; nothing was changed.
+    const refused=code(error);
+    if(typeof refused==='string'&&taskErrors.has(refused))return text({error:refused,note:TASK_NOTES[refused]});
     // The broker keeps storage error text private; the status still tells the next step.
     return text({error:error instanceof Refused?({400:'invalid_task_request',403:'not_available_in_this_chat',404:'task_not_found',409:'task_changed_list_again'} as Record<number,string>)[error.status]??'tasks_unavailable':'tasks_unavailable'});
   }
@@ -404,7 +420,9 @@ export const mcpTools:readonly McpTool[]=[
   {name:'memory_recall',description:'Recall long-term memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the conclusions memory holds, so read them with mcp__nocheh__archive_read before relying on a claim that matters.',
     inputSchema:shape({query:{type:'string'},profile:{type:'string'},limit:{type:'integer',minimum:1,maximum:50}},['query']),run:memoryRecall},
   {name:'action_request',description:'Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. '+
-    'From the owner\'s private chat, a message for any group or topic always waits for the owner\'s card, whatever the freedom setting. The result says which.',
+    'From the owner\'s private chat, a message for any group or topic always waits for the owner\'s card, whatever the freedom setting. The result says which. '+
+    'It posts only in the owner\'s private chat and topics, the owner\'s selected groups and their topics, and the private chats of people the owner allowed in those groups; '+
+    'a person\'s private chat always waits for the owner\'s card.',
     inputSchema:shape({destination:{type:'string',description:'Use current for this conversation including its topic, or a chat id from owner_read (a topic has its own chat id). The server resolves current from the authenticated source turn.'},text:{type:'string',maxLength:3500}},['destination','text']),run:actionRequest},
   {name:'background_job',description:'Background jobs: work too big for one reply runs in a session of its own and reports back here. '+
     'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD), and box or machine with steps. '+
@@ -454,7 +472,8 @@ export const mcpTools:readonly McpTool[]=[
     'action=update needs id and the expected_revision from the latest list or get, plus the fields to change; lists such as tags, people, assignees, '+
     'blocked_by, related, attachments and reminders replace the whole list, null clears a field, state done finishes a task (a repeating task then makes '+
     'its next one), archived true archives it and trashed true moves it to the trash. action=comment adds text as a comment. '+
-    'reminders are times like 2030-01-04T09:00 in settings.time_zone and are sent to the owner\'s private chat; repeat is '+
+    'reminders are times like 2030-01-04T09:00 in settings.time_zone and are sent to the owner\'s private chat. In a group, a list changes only reminders '+
+    'people set; the owner\'s reminders stay even when left out. Each person keeps up to 10 of their own on a task. repeat is '+
     '{"every":1,"unit":"day|week|month|year","weekdays":[1,4],"from":"due|done"} (weekdays only with week, 0 is Sunday) or null. '+
     'In the owner private conversation every list is available; in a group or topic that belongs to a project only that group\'s own tasks (with its '+
     'topics\' tasks when they share memory) and the tasks set on the project itself (no group) are, never another group\'s tasks, and nothing else; '+
@@ -472,7 +491,7 @@ export const mcpTools:readonly McpTool[]=[
       tags:{type:'array',items:{type:'string',maxLength:40},maxItems:20},group:{type:['string','null']},
       people:ids,assignees:ids,blocked_by:ids,related:ids,parent:{type:['string','null']},
       properties:{type:'object'},repeat:{type:['object','null']},
-      reminders:{type:'array',items:{type:'string'},maxItems:10},
+      reminders:{type:'array',items:{type:'string'}},
       attachments:{type:'array',items:{type:'object'},maxItems:40},
       archived:{type:'boolean'},trashed:{type:'boolean'},text:{type:'string',maxLength:4000},
       tag:{type:'string',maxLength:40},person:{type:'string'},q:{type:'string',maxLength:200},after:{type:'string'}},['action']),run:tasks},

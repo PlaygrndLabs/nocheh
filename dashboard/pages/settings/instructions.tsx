@@ -88,7 +88,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'telegram.approval_texts',
     title: 'Approval buttons and results',
-    hint: 'One “name: text” line each for the buttons, the note above a site’s or command’s “where asked” buttons that says the rule covers everyone allowed in that chat or topic (rule_note), the result added to a decided card and its {reason}, the name of a job or schedule that asked, the names of a command, a web page and a tool list (the lines starting with kind), the heading of a tool’s folded details (details), the label before the assistant’s summary (ai_says), the line under a long web address with its {count} (long_address), the line saying how many characters of input another server’s tool gets, with {count} and {site} (sends), the card that lists a job’s changes (the lines starting with list), a project task’s card and its results (the lines starting with task), and the short notices after a press. A line you remove keeps its default.',
+    hint: 'One “name: text” line each for the buttons, the note above a site’s or command’s “where asked” buttons that says the rule covers everyone allowed in that chat or topic (rule_note), the result added to a decided card and its {reason}, the name of a job or schedule that asked, the names of a command, a web page and a tool list (the lines starting with kind), the heading of a tool’s folded details (details), the label before the assistant’s summary (ai_says), the line under a long web address with its {count} (long_address), the line saying how many characters of input another server’s tool gets, with {count} and {site} (sends), the card that lists a job’s changes (the lines starting with list), a project task’s card and its results (the lines starting with task), and the short notices after a press. The chat words a send card, a notice and a reminder line share: your private chat (private_chat); a group and a topic (group_chat, topic, topic_name); a person’s private chat with the group you allowed them in (person_chat, person_chat_more with {count} more groups, person_chat_other); a chat with no name (unnamed_group, unnamed_topic, unnamed_person); a chat Nocheh no longer knows (unknown_chat) or doesn’t serve now (not_served); and a name that reads like another’s, told apart by its project on cards in your private chat (name_project) or by its short ID, the one the Chats page shows after the name (name_id). Then the result of an approved message that wasn’t sent (not_sent) with its reasons (reason_not_served, reason_settings_changed), and the notices when a scheduled task’s result wasn’t sent (schedule_not_sent), a scheduled task didn’t run (schedule_not_run) or a job’s report wasn’t sent (job_report_not_sent). A line you remove keeps its default; keep the values in braces, such as {name} and {reason}, in these lines, as Nocheh fills them in.',
   },
   {
     key: 'telegram.action_continued',
@@ -108,7 +108,12 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'tasks.reminder',
     title: 'Task reminder',
-    hint: 'Sent to your private chat when a task reminder is due. {title} is the task, {due} its due day, {list} its project and {notes} its notes. A line whose value is missing is left out.',
+    hint: 'Sent to your private chat when a task reminder is due. {title} is the task, {due} its due day, {list} its project and {notes} its notes. A line whose value is missing is left out. Reminders set or changed in a group start with lines from “Reminder lines: who set it and where”.',
+  },
+  {
+    key: 'tasks.reminder_texts',
+    title: 'Reminder lines: who set it and where',
+    hint: 'Reminders that people you allowed set in a group start with a 👤 line naming who and where. Theirs that come due together in one group arrive as one message, at most one message per group every 10 minutes, so with many due at once the last can come tens of minutes late (about 10 minutes per further message). Nothing is dropped. Your own reminders arrive at their time. One “name: text” line each: you and person, person_gone or unnamed_person for who; set_by for who set it and where ({who}, {place}); written_by with field_title, field_notes and field_due for who last wrote the task elsewhere; closed_by for who closed it; merged and more_waiting for the header and the last line of a merged message ({count}, {place}); note_line, the mark before each line of a person’s notes ({line}); and removed_in_group, the notice when a message from you in a group removed reminders set elsewhere. {place} uses the chat words from “Approval buttons and results”. A line you remove keeps its default; keep the values in braces in these lines, as Nocheh fills them in.',
   },
   {
     key: 'imports.ready',
@@ -240,10 +245,13 @@ export function BuiltInInstructions() {
         reset();
         await refreshResources();
       } catch (e) {
+        const code = (e as ApiError)?.message ?? '';
         throw new Error(
-          /conflict|changed/.test((e as ApiError)?.message ?? '')
+          /conflict|changed/.test(code)
             ? 'The instructions were changed somewhere else. Your edits are kept; check them and save again.'
-            : 'Couldn’t save the instructions.',
+            : code === 'prompt_placeholder_missing'
+              ? 'A “name: text” line lost a value in braces that Nocheh fills in, such as {name} or {who}. Your edits are kept; put it back and save again.'
+              : 'Couldn’t save the instructions.',
         );
       }
     },

@@ -13,6 +13,8 @@ import {ManagedExecutionRepository,managedEventId,managedIdentity,type ManagedIn
 import type {ScheduleRepository} from './schedules.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import {ownerChat} from '../assistant-policy.js';
+import {servedDestination} from '../destinations.js';
+import {currentChats} from './chats.js';
 
 export class ScheduledRunRepository extends ManagedExecutionRepository {
   protected readonly channel='scheduler' as const;
@@ -88,7 +90,14 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
     const row=(await this.control.query(`SELECT s.*,v.prompt_reference,v.configuration FROM workflow_schedules s
       JOIN schedule_versions v ON v.id=s.version_id WHERE s.id=$1`,[match[1]])).rows[0];
     if(!row||row.cursor!==match[2])return observation('skipped','schedule');
-    const binding=await this.guards.state();await this.profile(row.scope,row.scope,row.logical_profile,binding);
+    const binding=await this.guards.state();
+    // A schedule in a chat Nocheh no longer serves does not run, as before; the owner is told once per settings change
+    // (deselecting a group moves the epoch), not at every tick (ADR-0254).
+    try{await this.profile(row.scope,row.scope,row.logical_profile,binding);}catch(error){
+      if(error instanceof HttpError&&(error.status===403||error.status===404)&&!servedDestination(this.access.policy(),row.scope,await currentChats()))
+        await this.actions.ownerNotice(digest(canonical(['schedule-not-run-v1',row.id,row.scope,String(binding.epoch)])),'schedule_not_run',{chat:row.scope,reason:'reason_not_served'});
+      throw error;
+    }
     if(binding.mode==='on')await this.guards.prepare(row.prompt_reference,this.schedules.detectorVersion,this.schedules.detect);
     const ownership=await this.schedules.ownership();
     if(ownership.owner!==authority.owner||ownership.epoch!==authority.epoch||!ownership.admission)return observation('waiting','schedule',0,Date.now()+30000,'owner_paused');

@@ -9,6 +9,8 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
+import {accountIdFor,chatShortId,installChatsForTest} from '../src/chats.js';
+import {BOB,BOB_CHAT,GP1,GP3,OWNER,fixtureChats,fixtureDirectory,seedChats,seedGroups} from './fixture-groups.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -68,7 +70,8 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal(across.state,'proposed','a message built from one group\'s memory for another group waits for a review');
     // The person who asked, allowed in both groups, reviews it under their request in their own group and topic.
     const reviewCard=last('card');
-    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text,reviewCard.links],[group,17,'📨 Send to a Telegram group › a topic\n\nFor the other group',[]],
+    // A group with no name is told apart by its short id, the one the dashboard's chat list shows (ADR-0254).
+    assert.deepEqual([reviewCard.chat_id,reviewCard.topic,reviewCard.text,reviewCard.links],[group,17,'📨 Send to a Telegram group (…'+chatShortId(other)+') › a topic\n\nFor the other group',[]],
       'no "Asked in" line on a card in the chat where it was asked');
     // The card is the answer: it replies to the request, and Nocheh adds nothing of its own.
     assert.equal(reviewCard.reply_to,String((await stores.archive.query('SELECT payload FROM events WHERE id=$1',[topic.id])).rows[0].payload.toString().match(/"message_id":(\d+)/)[1]));
@@ -114,8 +117,10 @@ test('allowed members post freely in their own group; everything else waits for 
     const ask=await capture('owner-private',{message:{message_id:12,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'Post in Launch'}},'123');
     const toTopic=await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(ask.id,'123'),scope:null},{destination:forum+'/topic/7',text:'Hello forum'}));
     const internal=forum.slice(4);
-    assert.deepEqual([last('card').chat_id,last('card').reply_to,last('card').text,last('card').links],['123','12','📨 Send to “Plans team” › Launch\n\nHello forum',
-      [{offset:11,length:12,url:`https://t.me/c/${internal}/30`},{offset:26,length:6,url:`https://t.me/c/${internal}/7`}]]);
+    // The kind of chat is in fixed words; only the names are quoted, inside isolates (ADR-0254).
+    const plans='\u2068“Plans team”\u2069',launch='\u2068“Launch”\u2069';
+    assert.deepEqual([last('card').chat_id,last('card').reply_to,last('card').text,last('card').links],['123','12',`📨 Send to group ${plans} › topic ${launch}\n\nHello forum`,
+      [{offset:17,length:14,url:`https://t.me/c/${internal}/30`},{offset:40,length:10,url:`https://t.me/c/${internal}/7`}]]);
     assert.match(toTopic.message,/return \[NO_REPLY\]/);
     // A later turn in the same chat can follow the request without its ID; another chat cannot read it.
     const later={...await actor((await capture('owner-later',{message:{message_id:13,date:1700000000,chat:{id:123,type:'private'},from:{id:123},text:'Did it go out?'}},'123')).id,'123'),scope:null};
@@ -126,10 +131,10 @@ test('allowed members post freely in their own group; everything else waits for 
     await assert.rejects(s.telegramActions.inspect(await actor(plain.id,group),toTopic.id),{status:404});
     assert.ok((await s.telegramActions.recent(await actor(plain.id,group))).every(item=>item.id!==toTopic.id));
     await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(ask.id,'123'),scope:null},{destination:forum,text:'Hello General'}));
-    assert.equal(last('card').text,'📨 Send to “Plans team” › General\n\nHello General','a message to a forum without a topic goes to General');
+    assert.equal(last('card').text,`📨 Send to group ${plans} › General\n\nHello General`,'a message to a forum without a topic goes to General');
     await stores.control.query("UPDATE owner_prompts SET texts='{\"telegram.approval_texts\":\"topic: in {topic}\"}'::jsonb WHERE singleton");
     await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(ask.id,'123'),scope:null},{destination:forum+'/topic/9',text:'Hello unknown'}));
-    assert.deepEqual([last('card').text,last('card').links.at(-1)],['📨 Send to “Plans team” in a topic\n\nHello unknown',{offset:27,length:7,url:`https://t.me/c/${internal}/9`}],
+    assert.deepEqual([last('card').text,last('card').links.at(-1)],[`📨 Send to group ${plans} in a topic\n\nHello unknown`,{offset:35,length:7,url:`https://t.me/c/${internal}/9`}],
       'the owner\'s wording; a topic with no known name is still linked');
     await stores.control.query("UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton");
     // Under the freedom setting the owner's private request for a group or topic still shows its card first, as the
@@ -140,7 +145,7 @@ test('allowed members post freely in their own group; everything else waits for 
     const shown=()=>cards.filter(card=>card.kind==='card').length,shownBefore=shown();
     const free=await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(freeAsk.id,'123'),scope:null},{destination:forum+'/topic/7',text:'Free plan'}));
     assert.equal(free.state,'proposed','freedom never posts to a group without its card');assert.equal(shown(),shownBefore+1,'one card');
-    assert.deepEqual([last('card').id,last('card').chat_id,last('card').reply_to,last('card').text],[free.id,'123','14','📨 Send to “Plans team” › Launch\n\nFree plan']);
+    assert.deepEqual([last('card').id,last('card').chat_id,last('card').reply_to,last('card').text],[free.id,'123','14',`📨 Send to group ${plans} › topic ${launch}\n\nFree plan`]);
     assert.match(free.message,/return \[NO_REPLY\]/);
     const freeGeneral=await s.actionCommands.offer('telegram',await s.telegramActions.request({...await actor(freeAsk.id,'123'),scope:null},{destination:forum,text:'Free general'}));
     assert.equal(freeGeneral.state,'proposed');assert.equal(shown(),shownBefore+2);
@@ -346,4 +351,130 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal((await s.controlledExecution.claim({id:outdated.id,actor:'wf-'+row.id,workflow_id:row.id,workflow_token:lease.token})).claimed,false);
     assert.equal(await ending(outdated.id,notRun),cards.find(card=>card.kind==='card'&&card.id===outdated.id)!.text+'\n\n'+notRun);
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a send to a person\'s private chat names it in fixed words and quotes only names; a chat Nocheh stopped serving gets nothing and its card says why',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-send-cards-')),key='send-cards:'+Date.now();
+  // The fixture's chats, GP1 and GP3 served (ADR-0251), installed before the services so they keep them; Bob's private chat
+  // is known, and served only while the owner allows him in a served group (ADR-0254).
+  const restore=installChatsForTest(fixtureDirectory([GP1,GP3]));
+  const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],executed:Record<string,any>[]=[];let updates=0,sent=100;
+  let access:Record<string,{granted:string[];denied:string[]}>={[GP1]:{granted:[BOB],denied:[]}};
+  const policy=()=>({enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1,GP3],group_access:access,topic_memory:'group' as const});
+  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
+    runtime:async(operation,input)=>{
+      if(operation==='guard.detect')return {literals:[]};
+      if(operation==='action.execute'){executed.push(input);return {state:'done'};}
+      if(operation==='telegram.notice')return {state:'done'};
+      assert.equal(operation,'telegram.approval');cards.push(input);
+      return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};
+    },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  const bot=String(Date.now()).slice(-9);
+  const capture=async(label:string,payload:Record<string,unknown>,scope:string)=>{
+    const event:Envelope={version:1,key:payload.update_id?`telegram:${bot}:update:${payload.update_id}`:key+':'+label,origin:'live',kind:'telegram_update',bot_id:payload.update_id?bot:key,scope,source_id:payload.update_id?String(payload.update_id):label,revision:'1',occurred_at:null,text:'',payload};
+    const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
+  };
+  const actor=async(source:string,scope:string|null,space:string):Promise<Reader>=>{
+    const binding=await s.guards.state();return {admin:false,scope,space,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+  };
+  const said=(text:string,from=Number(OWNER),chat:Record<string,unknown>={id:Number(OWNER),type:'private'})=>({message:{message_id:++sent,date:1700000000,chat,from:{id:from,first_name:'Made-up'},text}});
+  // The owner asks in their private chat for a message to `destination`; its card comes to them there.
+  const send=async(label:string,destination:string,text:string)=>s.actionCommands.offer('telegram',
+    await s.telegramActions.request(await actor((await capture(label,said('Please send it'),OWNER)).id,null,OWNER),{destination,text}));
+  const ownerPress=(label:string,data:string)=>capture(label,{update_id:++updates,callback_query:{id:'query-'+label,from:{id:Number(OWNER)},chat_instance:'1',data,
+    message:{message_id:40,date:1700000000,chat:{id:Number(OWNER),type:'private'},reply_markup:{inline_keyboard:[[{text:'Approve',callback_data:data}]]}}}},OWNER);
+  const button=(choice:'a'|'d',action:{id:string;fingerprint:string})=>'n'+choice+action.id.slice(0,40)+action.fingerprint.slice(0,16);
+  const last=(kind:string)=>cards.filter(card=>card.kind===kind).at(-1)!;
+  const epoch=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
+  const bob='⁨“Bob”⁩',gp1='⁨“GP1”⁩',notServed='🚫 Approved, but not sent: Nocheh does not serve that chat now.';
+  try {
+    await seedChats(stores.control,fixtureChats([GP1,GP3]));await seedGroups(stores.control);
+    await stores.control.query("UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton");
+    await s.guards.reconcile();await s.guards.setMode('on');
+    // A person the owner allowed in a served group: the card names the kind of chat and the group in fixed words, and quotes
+    // only the names, bold where Telegram has no link to them.
+    const hello=await send('hello',BOB_CHAT,'Hello Bob');
+    assert.equal(hello.state,'proposed','a person\'s private chat always waits for the owner\'s card');
+    const helloCard=last('card');
+    assert.deepEqual([helloCard.id,helloCard.chat_id,helloCard.text],[hello.id,OWNER,`📨 Send to private chat with ${bob} (a person you allowed in group ${gp1})\n\nHello Bob`]);
+    assert.deepEqual(helloCard.links.map((link:any)=>link.type),['bold','bold']);
+    assert.equal(await s.actionCommands.callback(await ownerPress('hello-approve',button('a',hello))),true);
+    assert.equal(last('answer').text,'✅ Approved.');
+    assert.equal((await storageWorkflowOperations(s,async()=>({})).actions!(hello.id,await epoch('actions'))).state,'completed');
+    assert.deepEqual([executed.at(-1)!.chat_id,executed.at(-1)!.destination,executed.at(-1)!.text],[BOB,BOB_CHAT,'Hello Bob'],'sent to Bob\'s private chat in Telegram');
+    assert.equal(last('settle').text,helloCard.text+'\n\n✅ Approved and sent.');
+    // Allowed in two served groups: the first is named, with how many more.
+    access={[GP1]:{granted:[BOB],denied:[]},[GP3]:{granted:[BOB],denied:[]}};
+    await send('twice',BOB_CHAT,'Hello again');
+    assert.equal(last('card').text,`📨 Send to private chat with ${bob} (a person you allowed in group ${gp1} and 1 more)\n\nHello again`);
+    // A served group renamed to read like Bob: his name gets his chat's short id, and the group's gets its project on the
+    // owner's card, but only its short id on a card in a group.
+    await stores.control.query("UPDATE chats SET title='Bob' WHERE id=$1",[GP3]);
+    await send('twin',BOB_CHAT,'Hello twin');
+    assert.equal(last('card').text,`📨 Send to private chat with ${bob} (…${chatShortId(BOB_CHAT)}) (a person you allowed in group ${gp1} and 1 more)\n\nHello twin`);
+    const twinGroup=await send('twin-group',GP3,'For the twin group');
+    assert.equal(last('card').text,`📨 Send to group ${bob} of project ⁨“P1”⁩\n\nFor the twin group`);
+    const asked=await capture('bob-asks',said('Post it in the other group',Number(BOB),{id:Number(GP1),type:'supergroup'}),GP1);
+    const across=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(asked.id,GP1,GP1),{destination:GP3,text:'From GP1'}));
+    assert.equal(across.state,'proposed');
+    assert.deepEqual([last('card').chat_id,last('card').text],[GP1,`📨 Send to group ${bob} (…${chatShortId(GP3)})\n\nFrom GP1`],'a card in a group names no project');
+    await stores.control.query("UPDATE chats SET title='GP3' WHERE id=$1",[GP3]);
+    // With no title on his chat: the name Telegram gave him, its quotes and brackets made plain; a blank name gives way to
+    // his @username, linked to him; with neither, his chat's short id.
+    const untitled=fixtureChats([GP1,GP3]),account=accountIdFor('telegram',BOB);
+    installChatsForTest({...untitled,chats:untitled.chats.map(chat=>chat.id===BOB_CHAT?{...chat,title:null}:chat)});
+    await stores.control.query('UPDATE chat_accounts SET display_name=$2,username=NULL WHERE id=$1',[account,'Sara" (x']);
+    await send('display-name',BOB_CHAT,'Hello Sara');
+    assert.equal(last('card').text,`📨 Send to private chat with ⁨“Sara' [x”⁩ (a person you allowed in group ${gp1} and 1 more)\n\nHello Sara`);
+    await stores.control.query('UPDATE chat_accounts SET display_name=$2,username=$3 WHERE id=$1',[account,'ㅤ','sara_example']);
+    await send('username',BOB_CHAT,'Hello username');
+    const linkedCard=last('card');
+    assert.equal(linkedCard.text,`📨 Send to private chat with ⁨“@sara_example”⁩ (a person you allowed in group ${gp1} and 1 more)\n\nHello username`);
+    assert.deepEqual(linkedCard.links[0],{offset:linkedCard.text.indexOf('⁨“@'),length:17,url:'https://t.me/sara_example'});
+    await stores.control.query('UPDATE chat_accounts SET display_name=NULL,username=NULL WHERE id=$1',[account]);
+    await send('nameless',BOB_CHAT,'Hello nobody');
+    assert.equal(last('card').text,`📨 Send to private chat with a person …${chatShortId(BOB_CHAT)} (a person you allowed in group ${gp1} and 1 more)\n\nHello nobody`);
+    installChatsForTest(fixtureDirectory([GP1,GP3]));
+    // The message shows what a reader would not see, written out.
+    await send('hidden',BOB_CHAT,'Hi \u{e0041}');
+    assert.ok(last('card').text.endsWith('\n\nHi [U+E0041]'),last('card').text);
+    // A card too long with the owner's long person line names Bob alone; one too long even so waits in the Inbox.
+    access={[GP1]:{granted:[BOB],denied:[]}};
+    await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',
+      [JSON.stringify({'telegram.approval_texts':'person_chat: private chat with {name}, a person you allowed in {group}'+', who may read this'.repeat(20)})]);
+    const long='x'.repeat(3500),compact=await send('compact',BOB_CHAT,long);
+    assert.deepEqual([last('card').id,last('card').text],[compact.id,`📨 Send to private chat with ${bob}\n\n${long}`]);
+    const shown=cards.length,hidden=await send('too-long',BOB_CHAT,'x'.repeat(3000)+'​'.repeat(100));
+    assert.equal(cards.length,shown,'no card');assert.match(hidden.message,/too long for a Telegram card[^]*dashboard Inbox/);
+    await stores.control.query("UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton");
+    // Approved, then the owner stopped allowing Bob before it went out: nothing is sent, and the card says why.
+    const late=await send('late',BOB_CHAT,'Bye Bob');
+    assert.equal(await s.actionCommands.callback(await ownerPress('late-approve',button('a',late))),true);
+    access={};const sends=executed.length;
+    assert.equal((await storageWorkflowOperations(s,async()=>({})).actions!(late.id,await epoch('actions'))).state,'cancelled');
+    assert.equal(executed.length,sends,'nothing reaches a chat Nocheh stopped serving');
+    assert.deepEqual([last('settle').id,last('settle').text],[late.id,`📨 Send to private chat with ${bob}\n\nBye Bob\n\n${notServed}`]);
+    // Approved after he was no longer allowed: the press and /approve both say it was not sent, and why.
+    access={[GP1]:{granted:[BOB],denied:[]}};
+    const gone=await send('gone',BOB_CHAT,'Too late'),typed=await send('typed',BOB_CHAT,'By command');
+    access={};
+    assert.equal(await s.actionCommands.callback(await ownerPress('gone-approve',button('a',gone))),true);
+    assert.equal(last('answer').text,notServed);
+    assert.deepEqual([(await s.telegramActions.inspect(owner,gone.id)).state,(await s.telegramActions.inspect(owner,gone.id)).error_code],['cancelled','destination_not_served']);
+    assert.deepEqual([last('settle').id,last('settle').text],[gone.id,`📨 Send to private chat with ${bob}\n\nToo late\n\n${notServed}`]);
+    assert.equal(await s.actionCommands.controlReply(await capture('approve-command',said('/approve '+typed.id),OWNER)),notServed);
+    // A group switched off says so wherever it is named: as where a card was asked, and as where it would have gone.
+    const ownerInGp3=await capture('owner-in-gp3',said('Post this in GP1',Number(OWNER),{id:Number(GP3),type:'supergroup'}),GP3);
+    const fromGp3=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(ownerInGp3.id,GP3,GP3),{destination:GP1,text:'From GP3'}));
+    assert.deepEqual([fromGp3.state,last('card').text],['proposed',`📨 Send to group ${gp1} › General\n💬 Asked in “GP3”\n\nFrom GP3`]);
+    installChatsForTest(fixtureDirectory([GP1]));
+    assert.equal(await s.actionCommands.callback(await ownerPress('gp3-reject',button('d',fromGp3))),true);
+    assert.equal(last('settle').text,`📨 Send to group ${gp1} › General\n💬 Asked in “GP3” (not served now)\n\nFrom GP3\n\n❌ Rejected. Nothing was sent.`,'the owner\'s own Reject reads as before');
+    assert.equal(await s.actionCommands.callback(await ownerPress('twin-reject',button('d',twinGroup))),true);
+    assert.equal(last('settle').text,'📨 Send to group ⁨“GP3”⁩ (not served now)\n\nFor the twin group\n\n❌ Rejected. Nothing was sent.');
+  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

@@ -2,7 +2,9 @@ import {randomBytes} from 'node:crypto';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {conversationScope,groupAccessFor,ownerChat,ownerIds,type OwnerIds} from '../assistant-policy.js';
+import {conversationScope,ownerChat,ownerIds,type OwnerIds} from '../assistant-policy.js';
+import {chats} from '../chats.js';
+import {allowedIn} from '../destinations.js';
 import {parentSpace,servedGroup} from '../spaces.js';
 import {HttpError,object,string} from '../http.js';
 import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundMachine,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
@@ -776,8 +778,7 @@ export class BackgroundJobRepository {
   }
   /** Whether the person who asked for a job may still use Nocheh in its chat; the owner's own job always. */
   permitted(job:any):boolean {
-    const access=groupAccessFor(this.access.policy(),job.scope);
-    return !job.requester||!!access?.granted.includes(job.requester)&&!access.denied.includes(job.requester);
+    return !job.requester||allowedIn(this.access.policy(),job.scope,job.requester);
   }
   /** The newest to-do list a run of the job kept, while what that run read may still be shown: its binding carries to `binding`. */
   private async carriedTodo(id:string,binding:GuardBinding):Promise<Todo[]|null> {
@@ -816,7 +817,7 @@ export class BackgroundJobRepository {
     const parts=reportParts(String(JSON.parse(result.content.toString()).text??''));
     if(!parts.length)return this.finish(row,'failed','job_report_empty');
     const owner=ownerChat(this.access.policy())!,machine=!!row.machine&&row.scope!==owner;
-    const sent=(await this.control.query(`SELECT b.part,a.state,a.destination FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
+    const sent=(await this.control.query(`SELECT b.part,a.state,a.destination,a.error_code FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id
       WHERE b.job_id=$1 ORDER BY b.part`,[row.id])).rows;
     // A report that began in the group before machine reports went private keeps the parts sent there; the owner then gets
     // the whole report and the group its line. One the group got whole before then is done.
@@ -827,7 +828,12 @@ export class BackgroundJobRepository {
     if(away)targets.push({to:row.space_id,text:labeledLines(backgroundTexts,(await ownerPrompts(this.control))['background.texts'])[row.ended?'limited_private':'report_private']!});
     const last=sent.at(-1);
     // The group's line comes last: the report already reached the owner, so a lost line still ends the job done.
-    if(last&&['failed','ambiguous','cancelled','rejected'].includes(last.state))return away&&sent.length===targets.length?this.finish(row,'done'):this.finish(row,'failed','job_report_not_delivered');
+    if(last&&['failed','ambiguous','cancelled','rejected'].includes(last.state)) {
+      if(away&&sent.length===targets.length)return this.finish(row,'done');
+      // A part staged before Nocheh stopped serving its chat was closed unsent: the owner is told, as below.
+      if(last.error_code==='destination_not_served')await this.reportNotSent(row);
+      return this.finish(row,'failed','job_report_not_delivered');
+    }
     if(last&&last.state!=='done')return observation('waiting','delivery',sent.length,Date.now()+5000,'receipt_pending');
     if(sent.length>=targets.length)return this.finish(row,'done');
     // Only the group's line is left: it names nothing the run read, so no later epoch holds it back, and a Stop or a
@@ -861,9 +867,19 @@ export class BackgroundJobRepository {
       if(error instanceof HttpError&&['guard_transition_pending','guard_context_changed','audience_context_changed','action_context_changed'].includes(error.code))
         return observation('waiting','delivery',sent.length,Date.now()+2000,'guard_pending');
       if(line&&error instanceof HttpError)return this.finish(row,'done');
+      // Nocheh no longer serves the chat the report was for: the job ends unreported instead of failing every tick, and the
+      // owner is told, since its card may sit in a group the bot can no longer edit (ADR-0254).
+      if(error instanceof HttpError&&error.code==='destination_not_served'){await this.reportNotSent(row);return this.finish(row,'failed','job_report_not_delivered');}
       throw error;
     }
     return observation('waiting','delivery',part,Date.now()+5000,'receipt_pending');
+  }
+  /** One notice to the owner that a job's report did not reach the chat it was asked in, which Nocheh no longer serves.
+   *  A job asked in the owner's private chat needs none: that chat is always served. */
+  private async reportNotSent(row:any):Promise<void> {
+    if(chats().isOwner(row.space_id))return;
+    const title=(await this.proposal(row).catch(()=>null))?.title??'';
+    await this.telegram.ownerNotice(digest(canonical(['job-report-not-sent-v1',row.id])),'job_report_not_sent',{chat:row.space_id,reason:'reason_not_served',title});
   }
   /** The workflow family: `job:` drives a job, `run:` one of its runs. */
   async operation(job:string,authority:ExecutionAuthority):Promise<Observation> {

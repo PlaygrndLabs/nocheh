@@ -11,6 +11,7 @@ import {
   actionSummary,
   fromNow,
   fullTime,
+  problemText,
   useChatNames,
   useCommand,
   type Action,
@@ -52,6 +53,12 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
     if (typeof action.revision === 'number') body.expected_revision = action.revision;
     const done = await command.run(telegram ? '/tools/telegram-decision' : '/tools/decide', body, decision);
     if (!done) return;
+    // The chat stopped being one Nocheh serves after the card was made: the send was closed, not approved.
+    if (telegram && decision === 'approve' && (done as {state?: unknown}).state === 'cancelled') {
+      toast(problemText('destination_not_served'), 'bad');
+      onClose();
+      return;
+    }
     if (decision === 'approve' && again && !telegram) {
       const granted = await grant();
       if (!granted) {
@@ -204,7 +211,11 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
       )}
       {action.state === 'failed' && (
         <Notice tone="bad" title="It failed">
-          {failure ? 'Reason: ' + failure.replaceAll('_', ' ') + '.' : 'No reason was recorded.'}
+          {failure
+            ? failure === 'destination_not_served'
+              ? problemText(failure)
+              : 'Reason: ' + failure.replaceAll('_', ' ') + '.'
+            : 'No reason was recorded.'}
         </Notice>
       )}
 

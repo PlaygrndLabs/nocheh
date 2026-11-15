@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {canonical} from '../src/archive.js';
-import {cardName,cut,linked,operationCard,operationText,reordering,visible} from '../src/action-text.js';
+import {cardName,cut,likeOf,linked,operationCard,operationText,reordering,skeletonOf,visible} from '../src/action-text.js';
 import {approvalAction,approvalLines} from '../src/prompts.js';
 
 const words=approvalLines('');
@@ -277,4 +277,11 @@ test('a name or job text shows each hidden character where it stands, and keeps 
   assert.equal(reordering('Build \u202esite'),true);assert.equal(reordering('Fix \u2066it\u2069'),true);
   assert.equal(reordering('Go 🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}'),false,'a flag\'s tag characters are part of it');
   assert.equal(reordering('Hide \u{e0041}\u{e0042}'),true);assert.equal(reordering('مرور صفحه\u200cی هوا'),false);
+});
+
+test('chat labels read a character\'s prototype and a name\'s skeleton from the same tables as the cards',()=>{
+  assert.equal(likeOf('\u0430'),'a','a Cyrillic a is drawn as a Latin one');assert.equal(likeOf('\u203a'),'>');assert.equal(likeOf('"'),"''");
+  assert.equal(likeOf('x'),'x','a character with no look-alike is itself');assert.equal(likeOf('\u{1f600}'),'\u{1f600}');
+  assert.equal(skeletonOf('p\u0430ypal'),skeletonOf('paypal'));assert.notEqual(skeletonOf('paypal'),skeletonOf('paypa1x'));
+  assert.equal(skeletonOf('\ufb01le'),skeletonOf('file'),'a ligature reads as its letters');
 });

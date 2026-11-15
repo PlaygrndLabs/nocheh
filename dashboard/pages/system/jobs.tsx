@@ -95,7 +95,11 @@ export function jobProgress(job: Job): string {
 
 /** Why a job ended early, in words. */
 const jobError = (code: string) =>
-  code.startsWith('job_machine') ? machineErrorPhrase(code) : code.replaceAll('_', ' ');
+  code.startsWith('job_machine')
+    ? machineErrorPhrase(code)
+    : code === 'job_report_not_delivered'
+      ? 'The job finished, but its chat is not served now, so its report was not sent.'
+      : code.replaceAll('_', ' ');
 
 /** The plan the owner approved for a machine job: open while it runs, folded once it ended. */
 function Plan({steps, open}: {steps: string[]; open: boolean}) {
