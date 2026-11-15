@@ -98,11 +98,28 @@ export function envelope(value: unknown): Envelope {
 }
 /** Another message quoted inside an update: its files belong to that message, not to this one. */
 const nestedMessages = new Set(['reply_to_message','external_reply','pinned_message']);
+/** The fields of Telegram's PhotoSize. A list whose items carry only these is one picture in several sizes. */
+const photoSizeFields = new Set(['file_id','file_unique_id','width','height','file_size']);
+const photoSize = (value: unknown): value is Record<string,unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) &&
+  typeof (value as Record<string,unknown>).file_id === 'string' && Object.keys(value).every(key => photoSizeFields.has(key));
+const dimension = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+/** The largest size of one picture: the biggest area, then the biggest file; on a tie the later size (ADR-0251). */
+function largestSize(sizes: Record<string,unknown>[]): Record<string,unknown> {
+  return sizes.reduce((best, size) => {
+    const area = dimension(size.width)*dimension(size.height), bestArea = dimension(best.width)*dimension(best.height);
+    return area > bestArea || area === bestArea && dimension(size.file_size) >= dimension(best.file_size) ? size : best;
+  });
+}
+/** The files an update carries. A picture Telegram sends in several sizes (a photo, a new group photo, a paid photo or a
+ * video's cover) is one file at its largest size; the other sizes stay listed in the archived update. */
 export function attachmentRefs(payload: Record<string, unknown>): {kind:string; ref:string; metadata:Record<string,unknown>}[] {
   const refs = new Map<string, {kind:string; ref:string; metadata:Record<string,unknown>}>();
   function visit(value: unknown, kind: string, depth: number): void {
     if (depth > 25 || value === null || typeof value !== 'object') return;
-    if (Array.isArray(value)) { for (const v of value) visit(v, kind, depth+1); return; }
+    if (Array.isArray(value)) {
+      if (value.length > 0 && value.every(photoSize)) { visit(largestSize(value), kind, depth+1); return; }
+      for (const v of value) visit(v, kind, depth+1); return;
+    }
     const item = value as Record<string,unknown>;
     if (typeof item.file_id === 'string') refs.set(item.file_id, {kind, ref:item.file_id, metadata:item});
     for (const [key,v] of Object.entries(item)) if (!nestedMessages.has(key)) visit(v, key, depth+1);

@@ -75,7 +75,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const transcription=options.transcription??voiceTranscription(options.runtime),extraction=documentExtraction(options.runtime);
   // Voice notes archived before transcription was set up keep their readings; an earlier request still completes.
   const reprocessing=new ReprocessingRepository(stores,archive,derived,guards,options.dataDir,[transcription,extraction,...(options.transcription?[]:[archivedVoice()])]);
-  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction);
+  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction,options.policy);
   const retirements=new SourceRetirementRepository(stores,archive);
   const reactions=new ReactionStateRepository(archive,stores.control);
   const access=new SourceAccessRepository(stores,archive,guards,options.policy,retirements,reactions);
