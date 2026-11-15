@@ -44,9 +44,10 @@ export function recallPlace(where:RecallWhere,names:ReadonlyMap<string,string>):
 
 /**
  * The names of the groups and topics among `spaces` (Nocheh chat ids), from what Nocheh already saved: a group's from
- * its latest captured message under any Telegram id it has had, else from its chat row (the name its updates or the
- * owner's last Telegram refresh recorded); a topic's from its latest creation, edit or reply to its first message among
- * the group's recent messages, else from its topic row (the name the owner gave it, or the one Telegram last showed).
+ * its latest captured message under any Telegram id it has had, else from its chat row (the name its updates showed, or
+ * the one the owner's last Telegram refresh recorded while that refresh found the chat); a topic's from its latest
+ * creation, edit or reply to its first message among the group's recent messages, else from its topic row (the name the
+ * owner gave it, or the one Telegram last showed).
  * A failed lookup leaves names out, so a hit is labelled by its kind and recall never fails over a name.
  */
 export async function recallNames(stores:Pools,spaces:string[]):Promise<Map<string,string>> {
@@ -58,8 +59,10 @@ export async function recallNames(stores:Pools,spaces:string[]):Promise<Map<stri
   const newer=(a:{received_at:Date;id:string},b:{received_at:Date;id:string})=>
     a.received_at.getTime()!==b.received_at.getTime()?a.received_at.getTime()>b.received_at.getTime():a.id>b.id;
   try {
-    for(const row of (await stores.control.query('SELECT id,title FROM chats WHERE id=ANY($1::text[]) AND title IS NOT NULL',[[...groups,...topics]])).rows)
-      set(String(row.id),row.title);
+    // A name the owner's refresh recorded counts only while that refresh found the chat, as before step 2b.
+    for(const row of (await stores.control.query(`SELECT c.id,c.title FROM chats c LEFT JOIN chat_details d ON d.chat_id=c.id
+      WHERE c.id=ANY($1::text[]) AND c.title IS NOT NULL AND (c.title_source IS DISTINCT FROM 'refreshed' OR d.refreshed_state='available')`,
+      [[...groups,...topics]])).rows)set(String(row.id),row.title);
   }catch{}
   try {
     // A captured message names its group as the chat list does; it wins over the chat row. The archive keeps each

@@ -397,16 +397,17 @@ retired), gets its own record.
   compared by Nocheh chat ids, and names the group and topic from the chat
   directory, never from how an id is written.
 - ADR-0251: a recalled note's group and topic are named from the chat
-  directory: its title, then the newest archived message under any of the
-  group's Telegram ids, current or old. A live recording is judged in the chat
-  the directory finds: a served group, with access read under every Telegram id
-  it has had; a group the directory does not know lets only the owner through.
-  Member job spend counts the owner by `owner_id`, names each group from the
-  directory, and sends its notices and Pause or Resume edits to the owner's
-  private chat where it is in Telegram now, never to a chat the directory does
-  not know; only the owner's press in that chat pauses or resumes. A phone's
-  sign-in pause stays keyed by its Telegram account id, an adapter entry in the
-  format gate.
+  directory: the chat row's name (one the owner's refresh gave counts only
+  while that refresh found the chat, as before), then the newest archived
+  message under any of the group's Telegram ids, current or old. A live
+  recording is judged in the chat the directory finds: a served group, with
+  access read under every Telegram id it has had; a group the directory does
+  not know lets only the owner through. Member job spend counts the owner by
+  `owner_id`, names each group from the directory, and sends its notices and
+  Pause or Resume edits to the owner's private chat where it is in Telegram
+  now, never to a chat the directory does not know; only the owner's press in
+  that chat pauses or resumes. A phone's sign-in pause stays keyed by its
+  Telegram account id, an adapter entry in the format gate.
 </amendments>
 
 <alternatives>

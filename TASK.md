@@ -117,8 +117,10 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   `TELEGRAM_GROUP_IDS` entry naming a group by an earlier Telegram id finds that group.
 - Merged with main's fixes that lose nothing
   ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)), on old-shaped and digest chats: a
-  recalled note names its group and topic from the chat records, the group's title or its newest
-  message under any Telegram id it has had ([recall](test/recall-places.test.ts)); a live
+  recalled note names its group and topic from the chat records, the group's name or its newest
+  message under any Telegram id it has had, and a name only the owner's refresh gave counts while
+  that refresh found the group, as main does ([recall](test/recall-places.test.ts),
+  [store recall](test/store-recall-places.test.ts), [server](test/store-server.test.ts)); a live
   recording is judged in the chat the records find, so an allowed person is not cut in a group
   Telegram upgraded or in a new-id group, and a group the records do not know lets only the owner
   through ([sender](test/assistant.test.ts), [voice](test/store-voice-transcription.test.ts)); a
