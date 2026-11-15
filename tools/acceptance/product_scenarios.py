@@ -403,7 +403,7 @@ class ProductScenarios(Scenarios):
         _, text = self.turn(self.f.message(OWNER, 'Typed by me FWD2 [[turn:Forwarded:]]'), OWNER)
         self.gate('typed_text_has_no_forward_line', text.endswith(' absent'), answer=text)
         wording = 'نباید برود FWDCMD1'
-        request = self.f.message(OWNER, 'send [[action:'+str(OTHER_GROUP)+'|'+wording+']] [[after:silent]]')
+        request = self.f.message(OWNER, 'send [[action:'+self.f.chat(OTHER_GROUP)+'|'+wording+']] [[after:silent]]')
         _, before = self.silent_turn(request, OWNER)
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
         proposal = next(row for row in self.proposals() if wording in json.dumps(row, ensure_ascii=False))
