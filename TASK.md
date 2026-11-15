@@ -152,7 +152,8 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   it, in the services image only): `project_groups_stay_apart` fails at
   `one_reply_in_exact_conversation`, the reply to GP2's message going to GP1, and on that fixture
   GP1's archive search returns GP2's mark, which `group_answer_uses_only_that_group` checks;
-  `group_members` and `new_id_group_works_end_to_end` pass.
+  `group_members` and `new_id_group_works_end_to_end` pass. After merging main's fix to the
+  deleted topic check (#219), `deleted_topic` passes with `group_members` (3 of 3).
   Pending:
   - The full tester's waits for the person card (10 minutes) and the memory rebuild (15 minutes)
     are too short when every scenario runs on one fixture: raise them, or keep running it in
