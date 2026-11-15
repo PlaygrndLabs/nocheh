@@ -100,8 +100,9 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
 - Merged with main's card and forward fixes
   ([ADR-0250](docs/adr/0250-cards-and-forwards-say-whose-words-they-are.md)), on old-shaped and
   digest chats: a forwarded message's line says "You" only in the owner's private chat as the
-  chat records know it, a forwarded owner command is refused there and in a topic of a new-id
-  group, a forward among the recent group messages keeps its line
+  chat records know it, a forwarded owner command is refused there, and in a topic of a new-id
+  group it gets the owner-only refusal and no turn, a forward among the recent group messages
+  keeps its line
   ([dispatch](test/store-telegram-dispatch-chats.test.ts),
   [button](test/store-private-button.test.ts), [digest button](test/store-private-button-chats.test.ts)),
   and a job card in the owner's private chat names the group and topic it was asked in from the
@@ -110,12 +111,15 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   owner's people route keeps each person's standing and says whether the group's messages show
   them, under every Telegram id the group has had ([people](test/telegram-directory.test.ts),
   [records](test/store-chat-records.test.ts), [directory](test/test_telegram_operations.py),
-  [pages](test/dashboard-pages.browser.mjs)).
+  [pages](test/dashboard-pages.browser.mjs)). That route names each group by its Nocheh chat id,
+  with every Telegram id it has had, and the dashboard's directory of people keeps that id: a
+  group past the chat list's first page is listed once and opens as itself, and a
+  `TELEGRAM_GROUP_IDS` entry naming a group by an earlier Telegram id finds that group.
 
   Checks on the integrated branch after merging main: the build; node unit and dashboard tests
   (544: 346 pass, 194 store tests skipped there, and the 4 workflow tests that also fail on
   main); all 93 store test files on old-shaped and digest chats (231 pass, 0 fail); dashboard
-  format; the dashboard browser tests (45: 43 pass, and the 2 settings-apply tests that also fail
+  format; the dashboard browser tests (46: 44 pass, and the 2 settings-apply tests that also fail
   on main); Python Hermes (921, with the 2 environment errors that also occur on main), Telegram
   (122) and tools (120, 2 skipped). The format gate's allowlist holds only adapter, legacy and
   unrelated sites.
