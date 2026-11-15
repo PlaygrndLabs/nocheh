@@ -2,7 +2,7 @@ import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import {approvalAction,approvalCard,approvalLines,approvalTask,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
+import {approvalAction,approvalCard,approvalLines,approvalTask,backgroundMemberTexts,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
 import {cardName,controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,type Link,type OperationText} from '../action-text.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
 import {forwardOrigin,forwardedCommand} from '../forwarded.js';
@@ -14,6 +14,7 @@ import type {SourceAccessRepository} from './access.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
 import {closedStates,type BackgroundJobRepository} from './background-jobs.js';
+import {memberPause,memberResume} from './member-job-spend.js';
 import type {TaskRepository} from './tasks.js';
 import type {PrivateAnswerRepository} from './private-answers.js';
 
@@ -391,7 +392,8 @@ export class ActionCommandRepository {
     // A card in another chat than the one the job reports to does not say the report comes here. A job on the owner's machine
     // reports to the owner's private chat, wherever it was asked (ADR-0244).
     const away=(row.machine?this.access.policy().owner_id:String(row.space_id).split('/topic/')[0])!==place.chat;
-    const outcome=state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines[away?'running_elsewhere':'running']:card.lines[state];
+    // A job a member approved while member jobs are paused waits to start, which its card says (ADR-0251).
+    const outcome=state==='approved'&&card.paused?card.lines.paused:state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines[away?'running_elsewhere':'running']:card.lines[state];
     const buttons=['approved','running','reporting'].includes(state)?[[line.stop.slice(0,40),'ns'+id.slice(0,40)+card.fingerprint.slice(0,16)]]:null;
     if(outcome)await this.approval({kind:'settle',chat_id:place.chat,id,text:`${card.text}\n\n${outcome}`,links:[],...(buttons?{buttons}:{}),...seenIn(seen,place.chat)});
     if(['done','failed','limited'].includes(state)&&!row.cancel_requested)await this.offerList(row);
@@ -500,6 +502,7 @@ export class ActionCommandRepository {
     const row=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
     const query=row?JSON.parse(row.payload.toString()).callback_query:null,data=typeof query?.data==='string'?query.data.match(buttonData):null;
     if(query?.data===retryButton&&typeof query.id==='string')return this.retryPressed(query);
+    if((query?.data===memberPause||query?.data===memberResume)&&typeof query.id==='string')return this.memberJobsPressed(query,query.data===memberPause);
     const privately=typeof query?.data==='string'?answerButton.exec(query.data):null;
     if(privately&&typeof query.id==='string')return this.answerPressed(privately[1]!,query,source);
     if(!data||typeof query.id!=='string')return false;
@@ -625,6 +628,19 @@ export class ActionCommandRepository {
       reply=retried?fillTemplate(labels.retried!,{count:String(retried)}):labels.nothing!;
     }
     await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:reply.slice(0,200)},10000);
+    return true;
+  }
+  /** Pause or Resume under a notice about members' job spend: only the owner's press in their private chat changes
+   *  anything (ADR-0251). The notice then shows the answer and offers the other button. */
+  private async memberJobsPressed(query:any,paused:boolean):Promise<boolean> {
+    const chat=String(query.message?.chat?.id??''),owner=this.access.policy().owner_id;
+    const lines=labeledLines(backgroundMemberTexts,(await ownerPrompts(this.access.stores.control))['background.member_texts']);
+    let reply=lines.only_owner!;
+    if(this.jobs&&owner&&String(query.from?.id??'')===owner&&chat===owner) {
+      await this.jobs.members.setPaused(paused);
+      reply=paused?lines.paused!:lines.resumed!;
+    }
+    await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(reply).slice(0,200).join('')},10000);
     return true;
   }
   async controlReply(source:SourceReference):Promise<string|null> {

@@ -7,6 +7,7 @@
  {"path": "/v1/chat-tools", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/background-jobs", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/background-jobs/settings", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/background-jobs/member-pause", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/background-jobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/stop", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/machines", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/machines/settings", "owner_storage": true, "allowed_path": true},
