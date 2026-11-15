@@ -327,21 +327,26 @@ branch ([ADR-0254](docs/adr/0254-sends-go-only-to-chats-nocheh-serves.md),
   `reminder_with_split_emoji_arrives` ([scenarios](tools/acceptance/product_scenarios.py)).
 
   Nothing lost: every send that works today goes to a chat Nocheh serves, the owner's own
-  reminders keep their time and text, and nothing is capped or dropped. Checked so far, on the
-  working tree: the type check, and the unit tests of served destinations, chat labels, reminder
-  texts, texts, card text, data tools, chats and the chat id format gate pass. Pending: the store
-  tests in the Docker fixture, the dashboard browser tests, and the cloud tester run with the
-  five new scenarios; then a live look at a send card and a merged reminder on the owner's
-  install after merge. Not built, as approved: a cap on pending reminders per group, a daily
-  reminder cap, and a copy of the send check in the bot. Two behaviour changes are built as the
-  review recommended, for the owner's review: the owner's reminders on a task a person
-  finished, archived or trashed are sent, saying who closed it (the owner's own closing still
-  skips them); and a message from the owner in a group that removes reminders set elsewhere
-  sends the owner one notice. Owner steps: a message to a chat Nocheh does not serve is refused;
-  select the group, or allow the person in a selected group, on the Chats page. Send cards read
-  "group “…”", "› topic “…”" and "private chat with “…” (a person you allowed in group “…”)".
-  Reminders people set arrive with a "👤 Set by" line, merged per group; their wording is in
-  Settings › Assistant under "Reminder lines: who set it and where".
+  reminders keep their time and text, and nothing is capped or dropped. Checked: the type
+  check; the unit tests (281 pass; the 4 workflow tests that need Postgres fail, as on main);
+  the dashboard browser tests (50 of 50); the store suite in the Docker fixture (619 pass; the
+  4 files that fail on main fail the same way); and the cloud tester's new and affected
+  scenarios. Pending: a live look at a send card and a merged reminder on the owner's install
+  after merge. Left as they were, for later: a member's job still running when its group is
+  deselected ends with `job_not_permitted` and no notice; `/approve` reads an action before
+  deciding it, so a proposal changed in between answers as already decided; and the bot, while
+  it starts, answers "not connected" before it looks for the receipt of a message it already
+  sent (reminders now allow for that; the bot could look first). Not built, as approved: a cap
+  on pending reminders per group, a daily reminder cap, and a copy of the send check in the
+  bot. Two behaviour changes are built as the review recommended, for the owner's review: the
+  owner's reminders on a task a person finished, archived or trashed are sent, saying who
+  closed it (the owner's own closing still skips them); and a message from the owner in a group
+  that removes reminders set elsewhere sends the owner one notice. Owner steps: a message to a
+  chat Nocheh does not serve is refused; select the group, or allow the person in a selected
+  group, on the Chats page. Send cards read "group “…”", "› topic “…”" and "private chat with
+  “…” (a person you allowed in group “…”)". Reminders people set arrive with a "👤 Set by" line,
+  merged per group; their wording is in Settings › Assistant under "Reminder lines: who set it
+  and where".
 
 Members step 2: projects and the private button (owner, 2026-11-12: "I just review the
 tables and seems what I want if there is a important point or need my answer ask, else start
