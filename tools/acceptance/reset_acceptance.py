@@ -15,6 +15,8 @@ from tools.acceptance import (reset_baseline, reset_initialization,
 FORMAT = 'nocheh-reset-acceptance-mode-v1'
 STAGES = ('prepared', 'containers_created', 'fences_release_intent',
           'acceptance_running')
+# The state folders Hermes mounts besides its own: the erasure empties their parents, so they are made again.
+HERMES_FOLDERS = ('spool/brain-turns', 'admin/dashboard/home')
 
 
 def run(arguments, environment):
@@ -308,6 +310,10 @@ def activate(journal, preflight, *, runner=run, environment=None, command=None,
 
     if value['stage'] == 'prepared':
         reset_quiescence.assert_fences(journal.state, journal.value['reset_id'])
+        # Hermes's two folders (ADR-0251), made after the empty-baseline checks and before Docker could make them
+        # as root.
+        for folder in HERMES_FOLDERS:
+            reset_initialization._safe_directory(journal.state, folder)
         runner(_compose(command, profiles, ['create', '--no-build', *plan['desired']]), environment)
         by_service = _owned(plan, runner, environment)
         runner(['docker', 'update', '--restart=no',

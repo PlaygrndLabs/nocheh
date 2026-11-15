@@ -93,7 +93,7 @@ test('a background job is started with one call, approved on its card, runs as o
     const card=last('card');
     assert.equal(card.chat_id,group);assert.equal(card.reply_to,String(sent));
     assert.match(card.text,/Background job: Open tasks/);assert.match(card.text,/6 messages/);assert.ok(card.text.includes('about $'+priced.toFixed(2)),card.text);
-    assert.match(card.text,/🛑 Stops at \$5\.0 or 45 min, not counting the secret check\n/);assert.doesNotMatch(card.text,/can't be measured/);
+    assert.match(card.text,/🛑 Stops at \$5\.00 or 45 min, not counting the secret check\n/);assert.doesNotMatch(card.text,/can't be measured/);
     assert.match(card.text,/Find every task that is still open and who owns it\./);
     assert.match(card.text,/🔎 Starting it already used one secret check\. It counts toward the daily limit of the person who asked, unless it is rejected\./);
     const approve='na'+proposed.id.slice(0,40)+proposed.fingerprint.slice(0,16);
@@ -208,7 +208,8 @@ test('a background job is started with one call, approved on its card, runs as o
     assert.equal(big.approver,'owner');assert.equal(last('card').chat_id,'123');assert.match(big.message,/owner was asked privately/);
     assert.match(last('card').text,/^🗂 Background job: Huge\n💬 Asked in /,'the card in the private chat says where the job was asked (ADR-0250)');
     const huge=(big.estimate as any).cost_usd;assert.ok(huge>5);
-    assert.equal(Number((await job(big.id)).cost_limit_usd),Math.ceil(huge*1.5),'an approved estimate sets the limit at half again');
+    assert.equal(Number((await job(big.id)).cost_limit_usd),Math.ceil(Math.round(huge*100)*3/2)/100,'an approved estimate sets the limit at half again, to the cent for a member\'s job');
+    assert.ok(last('card').text.includes('🛑 Stops at $'+(Math.ceil(Math.round(huge*100)*3/2)/100).toFixed(2)+' or '),'the card shows that cap to the cent');
     // So does a member's job on a model with no input or output price: only its time limits it, and the card says so.
     rates={input:null,output:10,cache_read:0.2,cache_write:2.5};
     const unpriced=await s.actionCommands.offer('background',await s.jobs.start(await actor((await message('unpriced',8)).id),{title:'Unpriced',instruction:'Read the made-up notes.'}));

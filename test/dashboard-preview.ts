@@ -253,7 +253,10 @@ const backgroundJobs:any[]=[
   {id:hx('9f'),title:'Rotate the logs on build-vm',state:'proposed',chat:'42',asked_in:'42',attempts:0,ended:null,cost_usd:0,cost_limit_usd:5,priced:true,minutes_limit:45,
    estimate:{minutes:5,cost_usd:0.1},todo:[],started_at:null,finished_at:null,created_at:minutesAgo(2),error_code:null,machine:{name:'build-vm'},
    steps:['Set up logrotate for ~/projects/garden-site/logs'],machine_cleanup:null}];
-let jobLimits={cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,box_tools:true,revision:0};
+let jobLimits={cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,member_notice_usd:20,member_pause_usd:100,box_tools:true,revision:0};
+// What jobs members approved themselves spent today, and the pause of member jobs (ADR-0251).
+let memberPause:{by:'owner'|'auto';since:string;until:string|null}|null=null;
+const memberSpend=()=>({day:new Date().toISOString().slice(0,10),spent_usd:23.4,notice_usd:jobLimits.member_notice_usd,pause_usd:jobLimits.member_pause_usd,paused:memberPause});
 // Machines: the preview stands in for Nocheh's machine service with made-up machines, keys and commands. Test fails only for an
 // address ending in .invalid; the key it shows is a fingerprint of the name, so a new host key shows only after Trust a new host key.
 const fingerprint=(text:string)=>createHash('sha256').update(text).digest('base64').replace(/=+$/,'');
@@ -518,7 +521,8 @@ const server=createServer((req,res)=>{void(async()=>{
  if(phoneRoute){const body=await readJson(req) as any;
   if(phoneRoute==='check')return json(res,200,{state:await ownerLock.check(body.token,'phone')});
   if(phoneRoute==='sign-out'){await ownerLock.signOut(body.token);return json(res,200,{ok:true});}
-  try{return json(res,200,await ownerLock.signIn(body.password,'phone'));}catch(error:any){return json(res,error.status??503,{error:error.code,until:error.until,tries_left:error.tries_left});}}
+  // The preview has no Telegram launch data to check; its phone is the synthetic owner's.
+  try{return json(res,200,await ownerLock.signIn(body.password,'phone:42'));}catch(error:any){return json(res,error.status??503,{error:error.code,until:error.until,tries_left:error.tries_left});}}
  const phone=req.headers['x-nocheh-mini-session'];
  if(typeof phone==='string'){if(await ownerLock.check(phone,'phone')!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');}
  else sessions.authorize(req,req.method!=='GET');
@@ -666,7 +670,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/github')return json(res,200,githubStatus());
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
   if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
-  if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs});
+  if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs,members:memberSpend()});
   if(route==='/background-jobs/settings')return json(res,200,jobLimits);
   if(route==='/machines')return json(res,200,machineList(mode));
   if(route==='/chat-sends'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
@@ -753,8 +757,12 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
   if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
   if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');
-    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),
+    const notice=body.member_notice_usd===undefined?jobLimits.member_notice_usd:Number(body.member_notice_usd),high=body.member_pause_usd===undefined?jobLimits.member_pause_usd:Number(body.member_pause_usd);
+    if(!(high>=notice))throw new HttpError(400,'invalid_settings');
+    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_daily_jobs:Number(body.member_daily_jobs),member_notice_usd:notice,member_pause_usd:high,
       box_tools:typeof body.box_tools==='boolean'?body.box_tools:jobLimits.box_tools,revision:jobLimits.revision+1};return json(res,200,jobLimits);}
+  if(route==='/background-jobs/member-pause'){if(typeof body.paused!=='boolean')throw new HttpError(400,'invalid_member_pause');
+    memberPause=body.paused?{by:'owner',since:memberPause?.by==='owner'?memberPause.since:new Date().toISOString(),until:null}:null;return json(res,200,memberSpend());}
   if(route==='/machines/settings'){if(body.revision!==machineControl.revision)throw new HttpError(409,'configuration_conflict');
     machineControl={enabled:body.enabled===true,revision:machineControl.revision+1};return json(res,200,machineList(mode));}
   if(route==='/machines'){if(mode==='unavailable')throw new HttpError(400,'machine_unavailable');

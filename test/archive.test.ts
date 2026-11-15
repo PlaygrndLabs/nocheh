@@ -20,6 +20,33 @@ test('a message keeps its own files, not those of a message it replies to or pin
   assert.deepEqual(refs.map(ref=>[ref.kind,ref.ref]),[['document','own-file']]);
 });
 
+test('a picture Telegram sends in several sizes is one file at its largest size; the update keeps every size',()=>{
+  const size=(id:string,width?:number,height?:number,file_size?:number)=>({file_id:id,file_unique_id:'u-'+id,
+    ...(width===undefined?{}:{width}),...(height===undefined?{}:{height}),...(file_size===undefined?{}:{file_size})});
+  const files=(payload:Record<string,unknown>)=>attachmentRefs(payload).map(ref=>[ref.kind,ref.ref]);
+  const photo=[size('medium',320,240,9000),size('large',1280,960,90000),size('small',90,68,1200),size('wide',1000,1000,80000)];
+  const update={update_id:1,message:{message_id:2,caption:'Synthetic garden sign',photo}};
+  assert.deepEqual(files(update),[['photo','large']],'sizes out of order: the biggest area');
+  assert.deepEqual(attachmentRefs(update)[0]!.metadata,photo[1],'its own size only');
+  assert.equal(update.message.photo.length,4,'the update itself is unchanged');
+  assert.deepEqual(files({message:{photo:[size('a',640,480,5000),size('b',480,640,7000)]}}),[['photo','b']],'the same area: the bigger file');
+  assert.deepEqual(files({message:{photo:[size('a',640,480,5000),size('b',640,480,5000)]}}),[['photo','b']],'a tie: the later size');
+  assert.deepEqual(files({message:{photo:[size('a',640,480),size('b',undefined,undefined,99999)]}}),[['photo','a']],'a size without width or height counts as none');
+  assert.deepEqual(files({message:{photo:[size('only',1,1)]}}),[['photo','only']]);
+  assert.deepEqual(files({message:{new_chat_photo:[size('a',160,160),size('b',640,640)]}}),[['new_chat_photo','b']]);
+  assert.deepEqual(files({message:{paid_media:{star_count:1,paid_media:[{type:'photo',photo:[size('a',90,90),size('b',800,800)]}]}}}),[['photo','b']]);
+  assert.deepEqual(files({message:{video:{file_id:'clip',file_unique_id:'u-clip',width:640,height:360,duration:4,cover:[size('a',90,50),size('b',640,360)]}}}),
+    [['video','clip'],['cover','b']],'a video and the largest size of its cover');
+  // A list with anything but PhotoSize fields is not one picture: every file in it stays.
+  assert.deepEqual(files({message:{video:{file_id:'clip',file_unique_id:'u-clip',width:640,height:360,
+    qualities:[{file_id:'q1',file_unique_id:'u-q1',width:640,height:360,codec:'h264',file_size:1},{file_id:'q2',file_unique_id:'u-q2',width:1280,height:720,codec:'h264',file_size:2}]}}}),
+    [['video','clip'],['qualities','q1'],['qualities','q2']]);
+  assert.deepEqual(files({message:{photo:[size('a',90,90),{file_id:'b',width:800,height:800,thumbnail:size('t',1,1)}]}}),
+    [['photo','a'],['photo','b'],['thumbnail','t']],'a mixed list keeps every file');
+  assert.deepEqual(files({message:{message_id:3,reply_to_message:{message_id:1,photo:[size('quoted',800,800)]},photo:[size('own',800,600)]}}),[['photo','own']],
+    'a quoted message\'s picture still belongs to that message');
+});
+
 test('immutable file storage detects collisions and preserves bytes',async()=>{
   const root=await mkdtemp(join(tmpdir(),'nocheh-files-'));
   try {

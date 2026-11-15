@@ -75,7 +75,7 @@ test('a job the owner approved in their private chat reads Notion under the owne
     await saveNotion({enabled:true});
     assert.doesNotMatch(await card(offered.id),/📒/,'the card keeps what the job was asked with');
     const later=await s.jobs.start(await actor((await message('123',123,'Check my made-up table later')).id,null,'123'),{title:'Later card check',instruction:'Read it.',chat:group});
-    assert.match(await card(later.id),/🛑 Stops at \$5\.0 or 45 min, not counting the secret check\n🔎 Starting it already used one secret check\.\n📒 It can read your Notion without asking\. Changes still ask you\./);
+    assert.match(await card(later.id),/🛑 Stops at \$5\.00 or 45 min, not counting the secret check\n🔎 Starting it already used one secret check\.\n📒 It can read your Notion without asking\. Changes still ask you\./);
     const member=await s.jobs.start(await actor((await message(group,9,'Check it here')).id,group,group),{title:'Group card',instruction:'Read it.'});
     assert.doesNotMatch(await card(member.id),/📒/,'a group job never reaches Notion, so its card says nothing about it');
     // Approved after everything asks, the job keeps no Notion reads: approval only narrows what the card offered.

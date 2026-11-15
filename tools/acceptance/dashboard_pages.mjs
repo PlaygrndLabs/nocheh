@@ -1,7 +1,8 @@
 /**
  * Opens every dashboard page and tab of a running fixture in Chromium and
  * reports what the owner would see: the page heading, uncaught errors, console
- * errors and owner API calls that failed. Runs inside the tester's browser
+ * errors and owner API calls that failed; then Hermes's Chat, Sessions and Files pages, which must carry their
+ * reported script rules and draw no report. Runs inside the tester's browser
  * container on the fixture network (deploy/acceptance/browser.Dockerfile).
  *
  * The dashboard answers only its own local address, so a small relay on
@@ -77,6 +78,34 @@ for (const [route, title] of routes) {
     problems.push('did not open: ' + String(error.message).split('\n')[0]);
   }
   results.push({route, heading, passed: heading === title && !problems.length, problems});
+  await page.close();
+}
+// Hermes's own pages carry script rules that are only reported for now (ADR-0251). The browser fires a
+// securitypolicyviolation event for each report too, so a missing rule or any report fails here: a Hermes update
+// that adds a script the rules would block is caught before they are enforced.
+for (const route of ['chat', 'sessions', 'files']) {
+  const page = await context.newPage();
+  const problems = [];
+  await page.addInitScript(() => {
+    window.__nochehScriptReports = [];
+    document.addEventListener('securitypolicyviolation', event =>
+      window.__nochehScriptReports.push(`${event.effectiveDirective} ${event.blockedURI || 'inline'} at ${event.sourceFile || 'page'}`),
+    );
+  });
+  page.on('pageerror', error => problems.push('page error: ' + error.message));
+  try {
+    const response = await page.goto(`http://127.0.0.1:${port}/hermes/${route}`, {timeout: 60000});
+    const policy = response?.headers()['content-security-policy-report-only'] ?? '';
+    if (!/^script-src 'self' 'nonce-[A-Za-z0-9+/]+=*';/.test(policy)) problems.push('no script rules: ' + (policy || 'none'));
+    await page.locator('#root *').first().waitFor({timeout: 30000});
+    // Chat opens its live connections and loads its parts after the first paint.
+    await page.waitForTimeout(4000);
+    for (const report of await page.evaluate(() => window.__nochehScriptReports)) problems.push('script rule report: ' + report);
+    await page.screenshot({path: `${out}/hermes-${route}.png`});
+  } catch (error) {
+    problems.push('did not open: ' + String(error.message).split('\n')[0]);
+  }
+  results.push({route: 'hermes/' + route, heading: null, passed: !problems.length, problems});
   await page.close();
 }
 await browser.close();

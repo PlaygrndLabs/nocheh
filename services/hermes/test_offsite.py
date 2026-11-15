@@ -290,6 +290,35 @@ class SendAndCheckTests(unittest.TestCase):
             with self.assertRaisesRegex(offsite.OffsiteError, 'offsite_low_disk'): offsite.send(self.state, self.values)
         self.assertNotIn(JOBS[0], offsite.read_record(self.state).get('attempted', []))
 
+    def test_copies_that_fail_or_are_skipped_are_counted_for_the_owner(self):
+        from tools.operations.installation import backup_schedule
+        values = {**self.values, 'NOCHEH_BACKUP_SCHEDULE': 'off', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
+        self.backup(JOBS[0], 1)
+        refused = lambda handler: (handler._parts(), handler._body(), handler._send(403, b'<Error><Code>AccessDenied</Code></Error>'))
+        with patch.object(Bucket, 'do_PUT', refused):
+            with self.assertRaises(offsite.OffsiteError): offsite.send(self.state, self.values)
+            self.backup(JOBS[1], 2)
+            with self.assertRaises(offsite.OffsiteError): offsite.send(self.state, self.values)
+        found = backup_schedule.health(self.state, values)
+        self.assertEqual((found['offsite_failed'], found['offsite_reason']), (2, 'offsite_storage_AccessDenied'))
+        self.backup(JOBS[2], 3)
+        full = offsite.shutil.disk_usage(self.state)._replace(free=10)
+        with patch.object(offsite.shutil, 'disk_usage', return_value=full):
+            for _ in range(3): self.assertEqual(offsite.due(self.state, self.values), {'due': False, 'skipped': 'low_disk'})
+            self.assertEqual(backup_schedule.health(self.state, values)['offsite_skipped'], 1, 'once for each backup, not each check')
+            self.backup(JOBS[3], 4); offsite.due(self.state, self.values)
+            self.assertEqual(backup_schedule.health(self.state, values)['offsite_skipped'], 2)
+            # Send copy now on a full disk is a failure the owner hears about, and the backup stays due for the schedule.
+            with self.assertRaisesRegex(offsite.OffsiteError, 'offsite_low_disk'): offsite.send(self.state, self.values)
+        found = backup_schedule.health(self.state, values)
+        self.assertEqual((found['offsite_failed'], found['offsite_reason'], found['offsite_skipped']), (3, 'offsite_low_disk', 2))
+        self.assertTrue(offsite.due(self.state, self.values)['due'])
+        offsite.send(self.state, self.values)
+        found = backup_schedule.health(self.state, values)
+        self.assertEqual((found['offsite_failed'], found['offsite_skipped']), (0, 0))
+        self.assertEqual(backup_schedule.health(self.state, {**values, 'NOCHEH_OFFSITE': 'off'})['offsite_failed'], 0)
+
+
     def test_a_refused_completion_inside_a_success_answer_fails_the_copy(self):
         self.backup(JOBS[0], 1, payload=bytes(range(256)) * 20000)
         original = Bucket.do_POST

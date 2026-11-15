@@ -20,6 +20,7 @@ class ResetInventoryTests(unittest.TestCase):
         (self.state / 'files/original.bin').write_bytes(b'PRIVATE_ORIGINAL_MUST_NOT_BE_COPIED')
         (self.state / 'admin/applied.json').write_text('STALE_REVISION_MUST_NOT_BE_COPIED')
         (self.state / 'admin/settings.lock').touch()
+        (self.state / 'admin/backup-health.json').write_text('{"state": "complete"}')
         (self.memory / 'ledger').mkdir()
         (self.root / 'data/backups').mkdir()
         self.values = {'NOCHEH_STORAGE_LAYOUT': 'legacy', 'NOCHEH_HONCHO_ENABLED': 'true', 'SERVICE_TOKEN': 'SECRET_NEVER_SERIALIZED'}
@@ -76,6 +77,7 @@ class ResetInventoryTests(unittest.TestCase):
         self.assertEqual(actions[str(self.state / 'admin/restores')], 'review_restore')
         self.assertEqual(actions[str(self.state / 'admin/applied.json')], 'erase')
         self.assertEqual(actions[str(self.state / 'admin/settings.lock')], 'preserve')
+        self.assertEqual(actions[str(self.state / 'admin/backup-health.json')], 'erase')
         self.assertEqual(manifest['external_archives'][0]['action'], 'review_archive')
         self.assertIn('settle_external_effects', manifest['pending'])
         self.assertEqual(before, {str(path): path.read_bytes() for path in self.root.rglob('*') if path.is_file()})

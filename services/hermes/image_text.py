@@ -5,6 +5,9 @@ Hermes's vision tool detects the format, converts formats a model rejects and sh
 oversized images. The provider and model are the Images part of Settings › Models. Each
 image is read in a child process that holds only that provider's key, bounded in time and
 memory, with a Hermes home of its own; Hermes's own usage accounting reports its tokens.
+A read that fails because a write found no room in the memory /tmp or was refused by the
+locked-down container (ADR-0251) is no model call: it is counted for the owner's problem
+notice instead.
 """
 import asyncio
 import base64
@@ -50,27 +53,40 @@ def read_image(body):
     def bounded():
         import resource
         resource.setrlimit(resource.RLIMIT_AS, (MEMORY, MEMORY))
-    with tempfile.TemporaryDirectory(prefix='nocheh-image-') as home:
-        # Every provider is reached through its OpenAI-compatible API. Hermes would switch an
-        # Anthropic address to its Messages API now that the image has that SDK; a one-shot image
-        # read gains nothing from it.
-        Path(home, 'config.yaml').write_text(json.dumps({'auxiliary': {'vision': {
-            'provider': 'custom', 'model': selected['model'], 'base_url': selected['url'], 'api_key': '${env:' + KEY + '}',
-            'api_mode': 'chat_completions'}}}))
-        environment = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
-                       'HOME': home, 'TMPDIR': home, 'HERMES_HOME': home, KEY: selected['key'],
-                       **{name: os.environ[name] for name in ('HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy',
-                                                              'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE') if name in os.environ}}
-        try:
-            child = subprocess.run([sys.executable, '-m', 'services.hermes.image_text', json.dumps({'prompt': instruction})], input=data,
-                                   capture_output=True, timeout=SECONDS, env=environment, preexec_fn=bounded, check=False)
-            result = json.loads((child.stdout.strip().splitlines() or [b''])[-1])
-        except subprocess.TimeoutExpired:
-            result = {'state': 'failed', 'reason': 'timed_out'}
-        except ValueError:
-            result = {'state': 'failed', 'reason': 'nocheh_error'}
-    if not isinstance(result, dict) or result.get('state') not in ('done', 'failed', 'unreadable'):
-        result = {'state': 'failed', 'reason': 'nocheh_error'}
+    failure = None
+    try:
+        with tempfile.TemporaryDirectory(prefix='nocheh-image-') as home:
+            # Every provider is reached through its OpenAI-compatible API. Hermes would switch an
+            # Anthropic address to its Messages API now that the image has that SDK; a one-shot image
+            # read gains nothing from it.
+            Path(home, 'config.yaml').write_text(json.dumps({'auxiliary': {'vision': {
+                'provider': 'custom', 'model': selected['model'], 'base_url': selected['url'], 'api_key': '${env:' + KEY + '}',
+                'api_mode': 'chat_completions'}}}))
+            environment = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
+                           'HOME': home, 'TMPDIR': home, 'HERMES_HOME': home, KEY: selected['key'],
+                           **{name: os.environ[name] for name in ('HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy',
+                                                                  'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE') if name in os.environ}}
+            try:
+                child = subprocess.run([sys.executable, '-m', 'services.hermes.image_text', json.dumps({'prompt': instruction})], input=data,
+                                       capture_output=True, timeout=SECONDS, env=environment, preexec_fn=bounded, check=False)
+                result = json.loads((child.stdout.strip().splitlines() or [b''])[-1])
+            except subprocess.TimeoutExpired:
+                result = {'state': 'failed', 'reason': 'timed_out'}
+            except ValueError:
+                result = {'state': 'failed', 'reason': 'nocheh_error'}
+            if not isinstance(result, dict) or result.get('state') not in ('done', 'failed', 'unreadable'):
+                result = {'state': 'failed', 'reason': 'nocheh_error'}
+            # A read that did not get as far as the model, while /tmp has no room for the image, failed for want of room.
+            if result['state'] == 'unreadable' or result.get('reason') == 'nocheh_error':
+                failure = result.get('write_failure') if result.get('write_failure') in usage.WRITE_FAILURES else \
+                    'temp_full' if usage.temp_full(home, len(data)) else None
+    except OSError as error:
+        failure = usage.write_failure(error)
+        if failure is None:
+            raise
+    if failure:
+        usage.reader_failed('image', failure)
+        return {'state': 'unreadable'}
     if result['state'] in ('done', 'failed'):
         spent = {name: value for name, value in (result.get('usage') or {}).items() if name in (*usage.TOKENS, 'cost_usd')} \
             if isinstance(result.get('usage'), dict) else {}
@@ -83,6 +99,8 @@ def read_image(body):
                 spent['cost_usd'] = cost
         usage.record('image', {'calls': 1, **spent}, selected['model'], failed=result['state'] == 'failed',
                      provider=selected['provider'], reason=result.get('reason'), cause=result.get('cause'))
+    if result['state'] == 'done':
+        usage.reader_done('image')
     return {key: value for key, value in result.items() if key in ('state', 'text', 'reason')}
 
 
@@ -137,7 +155,18 @@ def read(data, hint):
     return {'state': 'failed', 'reason': reason(error), 'cause': cause(error), 'usage': spent}
 
 
+def answer(data, hint):
+    """The child's answer: a write that found no room or was refused says so; any other error fails the read."""
+    try:
+        return read(data, hint)
+    except Exception as error:
+        failure = usage.write_failure(error)
+        if failure is None:
+            raise
+        return {'state': 'unreadable', 'write_failure': failure}
+
+
 if __name__ == '__main__':
     import logging
     logging.disable(logging.CRITICAL)
-    print(json.dumps(read(sys.stdin.buffer.read(LIMIT + 1), json.loads(sys.argv[1])), ensure_ascii=False))
+    print(json.dumps(answer(sys.stdin.buffer.read(LIMIT + 1), json.loads(sys.argv[1])), ensure_ascii=False))

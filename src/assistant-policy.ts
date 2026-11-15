@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { HttpError, object } from './http.js';
 import { chats, chatsAfterMiss, isChatId } from './chats.js';
-import { isTelegramChat } from './chats-telegram.js';
+import { isTelegramAccount, isTelegramChat } from './chats-telegram.js';
 
 export interface GroupAccess {granted:string[];denied:string[]}
 /** Whether every topic of a group shares one memory ('group', the default) or each topic keeps its own ('topic'). */
@@ -92,6 +92,32 @@ export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:s
     if(user!==policy.owner_id && (!access?.granted.includes(user)||access.denied.includes(user)))return null;
   }
   return {owner,chat_id:id,user_id:String(sender.id)};
+}
+
+/**
+ * Whether a captured Telegram message, new or edited, was sent by the owner or by someone the owner allowed in that
+ * selected group (granted and not denied). Telegram does not say who an anonymous admin is, nor who wrote a post in a
+ * channel's or group's own name (sender_chat), so neither counts as allowed, nor as the owner; neither do bots, other
+ * updates and senders it cannot identify (ADR-0251). Unlike conversationScope, it reads edits and does not depend on
+ * Telegram replies being on. `scope` is the archive's raw Telegram chat id; the group is the chat the directory finds
+ * for it, served and with its access lists under every Telegram id it has had, so a chat with no row allows only the
+ * owner (ADR-0252).
+ */
+export function allowedSender(policy:AssistantPolicy,payload:unknown,scope:string):boolean {
+  if(payload===null||typeof payload!=='object'||Array.isArray(payload))return false;
+  const update=payload as Record<string,unknown>,found=update.message??update.edited_message;
+  if(found===null||typeof found!=='object'||Array.isArray(found))return false;
+  const message=found as Record<string,unknown>,chat=message.chat as Record<string,unknown>|undefined,sender=message.from as Record<string,unknown>|undefined;
+  if(message.sender_chat!==undefined&&message.sender_chat!==null)return false;
+  if(!chat||typeof chat!=='object'||!sender||typeof sender!=='object'||sender.is_bot===true)return false;
+  const user=typeof sender.id==='number'||typeof sender.id==='string'?String(sender.id):'';
+  if(!isTelegramAccount(user)||String(chat.id)!==scope)return false;
+  if(policy.owner_id!==null&&user===policy.owner_id)return true;
+  if(!['group','supergroup'].includes(String(chat.type)))return false;
+  const directory=chats(),id=isTelegramChat(scope)?directory.resolve('telegram',scope):null;
+  if(id===null||directory.kind(id)!=='group'||!directory.served(id))return false;
+  const access=groupAccessFor(policy,id);
+  return !!access&&access.granted.includes(user)&&!access.denied.includes(user);
 }
 
 /**

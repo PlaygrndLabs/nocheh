@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, machine_folder, DEFAULT_STATE, INSTALLATION_ROOT
+from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, machine_folder, runtime_folders, DEFAULT_STATE, INSTALLATION_ROOT
 from tools.operations.installation.workspaces import WorkspaceError
 
 ROOT = REPO_ROOT
@@ -37,10 +37,11 @@ def development_box_token():
     root = operating_root(); values = operating_config(root); path = root / '.env'; saved = read_env(path)
     missing = tuple(name for name in ('NOCHEH_BOX_TOKEN', 'NOCHEH_MACHINE_TOKEN') if not saved.get(name))
     if missing: write_env(path, generate(saved, missing))
-    # The launcher's read-only bind of the GitHub copies, nocheh-machines' keys folder and nocheh-telegram's state folder:
-    # made here at 0700, so Docker never makes them as root.
+    # The launcher's read-only bind of the GitHub copies, nocheh-machines' keys folder and the folders the services
+    # mount, such as nocheh-telegram's state and Hermes's two (ADR-0251): made here at 0700, so Docker never makes
+    # them as root.
     (root / 'data/local').mkdir(parents=True, exist_ok=True, mode=0o700); github_folders(root / 'data/local'); machine_folder(root / 'data/local')
-    (root / 'data/local/telegram').mkdir(exist_ok=True, mode=0o700)
+    runtime_folders(root / 'data/local')
     return images(values)
 
 
@@ -383,6 +384,10 @@ def main():
     if result == 0: result = subprocess.call(command + actions[args.command] + rest, cwd=ROOT, env=env)
     for name in {'up':('tools',),'build':('box','tools')}.get(args.command,()):
         if result==0: result=build_image(name, env)
+    if args.command == 'up' and result == 0:
+        # A database viewer left running gets its login (ADR-0251); a problem there is reported and leaves up's result.
+        from tools.operations.installation.database_viewer import refresh as refresh_viewer
+        refresh_viewer(STATE, command, ROOT)
 
     return result
 

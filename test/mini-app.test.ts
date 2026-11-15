@@ -58,19 +58,34 @@ test('the owner password is kept hashed, pauses after wrong tries and signs ever
     await assert.rejects(lock.create('taken-over-99'),{status:409,code:'owner_password_already_set'},'only the first visit creates it');
     assert.equal(await lock.check(browser.token,'browser'),'signed_in');
     assert.equal(await lock.check(browser.token,'phone'),'signed_out','a browser session is not a phone session');
-    const phone=await lock.signIn('river-lamp-42','phone');
+    const phone=await lock.signIn('river-lamp-42','phone:4242');
     assert.equal(await lock.check(phone.token,'phone'),'signed_in');
     assert.equal(await lock.check('y'.repeat(43),'phone'),'signed_out');
-    for(let miss=1;miss<FREE_TRIES;miss++)await assert.rejects(lock.signIn('wrong','phone'),{status:401,code:'wrong_password',tries_left:FREE_TRIES-miss});
-    await assert.rejects(lock.signIn('wrong','browser'),{status:429,code:'sign_in_paused',until:clock+15*60*1000},'one counter for browsers and phones');
-    await assert.rejects(lock.signIn('river-lamp-42','browser'),{status:429},'the right password waits for the pause too');
+    for(let miss=1;miss<FREE_TRIES;miss++)await assert.rejects(lock.signIn('wrong','phone:4242'),{status:401,code:'wrong_password',tries_left:FREE_TRIES-miss});
+    await assert.rejects(lock.signIn('wrong','phone:4242'),{status:429,code:'sign_in_paused',until:clock+15*60*1000});
+    await assert.rejects(lock.signIn('river-lamp-42','phone:4242'),{status:429},'the right password waits for the pause too');
+    assert.equal(await lock.check((await lock.signIn('river-lamp-42','browser')).token,'browser'),'signed_in','a paused phone never pauses the browser');
+    await assert.rejects(lock.signIn('wrong','phone:777'),{status:401,tries_left:FREE_TRIES-1},'each Telegram account counts on its own');
+    assert.deepEqual((await lock.status()).pauses,[{who:'phone',telegram_id:'4242',paused_until:clock+15*60*1000}]);
+    assert.equal((await lock.status()).paused_until,null,'the sign-in page shows only the browser\'s pause');
     clock+=15*60*1000+1;
-    await assert.rejects(lock.signIn('wrong','phone'),{status:429,until:clock+30*60*1000},'each further miss doubles the pause');
+    await assert.rejects(lock.signIn('wrong','phone:4242'),{status:429,until:clock+30*60*1000},'each further miss doubles the pause');
     clock+=30*60*1000+1;
-    const second=await lock.signIn('river-lamp-42','phone');
-    assert.deepEqual((await lock.status(browser.token)).sessions.map(s=>[s.kind,s.current]).sort(),[['browser',true],['phone',false],['phone',false]]);
+    const second=await lock.signIn('river-lamp-42','phone:4242');
+    assert.deepEqual((await lock.status(browser.token)).sessions.map(s=>[s.kind,s.current]).sort(),[['browser',false],['browser',true],['phone',false],['phone',false]]);
     const saved=await readFile(path,'utf8');
     assert.ok(![ 'river-lamp-42',browser.token,phone.token,second.token].some(secret=>saved.includes(secret)),'only hashes are stored');
+    // Sign-in pauses survive a restart and end only with the right password, their time or the owner's clear-pause.
+    for(let miss=0;miss<FREE_TRIES;miss++)await assert.rejects(lock.signIn('wrong','browser'));
+    const paused=await new OwnerLock(path,()=>clock).status();
+    assert.equal(paused.paused_until,clock+15*60*1000);assert.deepEqual(paused.pauses.map(pause=>pause.who),['browser']);
+    await assert.rejects(lock.changePassword('river-lamp-42','harbor-kite-17'),{status:429},'a password change waits for the browser\'s pause');
+    assert.deepEqual(await lock.clearPauses(),{cleared:1});
+    assert.deepEqual([(await lock.status()).paused_until,(await lock.status()).pauses],[null,[]]);
+    for(let miss=1;miss<FREE_TRIES;miss++)await assert.rejects(lock.signIn('wrong','browser'),{status:401,tries_left:FREE_TRIES-miss},'clearing forgets the wrong passwords too');
+    await assert.rejects(lock.signIn('river-lamp-42','phone'as never),{status:400,code:'invalid_sign_in'},'a phone is always one Telegram account');
+    assert.deepEqual(await lock.clearPauses(),{cleared:0});
+    await lock.signIn('river-lamp-42','browser');
     assert.equal((await stat(path)).mode&0o777,0o600);
     clock+=SESSION_IDLE-1000;assert.equal(await lock.check(second.token,'phone'),'signed_in','used within 30 days');
     clock+=SESSION_IDLE-1000;assert.equal(await lock.check(second.token,'phone'),'signed_in','using it keeps it signed in');
@@ -79,7 +94,7 @@ test('the owner password is kept hashed, pauses after wrong tries and signs ever
     const changed=await lock.changePassword('river-lamp-42','harbor-kite-17');
     assert.equal(await lock.check(second.token,'phone'),'signed_out','a new password signs every other session out');
     assert.equal(await lock.check(changed.token,'browser'),'signed_in','the browser that changed it stays signed in');
-    const third=await lock.signIn('harbor-kite-17','phone');
+    const third=await lock.signIn('harbor-kite-17','phone:4242');
     await lock.signOutOthers(changed.token);
     assert.equal(await lock.check(third.token,'phone'),'signed_out');
     assert.equal(await lock.check(changed.token,'browser'),'signed_in');
@@ -108,7 +123,7 @@ test('a browser is signed in only by its own cookie, with a CSRF value derived f
 });
 
 test('the mini app server forwards checked owner calls to the local dashboard with the phone\'s session',async()=>{
-  const calls:{path:string;host:string;session:string;cookie:string;body:string}[]=[],lockCalls:string[]=[];
+  const calls:{path:string;host:string;session:string;cookie:string;body:string}[]=[],lockCalls:string[]=[],launches:string[]=[];
   const directory=await mkdtemp(join(tmpdir(),'nocheh-lock-')),lock=new OwnerLock(join(directory,'lock.json'),()=>now);
   await lock.create('river-lamp-42');
   // Stands in for the dashboard's phone routes and its session check on forwarded calls.
@@ -118,9 +133,10 @@ test('the mini app server forwards checked owner calls to the local dashboard wi
     const phone=req.url?.match(/^\/api\/nocheh\/mini-app\/(sign-in|check|sign-out)$/)?.[1];
     if(phone){
       lockCalls.push(phone);const value=JSON.parse(body);
+      if(phone==='sign-in')launches.push(String(req.headers['x-telegram-init-data']));
       if(phone==='check')return reply(200,{state:await lock.check(value.token,'phone')});
       if(phone==='sign-out'){await lock.signOut(value.token);return reply(200,{ok:true});}
-      try{return reply(200,await lock.signIn(value.password,'phone'));}catch(error:any){return reply(error.status,{error:error.code,tries_left:error.tries_left});}
+      try{return reply(200,await lock.signIn(value.password,'phone:4242'));}catch(error:any){return reply(error.status,{error:error.code,tries_left:error.tries_left});}
     }
     if(await lock.check(req.headers['x-nocheh-mini-session'],'phone')!=='signed_in')return reply(401,{error:'mini_app_sign_in_required'});
     if(req.url==='/api/nocheh/settings')return reply(200,{fields:[{key:'TELEGRAM_OWNER_ID',value:'4242'},{key:'NOCHEH_REPLY_ROUTE_URL',value:'https://provider.example'}]});
@@ -144,6 +160,7 @@ test('the mini app server forwards checked owner calls to the local dashboard wi
     const wrong=await signIn('guess');
     assert.equal(wrong.status,401);assert.deepEqual(await wrong.json(),{error:'wrong_password',tries_left:FREE_TRIES-1});
     assert.equal(lockCalls.filter(call=>call==='sign-in').length,1,'a wrong password is sent once, never retried');
+    assert.deepEqual(launches,[owner],'the phone\'s launch data goes along, for the dashboard to check again');
     const signedIn=await signIn('river-lamp-42');assert.equal(signedIn.status,200);
     const {token}=await signedIn.json() as {token:string};
     const headers={'x-telegram-init-data':owner,'x-nocheh-mini-session':token};

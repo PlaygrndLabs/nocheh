@@ -194,6 +194,41 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   group by its digest, imported where the first start already gave that group its old id,
   does not reach the group until adoption.
 
+Security fixes, part 2: fixes that lose nothing (owner, 2026-11-14: "all yes"). One pull
+request with seven fixes, each built and reviewed on its own
+([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)):
+- Hermes runs with a read-only root, a 1 GiB memory `/tmp`, no capabilities and no new
+  privileges, and mounts only the folders it writes, never the dashboard's token or the rest
+  of the spool. Mounted folders are made at 0700 first, also on restore. On-first-use
+  installs stay on. A file read that fails for a full `/tmp` or a refused write is counted and
+  gives a notice ([compose](services/hermes/test_service_catalog.py),
+  [readers](services/hermes/test_document_text.py), [notices](services/hermes/test_problem_notices.py)).
+- Backups keep a workspace's links as links, skip special files, leave out and list what a
+  command made unreadable, and every backup or off-site copy that fails, is skipped or leaves
+  something out gives a notice ([backups](services/hermes/test_operations.py),
+  [schedule](services/hermes/test_backup_schedule.py), [off-site](services/hermes/test_offsite.py)).
+- A photo is read once, at its largest size. A live recording from someone not allowed is
+  transcribed up to its first 15 minutes, cut by its decoded sound
+  ([voice](services/hermes/test_voice_text.py), [preparation](test/store-voice-transcription.test.ts)).
+- Member jobs are capped to the cent; a daily notice mark and a holding pause mark
+  ([spend](test/store-member-job-spend.test.ts), [jobs](test/store-background-jobs.test.ts)).
+- The sharing filter sees only the search words; sharing and Notion texts say what they do;
+  recalled notes name their chat ([sharing](test/store-sharing.test.ts),
+  [recall](test/recall-places.test.ts)).
+- An AI finding never masks request structure, and a finding from a batch of several texts
+  is shared only once a check of that text alone confirms it
+  ([detection](test/store-prepared-context.test.ts), [copies](test/guarded.test.ts)).
+- Hermes's pages get a Report-Only script policy, the database viewer a login, and sign-in
+  pauses count per person ([dashboard](test/dashboard-boundary.test.ts),
+  [viewer](services/hermes/test_database_viewer.py), [sign-in](test/mini-app.test.ts)).
+
+  Unit, dashboard, store (525 in the fixture) and Hermes Python checks pass. The cloud tester's
+  new and affected scenarios pass: the locked-down Hermes, a large upload, documents, photos,
+  voice notes and the 15-minute cut, member job spend, recall labels, secrets, private marks and
+  every dashboard page. Pending: a look on the owner's install after the update. Owner steps:
+  run `./bin/nocheh db` once if the database viewer was running; the browser then asks for its
+  login.
+
 Security fixes, part 1: cards and forwarded messages (owner, 2026-11-14: "all yes", approving
 the fixes of the prompt-injection review with what each one loses). One pull request, the
 first of several; each later part waits for its own review
@@ -2132,6 +2167,13 @@ Earlier upgrades are in [task history](docs/task-history.md).
 </verification>
 
 <pending>
+
+Security fixes, part 2 follow-ups ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)):
+about a week after installing, check `./bin/nocheh diagnose` for `hermes_page_script_reports`
+(none) and a passing tester run, then turn the Hermes page script policy from Report-Only to
+enforced in one commit. Later: a re-read of a cut recording when its sender is allowed, one
+shared name cleaner for cards, forwards and recall labels, and a notice when an off-site
+restore check fails.
 
 Silent learning (October 10): on the owner's development installation with
 Claude through Honcho, seven `interpret` jobs failed after 9 to 10 attempts

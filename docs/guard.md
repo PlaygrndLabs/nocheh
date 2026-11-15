@@ -26,6 +26,15 @@ The Secret check model in Settings › Models receives original text through Her
 Local code validates its literal candidates, adds fixed patterns for common keys and
 tokens, and applies masks. The Voice notes and Images providers receive original media. Guarding does not encrypt the archive and detection can miss secrets.
 
+Identical text shares its result across audiences in two first-write-wins rows: the
+text's result, and a finding confirmed by a check of that text alone. A batch of one
+text, or a result with nothing beyond the fixed patterns, is shared as is. A finding
+from a batch of several texts is checked again on that text alone, at most 3 a batch,
+side by side; until such a check confirms it, the text is held back and every other
+audience checks it itself. Object keys, and a model request's role, type, name, model
+and tool id values outside a tool's input, are masked only by the fixed patterns,
+also in stored guarded copies.
+
 Edits and mode changes retire runtime contexts and credentials. In-flight delivery
 checks reject retired contexts. A reaction change starts a new epoch and makes only
 the earlier reaction state unreadable; an automatic learning revision starts one that

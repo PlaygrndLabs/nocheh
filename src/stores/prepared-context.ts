@@ -2,8 +2,8 @@ import type {Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError} from '../http.js';
 import {segments} from '../prepared-context.js';
-import {literalSpans} from '../guard.js';
-import {replaceValues,textValues} from '../guarded.js';
+import {literalSpans,mask,mergeSpans,patternSpans} from '../guard.js';
+import {replaceValues,requestFields,structureOnly,textValues,type Structure} from '../guarded.js';
 import type {SourceReference} from './archive.js';
 import type {OperationReference} from './operations.js';
 import {DerivedRepository,type DerivativeReference} from './derived.js';
@@ -26,7 +26,24 @@ CREATE INDEX IF NOT EXISTS runtime_inputs_text ON runtime_prepared_inputs(text_k
 export const preparedAudience=(principal:Reader)=>canonical([principal.scope===null?'owner':principal.space??principal.scope,principal.purpose??'assistant',...(namedProfile(principal)?[namedProfile(principal)]:[])]);
 const leaves=(value:unknown):string[]=>typeof value==='string'?(value?[value]:[]):Array.isArray(value)?value.flatMap(leaves):
   value&&typeof value==='object'?Object.values(value).flatMap(leaves):[];
+/** Single-text checks one detector batch may make to confirm its findings before they are shared (ADR-0251). */
+const CONFIRMATIONS=3;
+/** The shared result of a text with a finding that no check of that text alone has confirmed: no audience reuses it, so
+ *  each checks the text itself until a check of the text alone confirms a finding, kept under its own key (ADR-0251). */
+const UNCONFIRMED=canonical({unconfirmed:true});
+/** Whether each span `batch` marks in `text` lies inside a span of `found` or of a fixed secret pattern. */
+const covers=(text:string,found:readonly string[],batch:readonly string[])=>{
+  try {
+    const spans=mergeSpans(text,[...literalSpans(text,found),...patternSpans(text)]);
+    return literalSpans(text,batch).every(span=>spans.some(cover=>cover.start<=span.start&&span.end<=cover.end));
+  } catch {return false;}
+};
+export interface PrepareOptions {
+  /** The value is a model request: its role, type, name and model fields and its tool ids are structure (ADR-0251). */
+  request?:boolean;
+}
 
+type Input={text:string;key:string;output:DerivativeReference;literals?:string[]};
 type Deferred={promise:Promise<string>;resolve:(text:string)=>void;reject:(error:unknown)=>void};
 const deferred=():Deferred=>{
   let resolve!:(text:string)=>void,reject!:(error:unknown)=>void;
@@ -46,11 +63,11 @@ export class PreparedContextRepository {
     readonly root:(principal:Reader,binding:GuardBinding)=>Promise<SourceReference|OperationReference>,readonly detectorVersion:string) {
     this.audience=new AudienceRepository(guards);
   }
-  /** Trusted service callers only: call after checking and preparing the returned data. */
-  async allow(principal:Reader,value:unknown):Promise<void> {
+  /** Trusted service callers only: call after checking and preparing the returned data. Values in `except` are not marked prepared. */
+  async allow(principal:Reader,value:unknown,except?:ReadonlySet<string>):Promise<void> {
     if(principal.admin)return;
     const binding=await this.audience.assert(principal);if(binding.mode==='off')return;
-    const scope=preparedAudience(principal),values=[...new Set(leaves(value).flatMap(text=>[text,JSON.stringify(text).slice(1,-1)]))];
+    const scope=preparedAudience(principal),values=[...new Set(leaves(value).filter(text=>!except?.has(text)).flatMap(text=>[text,JSON.stringify(text).slice(1,-1)]))];
     for(let offset=0;offset<values.length;offset+=500) {
       const batch=values.slice(offset,offset+500);
       await this.derived.pool.query(`INSERT INTO runtime_prepared_values(id,audience,generation,epoch,content)
@@ -61,10 +78,10 @@ export class PreparedContextRepository {
   }
 
   /** A job run's preparation runs again when an epoch it carries across commits meanwhile (ADR-0208). */
-  async prepare(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>):Promise<unknown> {
-    return afterEpoch(jobRun(principal),()=>this.prepareOnce(principal,value,detect));
+  async prepare(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>,options:PrepareOptions={}):Promise<unknown> {
+    return afterEpoch(jobRun(principal),()=>this.prepareOnce(principal,value,detect,options));
   }
-  private async prepareOnce(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>):Promise<unknown> {
+  private async prepareOnce(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>,options:PrepareOptions):Promise<unknown> {
     if(principal.admin||!principal.turnEvent)throw new HttpError(403,'bound_guard_context_required');
     const binding=await this.audience.assert(principal),root=await this.root(principal,binding);
     if(binding.mode==='off'){await this.audience.assert(principal);return value;}
@@ -89,6 +106,10 @@ export class PreparedContextRepository {
       // The detector is part of the key: a secret-check model chosen mid-epoch starts fresh copies instead of conflicting with earlier ones.
       for(const part of parts)if(!part.prepared&&part.text.trim())fresh.set(part.text,digest(canonical([scope,binding,this.detectorVersion,part.text])));
     }
+    // Fresh text this request carries only as structure, which a finding never masks here, spends no single-text check.
+    const keep=structureOnly(value,options.request?requestFields:undefined);
+    const carried=new Set([...plans].filter(([original])=>!keep.has(original)).flatMap(([,parts])=>parts.map(part=>part.text)));
+    const structural=new Set([...fresh.keys()].filter(text=>!carried.has(text)));
     let remaining=[...fresh.entries()];
     while(remaining.length) {
       // Claim before any await, so a concurrent request sees the claim.
@@ -99,7 +120,7 @@ export class PreparedContextRepository {
         const result=deferred();this.inflight.set(key,result.promise);owned.set(text,{key,result});
       }
       try {
-        await this.guard(principal,binding,root,scope,owned,outputs,detect);
+        await this.guard(principal,binding,root,scope,owned,outputs,detect,structural);
         for(const [text,{result}] of owned)result.resolve(outputs.get(text)!);
       } catch(error) {
         for(const {result} of owned.values())result.reject(error);throw error;
@@ -114,11 +135,25 @@ export class PreparedContextRepository {
       }
     }
     for(const [original,parts] of plans)replacements.set(original,parts.map(part=>part.prepared||!part.text.trim()?part.text:outputs.get(part.text)!).join(''));
-    const result=replaceValues(value,replacements);await this.audience.assert(principal);await this.allow(principal,result);return result;
+    // Structure is never masked by a secret check's finding, only by the fixed secret patterns: a finding that is a field name
+    // or a role would break the request (ADR-0251). Text left whole, such as an owner-approved passage, stays whole. A
+    // structural value that differs from its guarded copy is not marked prepared, or the same word would pass unchecked
+    // inside this audience's later text.
+    const kept=new Map<string,string>(),exempt=new Set<string>();
+    const structure:Structure={...(options.request?{fields:requestFields}:{}),text:original=>{
+      let text=kept.get(original);
+      if(text===undefined) {
+        const guarded=replacements.get(original)??original;
+        text=guarded===original?original:mask(original,patternSpans(original)).text;kept.set(original,text);
+        if(text!==guarded)exempt.add(text);
+      }
+      return text;
+    }};
+    const result=replaceValues(value,replacements,structure);await this.audience.assert(principal);await this.allow(principal,result,exempt);return result;
   }
 
   private async guard(principal:Reader,binding:GuardBinding,root:SourceReference|OperationReference,scope:string,
-    owned:Map<string,{key:string}>,outputs:Map<string,string>,detect:(text:string,background?:boolean)=>Promise<unknown>) {
+    owned:Map<string,{key:string}>,outputs:Map<string,string>,detect:(text:string,background?:boolean)=>Promise<unknown>,structural:ReadonlySet<string>) {
     const candidates=[...owned.entries()].map(([text,{key}])=>[text,key] as [string,string]),pending:[string,string][]=[];
     // The guarded copy depends only on the text, the detector and its shared result, so the epoch is not part of this key.
     const textKey=(text:string)=>digest(canonical([scope,binding.generation,binding.mode,this.detectorVersion,text]));
@@ -144,7 +179,7 @@ export class PreparedContextRepository {
     while(pending.length) {
       const batch:[string,string][]=[];let length=0;
       while(pending.length&&batch.length<500&&length+pending[0]![0].length+32<=50000){const item=pending.shift()!;batch.push(item);length+=item[0].length+32;}
-      const inputs:{text:string;key:string;output:DerivativeReference;literals?:string[]}[]=[];
+      const inputs:Input[]=[];
       for(const [text,key] of batch) {
         const saved=await this.derived.checkpoint('guard-context:'+key);
         if(saved&&(saved.content.toString()!==text||saved.producer_version!==this.detectorVersion||saved.configuration_hash!==digest(canonical({audience:scope,binding}))))
@@ -163,32 +198,71 @@ export class PreparedContextRepository {
         // installation and mode reuses that result. Prepared values and guarded
         // copies stay per audience and epoch.
         const detector={generation:binding.generation,mode:binding.mode};
-        const shared=new Map(missing.map(input=>[input,'context-detection-text:'+digest(canonical([detector,this.detectorVersion,input.output.input_hash]))]));
+        // Each text has two shared rows under one digest, and the first result saved in each is the one every audience reads:
+        // the text's result, and the finding of a check of the text alone (ADR-0251). A reader masks what either one holds.
+        const shared=new Map(missing.map(input=>[input,digest(canonical([detector,this.detectorVersion,input.output.input_hash]))]));
+        const result=(input:Input)=>'context-detection-text:'+shared.get(input)!,confirmed=(input:Input)=>'context-detection-text-confirmed:'+shared.get(input)!;
         const known=(await this.derived.pool.query(`SELECT operation_id,content,content_hash,input_hash,producer_version,imported
-          FROM derived_artifacts WHERE operation_id=ANY($1::text[]) AND kind='guard_result'`,[[...shared.values()]])).rows;
+          FROM derived_artifacts WHERE operation_id=ANY($1::text[]) AND kind='guard_result'`,[missing.flatMap(input=>[confirmed(input),result(input)])])).rows;
+        const saved=(input:Input,operation:string)=>{
+          const row=known.find(candidate=>candidate.operation_id===operation);
+          return row&&!row.imported&&digest(row.content)===row.content_hash&&row.input_hash===input.output.input_hash&&row.producer_version===this.detectorVersion?
+            JSON.parse(row.content.toString()) as unknown:undefined;
+        };
+        // Texts held back: some check found something in them that no check of the text alone has confirmed yet.
+        const held=new Set<Input>();
         for(const input of missing) {
-          const row=known.find(candidate=>candidate.operation_id===shared.get(input));
-          if(row&&!row.imported&&digest(row.content)===row.content_hash&&row.input_hash===input.output.input_hash&&row.producer_version===this.detectorVersion)
-            input.literals=JSON.parse(row.content.toString()) as string[];
+          const found=[saved(input,confirmed(input)),saved(input,result(input))];
+          if(found.some(Array.isArray))input.literals=[...new Set(found.filter(Array.isArray).flat() as string[])];
+          else if(found[1]!==undefined)held.add(input);
         }
-        const unknown=missing.filter(input=>input.literals===undefined);
+        const unknown=missing.filter(input=>input.literals===undefined),results=new Map<Input,string>(),confirmations=new Map<Input,string[]>();
         if(unknown.length) {
           const joined=unknown.map(input=>input.text).join('\n<NOCHEH_FRAGMENT>\n');
           // Memory reviews and background job runs let replies take detector slots first.
-          await this.audience.assert(principal);const literals=await detect(joined,principal.purpose==='memory-review'||!!principal.logical_profile?.startsWith('job-'));literalSpans(joined,literals);
+          const background=principal.purpose==='memory-review'||!!principal.logical_profile?.startsWith('job-');
+          await this.audience.assert(principal);const literals=await detect(joined,background);literalSpans(joined,literals);
           if(!(literals as string[]).every(literal=>unknown.some(input=>input.text.includes(literal))))throw new HttpError(422,'guard_candidate_rejected');
           for(const input of unknown)input.literals=(literals as string[]).filter(literal=>input.text.includes(literal));
+          // Another text in the batch can steer what the check finds in this one, so a finding reaches other audiences only
+          // from a check of this text alone (ADR-0251); this audience keeps what it found. A text checked alone, or one with
+          // nothing found beyond the fixed secret patterns, shares its result as before. Any other text with a finding is
+          // held back before anything else runs, so a later empty result cannot take its place. Up to CONFIRMATIONS of these
+          // and of the texts held back earlier are each checked once more alone, side by side, and a finding of that check
+          // that covers the batch's finding is shared. A string this request carries only as structure is never masked by a
+          // finding, so it spends no check.
+          const alone=unknown.length===1,confirm:Input[]=[];
+          for(const input of unknown) {
+            const found=input.literals!;
+            if(alone) {
+              if(!held.has(input))results.set(input,canonical(found));
+              if(found.length)confirmations.set(input,found);
+            } else if(!held.has(input)&&covers(input.text,[],found))results.set(input,canonical([]));
+            else {
+              if(!held.has(input))results.set(input,UNCONFIRMED);
+              if(!structural.has(input.text)&&confirm.length<CONFIRMATIONS)confirm.push(input);
+            }
+          }
+          for(const [input,content] of results)await this.share(result(input),input.output,content,root,detector);
+          const checked=await Promise.allSettled(confirm.map(async input=>{
+            const found=await detect(input.text,background);literalSpans(input.text,found);return [...new Set(found as string[])];
+          }));
+          for(const [index,check] of checked.entries()) {
+            const input=confirm[index]!;
+            if(check.status==='rejected') {
+              // The text stays held back for the next audience to check; this audience's own check stands, so the turn goes on.
+              console.warn(JSON.stringify({event:'secret_check_confirmation_failed',code:check.reason instanceof HttpError?check.reason.code:'detector_unavailable'}));
+              continue;
+            }
+            const batch=input.literals!;input.literals=[...new Set([...batch,...check.value])];
+            if(check.value.length&&covers(input.text,check.value,batch))confirmations.set(input,check.value);
+          }
         }
         // One derived transaction checkpoints the entire completed detector batch.
         await this.derived.recordMany(missing.map(input=>({operation_id:'context-detection:'+input.key,source:root,parents:[input.output],kind:'guard_result',
           content:Buffer.from(canonical(input.literals)),producer:'nocheh-context-detector',producer_version:this.detectorVersion,
           configuration:{audience:scope,binding},provenance:{purpose:principal.purpose??'assistant'}})));
-        // The first result saved for a text is the one every audience reuses.
-        for(const input of unknown)
-          await this.derived.record({operation_id:shared.get(input)!,source:root,parents:[input.output],kind:'guard_result',
-            content:Buffer.from(canonical(input.literals)),producer:'nocheh-context-detector',producer_version:this.detectorVersion,
-            configuration:{detector},provenance:{purpose:'shared-detection'}})
-            .catch(error=>{if(!(error instanceof HttpError&&error.code==='derivative_identity_conflict'))throw error;});
+        for(const [input,found] of confirmations)await this.share(confirmed(input),input.output,canonical(found),root,detector);
       }
       // Independent guarded copies keep their exact publication/checkpoint
       // identities. Bound SQL work below the pool size across every request
@@ -209,6 +283,15 @@ export class PreparedContextRepository {
       })));
       for(const result of completed)if(result.status==='rejected')throw result.reason;
     }
+  }
+
+  /** Saves a text's shared result. The first one saved wins, and a later one is dropped. */
+  private async share(operation:string,output:DerivativeReference,content:string,root:SourceReference|OperationReference,
+    detector:{generation:string;mode:string}) {
+    await this.derived.record({operation_id:operation,source:root,parents:[output],kind:'guard_result',
+      content:Buffer.from(content),producer:'nocheh-context-detector',producer_version:this.detectorVersion,
+      configuration:{detector},provenance:{purpose:'shared-detection'}})
+      .catch(error=>{if(!(error instanceof HttpError&&error.code==='derivative_identity_conflict'))throw error;});
   }
 
   private async publish(work:()=>Promise<void>) {

@@ -44,6 +44,22 @@ def notes_snapshot(profile):
     return tuple(file.read_bytes() if file.is_file() and not file.is_symlink() else None for file in files)
 
 
+def place(profile, value):
+    """Where a profile's notes and conversations come from, for the label Nocheh puts on each recalled hit (ADR-0251):
+    its chat, whether it is the owner's own, and for a private answer that it is one and where it was asked, as its
+    receipt keeps it. A private answer's profile names the owner's private chat as its space but is never the owner's
+    (ADR-0249), so it is told apart first; a profile without its metadata is the owner's only by the owner marker."""
+    from .management import answer_receipt
+    value = value if isinstance(value, dict) else {}
+    answer = bool(value.get('answer'))
+    marker = profile/'nocheh-owner-profile.json'
+    owner = not answer and (value.get('owner') is True if 'owner' in value else marker.is_file() and not marker.is_symlink())
+    space = value.get('space')
+    group = answer_receipt(profile).get('answer_group') if answer else None
+    return {'space': space if isinstance(space, str) and 0 < len(space) <= 200 else None, 'owner': owner, 'answer': answer,
+            **({'answer_group': group} if group else {})}
+
+
 def recall(root, body, retirements=None):
     from hermes_state import SessionDB
     query = body.get('query', '')
@@ -53,11 +69,17 @@ def recall(root, body, retirements=None):
     if type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError('invalid_recall_limit')
     profiles = registered_profiles(root)
+    spaces = {}
+    def metadata(profile):
+        # Each profile's space.json is read once: it decides whether the profile is current and names its hits' place.
+        if profile.name not in spaces:
+            marker=profile/'space.json'
+            spaces[profile.name]=json.loads(marker.read_text()) if marker.is_file() and not marker.is_symlink() else None
+        return spaces[profile.name]
     if body.get('guard_epoch') is not None or body.get('generation') is not None:
         def current(profile):
-            metadata=profile/'space.json'
-            if not metadata.is_file() or metadata.is_symlink():return False
-            value=json.loads(metadata.read_text())
+            value=metadata(profile)
+            if value is None:return False
             return (body.get('guard_epoch') is None or value.get('guard_epoch')==body['guard_epoch']) and (body.get('generation') is None or value.get('generation')==body['generation'])
         profiles=[p for p in profiles if current(p)]
     selected = body.get('profile')
@@ -70,6 +92,7 @@ def recall(root, body, retirements=None):
     from .retired_history import IDENTIFIER, service_lookup, withheld_ids
     lookup = retirements or service_lookup
     for profile in profiles[:100]:
+        where = place(profile, metadata(profile))
         for name in ('MEMORY.md', 'USER.md'):
             file = profile / 'memories' / name
             if file.is_symlink() or not file.resolve().is_relative_to(profile.resolve()):
@@ -85,7 +108,7 @@ def recall(root, body, retirements=None):
                     value = lookup(cited[start:start+200]);hidden |= set(value['retired']) | set(value['answered'])
                 for line in lines:
                     if set(IDENTIFIER.findall(line)) & hidden: continue
-                    hits.append({'profile': profile.name, 'kind': 'native_note', 'file': name,
+                    hits.append({'profile': profile.name, **where, 'kind': 'native_note', 'file': name,
                                  'text': line[:8000], 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', line)})
         from .isolated_profile import database_path
         database = database_path(profile)
@@ -98,7 +121,7 @@ def recall(root, body, retirements=None):
             try:
                 for row in db.search_messages(query, limit=limit):
                     if row.get('id') in withheld: continue
-                    hits.append({'profile': profile.name, 'kind': 'native_session',
+                    hits.append({'profile': profile.name, **where, 'kind': 'native_session',
                                  'session': row.get('session_id'), 'text': str(row.get('content', ''))[:8000]})
             finally: db.close()
     # A per-profile query can refine a truncated global search without exposing paths.

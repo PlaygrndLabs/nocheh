@@ -6,7 +6,7 @@ import {chatName, formatDate, sourceHits, unknownChat} from '../../lib/chats-mod
 import {useChatDirectory} from '../../lib/chat-directory';
 import {Badge, Button, Details, Field, Input, Notice, Spinner, Textarea} from '../../ui/core';
 import {Drawer, useFeedback} from '../../ui/overlay';
-import {modeText, ruleBody, type Rule} from './rule-dialog';
+import {modeText, ruleBody, unusedNotesText, type Rule} from './rule-dialog';
 import {ActionError, chatHref, useAction} from './shared';
 
 type Preview = {
@@ -131,11 +131,15 @@ export function RuleDrawer({
             </dd>
             <dt className="text-muted">How</dt>
             <dd>{modeText[rule.mode].label}</dd>
+            {/* Saved notes always show here, even on a rule you approve, where only the filter would read them. */}
             {rule.instructions.trim() && (
               <>
                 <dt className="text-muted">Privacy notes</dt>
-                <dd className="whitespace-pre-wrap" dir="auto">
-                  {rule.instructions}
+                <dd>
+                  <span className="block whitespace-pre-wrap" dir="auto">
+                    {rule.instructions}
+                  </span>
+                  {rule.mode === 'approved' && <span className="block text-xs text-muted">{unusedNotesText}</span>}
                 </dd>
               </>
             )}
@@ -144,8 +148,8 @@ export function RuleDrawer({
             <ApprovedSharing rule={rule} />
           ) : (
             <p className="text-[13px] text-muted">
-              When {name(rule.destination)} asks about something, Nocheh checks these chats and passes on only what’s
-              safe. Each passed-on text lasts a short while.
+              When {name(rule.destination)} asks about something, Nocheh checks these chats and tries to pass on only
+              what’s relevant and not private. Each passed-on text lasts a short while.
             </p>
           )}
           <SharedTexts rule={rule} />

@@ -69,6 +69,18 @@ def hermes_rows(state, since):
     return rows
 
 
+def reader_rows(state, day):
+    """Files Hermes's readers could not read on `day` because a write failed (services/hermes/usage.py READERS), with
+    the reads that worked; [] while none was counted, and None without a tracker."""
+    rows = _read(Path(state) / 'hermes/usage/usage.sqlite',
+                 'SELECT day,reader,done,temp_full,read_only FROM reader_daily WHERE day=?', (day,))
+    if rows is None:
+        return None
+    count = lambda value: value if type(value) is int and value >= 0 else 0
+    return [{'day': row['day'], 'reader': row['reader'], **{name: count(row[name]) for name in ('done', 'temp_full', 'read_only')}}
+            for row in rows]
+
+
 def honcho_rows(state, since):
     from tools.operations.memory.honcho_setup import state_for
     rows = _read(state_for(state) / 'ledger/budget.sqlite', 'SELECT * FROM usage_daily WHERE day>=?', (since,))

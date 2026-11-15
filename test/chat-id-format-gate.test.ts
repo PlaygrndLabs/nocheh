@@ -36,6 +36,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['src/conversation-page.ts','adapter',1,'Telegram ids inside an original\'s payload'],
   ['src/mini-app.ts','adapter',2,'the Telegram user id checked against TELEGRAM_OWNER_ID'],
   ['src/observed-source.ts','adapter',3,'archive intake: Desktop export and live scopes are Telegram ids'],
+  ['src/owner-lock.ts','adapter',1,'a phone\'s sign-in pauses are kept under its Telegram account id'],
   ['src/stores/chat-sends.ts','adapter',1,'a send record\'s chat is the app\'s own chat id'],
   ['src/stores/runtime-configuration.ts','adapter',2,'the policy document holds raw Telegram owner and group ids'],
   ['tools/cli/main.py','adapter',1,'configure-telegram owner and group ids'],

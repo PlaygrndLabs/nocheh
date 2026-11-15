@@ -697,7 +697,8 @@ export class NativeMemoryRepository {
     // Priority follows the Honcho process, not the memory-review principal: the deriver
     // learns in the background, while the API answers recall during a reply.
     const detect=(text:string)=>this.detect(text,body.background===true);
-    const prepared=await this.prepared.prepare(current.principal,payload,detect);await this.current(current.row.id);return {payload:prepared};
+    // A model or embeddings request: its roles, names, model and tool ids stay as they are (ADR-0251).
+    const prepared=await this.prepared.prepare(current.principal,payload,detect,{request:true});await this.current(current.row.id);return {payload:prepared};
   }
   /** The engine's learning requests quote messages Nocheh already guarded. Mark those exact
    * writes as prepared in the current epoch so an unrelated epoch does not re-detect them. */
