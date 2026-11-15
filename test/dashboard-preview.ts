@@ -568,13 +568,13 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[],managed_runs:[{event_id:id,state:'done',created_at:new Date().toISOString(),channel:'browser',profile,scope:'42'},{event_id:voiceId,state:'failed',error_code:'provider_timeout',created_at:new Date(Date.now()-86400000).toISOString(),channel:'scheduler',job_id:'morning-check',job_name:'Morning aurora check',profile,scope:'42'}]},guard_mode:'on',services:[]});
   if(route==='/settings')return json(res,200,settingsView(mode));
   if(route==='/telegram/identities')return json(res,200,{groups:[
-    {id:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
-    {id:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
-    // A group Telegram upgraded, by its Telegram id now and, with nobody in it, by the earlier one the settings list. Sam wrote
-    // there and left; Lee's only record is that he left, so the People list leaves him out (ADR-0251).
-    {id:UPGRADED_TG,name:'Garden swap',users:[{id:'61',name:'Rosa',username:null,state:'in',seen:true},{id:'62',name:'Lee',username:null,state:'left',seen:false},
+    {id:'-10042',external:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
+    {id:'-10073',external:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
+    // A group Telegram upgraded, by its Nocheh id as storage names it, with its Telegram id now: the earlier one the
+    // settings list finds this same group (ADR-0251). Sam wrote there and left; Lee's only record is that he left, so the
+    // People list leaves him out.
+    {id:UPGRADED,external:UPGRADED_TG,name:'Garden swap',users:[{id:'61',name:'Rosa',username:null,state:'in',seen:true},{id:'62',name:'Lee',username:null,state:'left',seen:false},
       {id:'63',name:'Sam',username:null,state:'left',seen:true}]},
-    {id:UPGRADED_OLD_TG,name:null,users:[]},
   ],truncated:false});
   if(route==='/jobs')return json(res,200,jobs);
   const jobRead=/^\/jobs\/([a-f0-9-]{36})$/.exec(route);

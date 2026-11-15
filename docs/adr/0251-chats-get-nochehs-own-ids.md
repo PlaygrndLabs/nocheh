@@ -317,11 +317,18 @@ retired), gets its own record.
 
 - Conversations, people, topics and the Telegram refresh read `chats`,
   `chat_details`, `chat_accounts` and `chat_memberships`, not the archive or
-  the old Telegram tables. `GET /v1/telegram/identities` gives each person a
-  group has recorded with their latest standing (`in` or `left`) and `seen`:
-  whether the group's own messages show them, as an author or named in a join
-  message, read from the archive under every Telegram id the group has had and
-  only for which kind of update each is. The dashboard's people list shows, as
+  the old Telegram tables. `GET /v1/telegram/identities` names each group by
+  its Nocheh chat id, with its current Telegram id (`external`) and every
+  Telegram id it has had (`telegram_ids`, current first), and gives each
+  person a group has recorded with their latest standing (`in` or `left`) and
+  `seen`: whether the group's own messages show them, as an author or named in
+  a join message, read from the archive under every Telegram id the group has
+  had and only for which kind of update each is. The dashboard's directory of
+  people (`telegram.directory`) keeps that Nocheh id as the group's id, so
+  the chat list opens a group past its first page as itself; it matches a
+  `TELEGRAM_GROUP_IDS` entry to a group by any of those Telegram ids, asks
+  Telegram only by Telegram ids, and names a group only that list gives by
+  the Telegram id it gives. The dashboard's people list shows, as
   before step 2b, the people a group's messages show and anyone a rule names;
   someone whose only record is a member update, such as leaving, is not
   listed. A refresh writes a name only where no captured update gave one, keeps its own
@@ -486,6 +493,7 @@ retired), gets its own record.
   [directory](../../test/store-owner-supervision.test.ts),
   [refresh](../../test/store-telegram-chats.test.ts),
   [people](../../test/telegram-directory.test.ts),
+  [people's directory](../../test/test_telegram_operations.py),
   [topics](../../test/store-telegram-topics.test.ts),
   [strangers](../../test/store-strangers.test.ts),
   [sends](../../test/store-chat-sends.test.ts),

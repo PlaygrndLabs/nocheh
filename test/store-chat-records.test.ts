@@ -124,6 +124,11 @@ test('a group Telegram upgrades keeps one chat with its old and current ids, ser
     assert.deepEqual(saved.ids.map(row=>[row.external_id,row.chat_id,row.state]).sort(),[[next,id,'current'],[old,id,'old']].sort());
     assert.equal((await stores.control.query('SELECT count(*) FROM chat_ids WHERE external_id=ANY($1::text[])',[[old,next]])).rows[0].count,'2','no second chat');
     assert.deepEqual(saved.chats.map(row=>[row.title,row.app_type,row.state]),[['Basic upgraded','supergroup','active']]);
+    // The owner's people route names it once, by its Nocheh id, with both its Telegram ids, current first: the dashboard
+    // opens it by that id, and TELEGRAM_GROUP_IDS still naming it by the earlier one finds it (ADR-0251).
+    const listed=(await telegramDirectory(stores.control,{admin:true,scope:null},stores.archive)).groups
+      .filter(group=>group.id===id||[old,next].some(external=>group.telegram_ids.includes(external)));
+    assert.deepEqual(listed.map(group=>[group.id,group.external,group.telegram_ids]),[[id,next,[next,old]]]);
     // The bridge serves it while either id is in TELEGRAM_GROUP_IDS.
     for(const [ids,state] of [[[next],'active'],[[old],'active'],[[],'off']] as const) {
       await repository.serve({owner_id:OWNER,group_ids:[...ids]});

@@ -14,7 +14,7 @@ class TelegramDirectoryTests(unittest.TestCase):
                        'TELEGRAM_GROUP_IDS': '-10042', 'TELEGRAM_GROUP_ACCESS': '{"-10042":{"granted":["91"],"denied":["73"]}}'}
         mocked = patch.object(directory, 'load', return_value=self.values)
         mocked.start(); self.addCleanup(mocked.stop)
-        self.observed = {'groups': [{'id': '-10042', 'name': 'Old name',
+        self.observed = {'groups': [{'id': '-10042', 'external': '-10042', 'telegram_ids': ['-10042'], 'name': 'Old name',
                                      'users': [{'id': '73', 'name': 'Mira Chen', 'username': '@mira'}]}],
                          'truncated': False}
 
@@ -46,7 +46,7 @@ class TelegramDirectoryTests(unittest.TestCase):
             raise TimeoutError('private network detail')
 
         result = directory.directory(self.state, {'groups': [], 'truncated': False}, unavailable)
-        self.assertEqual(result, {'groups': [{'id': '-10042', 'name': None, 'users': []}], 'truncated': False})
+        self.assertEqual(result, {'groups': [{'id': '-10042', 'external': '-10042', 'name': None, 'users': []}], 'truncated': False})
 
     def test_mismatched_chat_and_user_ids_cannot_label_saved_identities(self):
         def api(token, method, **params):

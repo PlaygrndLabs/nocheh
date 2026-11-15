@@ -1832,6 +1832,42 @@ test('a group Telegram upgraded stays on by its earlier ID, and an older topic i
   await page.close();
 });
 
+test('a group people were seen in, past the first page of chats, is listed once and opens as itself', async () => {
+  // More than 100 chats: the upgraded group is not on the first page. People were seen there, so the list shows it from
+  // the people route, which names it by its Nocheh id, and opening it looks it up (ADR-0251).
+  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const problems = [];
+  page.on('pageerror', error => problems.push('page error: ' + error.message));
+  await page.route(/\/api\/nocheh\/settings$/, async route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const response = await route.fetch(),
+      view = await response.json();
+    for (const field of view.fields) if (field.key === 'TELEGRAM_GROUP_IDS') field.value = '-10042,-4005';
+    return route.fulfill({response, json: view});
+  });
+  await page.route(/\/api\/nocheh\/conversations\?limit=100$/, async route => {
+    const response = await route.fetch(),
+      first = await response.json();
+    first.items = first.items.filter(item => item.space_id !== UPGRADED);
+    first.next_cursor = first.items.at(-1).space_id;
+    return route.fulfill({response, json: first});
+  });
+  await page.goto(origin + '/#chats');
+  const list = page.getByRole('navigation', {name: 'Chats'});
+  await list.getByRole('link', {name: 'Garden swap'}).waitFor();
+  assert.equal(await list.getByRole('link', {name: 'Garden swap'}).count(), 1, 'listed once');
+  assert.equal(await list.getByRole('link', {name: 'Unknown chat'}).count(), 0);
+  await list.getByRole('link', {name: 'Garden swap'}).click();
+  await page.getByRole('heading', {name: 'Garden swap', level: 2}).waitFor();
+  assert.equal(new URL(page.url()).hash, '#chats?chat=' + encodeURIComponent(UPGRADED));
+  await page.locator('main header').getByText('Telegram ID -10099 · earlier -4005').waitFor();
+  await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
+  await page.getByRole('radiogroup', {name: 'Can Rosa talk to Nocheh'}).waitFor();
+  assert.equal(await page.getByText('Nocheh doesn’t know this chat.', {exact: false}).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a sharing rule finds messages from its groups by their chat, a new-id group and an upgraded one included', async () => {
   // Hits name their Nocheh chat; the archive's scope stays the Telegram ID the message came with.
   const rule = {

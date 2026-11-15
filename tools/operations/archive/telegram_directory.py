@@ -21,6 +21,11 @@ def _id(value, pattern):
     return text if isinstance(text, str) and pattern.fullmatch(text) else ''
 
 
+def _chat(value):
+    """A Nocheh chat id, as storage names a chat: opaque, printable, no whitespace, bounded. Never parsed (ADR-0251)."""
+    return value if isinstance(value, str) and 0 < len(value) <= 200 and all(32 < ord(c) != 127 for c in value) else ''
+
+
 def _person(value):
     if not isinstance(value, dict) or value.get('is_bot') is True:
         return None
@@ -54,14 +59,22 @@ def directory(state, archive=None, bot_api=_bot_api):
             archive = {'groups': [], 'truncated': False}
     if not isinstance(archive, dict):
         archive = {'groups': [], 'truncated': False}
-    groups = {}
+    # A group storage knows keeps its Nocheh chat id, which is how the dashboard opens it; its Telegram ids, current and
+    # older, only match TELEGRAM_GROUP_IDS and name it to Telegram (ADR-0251). A group only that list names is named by
+    # the Telegram id it gives. Nocheh ids and Telegram ids are kept apart and never compared.
+    groups, by_telegram = {}, {}
     for observed in archive.get('groups', []):
         if not isinstance(observed, dict):
             continue
-        # A group by its Telegram id now: its Nocheh id is that value only for a group stored before step 2b (ADR-0251).
-        identifier = _id(observed.get('external'), GROUP) or _id(observed.get('id'), GROUP)
-        if not identifier:
+        identifier = _chat(observed.get('id'))
+        if not identifier or ('chat', identifier) in groups:
             continue
+        external = _id(observed.get('external'), GROUP)
+        telegram = observed.get('telegram_ids') if isinstance(observed.get('telegram_ids'), list) else []
+        for value in [external, *telegram[:20]]:
+            value = _id(value, GROUP)
+            if value:
+                by_telegram.setdefault(value, ('chat', identifier))
         users = {}
         for user in observed.get('users', []):
             person = _person(user) if isinstance(user, dict) else None
@@ -72,10 +85,11 @@ def directory(state, archive=None, bot_api=_bot_api):
                 if isinstance(user.get('seen'), bool):
                     person['seen'] = user['seen']
                 users[person['id']] = person
-        groups[identifier] = {'id': identifier, 'name': _clean(observed.get('name')) or None, 'users': users}
+        groups[('chat', identifier)] = {'id': identifier, 'external': external or None, 'name': _clean(observed.get('name')) or None, 'users': users}
     token = values['TELEGRAM_BOT_TOKEN']
     for identifier in selected[:20]:
-        group = groups.setdefault(identifier, {'id': identifier, 'name': None, 'users': {}})
+        key = by_telegram.get(identifier, ('telegram', identifier))
+        group = groups.setdefault(key, {'id': identifier, 'external': identifier, 'name': None, 'users': {}})
         if not token:
             continue
         try:

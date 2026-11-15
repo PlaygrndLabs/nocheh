@@ -37,7 +37,9 @@ export type Person = {
   state?: 'in' | 'left';
   seen?: boolean;
 };
-export type IdentityGroup = {id: string; name?: string | null; users?: Person[]};
+/** A group people were seen in: its Nocheh chat id, or the Telegram id TELEGRAM_GROUP_IDS gives for a group only that
+ * list names, and its current Telegram id. */
+export type IdentityGroup = {id: string; external?: string | null; name?: string | null; users?: Person[]};
 export type AccessRule = {granted: string[]; denied: string[]};
 export type AccessMap = Record<string, AccessRule>;
 /** Looks a chat up by its Nocheh id in the chat directory; null when no chat has that id. */

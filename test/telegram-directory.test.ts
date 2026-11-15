@@ -19,6 +19,8 @@ test('owner Telegram directory gives recorded names, ids and membership, and who
       {chat_id:old,state:'in',external_id:'88',display_name:'Ari',username:null},
       {chat_id:old,state:'in',external_id:'123',display_name:'Owner',username:null},
       {chat_id:newer,state:'in',external_id:'456',display_name:null,username:'bob'}]};
+    // Current first, then older ones, as the query orders them.
+    assert.match(text,/ORDER BY i\.chat_id,i\.state='current' DESC/);
     return {rows:[{chat_id:old,external_id:old},{chat_id:newer,external_id:newerTg},{chat_id:newer,external_id:newerOld}]};
   }} as unknown as pg.Pool;
   // The archive by every Telegram id the groups have had: Mira, Nia and the owner wrote in the old group, Bob in the newer
@@ -38,19 +40,22 @@ test('owner Telegram directory gives recorded names, ids and membership, and who
   assert.match(read[0]!,/r\.kind='authored_by'/);
   for(const text of read)assert.equal([...text.matchAll(/payload/g)].length,[...text.matchAll(parts)].length,text);
   assert.deepEqual(result,{groups:[
-    {id:old,external:old,name:'Aurora planning',users:[
+    {id:old,external:old,telegram_ids:[old],name:'Aurora planning',users:[
       {id:'88',name:'Ari',username:null,state:'in',seen:true},
       {id:'77',name:'Kai',username:null,state:'in',seen:false},
       {id:'95',name:'Lee',username:null,state:'left',seen:false},
       {id:'73',name:'Mira Chen',username:'@mira',state:'in',seen:true},
       {id:'91',name:'Nia',username:null,state:'left',seen:true},
       {id:'123',name:'Owner',username:null,state:'in',seen:true}]},
-    {id:newer,external:newerTg,name:'@p2group',users:[{id:'456',name:null,username:'@bob',state:'in',seen:true}]},
+    // Named by its Nocheh id, with every Telegram id it has had for matching TELEGRAM_GROUP_IDS (ADR-0251).
+    {id:newer,external:newerTg,telegram_ids:[newerTg,newerOld],name:'@p2group',users:[{id:'456',name:null,username:'@bob',state:'in',seen:true}]},
   ],truncated:false});
-  // Without the archive, everyone recorded counts as seen.
+  // Without the archive, everyone recorded counts as seen, and the groups keep their Telegram ids.
   sql.length=0;
-  assert.ok((await telegramDirectory(control,{admin:true,scope:null})).groups.every(group=>group.users.every(user=>user.seen)));
-  assert.equal(sql.length,2);
+  const bare=await telegramDirectory(control,{admin:true,scope:null});
+  assert.ok(bare.groups.every(group=>group.users.every(user=>user.seen)));
+  assert.deepEqual(bare.groups.map(group=>group.telegram_ids),[[old],[newerTg,newerOld]]);
+  assert.equal(sql.length,3);
 });
 
 test('scoped readers cannot list Telegram identities',async()=>{
