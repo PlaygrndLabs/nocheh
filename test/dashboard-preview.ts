@@ -242,6 +242,8 @@ const club=(i:number)=>{const n=String(i).padStart(3,'0'),id='-2000000000'+n;
  return {space_id:id,name:'Club '+n,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true,topic_key:null,
   app_ids:[{app:'telegram',external:id,state:'current'}],is_forum:false,state:'active',owner:false,short_id:chatShortId(id),added_by:'owner',added_at:null,removed_event:false};};
 const manyChats=Array.from({length:120},(_,i)=>club(i+1));
+/** The groups a scenario lists beyond the preview's own chats. */
+const moreChats=(mode:string)=>mode==='many-chats'?manyChats:mode==='many-chats-moved'?[club(0),...manyChats]:[];
 /** The directory as the chats' states serve it, installed for the repositories the preview runs. */
 const directoryNow=()=>installChats(previewDirectory());
 /** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252), and who
@@ -684,7 +686,7 @@ const server=createServer((req,res)=>{void(async()=>{
   // and state filters apply before the list, sorted by id, is paged, as the store pages it.
   if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'',after=url.searchParams.get('after')??'',limit=Math.min(100,Number(url.searchParams.get('limit')||50));
    if(mode==='many-chats-moved'&&after)throw new HttpError(503,'fixture_observation_unavailable');
-   const all=[...conversations.map(conversationItem),...(mode==='many-chats'?manyChats:mode==='many-chats-moved'?[club(0),...manyChats]:[])].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)
+   const all=[...conversations.map(conversationItem),...moreChats(mode)].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)
     .filter(row=>(!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)))&&(!kind||row.kind===kind)&&(!state||row.state===state));
    const remaining=all.filter(row=>row.space_id>after),items=remaining.slice(0,limit);
    return json(res,200,{items,total:all.length,next_cursor:remaining.length>limit?items.at(-1).space_id:null,state:'current',observed_at:new Date().toISOString()});}
@@ -913,9 +915,12 @@ const server=createServer((req,res)=>{void(async()=>{
     if(!settingsChanges.TELEGRAM_BOT_TOKEN&&mode!=='fresh')throw new HttpError(400,'telegram_token_missing');
     if(saved('TELEGRAM_ENABLED')==='true')throw new HttpError(400,'telegram_running');
     return json(res,200,{bot:'@aurora_helper_bot',people:[{id:'42',name:'Owner',username:'@owner'}]});}
-  // Telegram is asked about the groups Nocheh is on in.
+  // Telegram is asked about the groups Nocheh is on in, at most 50 a press, as the server asks; the answer says how many
+  // are left.
   if(route==='/telegram/chats/refresh'){const directory=directoryNow();
-   return json(res,200,{chats:previewChats.filter(chat=>chat.kind==='group'&&directory.served(chat.id)).map(chat=>({chat_id:chat.id,external:chat.ids[0],state:'available',title:chat.title,is_forum:chat.is_forum===true}))});}
+   const served=[...previewChats.filter(chat=>chat.kind==='group'&&directory.served(chat.id)).map(chat=>({chat_id:chat.id,external:chat.ids[0],state:'available',title:chat.title,is_forum:chat.is_forum===true})),
+    ...moreChats(mode).map(chat=>({chat_id:chat.space_id,external:chat.space_id,state:'available',title:chat.name,is_forum:false}))];
+   return json(res,200,{chats:served.slice(0,50),remaining:Math.max(0,served.length-50)});}
   // The group switch (ADR-0253): on or off at once, with the project a group joins as it turns on: a new one named
   // after it, one of the owner's, or none. Only a group Nocheh is in has one.
   if(route==='/chats/state'){if(Object.keys(body).some(key=>!['chat_id','state','operation_id','project'].includes(key)))throw new HttpError(400,'unknown_chat_state_field');

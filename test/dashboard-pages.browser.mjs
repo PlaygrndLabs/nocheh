@@ -2136,6 +2136,12 @@ test('every group Nocheh is on in can be shared with and refreshed, past the fir
     await page.getByLabel('Find a chat').fill('Choir');
     await page.getByRole('navigation', {name: 'Chats'}).getByRole('link', {name: 'Choir practice'}).waitFor();
     assert.equal(await page.getByRole('button', {name: /Refresh group names/}).isEnabled(), true);
+    // Telegram is asked about 50 of the 122 a press, and the owner is told to press again for the rest.
+    await page.getByRole('button', {name: /Refresh group names/}).click();
+    await page
+      .getByRole('status')
+      .filter({hasText: 'Checked 50 groups with Telegram. Press again for the other 72.'})
+      .waitFor();
     assert.deepEqual(problems, []);
     await page.close();
   } finally {
