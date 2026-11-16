@@ -235,7 +235,15 @@ bot the update came to. Only Nocheh's own words are cut: another bot's message
 that someone pins or quotes is learned as someone else's, and a message sent
 through an inline bot, which its sender wrote, is labelled as sent through an
 inline bot. The owner's quote of their own forward is a quote of whoever wrote
-it, never the owner's words
+it, never the owner's words, and so is a quote of a message in another chat or
+topic: Telegram shows only who first sent it, and in a forum topic it also points
+the reply at the topic's first message, which the quote is not from. In the
+owner's notes review a quote is judged by who wrote the message it answers, as a
+pin is: another bot's message, which Telegram never sends to Nocheh, is cut out
+and counted, and a quote of a message in another chat or topic stays only when
+Nocheh holds that message and its sender is allowed there. A pinned message's
+own reply, such as a poll it answers in another chat, is never learned with the
+pin
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app

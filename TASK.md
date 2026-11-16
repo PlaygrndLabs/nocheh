@@ -236,7 +236,10 @@ becomes your private memory"). One pull request of several commits
   one, stays out of the owner's notes review and only there; group replies, group memory,
   interpretations and search keep it. A review drops such messages, rules learned from them
   and quotes of them from its context, and cuts such a message out of a pin of it; a later
-  grant adds nothing back. A pin of Nocheh's own message is never counted as kept out: one it
+  grant adds nothing back. A quote is judged by the message it answers even when the review
+  holds nothing of it: another bot's message, or one Nocheh never got, by its author as the
+  reply shows it, and one in another chat or topic stays only when the archive holds it and its
+  sender is allowed there. A pin of Nocheh's own message is never counted as kept out: one it
   learns stays in the pin, and a card, notice or reminder is taken out of it, so a pin of a card
   with nothing else to review is not reviewed at all. Memory › Assistant
   notes counts what was kept out, and System › Background work shows the message's Memory notes
@@ -247,9 +250,13 @@ becomes your private memory"). One pull request of several commits
   [workflows](test/store-workflows.test.ts)).
 - Labels: every note carries a label built by code from Hermes's own record of who wrote it
   and what that run read, made when the note is read. "You" only for a review of nothing but
-  the owner's own messages that cites them and reads no rule learned from anyone else; a turn's
-  note never. A rule is judged by the messages code recorded it was learned from, never by what
-  the model cited, and rules resting on others' words label the note as theirs; only a review
+  the owner's own messages that cites them and reads no rule but those the owner wrote (a rule
+  learned automatically, even from the owner's own messages, can restate others' words); a
+  turn's note never. A quote of a message in another chat or topic is never the sender's own
+  (in a forum topic Telegram also points the reply at the topic's first message), and a
+  Telegram Desktop export's message is a forward when it carries any of its forward fields. A
+  rule is judged by the messages code recorded it was learned from, never by what the model
+  cited, and rules resting on others' words label the note as theirs; only a review
   holding someone else's words reads them, as a review of Nocheh's own learned messages, alone or
   with the owner's own, leaves them out. A pin carries the words of the message it pinned, and
   the owner's quote or pin of Nocheh's own learned message counts as Nocheh's. A turn's reads
@@ -293,7 +300,9 @@ becomes your private memory"). One pull request of several commits
   learning the owner's pin of Nocheh's learned message, and the owner's pin or quote of a card
   or of Nocheh's message not archived yet, passes nothing on, so the owner's claims beside it
   can stay direct; a claim citing the pin or quote never is. A pin of only a card, or of only
-  Nocheh's message not archived yet, asks no interpretation or notes review either. Owner
+  Nocheh's message not archived yet, asks no interpretation or notes review either. A pinned
+  message's own reply (a poll or a contact it answers in another chat) is never learned with
+  the pin. Owner
   turns read the forwards block apart from the owner's, and
   recall asks it; when that ask fails, recall keeps the other answers and says so, and
   answers stay whole under their headers within 20,000 characters. A claim resting on a
@@ -350,7 +359,14 @@ becomes your private memory"). One pull request of several commits
   words; a pin of only Nocheh's message not archived yet neither reviewed nor interpreted): the
   build; the unit tests (the same 4 fail); the dashboard tests and format check; the store files
   they touch (note sources, reviews, long-term memory, entities, learning), each new check also
-  run without its fix and failing. Pending: the whole store suite after those fixes; the
+  run without its fix and failing. After the sixth review's fixes (a quote in another chat or
+  topic never the owner's, a Desktop export's forward by any of its fields, a review of only the
+  owner's messages reading only the rules the owner wrote, a pinned message's own reply not
+  learned, a quote of another bot's or of an unarchived or outside message judged in the
+  owner's notes review): the build; the unit tests (the same 4 fail); the dashboard tests and
+  format check; the reviews store file and those that read the same paths (long-term memory,
+  note sources, relationships, the rule catalog); the sweep's probes; each new check also run
+  without its fix and failing. Pending: the whole store suite after those fixes; the
   cloud tester's new and affected scenarios, with the changed `own_file_stays_recallable`
   checks and review waits; the private names scan; a live look at a
   labelled note, a forward and a skipped card on the owner's install after merge. Open owner
@@ -365,9 +381,11 @@ becomes your private memory"). One pull request of several commits
   as someone else's (it fails closed), and its words, Nocheh's own account's, are cut from
   everything learned, except where the stored bot is not an account (an import), where it is
   learned as someone else's; a forward of Nocheh's message sent on its own is learned as a
-  forward from a person shown as Nocheh, someone else's, card or not; a
-  quote inside a pinned message the archive does not hold, of a message in the same chat, stays
-  as someone else's quote; a quote of Nocheh's message is cut whole, so the notes review and
+  forward from a person shown as Nocheh, someone else's, card or not; a quote inside a pinned
+  message is checked only for Nocheh's words, and one the archive does not hold, of a message in
+  the same chat, stays as someone else's quote; a rule learned automatically from the owner's
+  messages can restate others' words, and a review of the owner's and Nocheh's own messages
+  reads it as Nocheh's; a quote of Nocheh's message is cut whole, so the notes review and
   interpretations no longer see which part was quoted; Hermes's own notes line adds up its own
   steps, so a lookup that works can mark a record failure working again; on deploy day today's
   store failures show once more as their own line; the owner's own forward in a group, or in a

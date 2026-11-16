@@ -11,8 +11,8 @@ stay out of the owner's private notes but still count for group replies; what
 others wrote is information, never the owner's own words or instructions. A
 review of the design tightened it: "you" only for a review of nothing but the
 owner's own messages that cites them, a note's earlier sources carried through
-the operations that replace it, and a reported claim never made direct. Two
-reviews of the build closed gaps in pins and quotes (of Nocheh's own messages
+the operations that replace it, and a reported claim never made direct.
+Reviews of the build closed gaps in pins and quotes (of Nocheh's own messages
 too), rules, recall, what a turn read, failure counting and the full tester's
 checks; this record describes the result. Four
 questions went to the owner; this builds the recommended answer to each, except
@@ -75,7 +75,14 @@ a recalled note names its source beside its chat).
 - In a review that goes ahead, related messages from people not allowed leave
   its context without taking one of its 30 places (`sender_not_allowed`), a rule
   whose evidence holds such a message is dropped (`rule_sender_not_allowed`),
-  and a quote of a dropped message is stripped. A pin is judged by the author of
+  and a quote of a dropped message is stripped. A quote is judged by the message
+  it answers even when the review holds nothing of it: one in this chat the
+  archive never got (another bot's message, which Telegram never sends to
+  Nocheh, or one sent before Nocheh was there) by its author as the reply shows
+  it, in this chat, as a pin's message is; one in another chat or topic stays
+  only when the archive holds that message and its sender is allowed where they
+  wrote it. A quote refused this way is cut out of the message quoting it, which
+  stays, and counted as `sender_not_allowed`. A pin is judged by the author of
   the message it pinned, in the same chat: one from someone not allowed is cut
   out of the pin, which stays, and counted as `sender_not_allowed`. A pinned
   message Telegram no longer shows carries no words and is let through. Nocheh's
@@ -89,9 +96,9 @@ a recalled note names its source beside its chat).
   completes with `nocheh_message` too. The same holds for a pin of Nocheh's own
   account's message the archive does not hold as Nocheh's (see below). Another
   bot's message is someone else's, and as a sender not allowed there it is cut
-  out of the pin and counted, in the notes review only. A reaction left with no
-  target once one was dropped is skipped as `target_not_allowed`, so no run is
-  spent on a bare emoji.
+  out of a pin or quote of it and counted, in the notes review only. A reaction
+  left with no target once one was dropped is skipped as `target_not_allowed`,
+  so no run is spent on a bare emoji.
 - Only the notes review applies these filters. Group replies, Honcho,
   interpretations, search and recall still take what a person not allowed sent,
   so that person still counts for group replies and group memory. What is
@@ -143,9 +150,15 @@ a recalled note names its source beside its chat).
   is the sender's own only when the message it answers is theirs and is not a
   forward of someone else's (`forwardFacts`, an inline bot's message included),
   as a pin's message is read: the owner's quote of their own forward quotes
-  whoever wrote it, so it is never the owner's typing, class or bucket. A reply
-  in another chat names only who first sent it, so it is the sender's own when
-  Telegram names the sender.
+  whoever wrote it, so it is never the owner's typing, class or bucket. A quote
+  of a message in another chat or topic (`external_reply`) is judged by that
+  message alone and is never the sender's own: Telegram names only who first
+  sent it, not whether it was a forward or sent through an inline bot, and in a
+  forum topic it also points `reply_to_message` at the topic's first message,
+  which the quote is not from. A Telegram Desktop export's message is a forward
+  when it carries any of the export's forward fields, whatever they hold:
+  `forwarded_from` (a deleted account's is `null`), `forwarded_from_id` or
+  `saved_from`.
 - `eventClass` gives one fixed token per message, such as `owner_message`,
   `person_message`, `forward_hidden_by_owner`, `file_by_person`, `pinned`,
   `nocheh_job_report`, `nocheh_about_forward` or `unknown`, in five groups:
@@ -161,19 +174,22 @@ a recalled note names its source beside its chat).
   those rules rest on (`rule_buckets`: `person`, `forward`, `file`) and what was
   left out. A rule is judged by the inputs code recorded when it was learned
   (its stored dependencies), never by what the model cited. It is the owner's
-  when the owner wrote it, or when it was learned from at least one message and
-  every one is the owner's own typing. A file's text or a transcript is judged
-  through the message it belongs to; any other input is someone else's, and
-  Nocheh's own messages are not the owner's. In a review of nothing but the
-  owner's own messages, rules not drawn from them are left out of that review
-  only (`rules_left_out_for_owner_label`). In a review of Nocheh's own learned
-  messages, alone or with the owner's own messages (its cards and notices are
-  not learned, and the owner's quote or pin of a learned one counts with them),
-  the rules resting on another person's message, a forward, a file or an input
-  that can't be told are left out the same way and counted there, so its notes
-  read `nocheh` rather than as others'. `owner_account_only` stays false for
-  such a review. A provenance stored before `rule_buckets` existed reads its
-  rules from others as another person's.
+  only when the owner wrote it: a rule learned automatically, even from nothing
+  but the owner's own messages, can restate a rule or Honcho's chat that its
+  interpretation read, since its recorded inputs name neither. A file's text or
+  a transcript is judged through the message it belongs to; any other input is
+  someone else's, and Nocheh's own messages are not the owner's. In a review of
+  nothing but the owner's own messages, every rule the owner did not write is
+  left out of that review only (`rules_left_out_for_owner_label`). In a review
+  of Nocheh's own learned messages, alone or with the owner's own messages (its
+  cards and notices are not learned, and the owner's quote or pin of a learned
+  one counts with them), the rules resting on another person's message, a
+  forward, a file or an input that can't be told are left out the same way and
+  counted there, so its notes read `nocheh` rather than as others'; a rule
+  learned from the owner's own messages stays there, since such a review's notes
+  are never the owner's. `owner_account_only` stays false for such a review. A
+  provenance stored before `rule_buckets` existed reads its rules from others as
+  another person's.
 - The review fragment's first line stays byte for byte. A second line, Nocheh's
   records, is one JSON object in fixed words with no names, listing each
   message's full id under its class's phrase, at most 3,600 characters. A fixed
@@ -215,18 +231,18 @@ a recalled note names its source beside its chat).
 - **The label is made when the note is read.** `/internal/notes/sources`
   (service token only) turns a note's origins and citations into `{from,
   label}`. `from` is one fixed token: `owner`, `nocheh`, `person`, `forward`,
-  `file`, `mixed`, `turn`, `turn_read`, `unknown` or `unavailable`. `owner` needs
-  all of these: a review with provenance of nothing but the owner's own typing,
-  whose source is among its messages, with nothing left out and no rules but the
-  owner's; and a note that cites at least one message, every one of them in that
-  review, and no more than 20 of them. Citations only ever narrow trust. An
-  all-owner review whose note cites none reads `nocheh`. Rules a review read
-  that rest on another person's message, a forward or a file make the note
-  `person`, `forward`, `file` or `mixed`, and its label says it read rules
-  learned from others; only a review that holds someone else's words reads
-  them (section 2). A `nocheh` note is not taken as the owner's own words:
-  its review held Nocheh's own messages, read rules learned from them, or did
-  not meet the owner rule. A turn's note is never `owner`: it is `turn` when it
+  `file`, `mixed`, `turn`, `turn_read`, `unknown` or `unavailable`. `owner`
+  needs all of these: a review with provenance of nothing but the owner's own
+  typing, whose source is among its messages, with nothing left out and no rules
+  but those the owner wrote; and a note that cites at least one message, every
+  one of them in that review, and no more than 20 of them. Citations only ever
+  narrow trust. An all-owner review whose note cites none reads `nocheh`. Rules
+  a review read that rest on another person's message, a forward or a file make
+  the note `person`, `forward`, `file` or `mixed`, and its label says it read
+  rules learned from others; only a review that holds someone else's words reads
+  them (section 2). A `nocheh` note is not taken as the owner's own words: its
+  review held Nocheh's own messages, read rules learned from them, or did not
+  meet the owner rule. A turn's note is never `owner`: it is `turn` when it
   answered the owner's own message, or the owner's quote of Nocheh's own learned
   message, without reading outside, else `turn_read`.
 - **Words.** The model reads fixed words (`modelSourceWords`, at most 120
@@ -408,8 +424,26 @@ a recalled note names its source beside its chat).
     pinned.
   - In a review of only the owner's own messages, or of those and Nocheh's own
     learned messages, conventions learned from others, or from a thread that
-    held others' messages, are left out of that review; turns and every other
-    review still read them.
+    held others' messages, are left out of that review; a review of only the
+    owner's own messages also leaves out every rule learned automatically, even
+    from the owner's own messages, and reads only the rules the owner wrote.
+    Turns and every other review still read them.
+  - In the owner's notes review, a quote of another bot's message, of a message
+    the archive never got from someone not allowed there, or of a message in
+    another chat or topic that the archive does not hold or whose sender is not
+    allowed there, is cut out of the message quoting it. The message stays, and
+    interpretations and long-term memory keep the quote, labelled as someone
+    else's.
+  - The owner's quote of their own message in another chat or topic, and a
+    Telegram Desktop export's forward with no name for its sender (a deleted
+    account's, or one marked only by `forwarded_from_id` or `saved_from`), are
+    no longer the owner's own typing: they are labelled a quote of someone
+    else's message and a forward from someone Nocheh cannot identify, and their
+    text is still learned.
+  - A pinned message's own reply to a message in another chat (a poll, a contact
+    or a venue it answers) is no longer learned with the pin; the pin's message
+    is learned without it, as every message is learned without the message it
+    answers.
   - Allowing someone later does not add their old messages to the notes.
   - Others' forwards, and others' messages the owner pins, leave the private
     chat's long-term memory session. A follow-up like "book the 7am one" is
@@ -490,9 +524,11 @@ a recalled note names its source beside its chat).
     the messages it cites are (`rule_sender_not_allowed`). Only a review that
     holds others' words reads such a rule, and its note reads as another
     person's, never the owner's or Nocheh's.
-  - A rule learned only from the owner's messages can restate a rule, or
-    Honcho's chat, that its interpretation read, since its recorded inputs name
-    neither.
+  - A rule learned automatically from the owner's messages can restate a rule,
+    or Honcho's chat, that its interpretation read. It is never the owner's
+    rule, so a review of only the owner's messages leaves it out, but a review
+    of the owner's and Nocheh's own messages reads it, and its note reads
+    `nocheh` rather than as another person's.
   - Members: `canLearn` reads the owner's yes on a message before it checks that
     the chat is served. The notes review checks both; Members step 4 must close
     it in `canLearn`.
@@ -509,9 +545,11 @@ a recalled note names its source beside its chat).
   - A forward of Nocheh's message, sent on its own rather than pinned or
     quoted, is learned as a forward from a person shown as Nocheh: someone
     else's, never the owner's words, but its text is kept, card or not.
-  - A quote inside a pinned message the archive does not hold, of a message in
-    the same chat, can't be traced (Telegram's pinned message carries no reply),
-    so it stays as a quote of someone else's message.
+  - A quote inside a pinned message is checked only for Nocheh's words: the
+    notes review does not ask who wrote the message it quotes, and one the
+    archive does not hold, of a message in the same chat, can't be traced at all
+    (Telegram's pinned message carries no reply), so it stays as a quote of
+    someone else's message.
   - A quote of Nocheh's message is cut whole, so the notes review and
     interpretations no longer see which part of it was quoted.
   - Hermes's own `notes` line adds up its own steps, so a lookup that works can

@@ -111,7 +111,10 @@ messages code recorded each was learned from: rules resting on another person's
 message, a forward or a file make the note `person`, `forward`, `file` or
 `mixed`. Only a review that holds someone else's words reads them; a review of
 Nocheh's own learned messages, alone or with the owner's own, leaves them out,
-and the owner's quote or pin of a message Nocheh learned counts as Nocheh's.
+and the owner's quote or pin of a message Nocheh learned counts as Nocheh's. A
+review of only the owner's own messages reads only the rules the owner wrote,
+since a rule learned automatically, even from the owner's own messages, can
+restate a rule or chat that its interpretation read.
 A pin or quote of Nocheh's message that is not archived yet, or whose capture
 failed, or of a forward of one, counts as someone else's (it fails closed), and
 its words, from Nocheh's own account, are cut from everything learned. Code tells
@@ -120,7 +123,11 @@ archive stored with the update (`events.bot_id`); when that is not an account,
 nothing is cut by it. Only Nocheh's own words are cut: another bot's message is
 learned as someone else's, and a message sent through an inline bot, which its
 sender wrote, as sent through an inline bot. The owner's quote of their own
-forward quotes whoever wrote it, so it is never `owner`. The evidence
+forward quotes whoever wrote it, so it is never `owner`, and neither is a quote
+of a message in another chat or topic, which Telegram does not show as a forward
+or as sent through an inline bot; a Telegram Desktop export's message with any
+of its forward fields is a forward. A pinned message's own reply is never
+learned with the pin. The evidence
 instruction says a `nocheh` note is not the owner's own words either. What a
 turn read comes from its own session:
 a search by meaning counts as reading other chats, an earlier tool result or
