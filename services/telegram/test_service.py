@@ -63,7 +63,7 @@ class ServiceTests(unittest.TestCase):
                                               'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true'})
         environment.start(); self.addCleanup(environment.stop)
         self.allowed = True
-        for name in ('check_delivery_policy', 'check_action_policy'):
+        for name in ('check_delivery_policy', 'check_action_policy', 'check_leave_policy'):
             patcher = patch('services.telegram.gateway.' + name, side_effect=lambda *_: self.allowed)
             patcher.start(); self.addCleanup(patcher.stop)
         self.mock = TelegramMock(self.root / 'telegram.json')
@@ -162,10 +162,15 @@ class ServiceTests(unittest.TestCase):
         # Journaled like every request that leaves, and a content-free send record says what it was.
         events = [json.loads(path.read_bytes()) for path in (self.root / 'spool/pending').glob('*.json')]
         self.assertIn(('-10055', 'leaveChat'), [(event['scope'], event['payload']['method']) for event in events if event['kind'] == 'outbound_intent'])
-        records = [json.loads(path.read_bytes()) for path in (self.root / 'spool/sends').glob('*.json')]
-        (record,) = [row for row in records if row['method'] == 'leaveChat' and row['chat'] == '-10055']
+        records = lambda: [json.loads(path.read_bytes()) for path in (self.root / 'spool/sends').glob('*.json')]
+        wait(lambda: len([row for row in records() if row['method'] == 'leaveChat']) == 3)
+        outcomes = {row['chat']: row for row in records() if row['method'] == 'leaveChat'}
+        record = outcomes['-10055']
         self.assertEqual((record['state'], record['error_code']), ('sent', None))
         self.assertTrue(record['reference'].startswith('leave:' + 'd' * 64 + ':'))
+        # A leave that found Nocheh gone is recorded as harmless, as the route counts it done; a refusal keeps its own code.
+        self.assertEqual([(outcomes[chat]['state'], outcomes[chat]['error_code']) for chat in ('-10066', '-10077000')],
+                         [('failed', 'already_left'), ('failed', 'no_permission')])
 
     def test_reply_is_silent_answers_the_message_and_keeps_one_receipt(self):
         body = self.turn(1, text='**Hi** there.')

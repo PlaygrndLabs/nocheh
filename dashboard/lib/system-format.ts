@@ -439,7 +439,7 @@ export const sendKinds: Record<string, string> = {
   refusal: 'Not-allowed reply',
   notice: 'Notice',
   notice_update: 'Notice update',
-  leave: 'Left a group',
+  leave: 'Leave a group',
   reaction: 'Reaction',
   setup: 'Bot setup',
   other: 'Other',
@@ -476,6 +476,8 @@ const sendReasons: Record<string, string> = {
   formatting_rejected: 'Formatting rejected',
   button_answer_expired: 'Button press expired',
   reaction_not_allowed: 'Reactions not allowed in this chat',
+  // Any answer saying Nocheh is not there: it left before, was removed, or the group was deleted.
+  already_left: 'Nocheh was no longer in the chat',
   no_permission: 'Bot lacks permission',
   message_too_long: 'Message too long',
   button_rejected: 'A button was rejected',

@@ -32,6 +32,9 @@ REJECTIONS = ((('bot was blocked',), 'bot_blocked'), (('user is deactivated',), 
               (('message is too long',), 'message_too_long'),
               (('button_data_invalid', 'button_url_invalid', 'wrong http url', 'web app'), 'button_rejected'))
 STATUSES = {429: 'rate_limited', 401: 'unauthorized', 403: 'forbidden', 409: 'conflict'}
+# Telegram's answers to a leave that mean Nocheh is not in the chat any more, so there is nothing left to leave. The leave
+# route counts such a leave as done, with any 403, and its record says so.
+GONE = ('chat not found', 'not a member', 'user_not_participant', 'channel_private', 'peer_id_invalid', 'was kicked', 'deactivated', 'was deleted')
 HELD = frozenset({'audience_changed', 'cancelled', 'authority_revoked', 'reaction_unbound'})
 METHOD = re.compile(r'[A-Za-z][A-Za-z0-9_.]{0,63}')
 BIGINT = 2 ** 63
@@ -77,6 +80,17 @@ def outcome(status, raw):
         first = result[0] if isinstance(result, list) and result else result
         return 'sent', None, _number(first.get('message_id')) if isinstance(first, dict) else None
     return 'failed', rejection_code(status, body.get('description'), body.get('error_code')), None
+
+
+def already_left(status, raw):
+    """Whether Telegram answered a leave saying Nocheh is not in that chat any more: any 403, or a 400 that names the chat
+    as gone, as the leave route reads it."""
+    if status == 403: return True
+    try:
+        description = json.loads(raw).get('description')
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return status == 400 and isinstance(description, str) and any(needle in description.lower() for needle in GONE)
 
 
 def rejection_code(status, description=None, reported=None):
@@ -129,6 +143,8 @@ class Sends:
     @quiet
     def answered(self, method, parameters, dispatch, response, ms=None):
         state, code, message = outcome(*response)
+        # A leave that found Nocheh gone did what it was for: a harmless code, not the refusal's own. Another refusal keeps its code.
+        if state == 'failed' and kind_of(method, dispatch) == 'leave' and already_left(*response): code = 'already_left'
         return self.note(method, parameters, dispatch, state, response[0], code, message, ms)
 
     @quiet

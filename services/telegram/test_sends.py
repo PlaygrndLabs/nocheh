@@ -11,7 +11,7 @@ from telegram.error import NetworkError, TimedOut
 
 from services.durable import canonical, digest
 from .capture import Capture, DISPATCH_KEY, Held, OUTBOUND_CHECK, instrument_request
-from .sends import Sends, exception_code, kind_of, not_sent_code, outcome
+from .sends import Sends, already_left, exception_code, kind_of, not_sent_code, outcome
 
 URL = 'https://api.telegram.org/bot123456:synthetic-token/'
 FIELDS = {'version', 'key', 'channel', 'account', 'at', 'kind', 'method', 'chat', 'thread', 'message_id', 'detail',
@@ -76,6 +76,28 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(outcome(200, canonical({'ok': False, 'error_code': 403, 'description': 'Synthetic'})), ('failed', 'forbidden', None))
         for status, raw in ((500, b'{"ok":false}'), (502, b'Bad Gateway'), (200, b'not json'), (200, b'[]')):
             self.assertEqual(outcome(status, raw), ('uncertain', 'server_error', None), (status, raw))
+
+    def test_a_leave_telegram_answers_gone_is_recorded_as_already_left_and_a_refusal_keeps_its_code(self):
+        # The leave route counts any 403, and a 400 naming the chat as gone, as done: so does the record.
+        gone = (refusal(403, 'Forbidden: bot is not a member of the supergroup chat'), refusal(403, 'Forbidden: bot was kicked from the group chat'),
+                refusal(403, 'Forbidden: the group chat was deleted'), refusal(400, 'Bad Request: chat not found'),
+                refusal(400, 'Bad Request: USER_NOT_PARTICIPANT'), refusal(400, 'Bad Request: CHANNEL_PRIVATE'), refusal(400, 'Bad Request: PEER_ID_INVALID'))
+        refused = ((refusal(400, 'Bad Request: not enough rights to leave'), 'no_permission'), (refusal(400, 'Synthetic refusal'), 'rejected'),
+                   (refusal(429, 'Too Many Requests: retry after 5'), 'rate_limited'), ((400, b'Bad Request'), 'rejected'))
+        self.assertTrue(all(already_left(*answer) for answer in gone))
+        self.assertFalse(any(already_left(*answer) for answer, _code in refused))
+        with tempfile.TemporaryDirectory() as folder:
+            sends, leave = Sends(Path(folder), '123456'), 'leave:' + 'a' * 64 + ':' + 'b' * 32
+            for answer in gone:
+                record = sends.answered('leaveChat', {'chat_id': -1001234567890}, leave, answer)
+                self.assertEqual((record['kind'], record['state'], record['status'], record['error_code']), ('leave', 'failed', answer[0], 'already_left'), answer)
+            for answer, code in refused:
+                self.assertEqual(sends.answered('leaveChat', {'chat_id': -1001234567890}, leave, answer)['error_code'], code, answer)
+            self.assertEqual(sends.answered('leaveChat', {'chat_id': -1001234567890}, leave, (200, b'{"ok":true,"result":true}'))['state'], 'sent')
+            self.assertEqual(sends.answered('leaveChat', {'chat_id': -1001234567890}, leave, (502, b'Bad Gateway'))['error_code'], 'server_error')
+            # Any other send keeps Telegram's own reason: a reply into a chat the bot was removed from is a problem.
+            reply = sends.answered('sendMessage', {'chat_id': -1001234567890, 'text': 'synthetic'}, 'telegram:1:update:2', gone[0])
+            self.assertEqual((reply['kind'], reply['error_code']), ('reply', 'bot_removed'))
 
     def test_exceptions_and_holds_become_codes(self):
         self.assertEqual([exception_code(e) for e in (TimedOut(), TimeoutError(), NetworkError('x'), OSError('x'), RuntimeError('x'))],

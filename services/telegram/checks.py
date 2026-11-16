@@ -241,3 +241,14 @@ def check_action_policy(body):
             headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
         with urllib.request.urlopen(request,timeout=10) as response:return json.loads(response.read(1024)).get('valid') is True
     except Exception:return False
+
+
+def check_leave_policy(body):
+    """The app's last word on a leave (ADR-0253): True while the group whose Telegram id is `chat_id` is still pending
+    from the add `id`, False once the owner turned it on or off or it was added again, None when the app cannot answer."""
+    try:
+        request=urllib.request.Request(archive_url()+'/internal/chats/leave',data=canonical({'id':body['id'],'chat_id':body['chat_id']}),
+            headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
+        with urllib.request.urlopen(request,timeout=10) as response:valid=json.loads(response.read(1024)).get('valid')
+    except Exception:return None
+    return valid if isinstance(valid,bool) else None

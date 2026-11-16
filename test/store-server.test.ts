@@ -234,6 +234,10 @@ test('separated application captures through control outages, exposes owner repo
     await connected.control.query("UPDATE telegram_action_requests SET state='running' WHERE id=$1",[proposal.id]);
     assert.equal((await request('/internal/actions/authorize',{id:proposal.id,destination:'123',chat_id:'123',text:'Synthetic approval preview'})).valid,true);
     await request('/internal/actions/authorize',{id:proposal.id,destination:'123',chat_id:'123',text:'different message'},403);
+    // The bot's last check before Nocheh leaves a group, behind the service token (store-chat-adds tests the rule).
+    await request('/internal/chats/leave',{id:'a'.repeat(64),chat_id:'-1009999999999'},401,credential);
+    assert.deepEqual(await request('/internal/chats/leave',{id:'a'.repeat(64),chat_id:'-1009999999999'}),{valid:false});
+    await request('/internal/chats/leave',{id:'a'.repeat(64)},400);
     assert.equal((await request('/v1/exports/sources?limit=1')).format,'nocheh-sources-v1');
     assert.ok(Array.isArray((await request('/v1/workflows?limit=1')).workflows));
     assert.ok(Array.isArray((await request('/v1/workflows/health')).workers));

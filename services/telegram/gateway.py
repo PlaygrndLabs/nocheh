@@ -20,8 +20,9 @@ from time import perf_counter
 from services.durable import canonical, digest, immutable_file
 from . import settings
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK
-from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, delivery_failure,
-                     leave_check, no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
+from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, check_leave_policy,
+                     delivery_failure, leave_check, no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
+from .sends import GONE
 
 # Telegram shows "typing…" for about five seconds per chat action, so presence renews it a little sooner.
 TYPING_INTERVAL = 4.0
@@ -33,8 +34,6 @@ HEX = re.compile(r'[a-f0-9]{64}')
 CHAT = re.compile(r'-?[1-9]\d{0,18}')
 MESSAGE = re.compile(r'[1-9]\d{0,15}')
 ERROR_NAME = re.compile(r'[A-Za-z_]{1,64}')
-# Telegram's answers to a leave that mean Nocheh is not in the chat any more, so there is nothing left to leave.
-GONE = ('chat not found', 'not a member', 'user_not_participant', 'channel_private', 'peer_id_invalid', 'was kicked', 'deactivated', 'was deleted')
 
 
 def topic_of(value):
@@ -598,16 +597,21 @@ class TelegramService:
     async def leave_chat(self, body):
         """Nocheh leaves a group, supergroup or channel that someone other than the owner added it to (ADR-0253), when
         storage asks. Never the owner's chat or a chat that is served now: the app's served list decides, read again when
-        it says the chat is not served, and one that cannot be read leaves nothing. At most once by its id: Telegram's
+        it says the chat is not served and once more right before Telegram is asked, and one that cannot be read leaves
+        nothing. Then only while the app says the group is still pending from this add. At most once by its id: Telegram's
         answer is kept, and a chat Nocheh is not in any more counts as left. Leaving twice changes nothing, so a leave whose
         answer never came keeps no receipt and is tried again with its own journal entry, rather than left ambiguous."""
         chat=str(body.get('chat_id') or '')
         # A group, supergroup or channel: Telegram gives each a negative id, and a person a positive one.
         if not HEX.fullmatch(str(body.get('id',''))) or not CHAT.fullmatch(chat) or int(chat)>=0:raise ValueError('invalid_leave')
-        served=await asyncio.to_thread(self.policy.current,None,5.0,lambda served:served.served(served.resolve(chat)))
-        if not served.available:return {'state':'not_started','error_code':'served_list_unavailable'}
-        found=served.resolve(chat)
-        if served.is_owner(found) or served.served(found):raise ValueError('leave_chat_not_allowed')
+        async def unserved():
+            """None when the chat may be left; refuses the owner's chat and a served one, and answers not_started when the
+            list cannot be read."""
+            served=await asyncio.to_thread(self.policy.current,None,5.0,lambda served:served.served(served.resolve(chat)))
+            if not served.available:return {'state':'not_started','error_code':'served_list_unavailable'}
+            found=served.resolve(chat)
+            if served.is_owner(found) or served.served(found):raise ValueError('leave_chat_not_allowed')
+        if refused:=await unserved():return refused
         if not self.connected():return {'state':'not_started','error_code':'telegram_not_connected'}
         name='leave-'+body['id']
         from telegram.error import BadRequest, ChatMigrated, Forbidden
@@ -617,6 +621,12 @@ class TelegramService:
                 saved=json.loads(receipt.read_bytes())
                 if saved.get('chat_id')!=chat:raise ValueError('invalid_leave')
                 return {key:value for key,value in saved.items() if key!='chat_id'}
+            # The owner may have turned the chat on or off, or someone added Nocheh again, while this leave waited behind
+            # other sends: the list decides again, then the app says whether the group is still pending from this add, just
+            # before the request goes. Neither keeps a receipt, so the stage asks again later and finds out why.
+            if refused:=await unserved():return refused
+            stands=await asyncio.to_thread(check_leave_policy,{'id':body['id'],'chat_id':chat})
+            if stands is not True:return {'state':'not_started','error_code':'leave_superseded' if stands is False else 'leave_check_unavailable'}
             token=DISPATCH_KEY.set('leave:'+body['id']+':'+uuid.uuid4().hex)
             check=OUTBOUND_CHECK.set(leave_check(chat))
             try:
