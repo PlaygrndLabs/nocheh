@@ -47,6 +47,11 @@ VM_SERVICE, VM_NAME, VM_LOGIN, VM_HOME = 'vm-fixture', 'build-vm', 'nocheh', '/h
 VM_IMAGE = 'nocheh-tester-vm:local'
 
 
+def shown(text):
+    """A message's text as a person sees it: without the invisible direction isolates around names."""
+    return re.sub('[\u2066-\u2069]', '', text or '')
+
+
 class ProductScenarios(Scenarios):
     # Helpers --------------------------------------------------------------------
 
@@ -1330,8 +1335,9 @@ class ProductScenarios(Scenarios):
                       and 'Move to '+group['title'] not in [button['text'] for button in buttons],
                       rows=[[button['text'] for button in row] for row in rows])
             reply, edited = self.answer_card(card, answer)
-            self.gate('press_answered_with_its_outcome', outcomes[answer] in (reply.get('text') or ''), answer=reply.get('text'))
-            self.gate('card_shows_the_outcome', edited['message']['text'].startswith(text) and outcomes[answer] in edited['message']['text'],
+            # Names arrive wrapped in direction isolates; the check reads the text as a person sees it.
+            self.gate('press_answered_with_its_outcome', outcomes[answer] in shown(reply.get('text')), answer=reply.get('text'))
+            self.gate('card_shows_the_outcome', edited['message']['text'].startswith(text) and outcomes[answer] in shown(edited['message']['text']),
                       card=edited['message']['text'][-300:])
             if answer == 'turn_off':
                 self.wait('turned_off', lambda chat=chat: self.state_of(chat) == 'off', 60)
