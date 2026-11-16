@@ -2,9 +2,17 @@
 import {useState} from 'react';
 import {useFeedback} from '../../ui/overlay';
 import {Card, CardBody, CardHeader, Notice, Switch} from '../../ui/core';
-import {chatName, currentAppId, type Chat} from '../../lib/chats-model';
+import {
+  chatName,
+  chatStateLabels,
+  chatStateText,
+  currentAppId,
+  isOn,
+  switchable,
+  type Chat,
+} from '../../lib/chats-model';
 import {JoinNotes, JoinProjectDialog, useJoinQuestion} from './project';
-import {chatHref, telegramSettingsHref, Unsaved, useChatNames, type Telegram} from './shared';
+import {ActionError, chatHref, telegramSettingsHref, useAction, useChatNames, type Telegram} from './shared';
 
 function telegramProblem(chat: Chat): string | null {
   const state = chat.telegram?.state;
@@ -52,7 +60,7 @@ export function NochehHere({chat, parent, telegram}: {chat: Chat; parent: Chat |
 
   if (chat.kind === 'topic') {
     const group = chat.parent_space ?? '';
-    const on = telegram.isOn(parent ?? chat);
+    const on = isOn(parent ?? chat);
     return (
       <Card>
         <CardHeader title="Nocheh here" />
@@ -75,14 +83,19 @@ export function NochehHere({chat, parent, telegram}: {chat: Chat; parent: Chat |
 }
 
 /**
- * A group's switch. Turning Nocheh on in a group with no project answer first asks which project it joins, or none;
- * in a group already in a project, it first names that project's other groups and its task list.
+ * A group's switch, which turns Nocheh on or off there at once (ADR-0253). Turning it on in a group with no project
+ * answer first asks which project it joins: one of yours, a new one named after the group, or none; in a group already
+ * in a project, it first names that project's other groups and its task list. Turning it off asks first: Nocheh stays
+ * in the group, silent, and the people you allowed are kept. Only a group Nocheh is in has a switch; any other says
+ * where Nocheh stands.
  */
 function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string | null; telegram: Telegram}) {
   const {confirm} = useFeedback();
   const names = useChatNames();
+  const action = useAction();
   const group = chat.space_id;
-  const on = telegram.isOn(chat);
+  const name = chatName(chat);
+  const on = isOn(chat);
   const join = useJoinQuestion(group);
   const [asking, setAsking] = useState(false);
   const change = async (next: boolean) => {
@@ -94,63 +107,65 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
       next &&
       join.project &&
       !(await confirm({
-        title: `Turn Nocheh on in ${chatName(chat)}?`,
-        body: <JoinNotes space={group} name={chatName(chat)} project={join.project} names={names} />,
+        title: `Turn Nocheh on in ${name}?`,
+        body: <JoinNotes space={group} name={name} project={join.project} names={names} />,
         confirm: 'Turn on',
       }))
     )
       return;
-    const rule = telegram.rule(chat);
-    if (!next && (rule.granted.length || rule.denied.length)) {
-      const ok = await confirm({
-        title: 'Turn Nocheh off in this group?',
-        body: 'This also forgets who you allowed to talk to it here.',
+    if (
+      !next &&
+      !(await confirm({
+        title: `Turn Nocheh off in “${name}”?`,
+        body: 'It stays in the group, silent. People you allowed are kept.',
         confirm: 'Turn off',
         danger: true,
-      });
-      if (!ok) return;
-    }
-    telegram.setGroup(chat, next);
+      }))
+    )
+      return;
+    await action.run(
+      'state',
+      '/chats/state',
+      {chat_id: group, state: next ? 'active' : 'off'},
+      {success: next ? `Nocheh is on in ${name}.` : `Nocheh is off in ${name}.`},
+    );
   };
+  const title = on
+    ? 'On in this group'
+    : chat.state && chat.state !== 'off'
+      ? chatStateLabels[chat.state]
+      : 'Off in this group';
+  const canSwitch = switchable(chat);
   return (
     <Card>
       <CardHeader title="Nocheh here" />
       <CardBody className="space-y-3 pt-2">
-        {problem && <Notice tone="warn">{problem}</Notice>}
+        {problem && canSwitch && <Notice tone="warn">{problem}</Notice>}
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
+            {canSwitch ? (
               <label htmlFor="group-on" className="text-sm font-medium">
-                {on ? 'On in this group' : 'Off in this group'}
+                {title}
               </label>
-              <Unsaved show={telegram.onChanged(chat)} />
-            </div>
-            <p className="mt-0.5 text-[13px] text-muted">
-              {on ? 'You can always talk to it here.' : 'Turn on to let Nocheh answer here.'}
-            </p>
+            ) : (
+              <p className="text-sm font-medium">{title}</p>
+            )}
+            <p className="mt-0.5 text-[13px] text-muted">{chatStateText(chat)}</p>
           </div>
-          <Switch
-            id="group-on"
-            checked={on}
-            disabled={!telegram.loaded || telegram.busy || (!on && (!join.settled || !currentAppId(chat)))}
-            onChange={value => void change(value)}
-            label="Nocheh in this group"
-          />
+          {canSwitch && (
+            <Switch
+              id="group-on"
+              checked={on}
+              disabled={!!action.busy || (!on && (!join.settled || !currentAppId(chat)))}
+              onChange={value => void change(value)}
+              label="Nocheh in this group"
+            />
+          )}
         </div>
         {on && <ReplyMode telegram={telegram} />}
+        <ActionError text={action.error} />
       </CardBody>
-      {asking && (
-        <JoinProjectDialog
-          group={group}
-          name={chatName(chat)}
-          revision={join.revision}
-          open
-          onDone={answered => {
-            setAsking(false);
-            if (answered) telegram.setGroup(chat, true);
-          }}
-        />
-      )}
+      {asking && <JoinProjectDialog chat={chat} open onDone={() => setAsking(false)} />}
     </Card>
   );
 }

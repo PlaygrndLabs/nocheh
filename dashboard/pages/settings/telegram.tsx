@@ -11,7 +11,6 @@ export const telegramKeys = [
   'TELEGRAM_OWNER_ID',
   'TELEGRAM_GROUP_REPLIES',
   'TELEGRAM_BOT_NAMES',
-  'TELEGRAM_GROUP_IDS',
   'TELEGRAM_GROUP_ACCESS',
   'TELEGRAM_TOPIC_MEMORY',
   'TELEGRAM_TYPING',
@@ -48,11 +47,6 @@ export function TelegramSettings() {
   const findable = !!token?.configured && !s.changed('TELEGRAM_BOT_TOKEN');
   const tunnel = s.field('CLOUDFLARE_TUNNEL_TOKEN');
   const miniApp = s.value('NOCHEH_MINI_APP_URL');
-  const groups = s
-    .value('TELEGRAM_GROUP_IDS')
-    .split(',')
-    .map(id => id.trim())
-    .filter(Boolean);
   return (
     <>
       {!enabled && (
@@ -246,7 +240,8 @@ export function TelegramSettings() {
           title="In groups"
           description={
             <>
-              Which groups Nocheh is in and who may talk to it there are set in{' '}
+              Add Nocheh to a group yourself in Telegram, and it is on there at once. If someone else adds it, it
+              leaves. Turn it on or off in a group, and choose who may talk to it there, in{' '}
               <a className="font-medium text-accent-text hover:underline" href={href('chats')}>
                 Chats
               </a>
@@ -256,23 +251,6 @@ export function TelegramSettings() {
           className="pb-3"
         />
         <div className="border-t border-line">
-          <SettingRow
-            title={
-              <>
-                Groups Nocheh is on in
-                <Unsaved show={s.changed('TELEGRAM_GROUP_IDS')} />
-              </>
-            }
-            description={
-              groups.length
-                ? `On in ${groups.length} ${groups.length === 1 ? 'group' : 'groups'}.`
-                : 'No groups are selected. Your private messages with Nocheh still work.'
-            }
-          >
-            <div className="flex sm:justify-end">
-              <LinkButton href={href('chats')}>Choose in Chats</LinkButton>
-            </div>
-          </SettingRow>
           <SettingRow
             title={
               <>

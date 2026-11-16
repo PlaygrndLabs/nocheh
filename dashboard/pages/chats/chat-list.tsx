@@ -4,20 +4,22 @@ import {Hash, MessageCircle, RefreshCw, Search, Users} from 'lucide-react';
 import {apiPost} from '../../lib/api';
 import {refreshResources} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
-import {chatError, chatName, chatTree, shortIdLabel, type Chat} from '../../lib/chats-model';
+import {chatError, chatName, chatStateLabels, chatTree, isOn, shortIdLabel, type Chat} from '../../lib/chats-model';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, Empty, Input, LoadError, LoadingRows} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
-import {useChats, type Telegram} from './shared';
+import {useChats} from './shared';
 
-export function ChatList({selected, telegram}: {selected: string | null; telegram: Telegram}) {
+export function ChatList({selected}: {selected: string | null}) {
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query);
   const {directory, identities, items, more} = useChats(deferred);
   const [refreshing, setRefreshing] = useState(false);
   const {toast} = useFeedback();
 
-  const tree = chatTree(items, identities.data?.groups ?? [], telegram.isOn, deferred);
+  const tree = chatTree(items, identities.data?.groups ?? [], deferred);
+  // Telegram is asked about the groups Nocheh is on in.
+  const served = items.some(chat => chat.kind === 'group' && isOn(chat));
   const nothing = !tree.privates.length && !tree.groups.length;
 
   const refreshNames = async () => {
@@ -59,7 +61,7 @@ export function ChatList({selected, telegram}: {selected: string | null; telegra
           size="sm"
           className="w-full justify-start text-muted"
           busy={refreshing}
-          disabled={!telegram.savedGroupIds.length}
+          disabled={!served}
           title="Asks Telegram for the current group names. Nothing is sent to anyone."
           onClick={() => void refreshNames()}
         >
@@ -92,7 +94,7 @@ export function ChatList({selected, telegram}: {selected: string | null; telegra
                         chat={chat}
                         label={chatName(chat)}
                         selected={selected === chat.space_id}
-                        state={chat.owner ? 'on' : 'off'}
+                        state={chat.owner ? 'active' : 'off'}
                       />
                     ))
                   ) : (
@@ -108,8 +110,7 @@ export function ChatList({selected, telegram}: {selected: string | null; telegra
                             chat={group}
                             label={chatName(group)}
                             selected={selected === group.space_id}
-                            state={telegram.isOn(group) ? 'on' : 'off'}
-                            unsaved={telegram.onChanged(group)}
+                            state={group.state}
                           />
                           {topics.map(topic => (
                             <Row
@@ -166,14 +167,13 @@ function Row({
   selected,
   state,
   nested,
-  unsaved,
 }: {
   chat: Chat;
   label: string;
   selected: boolean;
-  state?: 'on' | 'off';
+  /** Where Nocheh stands: On is marked, any other state is named. */
+  state?: Chat['state'];
   nested?: boolean;
-  unsaved?: boolean;
 }) {
   const short = shortIdLabel(chat);
   return (
@@ -196,18 +196,13 @@ function Row({
           {label}
         </span>
         {short && <ShortId value={short} />}
-        {unsaved && (
-          <span className="size-1.5 shrink-0 rounded-full bg-warn" title="Not saved yet">
-            <span className="sr-only">Not saved yet</span>
-          </span>
-        )}
         {chat.closed && <span className="shrink-0 text-xs text-muted">Closed</span>}
-        {state === 'on' && (
+        {state === 'active' && (
           <Badge tone="good" className="shrink-0">
-            On
+            {chatStateLabels.active}
           </Badge>
         )}
-        {state === 'off' && <span className="shrink-0 text-xs text-muted">Off</span>}
+        {state && state !== 'active' && <span className="shrink-0 text-xs text-muted">{chatStateLabels[state]}</span>}
       </a>
     </li>
   );
