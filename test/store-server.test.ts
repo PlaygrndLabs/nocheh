@@ -32,9 +32,10 @@ test('separated application captures through control outages, exposes owner repo
   const policy={enabled:true,owner_id:'123',group_ids:['-42']};let nativeCalls=0;
   // A group with a known name for the recall labels, its own on every run so nothing else names it.
   const named='-'+Date.now()+'7',where=(space:unknown,owner=false,answer=false,group?:string)=>({space,owner,answer,...(group?{answer_group:group}:{})});
-  const recalled=[{profile:'p-owner',...where('123',true),kind:'native_note',file:'MEMORY.md',text:'Juniper owner note',citations:[]},
+  const recalled=[{profile:'p-owner',...where('123',true),kind:'native_note',file:'MEMORY.md',text:'Juniper owner note',citations:[],
+      note:{key:'d'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}},
     {profile:'p-group',...where(named),kind:'native_note',file:'MEMORY.md',text:'Juniper group note',citations:[]},
-    {profile:'p-topic',...where(named+'/topic/9'),kind:'native_session',session:'s1',text:'Juniper topic talk'},
+    {profile:'p-topic',...where(named+'/topic/9'),kind:'native_session',session:'s1',text:'Juniper topic talk',role:'assistant'},
     {profile:'p-answer',...where('123',false,true,'“Synthetic Forum”'),kind:'native_session',session:'s2',text:'Juniper answer'},
     {profile:'p-answer-old',...where('123',false,true),kind:'native_session',session:'s3',text:'Juniper older answer'},
     {profile:'p-unknown',...where(null),kind:'native_note',file:'USER.md',text:'Juniper unknown',citations:[]}];
@@ -45,6 +46,8 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','reply.private':'Private answer','memory.limited':'Limited',
       'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images'}};
     if(operation.startsWith('persona.')||operation==='config.read')return {operation,input};
+    if(operation==='memory.read')return {scope:input.scope,profile:'p-owner',memories:[{name:'MEMORY.md',text:'Juniper',
+      entries:[{target:'memory',text:'Juniper',key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}]}],sessions:[]};
     if(operation==='memory.recall'){nativeCalls++;assert.equal(input.generation,(await services.guards.state()).generation);assert.equal(input.guard_epoch,(await services.guards.state()).epoch);return {hits:recalled,truncated:false,next_profile:null};}
     throw Error('unexpected external operation');
   };
@@ -87,6 +90,13 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/brain/manage',{action:'persona',scope:'default'})).operation,'persona.read');
     assert.equal((await request('/v1/brain/manage',{action:'preferences',scope:'default'})).operation,'config.read');
     await request('/v1/brain/manage',{action:'unknown'},400);
+    // The Notes page reads each note's source in the owner's words; what Hermes recorded stays behind (ADR-0257).
+    assert.deepEqual((await request('/v1/brain/manage',{action:'memory',scope:'123'})).memories[0].entries,[{target:'memory',text:'Juniper',from:'unknown',label:'Source not recorded'}]);
+    // Hermes's lookup takes the service token only, and a body not as Hermes writes it is refused.
+    const lookup={notes:[{key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}],space:'123'};
+    assert.deepEqual(await request('/internal/notes/sources',lookup),{labels:{['e'.repeat(64)]:{from:'unknown',label:'source not recorded'}}});
+    await request('/internal/notes/sources',lookup,401,scopeToken(token,'123',Date.now()+60000));
+    await request('/internal/notes/sources',{notes:[{key:'e'.repeat(64),origins:[{by:'owner'}]}]},400);
     const prompts=await request('/v1/prompts');
     assert.equal(prompts.defaults['reply.owner'],'Owner');assert.match(prompts.defaults['learning.interpret'],/\{trigger_id\}/);assert.deepEqual(prompts.texts,{});
     const saved=await request('/v1/prompts',{texts:{'reply.owner':' Answer in Persian. '},revision:prompts.revision});
@@ -204,6 +214,10 @@ test('separated application captures through control outages, exposes owner repo
     assert.ok(!JSON.stringify(recall).includes(named));
     assert.ok(recall.hits.every((hit:any)=>['space','owner','answer','answer_group'].every(key=>!(key in hit))));
     assert.equal(recall.hits[1].text,'Juniper group note');
+    // Each note says where it came from and each past conversation's row who wrote it, in fixed words (ADR-0257).
+    assert.deepEqual(recall.hits.map((hit:any)=>hit.source??hit.role),[{from:'unknown',label:'source not recorded'},{from:'unknown',label:'source not recorded'},
+      'Nocheh\'s reply','a message','a message',{from:'unknown',label:'source not recorded'}]);
+    assert.ok(recall.hits.every((hit:any)=>!('note' in hit)));
     await connected.control.query('DELETE FROM telegram_chat_observations WHERE chat_id=$1',[named]);
     const proposal=await request('/v1/action-requests',{destination:'current',text:'Synthetic approval preview'},200,credential);
     const tool=await request('/v1/tools/propose',{kind:'shell',arguments:{command:'pwd'}},200,credential);

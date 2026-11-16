@@ -37,6 +37,23 @@ def export_database(database,destination,locked):
             copy_with_sqlite(snapshot.as_uri()+'?mode=ro&immutable=1')
 
 
+SIDECAR='nocheh-note-sources.json'
+
+
+def sidecar_ok(path,root=None):
+    """Whether a profile's note source records are well formed (services/hermes/note_sources.py); one that is not
+    is counted as a failed restore."""
+    from services.hermes.note_sources import checked
+    try:ok=checked(json.loads(Path(path).read_text(encoding='utf-8'))) is not None
+    except (OSError,ValueError):ok=False
+    if not ok:
+        try:
+            from services.hermes.usage import note_failed
+            note_failed('restore',path=Path(root)/'usage/usage.sqlite' if root is not None else None)
+        except Exception:pass
+    return ok
+
+
 def export_native(root,directory):
     from services.hermes.native_memory import registered_profiles
     from services.hermes.isolated_profile import database_path
@@ -51,10 +68,13 @@ def export_native(root,directory):
         lock=lock_path.open('rb') if lock_path.exists() else None
         try:
             if lock:fcntl.flock(lock,fcntl.LOCK_SH)
-            for name in ('memories/MEMORY.md','memories/USER.md','space.json','nocheh-owner-profile.json','cron/jobs.json'):
+            for name in ('memories/MEMORY.md','memories/USER.md','space.json','nocheh-owner-profile.json','cron/jobs.json',SIDECAR):
                 source=profile/name
                 if source.is_symlink() or not source.resolve().is_relative_to(profile.resolve()):raise ValueError('native_export_path_denied')
                 if not source.is_file():continue
+                # Who wrote each note travels with the notes; a record file that is not one is left behind and counted,
+                # so its notes read as not recorded, never as anyone's (ADR-0257).
+                if name==SIDECAR and not sidecar_ok(source,root):continue
                 target=destination/name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
                 shutil.copyfile(source,target);target.chmod(0o600)
                 if name.startswith('memories/'):item['notes'].append(name)
@@ -148,7 +168,7 @@ def _validate_package(directory,manifest):
         notes=item.get('notes')
         if not isinstance(notes,list) or len(set(notes))!=len(notes) or any(note not in ('memories/MEMORY.md','memories/USER.md') for note in notes):raise ValueError('portable_notes_invalid')
         allowed.update('native/'+name+'/'+note for note in notes)
-        for marker in ('space.json','nocheh-owner-profile.json','cron/jobs.json'):
+        for marker in ('space.json','nocheh-owner-profile.json','cron/jobs.json',SIDECAR):
             if 'native/'+name+'/'+marker in files:allowed.add('native/'+name+'/'+marker)
         if item['sessions']:
             path=directory/'native'/name/'state.db';allowed.add('native/'+name+'/state.db')
@@ -216,6 +236,8 @@ def import_all(directory,native_output,api=None,*,restore_guarded=False):
     # only against the same bundle, and never replaces a conflicting local file.
     for name,item in manifest['files'].items():
         if not name.startswith(('native/','honcho/')):continue
+        # A note source record file that is not one is not restored; its notes read as not recorded.
+        if name.startswith('native/') and name.endswith('/'+SIDECAR) and not sidecar_ok(directory/name):continue
         destination=target/name
         if any(parent.is_symlink() for parent in destination.parents if parent!=target.parent):raise ValueError('portable_path_denied')
         destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)

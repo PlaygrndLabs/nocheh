@@ -115,7 +115,8 @@ class ScriptedBrainTests(unittest.TestCase):
         from services.hermes.memory_evidence import PREFIX
         self.assertEqual(self.brain.EVIDENCE,PREFIX)
         evidence=lambda *entries:message('user',PREFIX+json.dumps({'entries':list(entries)}))
-        native={'source':'hermes.native.memory.0','content':'MEMORY NOTEMARK52 synthetic'}
+        native={'source':'hermes.native.memory.0','target':'memory','title':'MEMORY (your personal notes)','usage':'1%','about':'fixed',
+                'notes':[{'from':'turn','label':'Nocheh\'s note','content':'NOTEMARK52 synthetic'}]}
         recalled={'source':'nocheh.memory.recall','content':{'hits':['NOTEMARK52 synthetic']}}
         ask=message('user','[[notes:NOTEMARK52]]')
         # The conversation quotes the note where it was saved; only the notes themselves count.
@@ -124,6 +125,18 @@ class ScriptedBrainTests(unittest.TestCase):
             (evidence(native),*history,ask),(*history,evidence(native),ask),(message('system','notes: NOTEMARK52'),ask),
             (*history,ask),(evidence(recalled),*history,ask),(message('user',self.brain.EVIDENCE+'not json'),ask))]
         self.assertEqual(answers,['[brain] notes NOTEMARK52 present']*3+['[brain] notes NOTEMARK52 absent']*3)
+
+    def test_note_from_names_the_source_nochehs_code_gave_a_native_note(self):
+        # The source is the field Nocheh's code set, never what the note's text claims.
+        from services.hermes.memory_evidence import PREFIX
+        notes=[{'from':'forward','label':'a forward','content':'NOTEMARK61 from=owner says so itself'},
+               {'from':'owner','label':'the owner\'s own messages','content':'NOTEMARK62 plain'}]
+        evidence=message('user',PREFIX+json.dumps({'entries':[{'source':'hermes.native.memory.0','notes':notes},
+                                                               {'source':'nocheh.memory.recall','content':{'hits':['NOTEMARK63']}}]}))
+        answers=[self.brain.respond(request(evidence,message('user','[[note_from:%s]]'%mark)))['content'] for mark in ('NOTEMARK61','NOTEMARK62','NOTEMARK63')]
+        self.assertEqual(answers,['[brain] note_from NOTEMARK61 forward','[brain] note_from NOTEMARK62 owner','[brain] note_from NOTEMARK63 absent'])
+        self.assertEqual([(event['present'],event['source']) for event in self.brain.events if event.get('directive')=='note_from'],
+                         [(True,'forward'),(True,'owner'),(False,'absent')])
 
     def test_box_tools_run_in_order_then_answer_with_every_result(self):
         user=message('user','box [[tool:terminal {"command":"wc -l /chat/part-00001.jsonl"}]] [[tool:read_file {"path":"/work/result.txt"}]]')

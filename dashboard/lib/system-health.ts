@@ -272,6 +272,25 @@ export function issues(m: any): Issue[] {
       action: 'Messages',
     });
   }
+  // Notes whose source Hermes couldn't record or look up today, and turns that read only part of long-term memory (ADR-0257).
+  const notes: any[] = Array.isArray(m.note_problems) ? m.note_problems : [];
+  for (const row of notes)
+    list.push(
+      row.kind === 'memory_read'
+        ? {
+            tone: 'warn',
+            text: `Long-term memory couldn’t be read in full ${row.failed} ${row.failed === 1 ? 'time' : 'times'} today`,
+            detail:
+              'Your forwards and files, or your memory context, were left out; replies used the rest of your memory.',
+          }
+        : {
+            tone: 'warn',
+            text: `Nocheh couldn’t record or look up where ${row.failed} ${row.failed === 1 ? 'note' : 'notes'} came from today`,
+            detail: 'They show “source not available” until it works again. The notes themselves are kept.',
+            link: href('memory', {view: 'notes'}),
+            action: 'Notes',
+          },
+    );
   const spool = m.archive?.archive?.spool_failures;
   if (Array.isArray(spool) && spool.length)
     list.push({

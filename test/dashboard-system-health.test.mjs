@@ -67,6 +67,29 @@ test('files a locked-down reader could not read say why and how to read them aga
   ]);
 });
 
+test('notes whose source could not be recorded and memory read in part are counted today', () => {
+  const found = issues({
+    note_problems: [
+      {day: '2026-11-14', kind: 'notes', failed: 3, ok: 9},
+      {day: '2026-11-14', kind: 'memory_read', failed: 1, ok: 4},
+    ],
+  });
+  assert.deepEqual(found, [
+    {
+      tone: 'warn',
+      text: 'Nocheh couldn’t record or look up where 3 notes came from today',
+      detail: 'They show “source not available” until it works again. The notes themselves are kept.',
+      link: '#memory?view=notes',
+      action: 'Notes',
+    },
+    {
+      tone: 'warn',
+      text: 'Long-term memory couldn’t be read in full 1 time today',
+      detail: 'Your forwards and files, or your memory context, were left out; replies used the rest of your memory.',
+    },
+  ]);
+});
+
 test('failed sends to chat apps need a look and open the Problems list', () => {
   const one = issues(
     monitoring(

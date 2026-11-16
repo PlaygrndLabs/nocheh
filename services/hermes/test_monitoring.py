@@ -56,6 +56,41 @@ class MonitoringTests(unittest.TestCase):
                          'Images: 1 image couldn’t be read today because Hermes’s locked-down container refused a file write. '
                          'The originals are kept: Make a new version on a message’s page reads one again.')
 
+    def test_notes_whose_source_was_not_recorded_and_memory_read_in_part_reach_the_notice(self):
+        # ADR-0257: every failed step of telling where notes came from is one count, and each kind is one line.
+        import sqlite3
+        from datetime import datetime, timezone
+        from services.hermes import usage
+        from tools.operations.provider import problems
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as state:
+            self.assertEqual(monitoring.note_problems(state, now), [], 'no tracker yet is nothing counted')
+            path = Path(state) / 'hermes/usage/usage.sqlite'
+            path.parent.mkdir(parents=True)
+            old = sqlite3.connect(str(path))
+            old.execute(usage.SCHEMA)
+            old.close()
+            self.assertEqual(monitoring.note_problems(state, now), [], 'a tracker from before notes were counted')
+            for kind in ('lookup', 'lookup', 'record', 'restore'):
+                usage.note_failed(kind, path=path, now=now.timestamp())
+            usage.note_done('lookup', path=path, now=now.timestamp())
+            usage.note_failed('memory_read', path=path, now=now.timestamp())
+            usage.note_done('memory_read', path=path, now=now.timestamp())
+            usage.note_done('memory_read', path=path, now=now.timestamp())
+            usage.note_failed('read', path=path, now=now.timestamp() - 86400)
+            usage.note_failed('elsewhere', path=path, now=now.timestamp())
+            rows = monitoring.note_problems(state, now)
+        self.assertEqual(rows, [{'day': '2026-10-13', 'kind': 'notes', 'failed': 4, 'ok': 1},
+                                {'day': '2026-10-13', 'kind': 'memory_read', 'failed': 1, 'ok': 2}])
+        found = problems.problems({'note_problems': rows}, [], '2026-10-13')
+        self.assertEqual([(problem['kind'], problem['count'], problem['ok']) for problem in found], [('notes', 4, 1), ('memory_read', 1, 2)])
+        self.assertEqual(problems.text(found[0], 1),
+                         'Memory labels: Nocheh couldn’t record or look up where 4 notes came from today, so they show “source not available”.')
+        self.assertEqual(problems.text(found[1], 1),
+                         'Long-term memory: Nocheh couldn’t read memory from your forwards and files, or your memory context, 1 time today; '
+                         'replies used the rest of your memory.')
+        self.assertIn('notes', problems.readable({'note_problems': rows}))
+
     def test_github_flags_come_from_the_app_file_without_its_key(self):
         from tools.operations.connections import secret_file
         pem='-----BEGIN RSA PRIVATE KEY-----\nMONITOR'+'x'*40+'\n-----END RSA PRIVATE KEY-----\n'

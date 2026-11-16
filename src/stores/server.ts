@@ -72,6 +72,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(!Array.isArray(ids)||ids.length>500||ids.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(400,'invalid_event_ids');
       return json(res,200,await s.retirements.historyRetirements(ids as string[]));
     }
+    if(req.method==='POST'&&path==='/internal/notes/sources') {
+      // Hermes asks where its notes came from before each turn and review (ADR-0257). The labels name groups only as
+      // Nocheh saved them and are never let through beforehand, so the request guard still reads them.
+      authorize(req,config.token);
+      return json(res,200,await s.noteSources.lookup(await readJson(req,256*1024)));
+    }
     if(req.method==='POST'&&path==='/internal/memory/prepare') {
       if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
       await assertGuardConfiguration(s.guards,config.guardMode);
@@ -223,7 +229,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const operation=({profiles:'listProfiles',memory:'readNotes',preferences:writes?'writeSettings':'readSettings',
         persona:writes?'writePersona':'readPersona'} as Record<string,BrainOperation>)[string(action,20)];
       if(!operation)throw new HttpError(400,'unknown_management_action');
-      return json(res,200,await brainOperation(s.brain,operation)(input));
+      // Each note says where it came from in the owner's words; what Hermes recorded about it stays behind.
+      const value=await brainOperation(s.brain,operation)(input);
+      return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value):value);
     }
     if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
@@ -424,8 +432,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
       const input=object(await readJson(req)),binding=await s.guards.state();
       if(!principal.admin)await s.turns.binding(principal);
-      // Each hit says in words which chat it came from, never by its raw ID (ADR-0251).
-      return result(await withRecallPlaces(s.stores,await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation})));
+      // Each hit says in words which chat it came from, never by its raw ID (ADR-0251), and each note where it came from (ADR-0257).
+      const found=await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation});
+      return result(await withRecallPlaces(s.stores,await s.noteSources.withRecallSources(found)));
     }
     if(path==='/v1/memory/reviews'&&req.method==='GET'){admin(principal);return json(res,200,await s.reviews.list(principal,url.searchParams.get('after')??''));}
     if(path==='/v1/memory/reviews/control'&&req.method==='POST') {

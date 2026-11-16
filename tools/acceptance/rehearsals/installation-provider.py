@@ -28,7 +28,7 @@ class ScriptedBrain:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes)(?::([^\]]*))?\]\]')
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes|note_from)(?::([^\]]*))?\]\]')
     # Any Nocheh tool (Hermes names Nocheh's MCP tools mcp__nocheh__<tool>), Hermes's own memory or to-do tool, or a
     # Hermes tool of a job's sealed box, with exact JSON arguments: [[tool:mcp__nocheh__tasks {"action":"list"}]],
     # [[tool:memory {"action":"add",...}]]. Several in one turn are called one after another.
@@ -84,23 +84,29 @@ class ScriptedBrain:
         inner = value['result']
         return (inner if isinstance(inner, str) else json.dumps(inner, ensure_ascii=False)) + text[end:]
 
-    def notes(self, body):
-        """The native notes the model sees: the system prompt, and the native entries of the
-        memory evidence. Never the conversation, which also quotes a note when it was saved."""
+    def evidence_notes(self, body):
+        """The native notes of the memory evidence, each with the source Nocheh's code labelled it with (from, label)
+        and its text (content)."""
         found = []
         for message in body.messages:
             text = self.text(message.content)
-            if message.role == 'system':
-                found.append(text)
-            elif text.startswith(self.EVIDENCE):
-                try:
-                    entries, _ = json.JSONDecoder().raw_decode(text[len(self.EVIDENCE):])
-                    entries = entries['entries']
-                except (ValueError, KeyError, TypeError):
-                    continue
-                found += [json.dumps(entry.get('content'), ensure_ascii=False) for entry in entries
-                          if isinstance(entry, dict) and str(entry.get('source', '')).startswith('hermes.native.memory.')]
+            if message.role == 'system' or not text.startswith(self.EVIDENCE):
+                continue
+            try:
+                entries, _ = json.JSONDecoder().raw_decode(text[len(self.EVIDENCE):])
+                entries = entries['entries']
+            except (ValueError, KeyError, TypeError):
+                continue
+            for entry in entries if isinstance(entries, list) else []:
+                if isinstance(entry, dict) and str(entry.get('source', '')).startswith('hermes.native.memory.') and isinstance(entry.get('notes'), list):
+                    found += [note for note in entry['notes'] if isinstance(note, dict)]
         return found
+
+    def notes(self, body):
+        """The native notes the model sees: the system prompt, and the native notes of the
+        memory evidence. Never the conversation, which also quotes a note when it was saved."""
+        return ([self.text(message.content) for message in body.messages if message.role == 'system']
+                + [json.dumps(note.get('content'), ensure_ascii=False) for note in self.evidence_notes(body)])
 
     def record(self, **event):
         self.events = (self.events + [event])[-500:]
@@ -225,6 +231,12 @@ class ScriptedBrain:
             present = bool(argument) and any(argument in note for note in self.notes(body))
             self.record(directive=kind, argument=argument, phase='final', present=present)
             return {'content': '[brain] notes ' + argument + (' present' if present else ' absent')}
+        if kind == 'note_from':
+            # The source a native note with the marker carries, as Nocheh's code labelled it: owner, person, turn...
+            found = next((note for note in self.evidence_notes(body) if argument and argument in str(note.get('content'))), None)
+            source = str(found.get('from')) if found else 'absent'
+            self.record(directive=kind, argument=argument, phase='final', present=found is not None, source=source)
+            return {'content': '[brain] note_from ' + argument + ' ' + source}
         if kind == 'context':
             earlier = '\n'.join(self.text(message.content) for message in body.messages
                                 if message is not messages[index])

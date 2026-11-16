@@ -358,10 +358,13 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     const sara=await say(2,789,'SARAMARK the party moved to Saturday');
     const saraEdit=await capture({edited_message:{...message(2,789,'SARAMARK the party moved to Sunday'),edit_date:1700000050}});
     const saraReaction=await react(1,789);
+    const keptBefore=(await services.reviews.list(owner)).kept_out;
     for(const source of [sara,saraEdit,saraReaction]) {
       assert.deepEqual(await services.reviews.queue(source),[],'nothing of hers is reviewed into the owner\'s notes');
       assert.deepEqual(await jobs(source),[]);assert.equal(await skipped(source),'sender_not_allowed');
     }
+    // The Notes page counts them this installation generation.
+    assert.equal((await services.reviews.list(owner)).kept_out,keptBefore+3);
     // The owner's messages, edits and reactions, Bob's message and Nocheh's own reply are reviewed.
     const alice=await say(3,123,'Alice: bring the cake');
     const aliceEdit=await capture({edited_message:{...message(3,123,'Alice: bring the big cake'),edit_date:1700000060}});

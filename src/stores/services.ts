@@ -60,6 +60,7 @@ import {SourceRetirementRepository} from './source-retirement.js';
 import {ReactionStateRepository} from './reaction-state.js';
 import {KnowledgeManagementRepository} from './knowledge-management.js';
 import {OwnerSupervisionRepository} from './owner-supervision.js';
+import {NoteSourceRepository} from './note-sources.js';
 import {BackgroundJobRepository} from './background-jobs.js';
 import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
@@ -157,6 +158,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
   jobs.stopped=async id=>{await controlledActions.stopJob(id);};
   controlledExecution.settled=id=>actionCommands.settle('controlled',id).then(()=>{},()=>{});
+  // One reader of where notes came from, for reviews, Hermes's lookups, the Notes page and recall.
+  const noteSources=new NoteSourceRepository(stores,options.policy,access);
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,chats,memoryAccess});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
@@ -175,7 +178,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>ownerChat(options.policy())}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,
-    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??''),
+    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??'',noteSources),noteSources,
     shared,
     detectorVersion:options.detectorVersion,detect};
 }

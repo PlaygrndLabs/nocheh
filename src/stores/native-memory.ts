@@ -801,7 +801,10 @@ export class NativeMemoryRepository {
       await this.prepared.allow(principal,{text:read.text});
       return {sources:[{source:'nocheh:memory:'+(read.session??workspace.id),kind:'memory_inference',text:read.text,exact_citations:false,
         limitations:['representation_has_no_exact_citations']}],limited_memory:false,syncing};
-    } catch(error){await this.prepared.audience.assert(principal);return limited;}
+    } catch(error) {
+      // A failed read says so, so the turn's parent counts it for the owner's notice (ADR-0257); the turn still runs.
+      await this.prepared.audience.assert(principal);return {...limited,error:'memory_context_failed'};
+    }
   }
   private async relevantOwnerCorrections(principal:Reader,query:string,binding:GuardBinding) {
     const space=principal.space??principal.scope;

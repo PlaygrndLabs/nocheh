@@ -87,6 +87,27 @@ class PortableBundleTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'destination_conflict'):import_all(root/'package',root/'inactive',api)
             self.assertEqual((root/'inactive/native'/profile/'memories/USER.md').read_text(),'Owner correction')
 
+    def test_who_wrote_each_note_travels_with_the_notes_and_a_bad_record_file_is_left_behind(self):
+        # ADR-0257: the parent-written record file goes and comes back with its profile; one that is not well formed is
+        # neither exported nor restored, so its notes read as not recorded, and each time is counted.
+        from services.hermes import note_sources
+        records={note_sources.key('user','Native notes'):{'origins':[{'by':'review','review':'b'*64}],'more':0,'at':'2026-11-08'}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);home=root/'state/hermes/profiles'/('nocheh-'+'a'*24);home.mkdir(parents=True)
+            note_sources.save(home,records);(root/'state/hermes/usage').mkdir()
+            api,manifest=self.prepare(root);profile=manifest['native_profiles'][0]['profile']
+            self.assertIn('native/'+profile+'/'+note_sources.SIDECAR,manifest['files'])
+            import_all(root/'package',root/'inactive',api)
+            self.assertEqual(note_sources.load(root/'inactive/native'/profile),records)
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);home=root/'state/hermes/profiles'/('nocheh-'+'a'*24);home.mkdir(parents=True)
+            (home/note_sources.SIDECAR).write_text('{"version":1,"entries":"forged"}');(root/'state/hermes/usage').mkdir()
+            api,manifest=self.prepare(root)
+            self.assertFalse(any(name.endswith(note_sources.SIDECAR) for name in manifest['files']))
+            counted=sqlite3.connect(root/'state/hermes/usage/usage.sqlite')
+            try:self.assertEqual(counted.execute("SELECT kind,failed FROM note_daily").fetchall(),[('restore',1)])
+            finally:counted.close()
+
     def test_all_checks_precede_remote_import_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);api,manifest=self.prepare(root)

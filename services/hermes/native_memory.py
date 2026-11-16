@@ -89,27 +89,33 @@ def recall(root, body, retirements=None):
     after = body.get('after_profile', '')
     profiles = [p for p in profiles if p.name > after]
     hits = []
-    from .retired_history import IDENTIFIER, service_lookup, withheld_ids
+    from .retired_history import IDENTIFIER, NOTE_DELIMITER, service_lookup, withheld_ids
+    from . import note_sources
     lookup = retirements or service_lookup
     for profile in profiles[:100]:
         where = place(profile, metadata(profile))
-        for name in ('MEMORY.md', 'USER.md'):
+        records = None
+        for target, name in note_sources.TARGETS:
             file = profile / 'memories' / name
             if file.is_symlink() or not file.resolve().is_relative_to(profile.resolve()):
                 raise ValueError('memory_path_denied')
             if file.is_file():
                 with file.open('rb') as source: raw = source.read(256 * 1024)
-                lines = [line for line in raw.decode('utf-8', errors='replace').splitlines()
-                         if all(word in line.casefold() for word in query.casefold().split())]
+                # Each line keeps the note it is in, found by walking the file note by note, so a hit carries that
+                # note's source as this parent recorded it (ADR-0257).
+                lines = [(line, entry.strip()) for entry in raw.decode('utf-8', errors='replace').removeprefix('\ufeff').split(NOTE_DELIMITER)
+                         for line in entry.splitlines() if all(word in line.casefold() for word in query.casefold().split())]
                 # A note citing a retired source is skipped until the profile's next turn removes it.
-                cited = sorted({event for line in lines for event in IDENTIFIER.findall(line)})
+                cited = sorted({event for line, _ in lines for event in IDENTIFIER.findall(line)})
                 hidden = set()
                 for start in range(0, len(cited), 200):
                     value = lookup(cited[start:start+200]);hidden |= set(value['retired']) | set(value['answered'])
-                for line in lines:
+                if lines and records is None: records = note_sources.load(profile)
+                for line, entry in lines:
                     if set(IDENTIFIER.findall(line)) & hidden: continue
                     hits.append({'profile': profile.name, **where, 'kind': 'native_note', 'file': name,
-                                 'text': line[:8000], 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', line)})
+                                 'text': line[:8000], 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', line),
+                                 'note': note_sources.note(records, target, entry)})
         from .isolated_profile import database_path
         database = database_path(profile)
         if database.is_symlink(): raise ValueError('session_path_denied')
@@ -121,12 +127,27 @@ def recall(root, body, retirements=None):
             try:
                 for row in db.search_messages(query, limit=limit):
                     if row.get('id') in withheld: continue
+                    # Who wrote the row: the person, Nocheh, or a tool, which storage puts in words.
+                    role = row.get('role')
                     hits.append({'profile': profile.name, **where, 'kind': 'native_session',
-                                 'session': row.get('session_id'), 'text': str(row.get('content', ''))[:8000]})
+                                 'session': row.get('session_id'), 'text': str(row.get('content', ''))[:8000],
+                                 'role': role if role in ('user', 'assistant', 'tool', 'system') else None})
             finally: db.close()
     # A per-profile query can refine a truncated global search without exposing paths.
     return {'hits': hits[:limit], 'truncated': len(hits) > limit,
             'next_profile': profiles[99].name if len(profiles) > 100 else None}
+
+
+def review_ops(results):
+    """The memory operations a review's forks asked for, from their messages, so the parent can tell which notes a new
+    note replaced (ADR-0257); nothing when a fork's messages are missing or they are too many to send back, and the
+    parent then assumes the most."""
+    from .retired_history import memory_ops
+    if not all(isinstance(result, dict) and isinstance(result.get('messages'), list) for result in results):
+        return {}
+    ops = [op for result in results for message in result['messages'] if isinstance(message, dict) and message.get('role') == 'assistant'
+           for op in memory_ops(message)]
+    return {'memory_ops': ops} if len(json.dumps(ops, ensure_ascii=False)) <= 256 * 1024 else {}
 
 
 def native_review(agent, content, runs=None, focus=None):
@@ -183,7 +204,7 @@ def native_review(agent, content, runs=None, focus=None):
         target()
         if not results or any(r.get('failed') or r.get('interrupted') or not r.get('completed') for r in results):
             raise RuntimeError('native_review_failed')
-        return {'state': 'done'}
+        return {'state': 'done', **review_ops(results)}
     finally:
         native.build_cache_parity_fork = original
         loop._review_input_budget_exhausted = original_budget

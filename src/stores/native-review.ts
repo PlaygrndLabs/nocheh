@@ -73,7 +73,7 @@ export async function requestStrandedSources(pool:pg.Pool,since:Date,limit=100):
 export class NativeReviewRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
     readonly turns:RuntimeTurnRepository,readonly brain:Brain,readonly token:string,
-    readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy())){}
+    readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy(),contexts.access)){}
   private get control(){return this.contexts.access.stores.control;}
   private actor(source:SourceReference,binding:GuardBinding):Reader {
     // The owner's private chat (ADR-0252), the space the owner's native notes are reviewed in.
@@ -330,7 +330,10 @@ export class NativeReviewRepository {
   }
   async list(principal:Reader,after='') {
     admin(principal);const rows=(await this.control.query('SELECT * FROM native_review_jobs WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;
-    return {jobs:rows.slice(0,100),next:rows.length>100?rows[99].id:null};
+    // How many messages from people not allowed where they wrote stayed out of the owner's notes this generation.
+    const generation=(await this.contexts.guards.state()).generation;
+    const kept=(await this.control.query("SELECT count(*)::int AS n FROM native_review_skips WHERE generation=$1 AND reason='sender_not_allowed'",[generation])).rows[0];
+    return {jobs:rows.slice(0,100),next:rows.length>100?rows[99].id:null,kept_out:Number(kept?.n??0)};
   }
   async controlJob(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=object(input);

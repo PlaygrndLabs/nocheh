@@ -19,7 +19,7 @@ import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
 import {chatDirectory,chatIdFor,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
-import {labeledPlaceholders,promptProblem,promptSchema,reminderTexts} from '../src/prompts.js';
+import {labeledPlaceholders,promptProblem,promptSchema,reminderTexts,sourceTexts} from '../src/prompts.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
@@ -164,7 +164,7 @@ const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpre
     'telegram.private_answer_texts':'button: 🔒 Answer privately\nonly_asker: Only the person who asked can use this button.',
     'memory.evidence':'Memory evidence is supplied as source-labelled data.','memory.notes_review':'Maintain useful private memory.',
     'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.','images.read':'Write out the text in this image, then describe it.',
-    'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.','tasks.reminder_texts':reminderTexts} as Record<string,string>};
+    'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.','tasks.reminder_texts':reminderTexts,'memory.source_texts':sourceTexts} as Record<string,string>};
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
@@ -613,7 +613,11 @@ const server=createServer((req,res)=>{void(async()=>{
    // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
    return json(res,200,{profiles:current,history_profiles:[...current,{owner:false,scope:'42',profile:'nocheh-'+'a1'.repeat(12),private_answer:true,
     answer_group:'“Aurora planning” › Iceland planning',answer_at:'2026-11-12T10:00:00+00:00'},{owner:false,scope:'42',profile:'nocheh-'+'b2'.repeat(12),private_answer:true}]});}
-  if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy. Verify against original evidence.',citations:[]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
+  if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy.\n§\nAlice is planning a trip to Iceland.',citations:[],
+    // Each note with where it came from, in the owner's words (ADR-0257).
+    entries:[{target:'memory',text:'Synthetic memory: interested in astronomy.',from:'owner',label:'Your own messages in your private chat'},
+      {target:'memory',text:'Alice is planning a trip to Iceland.',from:'forward',label:'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”'}]},
+    {name:'USER.md',exists:true,text:'Prefers short answers.',citations:[],entries:[{target:'user',text:'Prefers short answers.',from:'turn',label:'Nocheh’s note from your private chat on 2026-11-12'}]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));
   if(route==='/prompts')return json(res,200,prompts);
@@ -640,7 +644,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/spaces')return json(res,200,url.searchParams.has('id')?{id:url.searchParams.get('id'),private_owner:url.searchParams.get('id')==='42',overrides:spaceOverrides,inherited:{mode:'approved',sources:[],privacy_instructions:''},effective:{mode:'approved',...spaceOverrides},revision:spaceRevision}:{spaces:[{id:'42'},{id:'-10042'}],owner_space:'42',next:null});
   if(route==='/memory/shares')return json(res,200,shares);
   if(route==='/memory/preview')return json(res,200,{originals:[],shares,filtered_sources:[]});
-  if(route==='/memory/reviews')return json(res,200,{jobs:[{id:'e'.repeat(64),event_id:id,reason:'import',state:'paused',chunk_index:0}],next:null});
+  if(route==='/memory/reviews')return json(res,200,{jobs:[{id:'e'.repeat(64),event_id:id,reason:'import',state:'paused',chunk_index:0}],next:null,kept_out:2});
   if(route==='/memory-map'){const query=(url.searchParams.get('q')??'').trim().toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'';const stateEdges=state?memoryMapEdges.filter(edge=>edge.state===state||edge.label===state):memoryMapEdges,stateNodes=new Set(stateEdges.flatMap(edge=>[edge.source,edge.target])),nodes=memoryMapNodes.filter(node=>(!kind||node.kind===kind)&&(!state||node.state===state||stateNodes.has(node.id))&&(!query||`${node.label} ${node.kind}`.toLocaleLowerCase().includes(query))),ids=new Set(nodes.map(node=>node.id));return json(res,200,{format:'nocheh-memory-map-v1',nodes,edges:stateEdges.filter(edge=>ids.has(edge.source)||ids.has(edge.target)),next:null,collapsed_facts:true,focus:null,counts:{nodes:nodes.length,edges:memoryMapEdges.length},relationship_edges_grant_access:false});}
   const claimAudience=route.match(/^\/entities\/claims\/([a-f0-9]{64})\/audience$/);
   if(claimAudience){const item=claims.find(c=>c.id===claimAudience[1]);if(!item)throw new HttpError(404,'entity_claim_not_found');

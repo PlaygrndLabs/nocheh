@@ -31,6 +31,27 @@ class ManagementTests(unittest.TestCase):
             (profile_path(root,'123',policy)/'memories/MEMORY.md').symlink_to(root/'profiles'/Scopes.profile('-30')/'memories/MEMORY.md')
             with self.assertRaises(ValueError):call(action='memory',scope='123')
 
+    def test_each_note_is_listed_on_its_own_with_what_was_recorded_about_who_wrote_it(self):
+        # Storage puts each note's record in the owner's words (ADR-0257); a file Hermes could not read lists no notes,
+        # and the page shows it whole.
+        from . import note_sources
+        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);profile=profile_path(root,'-20',policy);(profile/'memories').mkdir(parents=True)
+            (profile/'memories/MEMORY.md').write_text('Alice likes tea.\n§\nBob is away.\n§\nAlice likes tea.')
+            (profile/'memories/USER.md').write_text('Sara leads Work.')
+            origin={'by':'turn','event':'c'*64,'channel':'telegram','at':'2026-11-08','reads':['recent'],'complete':True}
+            note_sources.save(profile,{note_sources.key('memory','Bob is away.'):{'origins':[origin],'more':0,'at':'2026-11-08'}})
+            memories={m['name']:m for m in dispatch(root,'test-model',policy,{'action':'memory','scope':'-20'})['memories']}
+            self.assertEqual(memories['MEMORY.md']['entries'],[
+                {'target':'memory','text':'Alice likes tea.','key':note_sources.key('memory','Alice likes tea.'),'origins':[{'by':'unknown'}],'more':0,'cites':[]},
+                {'target':'memory','text':'Bob is away.','key':note_sources.key('memory','Bob is away.'),'origins':[origin],'more':0,'cites':[]}])
+            self.assertEqual([e['text'] for e in memories['USER.md']['entries']],['Sara leads Work.'])
+            (profile/'memories/USER.md').write_bytes(b'\xff not text')
+            memories={m['name']:m for m in dispatch(root,'test-model',policy,{'action':'memory','scope':'-20'})['memories']}
+            self.assertNotIn('entries',memories['MEMORY.md']);self.assertNotIn('entries',memories['USER.md'])
+            self.assertEqual(memories['MEMORY.md']['text'],'Alice likes tea.\n§\nBob is away.\n§\nAlice likes tea.')
+
     def test_a_project_role_and_skills_are_kept_in_their_own_folder(self):
         policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
         with tempfile.TemporaryDirectory() as folder:

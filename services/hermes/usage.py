@@ -50,6 +50,13 @@ READER_SCHEMA = ('CREATE TABLE IF NOT EXISTS reader_daily(day TEXT NOT NULL, rea
                  'done INTEGER NOT NULL DEFAULT 0, temp_full INTEGER NOT NULL DEFAULT 0, read_only INTEGER NOT NULL DEFAULT 0, '
                  'PRIMARY KEY(day,reader))')
 WRITE_ERRORS = {errno.ENOSPC: 'temp_full', errno.EDQUOT: 'temp_full', errno.EROFS: 'read_only'}
+# Where native notes came from (ADR-0257), per UTC day and step: looking labels up, recording who wrote a note, reading
+# the notes, waiting for the notes lock, reading the record file, restoring it from a package, and long-term memory a
+# turn could not read in full (memory_read). `done` counts the steps that worked, so a notice can say when they work
+# again. Not model calls, so never in usage_daily. Codes and counts only.
+NOTE_KINDS = ('lookup', 'record', 'read', 'lock', 'sidecar', 'restore', 'memory_read')
+NOTE_SCHEMA = ('CREATE TABLE IF NOT EXISTS note_daily(day TEXT NOT NULL, kind TEXT NOT NULL, '
+               'done INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day,kind))')
 # Room a read needs in /tmp besides a copy of its file, below which a failed read is taken as /tmp being full.
 TEMP_MARGIN = 8 * 1024 * 1024
 # Why a run failed. Codes only: never the provider's message or any content.
@@ -433,6 +440,7 @@ def connect(path=None):
     db.execute('PRAGMA journal_mode=WAL')
     db.execute(SCHEMA)
     db.execute(READER_SCHEMA)
+    db.execute(NOTE_SCHEMA)
     present = {row[1] for row in db.execute('PRAGMA table_info(usage_daily)')}
     for name, kind in ADDED.items():
         if name not in present:
@@ -492,6 +500,39 @@ def _reader(reader, column, path, now):
             db.execute('INSERT INTO reader_daily(day,reader) VALUES(?,?) ON CONFLICT DO NOTHING', (day, reader))
             db.execute(f'UPDATE reader_daily SET {column}={column}+1 WHERE day=? AND reader=?', (day, reader))
             db.execute('DELETE FROM reader_daily WHERE day<?', ((moment - timedelta(days=RETENTION_DAYS)).strftime('%Y-%m-%d'),))
+            db.execute('COMMIT')
+        finally:
+            db.close()
+    except (OSError, sqlite3.Error):
+        pass
+
+
+def note_failed(kind, path=None, now=None):
+    """Count one failed step of telling where notes came from, or one turn that could not read long-term memory in
+    full. Never fails the work."""
+    _note(kind, 'failed', path, now)
+
+
+def note_done(kind, path=None, now=None):
+    """Count one step that worked, so its notice line can clear. Never fails the work."""
+    _note(kind, 'done', path, now)
+
+
+def _note(kind, column, path, now):
+    if kind not in NOTE_KINDS or column not in ('done', 'failed'):
+        return
+    moment = datetime.fromtimestamp(now or time.time(), timezone.utc)
+    day = moment.strftime('%Y-%m-%d')
+    target = Path(path or DATABASE)
+    if not target.parent.parent.is_dir():
+        return  # Not inside a Hermes installation, such as a unit test.
+    try:
+        db = connect(target)
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('INSERT INTO note_daily(day,kind) VALUES(?,?) ON CONFLICT DO NOTHING', (day, kind))
+            db.execute(f'UPDATE note_daily SET {column}={column}+1 WHERE day=? AND kind=?', (day, kind))
+            db.execute('DELETE FROM note_daily WHERE day<?', ((moment - timedelta(days=RETENTION_DAYS)).strftime('%Y-%m-%d'),))
             db.execute('COMMIT')
         finally:
             db.close()
