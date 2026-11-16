@@ -5,7 +5,7 @@ import {conversationFields,type ChatDirectory} from '../chats.js';
 import {telegramUsername} from '../chats-telegram.js';
 import {HttpError} from '../http.js';
 import {validateSpace} from '../spaces.js';
-import type {ConversationChatFields} from '../chat-wire.js';
+import {chatKinds,chatStates,type ConversationChatFields} from '../chat-wire.js';
 import {chatLabel,type ChatRepository} from './chats.js';
 import type {StorePools} from './connections.js';
 import {carriesForward} from './guards.js';
@@ -51,7 +51,9 @@ export interface OwnerSupervisionDependencies {
   knowledge:{proposal(principal:Reader,id:string):Promise<unknown>};
   memoryAccess?:Pick<MemoryAccessRepository,'describe'>;
 }
-type PageInput={q?:string;after?:string;limit?:number};
+/** A /v1/conversations page: a search, and optionally only chats of one kind or in one state (a topic is in its
+ * group's), so a filtered list such as the served groups pages whole. */
+type PageInput={q?:string;after?:string;limit?:number;kind?:string;state?:string};
 type DecisionInput={kind?:string;after?:string;limit?:number};
 const iso=(value:unknown):string|null=>value instanceof Date?value.toISOString():typeof value==='string'?value:null;
 const clean=(value:unknown):string|null=>typeof value==='string'?value.replace(/\s+/g,' ').trim().slice(0,200)||null:null;
@@ -177,9 +179,13 @@ export class OwnerSupervisionRepository {
   }
 
   async conversations(principal:Reader,input:PageInput={},hidden=new Set<string>()) {
-    admin(principal);const limit=pageLimit(input.limit),after=input.after??'',q=input.q??'';
+    admin(principal);const limit=pageLimit(input.limit),after=input.after??'',q=input.q??'',kind=input.kind??'',state=input.state??'';
     if(after)validateSpace(after);if(typeof q!=='string'||q.length>200)throw new HttpError(400,'invalid_conversation_query');
-    const all=(await this.directory()).filter(item=>!hidden.has(item.parent_space??item.space_id)&&conversationMatches(item,q));
+    if(kind&&!(chatKinds as readonly string[]).includes(kind))throw new HttpError(400,'invalid_conversation_kind');
+    if(state&&!(chatStates as readonly string[]).includes(state))throw new HttpError(400,'invalid_conversation_state');
+    // Filtered before paging, so a page and its cursor follow only the chats asked for.
+    const all=(await this.directory()).filter(item=>!hidden.has(item.parent_space??item.space_id)&&conversationMatches(item,q)&&
+      (!kind||item.kind===kind)&&(!state||item.state===state));
     const remaining=all.filter(item=>item.space_id>after),items=remaining.slice(0,limit);
     return {items,total:all.length,next_cursor:remaining.length>limit?items.at(-1)!.space_id:null,observed_at:new Date().toISOString(),state:'current' as const};
   }

@@ -5,6 +5,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {OwnerSupervisionRepository} from '../src/stores/owner-supervision.js';
+import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {chatIdFor} from '../src/chats.js';
 import type {ConversationDirectoryItem} from '../src/stores/owner-supervision.js';
@@ -75,6 +76,28 @@ test('stored owner directory and decisions span every page without turning reads
         ['group',null,null,false,[{app:'telegram',external:unrepresentableScope,state:'current'}]]);
       assert.deepEqual([oldGroup.kind,oldGroup.parent_space,oldGroup.topic_key,oldGroup.owner,oldGroup.app_ids],['group',null,null,false,[{app:'telegram',external:group,state:'current'}]]);
       assert.equal(unrepresentable.state,'off','a group first seen now, with no add by the owner, starts off');
+      // A kind or state filter applies before paging: the served groups page whole, one per page here, with a cursor
+      // that ends with them, and leave out every other chat (a topic is in its group's state).
+      const filtered=async(input:{kind?:string;state?:string})=>{const items:ConversationDirectoryItem[]=[];let after='',pages=0;
+        for(;;){const page=await view.conversations(owner,{...input,limit:1,after});pages++;items.push(...page.items);
+          assert.equal(page.items.length,page.total?1:0,'no filtered page is empty while chats remain');
+          if(!page.next_cursor)return {items,pages,total:page.total};after=page.next_cursor;}};
+      const everything=await all(),spaces=(items:ConversationDirectoryItem[])=>items.map(item=>item.space_id);
+      const served=await filtered({kind:'group',state:'active'});
+      assert.deepEqual(spaces(served.items),spaces(everything.filter(item=>item.kind==='group'&&item.state==='active')));
+      assert.ok([group,second].every(id=>spaces(served.items).includes(id)),'both served groups are listed');
+      assert.ok(!spaces(served.items).includes(unrepresentable.space_id),'a group that is off is left out');
+      assert.equal(served.pages,served.items.length);assert.equal(served.total,served.items.length);
+      const topics=await filtered({kind:'topic'});
+      assert.ok(topics.items.every(item=>item.kind==='topic')&&[topic19,topic21].every(id=>spaces(topics.items).includes(id)));
+      const off=await filtered({state:'off'});
+      assert.ok(off.items.every(item=>item.state==='off')&&spaces(off.items).includes(unrepresentable.space_id));
+      assert.deepEqual(spaces((await view.conversations(owner,{kind:'group',state:'active',q:second})).items),[second],'a filter and a search narrow together');
+      await assert.rejects(view.conversations(owner,{kind:'channel'}),{code:'invalid_conversation_kind'});
+      await assert.rejects(view.conversations(owner,{state:'on'}),{code:'invalid_conversation_state'});
+      // The route reads both filters.
+      const routed=await new OwnerStorageApi(services).request(owner,'GET',new URL('http://fixture/v1/conversations?kind=group&state=active&limit=1')) as {items:ConversationDirectoryItem[];next_cursor:string|null};
+      assert.deepEqual(spaces(routed.items),spaces(served.items.slice(0,1)));assert.equal(routed.next_cursor,served.items.length>1?served.items[0]!.space_id:null);
       // A topic first seen now is read as its group's topic, as an old-shaped one is.
       const newContext=await view.context(owner,topic21);
       assert.equal(newContext.conversation.kind,'topic');assert.equal(newContext.conversation.parent_space,group);

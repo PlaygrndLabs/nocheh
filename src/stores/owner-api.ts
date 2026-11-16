@@ -57,7 +57,8 @@ export class OwnerStorageApi {
     if(path==='/v1/private-answers'&&method==='GET')return s.privateAnswers.list(principal,{project:q.get('project')??undefined,after:q.get('after')??undefined});
     if(path==='/v1/chat-sends'&&method==='GET')return s.chatSends.list(principal,{filter:q.get('filter')??'all',kind:q.get('kind')??'',
       before:q.get('before')??'',limit:limit(q.get('limit'),50,100)});
-    if(path==='/v1/conversations'&&method==='GET')return s.supervision.conversations(principal,{q:q.get('q')??'',after:q.get('after')??'',limit:limit(q.get('limit'),50,100)});
+    if(path==='/v1/conversations'&&method==='GET')return s.supervision.conversations(principal,{q:q.get('q')??'',after:q.get('after')??'',limit:limit(q.get('limit'),50,100),
+      kind:q.get('kind')??'',state:q.get('state')??''});
     if(path==='/v1/conversations/context'&&method==='GET')return s.supervision.context(principal,q.get('space')??'');
     if(path==='/v1/decisions'&&method==='GET')return s.supervision.decisions(principal,{kind:q.get('kind')??'',after:q.get('after')??'',limit:limit(q.get('limit'),50,100)});
     const decision=path.match(/^\/v1\/decisions\/(controlled_action|telegram_action|memory_access|entity|knowledge)\/([a-f0-9]{64})$/);
