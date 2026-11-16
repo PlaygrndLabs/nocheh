@@ -66,6 +66,14 @@ def outbound_check(chat_id, topic, authorized, cancelled=None, requests=None, ma
     return check
 
 
+def leave_check(chat_id):
+    """Bind a leave to the one chat Nocheh was asked to leave: leaveChat there, and no other request."""
+    def check(method, parameters):
+        if method != 'leaveChat' or set(parameters) != {'chat_id'} or str(parameters.get('chat_id')) != str(chat_id):
+            raise Held('telegram_delivery_audience_changed')
+    return check
+
+
 def reaction_check(chat_id, message_id, authorized):
     """Bind a working reaction to the one message a turn answers.
 

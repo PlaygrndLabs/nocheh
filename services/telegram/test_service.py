@@ -111,6 +111,41 @@ class ServiceTests(unittest.TestCase):
         # No command menu is left in any scope.
         wait(lambda: not self.mock.state['commands'])
 
+    def leaving(self):
+        """The fake Telegram's leaveChat: True, or the fault queued for it."""
+        original = self.mock.call
+        async def call(method, data):
+            status, body = await original(method, data)
+            if method == 'leaveChat' and status == 400 and isinstance(body, dict) and body.get('description') == 'Bad Request: fixture method not implemented':
+                return 200, {'ok': True, 'result': True}
+            return status, body
+        self.mock.call = call
+
+    def test_a_leave_reaches_telegram_once_journaled_and_recorded(self):
+        self.leaving()
+        body = {'id': 'd' * 64, 'chat_id': '-10055'}
+        self.assertEqual(self.service.leave(body), {'state': 'done'})
+        self.assertEqual(self.service.leave(body), {'state': 'done'})
+        leaves = lambda: [call['parameters'] for call in self.mock.state['calls'] if call['method'] == 'leaveChat']
+        self.assertEqual(leaves(), [{'chat_id': '-10055'}], 'leaveChat once, for that chat alone')
+        # Never a served group, under its Telegram id now or before an upgrade.
+        for chat in (GROUP, NEW_TG, NEW_OLD):
+            with self.subTest(chat), self.assertRaisesRegex(ValueError, 'leave_chat_not_allowed'):
+                self.service.leave({'id': 'e' * 64, 'chat_id': chat})
+        self.mock.state['faults'].append({'method': 'leaveChat', 'code': 403, 'description': 'Forbidden: bot is not a member of the supergroup chat'})
+        self.assertEqual(self.service.leave({'id': 'f' * 64, 'chat_id': '-10066'}), {'state': 'done'}, 'already gone')
+        self.mock.state['faults'].append({'method': 'leaveChat', 'code': 400, 'description': 'Bad Request: not enough rights'})
+        self.assertEqual(self.service.leave({'id': '1' * 64, 'chat_id': '-10077000'}), {'state': 'failed', 'error_code': 'telegram_refused'})
+        self.assertEqual(len(leaves()), 3)
+        self.assertEqual(self.sent(), [])
+        # Journaled like every request that leaves, and a content-free send record says what it was.
+        events = [json.loads(path.read_bytes()) for path in (self.root / 'spool/pending').glob('*.json')]
+        self.assertIn(('-10055', 'leaveChat'), [(event['scope'], event['payload']['method']) for event in events if event['kind'] == 'outbound_intent'])
+        records = [json.loads(path.read_bytes()) for path in (self.root / 'spool/sends').glob('*.json')]
+        (record,) = [row for row in records if row['method'] == 'leaveChat' and row['chat'] == '-10055']
+        self.assertEqual((record['state'], record['error_code']), ('sent', None))
+        self.assertTrue(record['reference'].startswith('leave:' + 'd' * 64 + ':'))
+
     def test_reply_is_silent_answers_the_message_and_keeps_one_receipt(self):
         body = self.turn(1, text='**Hi** there.')
         result = self.service.reply(body)
