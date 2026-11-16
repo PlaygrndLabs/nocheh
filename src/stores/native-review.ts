@@ -263,13 +263,15 @@ export class NativeReviewRepository {
   }
   /** notesSender over the message an archived pin carries, by that message's own author in the pin's chat; a pin whose
    *  message can't be read is not let in. A message Telegram no longer shows (date 0) carries no words to leave out.
-   *  Nocheh's own message, found in the archive as the pin's chat's message (pinnedNocheh), is never someone not allowed:
-   *  a learned one stays, and a card, notice or reminder is not learned. Another bot's message is still left out. */
+   *  Nocheh's own message (NoteSourceRepository.carried) is never someone not allowed: a learned one stays, and a card,
+   *  notice or reminder is not learned, nor is Nocheh's own account's message the archive does not hold as Nocheh's (not
+   *  archived yet, or a forward of one), which is cut as a card is. Anyone else's, another bot's included, is asked as
+   *  its sender is. */
   private async pinnedSender(id:string):Promise<'review'|'sender_not_allowed'|'not_learned'> {
     const event=await this.archived(id),update=record(event?.payload),message=record(update?.message??update?.edited_message),pinned=record(message?.pinned_message);
     if(!event||!message||!pinned)return 'sender_not_allowed';
     if(pinned.date===0&&Object.keys(pinned).every(name=>['chat','message_id','date'].includes(name)))return 'review';
-    const own=(await this.sources.pinnedNocheh([id])).get(id);
+    const own=(await this.sources.carried([id])).get(id)?.pinned;
     if(own)return own==='learned'?'review':'not_learned';
     return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...pinned,chat:message.chat}}});
   }

@@ -30,11 +30,13 @@ export interface PreparedLearningContext {
  * pin, which stays. `not_learned` takes it out too, but not as left out for its sender: Nocheh's own card, notice or
  * reminder is not learned. `collect` gets the ids left out (a pin's own id when only the message it pinned was), the rules kept,
  * the ids of the rules left out with them, `bare_reaction` when the source is a reaction to a message that was left out,
- * `empty_pin` when the source is a pin of Nocheh's card, notice or reminder with nothing else in it, and each kept rule's
- * recorded inputs (`inputs`: the source ids of its stored dependencies, by rule id). Honcho passes none and interpretations
- * only `collect`, so they learn from everyone's messages, as before. For every caller a pin loses Nocheh's card, notice or
- * reminder, and a bot's message that is not Nocheh's learned one; a quote of Nocheh's own message or of a bot's is left
- * out of the message quoting it, and out of a message a pin carries (ADR-0256, ADR-0257).
+ * `empty_pin` when the source is a pin of Nocheh's card, notice or reminder, or of Nocheh's message not archived yet, with
+ * nothing else in it, and each kept rule's recorded inputs (`inputs`: the source ids of its stored dependencies, by rule
+ * id). Honcho passes none and interpretations only `collect`, so they learn from everyone's messages, as before, other
+ * bots' included. For every caller a pin loses Nocheh's card, notice or reminder, and Nocheh's own account's message the
+ * archive does not hold as Nocheh's learned one (not archived yet, or a forward of one); a quote of Nocheh's own words is
+ * left out of the message quoting it, and out of a message a pin carries (NoteSourceRepository.carried, ADR-0256,
+ * ADR-0257).
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
@@ -94,21 +96,21 @@ export class LearningContextRepository {
         const message=scoped.payload[kind];
         const carried=message.quote||message.pinned_message?(await this.entities.sources.carried([reference.id])).get(reference.id):undefined;
         delete message.reply_to_message;delete message.external_reply;
-        // A quote of Nocheh's own message, learned or not, or of another bot's, is never the sender's words: it goes, and the
-        // sender's own words stay. A learned one is evidence of its own; a card, notice or reminder is not learned, and a
-        // bot's message the archive does not hold as Nocheh's (not archived yet, or another bot's) is cut as a card is.
+        // A quote of Nocheh's own words, learned or not, is never the sender's: it goes, and the sender's own words stay. A
+        // learned message is evidence of its own; a card, notice or reminder is not learned, and Nocheh's own account's
+        // message the archive does not hold as Nocheh's (not archived yet, or a forward of one) is cut as a card is.
+        // Another bot's message is someone else's, and its quote stays, as anyone else's does.
         if(unquote||carried?.quote)delete message.quote;
-        // A pin carries the message it pinned whole; what someone not allowed there wrote stays out of the owner's notes
-        // review, and Nocheh's own card, notice or reminder stays out of everything learned from it, whoever pinned it. So
-        // does a bot's message that is not Nocheh's learned one: a bot is never someone allowed there, so nothing of anyone's
-        // is lost. A quote inside the pinned message goes as a quote does.
-        let pinned:boolean|'not_learned'|'bot'=!message.pinned_message?true:options.admit&&options.admitPinned?await options.admitPinned(reference):
-          carried?.pinned==='unlearned'?'not_learned':true;
-        if(pinned===true&&carried?.pinned==='bot')pinned='bot';
+        // A pin carries the message it pinned whole. Nocheh's own card, notice or reminder stays out of everything learned
+        // from it, whoever pinned it, and so does Nocheh's own account's message the archive does not hold as Nocheh's
+        // (carried: `bot`); what someone not allowed there wrote, another bot's message included, stays out of the owner's
+        // notes review only. A quote inside the pinned message goes as a quote does.
+        const pinned:boolean|'not_learned'=!message.pinned_message?true:carried?.pinned==='unlearned'||carried?.pinned==='bot'?'not_learned':
+          options.admit&&options.admitPinned?await options.admitPinned(reference):true;
         if(pinned!==true)delete message.pinned_message;
         else if(carried?.pinned_quote&&message.pinned_message&&typeof message.pinned_message==='object')delete message.pinned_message.quote;
         if(pinned===false){limitations.push('sender_not_allowed');unpinned.push(reference.id);}
-        // The source itself, a pin of Nocheh's card with nothing of its own, leaves nothing to review.
+        // The source itself, a pin of only Nocheh's card or of Nocheh's message not archived yet, leaves nothing to review.
         if(pinned==='not_learned'&&reference.id===source.id&&!texts.some(text=>text.trim())&&!derivatives.length)emptyPin=true;
       }
       observations.push({source:reference,value:scoped,derivatives});evidence.push({reference,text:texts.join('\n'),space});

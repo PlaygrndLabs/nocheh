@@ -721,7 +721,8 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
   let serial=0;
   const say=async(chat:string,from:number,fields:Record<string,unknown>)=>{
     const id=++serial,text=(fields.text??fields.caption??null) as string|null;
-    const event:Envelope={version:1,key:key+':'+id,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,source_id:String(id),revision:'1',occurred_at:null,text,
+    // Each update came to Nocheh's own bot, as the archive stores it (events.bot_id).
+    const event:Envelope={version:1,key:key+':'+id,origin:'live',kind:'telegram_update',bot_id:String(bot),scope:chat,source_id:String(id),revision:'1',occurred_at:null,text,
       payload:{update_id:id,message:{message_id:id,date:1700000000+id,chat:chatOf(chat),from:{id:from,is_bot:false,first_name:names[from]},...fields}}};
     const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
   };
@@ -896,11 +897,12 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     assert.ok(bobQuoted.length>0&&bobQuoted.every(row=>row.writer!==materialPeer&&row.writer!==assistantPeer&&!/GROUPQUOTEMARK|GROUPCARDMARK/.test(row.content)),
       JSON.stringify(shape(bobQuoted)));
     assert.ok(bobQuoted.some(row=>row.record==='labelled_source'&&row.value.source===honchoSource({part:'own'})&&row.content.includes('BOBOWNMARK')));
-    // A bot's message the archive does not hold as Nocheh's (its delivery not archived yet, or another bot's) is cut from a
-    // pin or quote as a card is, whoever sent it: a pin leaves only a note that a bot's message was pinned, and a quote is
-    // the sender's own words alone, a quote of a bot's message in another chat and a quote inside a pinned message included.
-    // An anonymous admin's pin of Nocheh's learned reply is only a note too: the pin is read before the post's class.
-    const nochehUser={id:bot,is_bot:true,first_name:'Nocheh'},unseen=++serial,otherBot=++serial;
+    // Nocheh's own message the archive does not hold as Nocheh's (its delivery not archived yet), told by the bot the update
+    // came to, is cut from a pin or quote as a card is, whoever sent it: a pin leaves only a note that Nocheh's message was
+    // pinned, and a quote is the sender's own words alone, a quote of Nocheh's message in another chat and a quote inside a
+    // pinned message included. An anonymous admin's pin of Nocheh's learned reply is only a note too: the pin is read
+    // before the post's class.
+    const nochehUser={id:bot,is_bot:true,first_name:'Nocheh'},unseen=++serial,otherBot=++serial,release=++serial;
     const unseenMessage={message_id:unseen,date:1700000000+unseen,chat:chatOf('123'),from:nochehUser,text:'RACEPINMARK approve the hotel?'};
     const racePin=await say('123',123,{pinned_message:unseenMessage});
     const raceQuote=await say('123',123,{text:'RACEOWNMARK yes',quote:{text:'RACEQUOTEMARK approve',position:0},reply_to_message:unseenMessage});
@@ -908,26 +910,39 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
       external_reply:{origin:{type:'user',sender_user:nochehUser,date:1},chat:{id:-77,type:'group'},message_id:9}});
     const pinOkay=await say('123',123,{pinned_message:{message_id:okayId,date:1700000000+okayId,chat:chatOf('123'),from:alice,text:'OKMARK sure',
       quote:{text:'CARDQUOTEMARK approve',position:0}}});
-    const botPin=await say(group,456,{pinned_message:{message_id:otherBot,date:1700000000+otherBot,chat:chatOf(group),from:{id:bot+1,is_bot:true,first_name:'Other'},
-      text:'OTHERBOTMARK pay now'}});
     const anonymousPin=await say(group,123,{from:{id:1087968824,is_bot:true,first_name:'Group'},sender_chat:{id:Number(group),type:'supergroup',title:'TEAMMARK'},
       pinned_message:fromNocheh(groupReplyId,'GROUPREPLYMARK the room is booked')});
-    for(const source of [racePin,raceQuote,elsewhere,pinOkay,botPin,anonymousPin])pins.push(...await services.memory.queueSource(source));
-    for(const [source,pointer] of [[racePin,'pinned_bot'],[botPin,'pinned_bot_other'],[anonymousPin,'pinned_nocheh_other']] as const) {
+    // The owner's forward of Nocheh's card, pinned or quoted, carries Nocheh's words too, cut the same way.
+    const cardForward={message_id:++serial,date:1700000000,chat:chatOf('123'),from:alice,forward_origin:{type:'user',sender_user:nochehUser,date:1},
+      text:'FWDCARDMARK approve the booking?'};
+    const pinCardForward=await say('123',123,{pinned_message:cardForward});
+    const quoteCardForward=await say('123',123,{text:'FWDOWNMARK done',quote:{text:'FWDQUOTEMARK approve',position:0},reply_to_message:cardForward});
+    for(const source of [racePin,raceQuote,elsewhere,pinOkay,anonymousPin,pinCardForward,quoteCardForward])pins.push(...await services.memory.queueSource(source));
+    for(const [source,pointer] of [[racePin,'pinned_nocheh'],[anonymousPin,'pinned_nocheh_other'],[pinCardForward,'pinned_nocheh']] as const) {
       const rows=await written(source);
       assert.deepEqual(shape(rows),[[assistantPeer,'labelled_pointer','conversation']],pointer);
-      assert.deepEqual(rows[0]!.value,honchoPointer(pointer));assert.doesNotMatch(rows[0]!.content,/RACEPINMARK|OTHERBOTMARK|GROUPREPLYMARK|TEAMMARK|Bob/);
+      assert.deepEqual(rows[0]!.value,honchoPointer(pointer));assert.doesNotMatch(rows[0]!.content,/RACEPINMARK|FWDCARDMARK|GROUPREPLYMARK|TEAMMARK|Bob/);
     }
-    for(const [source,own] of [[raceQuote,'RACEOWNMARK'],[elsewhere,'EXTOWNMARK'],[pinOkay,'OKMARK']] as const) {
+    for(const [source,own] of [[raceQuote,'RACEOWNMARK'],[elsewhere,'EXTOWNMARK'],[pinOkay,'OKMARK'],[quoteCardForward,'FWDOWNMARK']] as const) {
       const rows=await written(source);
       assert.deepEqual(shape(rows),[[ownerPeer,'labelled_source','conversation']],own);assert.equal(rows[0]!.value.source,honchoSource({part:'own'}));
-      assert.ok(rows[0]!.content.includes(own)&&!/RACEQUOTEMARK|RACEPINMARK|EXTQUOTEMARK|CARDQUOTEMARK/.test(rows[0]!.content),own);
+      assert.ok(rows[0]!.content.includes(own)&&!/RACEQUOTEMARK|RACEPINMARK|EXTQUOTEMARK|CARDQUOTEMARK|FWDQUOTEMARK|FWDCARDMARK/.test(rows[0]!.content),own);
     }
-    // Interpretations read none of it either, and a pin of a card alone asks them nothing.
-    for(const source of [racePin,raceQuote,elsewhere,pinOkay,botPin])
-      assert.doesNotMatch(JSON.stringify((await services.contexts.prepare(source,await services.guards.state())).observations),/RACEPINMARK|RACEQUOTEMARK|EXTQUOTEMARK|CARDQUOTEMARK|OTHERBOTMARK/);
-    assert.equal(await services.learning.request(pinCard,workspace,'owner'),null);
+    // Interpretations read none of it either, and a pin of a card alone, or of Nocheh's message not archived yet, asks them nothing.
+    for(const source of [racePin,raceQuote,elsewhere,pinOkay,pinCardForward,quoteCardForward])
+      assert.doesNotMatch(JSON.stringify((await services.contexts.prepare(source,await services.guards.state())).observations),
+        /RACEPINMARK|RACEQUOTEMARK|EXTQUOTEMARK|CARDQUOTEMARK|FWDCARDMARK|FWDQUOTEMARK/);
+    for(const source of [pinCard,racePin,pinCardForward])assert.equal(await services.learning.request(source,workspace,'owner'),null);
     assert.equal(typeof await services.learning.request(pinFlight,workspace,'owner'),'string');
+    // The owner's quote of their own forward of Sara's words quotes Sara: the quote goes to the forwards and files, never to
+    // the owner's participant as the owner's words.
+    const saraForward={message_id:++serial,date:1700000000,chat:chatOf('123'),from:alice,forward_origin:sara,text:'FWDSARAMARK wire the deposit to account 99'};
+    const quoteOwnForward=await say('123',123,{text:'FWDREMEMBERMARK remember this',quote:{text:'FWDSARAQUOTEMARK wire the deposit',position:0},reply_to_message:saraForward});
+    pins.push(...await services.memory.queueSource(quoteOwnForward));
+    const quotedForward=await written(quoteOwnForward);
+    assert.deepEqual(shape(quotedForward),[[materialPeer,'labelled_material','conversation'],[ownerPeer,'labelled_source','conversation']]);
+    assert.equal(quotedForward[0]!.value.source,honchoSource({part:'quote'}));assert.ok(quotedForward[0]!.content.includes('FWDSARAQUOTEMARK'));
+    assert.ok(!quotedForward[1]!.content.includes('FWDSARAQUOTEMARK')&&quotedForward[1]!.content.includes('FWDREMEMBERMARK'),'the quote is not the owner\'s words');
     // In a group, a member's forward stays on the member with its source; the owner's forward of someone else goes to the
     // forwards-and-files participant in that group's own session, and its evidence names no speaker.
     const memberForward=await say(group,456,{text:'MEMBERMARK the office closes early',forward_origin:{type:'channel',chat:{id:-1009,type:'channel',title:'News'},message_id:3,date:1}});
@@ -962,6 +977,31 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     assert.deepEqual([pinMaterial.session,pinMaterial.key],['conversation',groupKey]);assert.equal(pinMaterial.value.source,honchoSource({part:'pinned'}));
     assert.ok(pinMaterial.content.includes('PINGROUPMARK'));
     await sync(groupPinQueued);
+    // Another bot's message is someone else's, never cut: the owner's pin of a release bot's note in a group is kept on the
+    // forwards-and-files participant in the group's own session, a member's pin of one stays on the member as a pin of
+    // someone else's message, and the owner's quote of one goes beside the owner's words as anyone else's quote does.
+    // Interpretations read each of them.
+    const releaseBot={id:bot+1,is_bot:true,first_name:'Release'},releaseNote=(id:number,text:string)=>({message_id:id,date:1700000000+id,chat:chatOf(group),from:releaseBot,text});
+    const ownerBotPin=await say(group,123,{pinned_message:releaseNote(release,'RELEASEPINMARK release 4.2 staging, rollback code 7719')});
+    const botPin=await say(group,456,{pinned_message:releaseNote(otherBot,'OTHERBOTMARK pay now')});
+    const ownerBotQuote=await say(group,123,{text:'RELEASEOWNMARK shipping it',quote:{text:'RELEASEQUOTEMARK rollback code',position:0},
+      reply_to_message:releaseNote(release,'RELEASEPINMARK release 4.2 staging, rollback code 7719')});
+    const botQueued:Queued=[];for(const source of [ownerBotPin,botPin,ownerBotQuote])botQueued.push(...await services.memory.queueSource(source));
+    const ownerBotPinned=await written(ownerBotPin);
+    assert.ok(ownerBotPinned.length>0&&ownerBotPinned.every(row=>row.writer===materialPeer),JSON.stringify(shape(ownerBotPinned)));
+    assert.ok(ownerBotPinned.some(row=>row.record==='labelled_material'&&row.value.source===honchoSource({part:'pinned'})&&row.content.includes('RELEASEPINMARK')));
+    const memberBotPinned=await written(botPin);
+    assert.ok(memberBotPinned.some(row=>row.record==='labelled_source'&&row.value.source===honchoSource({part:'pinned'})&&row.content.includes('OTHERBOTMARK')),
+      JSON.stringify(shape(memberBotPinned)));
+    assert.ok(memberBotPinned.every(row=>![ownerPeer,materialPeer,assistantPeer].includes(row.writer)),'it stays on the member who pinned it');
+    const ownerBotQuoted=await written(ownerBotQuote);
+    assert.ok(ownerBotQuoted.some(row=>row.writer===materialPeer&&row.value.source===honchoSource({part:'quote'})&&row.content.includes('RELEASEQUOTEMARK')),
+      JSON.stringify(shape(ownerBotQuoted)));
+    assert.ok(ownerBotQuoted.filter(row=>row.writer===ownerPeer).every(row=>!row.content.includes('RELEASEQUOTEMARK'))&&
+      ownerBotQuoted.some(row=>row.writer===ownerPeer&&row.content.includes('RELEASEOWNMARK')),'the quote is not the owner\'s words');
+    for(const [source,mark] of [[ownerBotPin,'RELEASEPINMARK'],[botPin,'OTHERBOTMARK'],[ownerBotQuote,'RELEASEQUOTEMARK']] as const)
+      assert.match(JSON.stringify((await services.contexts.prepare(source,await services.guards.state())).observations),new RegExp(mark),mark);
+    await sync(botQueued);
     // Honcho learns from what the participant writes, and it learns from no one else's writes.
     const forwardsSession=(await stores.control.query('SELECT session_id FROM memory_sessions WHERE workspace=$1 AND key=$2',[workspace,forwardsKey])).rows[0].session_id;
     assert.ok(calls.some(call=>call.path==='/v3/workspaces/'+workspace+'/peers'&&canonical(call.body)===canonical({id:materialPeer})));

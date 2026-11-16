@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {accountIdFor} from '../src/chats.js';
-import {botPinned,botQuoted,bucketOf,eventClass,eventClasses,isEventClass,ownerTyped,sourceFacts,type FactsInput,type SourceFacts} from '../src/source-facts.js';
+import {bucketOf,eventClass,eventClasses,isEventClass,nochehPinned,nochehQuoted,ownerTyped,sourceFacts,type FactsInput,type SourceFacts} from '../src/source-facts.js';
 
 const OWNER='5001',SARA='5002';
 const group={id:-20,type:'supergroup'};
@@ -82,6 +82,29 @@ test('a quote of someone else\'s message is not the sender\'s own words; a quote
   assert.equal(live(update({from:owner,text:'yes',reply_to_message:{message_id:6,date:1,chat:group,from:sara}})).quote,null,'a reply without a quote');
 });
 
+test('the owner\'s quote of their own forward quotes whoever wrote it, as a pin of it does, never the owner\'s words',()=>{
+  const nocheh={id:9001,is_bot:true,first_name:'Nocheh'};
+  const quoting=(target:Record<string,unknown>)=>live(update({from:owner,text:'done',quote:{text:'pay',position:0},
+    reply_to_message:{message_id:6,date:1,chat:group,from:owner,text:'pay the invoice',...target}}));
+  // A forward of Sara's message, of Nocheh's card, of a channel post, or a message sent through an inline bot.
+  for(const [label,target] of [['a person\'s',{forward_origin:{type:'user',sender_user:sara,date:1}}],['Nocheh\'s card',{forward_origin:{type:'user',sender_user:nocheh,date:1}}],
+    ['a channel post',{forward_origin:{type:'channel',chat:{id:-100,title:'News'},message_id:3,date:1}}],['the older field',{forward_from:sara}],
+    ['an inline bot\'s',{via_bot:{id:9,is_bot:true,username:'made_up_bot'}}]] as const) {
+    const facts=quoting(target);
+    assert.deepEqual([facts.quote,ownerTyped(facts),classOf(facts),bucketOf(classOf(facts))],['other',false,'quote','person'],label);
+  }
+  // Their own forward of their own earlier message is still theirs.
+  const mine=quoting({forward_origin:{type:'user',sender_user:owner,date:1}});
+  assert.deepEqual([mine.quote,ownerTyped(mine),classOf(mine)],['own',true,'owner_message']);
+  // Inside a pin, read the same way: the owner's pinned reply quoting their own forward is a quote of someone else's.
+  const pinned=live({update_id:1,message:{message_id:8,date:2,chat:group,from:owner,pinned_message:{message_id:7,date:1,chat:group,from:owner,text:'done',
+    quote:{text:'pay',position:0},reply_to_message:{message_id:6,date:1,chat:group,from:owner,forward_origin:{type:'user',sender_user:sara,date:1},text:'pay'}}}});
+  assert.deepEqual([pinned.pinned,pinned.quote,ownerTyped(pinned),classOf(pinned)],['own','other',false,'quote']);
+  // A reply without a quote carries none of its target's words, so it stays the owner's.
+  const reply=live(update({from:owner,text:'done',reply_to_message:{message_id:6,date:1,chat:group,from:owner,forward_origin:{type:'user',sender_user:nocheh,date:1},text:'x'}}));
+  assert.deepEqual([reply.quote,ownerTyped(reply),classOf(reply)],[null,true,'owner_message']);
+});
+
 test('a pin carries the message it pinned: someone else\'s message or forward is never the pinner\'s own words',()=>{
   const chat={id:Number(OWNER),type:'private'};
   const pin=(from:Record<string,unknown>,pinned:Record<string,unknown>,where=group)=>live({update_id:1,message:{message_id:8,date:2,chat:where,from,
@@ -111,24 +134,37 @@ test('a pin carries the message it pinned: someone else\'s message or forward is
   assert.equal(live(update({from:owner,text:'hi'})).pinned,null);
 });
 
-test('a pin or quote of a bot\'s message is told by Telegram\'s own fields, a reply in another chat and an inline bot included',()=>{
-  const nocheh={id:9001,is_bot:true,first_name:'Nocheh'},card={message_id:3,date:1,chat:group,from:nocheh,text:'CARDMARK approve?'};
-  const quote={text:'CARDMARK',position:0};
-  // A pin of a bot's message, Nocheh's included; never a person's, an anonymous admin's (sent through a bot account in the
-  // chat's name), or one Telegram no longer shows.
-  assert.equal(botPinned({from:owner,pinned_message:card}),true);
-  assert.equal(botPinned({from:owner,pinned_message:{...card,from:sara,via_bot:{id:9002,is_bot:true,username:'gifbot'}}}),true,'sent through an inline bot');
-  assert.equal(botPinned({from:owner,pinned_message:{...card,from:sara}}),false);
-  assert.equal(botPinned({from:owner,pinned_message:{...card,from:{id:1087968824,is_bot:true,first_name:'Group'},sender_chat:group}}),false,'an anonymous admin');
-  assert.equal(botPinned({from:owner,pinned_message:{message_id:3,date:0,chat:group}}),false,'a message Telegram no longer shows');
-  assert.equal(botPinned({from:owner,text:'no pin'}),false);
-  // A quote of a bot's message, in this chat or another; a reply that quotes nothing quotes no bot.
-  assert.equal(botQuoted({from:owner,text:'ok',quote,reply_to_message:card}),true);
-  assert.equal(botQuoted({from:owner,text:'ok',quote,external_reply:{origin:{type:'user',sender_user:nocheh,date:1},chat:group,message_id:3}}),true,'in another chat');
-  assert.equal(botQuoted({from:owner,text:'ok',quote,external_reply:{origin:{type:'user',sender_user:sara,date:1}}}),false);
-  assert.equal(botQuoted({from:owner,text:'ok',quote,reply_to_message:{...card,from:sara}}),false);
-  assert.equal(botQuoted({from:owner,text:'ok',reply_to_message:card}),false,'no quote');
-  assert.equal(botQuoted(null),false);
+test('a pin or quote carries Nocheh\'s own words only by the bot\'s own account, compared by equality; another bot\'s is someone else\'s',()=>{
+  const BOT='9001',nocheh={id:Number(BOT),is_bot:true,first_name:'Nocheh'},card={message_id:3,date:1,chat:group,from:nocheh,text:'CARDMARK approve?'};
+  const quote={text:'CARDMARK',position:0},other={id:9002,is_bot:true,first_name:'Release bot'};
+  // A pin of Nocheh's own message, or of a forward of one (the newer and the older field); never another bot's, a message
+  // sent through an inline bot (a person wrote it), a person's, an anonymous admin's, or one Telegram no longer shows.
+  assert.equal(nochehPinned({from:owner,pinned_message:card},BOT),true);
+  assert.equal(nochehPinned({from:owner,pinned_message:{...card,from:owner,forward_origin:{type:'user',sender_user:nocheh,date:1}}},BOT),true,'a forward of Nocheh\'s card');
+  assert.equal(nochehPinned({from:owner,pinned_message:{...card,from:owner,forward_from:nocheh}},BOT),true,'the older forward field');
+  assert.equal(nochehPinned({from:owner,pinned_message:{...card,from:other}},BOT),false,'another bot\'s');
+  assert.equal(nochehPinned({from:owner,pinned_message:{...card,from:owner,forward_origin:{type:'user',sender_user:other,date:1}}},BOT),false,'a forward of another bot\'s');
+  assert.equal(nochehPinned({from:owner,pinned_message:{...card,from:sara,via_bot:{id:Number(BOT),is_bot:true,username:'nocheh_bot'}}},BOT),false,'sent through an inline bot');
+  assert.equal(nochehPinned({from:owner,pinned_message:{...card,from:sara}},BOT),false);
+  assert.equal(nochehPinned({from:owner,pinned_message:{...card,from:{...sara,id:Number(BOT)}}},BOT),false,'a person\'s account, whatever its id');
+  assert.equal(nochehPinned({from:owner,pinned_message:{...card,from:{id:1087968824,is_bot:true,first_name:'Group'},sender_chat:group}},BOT),false,'an anonymous admin');
+  assert.equal(nochehPinned({from:owner,pinned_message:{message_id:3,date:0,chat:group}},BOT),false,'a message Telegram no longer shows');
+  assert.equal(nochehPinned({from:owner,text:'no pin'},BOT),false);
+  // With no known bot (an id the archive holds in another form), no message is Nocheh's by its fields.
+  for(const unknown of [null,'','fixture','-9001',' 9001'])assert.equal(nochehPinned({from:owner,pinned_message:card},unknown),false,String(unknown));
+  // A quote of Nocheh's own words, in this chat, of a forward of them, or in another chat; a reply that quotes nothing
+  // quotes none, and another bot's message is someone else's.
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,reply_to_message:card},BOT),true);
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,reply_to_message:{...card,from:owner,forward_origin:{type:'user',sender_user:nocheh,date:1}}},BOT),true,'the owner\'s forward of a card');
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,external_reply:{origin:{type:'user',sender_user:nocheh,date:1},chat:group,message_id:3}},BOT),true,'in another chat');
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,external_reply:{origin:{type:'user',sender_user:other,date:1},chat:group,message_id:3}},BOT),false);
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,external_reply:{origin:{type:'user',sender_user:sara,date:1}}},BOT),false);
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,reply_to_message:{...card,from:other}},BOT),false,'another bot\'s');
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,reply_to_message:{...card,from:sara,via_bot:{id:9,is_bot:true,username:'gifbot'}}},BOT),false,'an inline bot\'s');
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,reply_to_message:{...card,from:sara}},BOT),false);
+  assert.equal(nochehQuoted({from:owner,text:'ok',reply_to_message:card},BOT),false,'no quote');
+  assert.equal(nochehQuoted({from:owner,text:'ok',quote,reply_to_message:card},null),false,'no known bot');
+  assert.equal(nochehQuoted(null,BOT),false);
 });
 
 test('files and recordings: text read from a file or an audio file is not the sender\'s words; their own voice is',()=>{

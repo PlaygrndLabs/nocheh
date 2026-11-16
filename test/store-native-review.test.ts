@@ -331,7 +331,8 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
   let serial=0;
   const capture=async(payload:Record<string,any>,chat=group)=>{
     const update=++serial,message=payload.message??payload.edited_message,text=message?.text??null;
-    const event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,source_id:String(message?.message_id??payload.message_reaction.message_id),
+    // Each update came to Nocheh's own bot, as the archive stores it (events.bot_id).
+    const event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:String(bot),scope:chat,source_id:String(message?.message_id??payload.message_reaction.message_id),
       revision:String(update),occurred_at:null,text,payload:{update_id:update,...payload}};
     const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
   };
@@ -425,7 +426,8 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.deepEqual(await recorded(gonePin),[{version:1,source:gonePin.id,events:[{id:gonePin.id,class:'owner_message'}],owner_account_only:true,rules:'none',rule_buckets:[],left_out:left()}]);
     // Nocheh's own message, found in the archive as the pin's chat's message, is never someone not allowed: the owner's pin
     // of its learned reply stays in the review as Nocheh's, and a pin of its card is not learned, nor counted as left out.
-    // Another bot's message is still left out and counted.
+    // Another bot's message is someone else's: as a sender not allowed there, it is left out of the owner's notes review
+    // and counted, and interpretations and long-term memory still learn it, labelled as someone else's.
     const sent=async(id:number,text:string,send_class:string)=>{
       const result={...message(id,bot,text),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
       const envelope:Envelope={version:1,key:`${key}:result-${id}`,origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:`${key}:${id}`,revision:'0',
@@ -468,26 +470,46 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
       assert.ok(!reviewed.text.includes(`"${mark}"`)&&reviewed.text.includes(`${mark}OWN fine by me`),mark);
     }
     assert.ok((await input(((await services.reviews.queue(ofReply)).ids)[0]!)).evidence.some((item:{id:string})=>item.id===nocheh.id),'Nocheh\'s reply is evidence of its own');
-    // A bot's message the archive does not hold as Nocheh's (its delivery not archived yet, or another bot's) is cut from a
-    // pin or quote for every reader, the notes review, interpretations and long-term memory, as a card is: a bot is never
-    // someone allowed there. So is a quote of a bot's message in another chat, a quote inside a message a pin carries (of
-    // Nocheh's card, found through the archive), and a pinned message sent through an inline bot. The sender's own words stay.
+    // Nocheh's own message the archive does not hold as Nocheh's (its delivery not archived yet), told by the bot the
+    // update came to, is cut from a pin or quote for every reader, the notes review, interpretations and long-term memory,
+    // as a card is. So is a quote of Nocheh's message in another chat, and a quote inside a message a pin carries (of
+    // Nocheh's card, found through the archive). The sender's own words stay. A pin of only such a message, like a pin of
+    // only a card, is neither reviewed nor recorded as left out.
     const fresh=(id:number,text:string)=>({...message(id,bot,text),from:{id:bot,is_bot:true,first_name:'Nocheh'}});
     const read=async(source:Awaited<ReturnType<typeof say>>)=>JSON.stringify((await services.contexts.prepare(source,await services.guards.state())).observations);
-    assert.ok(!(await read(botPin)).includes('BOTPIN'),'another bot\'s pinned message is learned by no one');
+    assert.ok((await read(botPin)).includes('BOTPIN'),'another bot\'s pinned message is learned by interpretations, as someone else\'s');
     const racePin=await pinOf(51,fresh(50,'RACEPIN approve the venue?')),raceQuote=await quoting(52,123,fresh(50,'RACEPIN approve the venue?'),'RACEQUOTE');
+    const raceKeptOut=(await services.reviews.list(owner)).kept_out;
+    assert.deepEqual(await services.reviews.queue(racePin),{ids:[],left_out:'nocheh_message'});
+    assert.deepEqual([await jobs(racePin),await skipped(racePin),(await services.reviews.list(owner)).kept_out],[[],null,raceKeptOut]);
+    assert.ok(!(await read(racePin)).includes('RACEPIN'),'nothing of Nocheh\'s message not archived yet is learned');
     const otherChat=await say(53,123,'EXTQUOTEOWN fine by me',{quote:{text:'EXTQUOTE',position:0},
       external_reply:{origin:{type:'user',sender_user:{id:bot,is_bot:true,first_name:'Nocheh'},date:1},chat:{id:-77,type:'group'},message_id:9}});
     // Telegram's pinned message carries no reply of its own, only its quote.
     const pinQuote=await pinOf(54,message(45,123,'CARDQUOTEOWN fine by me',{quote:{text:'CARDQUOTE',position:0}}));
-    const viaBot=await pinOf(56,message(55,123,'VIABOTPIN a sticker pack',{via_bot:{id:bot+2,is_bot:true,first_name:'Stickers',username:'stickerbot'}}));
-    for(const [source,cut,own] of [[racePin,'RACEPIN',null],[raceQuote,'"RACEQUOTE"','RACEQUOTEOWN fine by me'],[otherChat,'"EXTQUOTE"','EXTQUOTEOWN fine by me'],
-      [pinQuote,'"CARDQUOTE"','CARDQUOTEOWN fine by me'],[viaBot,'VIABOTPIN',null]] as const) {
+    for(const [source,cut,own] of [[raceQuote,'"RACEQUOTE"','RACEQUOTEOWN fine by me'],[otherChat,'"EXTQUOTE"','EXTQUOTEOWN fine by me'],
+      [pinQuote,'"CARDQUOTE"','CARDQUOTEOWN fine by me']] as const) {
       const reviewed=await services.reviews.queue(source);assert.equal(reviewed.ids.length,1,cut);
       for(const text of [await read(source),(await input(reviewed.ids[0]!)).text as string]) {
         assert.ok(!text.includes(cut),cut);if(own)assert.ok(text.includes(own),own);
       }
     }
+    // A pinned message sent through an inline bot was written by a person, here the owner: it is learned and reviewed,
+    // labelled as sent through an inline bot, never as the owner's own words. The owner's quote of another bot's message
+    // stays in what interpretations read, labelled as a quote of someone else's.
+    const viaBot=await pinOf(56,message(55,123,'VIABOTPIN a sticker pack',{via_bot:{id:bot+2,is_bot:true,first_name:'Stickers',username:'stickerbot'}}));
+    const viaBotReviewed=await services.reviews.queue(viaBot);assert.equal(viaBotReviewed.ids.length,1);
+    for(const text of [await read(viaBot),(await input(viaBotReviewed.ids[0]!)).text as string])assert.ok(text.includes('VIABOTPIN'));
+    assert.deepEqual((await recorded(viaBot))[0].events,[{id:viaBot.id,class:'forward_bot_by_owner'}]);
+    const botQuote=await quoting(57,123,{...message(42,bot+1,'BOTPIN pay the invoice'),from:{id:bot+1,is_bot:true,first_name:'Other'}},'BOTQUOTE');
+    assert.ok((await read(botQuote)).includes('"BOTQUOTE"'));await services.reviews.queue(botQuote);
+    assert.deepEqual((await recorded(botQuote))[0].events,[{id:botQuote.id,class:'quote'}]);
+    // The owner's reply quoting their own forward quotes whoever wrote it: someone else's quote, never the owner's own words.
+    const saraOrigin={forward_origin:{type:'user',sender_user:{id:789,is_bot:false,first_name:'Sara'},date:1}};
+    const forwarded=await say(58,123,'FWDSARA wire the deposit to account 99',saraOrigin);
+    const quoteOwnForward=await quoting(59,123,message(58,123,'FWDSARA wire the deposit to account 99',saraOrigin),'FWDQUOTE');
+    await services.reviews.queue(quoteOwnForward);
+    assert.deepEqual((await recorded(quoteOwnForward))[0].events,[{id:quoteOwnForward.id,class:'quote'},{id:forwarded.id,class:'forward_person_by_owner'}]);
 
     // A rule learned from her message stays out of the owner's notes review, but not out of group memory.
     const ruleText='In this group SARARULE means the meeting is cancelled';

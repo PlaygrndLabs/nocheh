@@ -85,6 +85,27 @@ test('note sources read each message\'s facts from the archive: its author, its 
     assert.deepEqual([pinLearned,pinCard,pinBob,pinNothing,pinByBob].map(id=>pinned.get(id)!.class),['pinned_nocheh','pinned','pinned','pinned','pinned']);
     assert.deepEqual(Object.fromEntries(await sources.pinnedNocheh([pinLearned,pinCard,pinBob,pinNothing,pinByBob,pinOther,typed,ofLearned])),
       {[pinLearned]:'learned',[pinCard]:'unlearned',[pinByBob]:'learned'},'another bot\'s message, Bob\'s, a missing one or no pin at all is not Nocheh\'s');
+    // What a pin or quote carries of Nocheh's own words (carried) is also told by the bot the update came to, the account the
+    // archive stored for it (here 123456), by equality: a pin of Nocheh's message the archive does not hold, or of the
+    // owner's forward of one, is Nocheh's own account's (`bot`), and so is a quote of either. Another bot's message, and
+    // one sent through an inline bot, carries nothing of Nocheh's. With no known bot, the fields tell nothing.
+    const forwardOfNocheh={message_id:++serial,date:1700000000,chat:group,from:owner,forward_origin:{type:'user',sender_user:botUser,date:1},text:'Book the 9am'};
+    const pinForward=await capture({origin:'live',kind:'telegram_update',scope:GP1,text:'',payload:message(group,owner,{pinned_message:forwardOfNocheh})});
+    const quoteForward=await capture({origin:'live',kind:'telegram_update',scope:GP1,text:'done',payload:message(group,owner,{text:'done',quote:{text:'Book',position:0},
+      reply_to_message:forwardOfNocheh})});
+    const viaPin=await capture({origin:'live',kind:'telegram_update',scope:GP1,text:'',payload:message(group,owner,{pinned_message:{message_id:++serial,date:1700000000,
+      chat:group,from:bob,via_bot:botUser,text:'Book the 9am'}})});
+    const otherQuote=await quoting(otherId,otherBot);
+    const unknownPin=await capture({origin:'live',bot_id:'fixture',kind:'telegram_update',scope:GP1,text:'',payload:message(group,owner,{
+      pinned_message:{message_id:learnedId+60,date:1700000000,chat:group,from:botUser,text:'Book the 9am'}})});
+    assert.deepEqual(Object.fromEntries(await sources.carried([pinLearned,pinCard,pinNothing,pinOther,pinForward,quoteForward,viaPin,otherQuote,unknownPin,ofLearned,ofCard,ofNothing,typed])),{
+      [pinLearned]:{pinned:'learned',quote:false,pinned_quote:false},[pinCard]:{pinned:'unlearned',quote:false,pinned_quote:false},
+      [pinNothing]:{pinned:'bot',quote:false,pinned_quote:false},[pinForward]:{pinned:'bot',quote:false,pinned_quote:false},
+      [quoteForward]:{pinned:null,quote:true,pinned_quote:false},[ofLearned]:{pinned:null,quote:true,pinned_quote:false},
+      [ofCard]:{pinned:null,quote:true,pinned_quote:false},[ofNothing]:{pinned:null,quote:true,pinned_quote:false}});
+    // The owner's quote of their own forward of Nocheh's message is a quote of someone else's, never the owner's own words.
+    const quotedForward=(await sources.classesFor([quoteForward])).get(quoteForward)!;
+    assert.deepEqual([quotedForward.facts.quote,quotedForward.class],['other','quote']);
     assert.equal((await sources.factsFor([])).size,0);
   } finally {restore();await Promise.all([stores.archive.end(),stores.derived.end(),stores.control.end()]);}
 });

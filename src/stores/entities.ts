@@ -446,7 +446,8 @@ export class EntityRepository {
    * otherwise reported by the speaker, as something the speaker passed on. The owner's pin of Nocheh's own learned
    * message passes nothing on, since Nocheh's message is learned as Nocheh's, but a claim citing it is never direct. Nor
    * does a pin or quote whose words were cut from everything learned (NoteSourceRepository.carried): Nocheh's card,
-   * notice or reminder, or a bot's message the archive does not hold as Nocheh's; a claim citing one is never direct.
+   * notice or reminder, or Nocheh's own account's message the archive does not hold as Nocheh's (not archived yet, or a
+   * forward of one); a claim citing one is never direct. Another bot's message is someone else's, passed on.
    */
   private async spoken(context:PreparedLearningContext):Promise<(cited:readonly SourceReference[])=>'direct'|'reported'|'inferred'> {
     const batch=context.observations.map(item=>item.source.id),ids=[...new Set([context.source.id,...batch,...context.evidence.map(item=>item.reference.id)])];

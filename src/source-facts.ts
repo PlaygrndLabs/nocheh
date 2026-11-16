@@ -1,5 +1,5 @@
 import {accountIdFor} from './chats.js';
-import {isTelegramAccount} from './chats-telegram.js';
+import {isBotAccount,isTelegramAccount} from './chats-telegram.js';
 import {forwardFacts,type Forward} from './forwarded.js';
 import {sendClassOf,unlearnedSendClasses,type SendClass} from './send-classes.js';
 
@@ -86,10 +86,16 @@ function forwarded(message:unknown):Pick<SourceFacts,'forward'|'forward_name'> {
   const found=forwardFacts(message);
   return {forward:found?.from??null,forward_name:found?.rawName??null};
 }
-/** Whose message a reply quotes: the sender's own only when the message it answers is theirs, by their Telegram id. */
+/**
+ * Whose message a reply quotes: the sender's own only when the message it answers is theirs, by their Telegram id, and
+ * is not a forward of someone else's (forwardFacts, an inline bot's message included), as a pin's message is read
+ * (pinnedOf): the sender's quote of their own forward quotes whoever wrote it. A message in another chat
+ * (external_reply) names only who first sent it (its origin), so one first sent by the sender is theirs.
+ */
 function quoteOf(message:Record<string,any>,sender:string|null):SourceFacts['quote'] {
   if(!record(message.quote))return null;
   const target=record(message.reply_to_message),external=record(record(message.external_reply)?.origin);
+  if(target&&(forwardFacts(target)?.from??'own')!=='own')return 'other';
   const author=target?(record(target.sender_chat)?null:record(target.from)?.id):external?.type==='user'?record(external.sender_user)?.id:null;
   return sender!==null&&(typeof author==='number'||typeof author==='string')&&String(author)===sender?'own':'other';
 }
@@ -111,23 +117,30 @@ function pinnedOf(message:Record<string,any>,sender:string|null):Partial<Pick<So
   return {pinned:'own',...(quote?{quote}:{})};
 }
 
-/** Whether a message Telegram shows inside another is a bot's words, by Telegram's own fields: sent by a bot itself
- *  (from.is_bot), not in a chat's name as an anonymous admin's post is, or sent through an inline bot (via_bot). Nocheh's
- *  own messages are a bot's. No id is read. */
-function botWords(message:Record<string,any>|null):boolean {
-  return !!message&&(record(message.from)?.is_bot===true&&!record(message.sender_chat)||!!record(message.via_bot)||typeof message.via_bot==='string');
+/**
+ * Whether a message Telegram shows inside another carries Nocheh's own words, by Telegram's own fields and the bot the
+ * update came to (`bot`, the archive's events.bot_id): sent by Nocheh's own account, or a forward first sent by it
+ * (forward_origin, or the older forward_from). The account is told by equality alone (isBotAccount), never an id's
+ * shape; with no known bot, no message is. Another bot's message is someone else's and is learned as such, and so is one
+ * sent through an inline bot (via_bot), which a person wrote: neither is Nocheh's.
+ */
+function nochehWords(message:Record<string,any>|null,bot:string|null):boolean {
+  if(!message)return false;
+  const origin=record(message.forward_origin);
+  return isBotAccount(message.from,bot)||origin?.type==='user'&&isBotAccount(origin.sender_user,bot)||!origin&&isBotAccount(message.forward_from,bot);
 }
-/** Whether the message a pin carries is a bot's words (botWords). One Telegram no longer shows (date 0) carries none. */
-export function botPinned(message:unknown):boolean {
+/** Whether the message a pin carries is Nocheh's own words (nochehWords). One Telegram no longer shows (date 0) carries none. */
+export function nochehPinned(message:unknown,bot:string|null):boolean {
   const pinned=record(record(message)?.pinned_message);
-  return !!pinned&&pinned.date!==0&&botWords(pinned);
+  return !!pinned&&pinned.date!==0&&nochehWords(pinned,bot);
 }
-/** Whether a message's quote is of a bot's words: the message it answers in the same chat is a bot's (botWords), or the
- *  one it answers in another chat (external_reply) was first sent by a bot. A message with no quote quotes nothing. */
-export function botQuoted(message:unknown):boolean {
+/** Whether a message's quote is of Nocheh's own words: the message it answers in the same chat carries them
+ *  (nochehWords), or the one it answers in another chat (external_reply) was first sent by Nocheh's own account. A
+ *  message with no quote quotes nothing. */
+export function nochehQuoted(message:unknown,bot:string|null):boolean {
   const found=record(message);if(!found||!record(found.quote))return false;
   const origin=record(record(found.external_reply)?.origin);
-  return botWords(record(found.reply_to_message))||origin?.type==='user'&&record(origin.sender_user)?.is_bot===true;
+  return nochehWords(record(found.reply_to_message),bot)||origin?.type==='user'&&isBotAccount(origin.sender_user,bot);
 }
 
 /** A Telegram Desktop export: its author is the account the archive proved for it (authored_by), never a name. */

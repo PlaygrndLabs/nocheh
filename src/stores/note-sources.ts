@@ -4,7 +4,7 @@ import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
 import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.js';
 import {sourceChat} from '../spaces.js';
-import {botPinned,botQuoted,bucketOf,eventClass,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
+import {bucketOf,eventClass,nochehPinned,nochehQuoted,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
 import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
 import {nameKeys,type Who} from '../task-reminder-text.js';
@@ -157,13 +157,16 @@ export class NoteSourceRepository {
     return this.nochehOf(await this.repliedTo(ids));
   }
   /**
-   * What of the words each of these messages carries is Nocheh's or another bot's (ADR-0256, ADR-0257), from the archive's
-   * relations and Telegram's own fields, never an id's shape or what anything says. `pinned`: the message a pin carries
-   * is Nocheh's own, `learned` or `unlearned` (pinnedNocheh), or else `bot`, a bot's (botPinned): Nocheh's message the
-   * archive does not hold, as when a pin is handled before Nocheh's delivery of that message is archived or its capture
-   * failed, or another bot's. `quote`: its quote is of Nocheh's own message (repliesToNocheh) or of a bot's (botQuoted),
-   * a reply in another chat included. `pinned_quote`: the message a pin carries quotes one of those, as the pin shows it
-   * or as the archive holds that message. Only a message that carries any of these is in the result.
+   * What of the words each of these messages carries is Nocheh's own (ADR-0256, ADR-0257), from the archive's relations,
+   * Telegram's own fields and the bot the message came to (events.bot_id, compared by equality alone: isBotAccount),
+   * never an id's shape or what anything says. `pinned`: the message a pin carries is Nocheh's own, `learned` or
+   * `unlearned` (pinnedNocheh), or else `bot`, Nocheh's own account's words the archive does not hold as Nocheh's message
+   * (nochehPinned): a pin handled before Nocheh's delivery of that message is archived or after its capture failed, or a
+   * pin of a forward of Nocheh's message, which cannot tell a card from a learned reply. `quote`: its quote is of Nocheh's
+   * own words (repliesToNocheh, or nochehQuoted: a forward of Nocheh's message and a reply in another chat included).
+   * `pinned_quote`: the message a pin carries quotes Nocheh's words, as the pin shows it or as the archive holds that
+   * message. Only a message that carries any of these is in the result. Another bot's message, and one sent through an
+   * inline bot, is someone else's: it carries none of these, and is learned labelled as someone else's.
    */
   async carried(ids:readonly string[]):Promise<Map<string,{pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;pinned_quote:boolean}>> {
     const wanted=[...new Set(ids.filter(fullId))],found=new Map<string,{pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;pinned_quote:boolean}>();
@@ -172,21 +175,24 @@ export class NoteSourceRepository {
     const held=[...new Set([...pinnedTo.values()].flat())];
     const [pins,heldMessages,heldReplies]=await Promise.all([this.nochehOf(pinnedTo),this.messages(held),this.repliesToNocheh(held)]);
     for(const id of wanted) {
-      const message=messages.get(id)??null,inner=record(message?.pinned_message);
-      const pinned=pins.get(id)??(botPinned(message)?'bot':null),quote=replies.has(id)||botQuoted(message);
-      const pinnedQuote=!!record(inner?.quote)&&(botQuoted(inner)||(pinnedTo.get(id)??[]).some(target=>heldReplies.has(target)||botQuoted(heldMessages.get(target))));
+      // The bot the pin or reply came to is the one whose own messages it may carry.
+      const {message=null,bot=null}=messages.get(id)??{},inner=record(message?.pinned_message);
+      const pinned=pins.get(id)??(nochehPinned(message,bot)?'bot':null),quote=replies.has(id)||nochehQuoted(message,bot);
+      const pinnedQuote=!!record(inner?.quote)&&(nochehQuoted(inner,bot)||
+        (pinnedTo.get(id)??[]).some(target=>heldReplies.has(target)||nochehQuoted(heldMessages.get(target)?.message,bot)));
       if(pinned||quote||pinnedQuote)found.set(id,{pinned,quote,pinned_quote:pinnedQuote});
     }
     return found;
   }
-  /** The Telegram message each of these archived events holds, as it was received, by id. */
-  private async messages(ids:readonly string[]):Promise<Map<string,Record<string,any>>> {
-    const found=new Map<string,Record<string,any>>();
+  /** The Telegram message each of these archived events holds, as it was received, by id, with the bot it came to as the
+   *  archive stored it (events.bot_id). */
+  private async messages(ids:readonly string[]):Promise<Map<string,{message:Record<string,any>;bot:string|null}>> {
+    const found=new Map<string,{message:Record<string,any>;bot:string|null}>();
     if(!ids.length)return found;
-    for(const row of (await this.stores.archive.query('SELECT id,payload FROM events WHERE id=ANY($1::text[])',[ids])).rows) {
+    for(const row of (await this.stores.archive.query('SELECT id,payload,bot_id FROM events WHERE id=ANY($1::text[])',[ids])).rows) {
       let payload:Record<string,any>|null=null;try{payload=record(JSON.parse((row.payload as Buffer).toString()));}catch{}
       const message=record(payload?.message??payload?.edited_message??payload?.channel_post??payload?.edited_channel_post);
-      if(message)found.set(String(row.id),message);
+      if(message)found.set(String(row.id),{message,bot:typeof row.bot_id==='string'?row.bot_id:null});
     }
     return found;
   }

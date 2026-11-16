@@ -301,7 +301,4 @@ test('Honcho records name their part in fixed words, with names that cannot clos
   // So is anyone else's, naming no one.
   assert.deepEqual(honchoPointer('pinned_nocheh_other'),{source:'Nocheh\'s note',
     text:'someone in this chat pinned one of Nocheh\'s own messages; its text is not kept here'});
-  // A pin of a bot's message the archive does not hold as Nocheh's names only a bot, since its text is not learned.
-  assert.deepEqual(honchoPointer('pinned_bot'),{source:'Nocheh\'s note',text:'the owner pinned a bot\'s message; its text is not kept here'});
-  assert.deepEqual(honchoPointer('pinned_bot_other'),{source:'Nocheh\'s note',text:'someone in this chat pinned a bot\'s message; its text is not kept here'});
 });
