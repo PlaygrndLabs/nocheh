@@ -118,8 +118,12 @@ as reading other chats, an earlier tool result or another person's group
 message counts only when the note copies a run of 32 characters or a
 distinctive token from it, and a forward of the sender's own message is not a
 read in the message the turn answers. Earlier in the session a forward the turn
-was given counts as read, except the owner's forward of their own message, so a
-member's own forward there counts. A note from a turn whose session can't be
+was given counts as read, except the owner's forward of their own message in
+their private chat, the only one written `[Forwarded: your own earlier message]`.
+Anywhere else an own forward is written
+`[Forwarded: the sender's own earlier message]`, a member's in a group and the
+owner's own in a group or in a private answer carried from one alike, and counts
+as a forward read (it fails closed). A note from a turn whose session can't be
 read is never `turn`, and the turn is counted for the owner's notice. The legacy
 memory mode (`NOCHEH_MEMORY_CONTEXT=legacy`) and the non-isolated runtime carry
 no labels, and a non-isolated run could reach the record file

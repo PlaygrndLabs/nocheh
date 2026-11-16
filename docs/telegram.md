@@ -217,13 +217,13 @@ sent before classes existed and the web chat's replies included, is learned
 
 A quote or a pin carries part or all of a message Nocheh sent. The owner's
 quote or pin of a message Nocheh learns, other than its reply about a forward,
-counts as Nocheh's in note labels, and long-term memory keeps that message as
-Nocheh's only: the quote is left out of the owner's record, and the pin leaves a
-fixed note that one of Nocheh's messages was pinned. A quote of a card is
-labelled and kept as a quote of someone else's message. The owner's notes
-review takes a pinned card out of any pin, and the owner's pin of a card leaves
-only that fixed note in long-term memory; a member's pin of a card still carries
-its text into that member's long-term memory, and interpretations read it
+counts as Nocheh's in note labels. Whoever quotes or pins one of Nocheh's
+messages, a card included, what is learned keeps Nocheh's words as Nocheh's
+only: the quote is left out of the record of the message quoting it, and the
+pin leaves a fixed note in long-term memory that one of Nocheh's messages was
+pinned. A quote of a card is labelled as a quote of someone else's message,
+without its words. Every review and interpretation takes a pinned card out of
+the pin, and a pin of a card with nothing else to review is not reviewed
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app

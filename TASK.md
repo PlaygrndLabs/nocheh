@@ -221,7 +221,7 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
 
 Security fixes: where memory comes from (owner, 2026-11-14: "all yes", approving the fixes of
 the prompt-injection review with what each one loses; this is risk 5, "Other people's text
-becomes your private memory"). One pull request in sixteen commits
+becomes your private memory"). One pull request of several commits
 ([ADR-0256](docs/adr/0256-nochehs-own-messages-carry-a-send-class.md),
 [ADR-0257](docs/adr/0257-learned-memory-names-its-source.md)):
 - Send classes: each message Nocheh sends carries a class, set where the send is decided and
@@ -237,7 +237,8 @@ becomes your private memory"). One pull request in sixteen commits
   interpretations and search keep it. A review drops such messages, rules learned from them
   and quotes of them from its context, and cuts such a message out of a pin of it; a later
   grant adds nothing back. A pin of Nocheh's own message is never counted as kept out: one it
-  learns stays in the pin, and a card, notice or reminder is taken out of it. Memory › Assistant
+  learns stays in the pin, and a card, notice or reminder is taken out of it, so a pin of a card
+  with nothing else to review is not reviewed at all. Memory › Assistant
   notes counts what was kept out, and System › Background work shows the message's Memory notes
   step as Done with the reason under it, which its details show under "Note", as for every task
   that ended, not under "Waiting for"
@@ -254,27 +255,34 @@ becomes your private memory"). One pull request in sixteen commits
   the owner's quote or pin of Nocheh's own learned message counts as Nocheh's. A turn's reads
   count a search by meaning as other chats and an earlier read in its session only when the note
   copies from it. A forward of the sender's own message is never a read in the message the turn
-  answers; earlier in the session only the owner's is skipped, so a member's own forward counts.
+  answers; earlier in the session only the owner's in their private chat is skipped, so any other
+  own forward counts, the owner's own in a group or in a private answer carried from one included
+  (it fails closed).
   The model reads fixed words beside the unchanged note, with a fixed sentence on what they
   mean, and `from=nocheh` is not the owner's own words; the owner reads editable words ("Note
   sources on the Notes page") under each note; each recalled note carries its own source. Each
   review carries a records line in fixed words. Every failure to record or look up a label, to
   read a turn's messages, or to read the forwards block, in Hermes or in storage, is counted per
   day into the owner's problem notice, which says what the owner sees while it fails; storage
-  writes a step that worked only after that day's failure of its kind, so steady use writes nothing
+  writes a step that worked only after that day's failure of its kind, so steady use writes nothing,
+  and its failures are lines of their own, apart from Hermes's, so one side working never clears
+  the other's
   ([facts](test/source-facts.test.ts), [labels](test/source-labels.test.ts),
   [route](test/store-note-sources.test.ts), [records](services/hermes/test_note_sources.py),
   [evidence](services/hermes/test_memory_evidence.py), [recall](test/recall-places.test.ts),
-  [notices](services/hermes/test_monitoring.py), [turns](services/hermes/test_turn_process.py),
+  [notices](services/hermes/test_monitoring.py), [notice lines](services/hermes/test_problem_notices.py),
+  [turns](services/hermes/test_turn_process.py),
   [status](test/store-server.test.ts), [health](test/dashboard-system-health.test.mjs)).
 - Long-term memory: one peer that is not a person writes the owner's forwards and files.
   Someone else's forward goes to the owner's own forwards session, with a fixed pointer left
   in the chat; file and audio text is a second record in the same chat session; the owner's
   forwards and files in a group stay in that group's session. Someone else's message the owner
-  pins is kept as a forward is. The owner's quote of Nocheh's own learned message is learned
-  as the owner's words without it, and stays direct in learning; the owner's pin of Nocheh's
-  own message, a card included but not a reply about a forward, leaves only a pointer in the
-  chat where it was pinned. Owner turns read the forwards block apart from the owner's, and
+  pins is kept as a forward is. A quote of any of Nocheh's own messages, by anyone, is learned
+  as the sender's words without it, in learning too, where the owner's quote of a learned one
+  stays direct; a pin of any of Nocheh's own messages, by anyone, leaves only a pointer in the
+  chat where it was pinned, and nothing learned reads a pinned card. In learning the owner's pin
+  of Nocheh's message passes nothing on, so the owner's claims beside it can stay direct; a claim
+  citing it never is. Owner turns read the forwards block apart from the owner's, and
   recall asks it; when that ask fails, recall keeps the other answers and says so, and
   answers stay whole under their headers within 20,000 characters. A claim resting on a
   forward, a file, a pin or someone else's message is reported or inferred, never direct.
@@ -286,11 +294,16 @@ becomes your private memory"). One pull request in sixteen commits
   not-allowed reply, forwarded message, member card, reminder, notes, job report, document,
   photo and voice scenarios. Since the tester's Honcho answers from the deterministic model,
   `own_file_stays_recallable` checks that recall asked the forwards participant, got its answer
-  and that this participant holds the file's text; a check behind the owner's notes reviews
-  waits up to 40 minutes and its timeout names how many reviews still waited; the tester's
-  Honcho takes the real setup's query and input limits
+  and that this participant holds the file's text. Every check that can wait behind the owner's
+  notes reviews (a review, a message's notes and memory steps settling, an import's review steps)
+  waits up to 40 minutes, stops at once when the review it waits for ended uncertain or paused,
+  and on a timeout names how many reviews still waited, or says that count is unknown. The
+  tester's Honcho takes the real setup's query and input limits and asks its model for answers
+  as the real setup does, `json_object` at every dialectic level, from the same settings code
   ([scenarios](tools/acceptance/product_scenarios.py), [brain](test/test_scripted_brain.py),
-  [rehearsal](tools/acceptance/rehearsals/installation-rehearsal.py)).
+  [waits](test/test_product_review_waits.py),
+  [rehearsal](tools/acceptance/rehearsals/installation-rehearsal.py),
+  [tester Honcho](test/test_installation_rehearsal.py)).
 
   Nothing real lost: everything is still learned somewhere, and what leaves the owner's notes
   or the owner's long-term memory block stays in the archive, search and group memory, or in
@@ -305,8 +318,14 @@ becomes your private memory"). One pull request in sixteen commits
   rows, the tester's checks): the build; the unit tests (the same 4 fail); the dashboard tests
   and format check; the store files they touch (note sources, reviews, entities, long-term
   memory, status, forwards); the whole Hermes suite (its two environment-only errors); the
-  tester's Python tests and the Honcho setup test. Pending: the whole store suite after those
-  fixes; the cloud tester's new and affected scenarios, with the changed
+  tester's Python tests and the Honcho setup test. After the third review's fixes (Nocheh's cards
+  out of every pin and quote, a pin of only a card not reviewed, the owner's pin or quote of
+  Nocheh's message passing nothing on in learning, the stores' notice lines apart, one helper for
+  the tests that read a Python file, every review wait, the tester's Honcho answers, where the
+  owner's own forward is skipped): the build; the unit tests (the same 4 fail); the dashboard
+  tests and format check; the notice, note-source and tester Python tests; the Honcho setup tests
+  and the docs test. Pending: the whole store suite after those fixes; the cloud tester's new and
+  affected scenarios, with the changed
   `own_file_stays_recallable` checks and review waits; the private names scan; a live look at a
   labelled note, a forward and a skipped card on the owner's install after merge. Open owner
   question: whether the message of someone not allowed that the owner replies or reacts to
@@ -315,12 +334,11 @@ becomes your private memory"). One pull request in sixteen commits
   learning setting; web-chat replies carry no class; no test covers Hermes counting a missing
   forwards block; a rule's recorded inputs are not checked against who is allowed there, only
   the messages it cites; an earlier read a turn restates in its own words is not counted;
-  Members step 4 must make `canLearn` check the chat is served before the owner's yes; in
-  learning the owner's pin of Nocheh's own message counts as passed on, so no claim beside it is
-  direct; a member's pin of Nocheh's card still carries its text into that member's long-term
-  memory and interpretations; the tester's Honcho does not set the real setup's `json_object`
-  output mode for its dialectic levels; the send-class and security-broker tests still find a
-  Python file through a single `PYTHONPATH` entry. Owner steps: none. Notes from before read
+  Members step 4 must make `canLearn` check the chat is served before the owner's yes; a pin or
+  quote handled before Nocheh's own message is archived is taken as someone else's (it fails
+  closed); the owner's own forward in a group, or in a private answer carried from one, counts as
+  a forward read in later turns of that session, so their notes read as having read a forward (it
+  fails closed). Owner steps: none. Notes from before read
   "Source not recorded" until the next fresh notes; Nocheh's cards and reminders no longer show
   up in what it learned; Memory › Long-term › Re-run says that replacing long-term memory from
   saved messages learns them by today's rules.

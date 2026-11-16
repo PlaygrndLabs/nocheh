@@ -511,8 +511,9 @@ it pinned. A pin of Nocheh's own message is never counted as kept out: a pin of
 a message it learns is reviewed with it, and a pin of its card, notice or
 reminder without it. Nocheh's own cards, notices and reminders are not learned anywhere, so their
 step shows as skipped ("Nocheh's own card, notice or reminder: kept, not
-learned"); when you pin one, long-term memory keeps only a note that you pinned
-one of Nocheh's messages.
+learned"); a pin of one with nothing else to review is not reviewed, and its
+step shows as Done with those words under it. When anyone pins one of Nocheh's
+messages, long-term memory keeps only a note that it was pinned.
 `memory reviews` returns the count as `kept_out`. Each review also stores which
 kinds of messages it read, and whose words the rules it read rest on, so its
 notes can be labelled later.
