@@ -117,6 +117,12 @@ chats it serves.
   upgrade's echo and changes nothing. Nocheh is still in that group, and
   Telegram reports the join from whoever upgraded it. So an upgrade never undoes
   the owner's Off, and a pending group's own leave goes ahead under its new id.
+  One exception: the owner's add is a real add to an off group that is fresh,
+  first recorded at most 10 minutes before the add was taken in, with no add
+  and no state change on record. That is a group whose own add has not been
+  recorded yet, so nothing says Nocheh is in it. It turns on and gets its card.
+  A group long known off, one carried off from 2b-1 and one the owner turned
+  off are not fresh, and anyone else's add to a fresh group is still an echo.
 - **Leaving and removal.** Nocheh leaving on its own makes the group `left`.
   Anyone removing it makes the group `removed`.
 - **The record.** Each add or removal writes one row in `chat_state_events`,
@@ -127,7 +133,9 @@ chats it serves.
   outcome, tries and notice. It holds no names and no message text. An add also
   writes who added Nocheh and when on the chat row (`added_by_account_id`,
   `added_by_role`, `added_at`, `add_event`).
-- **An upgrade.** `migrate()` never changes a group's state. When both
+- **An upgrade.** `migrate()` moves ids. It changes a state only when the fold
+  moves an owner add, and when the two chats stay apart and the new one took
+  the upgrade's echo (below). When both
   Telegram ids already have chats, because the new supergroup's update came
   first, a live update taken in after adoption began folds the new chat into
   the old one if only its own add ever served it: it is not on, or it is on only
@@ -138,10 +146,26 @@ chats it serves.
   meanwhile. Its ids, memberships, topics (except one whose key the old chat
   has) and add records move to the old chat, which keeps its state and its add.
   An owner add folded into an old chat Nocheh was not in (left, removed or
-  archived) turns it on: the owner added it again. Into an old chat that is
-  off, pending or could not be left, the add is the upgrade's echo: the stage
-  finds the moved card or leave superseded, and a pending group's own leave
-  goes ahead. Otherwise the two stay apart, as before.
+  archived), or not known to be in (off and fresh, measured from the folded
+  add's time), turns it on: the owner added it, and the moved card goes. Into
+  an old chat that is otherwise off, pending or could not be left, the add is
+  the upgrade's echo: the stage finds the moved card or leave superseded, and a
+  pending group's own leave goes ahead.
+- **Two chats that stay apart** after an upgrade still keep the echo rule
+  (`apart()`). The new chat took the upgrade's echo when it is on only from its
+  own owner add, with no switch or system change since, taken in within 10
+  minutes of the upgrade message, and the old chat is off, pending or could not
+  be left, and not fresh. The new chat then takes the old chat's state and who
+  added Nocheh, as a system change, so the dashboard says the same of both. Its
+  card, if it still waits, ends unsent (its outcome kept, or `superseded`), and
+  its project stays with it, so the project still names a chat. Off or could
+  not be left: the old chat keeps its state too, and this applies even after
+  the card went. Pending: the old chat's waiting leave moves to the new chat,
+  due within 30 s, at the only id Telegram still knows, and the old chat
+  becomes `left`. Not once the new chat's card was sent: Nocheh would leave a
+  group the card said it is on in, with no word to the owner. The new chat
+  then stays on, and the old chat's leave stays at the basic group's id, which
+  Telegram no longer knows, until it ends as could not leave (below).
 
 ## The stage
 
@@ -156,7 +180,13 @@ chats it serves.
   `telegram.leave` for the group's current Telegram id. Left, or already gone,
   makes the group `left`. A Telegram refusal makes it `could_not_leave`: silent,
   and the owner can still turn it on or off. Any other answer, or an error, is
-  tried again after 1, 2, 4 and up to 60 minutes, with no limit.
+  tried again after 1, 2, 4 and up to 60 minutes, with no limit, with one
+  exception. Telegram answering that it upgraded the group
+  (`telegram_chat_migrated`) on a try after six failed ones, over an hour of
+  waits, ends the leave as `could_not_leave`, as a refusal does: the owner gets
+  the switch, and a member's or hidden adder's add gets its note. Storage then
+  has only the basic group's dead id, because the upgrade messages never came
+  or the two chats stayed apart, and would try it forever.
 - **Notes to the owner.** After a leave, only an add by a member or by a hidden
   adder gets a note in the owner's private chat: `left_member`,
   `left_anonymous` or `could_not_leave`. A stranger's add gets only its record.
@@ -175,7 +205,13 @@ chats it serves.
   and puts the group in it. The card then says the group is on, in its new
   project, with one row of up to three "Move to …" buttons for the active
   projects updated last, and a row with No project and Turn off. A bot that
-  refuses the buttons gets the card as text alone.
+  refuses the buttons gets the card as text alone. A card whose send did not
+  go is tried again only while the group is still on from that add and in the
+  card's project. Otherwise no card goes, and the row ends `carded` with
+  notice `none`, so a card a lost answer did deliver still acts on the group
+  as it is now. When that leaves the card's project active with no group in
+  it, the project is archived in an owner command of its own
+  (`chat-add-archive:` and the add's event id).
 - **A press** on the card counts only when the owner presses it in the owner's
   private chat; anyone else is told only the owner can do this. Each press is
   its own owner command, with the operation `chat-card:` and the press's own
@@ -226,11 +262,22 @@ chats it serves.
   `invalid_conversation_kind`, `invalid_conversation_state`). The dashboard
   reads every group that is on this way, page by page, and uses later pages
   only when they were read after the first page's current cursor, so the list
-  is never stitched from pages read at different times. The import page offers
-  all of them and says "Some groups may be missing" when it cannot read the
-  whole list. Its share confirm asks whenever a chat is mapped anywhere but the
-  owner's private chat, as the server checks it. Refresh group names is
-  available whenever any group is on, or when that list cannot be read.
+  is never stitched from pages read at different times. A read again that
+  fails keeps the groups read before, but the list then counts as not whole.
+  The import page offers all of them and says "Some groups may be missing"
+  whenever the list is not whole: it could not read it all, or its last read
+  failed, until a read succeeds. Its share confirm asks whenever a chat is
+  mapped anywhere but the owner's private chat, as the server checks it.
+  Refresh group names is available whenever any group is on, or when that list
+  cannot be read.
+- Each press of Refresh group names (`POST /v1/telegram/chats/refresh`) asks
+  Telegram about at most 50 of the groups Nocheh is on in: those never
+  refreshed first, then those refreshed longest ago, ties by id. It answers
+  `{chats, remaining}`. `remaining` counts the groups that press did not ask
+  and that were not refreshed in the last hour, in groups (an upgraded group's
+  two answers count once). It goes down press by press and is 0 once every
+  group was checked within the hour. The toast then says "M more haven't been
+  checked in the last hour. Press again to check more."
 
 ## The bot and the tools
 
@@ -238,7 +285,10 @@ chats it serves.
   only a group, supergroup or channel that is neither the owner's chat nor on in
   the app's served list, read again when that list says it is not on; a list it
   cannot read leaves nothing. Its outbound check allows only `leaveChat` for
-  that chat. A final answer is kept as a receipt by id; a try whose answer never
+  that chat. A final answer is kept as a receipt by the add's id and the
+  Telegram id asked, so a refusal kept at a basic group's id never answers for
+  the supergroup it became: an upgraded group's new id is asked on its own,
+  once the app confirms it is that group's current id. A try whose answer never
   came keeps none and is tried again, since leaving twice changes nothing.
 - Once it holds the send lock, after any receipt replay and right before
   `leaveChat` goes, the bot reads the served list once more: a chat now on, or
@@ -254,8 +304,15 @@ chats it serves.
   as "chat not found" or "not a member") counts as left. Its send record keeps
   the code `already_left`, shown as "Nocheh was no longer in the chat", and is
   not a problem. A failed or uncertain leave try followed within 15 minutes by a
-  sent or `already_left` try of the same leave shows as sent on a retry. A
-  refusal keeps its own code and stays a problem.
+  sent or `already_left` try of the same leave, to the same chat, is recovered.
+  A failed or uncertain leave try is also recovered at any time, whatever its
+  chat or code, once the stage settles that add's leave as `left`: Nocheh's own
+  status update may have said it left before the try's answer came, or the
+  leave went at an upgraded group's new id. A recovered leave reads "…; Nocheh
+  left" instead of "sent on a retry". A refusal keeps its own code and stays a
+  problem unless the stage later settles that same add's leave as left. A
+  leave that ended `could_not_leave` or `superseded`, or still waits, recovers
+  nothing.
 - The poller asks Telegram for exactly the updates Nocheh reads: messages,
   channel posts and their edits, button presses, reactions and reaction counts,
   the bot's own and other people's membership changes, and join requests. It
@@ -296,8 +353,9 @@ chats it serves.
   explicit list of update kinds, and `/health` shows what `getMe` allows.
 - ADR-0238: a send record has the kind `leave`, shown as "Leave a group". A
   leave that found Nocheh gone keeps the harmless code `already_left`, and a
-  later try of the same leave that went or found Nocheh gone recovers an
-  earlier failed or uncertain try.
+  later try of the same leave that went or found Nocheh gone, or the stage
+  settling that leave as left, recovers an earlier failed or uncertain try. A
+  recovered leave reads "Nocheh left", not "sent on a retry".
 </amendments>
 
 <alternatives>
@@ -333,9 +391,10 @@ chats it serves.
 - The bot asks the app before each leave, so `nocheh-app` and `nocheh-telegram`
   run the same build. A bot newer than the app gets no answer from the new
   route, and its leaves wait (`leave_check_unavailable`) until both match.
-- Each switch, each card's project and each press on a card (Move, No project
-  or Turn off) is its own owner command, with one guard epoch. Adds, removals
-  and leaves move none.
+- Each switch, each card's project, each press on a card (Move, No project
+  or Turn off) and each archive of a card's project that a card tried again
+  left with no group is its own owner command, with one guard epoch. Adds,
+  removals and leaves move none.
 - Rollback to 2b-1 needs `TELEGRAM_GROUP_IDS` written again from the active
   groups, and every `TELEGRAM_GROUP_ACCESS` key not in it removed, since 2b-1
   refuses to start otherwise ([deploy](../deploy.md#roll-back-to-step-2b-1)).
@@ -348,18 +407,47 @@ chats it serves.
     needs a live check.
   - A leave is retried without limit while the bot cannot be reached, refuses
     the request (for example on a stale served list) or cannot get the app's
-    answer. The group stays pending and silent meanwhile.
+    answer. The group stays pending and silent meanwhile. Only Telegram's
+    upgrade answer has a limit, of over an hour.
+  - That limit counts the leave's tries, not upgrade answers in a row: no
+    column keeps the last answer. A leave that failed for other reasons for
+    over an hour ends as could not leave at its first upgrade answer. So does
+    one whose try runs, after a long outage, just before the late upgrade
+    messages are recorded: the group then reads Couldn't leave instead of
+    Left.
   - A leave Telegram answers by saying it upgraded the group keeps the send
-    code `rejected`, so Sent to apps counts it as a problem, though the stage
-    leaves the group again under its new id.
+    code `rejected`. Sent to apps counts it as a problem only until the stage
+    settles that leave as left, for example at the group's new id. When the
+    new id never reaches storage, or the two chats stayed apart after the card
+    was sent, every try keeps a `rejected` record until the leave ends as could
+    not leave after over an hour, and those records stay problems.
   - The caps are counted without a lock. Two stage runs at once could each send
     one note past a cap; only the app's storage worker runs the stage.
   - The card is rebuilt from the group's and the project's names when a press
     edits it, since the add record holds no names; a rename in between shows.
   - The fold runs only for a live update taken in after adoption began. A
     refresh, an import, history and a split from before step 2b keep two
-    chats, and so does an upgrade whose new chat already has a project answer,
-    for example when the upgrade messages come after the card made its project.
+    chats. So does an upgrade whose new chat already has a project answer, for
+    example when the upgrade messages come after the card made its project;
+    the new chat then takes the old one's echo by the stay-apart rule.
+  - A card already sent can say Nocheh is on in a group that the stay-apart
+    rule then makes Off or Couldn't leave. Its buttons still work.
+  - Pending with the card sent: Nocheh stays on in a group a stranger added,
+    as the card said. The old chat reads Leaving, then Couldn't leave after
+    over an hour, and a member's or hidden adder's add then gets a "couldn't
+    leave" note about it.
+  - The stay-apart rule's 10 minutes compare the two updates' capture times. An
+    upgrade message the capture sweep records hours late can still turn Off a
+    new chat that has been on since its card.
+  - Only the owner's add counts in a fresh group. A stranger's add to a fresh
+    off group whose own add is recorded late is still an echo: the group stays
+    off and silent and is never left.
+  - Whether a group is fresh can be wrong both ways. A group Nocheh was
+    silently in, which the owner upgrades within 10 minutes of its first
+    recorded message, turns on; so does a group a reset restored, upgraded by
+    the owner within 10 minutes of the restore. A group recorded off long ago,
+    which the owner adds again and upgrades while that add is still unrecorded,
+    stays off.
   - A rollback to a 2b-1 build without the fix that records each update once,
     then an upgrade again: updates that build took in but never marked recorded
     are after the boundary, so the next 2b-2 start may act on their adds and
@@ -376,14 +464,20 @@ chats it serves.
 - Checks: reading the bot's status
   ([facts](../../test/chats-telegram-updates.test.ts)); adds, removals, order,
   upgrades and folds, the owner's switch and the start, history before the
-  boundary, upgrade echoes in both orders run through the stage, and a fold
-  after the card made its project
+  boundary, upgrade echoes in both orders run through the stage, the owner's
+  add to a fresh group in both orders and to one recorded long ago, a fold
+  after the card made its project, and the stay-apart echo for Off, Couldn't
+  leave and pending in both orders, pending with the card sent, and a new chat
+  the owner switched or added at another time
   ([adoption](../../test/store-chat-adoption.test.ts)); the stage's leaves,
-  the app's last check before a leave, notes, caps outside which a removal's
-  line goes, the card and each press as its own command
+  the app's last check before a leave, a leave Telegram still answers as
+  upgraded after over an hour, notes, caps outside which a removal's line
+  goes, the card, a card tried again after its group changed, and each press
+  as its own command
   ([stage](../../test/store-chat-adds.test.ts),
   [buttons](../../test/chat-adds.test.ts),
-  [route](../../test/store-server.test.ts)); leave send records
+  [route](../../test/store-server.test.ts)); leave send records, cleared once
+  the leave settled as left, a refusal at an old id included
   ([records](../../test/store-chat-sends.test.ts),
   [bot records](../../services/telegram/test_sends.py),
   [labels](../../test/dashboard-system-health.test.mjs)); the policy, its
@@ -397,7 +491,8 @@ chats it serves.
   [portability](../../test/store-owner-portability.test.ts),
   [reset](../../test/store-reset-setup.test.ts),
   [reset tools](../../services/hermes/test_reset_preservation.py)); the bot,
-  with the served list and the app asked again inside the send lock
+  with the served list and the app asked again inside the send lock, and a
+  refused leave asked again at an upgraded group's new id
   ([leave](../../services/telegram/test_leave.py),
   [card buttons](../../services/telegram/test_approval_cards.py),
   [health](../../services/telegram/test_health.py),
@@ -406,7 +501,10 @@ chats it serves.
   ([configuration](../../services/hermes/test_configuration.py),
   [imports](../../services/hermes/test_import_jobs.py),
   [Hermes](../../services/hermes/test_scopes.py)); the conversations filters
-  ([supervision](../../test/store-owner-supervision.test.ts)); the dashboard
+  ([supervision](../../test/store-owner-supervision.test.ts)); a refresh of
+  50 groups at a time, oldest first, with the count left
+  ([refresh](../../test/store-telegram-chats.test.ts)); the dashboard, with a
+  failed read again that is not whole and the refresh's toasts
   ([model](../../test/dashboard-chats-model.test.mjs),
   [served groups](../../test/dashboard-chat-directory.test.mjs),
   [pages](../../test/dashboard-pages.browser.mjs)); and the full tester's

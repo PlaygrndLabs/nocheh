@@ -27,19 +27,29 @@ while its chat record says so.
   the record only. The owner's add turns it on at once; anyone else's add, a hidden adder's
   included, makes it `pending`, and Nocheh leaves. An add to a group that is on changes
   nothing, and an upgrade is never an add: any add, the owner's too, to an off, pending or
-  could-not-leave group within 10 minutes of its upgrade is the upgrade's echo. Nocheh leaving
-  makes the group `left`; a removal makes it `removed`. An upgrade's new supergroup folds into
-  the old chat when only its own add served it and it has no project answer; an owner add
-  folded in turns on only an old chat Nocheh was not in. Each add or removal keeps a
-  content-free record ([adoption](test/store-chat-adoption.test.ts)).
+  could-not-leave group within 10 minutes of its upgrade is the upgrade's echo, except the
+  owner's add to an off group first recorded in those 10 minutes with no add or state change on
+  record, whose own add was not recorded yet. Nocheh leaving makes the group `left`; a removal
+  makes it `removed`. An upgrade's new supergroup folds into the old chat when only its own add
+  served it and it has no project answer; an owner add folded in turns on only an old chat
+  Nocheh was not in, or an off one first recorded just then in the same way. When the two stay
+  apart, a new chat on only from the owner's add within 10 minutes of the upgrade takes the old
+  chat's Off, Couldn't leave or Leaving and who added Nocheh, and its waiting card never goes; a
+  Leaving group's leave moves to the new id and the old chat becomes `left`, unless the new
+  chat's card was already sent. Each add or removal keeps a content-free record
+  ([adoption](test/store-chat-adoption.test.ts)).
 - The add stage: the storage worker's `adds` stage leaves 30 s after someone else's add,
   retrying after 1, 2, 4 and up to 60 minutes with no limit, and settles `left` or
-  `could_not_leave`. It tells the owner of a member's or a hidden adder's add, at most once per
-  group and ten times in all a day; a stranger's add gets no note. A removal from a group that
-  was on gets one line, outside those caps. 30 s after the owner's add, a group with no project
-  answer joins a new project named after the group, and the owner's card offers Move to the
-  three projects updated last, No project, and Turn off; only the owner's press in the private
-  chat acts, and each press is its own owner command. The texts are the owner's, under
+  `could_not_leave`; a leave Telegram still answers with the group's upgrade after six tries,
+  over an hour, settles `could_not_leave`. It tells the owner of a member's or a hidden adder's
+  add, at most once per group and ten times in all a day; a stranger's add gets no note. A
+  removal from a group that was on gets one line, outside those caps. 30 s after the owner's
+  add, a group with no project answer joins a new project named after the group, and the
+  owner's card offers Move to the three projects updated last, No project, and Turn off; only
+  the owner's press in the private chat acts, and each press is its own owner command. A card
+  whose send did not go is tried again only while the group is still on from that add and in
+  its project; otherwise it ends with no card, and a project it left empty is archived in an
+  owner command of its own. The texts are the owner's, under
   `telegram.chat_adds` ([stage](test/store-chat-adds.test.ts),
   [card and backoff](test/chat-adds.test.ts)).
 - The owner's switch: `POST /v1/chats/state` turns a group Nocheh is in on or off in one owner
@@ -50,15 +60,20 @@ while its chat record says so.
   Settings › Telegram has no group list; the import page offers every group that is on, read
   through `/v1/conversations` filtered by `kind` and `state` before paging; System › Sent to
   apps names a leave "Leave a group", and a leave that found Nocheh gone (`already_left`) is not
-  a problem ([model](test/dashboard-chats-model.test.mjs),
+  a problem, nor is any failed or uncertain try of a leave the stage settled as left, with no
+  time window ("Nocheh left"). A served list whose last read failed is not whole, so the import
+  page says some groups may be missing. Refresh group names asks at most 50 groups a press,
+  those checked longest ago first, and says how many were not checked in the last hour
+  ([model](test/dashboard-chats-model.test.mjs),
   [served groups](test/dashboard-chat-directory.test.mjs),
   [filters](test/store-owner-supervision.test.ts), [records](test/store-chat-sends.test.ts),
-  [pages](test/dashboard-pages.browser.mjs)).
+  [refresh](test/store-telegram-chats.test.ts), [pages](test/dashboard-pages.browser.mjs)).
 - The bot and the tools: nocheh-telegram leaves a group through `/internal/telegram/leave`,
   which refuses the owner's chat, a positive id and any chat that is on. Inside its send lock,
   right before the leave, it reads the served list again and asks the app
   (`POST /internal/chats/leave`) whether the group is still pending from that add
-  ([route](test/store-server.test.ts)). It asks Telegram only for the update kinds Nocheh
+  ([route](test/store-server.test.ts)). It keeps a leave's answer by add and Telegram id, so an
+  upgraded group's new id is asked on its own. It asks Telegram only for the update kinds Nocheh
   reads, sends the card's buttons in rows, and shows the bot's `getMe` abilities in its health ([leave](services/telegram/test_leave.py),
   [service](services/telegram/test_service.py), [health](services/telegram/test_health.py),
   [cards](services/telegram/test_approval_cards.py)). `configure-telegram --group-id` is
@@ -91,6 +106,16 @@ while its chat record says so.
   On the merged branch: the build; node unit tests (410: 355 pass, 51 skipped, and
   only the 4 workflow tests that also fail on main fail); the dashboard build and format check;
   Python Telegram (145) and settings (11).
+  Second review fixes, four branches merged here (2026-11-16): the owner's add to a group first
+  recorded during its upgrade, the stay-apart echo, a card tried again only while still true, a
+  leave Telegram keeps answering as upgraded, leave receipts by add and Telegram id, a leave try
+  cleared once the leave settled as left, Refresh group names 50 at a time, and a failed read
+  again of the served list. Each fix's store tests passed on its own branch: chat adoption
+  (10), chat adds (7), chat sends (2), Telegram chats (2), server (2) and the other chat files;
+  the browser tests on the dashboard branch (52: 49 pass, and the 3 that also fail on main).
+  On the merged branch: the build; node unit tests (411: 356 pass, 51 skipped, and only the 4
+  workflow tests that also fail on main fail); the dashboard build and format check; Python
+  Telegram (146).
   Pending:
   - The whole full tester on images. It has not run on this step.
   - The store suite and the browser tests on the merged branch.

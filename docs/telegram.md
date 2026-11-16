@@ -166,7 +166,10 @@ cause a leave, a line, a card or a change of state.
   shows the answer and has no buttons. Move and No project archive the card's
   project once no group is in it. A card that kept its buttons, because the
   edit failed, still works: each press acts again on the group as it is then.
-  A group that already has a project answer keeps it and gets no card.
+  A group that already has a project answer keeps it and gets no card. A card
+  that could not be sent is tried again only while the group is still on from
+  your add and in that project; otherwise it never goes, and a project it left
+  with no group is archived.
 - **Anyone else's add.** A member, a stranger, another bot, an admin who
   remains anonymous or a channel: the group reads Leaving, Nocheh stays silent
   there, and about 30 s later it leaves. When the adder is a person you allowed
@@ -177,7 +180,9 @@ cause a leave, a line, a card or a change of state.
   leave, the group reads Couldn’t leave and Nocheh stays silent there; the
   line, when there is one, says so. A leave Telegram does not answer is tried
   again after 1, 2, 4 and up to 60 minutes, with no limit, and the group stays
-  silent meanwhile.
+  silent meanwhile. One exception: a leave Telegram still answers with the
+  group's upgrade after over an hour of tries ends as Couldn’t leave, like a
+  refusal.
 - **Caps.** You get at most one such line per group and ten such lines in all
   in 24 hours. A line over a cap is not sent.
 - **Adds that change nothing.** An add to a group that is on changes nothing. A
@@ -190,12 +195,21 @@ cause a leave, a line, a card or a change of state.
   the new supergroup, from whoever upgraded it. Within 10 minutes of the
   upgrade, that join to a group that is Off, Leaving or Couldn’t leave is an
   echo, even when it comes from you: the group keeps its state, and a group
-  that is leaving is left under its new ID. The new supergroup's own add can
-  also arrive before the upgrade messages. It then folds into the old chat when
-  only its own add served it and it has no project yet, so the group keeps its
-  state, project and people. Your add folded in turns on only a group Nocheh
-  was not in (Left, Removed or Imported history). Once the card made the new
-  chat's project, the two stay apart.
+  that is leaving is left under its new ID. Your own join still counts as an
+  add in an Off group Nocheh had only just seen, in those 10 minutes, with no
+  add on record: Nocheh's own add there was not recorded yet. The new
+  supergroup's own add can also arrive before the upgrade messages. It then
+  folds into the old chat when only its own add served it and it has no
+  project yet, so the group keeps its state, project and people. Your add
+  folded in turns on only a group Nocheh was not in (Left, Removed or Imported
+  history) or had only just seen. Once the card made the new chat's project,
+  the two stay apart, but the new one still takes the old one's Off, Couldn’t
+  leave or Leaving, and who added Nocheh, when it is on only from your add
+  within 10 minutes of the upgrade. Its card, if it had not gone yet, never
+  goes. A Leaving group's leave moves to the new ID. Once the card told you
+  Nocheh is on, Nocheh never leaves a group someone else added: the new chat
+  stays on, and the old one reads Leaving, then Couldn’t leave after over an
+  hour. A leave whose new ID never reaches Nocheh ends the same way.
 - **A reset.** A data reset that keeps your setup brings back a group Nocheh
   was still leaving, with its topics, as Off. Nocheh stays in it, silent, until
   you turn it on or remove Nocheh in Telegram.
@@ -214,7 +228,9 @@ short ID.
 chat that is on. Right before it leaves, it reads the served list again and
 asks the app (`POST /internal/chats/leave`) whether the group is still waiting
 to be left from that add, so a group you turned on or off, or that was added
-again, meanwhile is not left. Its `/health` shows what `getMe` says the bot may
+again, meanwhile is not left. It keeps Telegram's answer to a leave for each
+add and Telegram ID, so an upgraded group's new ID is asked on its own. Its
+`/health` shows what `getMe` says the bot may
 do: `can_join_groups`, `can_read_all_group_messages`, `supports_inline_queries`
 and `can_connect_to_business`.
 
@@ -256,7 +272,12 @@ an unchanged edit, an expired button answer and a reaction the chat does not
 allow are listed but never counted as problems. So is a leave Telegram answers
 as gone (any 403, or "chat not found", "not a member" and the like): it reads
 "Nocheh was no longer in the chat", and it also clears an earlier failed or
-uncertain try of the same leave. A leave Telegram refuses stays a problem. **Keep
+uncertain try of the same leave within 15 minutes. A failed or uncertain leave
+try is also cleared once Nocheh leaves that group for the same add, at any
+time, even when no later try went: Nocheh's own status update said it left,
+or it left at the group's new ID after an upgrade. A cleared leave reads
+"Nocheh left". A leave Telegram refuses stays a problem, unless Nocheh later
+leaves that group for the same add. **Keep
 delivery logs** in Settings › Privacy & data removes old records too. The
 dashboard's own mini app menu button call does not pass the bot yet, so it has
 no record ([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md)).
