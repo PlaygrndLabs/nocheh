@@ -5,7 +5,7 @@
  * lookup that fails is asked again a little later: until one answers, the chat is not settled, which is not the same
  * as unknown.
  */
-import {useEffect, useRef, useSyncExternalStore} from 'react';
+import {useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {apiGet} from './api';
 import {useResource} from './resource';
 import {appIds, groupOf, parentOf, type Chat, type Directory} from './chats-model';
@@ -105,5 +105,57 @@ export function useChatDirectory(interval = 30000) {
     groupOf: (space: string | null | undefined) => groupOf(find(space), find),
     /** A topic's chat. */
     parentOf: (space: string | null | undefined) => parentOf(find(space)),
+  };
+}
+
+/** The groups Nocheh is on in (ADR-0253): the server filters before paging, so its pages hold only them. */
+const servedPath = '/conversations?kind=group&state=active&limit=100';
+/** Pages read after the first: enough for any owner's groups, and never an endless loop. */
+const servedPages = 20;
+
+/** Reads up to `pages` pages of a /conversations list after `cursor`; complete when its last page said so. */
+export async function readPages(
+  get: (path: string) => Promise<Directory | null>,
+  path: string,
+  cursor: string,
+  pages: number,
+): Promise<{items: Chat[]; complete: boolean}> {
+  const items: Chat[] = [];
+  let after: string | null = cursor;
+  for (let page = 0; after && page < pages; page++) {
+    const next: Directory | null = await get(path + '&after=' + encodeURIComponent(after));
+    items.push(...(next?.items ?? []));
+    after = next?.next_cursor ?? null;
+  }
+  return {items, complete: !after};
+}
+
+/**
+ * Every group Nocheh is on in, whatever page of the whole directory each falls on: the groups the import page offers
+ * and the name refresh asks Telegram about. The first page is a shared resource; the pages after it, rare, are read
+ * again each time it is.
+ */
+export function useServedGroups(interval = 60000) {
+  const first = useResource<Directory>(servedPath, interval);
+  const cursor = first.data?.next_cursor ?? null;
+  const [rest, setRest] = useState<{items: Chat[]; error: string}>({items: [], error: ''});
+  useEffect(() => {
+    if (!cursor) return;
+    let live = true;
+    readPages(path => apiGet<Directory>(path), servedPath, cursor, servedPages).then(
+      read => live && setRest({items: read.items, error: ''}),
+      (error: unknown) =>
+        live &&
+        setRest(current => ({...current, error: error instanceof Error ? error.message : 'Request unavailable'})),
+    );
+    return () => {
+      live = false;
+    };
+  }, [cursor, first.receivedAt]);
+  const items = first.data?.items ?? [];
+  const seen = new Set(items.map(chat => chat.space_id));
+  return {
+    items: cursor ? [...items, ...rest.items.filter(chat => !seen.has(chat.space_id))] : items,
+    error: first.error || (cursor ? rest.error : ''),
   };
 }

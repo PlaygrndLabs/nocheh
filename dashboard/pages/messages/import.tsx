@@ -6,7 +6,7 @@
 import {useRef, useState} from 'react';
 import {FileArchive, FolderOpen, History, Upload} from 'lucide-react';
 import {apiBase, apiPost, authedFetch} from '../../lib/api';
-import {useChatDirectory} from '../../lib/chat-directory';
+import {useServedGroups} from '../../lib/chat-directory';
 import {currentAppId, isOn} from '../../lib/chats-model';
 import {useParam} from '../../lib/navigation';
 import {useResource, refreshResources} from '../../lib/resource';
@@ -264,7 +264,7 @@ function FilePick({
 
 function ImportReview({job}: {job: ImportJob}) {
   const settings = useSettings();
-  const directory = useChatDirectory(60000);
+  const served = useServedGroups(60000);
   const chatName = useChatNames();
   const feedback = useFeedback();
   const resume = isResume(job);
@@ -276,11 +276,15 @@ function ImportReview({job}: {job: ImportJob}) {
   const status = importStatus(job);
   const editable = job.state === 'ready' && !resume;
   const owner = settings.saved('TELEGRAM_OWNER_ID');
-  // History can be shared with a group Nocheh is on in, named by its current Telegram id as the import maps chats.
-  const groups = directory.items
-    .filter(chat => chat.kind === 'group' && isOn(chat))
-    .map(chat => currentAppId(chat))
-    .filter((id): id is string => !!id);
+  // History can be shared with a group Nocheh is on in, any of them, named by its current Telegram id as the import
+  // maps chats.
+  const targets = new Map<string, string | null>();
+  for (const chat of served.items) {
+    const id = currentAppId(chat);
+    if (id && chat.kind === 'group' && isOn(chat)) targets.set(id, chat.name?.trim() || null);
+  }
+  const groups = [...targets.keys()];
+  const groupName = (id: string) => targets.get(id) ?? chatName(id);
   const chosenMapping = resume ? (job.mapping ?? {}) : mapping;
   const chosenLearn = resume ? (job.review_approved ?? false) : learn;
   const shared = Object.values(chosenMapping).some(target => groups.includes(target));
@@ -402,7 +406,7 @@ function ImportReview({job}: {job: ImportJob}) {
                     const match = matchingGroup(chat, groups);
                     return editable && match && chosenMapping[chat.id] !== match ? (
                       <span className="block text-xs text-warn">
-                        This is {chatName(match)}. Share it with that chat so messages already saved aren’t kept twice.
+                        This is {groupName(match)}. Share it with that chat so messages already saved aren’t kept twice.
                       </span>
                     ) : null;
                   })()}
@@ -423,7 +427,7 @@ function ImportReview({job}: {job: ImportJob}) {
                   {owner && <option value={owner}>Add to your private chat with the assistant</option>}
                   {groups.map(group => (
                     <option key={group} value={group}>
-                      Share with {chatName(group)}
+                      Share with {groupName(group)}
                     </option>
                   ))}
                   {chosenMapping[chat.id] &&

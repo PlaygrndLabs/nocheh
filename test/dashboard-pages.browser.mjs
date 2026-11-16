@@ -2118,6 +2118,31 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
   await page.close();
 });
 
+test('every group Nocheh is on in can be shared with and refreshed, past the first 100 chats', async () => {
+  // 120 more groups Nocheh is on in: Garden swap falls past the first 100 chats, and past the first 100 such groups.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats');
+  try {
+    const {page, problems} = await open('messages?view=import&job=11111111-1111-4111-8111-111111111111');
+    await page.locator('#map-chat-1 option', {hasText: 'Share with Garden swap'}).waitFor({state: 'attached'});
+    const targets = (await page.locator('#map-chat-1 option').allTextContents()).filter(text =>
+      text.startsWith('Share with '),
+    );
+    assert.equal(targets.length, 122, 'Aurora planning, 120 clubs and Garden swap');
+    assert.ok(['Aurora planning', 'Club 001', 'Club 120'].every(name => targets.includes('Share with ' + name)));
+    // The chat list loads its first 100 chats; a search that finds no group Nocheh is on in still lets Telegram be
+    // asked about all of them.
+    await page.goto(origin + '/#chats');
+    await page.getByText('Showing the first 100 chats', {exact: false}).waitFor();
+    await page.getByLabel('Find a chat').fill('Choir');
+    await page.getByRole('navigation', {name: 'Chats'}).getByRole('link', {name: 'Choir practice'}).waitFor();
+    assert.equal(await page.getByRole('button', {name: /Refresh group names/}).isEnabled(), true);
+    assert.deepEqual(problems, []);
+    await page.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+});
+
 test('a sharing rule finds messages from its groups by their chat, a new-id group and an upgraded one included', async () => {
   // Hits name their Nocheh chat; the archive's scope stays the Telegram ID the message came with.
   const rule = {

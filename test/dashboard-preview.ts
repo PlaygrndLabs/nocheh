@@ -18,7 +18,7 @@ import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
-import {chatDirectory,chatIdFor,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
+import {chatDirectory,chatIdFor,chatShortId,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
 import type {ChatState} from '../src/chat-wire.js';
 import {labeledPlaceholders,promptProblem,promptSchema,reminderTexts} from '../src/prompts.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
@@ -234,6 +234,11 @@ const conversations:any[]=[
   telegram:{state:'not_member',migrate_to_chat_id:null,observed_at:new Date(Date.now()-2*864e5).toISOString()}},
  {space_id:REMOVED_TOPIC,name:'Trail maps',kind:'topic',parent_space:REMOVED_GROUP,parent_name:'Hiking crew',observed_at:new Date(Date.now()-4*864e5).toISOString(),configured:false,closed:false},
 ];
+/** The `many-chats` scenario: 120 more groups Nocheh is on in, listed only. Their ids sort before every digest id, so
+ * 'Garden swap' falls past the first 100 chats and past the first 100 groups Nocheh is on in. */
+const manyChats=Array.from({length:120},(_,i)=>{const n=String(i+1).padStart(3,'0'),id='-2000000000'+n;
+ return {space_id:id,name:'Club '+n,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true,topic_key:null,
+  app_ids:[{app:'telegram',external:id,state:'current'}],is_forum:false,state:'active',owner:false,short_id:chatShortId(id),added_by:'owner',added_at:null,removed_event:false};});
 /** The directory as the chats' states serve it, installed for the repositories the preview runs. */
 const directoryNow=()=>installChats(previewDirectory());
 /** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252), and who
@@ -672,8 +677,13 @@ const server=createServer((req,res)=>{void(async()=>{
     confirm_required:!fromGroup,readers:fromGroup?{space:conversation,group:conversation}:null});}
   if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
   if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant,...factGrants].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
-  // A search matches a chat's name, its group's name and its Telegram ids, as the server's does.
-  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),items=conversations.map(conversationItem).filter(row=>!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)));return json(res,200,{items,total:items.length,next_cursor:null,state:'current',observed_at:new Date().toISOString()});}
+  // A search matches a chat's name, its group's name and its Telegram ids, as the server's does; a search and the kind
+  // and state filters apply before the list, sorted by id, is paged, as the store pages it.
+  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'',after=url.searchParams.get('after')??'',limit=Math.min(100,Number(url.searchParams.get('limit')||50));
+   const all=[...conversations.map(conversationItem),...(mode==='many-chats'?manyChats:[])].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)
+    .filter(row=>(!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)))&&(!kind||row.kind===kind)&&(!state||row.state===state));
+   const remaining=all.filter(row=>row.space_id>after),items=remaining.slice(0,limit);
+   return json(res,200,{items,total:all.length,next_cursor:remaining.length>limit?items.at(-1).space_id:null,state:'current',observed_at:new Date().toISOString()});}
   if(route==='/conversations/context'){const space=url.searchParams.get('space')??'',directory=directoryNow(),group=directory.parentOf(space)??space;
    return json(res,200,{conversation:conversations.find(row=>row.space_id===space)??{space_id:space,name:null,kind:'unknown'},observed_at:new Date().toISOString(),state:'current',
     addressing:{state:'current',enabled:false,owner_id:'42',group_enabled:directory.isGroup(group)&&directory.served(group),granted:[],denied:[]},
