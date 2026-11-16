@@ -13,12 +13,13 @@ import {bumpChatRevision,ensureConnection,namePrivateChats,startChatDirectory,ty
  * reader of the old format (a Telegram chat id, optionally with one of its topics).
  *
  * It reads every place a chat value is stored: the columns below, the archive's events.scope and the topics its
- * observations name, TELEGRAM_OWNER_ID and TELEGRAM_GROUP_IDS, and the two Telegram tables step 2b-1 keeps read-only
+ * observations name, TELEGRAM_OWNER_ID, and the two Telegram tables step 2b-1 keeps read-only
  * (telegram_chat_observations, telegram_topic_registrations). Values that name no chat ('owner', '*', 'system',
  * 'desktop:*', import scopes, digests) get no row. A group Telegram upgraded before step 2b stays two chats, the old
  * one removed, as it was. Chats first seen later get their rows, with chatIdFor ids, when they are captured; after the
- * first seeding, a chat the seeder finds only in TELEGRAM_GROUP_IDS, TELEGRAM_OWNER_ID or the archive gets one too,
- * while a stored value keeps naming its chat by itself.
+ * first seeding, a chat the seeder finds only in TELEGRAM_OWNER_ID or the archive gets one too, while a stored value
+ * keeps naming its chat by itself. A group it seeds is off: only the owner adds Nocheh to a group or turns it on
+ * (ADR-0253); the owner's private chat is active.
  */
 
 /** A stored column that holds chat values, and how its values are read. */
@@ -107,7 +108,7 @@ const WINDOW=20000;
 
 export class ChatSeeder {
   readonly plan=new Map<string,Planned>();
-  constructor(readonly stores:{archive:pg.Pool;derived:pg.Pool;control:pg.Pool},readonly policy:Pick<AssistantPolicy,'owner_id'|'group_ids'>){}
+  constructor(readonly stores:{archive:pg.Pool;derived:pg.Pool;control:pg.Pool},readonly policy:Pick<AssistantPolicy,'owner_id'>){}
 
   /**
    * One stored value: its chat (and a topic's parent) is planned; a value that names no chat is ignored. A stored
@@ -136,7 +137,6 @@ export class ChatSeeder {
     await this.columns();
     await this.frozen();
     if(this.policy.owner_id)this.value(this.policy.owner_id,fresh);
-    for(const id of this.policy.group_ids)this.value(id,fresh);
     const upTo=await this.archive(after,fresh);
     return this.insert(upTo);
   }
@@ -253,8 +253,7 @@ export class ChatSeeder {
       const planned=[...this.plan.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);
       for(const chat of planned.filter(item=>item.kind!=='topic')) {
         if(known.has(chat.external)||rows.has(chat.id))continue;
-        const state:ChatState=chat.kind==='private'?chat.external===this.policy.owner_id?'active':'off':
-          this.policy.group_ids.includes(chat.external)?'active':chat.migrated?'removed':'off';
+        const state:ChatState=chat.kind==='private'?chat.external===this.policy.owner_id?'active':'off':chat.migrated?'removed':'off';
         let account:string|null=null;
         if(chat.kind==='private') {
           account=accountIdFor('telegram',chat.external);
@@ -290,7 +289,7 @@ export class ChatSeeder {
 
   /**
    * Values that came from elsewhere (an owner record or a reset snapshot written before step 2b), seeded the same way,
-   * without reading the archive. The chats they name are off unless the 2b-1 bridge serves them.
+   * without reading the archive. The groups they name are off until the owner turns them on (ADR-0253).
    */
   async values(values:Iterable<unknown>,titles:ReadonlyMap<string,{title:string;source:'owner'}>=new Map()):Promise<{chats:number;topics:number}> {
     for(const value of values)this.value(value);
@@ -316,8 +315,9 @@ const failure=(event:string,error:unknown)=>console.warn(JSON.stringify({event,c
 
 /**
  * The app's start for chat records (ADR-0252), before anything captures or runs: every chat already stored gets its
- * row (the seeder), chats are served as TELEGRAM_GROUP_IDS says (the 2b-1 bridge), and this process loads its chat
- * directory. A store that is not up yet is tried again; after `attempts` the start fails, and the service restarts.
+ * row (the seeder), the owner's private chat is the one active private chat (startOwnerChat; groups keep the state the
+ * owner and Telegram gave them, ADR-0253), and this process loads its chat directory. A store that is not up yet is
+ * tried again; after `attempts` the start fails, and the service restarts.
  * Then memberships are filled in from the archive in the background, in batches, until they reach the seeder's place.
  * Returns the function that stops that.
  */
@@ -327,8 +327,8 @@ export async function startChatRecords(stores:{archive:pg.Pool;derived:pg.Pool;c
   for(let attempt=1;;attempt++) {
     try {
       const configured=policy(),started=Date.now();
-      const seeded=await new ChatSeeder(stores,configured).seed(),served=await chats.serve(configured);
-      console.log(JSON.stringify({event:'chat_records_ready',chats:seeded.chats,topics:seeded.topics,served_changes:served,ms:Date.now()-started}));
+      const seeded=await new ChatSeeder(stores,configured).seed(),owner=await chats.startOwnerChat(configured);
+      console.log(JSON.stringify({event:'chat_records_ready',chats:seeded.chats,topics:seeded.topics,owner_chat_changes:owner,ms:Date.now()-started}));
       break;
     } catch(error) {
       failure('chat_records_start_failed',error);

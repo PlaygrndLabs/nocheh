@@ -76,7 +76,7 @@ export class TelegramChatRepository {
         const connection=await ensureConnection(db);
         // Only the id this chat was asked under moves; an id that already names another chat stays apart.
         const asked=await chatOfApp(db,connection,external);
-        if(asked?.id===chat&&await this.chats.migrate(db,connection,external,moved,this.chats.policy()))await bumpChatRevision(db);
+        if(asked?.id===chat&&await this.chats.migrate(db,connection,external,moved))await bumpChatRevision(db);
         follow=(await chatOfApp(db,connection,moved))?.id===chat;
       }
       if(available) {

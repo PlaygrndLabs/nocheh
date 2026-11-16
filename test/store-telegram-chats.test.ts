@@ -13,7 +13,7 @@ import {chatIdFor} from '../src/chats.js';
 import {ChatSeeder} from '../src/stores/chat-seed.js';
 import type {ConversationDirectoryItem} from '../src/stores/owner-supervision.js';
 
-test('an explicit owner refresh names selected groups from Telegram, follows an upgrade, and directory reads never call it',
+test('an explicit owner refresh names the groups that are on from Telegram, follows an upgrade, and directory reads never call it',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -22,7 +22,7 @@ test('an explicit owner refresh names selected groups from Telegram, follows an 
   const observed='-100'+base,silent='-'+(base%1000000000+7),moved='-'+(base%1000000000+8),missing='-'+(base%1000000000+9),upgraded='-100'+(base+1),owner:Reader={admin:true,scope:null};
   // A group Telegram upgraded whose new id already names a chat of its own (upgraded before step 2b): they stay apart.
   const split='-'+(base%1000000000+10),splitTo='-100'+(base+2);
-  const calls:string[]=[],policy={enabled:true,owner_id:'123',group_ids:[observed,silent,moved,missing,split]};
+  const calls:string[]=[],policy={enabled:true,owner_id:'123',group_ids:[]},groups=[observed,silent,moved,missing,split];
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -39,15 +39,18 @@ test('an explicit owner refresh names selected groups from Telegram, follows an 
     await s.capture.capture(event);
     await s.capture.capture({...event,key:'chats-split:'+base,scope:splitTo,payload:{update_id:2,message:{message_id:1,date:1,
       chat:{id:Number(splitTo),type:'supergroup',title:'Supergroup of its own'},from:{id:123},text:'hi'}}});
-    // The groups only TELEGRAM_GROUP_IDS names get their rows at app start, served by the 2b-1 bridge.
-    await new ChatSeeder(stores,policy).seed();await s.chats.serve(policy);
-    const ids=new Map((await stores.control.query('SELECT external_id,chat_id FROM chat_ids WHERE external_id=ANY($1::text[])',[policy.group_ids])).rows
+    // The groups only an owner record names get their rows from the seeder, off; the owner turns each on (ADR-0253).
+    await new ChatSeeder(stores,policy).values(groups.filter(id=>id!==observed));
+    const ids=new Map((await stores.control.query('SELECT external_id,chat_id FROM chat_ids WHERE external_id=ANY($1::text[])',[groups])).rows
       .map(row=>[row.external_id as string,row.chat_id as string])),chat=(external:string)=>ids.get(external)!;
+    for(const external of groups)await s.chats.setState(owner,{chat_id:chat(external),state:'active',operation_id:'chats-on:'+base+':'+external});
     assert.equal(chat(observed),chatIdFor('telegram',observed),'a group first seen after step 2b has a digest id');
     const before=await s.supervision.conversations(owner,{q:'',after:'',limit:100});
     assert.equal(before.items.find(item=>item.space_id===chat(silent))?.name,null);assert.equal(calls.length,0,'directory reads never call Telegram');
     await assert.rejects(s.telegramChats.refresh({admin:false,scope:null}),{status:403});
-    const refreshed=await s.telegramChats.refresh(owner);
+    const refreshed=await s.telegramChats.refresh(owner),mine=new Set([...groups,upgraded,splitTo]);
+    // Other tests' groups that are on are refreshed too: only this test's are looked at.
+    refreshed.chats=refreshed.chats.filter(item=>mine.has(item.external));
     // The upgraded group is asked again under its new id, at once.
     assert.deepEqual(refreshed.chats.map(item=>[item.external,item.state]).sort(),
       [[observed,'available'],[silent,'available'],[moved,'migrated'],[upgraded,'available'],[missing,'not_member'],[split,'migrated']].sort());
@@ -72,8 +75,12 @@ test('an explicit owner refresh names selected groups from Telegram, follows an 
     assert.deepEqual(find(split)?.app_ids,[{app:'telegram',external:split,state:'current'}]);
     const other=all.find(item=>item.app_ids.some(label=>label.external===splitTo));
     assert.ok(other&&other.space_id!==chat(split));assert.equal(other.name,'Supergroup of its own');assert.equal(other.telegram,undefined);
-    assert.equal(calls.length,6);assert.ok(!calls.includes(splitTo));
+    assert.equal(calls.filter(id=>mine.has(id)).length,6);assert.ok(!calls.includes(splitTo));
     // The frozen table is never written.
     assert.equal(Number((await stores.control.query('SELECT count(*) FROM telegram_chat_observations WHERE chat_id=ANY($1::text[])',[[observed,silent,moved,missing,split]])).rows[0].count),0);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{
+    // Turned off again, so no later test's refresh asks Telegram about them.
+    await stores.control.query(`UPDATE chats c SET state='off' FROM chat_ids i WHERE i.chat_id=c.id AND i.external_id=ANY($1::text[]) AND c.state='active'`,[[...groups,upgraded]]).catch(()=>undefined);
+    await stores.close();await rm(root,{recursive:true,force:true});
+  }
 });

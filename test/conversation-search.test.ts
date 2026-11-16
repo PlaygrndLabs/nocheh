@@ -12,7 +12,8 @@ import {chatIdFor,chatShortId} from '../src/chats.js';
 const NG1=chatIdFor('telegram','-1002000000001'),NG1_TOPIC=chatIdFor('telegram','-1002000000001','5'),UPGRADED=chatIdFor('telegram','-4005');
 const tg=(external:string,state:'current'|'old'='current')=>({app:'telegram' as const,external,state});
 const item=(value:Partial<ConversationDirectoryItem>&{space_id:string}):ConversationDirectoryItem=>({name:null,kind:'group',parent_space:null,parent_name:null,
-  observed_at:null,configured:false,topic_key:null,app_ids:[],is_forum:null,state:'active',owner:false,short_id:chatShortId(value.space_id),...value});
+  observed_at:null,configured:false,topic_key:null,app_ids:[],is_forum:null,state:'active',owner:false,short_id:chatShortId(value.space_id),
+  added_by:null,added_at:null,removed_event:false,...value});
 const items=[
   item({space_id:'-1001000000001',name:'Aurora planning',app_ids:[tg('-1001000000001')]}),
   item({space_id:NG1,name:'Night sky club',app_ids:[tg('-1002000000001')]}),

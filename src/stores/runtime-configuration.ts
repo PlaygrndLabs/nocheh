@@ -15,13 +15,15 @@ CREATE TABLE IF NOT EXISTS runtime_configuration (
  FOREIGN KEY(name,revision) REFERENCES runtime_configuration_versions(name,revision)
 );
 `;
-function policyDocument(policy:AssistantPolicy):AssistantPolicy {
+/**
+ * The admitted setup a runtime may use, and its fingerprint. Which groups are served is chats.state, never part of it, so
+ * turning a group on or off never moves the fingerprint or a guard epoch (ADR-0253); the first start after group_ids
+ * left the document writes one new revision and one epoch.
+ */
+function policyDocument(policy:AssistantPolicy):Pick<AssistantPolicy,'enabled'|'owner_id'|'group_access'> {
   if(typeof policy.enabled!=='boolean'||policy.owner_id!==null&&(typeof policy.owner_id!=='string'||!/^[1-9]\d{0,18}$/.test(policy.owner_id))||
-    !Array.isArray(policy.group_ids)||policy.group_ids.some(id=>typeof id!=='string'||!/^-[1-9]\d{0,18}$/.test(id))||policy.enabled&&!policy.owner_id)
-    throw new HttpError(400,'invalid_assistant_policy');
-  const groups=[...new Set(policy.group_ids)].sort();
-  return {enabled:policy.enabled,owner_id:policy.owner_id,group_ids:groups,
-    group_access:groupAccess(policy.group_access??{},groups,policy.owner_id)};
+    policy.enabled&&!policy.owner_id)throw new HttpError(400,'invalid_assistant_policy');
+  return {enabled:policy.enabled,owner_id:policy.owner_id,group_access:groupAccess(policy.group_access??{},policy.owner_id)};
 }
 
 /** Saved installation setup is admitted into control before a runtime can use it. */

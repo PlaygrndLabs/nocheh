@@ -33,6 +33,13 @@ export interface ConversationDirectoryItem {
   state:ConversationChatFields['state'];owner:ConversationChatFields['owner'];short_id:ConversationChatFields['short_id'];
   /** A person's public Telegram username, checked by the one username rule (telegramUsername), so the dashboard can link it. */
   username?:string;
+  /** Who last added Nocheh to the chat, as its row says (ADR-0253): the owner, someone else, an anonymous admin or a channel,
+   * an adder the app does not name, a row the seeder or a restore made, or nobody recorded. A topic's own row has none. */
+  added_by:'owner'|'other'|'anonymous'|'unknown'|'seeded'|null;
+  /** When Nocheh took that add in. */
+  added_at:string|null;
+  /** Whether Telegram ever said someone removed Nocheh from the chat (a removal Nocheh recorded, not one it was seeded with). */
+  removed_event:boolean;
 }
 export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
@@ -98,24 +105,28 @@ export class OwnerSupervisionRepository {
   private async snapshot():Promise<{directory:ChatDirectory;items:ConversationDirectoryItem[]}> {
     const [listing,configured,configuration]=await Promise.all([
       this.services.chats.listing(),
+      // A group the owner added Nocheh to is the owner's own, also once the owner turns it off (ADR-0253).
       this.stores.control.query(`SELECT space_id FROM project_assignments
         UNION SELECT destination FROM sharing_rules UNION SELECT jsonb_array_elements_text(sources) FROM sharing_rules
         UNION SELECT jsonb_array_elements_text(scopes) FROM organization_delegations
         UNION SELECT destination FROM memory_access_settings WHERE destination<>'*'
-        UNION SELECT destination FROM memory_fact_grants UNION SELECT destination FROM memory_access_requests`),
+        UNION SELECT destination FROM memory_fact_grants UNION SELECT destination FROM memory_access_requests
+        UNION SELECT id FROM chats WHERE added_by_role='owner'`),
       this.assistantConfiguration(),
     ]);
     const {directory,rows}=listing,policy=configuration?.policy;
-    // The policy holds Telegram ids; the chats they name are configured.
+    // The policy names the owner by a Telegram id; the chat it names is configured. Which groups are on is the
+    // directory's (chats.state), never the policy's: those are configured too.
     const configuredIds=new Set<string>([...configured.rows.map(row=>row.space_id).filter((id):id is string=>typeof id==='string'),
-      ...[...policy?.group_ids??[],...policy?.owner_id?[policy.owner_id]:[]].map(id=>directory.resolve('telegram',id)??id)]);
+      ...(policy?.owner_id?[policy.owner_id]:[]).map(id=>directory.resolve('telegram',id)??id),
+      ...directory.all().filter(chat=>chat.kind==='group'&&directory.served(chat.id)).map(chat=>chat.id)]);
     const items=new Map<string,ConversationDirectoryItem>();
     for(const chat of directory.all()) {
       const detail=rows.get(chat.id),configuredHere=configuredIds.has(chat.id);
       if(chat.kind==='topic'&&!detail?.seen_at&&detail?.title_source!=='owner'&&!configuredHere)continue;
       const name=chatLabel(chat,detail?.username,chat.app_ids[0]?.external);
       const value:ConversationDirectoryItem={space_id:chat.id,name,...conversationFields(directory,chat.id),parent_name:null,
-        observed_at:iso(detail?.seen_at),configured:configuredHere};
+        observed_at:iso(detail?.seen_at),configured:configuredHere,added_by:detail?.added_by??null,added_at:iso(detail?.added_at),removed_event:detail?.removed_event===true};
       if(chat.kind==='private'&&!chat.owner){const username=telegramUsername(detail?.username);if(username)value.username=username;}
       if(chat.kind==='topic'&&detail?.seen_at)value.closed=detail.closed===true;
       if(chat.kind==='topic'&&detail?.title_source==='owner')value.registered=true;
@@ -125,7 +136,8 @@ export class OwnerSupervisionRepository {
     for(const raw of configuredIds) {
       if(items.has(raw))continue;
       let space:string;try{space=validateSpace(raw);}catch{continue;}
-      items.set(space,{space_id:space,name:null,...conversationFields(directory,space),parent_name:null,observed_at:null,configured:true});
+      items.set(space,{space_id:space,name:null,...conversationFields(directory,space),parent_name:null,observed_at:null,configured:true,
+        added_by:null,added_at:null,removed_event:false});
     }
     for(const value of items.values())if(value.parent_space)value.parent_name=items.get(value.parent_space)?.name??null;
     return {directory,items:[...items.values()].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)};
@@ -263,14 +275,14 @@ export class OwnerSupervisionRepository {
       this.services.memory.status(),
     ]);
     // The policy keys a group's access by its Telegram ids, joined over every id the group has had as the turn gate joins
-    // them (groupAccessFor); the owner's private chat is the directory's.
+    // them (groupAccessFor); the owner's private chat is the directory's, and so is whether the group is on (chats.state).
     const guard=memory.guard,policy=configuration?.policy,externals=chats.get(parent)?.app_ids.map(label=>label.external)??[parent];
     const access=groupAccessOf(policy,externals),owner=space===chats.ownerChat();
     // While a group's topics share memory, a turn there reads the rules into the group and every one of its topics too.
     const groupWide=(policy?.topic_memory??'group')==='group'&&chats.kind(parent)==='group';
     const sharingRules=rules.rows.filter(row=>row.destination===space||groupWide).map(row=>row.destination===space?row:{...row,through_group:true});
     const conversation=directory.find(item=>item.space_id===space)??{space_id:space,name:null,...conversationFields(chats,space),
-      parent_name:directory.find(item=>item.space_id===parent)?.name??null,observed_at:null,configured:false};
+      parent_name:directory.find(item=>item.space_id===parent)?.name??null,observed_at:null,configured:false,added_by:null,added_at:null,removed_event:false};
     const currentBinding=(binding:any)=>binding?.generation===guard.generation&&Number(binding?.epoch)===Number(guard.epoch);
     const factIds=grants.rows.map(row=>row.fact_id),facts=factIds.length?(await this.stores.derived.query('SELECT id,active_revision FROM entity_claims WHERE id=ANY($1::text[])',[factIds])).rows:[];
     const factRevisions=new Map(facts.map(row=>[row.id,row.active_revision]));
@@ -290,7 +302,7 @@ export class OwnerSupervisionRepository {
     }
     return {conversation,observed_at:new Date().toISOString(),state:configuration&&security.rows[0]?'current':'partial',
       addressing:{state:configuration?'current':'unavailable',enabled:policy?.enabled??false,owner_id:policy?.owner_id??null,
-        group_enabled:!!policy?.enabled&&externals.some(id=>policy.group_ids.includes(id)),granted:access?.granted??[],denied:access?.denied??[],revision:configuration?.revision??null},
+        group_enabled:!!policy?.enabled&&chats.kind(parent)==='group'&&chats.served(parent),granted:access?.granted??[],denied:access?.denied??[],revision:configuration?.revision??null},
       knowledge_access:{source_scope:space,owner_access:owner,sharing_rules:sharingRules,
         fact_grants:grants.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&factRevisions.get(row.fact_id)===row.fact_revision&&row.state==='active'&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now()),authorization:'rechecked_on_use'})),
         sharing_releases:sharingReleases,

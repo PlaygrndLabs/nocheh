@@ -62,7 +62,7 @@ test('only a group or one of its topics may share, as the chat directory holds t
   assert.equal(parentSpace(GP1_TOPIC),GP1);assert.equal(parentSpace(GP1_NEW_TOPIC),GP1,'a digest topic under an old-shaped group');
   assert.equal(parentSpace(NG1_TOPIC),NG1);assert.equal(parentSpace(GP1),null);
   assert.equal(parentSpace('-1009999999999/topic/7'),null,'a parent is never read out of an id');
-  // Served follows the directory (the 2b-1 bridge serves it from TELEGRAM_GROUP_IDS), groups only.
+  // Served follows the directory (chats.state, ADR-0253), groups only.
   assert.deepEqual(servedGroups(),[GP1,GP2,GP3,GP4,NG1,NG2].sort());
   for(const id of [GP1,NG2])assert.ok(servedGroup(id),id);
   for(const id of [UNSERVED,GP1_TOPIC,NG1_TOPIC,OWNER,BOB_CHAT,'-20'])assert.equal(servedGroup(id),false,id);

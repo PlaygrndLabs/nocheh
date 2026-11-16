@@ -11,7 +11,7 @@ import {legacyDirectory} from './fixture-groups.js';
 installChatsForTest(legacyDirectory([...Array.from({length:125},(_,index)=>String(-1000-index)),'-1000/topic/7','-1000/topic/99','-9999'],{owner:'42',served:['-1000']}));
 
 const owner={admin:true,scope:null},date='2026-10-03T00:00:00.000Z';
-const detail=(value:Partial<ChatListing>):ChatListing=>({title_source:null,username:null,seen_at:null,closed:null,refreshed:null,...value});
+const detail=(value:Partial<ChatListing>):ChatListing=>({title_source:null,username:null,seen_at:null,closed:null,refreshed:null,added_by:null,added_at:null,removed_event:false,...value});
 const group=(id:string,title:string|null,state:ChatRow['state']='off'):ChatRow=>({id,app:'telegram',kind:'group',parent_id:null,topic_key:null,state,title,is_forum:true,account_id:null,app_type:'supergroup'});
 const topic=(id:string,parent:string,key:string,title:string|null=null):ChatRow=>({id,app:'telegram',kind:'topic',parent_id:parent,topic_key:key,state:'off',title,is_forum:false,account_id:null,app_type:null});
 const current=(chat:string,external:string):ChatIdRow=>({app:'telegram',external_id:external,chat_id:chat,state:'current'});
@@ -31,12 +31,12 @@ test('conversation directory lists chat records with exact identities, named top
   // Both families: old-shaped groups keep their Telegram id as their Nocheh id, newer ones have digest ids.
   const groups=Array.from({length:125},(_,index)=>{const external=String(-1001000000100-index);return {id:index%2?chatIdFor('telegram',external):external,external};});
   const named=chatIdFor('telegram',groups[1]!.external,'7'),unseen=chatIdFor('telegram',groups[3]!.external,'8'),seen=groups[0]!.id+'/topic/9';
-  const snapshot:ChatSnapshot={chats:[...groups.map(item=>group(item.id,'Same display name')),topic(named,groups[1]!.id,'7','Delivery'),
+  const snapshot:ChatSnapshot={chats:[...groups.map((item,index)=>group(item.id,'Same display name',index===1?'active':'off')),topic(named,groups[1]!.id,'7','Delivery'),
     topic(unseen,groups[3]!.id,'8'),topic(seen,groups[0]!.id,'9','Seen topic')],ids:groups.map(item=>current(item.id,item.external)),owner_chat:null};
   const details=new Map([[named,detail({title_source:'owner'})],[seen,detail({title_source:'observed',seen_at:new Date(date),closed:true})],
     [groups[0]!.id,detail({seen_at:new Date(date),refreshed:{state:'available',to:null,at:new Date(date)}})]]);
   const {value,queries}=repository((_store,sql)=>{
-    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:[groups[1]!.external]},revision:5}];
+    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42'},revision:5}];
     if(sql.includes('project_assignments'))return [{space_id:'-9999'}];
     throw Error('unexpected query');
   },snapshot,details);
@@ -53,7 +53,9 @@ test('conversation directory lists chat records with exact identities, named top
   assert.deepEqual(delivery.app_ids,[{app:'telegram',external:groups[1]!.external,state:'current'}]);assert.equal(delivery.observed_at,null);
   const observed=all.find(item=>item.space_id===seen)!;
   assert.equal(observed.closed,true);assert.equal(observed.registered,undefined);assert.equal(observed.observed_at,date);
+  // A group that is on (chats.state, ADR-0253) is the owner's; one that is off and nothing names is not.
   const configured=all.find(item=>item.space_id===groups[1]!.id)!;assert.equal(configured.configured,true);assert.equal(configured.kind,'group');
+  assert.equal(all.find(item=>item.space_id===groups[2]!.id)!.configured,false);
   assert.deepEqual(all.find(item=>item.space_id===groups[0]!.id)!.telegram,{state:'available',migrate_to_chat_id:null,observed_at:date});
   for(const unknown of ['-9999','42']) {
     const item=(await value.conversations(owner,{q:unknown})).items.find(entry=>entry.space_id===unknown)!;
@@ -93,7 +95,7 @@ test('unknown conversation context does not inherit a parent sharing grant or eq
   const run=async(id:string)=>{
     const {value}=repository((store,sql,params)=>{
       if(store==='archive')return [];
-      if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:[external],group_access:{[external]:{granted:['73'],denied:['91']}}},revision:2}];
+      if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_access:{[external]:{granted:['73'],denied:['91']}}},revision:2}];
       if(sql.includes('SELECT space_id FROM project_assignments'))return [];
       if(sql.includes('WHERE destination=$1')||sql.includes('p.destination=$1')||sql.includes('a.space_id=$1')||sql.includes('WHERE scopes ?'))assert.equal(params[0],id);
       if(sql.includes('destination=ANY'))assert.ok((params[0] as string[]).includes(id));
@@ -121,7 +123,7 @@ test('a group Telegram upgraded shows the access lists under both its ids joined
   const access={[before]:{granted:['301','302'],denied:[]},[after]:{granted:[],denied:['302']}};
   const {value}=repository((store,sql)=>{
     if(store==='archive')return [];
-    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_ids:[after],group_access:access},revision:2}];
+    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_access:access},revision:2}];
     if(sql.includes('security_policy'))return [{revision:1,document:{version:1,rules:[]}}];
     return [];
   },snapshot);

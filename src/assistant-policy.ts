@@ -9,8 +9,9 @@ export type TopicMemory='group'|'topic';
 export interface AssistantPolicy {enabled:boolean;
   /** The owner's account: the owner's Telegram user id. Compared only with a sender (who sent, pressed or asked). */
   owner_id:string|null;
-  /** Raw Telegram ids (current and old) of the served groups, for comparing archive originals only. A Nocheh chat is
-   * served when the chat directory says so (chats().served), never by finding its id here (ADR-0252). */
+  /** Derived, never configured: the raw Telegram ids (current and old) of the active groups, which servedPolicy (stores/chats.ts)
+   * fills from the chat directory, for comparing archive originals only. Settings and policy files never set it, and a
+   * Nocheh chat is served when the directory says so (chats().served), never by finding its id here (ADR-0252, ADR-0253). */
   group_ids:string[];group_access?:Record<string,GroupAccess>;topic_memory?:TopicMemory;
   /** The owner's private chat, a Nocheh chat id: where the owner talks to Nocheh, separate from the owner's account.
    * Absent in a policy written before step 2b, where the owner's private chat is the chat named by owner_id. */
@@ -20,11 +21,14 @@ export const ownerChat=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):st
 /** The owner as stored rows name them: their private chat (a row's chat) and their account (who asked or decided). */
 export interface OwnerIds {chat:string|null;account:string|null}
 export const ownerIds=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):OwnerIds=>({chat:ownerChat(policy),account:policy.owner_id});
-export function groupAccess(value:unknown,groups:string[],owner:string|null):Record<string,GroupAccess> {
+/** TELEGRAM_GROUP_ACCESS: who may use Nocheh in each group, keyed by a group's raw Telegram id. A key is checked by its
+ * shape only; one that names no active group grants nothing, since every reader joins the lists through the chat
+ * directory (groupAccessFor), and the owner turns groups on and off without touching it (ADR-0253). */
+export function groupAccess(value:unknown,owner:string|null):Record<string,GroupAccess> {
   const input=object(value),result:Record<string,GroupAccess>={};
   if(Object.keys(input).length>100)throw new Error('Invalid TELEGRAM_GROUP_ACCESS');
   for(const [group,raw] of Object.entries(input)) {
-    if(!groups.includes(group))throw new Error('Invalid TELEGRAM_GROUP_ACCESS');
+    if(!/^-[1-9]\d{0,18}$/.test(group))throw new Error('Invalid TELEGRAM_GROUP_ACCESS');
     const entry=object(raw);
     if(Object.keys(entry).some(key=>!['granted','denied'].includes(key))||!Array.isArray(entry.granted)||!Array.isArray(entry.denied))throw new Error('Invalid TELEGRAM_GROUP_ACCESS');
     const normalize=(values:unknown[]):string[]=>{
@@ -35,24 +39,26 @@ export function groupAccess(value:unknown,groups:string[],owner:string|null):Rec
   }
   return result;
 }
+/**
+ * The configured policy. Which groups Nocheh serves is never configured: the owner adds Nocheh to a group or turns it on
+ * in Chats (chats.state, ADR-0253), so TELEGRAM_GROUP_IDS is not read and a policy file's group_ids is ignored; group_ids
+ * starts empty and servedPolicy fills it from the chat directory.
+ */
 export function assistantPolicy(path?:string):AssistantPolicy {
   const enabled=process.env.TELEGRAM_ENABLED ?? 'false';
   if (!path && !['true','false'].includes(enabled)) throw new Error('Invalid TELEGRAM_ENABLED');
   const value=path ? object(JSON.parse(readFileSync(path,'utf8'))) : {
     enabled:enabled==='true',owner_id:process.env.TELEGRAM_OWNER_ID || null,
-    group_ids:(process.env.TELEGRAM_GROUP_IDS ?? '').split(',').map(v=>v.trim()).filter(Boolean),
     group_access:JSON.parse(process.env.TELEGRAM_GROUP_ACCESS ?? '{}'),
     topic_memory:process.env.TELEGRAM_TOPIC_MEMORY || 'group',
   };
   if (typeof value.enabled!=='boolean' || (value.owner_id!==null && (typeof value.owner_id!=='string' || !/^[1-9]\d{0,18}$/.test(value.owner_id))) ||
-      !Array.isArray(value.group_ids) || value.group_ids.some(v=>typeof v!=='string' || !/^-\d{1,19}$/.test(v)) ||
       (value.enabled && !value.owner_id) || !['group','topic',undefined].includes(value.topic_memory as string|undefined)) throw new Error('Invalid assistant policy');
   // Step 2b-1 seeds the owner's private chat under the id it always had: the owner's Telegram user id.
   const ownerChatId=(value as Record<string,unknown>).owner_chat===undefined?value.owner_id as string|null:(value as Record<string,unknown>).owner_chat;
   if(ownerChatId!==null&&!isChatId(ownerChatId)||ownerChatId===null&&value.owner_id!==null)throw new Error('Invalid assistant policy');
-  const groups=[...new Set(value.group_ids as string[])];
-  return {enabled:value.enabled,owner_id:value.owner_id as string|null,group_ids:groups,
-    group_access:groupAccess(value.group_access??{},groups,value.owner_id as string|null),topic_memory:(value.topic_memory as TopicMemory|undefined)??'group',
+  return {enabled:value.enabled,owner_id:value.owner_id as string|null,group_ids:[],
+    group_access:groupAccess(value.group_access??{},value.owner_id as string|null),topic_memory:(value.topic_memory as TopicMemory|undefined)??'group',
     owner_chat:ownerChatId as string|null};
 }
 /**
@@ -96,7 +102,7 @@ export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:s
 
 /**
  * Whether a captured Telegram message, new or edited, was sent by the owner or by someone the owner allowed in that
- * selected group (granted and not denied). Telegram does not say who an anonymous admin is, nor who wrote a post in a
+ * served group (granted and not denied). Telegram does not say who an anonymous admin is, nor who wrote a post in a
  * channel's or group's own name (sender_chat), so neither counts as allowed, nor as the owner; neither do bots, other
  * updates and senders it cannot identify (ADR-0251). Unlike conversationScope, it reads edits and does not depend on
  * Telegram replies being on. `scope` is the archive's raw Telegram chat id; the group is the chat the directory finds
@@ -122,7 +128,7 @@ export function allowedSender(policy:AssistantPolicy,payload:unknown,scope:strin
 
 /**
  * A live Telegram update from a chat Nocheh does not serve: a private chat with
- * anyone but the owner, a group or channel the owner has not selected, or a chat
+ * anyone but the owner, a group or channel that is not active, or a chat
  * the chat directory does not know (ADR-0252). It is kept as received, but never
  * prepared, learned from or read by the assistant.
  */
@@ -136,13 +142,15 @@ export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel
 
 /**
  * For a decision that cannot be taken back (a turn refused, a message left unprepared): when this process's chat
- * directory does not hold the Telegram chat a live original came from, waits until the loader has looked again
- * (ADR-0252). The capture that recorded the chat, a served group's new id after an upgrade, commits before its
- * workflows run, but this process may not have reloaded yet. A chat still unknown afterwards stays unknown, so the
- * caller fails closed as before.
+ * directory does not hold the Telegram chat a live original came from, or holds it but does not serve it, waits until
+ * the loader has looked again (ADR-0252). The capture that recorded the chat, a served group's new id after an
+ * upgrade, or the owner's add that turned it on (ADR-0253) commits before its workflows run, but this process may not
+ * have reloaded yet. A chat still unknown or unserved afterwards stays so, and the caller fails closed as before.
  */
 export async function settleTelegramChat(source:{channel:string;scope:string}):Promise<void> {
-  if(source.channel==='telegram'&&isTelegramChat(source.scope)&&chats().resolve('telegram',source.scope)===null)await chatsAfterMiss();
+  if(source.channel!=='telegram'||!isTelegramChat(source.scope))return;
+  const id=chats().resolve('telegram',source.scope);
+  if(id===null||!chats().served(id))await chatsAfterMiss();
 }
 
 /** Final Telegram send authorization uses the captured original, never a prepared representation. An answer reader's

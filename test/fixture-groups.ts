@@ -40,12 +40,13 @@ export const BOB='456',BOB_CHAT=chatIdFor('telegram',BOB);
 /** A chat directory snapshot with the accounts its private chats name, for seedChats. */
 export interface FixtureChats extends ChatSnapshot {accounts:{id:string;app:'telegram';external_id:string}[]}
 const account=(external:string)=>({id:accountIdFor('telegram',external),app:'telegram' as const,external_id:external});
-/** Served as the 2b-1 bridge serves: a group is active when any of its Telegram ids is in `groupIds`; the owner's
- * private chat is active; every other chat is off. A topic carries its parent's state. */
+/** Which chats are on (chats.state, ADR-0253): a group is active when any of its Telegram ids is in `groupIds` (the
+ * groups the owner added Nocheh to or turned on); the owner's private chat is active; every other chat is off. A topic
+ * carries its parent's state. */
 const stateOf=(kind:ChatRow['kind'],externals:readonly string[],groupIds:readonly string[],owner:boolean):ChatState=>
   owner?'active':kind!=='private'&&externals.some(id=>groupIds.includes(id))?'active':'off';
 
-/** Both fixture families as directory rows, served by `groupIds` (TELEGRAM_GROUP_IDS; GP1-GP4 by default). */
+/** Both fixture families as directory rows, with the groups `groupIds` names on (GP1-GP4 by default). */
 export function fixtureChats(groupIds:readonly string[]=GP_GROUP_IDS):FixtureChats {
   const chats:ChatRow[]=[],ids:ChatIdRow[]=[];
   const chat=(id:string,kind:'private'|'group',externals:{current:string;old?:string[]},extra:Partial<ChatRow>={})=>{
@@ -92,13 +93,15 @@ export function legacyChats(values:Iterable<string>,options:{owner?:string|null;
 }
 export const legacyDirectory=(values:Iterable<string>,options:{owner?:string|null;served?:readonly string[]}={}):ChatDirectory=>
   chatDirectory(legacyChats(values,options));
-/** Tests only: the legacy directory a hand-built policy implies: its owner's chat and its groups, served by its
- * group_ids, plus any other old values the test uses (topics, unserved groups, private chats). */
+/** Tests only: the legacy directory a hand-built policy implies: its owner's chat and its groups, on as its derived
+ * group_ids says (servedPolicy fills it from the directory), plus any other old values the test uses (topics, unserved
+ * groups, private chats). */
 export const policyDirectory=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'|'group_ids'>,extra:Iterable<string>=[]):ChatDirectory=>
   legacyDirectory([...policy.group_ids,...extra],{owner:policy.owner_chat===undefined?policy.owner_id:policy.owner_chat,served:policy.group_ids});
 
 /** Nocheh on, serving GP1-GP4 for the owner, with topics sharing their group's memory unless overridden. Installs the
- * fixture directory served by the policy's group_ids, as the 2b-1 bridge serves chats from TELEGRAM_GROUP_IDS. */
+ * fixture directory with the policy's group_ids on: group_ids is derived from chats.state (servedPolicy), so the
+ * policy and the directory a test sees agree. */
 export function groupsPolicy(overrides:Partial<AssistantPolicy>={}):AssistantPolicy {
   const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[...GP_GROUP_IDS],group_access:{},topic_memory:'group',owner_chat:OWNER,...overrides};
   if(overrides.owner_chat===undefined&&overrides.owner_id!==undefined)policy.owner_chat=overrides.owner_id;

@@ -110,11 +110,14 @@ test('reset setup restores only current configuration under a new generation and
     await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'foreign','active',1)",['d'.repeat(64)]);
     await assert.rejects(restoreResetSetup(stores,input),/target_changed/);
     // A version 1 snapshot, taken before step 2b, names chats by their old values: it restores none, and the seeder
-    // gives each value its row, with the same id, when the app starts (ADR-0252).
+    // gives each value its row, with the same id, when the app starts (ADR-0252). Its group_ids is ignored: its groups
+    // come up off until the owner turns them on, and only the owner's private chat is on (ADR-0253).
     assert.deepEqual(await chatRows(stores.control),{chats:[],chat_ids:[]});
-    await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001','-1002']}).seed();
+    assert.deepEqual((await stores.control.query(`SELECT v.document FROM runtime_configuration c JOIN runtime_configuration_versions v USING(name,revision)`)).rows[0].document,
+      {enabled:true,owner_id:'123'},'the restored runtime document leaves the old group list out');
+    await new ChatSeeder(stores,{owner_id:'123'}).seed();
     assert.deepEqual((await chatRows(stores.control)).chats.map(row=>[row.id,row.kind,row.parent_id,row.state]),
-      [['-1001','group',null,'active'],['-1001/topic/3','topic','-1001','active'],['-1002','group',null,'active'],['123','private',null,'active']]);
+      [['-1001','group',null,'off'],['-1001/topic/3','topic','-1001','off'],['-1002','group',null,'off'],['123','private',null,'active']]);
   } finally {await drop();}
 });
 
@@ -152,13 +155,13 @@ test('a version 2 snapshot restores its chats and app ids exactly, and decides w
     // The app's start then finds every value already has its row...
     const people=async()=>(await stores.control.query(`SELECT id,account_id FROM chats WHERE kind='private'`)).rows.map(row=>[row.id,row.account_id]).sort();
     assert.deepEqual(await people(),[['123',null],[bob,null]].sort(),'a snapshot carries no person');
-    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001',NG2_TG]}).seed(),{chats:0,topics:0});
+    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123'}).seed(),{chats:0,topics:0});
     // ...and names each restored private chat's person by its Telegram id, so the owner's and a member's private chat are
     // theirs again: Answer privately claims only in the asker's own private chat, found by its person (ADR-0249).
     assert.deepEqual(await people(),[['123',accountIdFor('telegram','123')],[bob,accountIdFor('telegram','456')]].sort());
     const directory=chatDirectory(await loadChatSnapshot(stores.control,{owner_id:'123'}));
     assert.equal(directory.get(bob)?.account_id,accountIdFor('telegram','456'));assert.equal(directory.ownerChat(),'123');
-    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001',NG2_TG]}).seed(),{chats:0,topics:0});
+    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123'}).seed(),{chats:0,topics:0});
     assert.deepEqual(await people(),[['123',accountIdFor('telegram','123')],[bob,accountIdFor('telegram','456')]].sort(),'a second start changes nothing');
   } finally {await drop();}
 });
