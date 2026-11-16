@@ -42,8 +42,8 @@ class MemoryCliTests(unittest.TestCase):
         self.assertEqual(self.invoke(['review','a'*64,'--approve'])[1]['approved'],True)
 
     def test_pause_resume_and_private_recall(self):
-        self.assertEqual(self.invoke(['pause','job']),('/v1/memory/reviews/control',{'id':'job','action':'pause'}))
-        self.assertEqual(self.invoke(['resume','job']),('/v1/memory/reviews/control',{'id':'job','action':'resume'}))
+        self.assertEqual(self.invoke(['pause','job','--revision','3']),('/v1/memory/reviews/control',{'id':'job','action':'pause','expected_revision':3}))
+        self.assertEqual(self.invoke(['resume','job','--revision','4']),('/v1/memory/reviews/control',{'id':'job','action':'resume','expected_revision':4}))
         self.assertEqual(self.invoke(['recall','Juniper','--profile','native-profile','--limit','5']),
                          ('/v1/memory/recall',{'query':'Juniper','profile':'native-profile','limit':5}))
 

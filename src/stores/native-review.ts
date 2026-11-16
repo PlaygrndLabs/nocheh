@@ -197,8 +197,10 @@ export class NativeReviewRepository {
         const claimed=await db.query("UPDATE native_review_jobs SET state='running',attempts=attempts+1,updated_at=now() WHERE id=$1 AND state='pending' AND NOT paused AND revision=$2 RETURNING id",[id,job.revision]);
         if(!claimed.rowCount)throw new HttpError(409,'native_review_changed');
       }
-      // An observation that cannot confirm the review counts toward the bound and waits longer next time.
-      const unconfirmed=async()=>{
+      // An observation that cannot confirm the review counts toward the bound and waits longer next time. The log says
+      // why: an error code or an unexpected state, never content.
+      const unconfirmed=async(code:string)=>{
+        console.warn(JSON.stringify({event:'native_review_unconfirmed',stage:uncertain?'observe':'start',attempts:job.attempts+(uncertain?0:1),code}));
         await db.query(`UPDATE native_review_jobs SET state='ambiguous',error_code='native_review_unconfirmed',reconciliations=reconciliations+$2,
           next_attempt=now()+interval '60 seconds'*power(2,least(greatest(reconciliations+$2-1,0),5)),updated_at=now() WHERE id=$1`,[id,uncertain?1:0]);return 'ambiguous';
       };
@@ -206,9 +208,19 @@ export class NativeReviewRepository {
       try {
         result=await brainOperation(this.brain,'reviewNotes')(uncertain?{id,scope:actor.space,observe_only:true}:{id,scope:actor.space,content:document.text,
           event_id:job.source_reference.id,guard_mode:job.binding.mode,archive_credential:credential});
-      }catch {return await unconfirmed();}
+      }catch(error){return await unconfirmed(error instanceof HttpError?error.code:'unknown');}
       if(!uncertain&&result.state==='waiting'&&result.error_code==='profile_busy') {
         await db.query("UPDATE native_review_jobs SET state='pending',attempts=greatest(0,attempts-1),error_code='waiting_for_profile',next_attempt=now()+interval '5 seconds',updated_at=now() WHERE id=$1",[id]);return 'pending';
+      }
+      // The brain records a review's start durably before it launches it (ADR-0097), so `not_found` means no run of this
+      // review began that could have changed notes: its start was lost, for example to a restart. It waits again as new
+      // work, checked in full before it starts, and each lost start counts as one of its attempts (ADR-0258).
+      if(uncertain&&result.state==='not_found'&&job.attempts<nativeAttemptLimit) {
+        const requeued=await db.query(`UPDATE native_review_jobs SET state='pending',reconciliations=0,error_code='native_review_not_started',
+          next_attempt=now()+interval '5 seconds',updated_at=now() WHERE id=$1 AND NOT paused AND revision=$2 RETURNING id`,[id,job.revision]);
+        // The owner paused or resumed it meanwhile; it stays as the owner left it and is observed again.
+        if(!requeued.rowCount)return 'ambiguous';
+        console.warn(JSON.stringify({event:'native_review_not_started',attempts:job.attempts}));return 'pending';
       }
       if(result.state==='done') {
         const output=await this.derived.record({operation_id:operationId,source:job.source_reference,parents:[job.input_reference],kind:'runtime_result',content:Buffer.from(canonical({state:'done'})),
@@ -223,7 +235,7 @@ export class NativeReviewRepository {
           [id,nativeAttemptLimit,nativeReconcileLimit])).rows[0];
         return row.state;
       }
-      if(result.state!=='running')return await unconfirmed();
+      if(result.state!=='running')return await unconfirmed(typeof result.state==='string'&&/^[a-z_]{1,40}$/.test(result.state)?result.state:'invalid_state');
       // Most reviews finish within seconds: a running review is observed after 5 seconds, then at doubling gaps up to a minute.
       await db.query(`UPDATE native_review_jobs SET state='running',error_code=NULL,updated_at=now(),next_attempt=now()+CASE WHEN $2
         THEN least(interval '60 seconds',greatest(interval '5 seconds',(next_attempt-updated_at)*2)) ELSE interval '5 seconds' END WHERE id=$1`,[id,uncertain]);return 'running';
@@ -244,8 +256,13 @@ export class NativeReviewRepository {
       const state=job.state==='ambiguous'?'ambiguous':body.action==='pause'?'paused':'pending';
       const row=(await db.query(`UPDATE native_review_jobs SET state=$2,paused=$3,revision=revision+1,next_attempt=now(),updated_at=now(),
         reconciliations=CASE WHEN $3 THEN reconciliations ELSE 0 END WHERE id=$1 RETURNING *`,[id,state,body.action==='pause'])).rows[0];
-      // Resuming an uncertain review can only reconcile its existing identity, with a fresh observation bound.
-      if(body.action==='resume')await requestWorkflow(db,'memory_review','native:'+id,row.revision);
+      // Resuming an uncertain review can only reconcile its existing identity, with a fresh observation bound. It gets a new
+      // workflow generation, since one opened for it while it waited may already have taken this revision's number.
+      if(body.action==='resume') {
+        const next=(await db.query(`SELECT greatest(coalesce(max(generation),0)+1,$2::int) AS generation FROM workflow_registry
+          WHERE family='memory_review' AND job_id=$1`,['native:'+id,row.revision])).rows[0].generation;
+        await requestWorkflow(db,'memory_review','native:'+id,Number(next));
+      }
       await db.query('COMMIT');return row;
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }

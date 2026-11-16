@@ -23,7 +23,7 @@ def main(arguments):
     recall=commands.add_parser('recall');recall.add_argument('query');recall.add_argument('--profile');recall.add_argument('--after-profile');recall.add_argument('--limit',type=int,default=10)
     reviews=commands.add_parser('reviews');reviews.add_argument('--after',default='')
     for name in ('pause','resume'):
-        commands.add_parser(name).add_argument('id')
+        control=commands.add_parser(name);control.add_argument('id');control.add_argument('--revision',type=int,required=True)
     review=commands.add_parser('review');review.add_argument('event_ids',nargs='+');review.add_argument('--approve',action='store_true',required=True)
     arguments=list(arguments)
     if '--space' in arguments:
@@ -57,5 +57,5 @@ def main(arguments):
     elif args.action=='recall':result=api.call(prefix+'recall',{'query':args.query,'limit':args.limit,**({'profile':args.profile} if args.profile else {}),**({'after_profile':args.after_profile} if args.after_profile else {})})
     elif args.action=='reviews':result=api.call(prefix+'reviews?'+urlencode({'after':args.after}))
     elif args.action=='review':result=api.call(prefix+'reviews',{'event_ids':args.event_ids,'approved':args.approve})
-    else:result=api.call(prefix+'reviews/control',{'id':args.id,'action':args.action})
+    else:result=api.call(prefix+'reviews/control',{'id':args.id,'action':args.action,'expected_revision':args.revision})
     print(json.dumps(result,ensure_ascii=False,indent=2));return 0
