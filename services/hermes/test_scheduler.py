@@ -8,13 +8,14 @@ from .native_admin import Administration
 from .native_cron import manage,inspect,store
 from .scheduler import Scheduler,now
 from .scopes import Scopes
+from services.chats import Served
 
 
 class SchedulerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.env=patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':str(self.root)});self.env.start()
-        self.admin=Administration(None,self.root,'gpt-5.6-sol',Scopes({'enabled':False,'owner_id':'42','group_ids':[]}), 'fixture-token-long-enough')
+        self.admin=Administration(None,self.root,'gpt-5.6-sol',Scopes({'enabled':False},Served.of('42')), 'fixture-token-long-enough')
         self.calls=[];self.inputs={};self.finished={};self.failed=None;self.executions=0;self.hold=False
         self.scheduler=Scheduler(self.admin,lambda:SimpleNamespace(access_token='ephemeral'),self.call,self.runner)
 
@@ -211,7 +212,7 @@ class StoreSchedulerTests(SchedulerTests):
         from .runtime_profiles import ProfileCatalog
         self.store_env=patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'});self.store_env.start()
         self.control=ControlFixture()
-        self.admin.policy=Scopes({'enabled':False,'owner_id':'42','group_ids':['-10']})
+        self.admin.policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
         self.admin.profile_catalog=ProfileCatalog(self.root,self.admin.policy,self.admin.token,self.control.request)
 
     def tearDown(self):

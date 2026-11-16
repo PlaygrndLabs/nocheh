@@ -154,7 +154,8 @@ def capture(root, policy, catalog=None):
 
     For an original-only source, supply active control runtime_profiles rows.
     The caller must fence changes to both the filesystem and that catalog.
-    `policy.owner` and `policy.groups` are the Telegram ids the setup names; `policy.chats`, when the configuration
+    `policy.owner` is the owner's Telegram id and `policy.groups` the Telegram ids of the groups Nocheh serves (the
+    configuration snapshot's active chats: no setting lists groups, ADR-0253); `policy.chats`, when the configuration
     snapshot has chat records, the chats they name by their Nocheh ids ({'owner', 'groups': {chat: [Telegram ids]},
     'topics': {topic: chat}}), else None for a source whose values name their chats in the old way (ADR-0252).
     """
