@@ -366,17 +366,21 @@ export class ChatRepository {
   /**
    * Both ids of an upgraded group name a chat: the new supergroup's update (often Nocheh's own my_chat_member) came
    * before its migrate_from message. The new chat folds into the old one when nothing but its own add ever served it:
-   * it is not on, or it is on only from an owner add whose card still waits. Its ids, memberships, topics (but one whose
-   * key the old chat has) and state events move to the old chat, which keeps its state and its add, unless an owner add
-   * folds into an old chat Nocheh was not in (left, removed or archived): the owner added it again, so it is on. Into an
-   * old chat that is off, pending or could not be left, where Nocheh still is, the add is the upgrade's echo: the stage
-   * finds the moved card or leave superseded, and the old chat's own leave goes ahead. Returns whether it folded.
+   * it is not on, or it is on only from an owner add whose card still waits, and it has no project (the card made one
+   * already, or the owner gave it one). Its ids, memberships, topics (but one whose key the old chat has) and state
+   * events move to the old chat, which keeps its state and its add, unless an owner add folds into an old chat Nocheh
+   * was not in (left, removed or archived): the owner added it again, so it is on. Into an old chat that is off,
+   * pending or could not be left, where Nocheh still is, the add is the upgrade's echo: the stage finds the moved card
+   * or leave superseded, and the old chat's own leave goes ahead. Returns whether it folded.
    */
   private async fold(db:Db,connection:string,old:string,next:string):Promise<boolean> {
     const row=(await db.query(`SELECT n.state<>'active' OR n.added_by_role='owner' AND n.state_seq IS NOT NULL
         AND EXISTS(SELECT 1 FROM chat_state_events e WHERE e.event_id=n.add_event AND e.chat_id=n.id AND e.action='card' AND e.state='waiting') AS folds,
       n.state='active' AS owner_add,o.state AS old_state FROM chats n,chats o WHERE n.id=$1 AND o.id=$2 FOR UPDATE OF n,o`,[next,old])).rows[0];
     if(!row?.folds)return false;
+    // A project of the new chat's own (its card made one, or the owner gave it one) would be left naming no chat: the two
+    // stay apart. Asked after the lock, in a statement of its own, so it sees a card's project committed meanwhile.
+    if((await db.query('SELECT 1 FROM project_assignments WHERE space_id=$1',[next])).rowCount)return false;
     await db.query(`UPDATE chat_ids SET state='old',reason='migrated',changed_at=now() WHERE connection_id=$1 AND chat_id=$2 AND state='current'`,[connection,old]);
     await db.query(`UPDATE chat_ids SET chat_id=$2,changed_at=now() WHERE chat_id=$1`,[next,old]);
     await db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source,since,checked_at,seen_seq,seen_bot)

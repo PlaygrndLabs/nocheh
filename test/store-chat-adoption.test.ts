@@ -351,6 +351,31 @@ test('an upgrade folds the new supergroup\'s own add into the old group, whichev
   }finally{await h.cleanup();await stores.close();}
 });
 
+test('a fold never leaves a project naming no chat: once the card gave the new supergroup its project, the two stay apart',fixture,async()=>{
+  const stores=await open(),policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
+  const h=harness(stores,()=>policy,'carded'),stage=await stageFor(stores,h.repository,()=>policy);
+  try {
+    const basic='-4'+String(h.base+1).slice(-9),next=h.group(1),old=chatIdFor('telegram',basic),fresh=chatIdFor('telegram',next);h.named.add(basic);
+    await h.message(basic,h.update(1),{},'group');
+    const add=await h.status(next,h.update(2),Number(OWNER),'left','member');
+    // The card made the new chat's project, and its notice did not go: the row waits to send it again.
+    stage.answers.notice=()=>({state:'failed'});
+    await stage.settle([fresh]);
+    const card=async()=>(await stores.control.query('SELECT chat_id,state,outcome,project_id FROM chat_state_events WHERE event_id=$1',[add.reference.id])).rows[0];
+    const made=await card();
+    assert.deepEqual([made.chat_id,made.state,made.outcome],[fresh,'waiting','carded']);
+    const assigned=async()=>(await stores.control.query('SELECT project_id FROM project_assignments WHERE space_id=$1',[fresh])).rows[0]?.project_id;
+    assert.equal(await assigned(),made.project_id);
+    // Then the upgrade's messages: the two chats stay, and the project and the card still name the new one.
+    await h.message(basic,h.update(3),{migrate_to_chat_id:Number(next)},'group');
+    await h.message(next,h.update(4),{migrate_from_chat_id:Number(basic)});
+    assert.equal((await stores.control.query('SELECT chat_id FROM chat_ids WHERE external_id=$1',[next])).rows[0].chat_id,fresh);
+    assert.deepEqual([(await row(stores,fresh))?.state,(await row(stores,old)).state],['active','off']);
+    assert.equal(await assigned(),made.project_id,'the project still names a chat that is there');
+    assert.deepEqual(await card(),made);
+  }finally{await h.cleanup();await stores.close();}
+});
+
 test('the owner switch turns a group on or off with its project in one owner command, and refuses chats Nocheh is not in',fixture,async()=>{
   const stores=await open(),policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'switch');
