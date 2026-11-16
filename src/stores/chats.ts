@@ -235,9 +235,9 @@ export class ChatRepository {
     // began. One an older build took in but never recorded (startAdoption) is history: recorded, never acted on.
     const acts=live&&!imported&&(!!facts.migration||!!facts.bot_status)&&await adopting(db,String(event.capture_sequence));
     let changed=false;
-    // An upgrade first, so the new id's own messages continue the same chat.
-    if(live&&facts.migration)changed=await this.migrate(db,connection,facts.migration.from,facts.migration.to,acts)||changed;
     const at=event.received_at as Date;
+    // An upgrade first, so the new id's own messages continue the same chat.
+    if(live&&facts.migration)changed=await this.migrate(db,connection,facts.migration.from,facts.migration.to,acts,at)||changed;
     for(const person of facts.people)await ensureAccount(db,connection,person,'telegram',at);
     let chat=await chatOfApp(db,connection,source.scope);
     if(!chat&&facts.chat){chat=await this.create(db,connection,facts.chat,policy,at,imported);changed=true;}
@@ -345,12 +345,16 @@ export class ChatRepository {
    * old one stays, so the chat keeps its history, project, tasks, switches and state. When both ids already name chats
    * of their own, they stay two chats, as a group upgraded before step 2b does, except in a live capture Nocheh acts on
    * (`live`; never history, see startAdoption): there the new one's updates came just before its upgrade message, and it
-   * folds into the old one if only its own add ever served it (fold).
+   * folds into the old one if only its own add ever served it (fold); if it may not, the two stay apart, and the new one
+   * still takes the upgrade's echo (apart). `at` is when Nocheh took the upgrade message in.
    */
-  async migrate(db:Db,connection:string,from:string,to:string,live=false):Promise<boolean> {
+  async migrate(db:Db,connection:string,from:string,to:string,live=false,at:Date=new Date()):Promise<boolean> {
     if(!isTelegramChat(from)||!isTelegramChat(to)||from===to)return false;
     const old=await chatOfApp(db,connection,from),next=await chatOfApp(db,connection,to);
-    if(old&&next)return live&&old.id!==next.id&&old.kind==='group'&&next.kind==='group'&&old.current&&next.current&&await this.fold(db,connection,old.id,next.id);
+    if(old&&next) {
+      if(!live||old.id===next.id||old.kind!=='group'||next.kind!=='group'||!old.current||!next.current)return false;
+      return await this.fold(db,connection,old.id,next.id)||await this.apart(db,old.id,next.id,at);
+    }
     if(old) {
       if(old.current)await db.query(`UPDATE chat_ids SET state='old',reason='migrated',changed_at=now() WHERE connection_id=$1 AND external_id=$2 AND state='current'`,[connection,from]);
       await db.query(`INSERT INTO chat_ids(connection_id,external_id,chat_id,state,reason) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
@@ -408,6 +412,35 @@ export class ChatRepository {
     await db.query(`UPDATE chats SET app_type='supergroup',updated_at=now() WHERE id=$1 AND app_type IS DISTINCT FROM 'supergroup'`,[old]);
     await db.query('DELETE FROM chat_details WHERE chat_id=$1',[next]);
     await db.query('DELETE FROM chats WHERE id=$1',[next]);
+    return true;
+  }
+
+  /**
+   * Both ids of an upgraded group name a chat and the new one may not fold (its card made its project, or went): the two
+   * stay apart, and an upgrade still never undoes the owner's Off or a pending group's leave. A new chat on only from its
+   * own owner add within ten minutes of the upgrade message (`at`), whose old chat is off, pending or could not be left
+   * and not fresh (see adopt), took the upgrade's echo. Its card ends unsent if it still waits, and its project stays
+   * with it, so the project still names a chat. Off or could not be left: the new chat takes that state. Pending: the
+   * old chat's add and its leave move to the new chat, whose id is the only one Telegram still knows, and the old chat
+   * is left. System changes, so an older update recorded late never undoes them. Returns whether it changed anything.
+   */
+  private async apart(db:Db,old:string,next:string,at:Date):Promise<boolean> {
+    const row=(await db.query(`SELECT o.state AS old_state,o.add_event AS old_add,n.add_event AS next_add FROM chats o,chats n
+      WHERE o.id=$1 AND n.id=$2 AND n.state='active' AND n.added_by_role='owner' AND n.state_seq IS NOT NULL
+        AND n.added_at>$3::timestamptz-interval '10 minutes' AND n.added_at<$3::timestamptz+interval '10 minutes'
+        AND o.state IN ('off','pending','could_not_leave') AND NOT ${fresh('o','n.added_at')} FOR UPDATE OF o,n`,[old,next,at])).rows[0];
+    if(!row)return false;
+    await db.query(`UPDATE chat_state_events SET state='done',outcome=coalesce(outcome,'superseded'),updated_at=now()
+      WHERE event_id=$1 AND chat_id=$2 AND state='waiting'`,[row.next_add,next]);
+    if(row.old_state!=='pending') {
+      await db.query(`UPDATE chats SET state=$2,${systemChange} WHERE id=$1`,[next,row.old_state]);
+      return true;
+    }
+    await db.query(`UPDATE chats n SET state='pending',added_by_account_id=o.added_by_account_id,added_by_role=o.added_by_role,added_at=o.added_at,
+      add_event=o.add_event,${systemChange} FROM chats o WHERE n.id=$1 AND o.id=$2`,[next,old]);
+    await db.query(`UPDATE chat_state_events SET chat_id=$1,due_at=least(due_at,now()+interval '30 seconds'),updated_at=now()
+      WHERE event_id=$2 AND chat_id=$3 AND action='leave' AND state='waiting'`,[next,row.old_add,old]);
+    await db.query(`UPDATE chats SET state='left',${systemChange} WHERE id=$1`,[old]);
     return true;
   }
 
