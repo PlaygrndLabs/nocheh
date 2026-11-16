@@ -43,7 +43,7 @@ class HelperTests(unittest.TestCase):
                 ('sendMessage', 'telegram:1:update:2', 'reply'), ('sendMessage', 'telegram:1:update:2:retry:1', 'reply'),
                 ('sendMessage', 'action:' + 'a' * 64, 'approved_send'), ('sendMessage', 'approval:' + 'a' * 64, 'approval_card'),
                 ('editMessageText', 'approval-settle:' + 'a' * 64, 'card_update'),
-                ('answerCallbackQuery', 'approval-answer:1', 'button_answer'), ('sendMessage', 'refusal:' + 'a' * 64, 'refusal'),
+                ('answerCallbackQuery', 'approval-answer:1', 'button_answer'), ('sendMessage', 'refusal:' + 'a' * 64, 'refusal'), ('leaveChat', 'leave:' + 'a' * 64 + ':1', 'leave'),
                 ('sendMessage', 'notice:' + 'a' * 64, 'notice'), ('editMessageText', 'notice-edit:notice-a:b', 'notice_update'),
                 ('sendMessage', 'something-new:1', 'other')):
             self.assertEqual(kind_of(method, dispatch), kind, (method, dispatch))

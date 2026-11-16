@@ -43,7 +43,7 @@ END$$;
 ALTER TABLE chat_sends ADD COLUMN IF NOT EXISTS chat_id text;
 `;
 
-export const sendKinds=['reply','approved_send','approval_card','card_update','button_answer','refusal','notice','notice_update','reaction','setup','other'] as const;
+export const sendKinds=['reply','approved_send','approval_card','card_update','button_answer','refusal','notice','notice_update','leave','reaction','setup','other'] as const;
 export const sendStates=['sent','failed','uncertain','not_sent'] as const;
 /** Expected no-ops, and a chat's own choice not to take reactions: listed, never counted as problems. */
 export const harmlessSendCodes=['message_not_modified','button_answer_expired','reaction_not_allowed'] as const;

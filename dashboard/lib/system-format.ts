@@ -439,6 +439,7 @@ export const sendKinds: Record<string, string> = {
   refusal: 'Not-allowed reply',
   notice: 'Notice',
   notice_update: 'Notice update',
+  leave: 'Left a group',
   reaction: 'Reaction',
   setup: 'Bot setup',
   other: 'Other',

@@ -19,7 +19,7 @@ from services.durable import canonical, digest, immutable_file
 
 # The dispatch key a request ran under names the kind of send it was.
 KINDS = (('telegram:', 'reply'), ('action:', 'approved_send'), ('approval:', 'approval_card'), ('approval-settle:', 'card_update'),
-         ('approval-answer:', 'button_answer'), ('refusal:', 'refusal'), ('notice:', 'notice'), ('notice-edit:', 'notice_update'))
+         ('approval-answer:', 'button_answer'), ('refusal:', 'refusal'), ('notice:', 'notice'), ('notice-edit:', 'notice_update'), ('leave:', 'leave'))
 # Telegram's description decides a refusal's code, first hit wins; its HTTP status is the fallback.
 REJECTIONS = ((('bot was blocked',), 'bot_blocked'), (('user is deactivated',), 'user_deactivated'),
               (('bot was kicked', 'bot is not a member'), 'bot_removed'), (('chat not found',), 'chat_not_found'),
