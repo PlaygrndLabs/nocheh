@@ -204,7 +204,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         return json(res,200,{...found,groups:found.groups.filter(group=>all||directory.served(group.id))});
       }
       if(view==='conversations')return json(res,200,await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
-        limit:limit(url.searchParams.get('limit'),50,100)},await s.supervision.outsiders(policy)));
+        limit:limit(url.searchParams.get('limit'),50,100),kind:url.searchParams.get('kind')??'',state:url.searchParams.get('state')??''},await s.supervision.outsiders(policy)));
       if(view==='conversation-context') {
         const space=url.searchParams.get('space')??'';
         if(await s.supervision.outsider(policy,space))throw new HttpError(404,'conversation_not_found');

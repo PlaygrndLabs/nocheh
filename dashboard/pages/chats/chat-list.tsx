@@ -2,9 +2,10 @@
 import {useDeferredValue, useState} from 'react';
 import {Hash, MessageCircle, RefreshCw, Search, Users} from 'lucide-react';
 import {apiPost} from '../../lib/api';
+import {useServedGroups} from '../../lib/chat-directory';
 import {refreshResources} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
-import {chatError, chatName, chatStateLabels, chatTree, isOn, shortIdLabel, type Chat} from '../../lib/chats-model';
+import {chatError, chatName, chatStateLabels, chatTree, shortIdLabel, type Chat} from '../../lib/chats-model';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, Empty, Input, LoadError, LoadingRows} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
@@ -14,12 +15,14 @@ export function ChatList({selected}: {selected: string | null}) {
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query);
   const {directory, identities, items, more} = useChats(deferred);
+  const served = useServedGroups(30000);
   const [refreshing, setRefreshing] = useState(false);
   const {toast} = useFeedback();
 
   const tree = chatTree(items, identities.data?.groups ?? [], deferred);
-  // Telegram is asked about the groups Nocheh is on in.
-  const served = items.some(chat => chat.kind === 'group' && isOn(chat));
+  // Telegram is asked about the groups Nocheh is on in: all of them, not the chats this list loaded or found. When they
+  // can't be read, the server decides.
+  const canRefresh = served.items.length > 0 || !!served.error;
   const nothing = !tree.privates.length && !tree.groups.length;
 
   const refreshNames = async () => {
@@ -61,7 +64,7 @@ export function ChatList({selected}: {selected: string | null}) {
           size="sm"
           className="w-full justify-start text-muted"
           busy={refreshing}
-          disabled={!served}
+          disabled={!canRefresh}
           title="Asks Telegram for the current group names. Nothing is sent to anyone."
           onClick={() => void refreshNames()}
         >

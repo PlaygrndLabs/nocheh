@@ -2069,12 +2069,16 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
     ['Hiking crew', 'Removed'],
   ])
     await list.getByRole('link', {name}).getByText(state, {exact: true}).waitFor();
-  // A group someone else added is being left or was left, and one Nocheh was removed from says so: none has a switch,
-  // or people to choose.
+  // A group someone else added is being left, one added without showing who was left, and one Nocheh was removed
+  // from says so: none has a switch, or people to choose.
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Nocheh here', exact: true})});
   for (const [name, state, text] of [
     ['Book swap', 'Leaving', 'Someone else added Nocheh here, so it is leaving.'],
-    ['Choir practice', 'Left', 'Nocheh left because someone else added it. Add Nocheh yourself to use it here.'],
+    [
+      'Choir practice',
+      'Left',
+      'Nocheh left because someone added it without showing who. To use it here, turn off Remain anonymous and add Nocheh yourself.',
+    ],
     ['Hiking crew', 'Removed', 'Nocheh was removed from this group.'],
   ]) {
     await list.getByRole('link', {name}).click();
@@ -2084,6 +2088,15 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
     assert.equal(await page.getByRole('switch', {name: 'Nocheh in this group'}).count(), 0, name);
     assert.equal(await page.getByRole('heading', {name: 'Who can talk to Nocheh'}).count(), 0, name);
   }
+  // A topic follows its group: one in a group Nocheh was removed from says so, in the group's own words, and has no
+  // reply mode or Telegram notice, as its group's page has none.
+  assert.equal(await card.getByText(/Add the bot in Telegram first/).count(), 0, 'Hiking crew');
+  await list.getByRole('link', {name: 'Trail maps'}).click();
+  await page.getByRole('heading', {name: 'Trail maps', level: 2}).waitFor();
+  await card.getByText('Nocheh was removed from this group.').waitFor();
+  assert.match(await card.innerText(), /Follows its group, Hiking crew: Removed\./);
+  for (const wrong of [/where Nocheh is/, /Add the bot in Telegram first/, /Answers only when called/])
+    assert.equal(await card.getByText(wrong).count(), 0, String(wrong));
   // A group Nocheh is in but off has its switch.
   await list.getByRole('link', {name: 'Weekend notes'}).click();
   await card.getByText('Nocheh doesn’t answer here.').waitFor();
@@ -2103,6 +2116,64 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
   assert.equal(await page.getByText('Groups Nocheh is on in').count(), 0);
   assert.deepEqual(problems, []);
   await page.close();
+});
+
+test('every group Nocheh is on in can be shared with and refreshed, past the first 100 chats', async () => {
+  // 120 more groups Nocheh is on in: Garden swap falls past the first 100 chats, and past the first 100 such groups.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats');
+  try {
+    const {page, problems} = await open('messages?view=import&job=11111111-1111-4111-8111-111111111111');
+    await page.locator('#map-chat-1 option', {hasText: 'Share with Garden swap'}).waitFor({state: 'attached'});
+    const targets = (await page.locator('#map-chat-1 option').allTextContents()).filter(text =>
+      text.startsWith('Share with '),
+    );
+    assert.equal(targets.length, 122, 'Aurora planning, 120 clubs and Garden swap');
+    assert.ok(['Aurora planning', 'Club 001', 'Club 120'].every(name => targets.includes('Share with ' + name)));
+    // The chat list loads its first 100 chats; a search that finds no group Nocheh is on in still lets Telegram be
+    // asked about all of them.
+    await page.goto(origin + '/#chats');
+    await page.getByText('Showing the first 100 chats', {exact: false}).waitFor();
+    await page.getByLabel('Find a chat').fill('Choir');
+    await page.getByRole('navigation', {name: 'Chats'}).getByRole('link', {name: 'Choir practice'}).waitFor();
+    assert.equal(await page.getByRole('button', {name: /Refresh group names/}).isEnabled(), true);
+    assert.deepEqual(problems, []);
+    await page.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+});
+
+test('a group that moves to a page not read yet is never dropped quietly, and sharing it still asks first', async () => {
+  writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats');
+  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  try {
+    const problems = [];
+    page.on('pageerror', error => problems.push('page error: ' + error.message));
+    // The served list is read again each minute: the test moves the page's clock on instead of waiting.
+    await page.clock.install();
+    await page.goto(origin + '/#messages?view=import&job=11111111-1111-4111-8111-111111111111');
+    const map = page.locator('#map-chat-1');
+    await map.locator('option', {hasText: 'Share with Club 099'}).waitFor({state: 'attached'});
+    await map.selectOption({label: 'Share with Club 099'});
+    // Club 000 is turned on and sorts first, so Club 099 leaves the first page; the pages after it can't be read.
+    writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats-moved');
+    await page.clock.fastForward(61000);
+    await page.getByText('Some groups may be missing').waitFor();
+    await map.locator('option', {hasText: 'Share with Club 000'}).waitFor({state: 'attached'});
+    assert.equal(await map.locator('option', {hasText: 'Share with Club 099'}).count(), 0);
+    assert.equal(await map.locator('option', {hasText: 'Share with Garden swap'}).count(), 0);
+    assert.equal(await map.inputValue(), '-2000000000099');
+    // The mapping still goes to a group, so starting asks first. Cancelling starts nothing.
+    await page.getByRole('button', {name: 'Start import'}).click();
+    const dialog = page.getByRole('dialog', {name: 'Share imported history with a group?'});
+    await dialog.getByRole('button', {name: 'Cancel'}).click();
+    await dialog.waitFor({state: 'detached'});
+    await page.getByRole('button', {name: 'Start import'}).waitFor();
+    assert.deepEqual(problems, []);
+  } finally {
+    await page.close();
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
 });
 
 test('a sharing rule finds messages from its groups by their chat, a new-id group and an upgraded one included', async () => {

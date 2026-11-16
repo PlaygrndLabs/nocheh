@@ -18,7 +18,7 @@ import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
-import {chatDirectory,chatIdFor,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
+import {chatDirectory,chatIdFor,chatShortId,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
 import type {ChatState} from '../src/chat-wire.js';
 import {labeledPlaceholders,promptProblem,promptSchema,reminderTexts} from '../src/prompts.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
@@ -29,12 +29,14 @@ if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_
  * id ('42', '-10042', '-10042/topic/7'); a group first seen later has a digest id ('Night sky club', with a topic), and a
  * group Telegram upgraded after that keeps its id under a new Telegram id ('Garden swap'). Nocheh is on where a chat's
  * state says (ADR-0253): the owner's chat, Aurora planning and Garden swap start on, the other groups off, and three
- * more show where Nocheh stands after someone else added it ('Book swap', leaving; 'Choir practice', left) or removed
- * it ('Hiking crew'). The group switch (POST /chats/state) changes a state here, in memory.
+ * more show where Nocheh stands after someone else added it ('Book swap', leaving), someone added it without showing
+ * who ('Choir practice', left) or someone removed it ('Hiking crew'). The group switch (POST /chats/state) changes a
+ * state here, in memory.
  */
 const NEW_GROUP_TG='-10088',NEW_GROUP=chatIdFor('telegram',NEW_GROUP_TG),NEW_TOPIC=chatIdFor('telegram',NEW_GROUP_TG,'3');
 const UPGRADED_OLD_TG='-4005',UPGRADED_TG='-10099',UPGRADED=chatIdFor('telegram',UPGRADED_OLD_TG);
 const LEAVING_GROUP=chatIdFor('telegram','-10091'),LEFT_GROUP=chatIdFor('telegram','-10092'),REMOVED_GROUP=chatIdFor('telegram','-10093');
+const REMOVED_TOPIC=chatIdFor('telegram','-10093','5');
 const previewChats:{id:string;kind:'private'|'group';title:string|null;ids:string[];old?:string[];is_forum?:boolean;topics?:[string,string][];state?:ChatState}[]=[
  {id:'42',kind:'private',title:'Owner',ids:['42'],state:'active'},
  {id:'73',kind:'private',title:'Mira Chen',ids:['73']},
@@ -45,7 +47,7 @@ const previewChats:{id:string;kind:'private'|'group';title:string|null;ids:strin
  {id:UPGRADED,kind:'group',title:'Garden swap',ids:[UPGRADED_TG],old:[UPGRADED_OLD_TG],state:'active'},
  {id:LEAVING_GROUP,kind:'group',title:'Book swap',ids:['-10091'],state:'pending'},
  {id:LEFT_GROUP,kind:'group',title:'Choir practice',ids:['-10092'],state:'left'},
- {id:REMOVED_GROUP,kind:'group',title:'Hiking crew',ids:['-10093'],state:'removed'},
+ {id:REMOVED_GROUP,kind:'group',title:'Hiking crew',ids:['-10093'],is_forum:true,topics:[[REMOVED_TOPIC,'5']],state:'removed'},
 ];
 /** Each chat's state, which the group switch changes; a chat with none listed starts off. */
 const chatStates=new Map<string,ChatState>(previewChats.map(chat=>[chat.id,chat.state??'off']));
@@ -219,15 +221,27 @@ const conversations:any[]=[
  {space_id:NEW_GROUP,name:'Night sky club',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
  {space_id:NEW_TOPIC,name:'Meteor watch',kind:'topic',parent_space:NEW_GROUP,parent_name:'Night sky club',observed_at:new Date().toISOString(),configured:false,closed:false},
  {space_id:UPGRADED,name:'Garden swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
- // Someone else added Nocheh to these two (ADR-0253): it is leaving the first and has left the second.
+ // Someone else added Nocheh to the first, and someone who didn't show who they were to the second (ADR-0253): it is
+ // leaving the first and has left the second.
  {space_id:LEAVING_GROUP,name:'Book swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false,
   added_by:'other',added_at:new Date(Date.now()-20000).toISOString()},
  {space_id:LEFT_GROUP,name:'Choir practice',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-864e5).toISOString(),configured:false,
   added_by:'anonymous',added_at:new Date(Date.now()-864e5).toISOString()},
- // Someone removed Nocheh from this one, and Telegram said so.
+ // Someone removed Nocheh from this one, and Telegram said so; the owner's refresh since found the bot not in it. Its
+ // topic follows it.
  {space_id:REMOVED_GROUP,name:'Hiking crew',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-3*864e5).toISOString(),configured:true,
-  added_by:'owner',added_at:new Date(Date.now()-30*864e5).toISOString(),removed_event:true},
+  added_by:'owner',added_at:new Date(Date.now()-30*864e5).toISOString(),removed_event:true,
+  telegram:{state:'not_member',migrate_to_chat_id:null,observed_at:new Date(Date.now()-2*864e5).toISOString()}},
+ {space_id:REMOVED_TOPIC,name:'Trail maps',kind:'topic',parent_space:REMOVED_GROUP,parent_name:'Hiking crew',observed_at:new Date(Date.now()-4*864e5).toISOString(),configured:false,closed:false},
 ];
+/** The `many-chats` scenario: 120 more groups Nocheh is on in, listed only. Their ids sort before every digest id, so
+ * 'Garden swap' falls past the first 100 chats and past the first 100 groups Nocheh is on in. In `many-chats-moved` one
+ * more, 'Club 000', sorts first, so 'Club 099' moves off the first page of those groups, and no page after the first can
+ * be read. */
+const club=(i:number)=>{const n=String(i).padStart(3,'0'),id='-2000000000'+n;
+ return {space_id:id,name:'Club '+n,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true,topic_key:null,
+  app_ids:[{app:'telegram',external:id,state:'current'}],is_forum:false,state:'active',owner:false,short_id:chatShortId(id),added_by:'owner',added_at:null,removed_event:false};};
+const manyChats=Array.from({length:120},(_,i)=>club(i+1));
 /** The directory as the chats' states serve it, installed for the repositories the preview runs. */
 const directoryNow=()=>installChats(previewDirectory());
 /** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252), and who
@@ -666,8 +680,14 @@ const server=createServer((req,res)=>{void(async()=>{
     confirm_required:!fromGroup,readers:fromGroup?{space:conversation,group:conversation}:null});}
   if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
   if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant,...factGrants].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
-  // A search matches a chat's name, its group's name and its Telegram ids, as the server's does.
-  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),items=conversations.map(conversationItem).filter(row=>!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)));return json(res,200,{items,total:items.length,next_cursor:null,state:'current',observed_at:new Date().toISOString()});}
+  // A search matches a chat's name, its group's name and its Telegram ids, as the server's does; a search and the kind
+  // and state filters apply before the list, sorted by id, is paged, as the store pages it.
+  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'',after=url.searchParams.get('after')??'',limit=Math.min(100,Number(url.searchParams.get('limit')||50));
+   if(mode==='many-chats-moved'&&after)throw new HttpError(503,'fixture_observation_unavailable');
+   const all=[...conversations.map(conversationItem),...(mode==='many-chats'?manyChats:mode==='many-chats-moved'?[club(0),...manyChats]:[])].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)
+    .filter(row=>(!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)))&&(!kind||row.kind===kind)&&(!state||row.state===state));
+   const remaining=all.filter(row=>row.space_id>after),items=remaining.slice(0,limit);
+   return json(res,200,{items,total:all.length,next_cursor:remaining.length>limit?items.at(-1).space_id:null,state:'current',observed_at:new Date().toISOString()});}
   if(route==='/conversations/context'){const space=url.searchParams.get('space')??'',directory=directoryNow(),group=directory.parentOf(space)??space;
    return json(res,200,{conversation:conversations.find(row=>row.space_id===space)??{space_id:space,name:null,kind:'unknown'},observed_at:new Date().toISOString(),state:'current',
     addressing:{state:'current',enabled:false,owner_id:'42',group_enabled:directory.isGroup(group)&&directory.served(group),granted:[],denied:[]},

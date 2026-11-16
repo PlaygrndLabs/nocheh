@@ -169,23 +169,30 @@ export const switchable = (chat: Chat | null | undefined): boolean =>
   chat?.kind === 'group' && (chat.state === 'active' || chat.state === 'off' || chat.state === 'could_not_leave');
 /**
  * What a group's state means, for its page. A group the seeder made (from before step 2b, or from imported history)
- * has no add or removal on record, so its text claims neither.
+ * has no add or removal on record, so its text claims neither. Telegram hides who added Nocheh when an admin adds it
+ * with Remain anonymous on, which may be the owner, so that add never says someone else.
  */
 export function chatStateText(chat: Chat): string {
-  const someoneElse = chat.added_by === 'other' || chat.added_by === 'anonymous';
+  const hidden = chat.added_by === 'anonymous';
   switch (chat.state) {
     case 'active':
       return 'You can always talk to it here.';
     case 'pending':
-      return 'Someone else added Nocheh here, so it is leaving.';
+      return hidden
+        ? 'Someone added Nocheh here without showing who, so it is leaving.'
+        : 'Someone else added Nocheh here, so it is leaving.';
     case 'left':
-      return someoneElse
-        ? 'Nocheh left because someone else added it. Add Nocheh yourself to use it here.'
-        : 'Nocheh isn’t in this group any more.';
+      return hidden
+        ? 'Nocheh left because someone added it without showing who. To use it here, turn off Remain anonymous and add Nocheh yourself.'
+        : chat.added_by === 'other'
+          ? 'Nocheh left because someone else added it. Add Nocheh yourself to use it here.'
+          : 'Nocheh isn’t in this group any more.';
     case 'removed':
       return chat.removed_event ? 'Nocheh was removed from this group.' : 'Nocheh isn’t in this group any more.';
     case 'could_not_leave':
-      return 'Someone else added Nocheh here and it couldn’t leave. It stays silent.';
+      return hidden
+        ? 'Someone added Nocheh here without showing who, and it couldn’t leave. It stays silent.'
+        : 'Someone else added Nocheh here and it couldn’t leave. It stays silent.';
     case 'archived':
       return 'From your imported history. Nocheh isn’t in this group.';
     default:

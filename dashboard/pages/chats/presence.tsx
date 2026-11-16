@@ -60,19 +60,33 @@ export function NochehHere({chat, parent, telegram}: {chat: Chat; parent: Chat |
 
   if (chat.kind === 'topic') {
     const group = chat.parent_space ?? '';
-    const on = isOn(parent ?? chat);
+    // A topic follows its group. Only the group's own item says who added Nocheh or that it was removed; until it
+    // loads, the topic's copy of the group's state still says where Nocheh stands.
+    const base = parent?.kind === 'group' ? parent : chat;
+    const on = isOn(base);
+    const state = base.state && base.state !== 'active' && base.state !== 'off' ? base.state : null;
+    const link = (
+      <a href={chatHref(group)} className="font-medium text-accent-text hover:underline" dir="auto">
+        {parent ? chatName(parent) : 'the group'}
+      </a>
+    );
     return (
       <Card>
         <CardHeader title="Nocheh here" />
         <CardBody className="space-y-2 pt-2">
-          {problem && <Notice tone="warn">{problem}</Notice>}
-          <p className="text-sm">
-            Follows its group,{' '}
-            <a href={chatHref(group)} className="font-medium text-accent-text hover:underline" dir="auto">
-              {parent ? chatName(parent) : 'the group'}
-            </a>
-            , where Nocheh is <strong>{on ? 'on' : 'off'}</strong>.
-          </p>
+          {problem && switchable(base) && <Notice tone="warn">{problem}</Notice>}
+          {state ? (
+            <>
+              <p className="text-sm">
+                Follows its group, {link}: <strong>{chatStateLabels[state]}</strong>.
+              </p>
+              <p className="text-[13px] text-muted">{chatStateText(base)}</p>
+            </>
+          ) : (
+            <p className="text-sm">
+              Follows its group, {link}, where Nocheh is <strong>{on ? 'on' : 'off'}</strong>.
+            </p>
+          )}
           {on && <ReplyMode telegram={telegram} />}
         </CardBody>
       </Card>
