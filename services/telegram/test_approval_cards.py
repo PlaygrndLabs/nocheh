@@ -251,6 +251,30 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(sent),2,'a refused button sends nothing')
             with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'d'*64,'chat_id':'-20'})  # only the owner's private chat
 
+    async def test_a_group_card_carries_rows_of_its_presses_and_no_other(self):
+        # The card about a group the owner added Nocheh to (ADR-0253): a Move button per offered project, then No project and Turn off.
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];edits=[];gateway=self.gateway(Path(folder),sent,edits)
+            press=lambda action,event='e'*32:'ng'+action+event
+            rows=[[{'text':'Move to Bakery','callback':press('0')},{'text':'Move to Garden','callback':press('1')},{'text':'Move to Books','callback':press('2')}],
+                  [{'text':'No project','callback':press('x')},{'text':'Turn off','callback':press('o')}]]
+            card={'id':'a'*64,'chat_id':'123','text':'Nocheh is on in “Bakery” (#4321), in its new project “Bakery”.','buttons':rows}
+            self.assertEqual(await gateway.send_notice(card),{'state':'done'})
+            keyboard=lambda markup:[[getattr(button,'callback_data',None) or button[1] for button in row] for row in getattr(markup,'inline_keyboard',markup)]
+            self.assertEqual(keyboard(sent[0][3]),[[press('0'),press('1'),press('2')],[press('x'),press('o')]])
+            # One row of card presses works as a list of buttons too, and the edit after a press drops them.
+            self.assertEqual(await gateway.send_notice({**card,'id':'b'*64,'buttons':rows[1]}),{'state':'done'})
+            self.assertEqual(keyboard(sent[1][3]),[[press('x'),press('o')]])
+            self.assertEqual(await gateway.send_notice({'id':card['id'],'chat_id':'123','text':card['text']+'\n\n“Bakery” is in no project now.','edit':True}),
+                             {'state':'done','edited':True})
+            self.assertIsNone(edits[-1][3])
+            button=lambda data:{'text':'Move','callback':data}
+            for bad in [[button(press('3'))],[button(press('m'))],[button(press('0','e'*31))],[button(press('0','e'*33))],[button(press('0','E'*32))],
+                        [button('ng0')],[button('na'+'e'*56)],[button(None)],[[button(press('0'))]]*4,[[button(press('0'))]*4],[[]],[],
+                        [button(press('0')),[button(press('1'))]],[[[button(press('0'))]]],[{'text':'Move','callback':press('0'),'url':'https://example.test'}]]:
+                with self.subTest(bad),self.assertRaises(ValueError):await gateway.send_notice({**card,'id':'c'*64,'buttons':bad})
+            self.assertEqual(len(sent),2,'a refused button sends nothing')
+
     async def test_a_sent_notice_is_edited_in_place_and_only_that_one(self):
         from telegram.error import BadRequest, Forbidden
         with tempfile.TemporaryDirectory() as folder:
