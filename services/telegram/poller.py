@@ -8,8 +8,12 @@ from .capture import clear_command_menu
 from .sender import seconds
 
 POLL_TIMEOUT = 25
-# The Telegram library's own types, so a dropped reaction type fails startup instead of silently losing reactions.
-REQUIRED_UPDATES = {'message_reaction', 'message_reaction_count'}
+# Every kind of update Nocheh reads, asked for by name (capture.py archives each under its chat): messages and channel
+# posts and their edits, button presses, reactions, the bot's own membership and other people's, and join requests.
+# Inline queries, business messages, payments, polls and boosts are never asked for, so Telegram never sends them. Each
+# must be one of the Telegram library's own types, so a dropped one fails startup instead of silently losing updates.
+ALLOWED_UPDATES = ('message', 'edited_message', 'channel_post', 'edited_channel_post', 'callback_query', 'message_reaction',
+                   'message_reaction_count', 'my_chat_member', 'chat_member', 'chat_join_request')
 CONFLICT_RETRIES = 5
 NETWORK_FAILURES = 10
 
@@ -52,8 +56,8 @@ class Poller:
     async def run(self):
         from telegram import Update
         from telegram.error import Conflict, InvalidToken, RetryAfter
-        if not REQUIRED_UPDATES.issubset(Update.ALL_TYPES):
-            raise RuntimeError('telegram_library_lacks_reaction_updates')
+        if not set(ALLOWED_UPDATES).issubset(Update.ALL_TYPES):
+            raise RuntimeError('telegram_library_lacks_update_types')
         service = self.service
         connected, failures, conflicts = False, 0, 0
         while not service.stopping:
@@ -61,7 +65,7 @@ class Poller:
                 if not connected:
                     await self.connect()
                     connected = True
-                updates = await service.bot.get_updates(offset=self.offset, timeout=POLL_TIMEOUT, limit=100, allowed_updates=Update.ALL_TYPES)
+                updates = await service.bot.get_updates(offset=self.offset, timeout=POLL_TIMEOUT, limit=100, allowed_updates=list(ALLOWED_UPDATES))
                 failures = conflicts = 0
                 if updates:
                     self.offset = updates[-1].update_id + 1

@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from services.durable import digest
 from services.telegram.capture import instrument_request
 from services.telegram.gateway import TelegramService
+from services.telegram.poller import ALLOWED_UPDATES
 from services.telegram.settings import Policy
 from tools.acceptance.telegram_mock import TelegramMock, TOKEN
 
@@ -110,6 +111,21 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.service.health()['state'], 'connected')
         # No command menu is left in any scope.
         wait(lambda: not self.mock.state['commands'])
+
+    def test_polling_asks_only_for_the_updates_nocheh_reads(self):
+        self.assertEqual(ALLOWED_UPDATES, ('message', 'edited_message', 'channel_post', 'edited_channel_post', 'callback_query', 'message_reaction',
+                                           'message_reaction_count', 'my_chat_member', 'chat_member', 'chat_join_request'))
+        wait(lambda: self.mock.state['allowed_updates'] == list(ALLOWED_UPDATES))
+        bot, person = {'id': int(BOT_ID), 'is_bot': True, 'first_name': 'Synthetic'}, {'id': 456, 'is_bot': False, 'first_name': 'Alice'}
+        # Someone adds the bot to a group: its own membership update arrives and is archived under that group.
+        added = {'update_id': 61, 'my_chat_member': {'chat': {'id': -10088, 'type': 'supergroup', 'title': 'Bakery'}, 'from': person, 'date': 1700000000,
+                                                     'old_chat_member': {'user': bot, 'status': 'left'}, 'new_chat_member': {'user': bot, 'status': 'member'}}}
+        inline = {'update_id': 60, 'inline_query': {'id': '1', 'from': person, 'query': 'x', 'offset': ''}}
+        self.inject([inline, added])
+        wait(lambda: self.mock.state['offset'] == 62)
+        events = {event['key']: event for event in (json.loads(path.read_bytes()) for path in (self.root / 'spool/pending').glob('*.json'))}
+        self.assertEqual(events[f'telegram:{BOT_ID}:update:61']['scope'], '-10088')
+        self.assertNotIn(f'telegram:{BOT_ID}:update:60', events, 'an inline query is never asked for')
 
     def leaving(self):
         """The fake Telegram's leaveChat: True, or the fault queued for it."""
