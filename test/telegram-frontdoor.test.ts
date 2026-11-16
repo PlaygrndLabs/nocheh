@@ -24,11 +24,11 @@ test('Telegram calls go to Nocheh\'s own bot, the other helper services to Herme
   const bot=recorder(()=>Response.json({state:'done'})),hermes=recorder(()=>Response.json({literals:[]}));
   const call=runtimeCall(combinedAdapter(telegramAdapter({url:'http://bot.invalid',token:'service',fetch:bot.fetch}),
     hermesAdapter({url:'http://hermes.invalid',token:'service',fetch:hermes.fetch})));
-  for(const operation of ['telegram.chat','telegram.approval','telegram.refusal','telegram.notice','telegram.identity','telegram.presence','telegram.reply','action.execute','source.file'] as const)
+  for(const operation of ['telegram.chat','telegram.approval','telegram.refusal','telegram.notice','telegram.identity','telegram.presence','telegram.reply','telegram.leave','action.execute','source.file'] as const)
     await call(operation,{id:'x'});
   await call('guard.detect',{text:'x'});await call('telegram.status',{});
   assert.deepEqual(bot.seen.map(row=>new URL(row.url).pathname),['/internal/telegram/chat','/internal/telegram/approval','/internal/telegram/refusal',
-    '/internal/telegram/notice','/internal/telegram/identity','/internal/telegram/presence','/internal/telegram/reply','/internal/telegram/action',
+    '/internal/telegram/notice','/internal/telegram/identity','/internal/telegram/presence','/internal/telegram/reply','/internal/telegram/leave','/internal/telegram/action',
     '/internal/telegram/file','/health']);
   assert.ok(bot.seen.slice(0,-1).every(row=>row.method==='POST'&&row.auth==='Bearer service'&&(row.body as {id:string}).id==='x'));
   assert.deepEqual([bot.seen.at(-1)!.method,bot.seen.at(-1)!.auth],['GET',undefined],'health is read without the service token');
@@ -42,6 +42,8 @@ test('the bot\'s failures keep the codes callers act on',async()=>{
   await assert.rejects(failing(413,'attachment_too_large')('telegram.notice',{}),{code:'telegram_unavailable'},'only a file read settles as too large');
   await assert.rejects(failing(429,'quota_paused')('telegram.reply',{}),{code:'quota_paused',status:429});
   await assert.rejects(failing(400,'invalid_request')('telegram.reply',{}),{code:'telegram_rejected_request',status:400});
+  // A leave the bot refuses (the chat is served now, or the owner's): the stage tries again later.
+  await assert.rejects(failing(400,'invalid_request')('telegram.leave',{}),{code:'telegram_rejected_request',status:400});
   await assert.rejects(failing(503,'telegram_unavailable')('telegram.presence',{}),{code:'telegram_unavailable',status:503});
   const lost=runtimeCall(telegramAdapter({url:'http://bot.invalid',token:'t',fetch:(async()=>{throw Error('refused');}) as typeof fetch}));
   await assert.rejects(lost('telegram.reply',{}),{code:'telegram_unavailable',status:503});

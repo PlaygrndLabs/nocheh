@@ -48,7 +48,7 @@ export function telegramScopes(chat: string | null | undefined, own?: string | n
 type Options = {url: string; token: string; fetch?: typeof fetch};
 /** Nocheh's own Telegram bot, the `nocheh-telegram` service (ADR-0235). Only this adapter knows its routes. It is the one
  * process that holds the bot token: it polls Telegram, and shows presence, sends replies, cards, refusals and notices,
- * runs approved sends and reads files and chats when Nocheh asks. */
+ * runs approved sends, reads files and chats, and leaves a group when Nocheh asks. */
 export function telegramAdapter(options: Options): RuntimeAdapter {
   const transport = options.fetch ?? fetch;
   const routes: Partial<Record<RuntimeOperation, string>> = {
@@ -62,6 +62,8 @@ export function telegramAdapter(options: Options): RuntimeAdapter {
     'telegram.identity': '/internal/telegram/identity',
     'telegram.presence': '/internal/telegram/presence',
     'telegram.reply': '/internal/telegram/reply',
+    // Nocheh leaving a group someone else added it to (ADR-0253): {id, chat_id}, once by id.
+    'telegram.leave': '/internal/telegram/leave',
   };
   return {
     id: 'telegram',
