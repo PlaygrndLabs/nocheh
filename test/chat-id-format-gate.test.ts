@@ -41,7 +41,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['src/stores/runtime-configuration.ts','adapter',2,'the policy document holds raw Telegram owner and group ids'],
   ['tools/cli/main.py','adapter',1,'configure-telegram owner and group ids'],
   ['tools/operations/archive/telegram_directory.py','adapter',2,'Telegram group and user ids typed by the owner'],
-  ['tools/operations/installation/configuration.py','adapter',3,'installer checks of TELEGRAM_OWNER_ID, TELEGRAM_GROUP_IDS and access'],
+  ['tools/operations/installation/configuration.py','adapter',3,'installer checks of TELEGRAM_OWNER_ID and TELEGRAM_GROUP_ACCESS'],
   ['tools/operations/installation/mini_app.py','adapter',1,'the bot id in the bot token'],
   ['tools/operations/security/group_access.py','adapter',1,'a Telegram user id typed by the owner'],
   ['services/hermes/preference_transfer.py','legacy',1,'a legacy-layout reset, or a preferences snapshot from before step 2b: its topic spaces read once'],
