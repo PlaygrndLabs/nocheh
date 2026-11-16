@@ -694,11 +694,13 @@ class ProductScenarios(Scenarios):
     REVIEW_SECONDS = 2400
     # How often a wait on one message's review looks whether that review already ended without a note.
     REVIEW_ENDED_EVERY = 30
+    # How many times Nocheh observes an uncertain review before it gives up on it, read from Nocheh's own code.
+    RECONCILE_LIMIT = int(re.search(r'export const nativeReconcileLimit=(\d+);', (ROOT/'src/stores/native-review.ts').read_text()).group(1))
 
     def review_wait(self, label, check, interval=2, event_id=None):
         """wait() for a step behind the owner's notes reviews. Given the awaited message's event id, a review of it that
-        ended uncertain or paused, which nothing in a run resumes, fails at once with that state. A timeout says how many
-        reviews were still waiting, or 'unknown' when that count can't be read."""
+        was paused, or stayed uncertain after Nocheh's last look, which nothing in a run resumes, fails at once with that
+        state. A timeout says how many reviews were still waiting, or 'unknown' when that count can't be read."""
         looked = [None]
 
         def watched():
@@ -723,14 +725,23 @@ class ProductScenarios(Scenarios):
 
     def review_ended(self, event_id):
         """'paused' or 'ambiguous' when a message's latest notes review stopped without saving anything, else None (also when
-        its state can't be read). An uncertain review counts only once a later look still could not confirm it: Hermes records
-        a start before it starts a review, so that look finds a review that did start, unless Hermes can't be reached then."""
+        its state can't be read). An uncertain review counts only once Nocheh gave up observing it: after RECONCILE_LIMIT looks
+        its workflow closes as native_review_unconfirmed, and a review Hermes failed too often is given up at once. Before
+        that, one look that fails while Hermes restarts or is slow leaves the review uncertain, and a later look can still
+        find it done."""
         try:
-            return self.f.query('nocheh_control', "SELECT CASE WHEN paused OR state='paused' THEN 'paused' WHEN state='ambiguous' AND "
-                                "reconciliations>0 THEN 'ambiguous' END FROM native_review_jobs WHERE source_reference->>'id'='"+event_id+"' "
-                                "ORDER BY created_at DESC LIMIT 1") or None
-        except (subprocess.SubprocessError, OSError):
+            raw = self.f.query('nocheh_control', "SELECT json_build_object('state',state,'paused',paused,'reconciliations',reconciliations) "
+                               "FROM native_review_jobs WHERE source_reference->>'id'='"+event_id+"' ORDER BY created_at DESC LIMIT 1")
+            job = json.loads(raw) if raw else None
+        except (subprocess.SubprocessError, OSError, ValueError):
             return None
+        if not job:
+            return None
+        if job['paused'] or job['state'] == 'paused':
+            return 'paused'
+        if job['state'] == 'ambiguous' and job['reconciliations'] >= self.RECONCILE_LIMIT:
+            return 'ambiguous'
+        return None
 
     def review_of(self, event_id):
         """The owner's notes review of a message ({state, provenance}: what Nocheh's code recorded it read), or None."""

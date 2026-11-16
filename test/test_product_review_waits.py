@@ -1,9 +1,11 @@
 """The tester's waits behind the owner's notes reviews (tools/acceptance/product_scenarios.py) wait as long as the review
-backlog can take, stop at once when the awaited review ended without a note, and keep their timeout label when the
-backlog count can't be read."""
+backlog can take, stop at once when the awaited review ended without a note (paused, or uncertain after Nocheh's last
+look), and keep their timeout label when the backlog count can't be read."""
 import ast
 import contextlib
 import io
+import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -44,7 +46,13 @@ class Store:
         raise AssertionError('unexpected query: '+sql)
 
 
-ENDED, PENDING, SETTLED = "THEN 'paused'", "WHERE state='pending'", "state IN ('queued','running','waiting','retryable_failed')"
+ENDED, PENDING, SETTLED = "'reconciliations',reconciliations", "WHERE state='pending'", "state IN ('queued','running','waiting','retryable_failed')"
+LIMIT = ProductScenarios.RECONCILE_LIMIT
+
+
+def job(state, reconciliations=0, paused=False):
+    """The awaited review's row as review_ended reads it."""
+    return json.dumps({'state': state, 'paused': paused, 'reconciliations': reconciliations})
 
 
 class ReviewWaitTests(unittest.TestCase):
@@ -68,9 +76,10 @@ class ReviewWaitTests(unittest.TestCase):
             return scenarios.review_wait(*args, **options)
 
     def test_a_review_that_ended_without_a_note_fails_at_once_with_its_state(self):
-        for state in ('ambiguous', 'paused'):
-            with self.subTest(state=state):
-                scenarios, _ = self.scenarios({ENDED: state})
+        for name, row, state in (('given up', job('ambiguous', LIMIT), 'ambiguous'), ('failed too often', job('ambiguous', LIMIT+1), 'ambiguous'),
+                                 ('paused', job('paused', 0, True), 'paused'), ('paused while uncertain', job('ambiguous', 1, True), 'paused')):
+            with self.subTest(name):
+                scenarios, _ = self.scenarios({ENDED: row})
                 started = self.clock.now
                 with self.assertRaises(Failed) as raised:
                     self.wait(scenarios, 'review_done', lambda: None, event_id=EVENT)
@@ -78,25 +87,47 @@ class ReviewWaitTests(unittest.TestCase):
                 self.assertEqual(self.clock.now, started)
 
     def test_a_review_still_waiting_is_waited_for_and_looked_at_only_now_and_then(self):
-        scenarios, store = self.scenarios({ENDED: '', PENDING: '41'})
-        with self.assertRaises(Failed) as raised:
-            self.wait(scenarios, 'review_done', lambda: None, event_id=EVENT)
-        self.assertEqual(str(raised.exception), 'timeout:review_done:reviews_pending=41')
-        self.assertGreaterEqual(self.clock.now, ProductScenarios.REVIEW_SECONDS)
-        looks = store.asked.count(ENDED)
-        self.assertLessEqual(looks, ProductScenarios.REVIEW_SECONDS//ProductScenarios.REVIEW_ENDED_EVERY+1)
-        self.assertGreater(looks, 1)
+        for row in ('', job('pending'), job('running')):
+            with self.subTest(row=row):
+                self.clock.now = 0.0
+                scenarios, store = self.scenarios({ENDED: row, PENDING: '41'})
+                with self.assertRaises(Failed) as raised:
+                    self.wait(scenarios, 'review_done', lambda: None, event_id=EVENT)
+                self.assertEqual(str(raised.exception), 'timeout:review_done:reviews_pending=41')
+                self.assertGreaterEqual(self.clock.now, ProductScenarios.REVIEW_SECONDS)
+                looks = store.asked.count(ENDED)
+                self.assertLessEqual(looks, ProductScenarios.REVIEW_SECONDS//ProductScenarios.REVIEW_ENDED_EVERY+1)
+                self.assertGreater(looks, 1)
+
+    def test_an_uncertain_review_nocheh_still_observes_is_waited_for(self):
+        # One look that failed (Hermes restarting, or a slow answer) leaves the review uncertain; a later look finds it done.
+        for seen in (0, 1, LIMIT-1):
+            with self.subTest(reconciliations=seen):
+                self.clock.now = 0.0
+                scenarios, store = self.scenarios({ENDED: lambda now, seen=seen: job('ambiguous' if now < 600 else 'done', seen)})
+                found = self.wait(scenarios, 'review_done', lambda: self.clock.now >= 600 and {'state': 'done'}, event_id=EVENT)
+                self.assertEqual(found, {'state': 'done'})
+                self.assertGreater(store.asked.count(ENDED), 1)
 
     def test_a_review_that_ends_later_stops_the_wait_then(self):
-        scenarios, _ = self.scenarios({ENDED: lambda now: 'ambiguous' if now >= 300 else ''})
+        scenarios, _ = self.scenarios({ENDED: lambda now: job('ambiguous', LIMIT if now >= 300 else 2)})
         with self.assertRaisesRegex(Failed, '^review_ambiguous:review_saved_the_note$'):
             self.wait(scenarios, 'review_saved_the_note', lambda: [], 10, EVENT)
         self.assertLess(self.clock.now, 300+ProductScenarios.REVIEW_ENDED_EVERY+10)
 
+    def test_the_limit_is_the_one_nocheh_gives_up_at(self):
+        source = (ROOT/'src/stores/native-review.ts').read_text()
+        self.assertEqual(LIMIT, int(re.search(r'nativeReconcileLimit=(\d+)', source).group(1)))
+        self.assertGreater(LIMIT, 1)
+        self.assertIn("row.reconciliations>=nativeReconcileLimit)return observation('ambiguous','reconcile',row.attempts,Date.now(),"
+                      "'native_review_unconfirmed')", (ROOT/'src/stores/workflow-operations.ts').read_text())
+
     def test_a_state_that_cannot_be_read_keeps_waiting(self):
-        broken = subprocess.CalledProcessError(1, ['psql'])
-        scenarios, _ = self.scenarios({ENDED: broken})
-        self.assertEqual(self.wait(scenarios, 'review_done', lambda: self.clock.now >= 900 and 'done', event_id=EVENT), 'done')
+        for broken in (subprocess.CalledProcessError(1, ['psql']), lambda now: 'not json'):
+            with self.subTest(broken=broken):
+                self.clock.now = 0.0
+                scenarios, _ = self.scenarios({ENDED: broken})
+                self.assertEqual(self.wait(scenarios, 'review_done', lambda: self.clock.now >= 900 and 'done', event_id=EVENT), 'done')
 
     def test_a_backlog_count_that_cannot_be_read_keeps_the_timeout_label(self):
         scenarios, _ = self.scenarios({PENDING: subprocess.CalledProcessError(1, ['psql'])})
