@@ -6,6 +6,8 @@
 import {useRef, useState} from 'react';
 import {FileArchive, FolderOpen, History, Upload} from 'lucide-react';
 import {apiBase, apiPost, authedFetch} from '../../lib/api';
+import {useChatDirectory} from '../../lib/chat-directory';
+import {currentAppId, isOn} from '../../lib/chats-model';
 import {useParam} from '../../lib/navigation';
 import {useResource, refreshResources} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
@@ -262,6 +264,7 @@ function FilePick({
 
 function ImportReview({job}: {job: ImportJob}) {
   const settings = useSettings();
+  const directory = useChatDirectory(60000);
   const chatName = useChatNames();
   const feedback = useFeedback();
   const resume = isResume(job);
@@ -273,11 +276,11 @@ function ImportReview({job}: {job: ImportJob}) {
   const status = importStatus(job);
   const editable = job.state === 'ready' && !resume;
   const owner = settings.saved('TELEGRAM_OWNER_ID');
-  const groups = settings
-    .saved('TELEGRAM_GROUP_IDS')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
+  // History can be shared with a group Nocheh is on in, named by its current Telegram id as the import maps chats.
+  const groups = directory.items
+    .filter(chat => chat.kind === 'group' && isOn(chat))
+    .map(chat => currentAppId(chat))
+    .filter((id): id is string => !!id);
   const chosenMapping = resume ? (job.mapping ?? {}) : mapping;
   const chosenLearn = resume ? (job.review_approved ?? false) : learn;
   const shared = Object.values(chosenMapping).some(target => groups.includes(target));
