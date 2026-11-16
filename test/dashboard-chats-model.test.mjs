@@ -26,7 +26,9 @@ const {
   groupOf,
   isGroupChat,
   parentOf,
+  shortIdLabel,
   sourceHits,
+  telegramProfile,
   unknownChat,
   withGroupListed,
 } = model;
@@ -84,6 +86,27 @@ test('a chat is named from the directory, and a digest id is never shown', () =>
   assert.equal(chatName({...find('73'), app_ids: []}), 'Private chat');
   assert.equal(chatName(null), 'Unknown chat');
   for (const chat of chats) assert.ok(!/[0-9a-f]{64}/.test(chatName(chat)), chat.space_id);
+});
+
+test('a group’s and a person’s short ID shows after the name, the one a send card adds; yours and a topic’s don’t', () => {
+  // The server's chatShortId: a hash of the chat's id, which the page shows as it comes and never works out.
+  const id = chat => ({...chat, short_id: '1a2b'});
+  assert.equal(shortIdLabel(id(find('-10042'))), '…1a2b');
+  assert.equal(shortIdLabel(id(find(NEW))), '…1a2b', 'a group with no name has one too');
+  assert.equal(shortIdLabel(id(find('73'))), '…1a2b');
+  assert.equal(shortIdLabel(id(find('42'))), null, 'your own chat');
+  assert.equal(shortIdLabel(id(find('-10042/topic/7'))), null, 'a card names a topic by its group’s');
+  assert.equal(shortIdLabel(id(unknownChat(NEW))), null);
+  assert.equal(shortIdLabel(find('-10042')), null, 'nothing when the server gives none');
+  assert.equal(shortIdLabel(null), null);
+  // A person with a public username links to their profile, as their send card does; no one else does.
+  assert.deepEqual(telegramProfile({...find('73'), username: 'mira_chen'}), {
+    handle: '@mira_chen',
+    href: 'https://t.me/mira_chen',
+  });
+  assert.equal(telegramProfile(find('73')), null);
+  assert.equal(telegramProfile({...find('42'), username: 'owner_name'}), null);
+  assert.equal(telegramProfile({...find('-10042'), username: 'aurora_group'}), null);
 });
 
 test('the Telegram ID label shows the current id and, after an upgrade, the earlier one', () => {

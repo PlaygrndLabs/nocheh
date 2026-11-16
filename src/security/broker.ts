@@ -17,7 +17,7 @@ import {RuntimeTurnRepository} from '../stores/turns.js';
 import {assertPrivateAnswerRoute} from '../stores/private-answers.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
-import {jobErrors} from '../mcp/tools.js';
+import {actionErrors,jobErrors,taskErrors} from '../mcp/tools.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {longFetch} from '../long-fetch.js';
 
@@ -217,8 +217,10 @@ export function brokerServer(options:BrokerOptions) {
         const response=await relayCall(options.archive+relay+url.search,{method:req.method!,headers:{authorization:credential,'content-type':'application/json'},...(body===undefined?{}:{body}),redirect:'error',signal:controller.signal});
         if(!response.ok) {
           // A job request is told what to correct, such as a member's daily limit or a box it may not have; a machine command
-          // why it did not run, also when the machine could not be reached; a proposal, that the owner turned its tool off here.
-          const codes=relay.startsWith('/v1/jobs/')&&response.status<500?jobErrors:exec?machineErrors:relay==='/v1/tools/propose'&&response.status<500?proposeErrors:null;
+          // why it did not run, also when the machine could not be reached; a proposal, that the owner turned its tool off here;
+          // a message request, that its chat is not one Nocheh serves; a task change, why a reminder time was not saved.
+          const codes=relay.startsWith('/v1/jobs/')&&response.status<500?jobErrors:exec?machineErrors:relay==='/v1/tools/propose'&&response.status<500?proposeErrors:
+            relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:null;
           const code=codes&&response.status>=400?await refusalCode(response):(await response.body?.cancel(),null);
           throw new HttpError(response.status,code&&codes!.has(code)?code:'scoped_archive_unavailable');
         }

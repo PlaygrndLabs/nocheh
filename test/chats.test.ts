@@ -5,7 +5,7 @@ import {createHmac} from 'node:crypto';
 import {canonical,digest} from '../src/archive.js';
 import {appBinding,reader,turnToken} from '../src/access.js';
 import {assistantPolicy,ownerChat} from '../src/assistant-policy.js';
-import {accountIdFor,chatDirectory,chatIdFor,chatIdListSql,chatIdPattern,chatIdSql,chats,connectionIdFor,conversationFields,installChats,
+import {accountIdFor,chatDirectory,chatIdFor,chatShortId,chatIdListSql,chatIdPattern,chatIdSql,chats,connectionIdFor,conversationFields,installChats,
   installChatsForTest,isChatId,refreshChatsOnEpoch,servedChats,setChatLoader,topicKey,type ChatSnapshot} from '../src/chats.js';
 import {isTelegramAccount,isTelegramChat,legacyChat,parseTelegramLink,telegramTopicId} from '../src/chats-telegram.js';
 import {telegramTopicId as spacesTopicId} from '../src/spaces.js';
@@ -170,10 +170,10 @@ test('the process directory is installed by its loader and reloads on a newer ep
 test('the dashboard and the Python services get their chat fields from the directory',()=>{
   const directory=fixtureDirectory(served);
   assert.deepEqual(conversationFields(directory,NG1_TOPIC),{kind:'topic',parent_space:NG1,topic_key:'7',
-    app_ids:[{app:'telegram',external:NG1_TG,state:'current'}],is_forum:true,state:'active',owner:false});
+    app_ids:[{app:'telegram',external:NG1_TG,state:'current'}],is_forum:true,state:'active',owner:false,short_id:chatShortId(NG1_TOPIC)});
   assert.deepEqual(conversationFields(directory,OWNER),{kind:'private',parent_space:null,topic_key:null,app_ids:[{app:'telegram',external:OWNER,state:'current'}],
-    is_forum:false,state:'active',owner:true});
-  assert.deepEqual(conversationFields(directory,'-1001000000077'),{kind:'unknown',parent_space:null,topic_key:null,app_ids:[],is_forum:null,state:null,owner:false});
+    is_forum:false,state:'active',owner:true,short_id:chatShortId(OWNER)});
+  assert.deepEqual(conversationFields(directory,'-1001000000077'),{kind:'unknown',parent_space:null,topic_key:null,app_ids:[],is_forum:null,state:null,owner:false,short_id:chatShortId('-1001000000077')});
   const list=servedChats(fixtureDirectory(),{app:'telegram',external:OWNER});
   assert.equal(list.owner_chat,OWNER);assert.deepEqual(list.owner_account,{app:'telegram',external:OWNER});
   assert.deepEqual(list.chats.map(chat=>chat.id).sort(),[OWNER,GP1,GP1_TOPIC,GP_GROUP_IDS[1],GP_GROUP_IDS[2],GP4].sort(),'served chats and the owner chat only');

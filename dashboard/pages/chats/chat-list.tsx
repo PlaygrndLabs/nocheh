@@ -4,7 +4,7 @@ import {Hash, MessageCircle, RefreshCw, Search, Users} from 'lucide-react';
 import {apiPost} from '../../lib/api';
 import {refreshResources} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
-import {chatError, chatName, chatTree, type Chat} from '../../lib/chats-model';
+import {chatError, chatName, chatTree, shortIdLabel, type Chat} from '../../lib/chats-model';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, Empty, Input, LoadError, LoadingRows} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
@@ -175,6 +175,7 @@ function Row({
   nested?: boolean;
   unsaved?: boolean;
 }) {
+  const short = shortIdLabel(chat);
   return (
     <li>
       <a
@@ -194,6 +195,7 @@ function Row({
         <span dir="auto" className={cn('min-w-0 flex-1 truncate', nested ? 'text-[13px]' : 'font-medium')}>
           {label}
         </span>
+        {short && <ShortId value={short} />}
         {unsaved && (
           <span className="size-1.5 shrink-0 rounded-full bg-warn" title="Not saved yet">
             <span className="sr-only">Not saved yet</span>
@@ -208,5 +210,17 @@ function Row({
         {state === 'off' && <span className="shrink-0 text-xs text-muted">Off</span>}
       </a>
     </li>
+  );
+}
+
+/** A chat's short ID after its name, as a send card or a notice adds it to a name that reads like another's. */
+export function ShortId({value}: {value: string}) {
+  return (
+    <span
+      className="shrink-0 font-mono text-xs text-muted"
+      title="Short ID: a card or notice adds it after a name that reads like another chat’s"
+    >
+      {value}
+    </span>
   );
 }

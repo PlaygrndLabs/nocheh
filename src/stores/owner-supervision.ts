@@ -2,6 +2,7 @@ import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {groupAccessOf,type AssistantPolicy} from '../assistant-policy.js';
 import {conversationFields,type ChatDirectory} from '../chats.js';
+import {telegramUsername} from '../chats-telegram.js';
 import {HttpError} from '../http.js';
 import {validateSpace} from '../spaces.js';
 import type {ConversationChatFields} from '../chat-wire.js';
@@ -29,7 +30,9 @@ export interface ConversationDirectoryItem {
   registered?:boolean;
   /** From the chat directory (ADR-0252, ConversationChatFields): the dashboard reads these instead of an id's shape. */
   topic_key:ConversationChatFields['topic_key'];app_ids:ConversationChatFields['app_ids'];is_forum:ConversationChatFields['is_forum'];
-  state:ConversationChatFields['state'];owner:ConversationChatFields['owner'];
+  state:ConversationChatFields['state'];owner:ConversationChatFields['owner'];short_id:ConversationChatFields['short_id'];
+  /** A person's public Telegram username, checked by the one username rule (telegramUsername), so the dashboard can link it. */
+  username?:string;
 }
 export interface OwnerSupervisionDependencies {
   stores:StorePools;projects:ProjectRepository;controlledActions:Pick<ControlledActionRepository,'inspect'>;
@@ -113,6 +116,7 @@ export class OwnerSupervisionRepository {
       const name=chatLabel(chat,detail?.username,chat.app_ids[0]?.external);
       const value:ConversationDirectoryItem={space_id:chat.id,name,...conversationFields(directory,chat.id),parent_name:null,
         observed_at:iso(detail?.seen_at),configured:configuredHere};
+      if(chat.kind==='private'&&!chat.owner){const username=telegramUsername(detail?.username);if(username)value.username=username;}
       if(chat.kind==='topic'&&detail?.seen_at)value.closed=detail.closed===true;
       if(chat.kind==='topic'&&detail?.title_source==='owner')value.registered=true;
       if(chat.kind!=='topic'&&detail?.refreshed)value.telegram={state:detail.refreshed.state,migrate_to_chat_id:detail.refreshed.to,observed_at:iso(detail.refreshed.at)!};

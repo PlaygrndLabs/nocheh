@@ -192,6 +192,11 @@ export function problemText(error: unknown): string {
     return 'Something it used changed after it was asked. It can’t be approved now. Ask again if you still want it.';
   if (code === 'action_already_started_or_closed') return 'This was already decided, or it has started.';
   if (code === 'action_delivery_denied') return 'Your security settings don’t allow sending this message.';
+  if (code === 'destination_not_served')
+    return 'Nocheh doesn’t serve that chat now, so nothing was sent. Select the group, or allow the person in a selected group, on the Chats page.';
+  if (code === 'job_report_not_served')
+    return 'The job finished, but its chat is not served now, so its report was not sent.';
+  if (code === 'job_report_not_delivered') return 'The job finished, but its report could not be delivered.';
   if (code === 'invalid_permission_bounds') return 'Choose up to 30 days and up to 1000 uses.';
   if (code === 'entity_target_required' || code === 'active_entity_required')
     return 'Enter the ID of a person Nocheh already knows.';

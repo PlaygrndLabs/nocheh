@@ -12,7 +12,7 @@ import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.
  */
 export const promptKeys=['reply.common','reply.owner','reply.group','reply.private','memory.limited','memory.evidence','memory.notes_review',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
-  'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','imports.ready','system.problems','system.problem_buttons','images.read',
+  'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','tasks.reminder_texts','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
   'background.member_spend','background.member_paused','background.member_texts'] as const;
 export type PromptKey=typeof promptKeys[number];
@@ -83,6 +83,15 @@ export const approvalTexts=[
   'stop: 🛑 Stop','stopping_job: 🛑 Stopping the job. Nothing more runs.','job_ended: This job has already ended.',
   'only_stop: Only the person who asked or the owner can stop this job.','private_chat: your private chat','unnamed_group: a Telegram group',
   'topic: › {topic}','unnamed_topic: a topic','general_topic: General',
+  'group_chat: group {name}','topic_name: topic {name}','person_chat: private chat with {name} (a person you allowed in {group})',
+  'person_chat_more: private chat with {name} (a person you allowed in {group} and {count} more)','person_chat_other: private chat with {name}',
+  'unnamed_person: a person …{id}','unknown_chat: a chat Nocheh no longer knows','not_served: (not served now)',
+  'name_project: {name} of project {project}','name_id: {name} (…{id})',
+  'not_sent: 🚫 Approved, but not sent: {reason}','reason_not_served: Nocheh does not serve that chat now.',
+  'reason_settings_changed: your settings changed while it ran. It runs again at its next time.',
+  'schedule_not_sent: ⚠\ufe0f A scheduled task in {chat} finished, but its result was not sent: {reason}',
+  'schedule_not_run: ⚠\ufe0f A scheduled task in {chat} did not run: {reason} It runs again once you select that group on the dashboard Chats page.',
+  'job_report_not_sent: ⚠\ufe0f The job {title} finished, but its report was not sent to {chat}: {reason}',
   'sent: ✅ Approved and sent.','sending: ⏳ Approved. Sending now.','done: ✅ Approved and done.','approved: ✅ Approved.',
   'allowed_here: ✅ Approved. This site is allowed for 12 hours for everyone in the chat or topic that asked.',
   'allowed_always: ✅ Approved. It is allowed for 30 days for everyone in the chat or topic that asked; revoke it in the dashboard.',
@@ -128,15 +137,39 @@ export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_alw
   'failed_action'|'unsure'|'not_run'|'read_closed'|'marked_ran'|'marked_not_run'|'marked_sent'|'marked_not_sent'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_sandbox'|'reason_other'|
   'from_job'|'from_schedule'|'from_schedule_in'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
   'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_later'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed'|
-  'task_move_group'|'task_move_group_family'|'task_move_project'|'task_move_project_family'|'task_group_only'|'task_group_later';
-/** The labeled lines, with any line the owner removed or left empty taken from the default. */
+  'task_move_group'|'task_move_group_family'|'task_move_project'|'task_move_project_family'|'task_group_only'|'task_group_later'|
+  'group_chat'|'topic_name'|'person_chat'|'person_chat_more'|'person_chat_other'|'unnamed_person'|'unknown_chat'|'not_served'|'name_project'|'name_id'|
+  'not_sent'|'reason_not_served'|'reason_settings_changed'|'schedule_not_sent'|'schedule_not_run'|'job_report_not_sent';
+/** The labeled lines, with any line the owner removed or left empty taken from the default, and so is a stored line
+ * that lacks a value Nocheh fills in (labeledPlaceholders). */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
-  return labeledLines(approvalTexts,text) as Record<ApprovalText,string>;
+  return checkedLines('telegram.approval_texts',approvalTexts,text) as Record<ApprovalText,string>;
 }
+const readLines=(value:string):Record<string,string>=>Object.fromEntries(value.split('\n').map(line=>line.match(/^\s*([a-z_]+)\s*:\s*(.*\S)\s*$/))
+  .filter(match=>!!match).map(match=>[match![1],match![2]]));
 /** "name: text" lines over their defaults; a line the owner removed or left empty keeps its default. */
 export function labeledLines(defaults:string,text:string|undefined):Record<string,string> {
-  const read=(value:string)=>Object.fromEntries(value.split('\n').map(line=>line.match(/^\s*([a-z_]+)\s*:\s*(.*\S)\s*$/)).filter(match=>!!match).map(match=>[match![1],match![2]]));
-  return {...read(defaults),...read(text??'')};
+  return {...readLines(defaults),...readLines(text??'')};
+}
+/** The lines of one labeled text whose owner's version must keep the values Nocheh fills in: a chat's name, who set a
+ * reminder and where, why a send stopped. A save without one is refused; a stored one reads as its default. */
+export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string,readonly string[]>>>>={
+  'telegram.approval_texts':{group_chat:['{name}'],topic_name:['{name}'],person_chat:['{name}','{group}'],person_chat_more:['{name}','{group}','{count}'],
+    person_chat_other:['{name}'],unnamed_person:['{id}'],name_project:['{name}','{project}'],name_id:['{name}','{id}'],not_sent:['{reason}'],
+    schedule_not_sent:['{chat}','{reason}'],schedule_not_run:['{chat}','{reason}'],job_report_not_sent:['{chat}','{reason}']},
+  'tasks.reminder_texts':{person:['{name}'],person_gone:['{name}'],set_by:['{who}','{place}'],written_by:['{who}','{place}','{fields}'],
+    closed_by:['{who}','{place}'],merged:['{count}','{place}'],more_waiting:['{count}'],note_line:['{line}'],removed_in_group:['{count}','{times}']},
+};
+/** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
+ *  Object property ('constructor', '__proto__') is just a line; a text with no such lines is not read at all. */
+const missingLines=(key:PromptKey,text:string)=>{
+  const required=Object.hasOwn(labeledPlaceholders,key)?labeledPlaceholders[key]:undefined;if(!required)return [];
+  return Object.entries(readLines(text)).filter(([name,line])=>(Object.hasOwn(required,name)?required[name]!:[]).some(value=>!line.includes(value))).map(([name])=>name);
+};
+/** labeledLines, where an owner's line that lacks a value it must keep reads as its default. */
+function checkedLines(key:PromptKey,defaults:string,text:string|undefined):Record<string,string> {
+  const missing=new Set(missingLines(key,text??''));
+  return {...readLines(defaults),...Object.fromEntries(Object.entries(readLines(text??'')).filter(([name])=>!missing.has(name)))};
 }
 /** Whether a template line stays when filled: none of its placeholders lacks its value. */
 export const lineKept=(line:string,values:Record<string,string|null|undefined>)=>![...line.matchAll(/\{([a-z_]+)\}/g)].some(([,name])=>name! in values&&!values[name!]);
@@ -148,6 +181,25 @@ export function fillTemplate(template:string,values:Record<string,string|null|un
 /** A task reminder in the owner's private chat. A line whose value is missing,
  * such as the due day or the project's list, is left out. */
 export const taskReminder='⏰ {title}\n📅 {due}\n📁 {list}\n\n{notes}';
+/** The lines code puts above a reminder that was set, or whose task was last written, anywhere but by the owner in the
+ * private chat or the dashboard: who set it and where, who last wrote the task and closed it, the header and the
+ * backlog line of people's reminders merged into one message, the mark before each line of a person's notes, and the
+ * notice when the owner's message in a group removed reminders set elsewhere. {place} uses the approval texts' chat
+ * words, so there is one set of them. */
+export const reminderTexts=['you: you','person: {name}, a person you allowed','person_gone: {name}, a person you no longer allow',
+  'unnamed_person: someone you allowed','set_by: 👤 Set by {who} in {place}','written_by: ✏\ufe0f Last written by {who} in {place}: {fields}',
+  'field_title: title','field_notes: notes','field_due: due day','closed_by: ☑\ufe0f Closed by {who} in {place}',
+  'merged: 🔔 {count} reminders set in {place}',
+  'more_waiting: ⏳ {count} more reminders set in {place} are due. They come in the next message; at most one message per group every 10 minutes.',
+  'note_line: ┆ {line}',
+  'removed_in_group: 🗑\ufe0f A message from you in {place} removed {count} reminders on {title} that were set elsewhere: {times}. If you did not mean to, add them again in the dashboard.'].join('\n');
+export type ReminderText='you'|'person'|'person_gone'|'unnamed_person'|'set_by'|'written_by'|'field_title'|'field_notes'|'field_due'|'closed_by'|
+  'merged'|'more_waiting'|'note_line'|'removed_in_group';
+/** The reminder lines, with any line the owner removed or left empty, or stored without a value it must keep, taken
+ * from the default. */
+export function reminderLines(text:string|undefined):Record<ReminderText,string> {
+  return checkedLines('tasks.reminder_texts',reminderTexts,text) as Record<ReminderText,string>;
+}
 /** Sent to the owner's private chat once an import's messages are all prepared. */
 export const importReady='✅ Import ready: {chats}\n{messages} messages are saved, read and checked for secrets. You can ask about them now.\n⚠️ {failed} of them could not be prepared; see System › Health.';
 /** A message to the owner's private chat about new or worse problems, one line each. */
@@ -259,7 +311,7 @@ export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerTe
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
   'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,
-  'telegram.private_answer':privateAnswerFrame,'telegram.private_answer_texts':privateAnswerTexts,'tasks.reminder':taskReminder,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
+  'telegram.private_answer':privateAnswerFrame,'telegram.private_answer_texts':privateAnswerTexts,'tasks.reminder':taskReminder,'tasks.reminder_texts':reminderTexts,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine,
   'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts};
@@ -273,18 +325,24 @@ CREATE TABLE IF NOT EXISTS owner_prompts (
 INSERT INTO owner_prompts(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 `;
 
-/** A plain-language problem with a replacement text, or null when it can be saved. */
-export function promptProblem(key:string,text:unknown):string|null {
+/** Why a stored text cannot be used whole, or null. A labeled line that lacks its values is not such a problem: that
+ * line alone reads as its default, so the owner's other lines stay. */
+function textProblem(key:string,text:unknown):string|null {
   if(!(promptKeys as readonly string[]).includes(key))return 'unknown_prompt';
   if(typeof text!=='string'||!text.trim())return 'empty_prompt';
   if(text.length>PROMPT_LIMIT)return 'prompt_too_long';
   if((promptPlaceholders[key as PromptKey]??[]).some(name=>!text.includes(name)))return 'prompt_placeholder_missing';
   return null;
 }
+/** A plain-language problem with a replacement text, or null when it can be saved. A labeled line must keep the values
+ * Nocheh fills in (labeledPlaceholders). */
+export function promptProblem(key:string,text:unknown):string|null {
+  return textProblem(key,text)??(missingLines(key as PromptKey,text as string).length?'prompt_placeholder_missing':null);
+}
 
 export async function ownerPrompts(control:Pick<pg.Pool,'query'>):Promise<Partial<Record<PromptKey,string>>> {
   const texts=(await control.query('SELECT texts FROM owner_prompts WHERE singleton')).rows[0]?.texts??{};
-  return Object.fromEntries(Object.entries(texts).filter(([key,text])=>promptProblem(key,text)===null)) as Partial<Record<PromptKey,string>>;
+  return Object.fromEntries(Object.entries(texts).filter(([key,text])=>textProblem(key,text)===null)) as Partial<Record<PromptKey,string>>;
 }
 
 /** The learning instruction with Nocheh's values filled in. */

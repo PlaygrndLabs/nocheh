@@ -20,6 +20,8 @@ import {assertChatDirectory,bumpChatRevision,ensureConnection,reloadChats} from 
  * switches arrive off or inherited, and reminders whose time has passed or
  * whose sending was interrupted arrive skipped, and chats arrive off, served only as this installation's own settings
  * say. The freedom level, Telegram policy, grants, approvals and job history stay out, as they do for derivatives.
+ * A reminder keeps who set it and where, and a task who last wrote it where, by account (ADR-0255); the names people
+ * wrote for themselves stay out, and so do people's merged reminders, which are a send log.
  *
  * Chats (ADR-0252): a chat keeps its Nocheh id, so every row naming it means the same chat here. A record exported
  * before step 2b names chats by the old values and carries topic names as telegram_topic_registrations; on import
@@ -36,6 +38,7 @@ const tables:Record<string,Table>={
   owner_task_people:{key:['task_id','role','entity_id']},
   owner_task_links:{key:['task_id','kind','other_id']},
   owner_task_reminders:{key:['id']},
+  owner_task_writers:{key:['task_id','field']},
   owner_task_comments:{key:['id']},
   owner_task_activity:{key:['id'],serial:'id'},
   owner_task_attachments:{key:['task_id','position']},
@@ -77,6 +80,8 @@ export function retire(table:string,row:Record<string,unknown>):Record<string,un
     const {project_id:project,...rest}=row;
     return project===null||project===undefined?rest:null;
   }
+  // A reminder exported before reminders named who set them was the owner's.
+  if(table==='owner_task_reminders'&&!('set_by' in row))return {...row,set_by:'owner'};
   if(table==='project_assignments'){
     const {share_into:_share,...rest}=row;
     const topic=legacyChat(rest.space_id)?.kind==='topic'||directory().kind(rest.space_id as string)==='topic';
@@ -205,10 +210,14 @@ export class OwnerPortabilityRepository {
     // Only a real false stays off; anything else, such as "t" or 1 that the database would read as on, arrives inherited.
     if(table==='chat_tool_settings')return Object.fromEntries(Object.entries(row).map(([key,value])=>
       [key,['shell','browser','mcp'].includes(key)?(value===false?false:null):key==='revision'?1:value]));
+    // A name a person wrote for themselves stays out (labels read the name their account has here); a merged message's
+    // id and the tries of a send belong to the installation that sent it.
     if(table==='owner_task_reminders') {
-      const due=Date.parse(String(row.remind_at));
-      if(row.state==='sending'||row.state==='uncertain'||row.state==='pending'&&!(due>Date.now()))return {...row,state:'skipped'};
+      const due=Date.parse(String(row.remind_at)),cleared={...row,set_by_name:null,batch_id:null,tries:0};
+      if(row.state==='sending'||row.state==='uncertain'||row.state==='pending'&&!(due>Date.now()))return {...cleared,state:'skipped'};
+      return cleared;
     }
+    if(table==='owner_task_writers')return {...row,name:null};
     return row;
   }
 }

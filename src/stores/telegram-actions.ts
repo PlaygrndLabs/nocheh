@@ -7,6 +7,9 @@ import {HttpError,object,string} from '../http.js';
 import {conversationScope,ownerChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {telegramDestination} from '../chats-telegram.js';
+import {fillLine,labelName,placeLabel,quotedName} from '../chat-labels.js';
+import {allowedIn,servedDestination} from '../destinations.js';
+import {approvalLines,ownerPrompts,type ApprovalText} from '../prompts.js';
 import {telegramAddress,telegramTarget} from '../frontdoor/telegram.js';
 import type {RuntimeCall} from '../runtime.js';
 import {evaluate,recordEffect} from '../security/store.js';
@@ -23,13 +26,16 @@ import type {GuardRepository,GuardBinding} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import {closedAs,ownerResolutions} from './controlled-action-schema.js';
 import type {RuntimeTurnRepository} from './turns.js';
+import {currentChats} from './chats.js';
 
 const protocol='telegram-action-v2';
 // Owner-approved memory wording uses the memory input bound; native Telegram
 // splitting preserves one action identity and rechecks authority for each chunk.
 const trustedTextLimit=12000;
-/** A destination is a chat or topic the chat directory knows, by its chat id (ADR-0252); anything else is refused. */
-const knownChat=(value:string)=>!!chats().get(value);
+/** A notice as the bot takes it: at most 4000 UTF-16 units, never ending in half a character, with any lone surrogate
+ * written as U+FFFD, so a cut name never makes Telegram refuse it. */
+const noticeText=(text:string)=>text.slice(0,/[\uD800-\uDBFF]/.test(text.charAt(3999))?3999:4000)
+  .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,'\uFFFD');
 /** The chat a chat or topic belongs to. */
 const chatOf=(space:string)=>chats().parentOf(space)??space;
 type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
@@ -124,9 +130,15 @@ export class TelegramActionRepository {
     admin(principal);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_run_identity');
     const row=(await this.stores.control.query("SELECT * FROM managed_runs WHERE event_id=$1 AND channel='scheduler'",[id])).rows[0];
     if(!row||row.state!=='done'||row.cancel_requested||!row.result_reference)return {state:'withheld',reason:'run_not_complete'};
-    try{await this.guards.assertCurrent(row.binding);}catch(error){if(!(error instanceof HttpError)||error.status>=500)throw error;return {state:'withheld',reason:'guard_context_changed'};}
     const version=(await this.stores.control.query(`SELECT v.*,a.execution_version AS active_execution,a.configuration AS active_configuration
       FROM schedule_versions v JOIN workflow_schedules s ON s.id=v.schedule_id JOIN schedule_versions a ON a.id=s.version_id WHERE v.id=$1`,[row.schedule_version])).rows[0];
+    // A result held back for its chat is told to the owner once per run (ADR-0254); one kept in Nocheh was never to be sent.
+    const telegram=version?.configuration?.deliver==='telegram';
+    const untold=(reason:ApprovalText)=>telegram?this.ownerNotice(digest(canonical(['schedule-result-not-sent-v1',id])),'schedule_not_sent',{chat:row.scope,reason}):undefined;
+    // Checked before the guard and the profile, which would refuse first and silently: a chat Nocheh no longer serves.
+    if(telegram&&!servedDestination(this.access.policy(),row.scope,await currentChats())){await untold('reason_not_served');return {state:'withheld',reason:'destination_not_served'};}
+    try{await this.guards.assertCurrent(row.binding);}catch(error){if(!(error instanceof HttpError)||error.status>=500)throw error;
+      await untold('reason_settings_changed');return {state:'withheld',reason:'guard_context_changed'};}
     if(!version||version.execution_version!==version.active_execution||version.active_configuration.removed)return {state:'withheld',reason:'schedule_definition_changed'};
     const selected=await new RuntimeProfileRepository(this.access).resolve(principal,{profile:row.logical_profile});
     if(selected.logical_profile!==row.logical_profile||selected.scope!==row.scope||row.space_id!==row.scope)throw new HttpError(403,'profile_scope_denied');
@@ -152,10 +164,7 @@ export class TelegramActionRepository {
    * granted and not denied under any Telegram id the group has had, so an upgrade keeps who may talk there. */
   private allowedGroups(user:string):string[] {
     const policy=this.access.policy(),directory=chats();
-    const access=(external:string)=>policy.group_access?.[external];
-    return directory.all().filter(chat=>chat.kind==='group'&&directory.served(chat.id)).filter(chat=>user===policy.owner_id||
-      chat.app_ids.some(id=>!!access(id.external)?.granted.includes(user))&&!chat.app_ids.some(id=>!!access(id.external)?.denied.includes(user)))
-      .map(chat=>chat.id);
+    return directory.all().filter(chat=>chat.kind==='group'&&directory.served(chat.id)&&(user===policy.owner_id||allowedIn(policy,chat.id,user,directory))).map(chat=>chat.id);
   }
   /** Why a live group request needs no approval, or null: a post in the same
    * group, or the owner's own request for their private chat, which already
@@ -195,14 +204,18 @@ export class TelegramActionRepository {
       WHERE chat_id=ANY($1::text[]) AND refreshed_state='available' AND refreshed_title IS NOT NULL`,[groups])).rows
       .map(row=>[row.chat_id as string,row.refreshed_title as string]));
     return {groups:groups.map(group=>({destination:group,name:titles.get(group)??null,current:group===principal.scope})),
-      note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. A message to this same group is posted without approval; a message to another group is shown to the owner to approve first.'};
+      note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. Nocheh posts only in the owner\'s private chat and its topics, the owner\'s selected groups and their topics, and the private chats of people the owner allowed in those groups. A message to this same group is posted without approval; a message to another group or to a person\'s private chat is shown to the owner to approve first.'};
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
     source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string,requester:string|null=null){
-    // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0252).
-    const requested=string(input.destination,200),text=string(input.text,3500);
-    const destination=requested==='current'&&channel==='telegram'?principal.space??turn.scope:telegramDestination(requested,chats());
-    if(!destination||!knownChat(destination)||!text.trim())throw new HttpError(400,'invalid_action');
+    // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0252), and
+    // either must be a chat Nocheh serves (ADR-0254). An unknown chat and one not served answer alike, so nothing is learned
+    // by asking. A turn with no live Telegram message (a job, a schedule, the web chat) has no 'current': a bad request as
+    // before, never a claim that its chat is not served.
+    const requested=string(input.destination,200),text=string(input.text,3500),directory=await currentChats();
+    if(!text.trim()||requested==='current'&&channel!=='telegram')throw new HttpError(400,'invalid_action');
+    const destination=requested==='current'?principal.space??turn.scope:telegramDestination(requested,directory);
+    if(!destination||!servedDestination(this.access.policy(),destination,directory))throw new HttpError(403,'destination_not_served');
     const id=digest(canonical([protocol,source,binding,destination,text]));
     const proposal=await this.derived.record({operation_id:'telegram-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
       producer:'nocheh',producer_version:protocol,configuration:{destination,binding},provenance:{purpose:'exact_owner_approval'}});
@@ -268,7 +281,8 @@ export class TelegramActionRepository {
   /** Prepare derived bytes before acquiring control locks; preparation can itself publish guard records. */
   async prepareSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string):Promise<PreparedSystemAction> {
     if(principal.admin||!principal.space||!principal.logical_profile)throw new HttpError(403,'bound_guard_context_required');
-    if(!knownChat(destination)||!text.trim()||text.length>trustedTextLimit)throw new HttpError(400,'invalid_action');
+    if(!text.trim()||text.length>trustedTextLimit)throw new HttpError(400,'invalid_action');
+    if(!servedDestination(this.access.policy(),destination,await currentChats()))throw new HttpError(403,'destination_not_served');
     await this.guards.assertCurrent(binding);await this.access.archive.verify(source);
     const id=systemActionId(source,binding,destination,text,key);
     const proposal=await this.derived.record({operation_id:'telegram-system-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
@@ -323,6 +337,19 @@ export class TelegramActionRepository {
     admin(principal);const rows=(await this.stores.control.query('SELECT id FROM telegram_action_requests ORDER BY created_at DESC,id DESC LIMIT 100')).rows;
     return Promise.all(rows.map(row=>this.inspect(principal,row.id)));
   }
+  /** Tells the owner, in their private chat, that a scheduled task's result, a schedule's run or a job's report did not
+   * reach its chat, and why, in the owner's editable words (ADR-0254). The id makes the bot send it once. A notice that
+   * fails shows in System › Health and never causes another (SPECS.md); the caller goes on either way. */
+  async ownerNotice(id:string,key:'schedule_not_sent'|'schedule_not_run'|'job_report_not_sent',values:{chat:string;reason:ApprovalText;title?:string}):Promise<void> {
+    try {
+      const owner=ownerChat(this.access.policy());if(!owner)return;
+      const line=approvalLines((await ownerPrompts(this.stores.control))['telegram.approval_texts']),directory=await currentChats();
+      // One pass: a name that holds {chat} or {reason} stays as written, and the line is never dropped.
+      const text=noticeText(fillLine(line[key],{chat:placeLabel(values.chat,line,directory),reason:line[values.reason],
+        ...(values.title===undefined?{}:{title:quotedName(labelName(values.title)??'')})}));
+      await this.call('telegram.notice',{id,...telegramTarget(owner,directory),text},30000);
+    }catch{/* Shown in System › Health by the bot; nothing here waits for it. */}
+  }
   /** Trusted native sender rechecks the exact approved payload immediately before sending. */
   async authorizeDelivery(value:unknown) {
     const body=object(value),row=await this.row(string(body.id,64));
@@ -330,7 +357,9 @@ export class TelegramActionRepository {
     const target=telegramAddress(row.destination);
     if(row.state!=='running'||body.destination!==row.destination||typeof body.text!=='string'||
       digest(canonical({destination:body.destination,text:body.text}))!==row.fingerprint||!target||
-      String(body.chat_id)!==target.chat_id||(body.topic==null?undefined:String(body.topic))!==(target.topic===undefined?undefined:String(target.topic)))
+      String(body.chat_id)!==target.chat_id||(body.topic==null?undefined:String(body.topic))!==(target.topic===undefined?undefined:String(target.topic))||
+      // The last word, asked by the bot before each message it sends: a chat Nocheh no longer serves gets nothing.
+      !servedDestination(this.access.policy(),row.destination,await currentChats()))
       throw new HttpError(403,'action_delivery_denied');
     await this.text(row);
     if((await evaluate(this.stores.control,this.effect(row),row.authority??'exact_owner_approval')).outcome!=='allow')
@@ -352,11 +381,27 @@ export class TelegramActionRepository {
       const prior=(await db.query('SELECT * FROM telegram_action_decisions WHERE operation_id=$1',[operation])).rows[0];
       if(prior) {
         if(prior.request_hash!==hash)throw new HttpError(409,'action_decision_conflict');
-        await db.query('COMMIT');return {id,state:current.state,revision:current.revision};
+        await db.query('COMMIT');return {id,state:current.state,revision:current.revision,...(current.state==='cancelled'?{error_code:current.error_code as string|null}:{})};
       }
       if(body.expected_revision!==undefined&&body.expected_revision!==current.revision)throw new HttpError(409,'action_revision_changed');
       if(current.state!=='proposed')throw new HttpError(409,'action_already_started_or_closed');
-      if(body.decision==='approve'){await this.fence(db,current.binding);await this.text(current);}
+      if(body.decision==='approve') {
+        // A send that can never go out now is closed, its approval kept, so the press, /approve and the card say why instead of
+        // buttons that fail on every press (ADR-0254). An unserved chat is asked first: the settings change that deselects a
+        // group also moves the epoch. A pending publication passes, so it stays an error.
+        let closed:string|null=servedDestination(this.access.policy(),current.destination,await currentChats())?null:'destination_not_served';
+        if(!closed)try{await this.fence(db,current.binding);await this.text(current);}catch(error){
+          if(!(error instanceof HttpError)||!['action_context_changed','guard_context_changed','action_proposal_changed','action_delivery_denied'].includes(error.code))throw error;
+          closed=error.code==='guard_context_changed'?'action_context_changed':error.code;
+        }
+        if(closed) {
+          const revision=current.revision+1;
+          await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code=$4,revision=$2,decision_reference=$3,updated_at=now() WHERE id=$1",[id,revision,source??null,closed]);
+          await db.query("INSERT INTO telegram_action_decisions(operation_id,request_hash,action_id,decision,revision,source_reference) VALUES($1,$2,$3,'approve',$4,$5)",[operation,hash,id,revision,source??null]);
+          // The reason rides along for the dashboard; the press and /approve read it from the row.
+          await db.query('COMMIT');return {id,state:'cancelled',revision,error_code:closed};
+        }
+      }
       const state=body.decision==='approve'?'approved':'rejected',revision=current.revision+1;
       await db.query('UPDATE telegram_action_requests SET state=$2,revision=$3,decision_reference=$4,updated_at=now() WHERE id=$1',[id,state,revision,source??null]);
       await db.query('INSERT INTO telegram_action_decisions(operation_id,request_hash,action_id,decision,revision,source_reference) VALUES($1,$2,$3,$4,$5,$6)',[operation,hash,id,body.decision,revision,source??null]);
@@ -406,23 +451,25 @@ export class TelegramActionRepository {
       if(!closed&&row.next_attempt>new Date())return observation('waiting','action',0,row.next_attempt.getTime(),'receipt_pending');
       const observe=['running','ambiguous'].includes(row.state),effect=this.effect(row);
       let decision=row.security_decision,text:string|undefined;
-      const finish=async(state:'done'|'denied'|'ambiguous',result:unknown)=>{
+      const finish=async(state:'done'|'denied'|'ambiguous',result:unknown,code?:string)=>{
         await db.query('BEGIN');
         try {
           // A check that finds the same unclear outcome changes nothing, so its revision stays and an open review stays usable.
           await db.query(`UPDATE telegram_action_requests SET state=$2,result_reference=$3,error_code=$4,next_attempt=now()+interval '60 seconds',
             revision=revision+CASE WHEN state IS DISTINCT FROM $2 OR result_reference IS DISTINCT FROM $3::jsonb OR error_code IS DISTINCT FROM $4 THEN 1 ELSE 0 END,updated_at=now() WHERE id=$1`,
-            [id,state==='denied'?'rejected':state,result,state==='done'?null:state==='denied'?'action_delivery_denied':'delivery_unconfirmed']);
+            [id,state==='denied'?'rejected':state,result,state==='done'?null:code??(state==='denied'?'action_delivery_denied':'delivery_unconfirmed')]);
           if(decision)await recordEffect(db,effect,state==='done'?'completed':state==='denied'?'blocked':'ambiguous',decision,row.source_reference);
           await db.query('COMMIT');
         }catch(error){await db.query('ROLLBACK');throw error;}
         return observation(state==='done'?'completed':state==='denied'?'denied':'waiting',state==='ambiguous'?'reconcile':'action',1,Date.now()+60000,state==='ambiguous'?'receipt_pending':null);
       };
+      // A send the bot refused because Nocheh no longer serves its chat keeps that reason, so its card says so.
+      const refused=async(state:string)=>state==='denied'&&!servedDestination(this.access.policy(),row.destination,await currentChats())?'destination_not_served':undefined;
       const durable=await this.derived.checkpoint('telegram-action-result:'+id+':done')??await this.derived.checkpoint('telegram-action-result:'+id+':denied');
       if(durable) {
         const state=JSON.parse(durable.content.toString()).state;
         if(digest(durable.content)!==durable.content_hash||!['done','denied'].includes(state)||durable.content.toString()!==canonical({state}))throw new HttpError(409,'action_result_conflict');
-        return await finish(state,{store:'derived',kind:'artifact',id:durable.id,input_hash:durable.content_hash});
+        return await finish(state,{store:'derived',kind:'artifact',id:durable.id,input_hash:durable.content_hash},await refused(state));
       }
       // A receipt saved before the owner's word still settles it, above; otherwise the word stands.
       if(closed)return observation(row.resolution==='ran'?'completed':'skipped','action');
@@ -438,11 +485,18 @@ export class TelegramActionRepository {
             return observation('cancelled','action',0,Date.now(),'superseded');
           }throw error;
         }
+        // A chat Nocheh stopped serving after the approval, or one the directory no longer knows, gets nothing: the send is
+        // closed with its reason instead of waiting for a chat that never comes back (ADR-0254).
+        if(!servedDestination(this.access.policy(),row.destination,await currentChats())) {
+          await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='destination_not_served',revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);
+          return observation('cancelled','action',0,Date.now(),'superseded');
+        }
         await db.query('BEGIN');
         try {
           await this.fence(db,row.binding);decision=await evaluate(db,effect,row.authority??'exact_owner_approval',true);
           if(decision.outcome!=='allow') {
-            await recordEffect(db,effect,'blocked',decision,row.source_reference);await db.query("UPDATE telegram_action_requests SET state='rejected',security_decision=$2,revision=revision+1,updated_at=now() WHERE id=$1",[id,decision]);
+            // A rule refused it at the start: its own reason, so the approved card does not read like the owner's Reject.
+            await recordEffect(db,effect,'blocked',decision,row.source_reference);await db.query("UPDATE telegram_action_requests SET state='rejected',error_code='security_start_denied',security_decision=$2,revision=revision+1,updated_at=now() WHERE id=$1",[id,decision]);
             await db.query('COMMIT');return observation('denied','action');
           }
           const claimed=await db.query("UPDATE telegram_action_requests SET state='running',security_decision=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved' AND revision=$3 RETURNING id",[id,decision,row.revision]);
@@ -469,7 +523,7 @@ export class TelegramActionRepository {
       const state=response.state==='done'?'done':response.state==='denied'?'denied':'ambiguous',result=await this.derived.record({operation_id:'telegram-action-result:'+id+':'+(state==='ambiguous'?'uncertain':state),
         source:row.source_reference,parents:[row.proposal_reference],kind:'action_result',content:Buffer.from(canonical({state})),
         producer:'hermes',producer_version:protocol,configuration:{id},provenance:{binding:row.binding,native_receipt:id}});
-      return await finish(state,result);
+      return await finish(state,result,await refused(state));
     }finally{await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(hashtextextended($1,803363))',[id]);if(held)await leaveFamily(db,'actions');});}
   }
 }

@@ -205,6 +205,20 @@ export class ChatSendRepository {
     return {records:await this.rows(rows.slice(0,count)),next:rows.length>count?String(rows[count-1].id):null};
   }
 
+  /**
+   * A send Nocheh gave up on itself, with no front door record to say so: a task reminder Telegram refused, or never
+   * confirmed after its tries (ADR-0255). One row per reference, so a repeat adds nothing; it shows in System › Health as
+   * a problem of its kind. Its key is the front doors' shape, under its own channel and account words, so it never meets
+   * one of theirs.
+   */
+  async recordLocal(send:{kind:'notice';chat:string|null;state:'failed'|'uncertain';status:number;error_code:'reminder_refused'|'reminder_unconfirmed';reference:string}):Promise<void> {
+    const directory=await currentChats().catch(()=>null);
+    await this.control.query(`INSERT INTO chat_sends(record_key,channel,account,at,kind,method,chat,state,status,error_code,reference,chat_id)
+      VALUES($1,'telegram',NULL,now(),$2,'sendMessage',$3,$4,$5,$6,$7,$8) ON CONFLICT(record_key) DO NOTHING`,
+      ['send:tasks:reminders:'+digest(send.reference).slice(0,32),send.kind,send.chat,send.state,send.status,send.error_code,send.reference,
+        directory?sentTo(directory,'telegram',send.chat,null):null]);
+  }
+
   /** Remove one bounded batch of records sent before the cutoff. */
   async prune(cutoff:Date,batch=5000):Promise<number> {
     if(!Number.isSafeInteger(batch)||batch<1)throw new HttpError(400,'invalid_retention_batch');

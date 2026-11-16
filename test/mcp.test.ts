@@ -487,6 +487,13 @@ test('the task tool uses only the owner task routes and explains failures',async
   assert.equal(idle.calls.length,0);
   for(const [status,code] of [[409,'task_changed_list_again'],[403,'not_available_in_this_chat'],[404,'task_not_found'],[400,'invalid_task_request'],[500,'tasks_unavailable']] as const)
     assert.equal((await run('tasks',{action:'list'},fake(()=>new Status(status,{})).context)).error,code);
+  // A reminder time that was not saved says so, and how to ask again (ADR-0255); any other code still reads by its status.
+  const limit=await run('tasks',{action:'update',id:ID,expected_revision:4,reminders:['2030-01-04T09:00']},fake(()=>new Status(400,{error:'task_reminder_limit'})).context);
+  assert.equal(limit.error,'task_reminder_limit');assert.match(limit.note,/^Nothing was changed: each person keeps at most 10 reminders/);
+  for(const code of ['task_reminder_past','invalid_task_reminders','invalid_task_reminder'])
+    assert.match((await run('tasks',{action:'add',title:'Synthetic',reminders:['x']},fake(()=>new Status(400,{error:code})).context)).note,/^Nothing was changed: /,code);
+  assert.deepEqual(await run('tasks',{action:'list'},fake(()=>new Status(400,{error:'made_up_code'})).context),{error:'invalid_task_request'});
+  assert.equal((tool('tasks').inputSchema.properties as Record<string,Record<string,unknown>>).reminders!.maxItems,undefined,'the limit is per person, kept by storage');
   const long=await run('tasks',{action:'list'},fake(()=>({tasks:['x'.repeat(30000)]})).context);
   assert.equal(long.truncated,true);assert.equal(long.excerpt.length,22000);assert.match(long.note,/Narrow the list/);
   assert.deepEqual(await run('tasks',{action:'comment',id:ID,text:'t'},fake(()=>({comment:'x'.repeat(30000)})).context),{id:ID,commented:true});
@@ -505,6 +512,15 @@ test('owner directory, destinations and message requests keep their routes and p
   assert.equal((await run('owner_read',{view:'secrets'},idle.context)).error,'owner_read_unavailable');
   assert.deepEqual(await run('action_request',{text:'no destination'},idle.context),{error:'action_request_unavailable'});
   assert.equal(idle.calls.length,0);
+  // A chat Nocheh does not serve is told as such, with what the owner can do; any other refusal stays plain (ADR-0254).
+  const unserved=await run('action_request',{destination:'b'.repeat(64),text:'Synthetic note'},fake(()=>new Status(403,{error:'destination_not_served'})).context);
+  assert.equal(unserved.error,'destination_not_served');assert.match(unserved.note,/^Nothing was sent and no card was made: /);assert.match(unserved.note,/Chats page/);
+  assert.deepEqual(await run('action_request',{destination:'current',text:' '},fake(()=>new Status(400,{error:'invalid_action'})).context),{error:'action_request_unavailable'});
+  // 'current' from a job, a schedule or the web chat, which have no live Telegram message, is a bad request as before: the
+  // model is never told its chat is not served.
+  const current=await run('action_request',{destination:'current',text:'Post the summary here'},fake(()=>new Status(400,{error:'invalid_action'})).context);
+  assert.deepEqual(current,{error:'action_request_unavailable'});assert.ok(!JSON.stringify(current).includes('not served'));
+  assert.deepEqual(await run('action_request',{destination:'current',text:'Synthetic'},fake(()=>new Status(403,{error:'made_up_code'})).context),{error:'action_request_unavailable'});
   assert.equal((await run('telegram_destinations',{},fake(()=>new Status(403)).context)).note,'Available only in a group conversation.');
 });
 

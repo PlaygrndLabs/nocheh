@@ -189,5 +189,14 @@ test('send records drain once from the spool, list newest first with chat names,
     assert.deepEqual(listed.map(row=>[row.error_code,row.problem,row.recovered]),[['chat_not_found',true,false],['timed_out',false,true],
       ['rate_limited',false,true],['formatting_rejected',false,true],['message_not_found',true,false]]);
     assert.deepEqual((await sends.list(owner,{filter:'problems'})).records.map(row=>row.error_code),['chat_not_found','message_not_found']);
+
+    // A task reminder Telegram refused is recorded by the store itself (ADR-0255): a problem of its own kind in Health,
+    // once however often it is recorded.
+    const reminder={kind:'notice' as const,chat:'123',state:'failed' as const,status:400,error_code:'reminder_refused' as const,reference:'notice:'+'b'.repeat(64)};
+    await sends.recordLocal(reminder);await sends.recordLocal(reminder);
+    const reminded=await sends.summary();
+    assert.deepEqual([reminded.problems,reminded.problem_kinds],[3,{notice:1,reply:2}]);
+    assert.deepEqual(reminded.latest_problems.map(row=>[row.kind,row.state,row.error_code]).find(row=>row[2]==='reminder_refused'),['notice','failed','reminder_refused']);
+    assert.equal((await stores.control.query('SELECT count(*)::int AS count FROM chat_sends WHERE reference=$1',[reminder.reference])).rows[0].count,1,'a repeated reference adds nothing');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

@@ -159,8 +159,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
     background:(id,authority)=>s.jobs.operation(id,authority),
     actions:async(id,authority)=>{
       const result=await s.telegramActions.run(id,authority);
-      // The approval card, if any, then says the message was sent.
-      if(result.state==='completed')await s.actionCommands.settle('telegram',id).catch(()=>{});
+      // The approval card, if any, then says the message was sent, or that it was not and why.
+      if(['completed','cancelled','denied'].includes(result.state))await s.actionCommands.settle('telegram',id).catch(()=>{});
       return result;
     },
     preparation:async(job,authority)=>{

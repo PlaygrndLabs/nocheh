@@ -284,6 +284,70 @@ first of several; each later part waits for its own review
   pass. Pending: a live look at a forwarded message and a web card on the owner's install. Owner steps: a
   forwarded `/approve` now gets "Forwarded commands are ignored"; type it or use the card.
 
+Security fixes: sends and reminders (owner, 2026-11-14: "all yes", approving the fixes of the
+prompt-injection review with what each one loses; this is risk 3, "Approved sends can go to any
+chat", and risk 9, "Member reminders reach your private chat"). One pull request on the chat ids
+branch ([ADR-0254](docs/adr/0254-sends-go-only-to-chats-nocheh-serves.md),
+[ADR-0255](docs/adr/0255-reminders-say-who-set-them.md)):
+- Sends: Nocheh sends only to the owner's private chat and its topics, the selected groups and
+  their topics, and the private chats of people the owner allowed in those groups, a person's
+  private chat always behind the owner's card. Any other chat, or one Nocheh has no record of,
+  is refused alike with `destination_not_served` at the proposal and at system sends, closed
+  unsent at the approval and before the run, and refused by the app's check the bot asks
+  before each message; the model is told the owner can serve it on the Chats page. A send
+  closed unsent says why on its card, in its button answer and in `/approve`. A scheduled
+  result held back for its chat or a settings change, a schedule that cannot run in a chat
+  that is not served, and a job report whose chat is no longer served each send the owner one
+  notice ([destinations](test/served-destinations.test.ts),
+  [sends](test/store-telegram-actions.test.ts), [schedules](test/store-scheduled-runs.test.ts),
+  [jobs](test/store-background-jobs.test.ts), [tools](test/mcp.test.ts),
+  [broker](test/store-security-broker.test.ts)).
+- Cards: the kind of chat in fixed, editable words and only the name quoted, inside quotes and
+  isolates code adds, with quote, bracket and angle look-alikes made plain; a person's chat
+  names the group the owner allowed them in and links their profile; a name that reads like
+  another's gets its project on the owner's cards, or its short ID, which the Chats page
+  shows too; "(not served now)" after a group Nocheh no longer serves; the message shows its
+  hidden characters. A saved text line that drops a value Nocheh fills in is refused
+  ([labels](test/chat-labels.test.ts), [cards](test/store-approval-buttons.test.ts),
+  [card text](test/action-text.test.ts), [texts](test/prompts.test.ts),
+  [Chats page](test/dashboard-chats-model.test.mjs)).
+- Reminders: each reminder records who set it and where. One set, or on a task written or
+  closed, anywhere but by the owner in the private chat or the dashboard starts with fixed
+  lines naming who and where, before anything a person wrote, and a person's notes are marked
+  line by line. A person's list never removes the owner's reminders, and each editor keeps up
+  to 10 of their own. People's reminders due together in one group come as one message, at
+  most one per group every 10 minutes, none dropped; the owner's come at their time. Cuts keep
+  whole characters, so notes that end inside an emoji no longer stop every later reminder; one
+  Telegram refuses shows as Not sent and in System › Health. The drawer shows who set each
+  reminder ([reminder texts](test/task-reminder-text.test.ts), [tasks](test/store-tasks.test.ts),
+  [export](test/store-owner-portability.test.ts), [Health](test/store-chat-sends.test.ts),
+  [pages](test/dashboard-pages.browser.mjs)).
+- Full tester: `send_to_stranger_refused`, `send_to_unselected_group_refused`,
+  `send_to_allowed_person_private`, `member_reminder_says_who_set_it` and
+  `reminder_with_split_emoji_arrives` ([scenarios](tools/acceptance/product_scenarios.py)).
+
+  Nothing lost: every send that works today goes to a chat Nocheh serves, the owner's own
+  reminders keep their time and text, and nothing is capped or dropped. Checked: the type
+  check; the unit tests (281 pass; the 4 workflow tests that need Postgres fail, as on main);
+  the dashboard browser tests (50 of 50); the store suite in the Docker fixture (619 pass; the
+  4 files that fail on main fail the same way); and the cloud tester's new and affected
+  scenarios. Pending: a live look at a send card and a merged reminder on the owner's install
+  after merge. Left as they were, for later: a member's job still running when its group is
+  deselected ends with `job_not_permitted` and no notice; `/approve` reads an action before
+  deciding it, so a proposal changed in between answers as already decided; and the bot, while
+  it starts, answers "not connected" before it looks for the receipt of a message it already
+  sent (reminders now allow for that; the bot could look first). Not built, as approved: a cap
+  on pending reminders per group, a daily reminder cap, and a copy of the send check in the
+  bot. Two behaviour changes are built as the review recommended, for the owner's review: the
+  owner's reminders on a task a person finished, archived or trashed are sent, saying who
+  closed it (the owner's own closing still skips them); and a message from the owner in a group
+  that removes reminders set elsewhere sends the owner one notice. Owner steps: a message to a
+  chat Nocheh does not serve is refused; select the group, or allow the person in a selected
+  group, on the Chats page. Send cards read "group “…”", "› topic “…”" and "private chat with
+  “…” (a person you allowed in group “…”)". Reminders people set arrive with a "👤 Set by" line,
+  merged per group; their wording is in Settings › Assistant under "Reminder lines: who set it
+  and where".
+
 Members step 2: projects and the private button (owner, 2026-11-12: "I just review the
 tables and seems what I want if there is a important point or need my answer ask, else start
 build.", approving the Members design; 2026-11-13: chose "Keep them, yours only" when asked

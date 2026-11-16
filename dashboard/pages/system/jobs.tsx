@@ -107,9 +107,16 @@ export function jobProgress(job: Job): string {
     .join(' · ');
 }
 
-/** Why a job ended early, in words. */
+/** Why a job ended early, in words. Only a chat Nocheh stopped serving is named as the cause; any other lost report (a
+ *  Telegram timeout, a refusal, a changed setting) may even have arrived, so its words say no more than that. */
 const jobError = (code: string) =>
-  code.startsWith('job_machine') ? machineErrorPhrase(code) : code.replaceAll('_', ' ');
+  code.startsWith('job_machine')
+    ? machineErrorPhrase(code)
+    : code === 'job_report_not_served'
+      ? 'The job finished, but its chat is not served now, so its report was not sent.'
+      : code === 'job_report_not_delivered'
+        ? 'The job finished, but its report could not be delivered.'
+        : code.replaceAll('_', ' ');
 
 /** The plan the owner approved for a machine job: open while it runs, folded once it ended. */
 function Plan({steps, open}: {steps: string[]; open: boolean}) {

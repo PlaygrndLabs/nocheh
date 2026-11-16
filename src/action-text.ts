@@ -253,6 +253,10 @@ const drawn=(name:string)=>Array.from(name.normalize('NFKD').replace(/\p{Default
 /** Text's skeleton, as Unicode defines it to find text that reads alike, without a dot over an i or a j, which
  * fonts draw as its own. */
 const skeleton=(name:string)=>drawn(name).replace(/(?<=\p{Soft_Dotted}\p{M}*)\u0307/gu,'');
+/** The skeleton, for chat labels that must tell names that read alike (src/chat-labels.ts). */
+export const skeletonOf=skeleton;
+/** The character Unicode takes as a character's prototype (UTS #39), or the character itself. */
+export const likeOf=(char:string):string=>likeness.get(char)??char;
 /** Whether two keys of one object have one skeleton. Such an input is shown as its JSON in code, where each
  * letter keeps its own shape, with every character beyond plain ASCII written as its code, so the two keys
  * never read as one. */

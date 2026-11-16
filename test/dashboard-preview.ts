@@ -19,6 +19,9 @@ import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
 import {chatDirectory,chatIdFor,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
+import {labeledPlaceholders,promptProblem,promptSchema,reminderTexts} from '../src/prompts.js';
+import {chatSchema} from '../src/stores/chat-schema.js';
+import {chatRecordSchema} from '../src/stores/chats.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
 /*
  * The chat directory the preview serves (ADR-0252). Chats Nocheh knew before step 2b keep their stored value as their
@@ -54,7 +57,10 @@ const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLoc
 await initialize(pool);
 await ownerLock.create('preview-password');
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
-await pool.query('DROP TABLE IF EXISTS owner_task_requests,owner_task_operations,owner_task_people,owner_task_links,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,chat_tool_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);await pool.query(chatToolSchema);
+await pool.query('DROP TABLE IF EXISTS owner_task_requests,owner_task_operations,owner_task_people,owner_task_links,owner_task_reminder_batches,owner_task_writers,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,chat_tool_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);await pool.query(chatToolSchema);
+// A reminder's "Set by" line reads the owner's reminder lines and the people Telegram showed: empty here, so the built-in
+// lines and the name kept with the reminder are used.
+await pool.query(promptSchema);await pool.query(chatSchema);await pool.query(chatRecordSchema);
 // Two synthetic projects, each with its own list beside the personal one.
 const garden='9'.repeat(64),studio='8'.repeat(64);
 for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch']])
@@ -89,6 +95,14 @@ await tasks.create(taskOwner,{operation_id:'preview-5',title:'Pick the photos',p
 await tasks.create(taskOwner,{operation_id:'preview-6',title:'Check the booking page works',scope:studio,status:'waiting',blocked_by:[announcement.id]});
 await tasks.create(taskOwner,{operation_id:'preview-7',title:'Pay the rent',tags:['Money'],priority:2,repeat:{every:1,unit:'month'},due_on:new Date().toISOString().slice(0,10)});
 await tasks.comment(taskOwner,announcement.id,{operation_id:'preview-comment',text:'Devon sends the photos on Friday.'});
+// Reminders as the owner sees who set them (ADR-0255): nine of the owner's, one a person allowed in Aurora planning set
+// there, to the second, and one of theirs Telegram refused. No chat turn reaches the preview, so they are written here.
+const greenhouse=await tasks.create(taskOwner,{operation_id:'preview-8',title:'Water the greenhouse plants',tags:['Garden']});
+await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by)
+  SELECT encode(sha256(convert_to('preview-reminder-'||n,'UTF8')),'hex'),$1,date_trunc('minute',now())+n*interval '1 day','pending','owner' FROM generate_series(3,11) n`,[greenhouse.id]);
+await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by,set_by_account_id,set_by_name,set_in_chat_id,set_in_group_id) VALUES
+  ($2,$1,date_trunc('minute',now())+interval '2 days 30 seconds','pending','person',$4,'Sam Rivera','-10042','-10042'),
+  ($3,$1,date_trunc('minute',now())-interval '1 day','failed','person',$4,'Sam Rivera','-10042','-10042')`,[greenhouse.id,'e1'.repeat(32),'e2'.repeat(32),'a7'.repeat(32)]);
 const client=await pool.connect();try{
  for(let i=0;i<90;i++){
   const family=(['browser','imports','tools','telegram','honcho','memory_review','preparation'] as const)[i%7]!;
@@ -150,7 +164,7 @@ const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpre
     'telegram.private_answer_texts':'button: 🔒 Answer privately\nonly_asker: Only the person who asked can use this button.',
     'memory.evidence':'Memory evidence is supplied as source-labelled data.','memory.notes_review':'Maintain useful private memory.',
     'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.','images.read':'Write out the text in this image, then describe it.',
-    'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.'} as Record<string,string>};
+    'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.','tasks.reminder_texts':reminderTexts} as Record<string,string>};
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
@@ -188,7 +202,7 @@ const memoryMapEdges:any[]=[
 ];
 const conversations:any[]=[
  {space_id:'42',name:'Owner',kind:'private',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:true},
- {space_id:'73',name:'Mira Chen',kind:'private',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
+ {space_id:'73',name:'Mira Chen',kind:'private',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false,username:'mira_chen'},
  {space_id:conversation,name:'Aurora planning',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:true},
  {space_id:topic,name:'Iceland planning',kind:'topic',parent_space:conversation,parent_name:'Aurora planning',observed_at:new Date().toISOString(),configured:false,closed:false},
  {space_id:'-10073',name:'Weekend notes',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
@@ -807,6 +821,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/prompts'){if(body.revision!==prompts.revision)throw new HttpError(409,'configuration_conflict');
    for(const [key,text] of Object.entries(body.texts as Record<string,string|null>)){
      if(text!==null&&(prompts.placeholders as Record<string,string[]>)[key]?.some(name=>!text.includes(name)))throw new HttpError(400,'prompt_placeholder_missing');
+     // As the server does: a "name: text" line that drops a value Nocheh fills in is refused.
+     const labeled=text!==null&&key in labeledPlaceholders?promptProblem(key,text):null;if(labeled)throw new HttpError(400,labeled);
      if(text===null)delete prompts.texts[key];else prompts.texts[key]=text;}
    prompts.revision+='x';return json(res,200,prompts);}
   if(route==='/memory/persona'){const current=persona(String(body.scope));if(body.revision!==current.revision)throw new HttpError(409,'configuration_conflict');

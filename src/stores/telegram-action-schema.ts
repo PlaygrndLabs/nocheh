@@ -13,6 +13,8 @@ ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS authority text NOT
 -- The owner's word on an unclear send (ADR-0218). The state stays as observed; it is never sent again.
 ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS resolution text CHECK(resolution IN ('ran','not_run','dismissed'));
 ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
+-- The chat or topic (a chat id) its card was posted in, kept before posting, so its decision settles there (ADR-0254).
+ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS card_space text;
 CREATE TABLE IF NOT EXISTS telegram_action_decisions (
  operation_id text PRIMARY KEY,request_hash text NOT NULL,action_id text NOT NULL REFERENCES telegram_action_requests(id),
  decision text NOT NULL CHECK(decision IN ('approve','deny')),revision integer NOT NULL,source_reference jsonb,

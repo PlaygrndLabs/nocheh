@@ -21,6 +21,9 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-scheduled-runs-')),base=Date.now(),token=digest('scheduled-'+base);
   let failCompletion=false,mode='done',serial=0;const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>();
+  // The groups the owner serves, which a test turns off as the owner would; `deselect` turns them off as a run finishes.
+  // Notices to the owner are kept apart: the bot sends each id once.
+  let groups=['-123'],deselect=false;const notices:any[]=[];
   const control=new Proxy(stores.control,{get(target,key){if(key==='connect')return async()=>{
     const db=await target.connect();return new Proxy(db,{get(client,name){if(name==='query')return (sql:any,...args:any[])=>{
       if(failCompletion&&String(sql).startsWith('UPDATE managed_runs SET state=$2,result_reference')){failCompletion=false;return Promise.reject(Error('lost control completion'));}
@@ -28,6 +31,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   };const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
   const runtime:FakeCall=async(op,body)=>{
     if(op==='guard.detect')return {literals:String(body.text).includes('fixture-secret')?['fixture-secret']:[]};
+    if(op==='telegram.notice'){notices.push(body);return {state:'done'};}
     calls.push({op,body});if(op==='schedule.advance')return {state:'waiting',next_attempt:Date.now()+60000};
     assert.ok(op.startsWith('run.'),'no external delivery while staging a proposal');const id=String(body.event_id);
     if(op==='run.resume'){assert.equal(body.observe_only,true);return native.get(id)??{state:'not_found'};}
@@ -40,9 +44,10 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.equal((await s.scheduled.claim(context)).claimed,false);assert.deepEqual(await s.scheduled.prepare(context),{transcripts:[],files:[]});
     native.set(id,{state:'running'});if(mode==='running')return {state:'running'};
     await s.scheduled.finish({event_id:id,actor:context.actor,state:'done',session:context.conversation,text:'Scheduled answer fixture-secret'});
+    if(deselect){deselect=false;groups=[];}
     native.set(id,{state:'done'});if(mode==='ack_lost'){mode='done';throw Error('lost native acknowledgement');}return {state:'done'};
   };
-  const s=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:['-123']}),runtime,
+  const s=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:groups}),runtime,
     memoryEngine:honchoEngine(async()=>{throw Error('no providers');})}),owner={admin:true,scope:null};
   const authority=async()=>({owner:'inngest' as const,epoch:(await s.schedules.ownership()).epoch});
   const capture=async(options:Record<string,unknown>={})=>{
@@ -74,8 +79,34 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const uncertain=await capture();mode='running';await run(uncertain.event_id);native.delete(uncertain.event_id);
     assert.equal((await run(uncertain.event_id)).state,'ambiguous');assert.equal((await s.scheduled.delivery(uncertain)).state,'withheld');
     const cancelled=await capture();await s.scheduled.cancel(cancelled);assert.equal((await run(cancelled.event_id)).state,'cancelled');
+    // The owner stopped serving the group as its run finished: the result is held back, and the owner is told once, by the
+    // run (ADR-0254). Nothing is proposed.
+    mode='done';const unserved=await capture({scope:'-123',deliver:'telegram',prompt:'Group result fixture'});deselect=true;
+    assert.equal((await run(unserved.event_id)).state,'completed');assert.deepEqual(groups,[]);
+    const notSent=digest(canonical(['schedule-result-not-sent-v1',unserved.event_id]));
+    assert.deepEqual(notices.map(notice=>notice.id),[notSent]);
+    assert.deepEqual(await s.scheduled.delivery(unserved),{state:'withheld',reason:'destination_not_served'});
+    assert.deepEqual([...new Set(notices.map(notice=>notice.id))],[notSent],'a run is told once');
+    assert.equal(notices[0].chat_id,'123');
+    assert.match(notices[0].text,/^⚠\ufe0f A scheduled task in .* \(not served now\) finished, but its result was not sent: Nocheh does not serve that chat now\.$/);
+    assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM telegram_action_requests WHERE source_reference->>\'id\'=$1',[unserved.event_id])).rows[0].n,0);
+    // Its next time does not run either, as before, and its retries go on. The owner is told once for that fire, though the
+    // epoch moves between retries, as a reaction in any served group moves it.
+    notices.length=0;
+    const trigger=storageWorkflowOperations(s,runtime).schedules!,fire='schedule:'+unserved.schedule+':'+digest(unserved.job);
+    for(let tick=0;tick<3;tick++) {
+      if(tick)await stores.control.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton');
+      await assert.rejects(trigger(fire,await authority()),(error:any)=>[403,404].includes(error.status),'tick '+tick);
+    }
+    const notRun=digest(canonical(['schedule-not-run-v1',unserved.schedule,'-123',digest(unserved.job)]));
+    assert.deepEqual([...new Set(notices.map(notice=>notice.id))],[notRun],'one notice for the fire, whatever the epoch');
+    assert.match(notices[0].text,/did not run: Nocheh does not serve that chat now\. It runs again once you select that group/);
+    groups=['-123'];notices.length=0;mode='running';
     const epoch=await capture();await s.guards.setMode('off');assert.equal((await run(epoch.event_id)).state,'cancelled');
     assert.equal((await s.scheduled.delivery(delivered)).state,'withheld');
+    // A result held back by a settings change is told too, once for the run; one kept in Nocheh never is.
+    assert.deepEqual(notices.map(notice=>notice.id),[digest(canonical(['schedule-result-not-sent-v1',delivered.event_id]))]);
+    assert.match(notices[0].text,/finished, but its result was not sent: your settings changed while it ran\./);
     mode='done';const off=await capture({prompt:'Explicit guard off'});assert.equal((await run(off.event_id)).state,'completed');
     assert.equal((await storageWorkflowOperations(s,runtime).schedules!('schedule:'+off.schedule+':'+digest(off.job),await authority())).state,'waiting');
     assert.equal((await storageWorkflowOperations(s,runtime).schedules!('schedule:'+off.schedule+':'+digest('obsolete'),await authority())).state,'skipped');
