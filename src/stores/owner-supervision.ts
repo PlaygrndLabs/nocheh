@@ -34,7 +34,8 @@ export interface ConversationDirectoryItem {
   /** A person's public Telegram username, checked by the one username rule (telegramUsername), so the dashboard can link it. */
   username?:string;
   /** Who last added Nocheh to the chat, as its row says (ADR-0253): the owner, someone else, an anonymous admin or a channel,
-   * an adder the app does not name, a row the seeder or a restore made, or nobody recorded. A topic's own row has none. */
+   * an adder the app does not name, a row the seeder or a restore made, or nobody recorded. A topic the owner registered
+   * says owner; any other topic has none. */
   added_by:'owner'|'other'|'anonymous'|'unknown'|'seeded'|null;
   /** When Nocheh took that add in. */
   added_at:string|null;
@@ -111,7 +112,7 @@ export class OwnerSupervisionRepository {
         UNION SELECT jsonb_array_elements_text(scopes) FROM organization_delegations
         UNION SELECT destination FROM memory_access_settings WHERE destination<>'*'
         UNION SELECT destination FROM memory_fact_grants UNION SELECT destination FROM memory_access_requests
-        UNION SELECT id FROM chats WHERE added_by_role='owner'`),
+        UNION SELECT id FROM chats WHERE kind='group' AND added_by_role='owner'`),
       this.assistantConfiguration(),
     ]);
     const {directory,rows}=listing,policy=configuration?.policy;
