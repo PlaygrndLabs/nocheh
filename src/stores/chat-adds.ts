@@ -18,8 +18,8 @@ import {writeAssignment,writeProject} from './projects.js';
  * chat_state_events row per add or removal (ChatRepository.adopt); this stage, run by the storage worker every few
  * seconds, does the rest outside any capture: it leaves a group someone else added it to and may tell the owner, gives a
  * group the owner added its own project with a card in the owner's private chat, and tells the owner when Nocheh was
- * removed from a group it was on in. Every Telegram call is made at most once by its id, so a row tried again after a
- * crash or a lost answer never leaves, sends or carded twice.
+ * removed from a group it was on in. Every Telegram call is made at most once by its id, and every owner command once by
+ * its operation id, so a row tried again after a crash or a lost answer never leaves, sends or makes a project twice.
  */
 
 /** The card's buttons: `ng`, the choice (0, 1 or 2 moves the group to that offered project, x takes it out of projects,
@@ -34,7 +34,8 @@ export const retryMinutes=(attempts:number)=>Math.min(2**Math.max(0,attempts),60
 const BATCH=20,LEASE="interval '5 minutes'",NOTICE_TRIES=10,GROUP_NOTES=1,ALL_NOTES=10;
 /** How many projects a card offers to move the group to. */
 const OFFERED=3;
-const owner:Reader={admin:true,scope:null};
+/** The owner's authority, for the commands the card makes and its buttons run. */
+const asOwner:Reader={admin:true,scope:null};
 
 type Button={text:string;callback:string};
 export type ChatAddRow={event_id:string;chat_id:string;kind:'added'|'removed';role:'owner'|'other'|'anonymous'|'unknown'|null;account_id:string|null;
@@ -169,7 +170,7 @@ export class ChatAdds {
         await this.finish(row,{outcome:'answered'});return;}
       // The assignment checks the group against this process's chat directory: a group recorded a moment ago is in it.
       await currentChats();
-      const made=await this.commands.run(owner,'chat-add-project:'+row.event_id,{kind:'chat_add_project',event_id:row.event_id,chat_id:row.chat_id},async db=>{
+      const made=await this.commands.run(asOwner,'chat-add-project:'+row.event_id,{kind:'chat_add_project',event_id:row.event_id,chat_id:row.chat_id},async db=>{
         const now=(await db.query('SELECT state,add_event,title FROM chats WHERE id=$1 FOR UPDATE',[row.chat_id])).rows[0];
         if(!now||now.state!=='active'||now.add_event!==row.event_id)return {outcome:'superseded' as Outcome,project_id:null};
         if((await db.query('SELECT 1 FROM project_assignments WHERE space_id=$1 FOR UPDATE',[row.chat_id])).rowCount)return {outcome:'answered' as Outcome,project_id:null};
@@ -248,13 +249,13 @@ export class ChatAdds {
     let reply:string;
     try {
       if(choice==='o') {
-        await this.chats.setState(owner,{chat_id:row.chat_id,state:'off',operation_id:`chat-card:${row.event_id}:o`});
+        await this.chats.setState(asOwner,{chat_id:row.chat_id,state:'off',operation_id:`chat-card:${row.event_id}:o`});
         reply=fillLine(lines.turned_off,{group});
       } else {
         const project=choice==='x'?null:row.offered[Number(choice)];
         if(project===undefined)return lines.changed;
         await currentChats();
-        await this.commands.run(owner,`chat-card:${row.event_id}:${choice}`,{kind:'chat_card',event_id:row.event_id,chat_id:row.chat_id,project_id:project},async db=>{
+        await this.commands.run(asOwner,`chat-card:${row.event_id}:${choice}`,{kind:'chat_card',event_id:row.event_id,chat_id:row.chat_id,project_id:project},async db=>{
           const own=(await db.query('SELECT revision FROM project_assignments WHERE space_id=$1',[row.chat_id])).rows[0];
           await writeAssignment(db,{space_id:row.chat_id,project_id:project,mode:project?'assigned':'none',expected_revision:Number(own?.revision??0)});
           // The card's own project, once no group is in it, is archived, so it does not linger in the owner's list.
