@@ -1,4 +1,5 @@
-import {readFileSync} from 'node:fs';
+import {existsSync,readFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {deliveredKinds,sendClassOf,sendClasses,unlearnedSendClasses} from '../src/send-classes.js';
@@ -14,7 +15,9 @@ test('Nocheh\'s sends carry one of eleven neutral classes, and only cards, card 
 });
 
 test('the Telegram adapter stamps the same classes, and every route default is one of them',()=>{
-  const sends=readFileSync(new URL('../../services/telegram/sends.py',import.meta.url),'utf8');
+  // The stores image has no services folder; its runner mounts one under PYTHONPATH instead.
+  const places=[new URL('../../services/telegram/sends.py',import.meta.url).pathname,join(process.env.PYTHONPATH??'/nonexistent','services/telegram/sends.py')];
+  const sends=readFileSync(places.find(place=>existsSync(place))??places[0]!,'utf8');
   const quoted=(text:string)=>[...text.matchAll(/'([a-z_:-]+)'/g)].map(match=>match[1]!);
   assert.deepEqual(quoted(sends.match(/^SEND_CLASSES = \(([^)]*)\)/m)?.[1]??''),[...sendClasses]);
   const defaults=quoted(sends.match(/^DEFAULT_CLASSES = \(([\s\S]*?)\)\n/m)?.[1]??'').filter(item=>!item.endsWith(':'));
