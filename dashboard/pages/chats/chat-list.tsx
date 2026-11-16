@@ -21,7 +21,8 @@ export function ChatList({selected}: {selected: string | null}) {
 
   const tree = chatTree(items, identities.data?.groups ?? [], deferred);
   // Telegram is asked about the groups Nocheh is on in, not the chats this list loaded or found: up to 50 a press, those
-  // checked longest ago first. When they can't be read, the server decides.
+  // checked longest ago first, and the answer counts the others not checked in the last hour. When they can't be read,
+  // the server decides.
   const canRefresh = served.items.length > 0 || !!served.error;
   const nothing = !tree.privates.length && !tree.groups.length;
 
@@ -33,9 +34,12 @@ export function ChatList({selected}: {selected: string | null}) {
       // An upgraded group answers twice; it is one group.
       const count = new Set(result?.chats?.map(chat => chat.chat_id)).size;
       const remaining = result?.remaining ?? 0;
+      // A press checks at most 50, so the toast never says the next one checks them all.
       toast(
         `Checked ${count} ${count === 1 ? 'group' : 'groups'} with Telegram.` +
-          (remaining > 0 ? ` Press again for the other ${remaining}.` : ''),
+          (remaining > 0
+            ? ` ${remaining} more ${remaining === 1 ? 'hasn’t' : 'haven’t'} been checked in the last hour. Press again to check more.`
+            : ''),
       );
     } catch (error) {
       toast(chatError(error), 'bad');

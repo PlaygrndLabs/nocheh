@@ -85,7 +85,7 @@ test('an explicit owner refresh names the groups that are on from Telegram, foll
   }
 });
 
-test('a refresh asks Telegram about at most 50 groups, those never refreshed and then those refreshed longest ago first, and says how many it left',
+test('a refresh asks Telegram about at most 50 groups, those never refreshed and then those refreshed longest ago first, and counts the others not refreshed in the last hour',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
@@ -117,13 +117,19 @@ test('a refresh asks Telegram about at most 50 groups, those never refreshed and
     const second=await press();
     assert.deepEqual(second.asked.slice(0,5),sorted.slice(50),'the groups the first press left out go first');
     assert.deepEqual(second.asked.slice(5),sorted.slice(0,45),'then those refreshed longest ago');
-    assert.equal(second.remaining,5);
+    assert.equal(second.remaining,0,'the 5 it left out were refreshed by the first press');
     assert.equal(Number((await stores.control.query('SELECT count(*) FROM chat_details WHERE chat_id=ANY($1::text[]) AND refreshed_at IS NOT NULL',[ids])).rows[0].count),55,
       'two presses reach every group');
-    // A group whose last refresh is oldest goes first, whichever press it was in.
-    await stores.control.query(`UPDATE chat_details SET refreshed_at='2001-01-01T00:00:00Z' WHERE chat_id=$1`,[sorted[44]]);
+    // Two hours later every group is due again, and a group whose last refresh is oldest goes first, whichever press it
+    // was in. The 5 this press leaves out are counted again.
+    await stores.control.query(`UPDATE chat_details SET refreshed_at=CASE WHEN chat_id=$2 THEN '2001-01-01T00:00:00Z' ELSE refreshed_at-interval '2 hours' END
+      WHERE chat_id=ANY($1::text[])`,[ids,sorted[44]]);
     const third=await press();
-    assert.deepEqual(third.asked.slice(0,6),[sorted[44],...sorted.slice(45,50)]);assert.equal(third.remaining,5);
+    assert.deepEqual(third.asked.slice(0,6),[sorted[44],...sorted.slice(45,50)]);
+    assert.deepEqual([...third.asked].sort(),[...sorted.slice(0,39),...sorted.slice(44)],'the 5 refreshed latest are left out');
+    assert.equal(third.remaining,5);
+    const fourth=await press();
+    assert.deepEqual(fourth.asked.slice(0,5),sorted.slice(39,44),'the 5 left out go first');assert.equal(fourth.remaining,0);
   }finally{
     await stores.control.query(`UPDATE chats c SET state='off' FROM chat_ids i WHERE i.chat_id=c.id AND i.external_id=ANY($1::text[]) AND c.state='active'`,[groups]).catch(()=>undefined);
     await stores.close();await rm(root,{recursive:true,force:true});

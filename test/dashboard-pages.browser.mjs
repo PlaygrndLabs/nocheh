@@ -2136,12 +2136,19 @@ test('every group Nocheh is on in can be shared with and refreshed, past the fir
     await page.getByLabel('Find a chat').fill('Choir');
     await page.getByRole('navigation', {name: 'Chats'}).getByRole('link', {name: 'Choir practice'}).waitFor();
     assert.equal(await page.getByRole('button', {name: /Refresh group names/}).isEnabled(), true);
-    // Telegram is asked about 50 of the 122 a press, and the owner is told to press again for the rest.
-    await page.getByRole('button', {name: /Refresh group names/}).click();
-    await page
-      .getByRole('status')
-      .filter({hasText: 'Checked 50 groups with Telegram. Press again for the other 72.'})
-      .waitFor();
+    // Telegram is asked about 50 of the 122 a press. The owner is told how many are left to check, fewer each press,
+    // and nothing more once every group was checked in the last hour; a press never promises to check them all.
+    for (const toast of [
+      'Checked 50 groups with Telegram. 72 more haven’t been checked in the last hour. Press again to check more.',
+      'Checked 50 groups with Telegram. 22 more haven’t been checked in the last hour. Press again to check more.',
+      'Checked 50 groups with Telegram.',
+    ]) {
+      await page.getByRole('button', {name: /Refresh group names/}).click();
+      await page
+        .getByRole('status')
+        .filter({hasText: new RegExp('^' + toast.replaceAll('.', '\\.') + '$')})
+        .waitFor();
+    }
     assert.deepEqual(problems, []);
     await page.close();
   } finally {

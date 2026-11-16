@@ -242,6 +242,8 @@ const club=(i:number)=>{const n=String(i).padStart(3,'0'),id='-2000000000'+n;
  return {space_id:id,name:'Club '+n,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true,topic_key:null,
   app_ids:[{app:'telegram',external:id,state:'current'}],is_forum:false,state:'active',owner:false,short_id:chatShortId(id),added_by:'owner',added_at:null,removed_event:false};};
 const manyChats=Array.from({length:120},(_,i)=>club(i+1));
+/** When Refresh group names last asked about each group, by chat id. */
+const refreshedAt=new Map<string,number>();
 /** The groups a scenario lists beyond the preview's own chats. */
 const moreChats=(mode:string)=>mode==='many-chats'?manyChats:mode==='many-chats-moved'?[club(0),...manyChats]:[];
 /** The directory as the chats' states serve it, installed for the repositories the preview runs. */
@@ -915,12 +917,14 @@ const server=createServer((req,res)=>{void(async()=>{
     if(!settingsChanges.TELEGRAM_BOT_TOKEN&&mode!=='fresh')throw new HttpError(400,'telegram_token_missing');
     if(saved('TELEGRAM_ENABLED')==='true')throw new HttpError(400,'telegram_running');
     return json(res,200,{bot:'@aurora_helper_bot',people:[{id:'42',name:'Owner',username:'@owner'}]});}
-  // Telegram is asked about the groups Nocheh is on in, at most 50 a press, as the server asks; the answer says how many
-  // are left.
-  if(route==='/telegram/chats/refresh'){const directory=directoryNow();
+  // Telegram is asked about the groups Nocheh is on in as the server asks: at most 50 a press, those never checked and
+  // then those checked longest ago first, ties by id; the answer counts the others not checked in the last hour.
+  if(route==='/telegram/chats/refresh'){const directory=directoryNow(),now=Date.now(),last=(id:string)=>refreshedAt.get(id)??0;
    const served=[...previewChats.filter(chat=>chat.kind==='group'&&directory.served(chat.id)).map(chat=>({chat_id:chat.id,external:chat.ids[0],state:'available',title:chat.title,is_forum:chat.is_forum===true})),
     ...moreChats(mode).map(chat=>({chat_id:chat.space_id,external:chat.space_id,state:'available',title:chat.name,is_forum:false}))];
-   return json(res,200,{chats:served.slice(0,50),remaining:Math.max(0,served.length-50)});}
+   const chats=served.sort((a,b)=>last(a.chat_id)-last(b.chat_id)||(a.chat_id<b.chat_id?-1:a.chat_id>b.chat_id?1:0)).slice(0,50);
+   for(const chat of chats)refreshedAt.set(chat.chat_id,now);
+   return json(res,200,{chats,remaining:served.filter(chat=>last(chat.chat_id)<now-3600000).length});}
   // The group switch (ADR-0253): on or off at once, with the project a group joins as it turns on: a new one named
   // after it, one of the owner's, or none. Only a group Nocheh is in has one.
   if(route==='/chats/state'){if(Object.keys(body).some(key=>!['chat_id','state','operation_id','project'].includes(key)))throw new HttpError(400,'unknown_chat_state_field');

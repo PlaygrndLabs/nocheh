@@ -27,6 +27,8 @@ const states=['available','migrated','not_member','not_found'];
 const appTypes=new Set(['private','group','supergroup','channel']);
 /** Served groups asked about in one refresh: each is a Telegram call, so a press stays short however many groups are on. */
 const refreshBatch=50;
+/** A group refreshed this recently counts as checked: a press says how many others it left (the chat list says "in the last hour"). */
+const refreshRecent=60*60*1000;
 
 /**
  * Current chat presentation read from Telegram only on an explicit owner refresh (ADR-0252): the served groups' names
@@ -35,14 +37,15 @@ const refreshBatch=50;
  * never grants access, and a refresh never changes whether a chat is served. A group Telegram moved to a new id (an
  * upgrade to a supergroup) gets that id as its current one at once, keeping the old one, and is asked again under it.
  * Each press asks about at most refreshBatch served groups, those never refreshed and then those refreshed longest ago
- * first, and says how many it left, so pressing again reaches every one.
+ * first, and says how many others were not refreshed within refreshRecent, so pressing again until none are left
+ * reaches every one.
  */
 export class TelegramChatRepository {
   constructor(readonly control:pg.Pool,readonly call:RuntimeCall,readonly chats:Pick<ChatRepository,'listing'|'migrate'|'policy'>){}
 
   async refresh(principal:Reader) {
     admin(principal);
-    const {directory,rows}=await this.chats.listing();
+    const {directory,rows}=await this.chats.listing(),recent=Date.now()-refreshRecent;
     const served=directory.all().filter(chat=>chat.app==='telegram'&&chat.kind==='group'&&directory.served(chat.id));
     // Never refreshed first, then the oldest refresh, ties by id: the groups one press leaves out go first in the next.
     const last=(id:string)=>rows.get(id)?.refreshed?.at.getTime()??0;
@@ -65,8 +68,10 @@ export class TelegramChatRepository {
     }
     // This process's directory shows the names and ids just saved (a name decides nothing, but cards and lists show it).
     if(linked||chats.length)await reloadChats();
-    // Counted in groups, not answers: an upgraded group answers twice.
-    return {chats,remaining:served.length-groups.length};
+    // The groups this press left out and not refreshed lately, counted in groups (an upgraded group answers twice): it
+    // goes down press by press and is 0 once pressing again has reached every one.
+    const asked=new Set(groups.map(group=>group.id));
+    return {chats,remaining:served.filter(chat=>!asked.has(chat.id)&&last(chat.id)<recent).length};
   }
 
   /**
