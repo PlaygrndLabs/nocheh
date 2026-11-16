@@ -12,7 +12,7 @@ from unittest.mock import patch
 from telegram.error import Conflict, InvalidToken, NetworkError
 
 from .gateway import TelegramService
-from .poller import CONFLICT_RETRIES, NETWORK_FAILURES, Poller
+from .poller import ABILITIES, CONFLICT_RETRIES, NETWORK_FAILURES, Poller
 from .settings import Policy
 
 
@@ -64,6 +64,22 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         service, restarts, waits, incident = await self.ladder(InvalidToken())
         self.assertEqual((service.bot.polls, waits, restarts), (1, [], []))
         self.assertEqual(service.health()['error_code'], 'invalid_token')
+
+    async def test_health_shows_what_getme_says_the_bot_may_do_and_it_starts_anyway(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = self.service(folder, [])
+            service.bot = Bot(None)
+            async def get_me():
+                return SimpleNamespace(id=123456, username='synthetic_fixture_bot', first_name='Synthetic', can_join_groups=True,
+                                       can_read_all_group_messages=False, supports_inline_queries=True, can_connect_to_business=None)
+            service.bot.get_me = get_me
+            poller = Poller(service)
+            await poller.connect()
+            poller.menu.cancel()
+            self.assertEqual(service.status, 'connected', 'a bot that allows more than Nocheh uses still starts')
+            health = service.health()
+            self.assertEqual({key: health[key] for key in ABILITIES if key in health},
+                             {'can_join_groups': True, 'can_read_all_group_messages': False, 'supports_inline_queries': True})
 
     def test_connected_needs_a_recent_poll(self):
         with tempfile.TemporaryDirectory() as folder:

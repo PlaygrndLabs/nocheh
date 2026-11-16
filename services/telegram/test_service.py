@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from services.durable import digest
 from services.telegram.capture import instrument_request
 from services.telegram.gateway import TelegramService
-from services.telegram.poller import ALLOWED_UPDATES
+from services.telegram.poller import ABILITIES, ALLOWED_UPDATES
 from services.telegram.settings import Policy
 from tools.acceptance.telegram_mock import TelegramMock, TOKEN
 
@@ -109,6 +109,10 @@ class ServiceTests(unittest.TestCase):
         self.assertIn(f'telegram:{BOT_ID}:update:5', [event['key'] for event in events])
         self.assertEqual(self.service.identify(), {'state': 'connected', 'bot_id': BOT_ID, 'username': 'synthetic_fixture_bot', 'first_name': 'Synthetic'})
         self.assertEqual(self.service.health()['state'], 'connected')
+        # What getMe says the bot may do shows in health; one it does not say is left out.
+        health = self.service.health()
+        self.assertEqual({key: health[key] for key in ABILITIES if key in health},
+                         {'can_join_groups': True, 'can_read_all_group_messages': True, 'supports_inline_queries': False})
         # No command menu is left in any scope.
         wait(lambda: not self.mock.state['commands'])
 

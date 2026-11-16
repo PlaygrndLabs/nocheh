@@ -64,6 +64,8 @@ class TelegramService:
         self.typing_on, self.reactions_on = settings.typing_enabled(), settings.reactions_enabled()
         self.loop = self.bot = self.sender = self.capture = self.action_lock = None
         self.identity, self.failure, self.stopping, self.poller = None, None, False, None
+        # What getMe says the bot may do, shown in health (poller.ABILITIES).
+        self.abilities = {}
         self.thread = self.polling = None
         self.presences, self.replies, self.cancels = {}, {}, {}
         self.receipts = self.spool / 'dispatch'
@@ -139,7 +141,7 @@ class TelegramService:
             last = polling.get('last_poll_at')
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() if last else None
             if age is None or age > 120: state = 'recovering'
-        return {**polling, 'state': state, 'error_code': code}
+        return {**polling, **self.abilities, 'state': state, 'error_code': code}
 
     def stop(self):
         self.stopping = True
