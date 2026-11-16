@@ -109,10 +109,15 @@ class ProductScenarios(Scenarios):
         wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
         return names
 
+    def listed(self, app_id):
+        """The owner's chat list item of a Telegram chat, or {} while the list does not show it yet."""
+        chat = self.f.chat(app_id)
+        return next((item for item in self.f.conversations() if item['space_id'] == chat), {})
+
     def state_of(self, app_id):
         """Nocheh's state in a Telegram chat as the owner's chat list shows it: active (On), off, pending (Leaving), left,
-        removed, could_not_leave or archived (ADR-0253)."""
-        return self.f.chat_item(app_id).get('state')
+        removed, could_not_leave or archived (ADR-0253); None while it is not listed."""
+        return self.listed(app_id).get('state')
 
     def served(self, app_id):
         """Whether the owner's chat list shows Nocheh on in a Telegram chat."""
@@ -1203,8 +1208,9 @@ class ProductScenarios(Scenarios):
         role = 'anonymous' if by == ANONYMOUS_ADMIN else 'other'
         before, leaves = len(self.f.sent()), len(self.leave_calls(chat))
         _, event_id = self.status_change(group, by)
-        item = self.f.chat_item(chat)
-        self.gate('leaving_at_once', item.get('state') == 'pending' and item.get('added_by') == role, state=item.get('state'), added_by=item.get('added_by'))
+        # Leaving shows at once, well before the leave about 30 seconds later.
+        item = self.wait('leaving_at_once', lambda: (lambda item: item if item.get('state') == 'pending' else None)(self.listed(chat)), 15)
+        self.gate('added_by_someone_else', item.get('added_by') == role, added_by=item.get('added_by'))
         # While it is leaving Nocheh says nothing there: no reply, and no refusal even to someone allowed in another group.
         self.turn(self.f.message(chat, 'Are you here?', sender=MEMBER), chat, expect_reply=False)
         record = self.settled(event_id)
