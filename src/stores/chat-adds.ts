@@ -33,6 +33,9 @@ export const retryMinutes=(attempts:number)=>Math.min(2**Math.max(0,attempts),60
  *  in 24 hours: one per group, ten in all (a stranger making new groups cannot flood the owner). A removal's line is
  *  outside them. */
 const BATCH=20,LEASE="interval '5 minutes'",NOTICE_TRIES=10,GROUP_NOTES=1,ALL_NOTES=10;
+/** The tries after which a leave Telegram still answers with the group's upgrade ends as could_not_leave: six waits of 1,
+ *  2, 4… 32 minutes, over an hour. */
+const MIGRATED_TRIES=6;
 /** How many projects a card offers to move the group to. */
 const OFFERED=3;
 /** The owner's authority, for the commands the card makes and its buttons run. */
@@ -136,7 +139,8 @@ export class ChatAdds {
    * Leave a group someone else added Nocheh to, 30 s after the add (so an upgrade's two halves fold first): only while the
    * group is still pending from this very add. The owner turning it on or off meanwhile, or adding it again, supersedes the
    * leave. Telegram leaving, or saying Nocheh is gone already, makes it left; refusing makes it could_not_leave, which the
-   * owner can still turn on or off. Then the note, for a person the owner allowed or a hidden adder.
+   * owner can still turn on or off, and so does Telegram still saying the group was upgraded after over an hour of tries.
+   * Then the note, for a person the owner allowed or a hidden adder.
    */
   private async leave(row:ChatAddRow):Promise<void> {
     if(!row.outcome) {
@@ -151,6 +155,9 @@ export class ChatAdds {
         try{result=await this.call('telegram.leave',{id:row.event_id,chat_id:chat.external},30000);}
         catch{await this.later(row);return;}
         if(result.state==='done')outcome='left';else if(result.state==='failed')outcome='could_not_leave';
+        // Still the old basic group's id after over an hour: its new id never reached storage (the upgrade's messages were
+        // lost, or the two chats stayed apart), so the dead id would be tried forever. It ends as a refusal does.
+        else if(result.error_code==='telegram_chat_migrated'&&row.attempts>=MIGRATED_TRIES)outcome='could_not_leave';
         else{await this.later(row);return;}
         await this.chats.leaveSettled(row.chat_id,row.event_id,outcome);
       }

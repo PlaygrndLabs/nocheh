@@ -196,6 +196,40 @@ test('the bot\'s last check before a leave holds only while the group is pending
   }finally{await h.cleanup();await stores.close();}
 });
 
+test('a leave Telegram still answers with the group\'s upgrade after over an hour of tries ends as could not leave; any other answer is tried again',fixture,async()=>{
+  const stores=await open(),h=await harness(stores,'migrated');
+  try {
+    const member=h.group(1),stranger=h.group(2),offline=h.group(3),tg=(value:string)=>chatIdFor('telegram',value);
+    const memberAdd=await h.status(member,1,MEMBER,'left','member'),strangerAdd=await h.status(stranger,2,STRANGER,'left','member');
+    const offlineAdd=await h.status(offline,3,STRANGER,'left','member');
+    // Two old basic groups whose new ids never came: Telegram answers each leave with the upgrade. The bot cannot reach
+    // Telegram for the third.
+    h.answers.leave=input=>input.chat_id===offline?{state:'not_started',error_code:'telegram_not_connected'}:{state:'not_started',error_code:'telegram_chat_migrated'};
+    const leaves=(event:string)=>h.calls.filter(item=>item.operation==='telegram.leave'&&item.input.id===event).length;
+    const outcome=async(event:string)=>{const saved=await h.row(event);return [saved.state,saved.outcome,saved.notice,saved.attempts];};
+    // Six tries, with waits of 1, 2, 4… 32 minutes after them: each is tried again, and each group stays pending.
+    for(let index=0;index<6;index++){await h.due();await h.adds.settle();}
+    for(const [event,value] of [[memberAdd,member],[strangerAdd,stranger],[offlineAdd,offline]] as const) {
+      assert.deepEqual(await outcome(event),['waiting',null,'none',6],value);
+      assert.equal((await h.chat(tg(value))).state,'pending');
+    }
+    // The seventh try, over an hour on: the upgraded ones end as a refused leave does, so the owner gets the switch and,
+    // for the member's add, the note. The one Telegram could not be reached for is tried again.
+    await h.due();await h.adds.settle();
+    assert.deepEqual([leaves(memberAdd),leaves(strangerAdd),leaves(offlineAdd)],[7,7,7]);
+    assert.deepEqual(await outcome(memberAdd),['done','could_not_leave','sent',0]);
+    assert.deepEqual(await outcome(strangerAdd),['done','could_not_leave','none',0],'a stranger\'s add is only the content-free record');
+    for(const value of [member,stranger]){const saved=await h.chat(tg(value));assert.deepEqual([saved.state,saved.state_seq],['could_not_leave',null]);}
+    assert.deepEqual(await outcome(offlineAdd),['waiting',null,'none',7]);assert.equal((await h.chat(tg(offline))).state,'pending');
+    assert.deepEqual(h.calls.filter(item=>item.operation==='telegram.notice').map(item=>item.input),[{id:digest('chat-add-note:'+memberAdd),chat_id:OWNER,
+      text:`${quoted('Mina')} added Nocheh to ${shown(tg(member),h.title(member))}, and it couldn't leave. It stays silent there.`}]);
+    // Once settled, nothing is tried again, and the owner can turn the group on or off.
+    await h.due();await h.adds.settle();
+    assert.deepEqual([leaves(memberAdd),leaves(strangerAdd)],[7,7]);
+    assert.equal((await h.repository.setState(owner,{chat_id:tg(stranger),state:'off',operation_id:'migrated-off:'+h.update(0)})).state,'off');
+  }finally{await h.cleanup();await stores.close();}
+});
+
 test('notes about leaving are capped at one per group and ten in all a day, a removal\'s line is not, and none goes without the owner\'s private chat',fixture,async()=>{
   const stores=await open(),h=await harness(stores,'caps');
   try {
