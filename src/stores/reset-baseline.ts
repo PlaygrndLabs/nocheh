@@ -3,7 +3,7 @@ import {canonical,digest} from '../archive.js';
 import {families} from '../workflows/store.js';
 import type {StorePools} from './connections.js';
 import {storeSchemas} from './schema.js';
-import {admittedDocument,chatRows,resetSetupSnapshot,setupRows,sortedChats} from './reset-setup.js';
+import {admittedDocument,chatRows,resetSetupSnapshot,restoredChats,setupRows} from './reset-setup.js';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const exact=(value:unknown,keys:string[])=>{
@@ -108,7 +108,7 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
   const saved={...await setupRows(stores.control),
     runtime_profiles:(await stores.control.query("SELECT id,name,owner_id FROM runtime_profiles WHERE state='active' ORDER BY id")).rows};
   for(const [name,rows] of Object.entries(saved))if(!same(rows,(configuration as any)[name]))throw Error('reset_baseline_setup_changed');
-  if(!same(await chatRows(stores.control),sortedChats(configuration)))throw Error('reset_baseline_setup_changed');
+  if(!same(await chatRows(stores.control),restoredChats(configuration)))throw Error('reset_baseline_setup_changed');
   const commands=request.profile_commands as any[];
   const owner=configuration.runtime_configuration[0]!.document.owner_id;
   const ownerCommands=(await stores.control.query("SELECT id,request_hash,result,epoch::int AS epoch FROM owner_commands ORDER BY id")).rows;
