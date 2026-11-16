@@ -399,8 +399,10 @@ export class NativeMemoryRepository {
    * in the same session on the forwards-and-files participant, so a caption still links to its file. Someone else's
    * message the owner pinned is kept as such a forward is. A quote of Nocheh's own message, by anyone, is the sender's
    * words without it, and is written nowhere else: a learned one is already learned as Nocheh's, and a card, notice or
-   * reminder is not learned at all. A pin of Nocheh's own message, by anyone, leaves only a note in that chat that it was
-   * pinned, for the same reason. Everyone else's message stays on its
+   * reminder is not learned at all. A pin of Nocheh's own message, by anyone, an anonymous admin included, leaves only a
+   * note in that chat that it was pinned, for the same reason. A quote or pin of a bot's message the archive does not hold
+   * as Nocheh's (not archived yet, or another bot's) is treated the same way, and its note names only a bot. Everyone
+   * else's message stays on its
    * writer, and Nocheh's on the assistant, each naming what it is; Nocheh's reply about someone else's forward goes with
    * that forward.
    */
@@ -415,9 +417,13 @@ export class NativeMemoryRepository {
         session:about?'material':'conversation',record:'labelled_source',subjects:true}];
     }
     const guarded=(observations[0]?.value as any)?.payload;
-    if(found.class==='pinned_nocheh'||found.class==='pinned'&&(await this.sources.pinnedNocheh([source.id])).has(source.id))
-      return [{text:canonical(honchoPointer(facts.author==='owner'?'pinned_nocheh':'pinned_nocheh_other')),writer:'assistant',session:'conversation',
-        record:'labelled_pointer',subjects:false}];
+    // Checked before any class, so an anonymous admin's pin, a post in the chat's name, is read the same way.
+    const cut=facts.pinned!==null||facts.quote!==null?(await this.sources.carried([source.id])).get(source.id):undefined;
+    const by=facts.author==='owner'?'':'_other' as const;
+    if(found.class==='pinned_nocheh'||facts.pinned!==null&&cut?.pinned) {
+      const pin=found.class==='pinned_nocheh'||cut?.pinned!=='bot'?`pinned_nocheh${by}` as const:`pinned_bot${by}` as const;
+      return [{text:canonical(honchoPointer(pin)),writer:'assistant',session:'conversation',record:'labelled_pointer',subjects:false}];
+    }
     if(facts.forward!==null&&facts.forward!=='own'||facts.pinned==='other') {
       let original:unknown=null;try{original=JSON.parse(row.payload.toString());}catch{}
       // The kind comes from the original and the name from the guarded copy, which the secret check has read; a pin's
@@ -433,8 +439,9 @@ export class NativeMemoryRepository {
     const voice=(derivative:{kind:string;id:string})=>derivative.kind==='transcript'&&ownVoice.has(kinds.get(derivative.id)??'');
     const derivatives=observations.flatMap(item=>item.derivatives),recorded=derivatives.some(voice);
     const said=observations.some(item=>String((item.value as any)?.text??'').trim());
-    // A quote of Nocheh's own message, learned or not, is left out of the sender's words, and written nowhere else.
-    const nocheh=found.class==='quote_nocheh'||facts.quote==='other'&&(await this.sources.repliesToNocheh([source.id])).has(source.id);
+    // A quote of Nocheh's own message, learned or not, or of another bot's, is left out of the sender's words, and written
+    // nowhere else; so is one inside a message the sender pinned.
+    const nocheh=found.class==='quote_nocheh'||facts.quote==='other'&&!!(cut?.quote||cut?.pinned_quote);
     const others=facts.quote==='other'&&!nocheh;
     const kept:HonchoPart[]=[...(derivatives.some(item=>item.kind==='extracted_text')?[{part:'file' as const,name:fileName(guarded)}]:[]),
       ...(derivatives.some(item=>item.kind==='transcript'&&!voice(item))?[{part:'audio' as const}]:[]),...(others?[{part:'quote' as const}]:[])];

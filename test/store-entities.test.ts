@@ -199,6 +199,20 @@ test('people and projects keep stable identity, attributed evidence, connected r
       {entity_suggestions:[],entity_claims:[ownClaim('typed beside a pin of Nocheh',beside),ownClaim('citing the pin of Nocheh',pin)]},`${stamp}:pinned-nocheh`)).rejected,[]);
     const besidePin=new Map((await entities.inspect(owner,self!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
     assert.deepEqual(['typed beside a pin of Nocheh','citing the pin of Nocheh'].map(predicate=>besidePin.get(predicate)?.attribution),['direct','reported']);
+    // Nor do the owner's pin and quote of Nocheh's card, whose words are cut from everything learned: the owner's own typing
+    // beside either stays direct, and a claim citing the pin or the quote itself is still never direct.
+    const cardPin=(await archive.capture({version:1,key:`entities:${stamp}:pin:72`,origin:'live',kind:'telegram_update',bot_id:'fixture',scope:atlasGroup,source_id:'72',
+      revision:'1',occurred_at:null,text:null,payload:{update_id:Number(stamp.slice(-8))+872,message:{message_id:72,date:3,chat,from:{id:42,first_name:'Owner'},
+        pinned_message:{message_id:62,date:1,chat,from:bot,text:'Book the 9am train.'}}}})).source.reference;
+    for(const [label,carrier,id] of [['a pin of a card',cardPin,'73'],['a quote of a card',ofCard,'74']] as const) {
+      const typedHere=await capture(id,42,'I keep my keys by the door.'),here=await entities.context(typedHere,[],'I keep my keys by the door.');
+      assert.deepEqual((await entities.publishDiscoveries({...prepared,source:typedHere,entities:here,
+        evidence:[typedHere,carrier,card].map(reference=>({reference,text:'',space:atlasGroup})),observations:[typedHere,carrier].map(source=>({source,value:{},derivatives:[]}))},
+        {entity_suggestions:[],entity_claims:[ownClaim('typed beside '+label,typedHere),ownClaim('citing '+label,carrier)]},`${stamp}:${label}`)).rejected,[]);
+    }
+    const besideCard=new Map((await entities.inspect(owner,self!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
+    assert.deepEqual(['a pin of a card','a quote of a card'].map(label=>[besideCard.get('typed beside '+label)?.attribution,besideCard.get('citing '+label)?.attribution]),
+      [['direct','reported'],['direct','reported']]);
     await assert.rejects(entities.inspect(privateReader,context.mentioned_projects[0]!.id),{code:'entity_not_found'});
     assert.equal((await entities.list(privateReader,{query:'Beacon'})).entities.length,0,'private entity names do not leak through search');
 

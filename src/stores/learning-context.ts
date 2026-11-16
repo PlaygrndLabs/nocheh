@@ -31,9 +31,10 @@ export interface PreparedLearningContext {
  * reminder is not learned. `collect` gets the ids left out (a pin's own id when only the message it pinned was), the rules kept,
  * the ids of the rules left out with them, `bare_reaction` when the source is a reaction to a message that was left out,
  * `empty_pin` when the source is a pin of Nocheh's card, notice or reminder with nothing else in it, and each kept rule's
- * recorded inputs (`inputs`: the source ids of its stored dependencies, by rule id). Honcho and interpretations pass none,
- * so they learn from everyone's messages, as before; for every caller a pin of Nocheh's card, notice or reminder loses it,
- * and a quote of any message of Nocheh's is left out of the message quoting it (ADR-0256, ADR-0257).
+ * recorded inputs (`inputs`: the source ids of its stored dependencies, by rule id). Honcho passes none and interpretations
+ * only `collect`, so they learn from everyone's messages, as before. For every caller a pin loses Nocheh's card, notice or
+ * reminder, and a bot's message that is not Nocheh's learned one; a quote of Nocheh's own message or of a bot's is left
+ * out of the message quoting it, and out of a message a pin carries (ADR-0256, ADR-0257).
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
@@ -91,15 +92,21 @@ export class LearningContextRepository {
       const scoped=structuredClone(value);
       for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(scoped.payload?.[kind]) {
         const message=scoped.payload[kind];
+        const carried=message.quote||message.pinned_message?(await this.entities.sources.carried([reference.id])).get(reference.id):undefined;
         delete message.reply_to_message;delete message.external_reply;
-        // A quote of Nocheh's own message, learned or not, is Nocheh's words, never the sender's: it goes, and the sender's
-        // own words stay. A learned one is evidence of its own; a card, notice or reminder is not learned.
-        if(unquote||message.quote&&(await this.entities.sources.repliesToNocheh([reference.id])).has(reference.id))delete message.quote;
+        // A quote of Nocheh's own message, learned or not, or of another bot's, is never the sender's words: it goes, and the
+        // sender's own words stay. A learned one is evidence of its own; a card, notice or reminder is not learned, and a
+        // bot's message the archive does not hold as Nocheh's (not archived yet, or another bot's) is cut as a card is.
+        if(unquote||carried?.quote)delete message.quote;
         // A pin carries the message it pinned whole; what someone not allowed there wrote stays out of the owner's notes
-        // review, and Nocheh's own card, notice or reminder stays out of everything learned from it, whoever pinned it.
-        const pinned=!message.pinned_message?true:options.admit&&options.admitPinned?await options.admitPinned(reference):
-          (await this.entities.sources.pinnedNocheh([reference.id])).get(reference.id)==='unlearned'?'not_learned':true;
+        // review, and Nocheh's own card, notice or reminder stays out of everything learned from it, whoever pinned it. So
+        // does a bot's message that is not Nocheh's learned one: a bot is never someone allowed there, so nothing of anyone's
+        // is lost. A quote inside the pinned message goes as a quote does.
+        let pinned:boolean|'not_learned'|'bot'=!message.pinned_message?true:options.admit&&options.admitPinned?await options.admitPinned(reference):
+          carried?.pinned==='unlearned'?'not_learned':true;
+        if(pinned===true&&carried?.pinned==='bot')pinned='bot';
         if(pinned!==true)delete message.pinned_message;
+        else if(carried?.pinned_quote&&message.pinned_message&&typeof message.pinned_message==='object')delete message.pinned_message.quote;
         if(pinned===false){limitations.push('sender_not_allowed');unpinned.push(reference.id);}
         // The source itself, a pin of Nocheh's card with nothing of its own, leaves nothing to review.
         if(pinned==='not_learned'&&reference.id===source.id&&!texts.some(text=>text.trim())&&!derivatives.length)emptyPin=true;

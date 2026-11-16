@@ -111,6 +111,25 @@ function pinnedOf(message:Record<string,any>,sender:string|null):Partial<Pick<So
   return {pinned:'own',...(quote?{quote}:{})};
 }
 
+/** Whether a message Telegram shows inside another is a bot's words, by Telegram's own fields: sent by a bot itself
+ *  (from.is_bot), not in a chat's name as an anonymous admin's post is, or sent through an inline bot (via_bot). Nocheh's
+ *  own messages are a bot's. No id is read. */
+function botWords(message:Record<string,any>|null):boolean {
+  return !!message&&(record(message.from)?.is_bot===true&&!record(message.sender_chat)||!!record(message.via_bot)||typeof message.via_bot==='string');
+}
+/** Whether the message a pin carries is a bot's words (botWords). One Telegram no longer shows (date 0) carries none. */
+export function botPinned(message:unknown):boolean {
+  const pinned=record(record(message)?.pinned_message);
+  return !!pinned&&pinned.date!==0&&botWords(pinned);
+}
+/** Whether a message's quote is of a bot's words: the message it answers in the same chat is a bot's (botWords), or the
+ *  one it answers in another chat (external_reply) was first sent by a bot. A message with no quote quotes nothing. */
+export function botQuoted(message:unknown):boolean {
+  const found=record(message);if(!found||!record(found.quote))return false;
+  const origin=record(record(found.external_reply)?.origin);
+  return botWords(record(found.reply_to_message))||origin?.type==='user'&&record(origin.sender_user)?.is_bot===true;
+}
+
 /** A Telegram Desktop export: its author is the account the archive proved for it (authored_by), never a name. */
 function desktop(kind:string,payload:unknown,authors:FactsInput['authors'],owner:string|null):SourceFacts {
   const body=record(payload),message=record(body?.message);

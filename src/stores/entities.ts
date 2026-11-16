@@ -444,16 +444,21 @@ export class EntityRepository {
    * direct only when the speaker typed every message it cites and sent no forward, file or quote in the batch (the
    * owner's quote of Nocheh's own learned message counts as typed); inferred when it cites anyone else's message;
    * otherwise reported by the speaker, as something the speaker passed on. The owner's pin of Nocheh's own learned
-   * message passes nothing on, since Nocheh's message is learned as Nocheh's, but a claim citing it is never direct.
+   * message passes nothing on, since Nocheh's message is learned as Nocheh's, but a claim citing it is never direct. Nor
+   * does a pin or quote whose words were cut from everything learned (NoteSourceRepository.carried): Nocheh's card,
+   * notice or reminder, or a bot's message the archive does not hold as Nocheh's; a claim citing one is never direct.
    */
   private async spoken(context:PreparedLearningContext):Promise<(cited:readonly SourceReference[])=>'direct'|'reported'|'inferred'> {
     const batch=context.observations.map(item=>item.source.id),ids=[...new Set([context.source.id,...batch,...context.evidence.map(item=>item.reference.id)])];
-    const [classes,authors]=await Promise.all([this.sources.classesFor(ids),this.stores.archive.query(`SELECT event_id,array_agg(DISTINCT target_id) AS targets
-      FROM source_relations WHERE event_id=ANY($1::text[]) AND kind='authored_by' GROUP BY event_id`,[ids])]);
+    const [classes,authors,carried]=await Promise.all([this.sources.classesFor(ids),this.stores.archive.query(`SELECT event_id,array_agg(DISTINCT target_id) AS targets
+      FROM source_relations WHERE event_id=ANY($1::text[]) AND kind='authored_by' GROUP BY event_id`,[ids]),this.sources.carried(batch)]);
     // The speaker is who the archive proved wrote the source, as the trusted speaker is; a message with no single author is no one's.
     const author=new Map<string,string|null>(authors.rows.map(row=>[String(row.event_id),row.targets.length===1?String(row.targets[0]):null]));
     const speaker=author.get(context.source.id)??null,theirs=(id:string)=>speaker!==null&&author.get(id)===speaker;
-    const nochehOwn=(id:string)=>['pinned_nocheh','quote_nocheh'].includes(classes.get(id)?.class??'');
+    const nochehOwn=(id:string)=>{
+      const found=classes.get(id),cut=carried.get(id);
+      return ['pinned_nocheh','quote_nocheh'].includes(found?.class??'')||!!found&&!!cut&&(found.facts.pinned!==null&&!!cut.pinned||found.class==='quote'&&(cut.quote||cut.pinned_quote));
+    };
     const passedOn=batch.some(id=>theirs(id)&&!typed(classes.get(id))&&!nochehOwn(id));
     return cited=>!passedOn&&cited.every(ref=>theirs(ref.id)&&typed(classes.get(ref.id)))?'direct':cited.some(ref=>!theirs(ref.id))?'inferred':'reported';
   }

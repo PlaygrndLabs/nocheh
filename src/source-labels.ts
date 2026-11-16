@@ -89,7 +89,9 @@ export const modelSourceWords={
     pointer:'the owner forwarded a message from {origin}; its text is kept with the owner\'s forwards and files',
     pinned_pointer:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files',
     pinned_nocheh_pointer:'the owner pinned one of Nocheh\'s own messages; its text is not kept here',
-    pinned_nocheh_other_pointer:'someone in this chat pinned one of Nocheh\'s own messages; its text is not kept here'},
+    pinned_nocheh_other_pointer:'someone in this chat pinned one of Nocheh\'s own messages; its text is not kept here',
+    pinned_bot_pointer:'the owner pinned a bot\'s message; its text is not kept here',
+    pinned_bot_other_pointer:'someone in this chat pinned a bot\'s message; its text is not kept here'},
 } as const;
 /** The longest label the model reads; the Notes page shows the whole label in the owner's words. */
 export const MODEL_LABEL_LIMIT=120;
@@ -374,11 +376,11 @@ export function honchoSource(part:HonchoPart):string {
 export const honchoSources=(parts:readonly HonchoPart[]):string=>[...new Set(parts.map(honchoSource))].join('; ');
 /** What stays in the owner's private chat in place of someone else's forward, or someone else's message the owner
  *  pinned, which is kept with the owner's forwards and files: fixed words that name only the kind of origin, so the chat
- *  still shows that something was forwarded or pinned. The owner's pin of Nocheh's own message is only such a note, in
- *  the chat where it was pinned: Nocheh's message is learned as Nocheh's, or not at all when it is a card. */
-export function honchoPointer(from:Exclude<Forward['from'],'own'>|'pinned'|'pinned_nocheh'|'pinned_nocheh_other'):{source:string;text:string} {
-  const words=modelSourceWords.honcho;
-  return {source:words.note,text:from==='pinned'?words.pinned_pointer:from==='pinned_nocheh'?words.pinned_nocheh_pointer:
-    from==='pinned_nocheh_other'?words.pinned_nocheh_other_pointer:
-    fillLine(words.pointer,{origin:modelSourceWords.origins[from]})};
+ *  still shows that something was forwarded or pinned. A pin of Nocheh's own message, by anyone, is only such a note, in
+ *  the chat where it was pinned: Nocheh's message is learned as Nocheh's, or not at all when it is a card. So is a pin of
+ *  any other bot's message, Nocheh's not archived yet included, whose text is not learned at all. */
+export function honchoPointer(from:Exclude<Forward['from'],'own'>|'pinned'|`pinned_${'nocheh'|'bot'}${''|'_other'}`):{source:string;text:string} {
+  const words=modelSourceWords.honcho,pins={pinned:words.pinned_pointer,pinned_nocheh:words.pinned_nocheh_pointer,
+    pinned_nocheh_other:words.pinned_nocheh_other_pointer,pinned_bot:words.pinned_bot_pointer,pinned_bot_other:words.pinned_bot_other_pointer};
+  return {source:words.note,text:from in pins?pins[from as keyof typeof pins]:fillLine(words.pointer,{origin:modelSourceWords.origins[from as Exclude<Forward['from'],'own'>]})};
 }

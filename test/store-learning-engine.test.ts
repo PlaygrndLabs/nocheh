@@ -80,7 +80,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
       {kind:'meaning',subject:'check',text:'A check means reviewed in this conversation.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[reaction.id,parent.id],conflicts:[]},
       {kind:'state',subject:'packet',text:'The packet may have been reviewed.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[reaction.id,parent.id],conflicts:[]},
     ]};
-    const job=await learning.request(reaction,workspace,space);
+    const job=(await learning.request(reaction,workspace,space))!;
     await assert.rejects(learning.run(job,async()=>{throw Error('injected-detector-outage');},authority),/injected-detector-outage/);
     assert.equal(calls,1);
     await stores.control.query("INSERT INTO dispatches(event_id,source_reference,binding,state) VALUES($1,$2,$3,'running')",[parent.id,parent,binding]);
@@ -101,7 +101,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.deepEqual(await learning.run(job,detect,authority),ids);
     assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='organization' AND job_id=$1",['learning:'+job])).rows[0].count,'1',
       'publishing recovery commits completion and one deterministic organization follow-up');
-    assert.equal(await learning.request(reaction,workspace,space),job,'learned output does not recursively create another learning request');
+    assert.equal((await learning.request(reaction,workspace,space))!,job,'learned output does not recursively create another learning request');
     for(const id of ids)assert.equal((await learned.read(access.principal(space),id,await guards.state(),r=>access.canRead(access.principal(space),r,binding))).revision,1);
     // Learning never schedules a dispatch, outbound action, or approval; the row above only simulates an active reply.
     assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE job_id=$1 AND family='memory_review'",['interpret:'+job])).rows[0].count,'1');
@@ -115,7 +115,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
       {kind:'meaning',subject:'check',text:'A check indicates review, and removal withdraws that signal.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[removed.id,parent.id],conflicts:[]},
       {kind:'state',subject:'packet',text:'The review signal was withdrawn; actual completion is unknown.',scope:{kind:'conversation',id:space},uncertainty:'uncertain',evidence_ids:[removed.id,parent.id],conflicts:[]},
     ]};
-    const updateJob=await learning.request(removed,workspace,space);let finished=0;
+    const updateJob=(await learning.request(removed,workspace,space))!;let finished=0;
     await stores.control.query("UPDATE dispatches SET state='running',binding=$2 WHERE event_id=$1",[parent.id,binding]);
     await assert.rejects(learning.run(updateJob,detect,authority),{code:'learning_publication_pending'});
     assert.equal(calls,2,'the pending publication retains its completed reasoning result');
@@ -141,7 +141,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const nextWorkspace=digest(key+':next-workspace');
     await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[nextWorkspace,currentBinding.generation,currentBinding.epoch,space]);
     await readable(nextWorkspace,'next');
-    assert.equal(await learning.request(removed,nextWorkspace,space),updateJob,'an unrelated generation refresh reuses identical authorized inputs');
+    assert.equal((await learning.request(removed,nextWorkspace,space))!,updateJob,'an unrelated generation refresh reuses identical authorized inputs');
     assert.equal(calls,2);
     // A convention's generated wording is guidance, not independent new evidence.
     const conventionText='In this conversation a green mark means ready for review.';
@@ -153,7 +153,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
       uncertainty:'explicit' as const,evidence:[convention],quote:{source_id:convention.id,text:conventionText},conflicts:[]};
     const ruleId=digest(key+':rule');
     await learned.publishAutomatic(ruleId,rule,null,key+':rule-first',ruleDependencies,await guards.state(),'fixture',detect);
-    const withConvention=await learning.request(removed,nextWorkspace,space);
+    const withConvention=(await learning.request(removed,nextWorkspace,space))!;
     assert.notEqual(withConvention,updateJob,'new original convention evidence must trigger fresh learning');
     response={interpretations:[]};await learning.run(withConvention,detect,authority);assert.equal(calls,3);
     assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='organization' AND job_id=$1",['learning:'+withConvention])).rows[0].count,'1',
@@ -177,16 +177,16 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const afterRewrite=await contexts.prepare(removed,await guards.state());
     assert.notDeepEqual(beforeRewrite.rules,afterRewrite.rules,'the model still receives the complete current rule wording');
     assert.deepEqual(beforeRewrite.rule_inputs,afterRewrite.rule_inputs);
-    assert.equal(await learning.request(removed,rephrasedWorkspace,space),withConvention,'generated paraphrasing cannot restart learning');
+    assert.equal((await learning.request(removed,rephrasedWorkspace,space))!,withConvention,'generated paraphrasing cannot restart learning');
     await learned.publishAutomatic(digest(key+':second-rule'),{...rule,subject:'readiness'},null,key+':rule-renamed',ruleDependencies,
       await guards.state(),'fixture',detect);
-    assert.equal(await learning.request(removed,rephrasedWorkspace,space),withConvention,'model-chosen rule identities cannot multiply the same evidence');
+    assert.equal((await learning.request(removed,rephrasedWorkspace,space))!,withConvention,'model-chosen rule identities cannot multiply the same evidence');
     const ruleArtifact=(await stores.derived.query('SELECT derived_id FROM learned_versions WHERE entry_id=$1 AND revision=2',[ruleId])).rows[0].derived_id;
     const guardedRule=await guards.read('derived_artifacts:'+ruleArtifact,await guards.state());
     await guards.edit('derived_artifacts:'+ruleArtifact,guardedRule.revision,
       {...guardedRule.value as object,text:'The owner-edited guarded convention requires review only.'},key+':rule-guard-edit');
     const guardedWorkspace=await workspaceNow('guarded-rule');
-    const guardedJob=await learning.request(removed,guardedWorkspace,space);
+    const guardedJob=(await learning.request(removed,guardedWorkspace,space))!;
     assert.notEqual(guardedJob,withConvention,'an owner edit to a guarded automatic convention must trigger fresh learning');
     await learning.run(guardedJob,detect,authority);assert.equal(calls,4);
     const beforeOwnerCorrection=await guards.state();
@@ -196,12 +196,12 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     await assert.rejects(guards.assertCurrent(beforeOwnerCorrection),{code:'guard_context_changed'},'owner correction remains immediate during an admitted reply');
     await stores.control.query("UPDATE dispatches SET state='done' WHERE event_id=$1",[parent.id]);
     const ownerWorkspace=await workspaceNow('owner-rule');
-    const ownerJob=await learning.request(removed,ownerWorkspace,space);
+    const ownerJob=(await learning.request(removed,ownerWorkspace,space))!;
     assert.notEqual(ownerJob,withConvention,'an owner correction must invalidate the prior interpretation input');
     await learning.run(ownerJob,detect,authority);assert.equal(calls,5);
     await learned.correct({admin:true,scope:null},ruleId,{expected_revision:3,operation_id:key+':retire-owner-rule',text:'',retired:true},detect);
     const retiredWorkspace=await workspaceNow('retired-rule');
-    assert.notEqual(await learning.request(removed,retiredWorkspace,space),ownerJob,'retiring owner guidance must not reuse that guidance');
+    assert.notEqual((await learning.request(removed,retiredWorkspace,space))!,ownerJob,'retiring owner guidance must not reuse that guidance');
     // Honcho answers absent fields as null; one invalid item is dropped and recorded.
     const thumbs=(await archive.capture(event('thumbs',{update_id:50,message_reaction:{chat:{id:group},message_id:1,date:1700000020,user:{id:7},
       old_reaction:[],new_reaction:[{type:'emoji',emoji:'👍'}]}}))).source.reference;
@@ -210,7 +210,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
       uncertainty:'uncertain',evidence_ids,conflicts:null,quote:null});
     response={interpretations:[item('acknowledged packet',[thumbs.id,parent.id]),
       item('invented source',[thumbs.id,digest('not-in-context')])],entity_suggestions:null,entity_claims:[],organization:null};
-    const partialJob=await learning.request(thumbs,retiredWorkspace,space);
+    const partialJob=(await learning.request(thumbs,retiredWorkspace,space))!;
     assert.equal((await learning.run(partialJob,detect,authority)).length,1);assert.equal(calls,6);
     assert.deepEqual((await stores.control.query('SELECT state,rejected FROM interpretation_jobs WHERE id=$1',[partialJob])).rows[0],
       {state:'done',rejected:[{section:'interpretations',code:'unavailable_interpretation_evidence'}]});
@@ -219,7 +219,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
       old_reaction:[],new_reaction:[{type:'emoji',emoji:'👋'}]}}))).source.reference;
     await guards.prepare(wave,'fixture',detect);
     response='I could not find anything to learn here.';
-    const unusableJob=await learning.request(wave,retiredWorkspace,space);
+    const unusableJob=(await learning.request(wave,retiredWorkspace,space))!;
     for(let attempt=0;attempt<2;attempt++)await assert.rejects(learning.run(unusableJob,detect,authority),{code:'invalid_interpretation_result'});
     assert.equal(calls,7,'the saved unusable result is reused, not regenerated');
     assert.ok(terminalLearningCodes.has('invalid_interpretation_result'));
@@ -229,7 +229,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const nod=(await archive.capture(event('nod',{update_id:52,message_reaction:{chat:{id:group},message_id:1,date:1700000022,user:{id:7},
       old_reaction:[],new_reaction:[{type:'emoji',emoji:'👌'}]}}))).source.reference;
     await guards.prepare(nod,'fixture',detect);
-    const stranded=await learning.request(nod,retiredWorkspace,space);
+    const stranded=(await learning.request(nod,retiredWorkspace,space))!;
     assert.deepEqual(await learning.renew(nod),[],'current learning is left to run');
     const bump=async()=>{const before=(await guards.state()).epoch;await guards.setMode('off');await guards.setMode('on');assert.ok((await guards.state()).epoch>before);};
     await bump();
@@ -251,15 +251,15 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const wink=(await archive.capture(event('wink',{update_id:53,message_reaction:{chat:{id:group},message_id:1,date:1700000023,user:{id:7},
       old_reaction:[],new_reaction:[{type:'emoji',emoji:'😉'}]}}))).source.reference;
     await guards.prepare(wink,'fixture',detect);
-    const waiting=await learning.request(wink,retiredWorkspace,space);await bump();
+    const waiting=(await learning.request(wink,retiredWorkspace,space))!;await bump();
     response={interpretations:[]};await learning.run(waiting,detect,authority);assert.equal(calls,8);
     const rebound=(await stores.control.query('SELECT state,binding FROM interpretation_jobs WHERE id=$1',[waiting])).rows[0];
     assert.equal(rebound.state,'done');assert.deepEqual(rebound.binding,await guards.state());
     assert.deepEqual(await learning.renew(wink),[]);
     // Inputs that changed meanwhile are learned as they are now, and only once.
-    const changed=await learning.request(nod,retiredWorkspace,space);
+    const changed=(await learning.request(nod,retiredWorkspace,space))!;
     await stores.control.query('UPDATE interpretation_jobs SET context_hash=$2 WHERE id=$1',[changed,digest('changed inputs')]);await bump();
-    const twin=await learning.request(nod,retiredWorkspace,space);assert.notEqual(twin,changed);
+    const twin=(await learning.request(nod,retiredWorkspace,space))!;assert.notEqual(twin,changed);
     const learnedNow=await learning.run(changed,detect,authority);assert.equal(calls,9);
     const relearned=(await stores.control.query('SELECT state,context_hash FROM interpretation_jobs WHERE id=$1',[changed])).rows[0];
     assert.equal(relearned.state,'done');assert.notEqual(relearned.context_hash,digest('changed inputs'));

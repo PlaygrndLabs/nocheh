@@ -468,6 +468,26 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
       assert.ok(!reviewed.text.includes(`"${mark}"`)&&reviewed.text.includes(`${mark}OWN fine by me`),mark);
     }
     assert.ok((await input(((await services.reviews.queue(ofReply)).ids)[0]!)).evidence.some((item:{id:string})=>item.id===nocheh.id),'Nocheh\'s reply is evidence of its own');
+    // A bot's message the archive does not hold as Nocheh's (its delivery not archived yet, or another bot's) is cut from a
+    // pin or quote for every reader, the notes review, interpretations and long-term memory, as a card is: a bot is never
+    // someone allowed there. So is a quote of a bot's message in another chat, a quote inside a message a pin carries (of
+    // Nocheh's card, found through the archive), and a pinned message sent through an inline bot. The sender's own words stay.
+    const fresh=(id:number,text:string)=>({...message(id,bot,text),from:{id:bot,is_bot:true,first_name:'Nocheh'}});
+    const read=async(source:Awaited<ReturnType<typeof say>>)=>JSON.stringify((await services.contexts.prepare(source,await services.guards.state())).observations);
+    assert.ok(!(await read(botPin)).includes('BOTPIN'),'another bot\'s pinned message is learned by no one');
+    const racePin=await pinOf(51,fresh(50,'RACEPIN approve the venue?')),raceQuote=await quoting(52,123,fresh(50,'RACEPIN approve the venue?'),'RACEQUOTE');
+    const otherChat=await say(53,123,'EXTQUOTEOWN fine by me',{quote:{text:'EXTQUOTE',position:0},
+      external_reply:{origin:{type:'user',sender_user:{id:bot,is_bot:true,first_name:'Nocheh'},date:1},chat:{id:-77,type:'group'},message_id:9}});
+    // Telegram's pinned message carries no reply of its own, only its quote.
+    const pinQuote=await pinOf(54,message(45,123,'CARDQUOTEOWN fine by me',{quote:{text:'CARDQUOTE',position:0}}));
+    const viaBot=await pinOf(56,message(55,123,'VIABOTPIN a sticker pack',{via_bot:{id:bot+2,is_bot:true,first_name:'Stickers',username:'stickerbot'}}));
+    for(const [source,cut,own] of [[racePin,'RACEPIN',null],[raceQuote,'"RACEQUOTE"','RACEQUOTEOWN fine by me'],[otherChat,'"EXTQUOTE"','EXTQUOTEOWN fine by me'],
+      [pinQuote,'"CARDQUOTE"','CARDQUOTEOWN fine by me'],[viaBot,'VIABOTPIN',null]] as const) {
+      const reviewed=await services.reviews.queue(source);assert.equal(reviewed.ids.length,1,cut);
+      for(const text of [await read(source),(await input(reviewed.ids[0]!)).text as string]) {
+        assert.ok(!text.includes(cut),cut);if(own)assert.ok(text.includes(own),own);
+      }
+    }
 
     // A rule learned from her message stays out of the owner's notes review, but not out of group memory.
     const ruleText='In this group SARARULE means the meeting is cancelled';

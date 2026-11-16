@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {accountIdFor} from '../src/chats.js';
-import {bucketOf,eventClass,eventClasses,isEventClass,ownerTyped,sourceFacts,type FactsInput,type SourceFacts} from '../src/source-facts.js';
+import {botPinned,botQuoted,bucketOf,eventClass,eventClasses,isEventClass,ownerTyped,sourceFacts,type FactsInput,type SourceFacts} from '../src/source-facts.js';
 
 const OWNER='5001',SARA='5002';
 const group={id:-20,type:'supergroup'};
@@ -109,6 +109,26 @@ test('a pin carries the message it pinned: someone else\'s message or forward is
   const gone=pin(owner,{date:0},chat);
   assert.deepEqual([gone.pinned,classOf(gone)],[null,'owner_message']);
   assert.equal(live(update({from:owner,text:'hi'})).pinned,null);
+});
+
+test('a pin or quote of a bot\'s message is told by Telegram\'s own fields, a reply in another chat and an inline bot included',()=>{
+  const nocheh={id:9001,is_bot:true,first_name:'Nocheh'},card={message_id:3,date:1,chat:group,from:nocheh,text:'CARDMARK approve?'};
+  const quote={text:'CARDMARK',position:0};
+  // A pin of a bot's message, Nocheh's included; never a person's, an anonymous admin's (sent through a bot account in the
+  // chat's name), or one Telegram no longer shows.
+  assert.equal(botPinned({from:owner,pinned_message:card}),true);
+  assert.equal(botPinned({from:owner,pinned_message:{...card,from:sara,via_bot:{id:9002,is_bot:true,username:'gifbot'}}}),true,'sent through an inline bot');
+  assert.equal(botPinned({from:owner,pinned_message:{...card,from:sara}}),false);
+  assert.equal(botPinned({from:owner,pinned_message:{...card,from:{id:1087968824,is_bot:true,first_name:'Group'},sender_chat:group}}),false,'an anonymous admin');
+  assert.equal(botPinned({from:owner,pinned_message:{message_id:3,date:0,chat:group}}),false,'a message Telegram no longer shows');
+  assert.equal(botPinned({from:owner,text:'no pin'}),false);
+  // A quote of a bot's message, in this chat or another; a reply that quotes nothing quotes no bot.
+  assert.equal(botQuoted({from:owner,text:'ok',quote,reply_to_message:card}),true);
+  assert.equal(botQuoted({from:owner,text:'ok',quote,external_reply:{origin:{type:'user',sender_user:nocheh,date:1},chat:group,message_id:3}}),true,'in another chat');
+  assert.equal(botQuoted({from:owner,text:'ok',quote,external_reply:{origin:{type:'user',sender_user:sara,date:1}}}),false);
+  assert.equal(botQuoted({from:owner,text:'ok',quote,reply_to_message:{...card,from:sara}}),false);
+  assert.equal(botQuoted({from:owner,text:'ok',reply_to_message:card}),false,'no quote');
+  assert.equal(botQuoted(null),false);
 });
 
 test('files and recordings: text read from a file or an audio file is not the sender\'s words; their own voice is',()=>{

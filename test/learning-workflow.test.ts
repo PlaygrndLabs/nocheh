@@ -157,3 +157,29 @@ test('Nocheh\'s own cards, notices and reminders close every learning step unlea
     assert.deepEqual([left.state,left.waiting_reason,calls],['skipped',reason,['withdraw:'+card]]);safeMetadata(left);
   }
 });
+
+test('a pin of Nocheh\'s card alone asks for no learning, and its long-term memory step says why',async()=>{
+  const client={release:()=>{},query:async(sql:string)=>{
+    if(sql.includes('pg_try_advisory_lock_shared'))return {rows:[{locked:true}]};
+    if(sql.includes('FROM workflow_owners'))return {rows:[{owner:'inngest',admission:true,epoch:1}]};
+    if(sql.includes('FROM memory_engine_connection'))return {rows:[{attached:true}]};
+    return {rows:[]};
+  }};
+  const pin=digest('synthetic-card-pin'),binding={generation:'1',epoch:1,mode:'on'};let asked:string|null=null;const requests:string[]=[];
+  const services:any={stores:{control:{connect:async()=>client,query:client.query}},guards:{state:async()=>binding,assertCurrent:async()=>{}},
+    archive:{captured:async(id:string)=>({reference:{id},origin:'live'})},
+    access:{space:async()=>'5001',canLearn:async()=>true,notLearned:async()=>null,policy:()=>({owner_id:'5001'})},
+    preparation:{status:async()=>({state:'completed'})},
+    learning:{request:async(source:{id:string})=>{requests.push(source.id);return asked;}},
+    memory:{queueSource:async()=>[{audience:'owner',workspace:'w',receipts:['r']}],settled:async()=>true}};
+  const operations=storageWorkflowOperations(services,async()=>{throw Error('no runtime calls');});
+  const authority={owner:'inngest' as const,epoch:1};
+  // Learning finds nothing left once the card is cut out (null): Honcho's note that it was pinned is still written.
+  const empty=await operations.honcho!('source:'+pin,authority);
+  assert.deepEqual([empty.state,empty.waiting_reason],['completed','nocheh_message']);safeMetadata(empty);
+  // Anything else learning asks for completes the step as before.
+  asked=digest('synthetic-learning-job');
+  const learned=await operations.honcho!('source:'+pin,authority);
+  assert.deepEqual([learned.state,learned.waiting_reason],['completed',null]);
+  assert.deepEqual(requests,[pin,pin]);
+});
