@@ -437,6 +437,24 @@ export class ChatRepository {
   }
 
   /**
+   * The stage's end of a leave (ChatAdds, ADR-0253): a group still pending from `event`'s add becomes left, or
+   * could_not_leave when Telegram refused. A system change, so an older update recorded late never undoes it; a group the
+   * owner turned on or off meanwhile, or added again, keeps its state. Returns whether it changed.
+   */
+  async leaveSettled(chat:string,event:string,state:'left'|'could_not_leave'):Promise<boolean> {
+    const db=await this.stores.control.connect();let changed=false;
+    try {
+      await db.query('BEGIN');
+      changed=!!(await db.query(`UPDATE chats SET state=$3,${systemChange} WHERE id=$1 AND state='pending' AND add_event=$2`,[chat,event,state])).rowCount;
+      if(changed)await bumpChatRevision(db);
+      await db.query('COMMIT');
+    } catch(error){await db.query('ROLLBACK');throw error;}
+    finally{db.release();}
+    if(changed)await reloadChats();
+    return changed;
+  }
+
+  /**
    * Memberships from the archive, for updates taken in before chats recorded them: one batch of live Telegram
    * updates at a time, in capture order, resumable from chat_seed_state. An update capture already recorded is skipped,
    * so the batch after an app start, which holds the updates taken in since the last one, writes nothing they wrote.
