@@ -367,6 +367,55 @@ test('the owner\'s add gets its own project and a card, in one owner command; th
   }finally{await h.cleanup();await stores.close();}
 });
 
+test('a card tried again after its send did not go goes only while the group is still on from that add and in the card\'s project',fixture,async()=>{
+  const stores=await open(),h=await harness(stores,'card-retry');
+  try {
+    const kept=h.group(1),off=h.group(2),removed=h.group(3),moved=h.group(4),tg=(value:string)=>chatIdFor('telegram',value);
+    const auto=(event:string)=>digest('project:chat-add-project:'+event);
+    // The bot cannot reach Telegram: each card makes its project, and its send is tried again later.
+    h.answers.notice=()=>({state:'not_started',error_code:'telegram_not_connected'});
+    const events:string[]=[];
+    for(const [index,value] of [kept,off,removed,moved].entries())events.push(await h.status(value,index+1,Number(OWNER),'left','member'));
+    const [keptAdd,offAdd,removedAdd,movedAdd]=events as [string,string,string,string];
+    await h.due();await h.adds.settle();
+    const cards=(event:string)=>h.calls.filter(item=>item.operation==='telegram.notice'&&item.input.id===digest('chat-add-card:'+event)).length;
+    for(const event of events) {
+      const saved=await h.row(event);
+      assert.deepEqual([saved.state,saved.outcome,saved.notice,saved.attempts,saved.project_id],['waiting','carded','none',1,auto(event)]);
+      assert.equal(cards(event),1);
+    }
+    // Meanwhile the owner turns one off on the dashboard, a member removes Nocheh from another, and the owner moves a third
+    // to another project.
+    await h.repository.setState(owner,{chat_id:tg(off),state:'off',operation_id:'retry-off:'+h.update(0)});
+    const removal=await h.status(removed,5,ALICE,'member','kicked');
+    const other=digest('chat-adds-retry:'+h.update(6));
+    await stores.control.query(`INSERT INTO projects(id,name,description,state,revision) VALUES($1,'Shop','','active',1)`,[other]);
+    await stores.control.query(`UPDATE project_assignments SET project_id=$2,revision=revision+1 WHERE space_id=$1`,[tg(moved),other]);
+
+    // Telegram is back: only the group still on in its card's project gets its card. The others end with none, still
+    // 'carded', and the removal is told once.
+    h.answers.notice=()=>({state:'done'});
+    const epoch=await h.epoch();
+    await h.due();await h.adds.settle();
+    assert.equal(cards(keptAdd),2);
+    assert.deepEqual([(await h.row(keptAdd)).state,(await h.row(keptAdd)).outcome,(await h.row(keptAdd)).notice],['done','carded','sent']);
+    for(const event of [offAdd,removedAdd,movedAdd]) {
+      assert.equal(cards(event),1,event);
+      const saved=await h.row(event);assert.deepEqual([saved.state,saved.outcome,saved.notice],['done','carded','none'],event);
+    }
+    assert.equal(h.calls.filter(item=>item.input?.id===digest('chat-add-tell:'+removal)).length,1);
+    assert.deepEqual([(await h.row(removal)).outcome,(await h.row(removal)).notice],['told','sent']);
+    // The moved group's card project, left with no group, is archived in one owner command; the others keep theirs.
+    assert.equal(await h.epoch(),epoch+1);
+    const state=async(event:string)=>(await stores.control.query('SELECT state FROM projects WHERE id=$1',[auto(event)])).rows[0].state;
+    assert.deepEqual([await state(keptAdd),await state(offAdd),await state(removedAdd),await state(movedAdd)],['active','active','active','archived']);
+    const count=h.calls.length;
+    await h.due();await h.adds.settle();assert.equal(h.calls.length,count,'nothing is sent again');
+    // A card an earlier try did deliver, though its answer was lost, still answers a press on the group as it is now.
+    assert.equal(await h.press(chatAddData('o',offAdd)),`Nocheh is off in ${shown(tg(off),h.title(off))}. It stays in the group, silent.`);
+  }finally{await h.cleanup();await stores.close();}
+});
+
 test('Nocheh removed from a group it was on in is told once; from a group that was off, nothing',fixture,async()=>{
   const stores=await open(),h=await harness(stores,'tell');
   try {

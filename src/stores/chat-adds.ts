@@ -54,6 +54,14 @@ export function noteLine(row:Pick<ChatAddRow,'role'|'member'>,outcome:string|nul
 const points=(text:string,size:number)=>Array.from(text).slice(0,size).join('');
 /** At most `size` UTF-16 units, as Telegram counts a message, never cut inside a character. */
 const units=(text:string,size:number)=>{const part=text.slice(0,size);return /[\ud800-\udbff]$/.test(part)?part.slice(0,-1):part;};
+/** The card's own project, once no group is in it, is archived, so it does not linger in the owner's list. Returns
+ *  whether it was. */
+async function archiveEmpty(db:pg.PoolClient,project:string):Promise<boolean> {
+  const made=(await db.query('SELECT name,description,state,revision FROM projects WHERE id=$1 FOR UPDATE',[project])).rows[0];
+  if(made?.state!=='active'||(await db.query(`SELECT 1 FROM project_assignments WHERE project_id=$1 AND mode='assigned'`,[project])).rowCount)return false;
+  await writeProject(db,{id:project,name:made.name,description:made.description,state:'archived',expected_revision:Number(made.revision)});
+  return true;
+}
 /** The card's buttons: one row moving the group to each offered project still there (by its index on the row), then No
  *  project and Turn off. Labels are cut to Telegram's 40 characters. */
 export function cardRows(lines:Record<ChatAddText,string>,event:string,offered:readonly {index:number;name:string|null}[]):Button[][] {
@@ -189,6 +197,20 @@ export class ChatAdds {
       if(made.outcome!=='carded'||!made.project_id){await this.finish(row,{outcome:made.outcome});return;}
       const offered=(await this.control.query(`SELECT id FROM projects WHERE state='active' AND id<>$1 ORDER BY updated_at DESC,id LIMIT ${OFFERED}`,[made.project_id])).rows.map(item=>item.id as string);
       await this.keep(row,{outcome:'carded',project_id:made.project_id,offered});
+    } else {
+      // A card tried again after its send did not go says only what is still true: the group is on from this very add and
+      // in the card's project. Turned off, removed, added again or moved meanwhile, the row ends with no card. It stays
+      // 'carded', so a card a lost answer did deliver still answers presses on the group as it is now. The card's project,
+      // left with no group, is archived as a press archives it.
+      const now=(await this.control.query(`SELECT c.state,c.add_event,a.mode,a.project_id FROM chats c LEFT JOIN project_assignments a ON a.space_id=c.id
+        WHERE c.id=$1`,[row.chat_id])).rows[0];
+      if(!now||now.state!=='active'||now.add_event!==row.event_id||now.mode!=='assigned'||now.project_id!==row.project_id) {
+        if(row.project_id&&(await this.control.query(`SELECT 1 FROM projects p WHERE p.id=$1 AND p.state='active'
+            AND NOT EXISTS(SELECT 1 FROM project_assignments a WHERE a.project_id=p.id AND a.mode='assigned')`,[row.project_id])).rowCount)
+          await this.commands.run(asOwner,'chat-add-archive:'+row.event_id,{kind:'chat_add_archive',event_id:row.event_id,project_id:row.project_id},
+            async db=>({project_id:row.project_id,archived:await archiveEmpty(db,row.project_id!)}));
+        await this.finish(row,{});return;
+      }
     }
     const target=this.owner();if(!target){await this.finish(row,{});return;}
     const {lines,words}=await this.lines(),{text}=await this.cardText(row,lines,words);
@@ -272,10 +294,7 @@ export class ChatAdds {
         await this.commands.run(asOwner,operation,{kind:'chat_card',event_id:row.event_id,choice,chat_id:row.chat_id,project_id:project},async db=>{
           const own=(await db.query('SELECT revision FROM project_assignments WHERE space_id=$1',[row.chat_id])).rows[0];
           await writeAssignment(db,{space_id:row.chat_id,project_id:project,mode:project?'assigned':'none',expected_revision:Number(own?.revision??0)});
-          // The card's own project, once no group is in it, is archived, so it does not linger in the owner's list.
-          const made=(await db.query('SELECT name,description,state,revision FROM projects WHERE id=$1 FOR UPDATE',[row.project_id])).rows[0];
-          if(made?.state==='active'&&!(await db.query(`SELECT 1 FROM project_assignments WHERE project_id=$1 AND mode='assigned'`,[row.project_id])).rowCount)
-            await writeProject(db,{id:row.project_id!,name:made.name,description:made.description,state:'archived',expected_revision:Number(made.revision)});
+          await archiveEmpty(db,row.project_id!);
           return {chat_id:row.chat_id,project_id:project};
         });
         const name=project?labelName((await this.control.query('SELECT name FROM projects WHERE id=$1',[project])).rows[0]?.name):null;
