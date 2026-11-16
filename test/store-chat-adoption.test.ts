@@ -409,10 +409,11 @@ test('when the two stay apart, the new supergroup takes the old group\'s Off, le
   const stores=await open(),ALICE=7841,policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'apart'),stage=await stageFor(stores,h.repository,()=>policy);
   try {
-    for(const [n,first,start] of [[1,'old','off'],[2,'new','off'],[3,'old','pending'],[4,'new','pending'],[5,'old','could_not_leave']] as const) {
+    for(const [n,first,start,adder] of [[1,'old','off',ALICE],[2,'new','off',ALICE],[3,'old','pending',ALICE],[4,'new','pending',ALICE],
+      [5,'old','could_not_leave',ANONYMOUS]] as const) {
       const basic='-4'+String(h.base+n).slice(-9),next=h.group(n),old=chatIdFor('telegram',basic),fresh=chatIdFor('telegram',next);h.named.add(basic);
-      const label=JSON.stringify({n,first,start});
-      await begin(stores,h,stage,n,basic,start,ALICE);
+      const label=JSON.stringify({n,first,start,adder});
+      await begin(stores,h,stage,n,basic,start,adder);
       const before=await row(stores,old);
       // Telegram tells Nocheh it is in the new supergroup, from the owner who upgraded it, and the upgrade messages come
       // late: the card made the new chat's project meanwhile, and its notice did not go, so the row waits to send it.
@@ -438,13 +439,16 @@ test('when the two stay apart, the new supergroup takes the old group\'s Off, le
       assert.deepEqual(await card(),{...made,state:'done'},label);
       const now=await row(stores,fresh),then=await row(stores,old);
       assert.deepEqual([now.state_seq,chats().served(fresh)],[null,false],label+': a system change every process sees');
+      // The new chat takes the old one's state and who added Nocheh, so the dashboard says the same of both.
+      assert.deepEqual([now.state,now.add_event,now.added_by_role,now.added_by_account_id,now.added_at],
+        [start,before.add_event,before.added_by_role,before.added_by_account_id,before.added_at],label);
       if(start==='pending') {
-        // The stranger's add and its leave move to the new chat, due soon; the old chat's id is gone, so it is left.
-        assert.deepEqual([now.state,now.add_event,now.added_by_role,now.added_by_account_id,then.state],
-          ['pending',before.add_event,'other',accountIdFor('telegram',String(ALICE)),'left'],label);
+        // The stranger's leave moves to the new chat, due soon; the old chat's id is gone, so it is left.
+        assert.deepEqual([now.added_by_role,now.added_by_account_id,then.state],['other',accountIdFor('telegram',String(ALICE)),'left'],label);
         assert.deepEqual((await stores.control.query(`SELECT chat_id,state,due_at<=now()+interval '30 seconds' AS soon FROM chat_state_events WHERE event_id=$1`,
           [before.add_event])).rows[0],{chat_id:fresh,state:'waiting',soon:true},label);
-      } else assert.deepEqual([now.state,then.state,then.add_event],[start,start,before.add_event],label);
+      } else assert.deepEqual([then.state,then.add_event],[start,before.add_event],label);
+      if(start==='could_not_leave')assert.equal(now.added_by_role,'anonymous',label);
 
       // The stage sends no card; a pending group is left under its new id.
       const calls=await stage.settle([fresh,old]);
