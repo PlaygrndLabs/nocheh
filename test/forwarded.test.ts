@@ -77,5 +77,8 @@ test('a Telegram Desktop export names only who a forward showed, so it is someon
   assert.deepEqual(forwardFacts({id:1,type:'message',from:'Owner',from_id:'user5',forwarded_from:'Sara',text:'hi'}),{from:'hidden',rawName:'Sara'});
   assert.deepEqual(forwardFacts({id:1,type:'message',from:'Owner',from_id:'user5',via_bot:'@made_up_bot',text:'hi'}),{from:'bot',rawName:'@made_up_bot'});
   assert.equal(forwardFacts({id:1,type:'message',from:'Owner',from_id:'user5',text:'hi'}),null,'an exported message of one\'s own');
+  // Any of its forward fields makes it a forward, whatever it holds: a deleted account's name is written as null.
+  for(const fields of [{forwarded_from:null},{forwarded_from:null,forwarded_from_id:'user6'},{forwarded_from_id:'channel7'},{saved_from:'News'},{forwarded_from:7}])
+    assert.deepEqual(forwardFacts({id:1,type:'message',from:'Owner',from_id:'user5',...fields,text:'hi'}),{from:'hidden',rawName:null},JSON.stringify(fields));
   assert.equal(forwardOrigin({id:1,type:'message',from:'Owner',forwarded_from:'Sara'}),null,'the frame line reads live messages only, as before');
 });

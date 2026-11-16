@@ -89,14 +89,17 @@ function forwarded(message:unknown):Pick<SourceFacts,'forward'|'forward_name'> {
 /**
  * Whose message a reply quotes: the sender's own only when the message it answers is theirs, by their Telegram id, and
  * is not a forward of someone else's (forwardFacts, an inline bot's message included), as a pin's message is read
- * (pinnedOf): the sender's quote of their own forward quotes whoever wrote it. A message in another chat
- * (external_reply) names only who first sent it (its origin), so one first sent by the sender is theirs.
+ * (pinnedOf): the sender's quote of their own forward quotes whoever wrote it. A quote of a message in another chat or
+ * topic (external_reply) is judged by that message alone, and is never the sender's own: Telegram shows only who first
+ * sent it (its origin), not whether it was a forward or sent through an inline bot, and in a forum topic it also sets
+ * reply_to_message, to the topic's first message, which the quote is not from.
  */
 function quoteOf(message:Record<string,any>,sender:string|null):SourceFacts['quote'] {
   if(!record(message.quote))return null;
-  const target=record(message.reply_to_message),external=record(record(message.external_reply)?.origin);
+  if(record(message.external_reply))return 'other';
+  const target=record(message.reply_to_message);
   if(target&&(forwardFacts(target)?.from??'own')!=='own')return 'other';
-  const author=target?(record(target.sender_chat)?null:record(target.from)?.id):external?.type==='user'?record(external.sender_user)?.id:null;
+  const author=target&&!record(target.sender_chat)?record(target.from)?.id:null;
   return sender!==null&&(typeof author==='number'||typeof author==='string')&&String(author)===sender?'own':'other';
 }
 

@@ -112,10 +112,13 @@ export class NativeReviewRepository {
     // after the return above, so a source already reviewed in this generation keeps its review.
     const leave=async(reason:NotesSkip):Promise<QueuedReviews>=>{await this.skip(source,binding,reason);return {ids:kept.filter(id=>!waiting.includes(id)),left_out:reason};};
     const decision=await this.decide(source,binding);if(decision!=='review')return await leave(decision);
-    // Related messages are asked the same question, each once; a pin's message by its own author.
-    const asked=new Map<string,Promise<boolean>>(),options:Required<LearningContextOptions>={
-      admit:reference=>{let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id).then(value=>value==='review'));return allowed;},
+    // Related messages are asked the same question, each once; a pin's message by its own author, and a quote's by the
+    // message it answers.
+    const asked=new Map<string,Promise<boolean>>(),admit=(reference:SourceReference)=>{
+      let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id).then(value=>value==='review'));return allowed;};
+    const options:Required<LearningContextOptions>={admit,
       admitPinned:reference=>this.pinnedSender(reference.id).then(value=>value==='not_learned'?value:value==='review'),
+      admitQuoted:reference=>this.quotedSender(reference.id,admit).then(value=>value==='review'),
       collect:{dropped:[],versions:[],refused:[],bare_reaction:false,empty_pin:false,inputs:new Map()}};
     let context;
     try{context=await this.contexts.prepare(source,binding,options);}
@@ -189,14 +192,15 @@ export class NativeReviewRepository {
   /**
    * What code records about a review's batch (ADR-0257), from each message's own fields: its class, whether every
    * message was the owner's own typing, whose rules it reads and whose words they rest on, and how many messages and
-   * rules were left out. A rule is judged by what code recorded it was learned from (its stored dependencies), never by
-   * what the model cited of them: it is the owner's when the owner wrote it, or when it was learned from at least one
-   * message and every one is the owner's own typing. A transcript or a file's text is judged through the message it
-   * belongs to, which is recorded with it; any other input is someone else's. In a batch of the owner's own typing only,
-   * the rules learned from anyone else are left out of that one review, so a note it writes can still read as the
-   * owner's. In a batch of the owner's own typing and Nocheh's own learned messages, the rules resting on another
-   * person's message, a forward or a file are left out of it the same way, so its notes stay Nocheh's. Turns and every
-   * other review still read them.
+   * rules were left out. A rule is the owner's only when the owner wrote it: one learned automatically, even from the
+   * owner's own message alone, may restate a rule or a forward its interpretation read. Whose words a rule rests on is
+   * judged by what code recorded it was learned from (its stored dependencies), never by what the model cited of them:
+   * a transcript or a file's text is judged through the message it belongs to, which is recorded with it; any other
+   * input is someone else's. In a batch of the owner's own typing only, every rule the owner did not write is left out of
+   * that one review, so a note it writes can still read as the owner's. In a batch of the owner's own typing and
+   * Nocheh's own learned messages, the rules resting on another person's message, a forward or a file are left out of it
+   * the same way, so its notes stay Nocheh's; a rule learned from the owner's own typing stays there, since such a
+   * review's notes are never the owner's. Turns and every other review still read them.
    */
   private async batch(source:SourceReference,context:PreparedLearningContext,collect:Required<LearningContextOptions>['collect']) {
     const versions=collect.versions,inputs=(version:InterpretationVersion)=>collect.inputs.get(version.id)??[];
@@ -204,7 +208,7 @@ export class NativeReviewRepository {
     const told=(version:InterpretationVersion)=>inputs(version).every(id=>id.startsWith('events:')||id.startsWith('derived_artifacts:'));
     const classes=await this.sources.classesFor([...context.observations.map(item=>item.source.id),...versions.flatMap(learnedFrom)]);
     const typed=(id:string)=>{const found=classes.get(id);return !!found&&ownerTyped(found.facts);};
-    const ownRule=(version:InterpretationVersion)=>version.author==='owner'||learnedFrom(version).length>0&&told(version)&&learnedFrom(version).every(typed);
+    const ownRule=(version:InterpretationVersion)=>version.author==='owner';
     // Whose words a rule rests on, besides the owner's and Nocheh's learned messages, which name nobody: a message or an
     // input that can't be told is another person's.
     const others=(version:InterpretationVersion)=>{
@@ -274,6 +278,29 @@ export class NativeReviewRepository {
     const own=(await this.sources.carried([id])).get(id)?.pinned;
     if(own)return own==='learned'?'review':'not_learned';
     return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...pinned,chat:message.chat}}});
+  }
+  /**
+   * Whether the message an archived event quotes may go into the owner's notes, by that message's own author (ADR-0257):
+   * the message it answers as the archive holds it, each revision asked as a related message is (`admit`). A quote of a
+   * message in another chat or topic (external_reply) is judged by that message alone, and stays only when the archive
+   * holds it and its sender is allowed where they wrote it. A quote of one in this chat the archive never got (another
+   * bot's message, or one sent before Nocheh was there) is judged by its author as the reply shows it, in this chat, as
+   * pinnedSender judges a pin's. A quote with nothing to judge it by is not let in.
+   */
+  private async quotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>):Promise<'review'|'sender_not_allowed'> {
+    const event=await this.archived(id),update=record(event?.payload);
+    const message=record(update?.message??update?.edited_message??update?.channel_post??update?.edited_channel_post);
+    if(!event||!message)return 'sender_not_allowed';
+    const external=!!record(message.external_reply),relationships=this.contexts.access.relationships;
+    // The archive's reply relation for one in another chat or topic is marked external (observedSource).
+    const targets=(await this.contexts.access.stores.archive.query(`SELECT o.platform,o.namespace,o.kind,o.external_id FROM source_relations r
+      JOIN source_objects o ON o.id=r.target_id WHERE r.event_id=$1 AND r.kind='reply_to' AND coalesce(r.metadata->>'external','false')=$2`,[id,String(external)])).rows;
+    const held=(await Promise.all(targets.map(target=>relationships.observations({platform:target.platform,namespace:target.namespace,kind:target.kind,
+      external_id:target.external_id},'',30)))).flatMap(page=>page.references);
+    if(held.length){for(const reference of held)if(!await admit(reference))return 'sender_not_allowed';return 'review';}
+    const replied=record(message.reply_to_message);
+    if(external||!replied)return 'sender_not_allowed';
+    return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...replied,chat:message.chat}}});
   }
   private async record(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
     await this.control.query('INSERT INTO native_review_skips(event_id,generation,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[source.id,binding.generation,reason]);

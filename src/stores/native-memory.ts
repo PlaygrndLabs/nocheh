@@ -64,12 +64,13 @@ function fileName(payload:any):string|null {
   const name=message?.document?.file_name??message?.audio?.file_name??files.find((file:any)=>['file','image'].includes(file?.kind))?.name;
   return typeof name==='string'?name:null;
 }
-/** A guarded copy without the quote its reply carries, nor one inside a message it pinned. */
+/** A guarded copy without the quote its reply carries, nor the quote or reply inside a message it pinned. */
 function unquoted(value:unknown):unknown {
   const copy=structuredClone(value) as any;
   for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(copy?.payload?.[kind]) {
     delete copy.payload[kind].quote;
-    if(copy.payload[kind].pinned_message&&typeof copy.payload[kind].pinned_message==='object')delete copy.payload[kind].pinned_message.quote;
+    const pinned=copy.payload[kind].pinned_message;
+    if(pinned&&typeof pinned==='object'){delete pinned.quote;delete pinned.reply_to_message;delete pinned.external_reply;}
   }
   return copy;
 }

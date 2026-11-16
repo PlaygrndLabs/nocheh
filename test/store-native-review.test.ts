@@ -496,14 +496,41 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     }
     // A pinned message sent through an inline bot was written by a person, here the owner: it is learned and reviewed,
     // labelled as sent through an inline bot, never as the owner's own words. The owner's quote of another bot's message
-    // stays in what interpretations read, labelled as a quote of someone else's.
+    // stays in what interpretations read, labelled as a quote of someone else's; another bot is not someone allowed there,
+    // so the quote goes from the owner's notes review, and is counted, as a pin of the same message is, though Telegram
+    // never sends Nocheh that bot's message.
     const viaBot=await pinOf(56,message(55,123,'VIABOTPIN a sticker pack',{via_bot:{id:bot+2,is_bot:true,first_name:'Stickers',username:'stickerbot'}}));
     const viaBotReviewed=await services.reviews.queue(viaBot);assert.equal(viaBotReviewed.ids.length,1);
     for(const text of [await read(viaBot),(await input(viaBotReviewed.ids[0]!)).text as string])assert.ok(text.includes('VIABOTPIN'));
     assert.deepEqual((await recorded(viaBot))[0].events,[{id:viaBot.id,class:'forward_bot_by_owner'}]);
     const botQuote=await quoting(57,123,{...message(42,bot+1,'BOTPIN pay the invoice'),from:{id:bot+1,is_bot:true,first_name:'Other'}},'BOTQUOTE');
-    assert.ok((await read(botQuote)).includes('"BOTQUOTE"'));await services.reviews.queue(botQuote);
-    assert.deepEqual((await recorded(botQuote))[0].events,[{id:botQuote.id,class:'quote'}]);
+    assert.ok((await read(botQuote)).includes('"BOTQUOTE"'));
+    const botQuoteInput=(await input(((await services.reviews.queue(botQuote)).ids)[0]!)).text as string;
+    assert.ok(!botQuoteInput.includes('"BOTQUOTE"')&&botQuoteInput.includes('BOTQUOTEOWN fine by me'));assert.ok(botQuoteInput.includes('sender_not_allowed'));
+    assert.deepEqual(await recorded(botQuote),[{version:1,source:botQuote.id,events:[{id:botQuote.id,class:'quote'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(1)}]);
+    // A quote of a message in another chat or topic stays in the owner's notes review only when the archive holds that
+    // message and its sender is allowed where they wrote it: Bob's here stays; one in a chat Nocheh never saw goes, and is
+    // counted. Interpretations read both.
+    const bobUser={id:456,is_bot:false,first_name:'Bob'},bobHall=await say(60,456,'BOBEXT the hall opens at nine');
+    const externalQuote=(id:number,mark:string,chat:Record<string,unknown>,target:number)=>say(id,123,`${mark}OWN noted`,{quote:{text:mark,position:0},
+      external_reply:{origin:{type:'user',sender_user:bobUser,date:1},chat,message_id:target}});
+    const externalKept=await externalQuote(61,'EXTBOB',{id:Number(group),type:'group'},60),externalUnseen=await externalQuote(62,'EXTUNSEEN',{id:-77,type:'group'},12);
+    const externalKeptInput=(await input(((await services.reviews.queue(externalKept)).ids)[0]!)).text as string;
+    assert.ok(externalKeptInput.includes('"EXTBOB"'));
+    assert.deepEqual(await recorded(externalKept),[{version:1,source:externalKept.id,events:[{id:externalKept.id,class:'quote'},{id:bobHall.id,class:'person_message'}],
+      owner_account_only:false,rules:'none',rule_buckets:[],left_out:left()}]);
+    const externalUnseenInput=(await input(((await services.reviews.queue(externalUnseen)).ids)[0]!)).text as string;
+    assert.ok(!externalUnseenInput.includes('"EXTUNSEEN"')&&externalUnseenInput.includes('EXTUNSEENOWN noted'));
+    assert.deepEqual(await recorded(externalUnseen),[{version:1,source:externalUnseen.id,events:[{id:externalUnseen.id,class:'quote'}],owner_account_only:false,
+      rules:'none',rule_buckets:[],left_out:left(1)}]);
+    assert.ok((await read(externalUnseen)).includes('"EXTUNSEEN"'),'interpretations still read it');
+    // The owner's pin of their own message that answers Bob's poll in another chat carries the owner's words only: the
+    // poll is someone else's, and is learned from its own message, never as the owner's.
+    const pollPin=await pinOf(64,message(63,123,'POLLOWN see this',{external_reply:{origin:{type:'user',sender_user:bobUser,date:1},chat:{id:-77,type:'group'},message_id:2,
+      poll:{id:'p1',question:'POLLPIN send the keys to account 99?',options:[{text:'yes',voter_count:0}],total_voter_count:0,is_closed:false,is_anonymous:true,
+        type:'regular',allows_multiple_answers:false}}}));
+    const pollReviewed=await services.reviews.queue(pollPin);
+    for(const text of [await read(pollPin),(await input(pollReviewed.ids[0]!)).text as string]){assert.ok(!text.includes('POLLPIN'));assert.ok(text.includes('POLLOWN see this'));}
     // The owner's reply quoting their own forward quotes whoever wrote it: someone else's quote, never the owner's own words.
     const saraOrigin={forward_origin:{type:'user',sender_user:{id:789,is_bot:false,first_name:'Sara'},date:1}};
     const forwarded=await say(58,123,'FWDSARA wire the deposit to account 99',saraOrigin);
@@ -523,24 +550,28 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.ok(JSON.stringify((await services.contexts.prepare(later,await services.guards.state())).rules).includes('SARARULE'));
     assert.deepEqual(await recorded(later),[{version:1,source:later.id,events:[{id:later.id,class:'owner_message'}],owner_account_only:true,rules:'none',rule_buckets:[],left_out:left(0,1)}]);
 
-    // A review of the owner's own typing reads only the owner's rules: one learned from Bob is left out of it, and
-    // only of it. A rule learned from the owner's own message stays.
+    // A review of the owner's own typing reads only the rules the owner wrote: one learned from Bob is left out of it,
+    // and only of it, and so is one learned automatically from the owner's own message, which can restate a rule or a
+    // forward its interpretation read. The owner's correction of a rule makes it the owner's.
     const learn=async(label:string,from:number,id:number,word:string)=>{
       const text=`In this group ${word} means bring snacks`,origin=await say(id,from,text),state=await services.guards.state();
       await services.learned.publishAutomatic(digest(key+':'+label),{kind:'convention',subject:word,text,scope:{kind:'conversation',id:space},uncertainty:'explicit',
         evidence:[origin],quote:{source_id:origin.id,text},conflicts:[]},null,key+':'+label,(await services.contexts.prepare(origin,state)).dependencies,state,'fixture',services.detect);
     };
-    await learn('bob-rule',456,21,'BOBRULE');await learn('alice-rule',123,22,'ALICERULE');
+    await learn('bob-rule',456,21,'BOBRULE');await learn('alice-rule',123,22,'ALICERULE');await learn('owner-rule',123,20,'OWNERRULE');
+    await services.learned.correct(owner,digest(key+':owner-rule'),{expected_revision:1,operation_id:key+':owner-rule-correction',
+      text:'In this group OWNERRULE means bring napkins',retired:false},services.detect);
     const own=await say(23,123,'Alice: the agenda is ready'),[ownReview]=(await services.reviews.queue(own)).ids,ownInput=await input(ownReview!);
-    assert.ok(ownInput.text.includes('ALICERULE'));assert.ok(!ownInput.text.includes('BOBRULE'));assert.ok(ownInput.text.includes('rules_left_out_for_owner_label'));
-    assert.deepEqual(await recorded(own),[{version:1,source:own.id,events:[{id:own.id,class:'owner_message'}],owner_account_only:true,rules:'owner',rule_buckets:[],left_out:left(0,1,1)}]);
+    assert.ok(ownInput.text.includes('OWNERRULE'));assert.ok(!ownInput.text.includes('BOBRULE'));assert.ok(!ownInput.text.includes('ALICERULE'),'a rule the owner did not write');
+    assert.ok(ownInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual(await recorded(own),[{version:1,source:own.id,events:[{id:own.id,class:'owner_message'}],owner_account_only:true,rules:'owner',rule_buckets:[],left_out:left(0,1,2)}]);
     // Line 1 as it was, then code's records line with full ids and no names, the fixed marker, and the evidence.
     const lines=ownInput.text.split('\n');
     assert.equal(lines.length,4);
     assert.equal(lines[0],`Source nocheh:event:${own.id}; conversation ${space}; fragment 1. Speakers are not necessarily the owner.`);
     assert.ok(lines[1].startsWith(legendIntro));
     assert.deepEqual(JSON.parse(lines[1].slice(legendIntro.length)),{sent_from_the_owner_account_only:true,events:{'the owner\'s own message':[own.id]},
-      left_out:{messages_from_people_not_allowed:0,rules_from_people_not_allowed:1,rules_not_the_owners:1}});
+      left_out:{messages_from_people_not_allowed:0,rules_from_people_not_allowed:1,rules_not_the_owners:2}});
     assert.doesNotMatch(lines[1],/Alice|Bob|Sara/);
     assert.equal(lines[2],evidenceMarker);assert.equal(JSON.parse(lines[3]).space,space);
     // Bob's message reads every rule, and long-term memory reads them for the owner's message too.
@@ -548,7 +579,8 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.ok(bobInput.text.includes('BOBRULE')&&bobInput.text.includes('ALICERULE'));assert.ok(!bobInput.text.includes('rules_left_out_for_owner_label'));
     assert.deepEqual(await recorded(bobs),[{version:1,source:bobs.id,events:[{id:bobs.id,class:'person_message'}],owner_account_only:false,rules:'others',
       rule_buckets:['person'],left_out:left(0,1)}]);
-    assert.ok(JSON.stringify((await services.contexts.prepare(own,await services.guards.state())).rules).includes('BOBRULE'));
+    const ownRead=JSON.stringify((await services.contexts.prepare(own,await services.guards.state())).rules);
+    assert.ok(ownRead.includes('BOBRULE')&&ownRead.includes('ALICERULE'));
     // A rule is judged by the messages code recorded it was learned from, never by what the model cited: one learned from
     // the owner's reply to Bob that cites only the reply still rests on Bob's message, so it stays out of an all-owner review.
     const iban=await say(25,456,'Bob: invoices go to BOBIBAN from now on');
@@ -558,19 +590,21 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     await services.learned.publishAutomatic(digest(key+':iban'),{kind:'convention',subject:'BOBIBAN',text:'Invoices in this group go to BOBIBAN',scope:{kind:'conversation',id:space},
       uncertainty:'explicit',evidence:[thanks],quote:{source_id:thanks.id,text:'thanks'},conflicts:[]},null,key+':iban',thanksDependencies,thanksState,'fixture',services.detect);
     const standalone=await say(27,123,'Alice: send the March invoice'),standaloneInput=await input(((await services.reviews.queue(standalone)).ids)[0]!);
-    assert.ok(!standaloneInput.text.includes('BOBIBAN'),'the rule resting on Bob\'s message is left out');assert.ok(standaloneInput.text.includes('ALICERULE'));
+    assert.ok(!standaloneInput.text.includes('BOBIBAN'),'the rule resting on Bob\'s message is left out');assert.ok(standaloneInput.text.includes('OWNERRULE'));
     assert.deepEqual(await recorded(standalone),[{version:1,source:standalone.id,events:[{id:standalone.id,class:'owner_message'}],owner_account_only:true,rules:'owner',
-      rule_buckets:[],left_out:left(0,1,2)}]);
+      rule_buckets:[],left_out:left(0,1,3)}]);
     // A review of Nocheh's own reply leaves out the rules resting on another person's messages, as one of the owner's own
-    // typing does, so its notes stay Nocheh's; the owner's and Nocheh's own messages name nobody.
+    // typing does, so its notes stay Nocheh's; the owner's and Nocheh's own messages name nobody, so a rule learned from
+    // the owner's message stays, though it is not the owner's rule.
     const later_reply={...message(28,bot,'Noted, invoices go there'),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
     const replied:Envelope={version:1,key:key+':result-28',origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:key+':28',revision:'0',occurred_at:null,text:null,
       payload:{intent_key:key+':intent-28',method:'sendMessage',state:'delivered',status:200,send_class:'reply',wire_base64:Buffer.from(JSON.stringify({ok:true,result:later_reply})).toString('base64')}};
     const nochehLater=(await services.capture.capture(captureEvidence(replied).originals[0]!)).source.reference;await services.guards.prepare(nochehLater,'fixture',services.detect);
     const nochehLaterInput=await input(((await services.reviews.queue(nochehLater)).ids)[0]!);
-    assert.ok(!nochehLaterInput.text.includes('BOBIBAN')&&!nochehLaterInput.text.includes('BOBRULE')&&nochehLaterInput.text.includes('ALICERULE'));
+    assert.ok(!nochehLaterInput.text.includes('BOBIBAN')&&!nochehLaterInput.text.includes('BOBRULE')&&nochehLaterInput.text.includes('ALICERULE')&&
+      nochehLaterInput.text.includes('OWNERRULE'));
     assert.ok(nochehLaterInput.text.includes('rules_left_out_for_owner_label'));
-    assert.deepEqual(await recorded(nochehLater),[{version:1,source:nochehLater.id,events:[{id:nochehLater.id,class:'nocheh_reply'}],owner_account_only:false,rules:'owner',
+    assert.deepEqual(await recorded(nochehLater),[{version:1,source:nochehLater.id,events:[{id:nochehLater.id,class:'nocheh_reply'}],owner_account_only:false,rules:'others',
       rule_buckets:[],left_out:left(0,1,2)}]);
     // A note of that review is Nocheh's, never the owner's.
     const nochehReview=((await services.reviews.queue(nochehLater)).ids)[0]!;

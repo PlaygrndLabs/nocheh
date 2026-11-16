@@ -59,11 +59,13 @@ export function forwardOrigin(message:unknown,names?:unknown):Forward|null {
 
 /** Where a message was forwarded from, as forwardOrigin reads it, with the name as Telegram showed it, for a label that
  *  writes it out itself (labelName). A Telegram Desktop export says only the name a forward showed (forwarded_from), so
- *  it is a forward from someone Nocheh cannot identify, and one sent through an inline bot names the bot (via_bot). */
+ *  it is a forward from someone Nocheh cannot identify, and one sent through an inline bot names the bot (via_bot). Any
+ *  of its forward fields makes it a forward, whatever it holds: forwarded_from with no name (a deleted account is
+ *  written as null), forwarded_from_id, or saved_from (a message saved from another chat). */
 export function forwardFacts(original:unknown,guarded?:unknown):{from:Forward['from'];rawName:string|null}|null {
   const message=record(original),shown=record(guarded)??message;
   if(message&&typeof message.via_bot==='string')return {from:'bot',rawName:raw(shown?.via_bot)};
-  if(message&&typeof message.forwarded_from==='string')return {from:'hidden',rawName:raw(shown?.forwarded_from)};
+  if(message&&['forwarded_from','forwarded_from_id','saved_from'].some(name=>Object.hasOwn(message,name)))return {from:'hidden',rawName:raw(shown?.forwarded_from)};
   const found=originOf(original,guarded,shownRaw);
   return found&&{from:found.from,rawName:found.name};
 }

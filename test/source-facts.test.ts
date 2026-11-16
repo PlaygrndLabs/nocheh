@@ -76,10 +76,29 @@ test('a quote of someone else\'s message is not the sender\'s own words; a quote
   const own=quoting({reply_to_message:{message_id:6,date:1,chat:group,from:owner,text:'pay now'}});
   assert.equal(own.quote,'own');assert.equal(ownerTyped(own),true);assert.equal(classOf(own),'owner_message');
   assert.equal(quoting({reply_to_message:{message_id:6,date:1,chat:group,from:owner,sender_chat:{id:-20,type:'supergroup'}}}).quote,'other','a post in a chat\'s name');
-  assert.equal(quoting({external_reply:{origin:{type:'user',sender_user:owner,date:1},chat:group,message_id:6}}).quote,'own');
+  // A quote of a message in another chat or topic is never the sender's own: Telegram does not say whether it was a
+  // forward or sent through an inline bot.
+  assert.equal(quoting({external_reply:{origin:{type:'user',sender_user:owner,date:1},chat:group,message_id:6}}).quote,'other');
   assert.equal(quoting({external_reply:{origin:{type:'hidden_user',sender_user_name:'Owner',date:1},chat:group,message_id:6}}).quote,'other');
   assert.equal(quoting({}).quote,'other','a quote with nothing to show whose');
   assert.equal(live(update({from:owner,text:'yes',reply_to_message:{message_id:6,date:1,chat:group,from:sara}})).quote,null,'a reply without a quote');
+});
+
+test('in a forum topic, a quote of a message in another chat is judged by that message, never by the topic\'s first message',()=>{
+  // Telegram sets reply_to_message to the topic's first message for every message in a topic that answers nothing in
+  // it, an answer to a message in another chat included; here the owner made the topic.
+  const forum={id:-21,type:'supergroup',is_forum:true},root={message_id:40,message_thread_id:40,is_topic_message:true,date:1,chat:forum,from:owner,
+    forum_topic_created:{name:'Ops',icon_color:1}};
+  const quoting=(origin:Record<string,unknown>)=>live({update_id:1,message:{message_id:77,message_thread_id:40,is_topic_message:true,date:5,chat:forum,from:owner,
+    text:'ok noted',reply_to_message:root,external_reply:{origin:{type:'user',date:2,...origin},chat:{id:-22,type:'supergroup'},message_id:12},
+    quote:{text:'wire the deposit to account 99',position:0}}});
+  const bobs=quoting({sender_user:bob});
+  assert.deepEqual([bobs.quote,ownerTyped(bobs),classOf(bobs),bucketOf(classOf(bobs))],['other',false,'quote','person']);
+  // Nor is the owner's own message there, which may have been sent through an inline bot; Nocheh's words are still cut.
+  const own=quoting({sender_user:owner});
+  assert.deepEqual([own.quote,ownerTyped(own),classOf(own)],['other',false,'quote']);
+  assert.equal(nochehQuoted({from:owner,text:'ok',reply_to_message:root,quote:{text:'x',position:0},
+    external_reply:{origin:{type:'user',sender_user:{id:9001,is_bot:true,first_name:'Nocheh'},date:1},chat:{id:-22,type:'supergroup'},message_id:3}},'9001'),true);
 });
 
 test('the owner\'s quote of their own forward quotes whoever wrote it, as a pin of it does, never the owner\'s words',()=>{
@@ -228,6 +247,12 @@ test('a Telegram Desktop export is read by the author the archive proved, never 
   assert.deepEqual([own.author,own.account,own.name,ownerTyped(own),classOf(own)],['owner',accountIdFor('telegram',OWNER),'Owner',true,'owner_message']);
   const forwarded=exported({from:'Owner',from_id:'user'+OWNER,forwarded_from:'Sara',text:'hi'},[{namespace:'bot-api',kind:'actor',external_id:OWNER}]);
   assert.deepEqual([forwarded.forward,forwarded.forward_name,classOf(forwarded)],['hidden','Sara','forward_hidden_by_owner']);
+  // Any forward field makes it a forward, whatever it holds: a deleted account's forward is written with no name.
+  for(const fields of [{forwarded_from:null},{forwarded_from:null,forwarded_from_id:'user'+SARA},{forwarded_from_id:'channel77'},{saved_from:'News'}]) {
+    const facts=exported({from:'Owner',from_id:'user'+OWNER,...fields,text:'wire the deposit to account 99'},[{namespace:'bot-api',kind:'actor',external_id:OWNER}]);
+    assert.deepEqual([facts.forward,facts.forward_name,ownerTyped(facts),classOf(facts),bucketOf(classOf(facts))],['hidden',null,false,'forward_hidden_by_owner','forward'],
+      JSON.stringify(fields));
+  }
   assert.equal(exported({from:'Sara',text:'hi'},[{namespace:'bot-api',kind:'actor',external_id:SARA}]).author,'person');
   assert.equal(exported({from:'Owner',text:'hi'},[{namespace:'["desktop","private_supergroup","1"]',kind:'actor',external_id:OWNER}]).author,'person','an account the archive did not prove');
   assert.equal(exported({from:'News',text:'hi'},[{namespace:'bot-api',kind:'conversation',external_id:'x'}]).author,'anonymous');
