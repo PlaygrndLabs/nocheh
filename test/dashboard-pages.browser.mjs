@@ -2069,12 +2069,16 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
     ['Hiking crew', 'Removed'],
   ])
     await list.getByRole('link', {name}).getByText(state, {exact: true}).waitFor();
-  // A group someone else added is being left or was left, and one Nocheh was removed from says so: none has a switch,
-  // or people to choose.
+  // A group someone else added is being left, one added without showing who was left, and one Nocheh was removed
+  // from says so: none has a switch, or people to choose.
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Nocheh here', exact: true})});
   for (const [name, state, text] of [
     ['Book swap', 'Leaving', 'Someone else added Nocheh here, so it is leaving.'],
-    ['Choir practice', 'Left', 'Nocheh left because someone else added it. Add Nocheh yourself to use it here.'],
+    [
+      'Choir practice',
+      'Left',
+      'Nocheh left because someone added it without showing who. To use it here, turn off Remain anonymous and add Nocheh yourself.',
+    ],
     ['Hiking crew', 'Removed', 'Nocheh was removed from this group.'],
   ]) {
     await list.getByRole('link', {name}).click();

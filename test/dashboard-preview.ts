@@ -29,8 +29,9 @@ if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_
  * id ('42', '-10042', '-10042/topic/7'); a group first seen later has a digest id ('Night sky club', with a topic), and a
  * group Telegram upgraded after that keeps its id under a new Telegram id ('Garden swap'). Nocheh is on where a chat's
  * state says (ADR-0253): the owner's chat, Aurora planning and Garden swap start on, the other groups off, and three
- * more show where Nocheh stands after someone else added it ('Book swap', leaving; 'Choir practice', left) or removed
- * it ('Hiking crew'). The group switch (POST /chats/state) changes a state here, in memory.
+ * more show where Nocheh stands after someone else added it ('Book swap', leaving), someone added it without showing
+ * who ('Choir practice', left) or someone removed it ('Hiking crew'). The group switch (POST /chats/state) changes a
+ * state here, in memory.
  */
 const NEW_GROUP_TG='-10088',NEW_GROUP=chatIdFor('telegram',NEW_GROUP_TG),NEW_TOPIC=chatIdFor('telegram',NEW_GROUP_TG,'3');
 const UPGRADED_OLD_TG='-4005',UPGRADED_TG='-10099',UPGRADED=chatIdFor('telegram',UPGRADED_OLD_TG);
@@ -219,7 +220,8 @@ const conversations:any[]=[
  {space_id:NEW_GROUP,name:'Night sky club',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
  {space_id:NEW_TOPIC,name:'Meteor watch',kind:'topic',parent_space:NEW_GROUP,parent_name:'Night sky club',observed_at:new Date().toISOString(),configured:false,closed:false},
  {space_id:UPGRADED,name:'Garden swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
- // Someone else added Nocheh to these two (ADR-0253): it is leaving the first and has left the second.
+ // Someone else added Nocheh to the first, and someone who didn't show who they were to the second (ADR-0253): it is
+ // leaving the first and has left the second.
  {space_id:LEAVING_GROUP,name:'Book swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false,
   added_by:'other',added_at:new Date(Date.now()-20000).toISOString()},
  {space_id:LEFT_GROUP,name:'Choir practice',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-864e5).toISOString(),configured:false,

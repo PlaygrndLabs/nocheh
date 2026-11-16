@@ -197,11 +197,23 @@ test('a group’s text says why Nocheh left only when an add or a removal is on 
   const group = (state, more = {}) => chatStateText({...find(NEW), state, ...more});
   assert.equal(group('off'), 'Nocheh doesn’t answer here.');
   assert.equal(group('pending', {added_by: 'other'}), 'Someone else added Nocheh here, so it is leaving.');
-  for (const by of ['other', 'anonymous'])
-    assert.equal(
-      group('left', {added_by: by}),
-      'Nocheh left because someone else added it. Add Nocheh yourself to use it here.',
-    );
+  assert.equal(
+    group('left', {added_by: 'other'}),
+    'Nocheh left because someone else added it. Add Nocheh yourself to use it here.',
+  );
+  // Telegram hides an admin who adds Nocheh with Remain anonymous on, who may be the owner: never "someone else".
+  assert.equal(
+    group('pending', {added_by: 'anonymous'}),
+    'Someone added Nocheh here without showing who, so it is leaving.',
+  );
+  assert.equal(
+    group('left', {added_by: 'anonymous'}),
+    'Nocheh left because someone added it without showing who. To use it here, turn off Remain anonymous and add Nocheh yourself.',
+  );
+  assert.equal(
+    group('could_not_leave', {added_by: 'anonymous'}),
+    'Someone added Nocheh here without showing who, and it couldn’t leave. It stays silent.',
+  );
   // A group the seeder made, or one Nocheh left on its own, claims no add by someone else.
   for (const by of ['seeded', 'owner', 'unknown', null, undefined])
     assert.equal(group('left', {added_by: by}), 'Nocheh isn’t in this group any more.', String(by));
