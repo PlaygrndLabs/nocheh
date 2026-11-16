@@ -7,7 +7,7 @@ import {allowedAccounts} from '../destinations.js';
 import {telegramAddress,telegramChat,telegramScopes} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import {approvalAction,approvalCard,approvalLines,approvalTask,backgroundMemberTexts,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
+import {approvalAction,approvalCard,approvalLines,approvalTask,backgroundMemberTexts,chatAddLines,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
 import {cardName,controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,visible,type Link,type OperationText} from '../action-text.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
 import {forwardOrigin,forwardedCommand} from '../forwarded.js';
@@ -23,6 +23,7 @@ import {memberPause,memberResume} from './member-job-spend.js';
 import type {TaskRepository} from './tasks.js';
 import type {PrivateAnswerRepository} from './private-answers.js';
 import {currentChats} from './chats.js';
+import {chatAddButton,type ChatAddChoice,type ChatAdds} from './chat-adds.js';
 
 type ActionKind='telegram'|'controlled'|'background'|'list'|'task';
 /** One card of a job's waiting changes, as frozen when it was sent. */
@@ -121,7 +122,8 @@ const listed=(action:{kind:string;arguments:Record<string,any>;summary?:string|n
  * it was asked, where that person or the owner decides it. */
 export class ActionCommandRepository {
   constructor(readonly access:SourceAccessRepository,readonly telegram:TelegramActionRepository,readonly tools:ControlledActionRepository,
-    readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository,readonly tasks?:TaskRepository,readonly answers?:PrivateAnswerRepository){}
+    readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository,readonly tasks?:TaskRepository,readonly answers?:PrivateAnswerRepository,
+    readonly adds?:ChatAdds){}
   private async approval(input:Record<string,unknown>,timeout=15000) {
     if(!this.call)return null;
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
@@ -662,6 +664,8 @@ export class ActionCommandRepository {
     const query=row?JSON.parse(row.payload.toString()).callback_query:null,data=typeof query?.data==='string'?query.data.match(buttonData):null;
     if(query?.data===retryButton&&typeof query.id==='string')return this.retryPressed(query);
     if((query?.data===memberPause||query?.data===memberResume)&&typeof query.id==='string')return this.memberJobsPressed(query,query.data===memberPause);
+    const added=typeof query?.data==='string'?chatAddButton.exec(query.data):null;
+    if(added&&typeof query.id==='string')return this.chatAddPressed(query,added[1] as ChatAddChoice,added[2]!);
     const privately=typeof query?.data==='string'?answerButton.exec(query.data):null;
     if(privately&&typeof query.id==='string')return this.answerPressed(privately[1]!,query,source);
     if(!data||typeof query.id!=='string')return false;
@@ -815,6 +819,17 @@ export class ActionCommandRepository {
       await this.jobs.members.setPaused(paused);
       reply=paused?lines.paused!:lines.resumed!;
     }
+    await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(reply).slice(0,200).join('')},10000);
+    return true;
+  }
+  /** A button on the card after the owner added Nocheh to a group (ADR-0253): only the owner's press in their private
+   *  chat moves the group to another project or out of projects, or turns Nocheh off there. */
+  private async chatAddPressed(query:any,choice:ChatAddChoice,event:string):Promise<boolean> {
+    const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),owner=ownerChat(policy);
+    const lines=chatAddLines((await ownerPrompts(this.access.stores.control))['telegram.chat_adds']);
+    let reply=lines.only_owner;
+    // The owner's own press (their account), in their private chat (its chat id), as for Retry failed.
+    if(owner&&policy.owner_id&&String(query.from?.id??'')===policy.owner_id&&telegramChat(chat)===owner)reply=this.adds?await this.adds.press(choice,event):lines.changed;
     await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(reply).slice(0,200).join('')},10000);
     return true;
   }
