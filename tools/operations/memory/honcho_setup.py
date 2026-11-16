@@ -22,8 +22,21 @@ STATE=Path(read_env(env_path(PROVIDER_STATE)).get('NOCHEH_HONCHO_STATE_DIR') or
 # them equal.
 QUERY_CHARACTERS=200000
 INPUT_TOKENS=61440
+# Honcho's dialectic reasoning levels; each has its own model settings.
+DIALECTIC_LEVELS=('minimal','low','medium','high','max')
 # Nocheh's pinned build of the Honcho source checkout; docker-compose.yml names it.
 BUILD_FILE='nocheh.Dockerfile'
+
+
+def model_answers():
+    """How Honcho asks its model for answers, the same in every Honcho Nocheh runs, the tester's included."""
+    env={'DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE':'json_object'}
+    for level in DIALECTIC_LEVELS:
+        env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
+        # A chat asked for a response_format, as learning is, otherwise sends a non-strict json_schema with its tools,
+        # which an OpenAI-compatible endpoint can refuse; json_object puts the schema in the prompt and Honcho repairs and checks the answer.
+        env[f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
+    return env
 
 
 def state_for(provider_state):
@@ -87,17 +100,12 @@ def initialize(provider_state=PROVIDER_STATE):
          'EMBEDDING_MODEL_CONFIG__OVERRIDES__API_KEY_ENV':'NOCHEH_HONCHO_INTERNAL_TOKEN'}
     model=reasoning.model
     prefixes=['DERIVER_MODEL_CONFIG','SUMMARY_MODEL_CONFIG','DREAM_DEDUCTION_MODEL_CONFIG','DREAM_INDUCTION_MODEL_CONFIG']
-    prefixes += [f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG' for level in ('minimal','low','medium','high','max')]
+    prefixes += [f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG' for level in DIALECTIC_LEVELS]
     for prefix in prefixes:
         env.update({prefix+'__TRANSPORT':'openai',prefix+'__MODEL':model,
                     prefix+'__OVERRIDES__BASE_URL':'http://meter:8790/v1',
                     prefix+'__OVERRIDES__API_KEY_ENV':'NOCHEH_HONCHO_INTERNAL_TOKEN'})
-    env['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
-    for level in ('minimal','low','medium','high','max'):
-        env[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS']='2500'
-        # A chat asked for a response_format, as learning is, otherwise sends a non-strict json_schema with its tools,
-        # which an OpenAI-compatible endpoint can refuse; json_object puts the schema in the prompt and Honcho repairs and checks the answer.
-        env[f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG__STRUCTURED_OUTPUT_MODE']='json_object'
+    env.update(model_answers())
     (state/'honcho.env').write_text(''.join(f'{key}={value}\n' for key,value in env.items()))
     for name in ('honcho.env','meter.env'): (state/name).chmod(0o600)
     if values.get('NOCHEH_HONCHO_ENABLED')=='true':

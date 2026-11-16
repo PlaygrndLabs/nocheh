@@ -665,12 +665,12 @@ class ProductScenarios(Scenarios):
         self.gate('sent_as_'+expected, found['payload'].get('send_class') == expected, send_class=found['payload'].get('send_class'))
         return found['id']
 
-    def learning(self, event_id, seconds=600):
-        """How a message's notes review and long-term memory steps ended, once both settled, as 'family:state:reason'."""
+    def learning(self, event_id):
+        """How a message's notes review and long-term memory steps ended, once both settled, as 'family:state:reason'.
+        Both steps take the background slot the owner's notes reviews hold, so they can wait behind them."""
         where = "FROM workflow_registry WHERE family IN ('memory_review','honcho') AND job_id='source:"+event_id+"'"
-        self.wait('learning_settled', lambda: self.f.query('nocheh_control', "SELECT count(*) "+where+" AND family='memory_review'") != '0'
-                  and self.f.query('nocheh_control', "SELECT count(*) "+where+" AND state IN ('queued','running','waiting','retryable_failed')") == '0',
-                  seconds)
+        self.review_wait('learning_settled', lambda: self.f.query('nocheh_control', "SELECT count(*) "+where+" AND family='memory_review'") != '0'
+                         and self.f.query('nocheh_control', "SELECT count(*) "+where+" AND state IN ('queued','running','waiting','retryable_failed')") == '0')
         raw = self.f.query('nocheh_control', "SELECT string_agg(DISTINCT family||':'||state||':'||coalesce(waiting_reason,''),',') "+where
                            + " AND coalesce(waiting_reason,'')<>'superseded'")
         return sorted(value for value in raw.split(',') if value)
@@ -692,16 +692,45 @@ class ProductScenarios(Scenarios):
     # The owner's notes reviews run one at a time, and each waits while any Honcho write waits for its first attempt, so
     # late in a full run dozens can be waiting, and the background steps that queue or skip them can wait behind them too.
     REVIEW_SECONDS = 2400
+    # How often a wait on one message's review looks whether that review already ended without a note.
+    REVIEW_ENDED_EVERY = 30
 
-    def review_wait(self, label, check, interval=2):
-        """wait() for a step behind the owner's notes reviews; a timeout says how many reviews were still waiting."""
+    def review_wait(self, label, check, interval=2, event_id=None):
+        """wait() for a step behind the owner's notes reviews. Given the awaited message's event id, a review of it that
+        ended uncertain or paused, which nothing in a run resumes, fails at once with that state. A timeout says how many
+        reviews were still waiting, or 'unknown' when that count can't be read."""
+        looked = [None]
+
+        def watched():
+            value = check()
+            if value or event_id is None or (looked[0] is not None and time.monotonic()-looked[0] < self.REVIEW_ENDED_EVERY):
+                return value
+            looked[0] = time.monotonic()
+            ended = self.review_ended(event_id)
+            if ended:
+                raise Failed('review_'+ended+':'+label)
+            return value
         try:
-            return self.wait(label, check, self.REVIEW_SECONDS, interval)
+            return self.wait(label, watched, self.REVIEW_SECONDS, interval)
         except Failed as error:
             if str(error) != 'timeout:'+label:
                 raise
-            pending = self.f.query('nocheh_control', "SELECT count(*) FROM native_review_jobs WHERE state='pending'")
+            try:
+                pending = self.f.query('nocheh_control', "SELECT count(*) FROM native_review_jobs WHERE state='pending'")
+            except (subprocess.SubprocessError, OSError):
+                pending = ''
             raise Failed('timeout:'+label+':reviews_pending='+(pending or 'unknown')) from None
+
+    def review_ended(self, event_id):
+        """'paused' or 'ambiguous' when a message's latest notes review stopped without saving anything, else None (also when
+        its state can't be read). An uncertain review counts only once a later look still could not confirm it: Hermes records
+        a start before it starts a review, so that look finds a review that did start, unless Hermes can't be reached then."""
+        try:
+            return self.f.query('nocheh_control', "SELECT CASE WHEN paused OR state='paused' THEN 'paused' WHEN state='ambiguous' AND "
+                                "reconciliations>0 THEN 'ambiguous' END FROM native_review_jobs WHERE source_reference->>'id'='"+event_id+"' "
+                                "ORDER BY created_at DESC LIMIT 1") or None
+        except (subprocess.SubprocessError, OSError):
+            return None
 
     def review_of(self, event_id):
         """The owner's notes review of a message ({state, provenance}: what Nocheh's code recorded it read), or None."""
@@ -720,8 +749,9 @@ class ProductScenarios(Scenarios):
         """A message's notes review once it saved the note with this mark, as [[review-note:]] asks (installation-provider.py),
         and ended, so Hermes recorded who wrote the note."""
         self.review_wait('review_saved_the_note', lambda: [event for event in self.f.brain() if event.get('directive') == 'review-note'
-                                                          and event['phase'] == 'final' and mark in (event.get('argument') or '')], 10)
-        return self.review_wait('review_done', lambda: (lambda found: found if found and found['state'] == 'done' else None)(self.review_of(event_id)))
+                                                          and event['phase'] == 'final' and mark in (event.get('argument') or '')], 10, event_id)
+        return self.review_wait('review_done', lambda: (lambda found: found if found and found['state'] == 'done' else None)(self.review_of(event_id)),
+                                event_id=event_id)
 
     def kept_apart(self, event_id):
         """Someone else's forward in the owner's private chat: written by the forwards-and-files participant in the owner's
@@ -1453,6 +1483,7 @@ class ProductScenarios(Scenarios):
         drained = lambda: self.honcho("SELECT count(*) FROM queue WHERE NOT processed") == '0'
         jobs = lambda ids, what='count(*)': self.f.query('nocheh_control', "SELECT "+what+" FROM workflow_registry WHERE family IN ('memory_review','honcho') "
             "AND job_id IN ("+listed('source:'+value for value in ids)+")")
+        # These steps take the background slot the owner's notes reviews hold, so waiting for them is a review_wait.
         settled = lambda ids: lambda: self.f.query('nocheh_control', "SELECT count(*) FROM workflow_registry WHERE family IN ('memory_review','honcho') AND job_id IN ("
             + listed('source:'+value for value in ids)+") AND state IN ('queued','running','waiting','retryable_failed')") == '0'
         outcomes = lambda ids: jobs(ids, "string_agg(DISTINCT family||':'||state||':'||coalesce(waiting_reason,''),',')")
@@ -1478,7 +1509,7 @@ class ProductScenarios(Scenarios):
         live = 'LRNLIVE'+str(self.f.ids())
         self.turn(self.f.message(OTHER_GROUP, 'پیام تازه '+live), OTHER_GROUP)
         self.wait('later_live_message_learned', lambda: in_honcho(live) not in ('', '0'), 600)
-        self.wait('off_reviews_settled', settled(ids), 600)
+        self.review_wait('off_reviews_settled', settled(ids))
         self.wait('honcho_queue_drained', drained, 600)
         observed['off_review_jobs'] = outcomes(ids)
         self.gate('off_not_in_long_term_memory', in_honcho(off+'M') == '0' and receipts(ids) == '0', honcho=in_honcho(off+'M'), receipts=receipts(ids))
@@ -1497,7 +1528,7 @@ class ProductScenarios(Scenarios):
         later = 'LRNLIVE'+str(self.f.ids())
         self.turn(self.f.message(OWNER, 'پیام تازه '+later), OWNER)
         self.wait('later_private_message_learned', lambda: in_honcho(later) not in ('', '0'), 600)
-        self.wait('private_reviews_settled', settled(kept), 600)
+        self.review_wait('private_reviews_settled', settled(kept))
         self.wait('honcho_queue_drained_again', drained, 600)
         observed['private_review_jobs'] = outcomes(kept)
         self.gate('private_never_learned', in_honcho(private+'M') == '0' and receipts(kept) == '0', honcho=in_honcho(private+'M'), receipts=receipts(kept))
@@ -1513,7 +1544,7 @@ class ProductScenarios(Scenarios):
         self.gate('again_keeps_nothing_twice', again.get('state') == 'complete' and again.get('duplicates') == 3 and imported(off) == ids,
                   job={key: again.get(key) for key in ('state', 'completed', 'duplicates', 'error')})
         self.wait('again_learned_into_long_term_memory', lambda: in_honcho(off+'M') not in ('', '0'), 900)
-        self.wait('again_reviews_settled', settled(ids), 600)
+        self.review_wait('again_reviews_settled', settled(ids))
         self.wait('honcho_queue_drained_last', drained, 600)
         observed['again_review_jobs'] = outcomes(ids)
         observed['again_learning_inputs'] = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='memory_input' AND event_id IN ("+listed(ids)+")")
@@ -1614,7 +1645,7 @@ class ProductScenarios(Scenarios):
         sent = self.sent_as(reminder[0], 'reminder')
         self.not_learned(sent)
         answer, _ = self.turn(self.f.message(OWNER, 'ممنون، سر راه می‌خرم', reply_to=reminder[0]['message']), OWNER)
-        review = self.wait('reply_reviewed', lambda: (lambda found: found if found and found.get('provenance') else None)(self.review_of(answer)), 600)
+        review = self.review_wait('reply_reviewed', lambda: (lambda found: found if found and found.get('provenance') else None)(self.review_of(answer)))
         classes = {item.get('id'): item.get('class') for item in review['provenance'].get('events') or []}
         self.gate('reply_reviewed_with_the_reminder', classes.get(answer) == 'owner_message' and classes.get(sent) == 'nocheh_unlearned', classes=classes)
         detail = self.f.app('/v1/tasks/'+task['id'])
