@@ -102,18 +102,24 @@ class MonitoringTests(unittest.TestCase):
                                       {'day': '2026-10-13', 'kind': 'notes', 'done': '1', 'failed': 1}]}
         with tempfile.TemporaryDirectory() as state:
             self.assertEqual(monitoring.note_problems(state, now, archive=stores),
-                             [{'day': '2026-10-13', 'kind': 'notes', 'failed': 2, 'ok': 3},
-                              {'day': '2026-10-13', 'kind': 'memory_read', 'failed': 1, 'ok': 1}],
+                             [{'day': '2026-10-13', 'kind': 'note_labels', 'failed': 2, 'ok': 3},
+                              {'day': '2026-10-13', 'kind': 'forwards_read', 'failed': 1, 'ok': 1}],
                              'the stores alone are counted with no tracker yet')
             self.assertEqual(monitoring.note_problems(state, now, archive={'unavailable': True}), [], 'stores unreachable')
-            # Hermes's own steps and the stores' add up in one line.
+            # Hermes's own steps and the stores' are lines of their own, each with only its own steps that worked.
             path = Path(state) / 'hermes/usage/usage.sqlite'
             path.parent.mkdir(parents=True)
             usage.note_failed('read', path=path, now=now.timestamp())
             usage.note_done('record', path=path, now=now.timestamp())
             self.assertEqual(monitoring.note_problems(state, now, archive=stores),
-                             [{'day': '2026-10-13', 'kind': 'notes', 'failed': 3, 'ok': 4},
-                              {'day': '2026-10-13', 'kind': 'memory_read', 'failed': 1, 'ok': 1}])
+                             [{'day': '2026-10-13', 'kind': 'notes', 'failed': 1, 'ok': 1},
+                              {'day': '2026-10-13', 'kind': 'note_labels', 'failed': 2, 'ok': 3},
+                              {'day': '2026-10-13', 'kind': 'forwards_read', 'failed': 1, 'ok': 1}])
+            found = problems.problems({'note_problems': monitoring.note_problems(state, now, archive=stores)}, [], '2026-10-13')
+            self.assertEqual([problems.text(problem, 1) for problem in found if problem['kind'] in ('note_labels', 'forwards_read')], [
+                'Memory labels: looking up where notes came from failed 2 times today. Recall and the Notes page showed those '
+                'notes as “source not available right now” or without their chat. The notes and what was recorded about them are kept.',
+                'Long-term memory: recall couldn’t ask your forwards and files 1 time today; it answered from the rest of your memory.'])
 
     def test_a_stores_step_that_works_after_its_failure_says_working_again(self):
         # ADR-0257: the stores write a step that worked only once their day holds a failure of its kind, so steady use
@@ -126,7 +132,7 @@ class MonitoringTests(unittest.TestCase):
             def current(done, failed):
                 rows = monitoring.note_problems(state, now, archive={'memory_problems': [{'day': day, 'kind': 'memory_read', 'done': done, 'failed': failed}]})
                 return {problem['key']: problem for problem in problems.problems({'note_problems': rows}, [], day)}
-            watch = problems._watch(current(0, 1)['memory_read:' + day], 1)
+            watch = problems._watch(current(0, 1)['forwards_read:' + day], 1)
             self.assertFalse(problems.cleared(watch, current(0, 1), set()), 'nothing has worked since')
             self.assertTrue(problems.cleared(watch, current(1, 1), set()), 'a step that worked after the failure')
             self.assertTrue(problems.back(watch, current(1, 2), set(), set()), 'a failure after it reopens the line')
@@ -159,9 +165,49 @@ class MonitoringTests(unittest.TestCase):
                  patch.object(monitoring.subprocess, 'check_output', return_value=''), patch.object(monitoring, 'API') as api:
                 api.return_value.call.side_effect = call
                 result = monitoring.status(state)
-        self.assertEqual(result['note_problems'], [{'day': today, 'kind': 'notes', 'failed': 3, 'ok': 5}])
+        self.assertEqual(result['note_problems'], [{'day': today, 'kind': 'notes', 'failed': 1, 'ok': 0},
+                                                   {'day': today, 'kind': 'note_labels', 'failed': 2, 'ok': 5}])
         found = problems.problems(result, [], today)
-        self.assertEqual([(problem['kind'], problem['count']) for problem in found if problem['kind'] == 'notes'], [('notes', 3)])
+        self.assertEqual([(problem['kind'], problem['count']) for problem in found if problem['kind'] in ('notes', 'note_labels')],
+                         [('notes', 1), ('note_labels', 2)])
+        self.assertTrue({'notes', 'store_notes'} <= problems.readable(result))
+        self.assertNotIn('store_notes', problems.readable({**result, 'archive': {'unavailable': True}}),
+                         'the stores\' lines clear only on a check that read their counts')
+
+    def test_a_step_that_works_on_one_side_never_clears_the_other_sides_failure(self):
+        # Hermes and the stores count their own steps; each line clears only on its own side's step that worked.
+        from datetime import datetime, timezone
+        from services.hermes import usage
+        from tools.operations.provider import problems
+        now, day = datetime(2026, 10, 13, 12, tzinfo=timezone.utc), '2026-10-13'
+        with tempfile.TemporaryDirectory() as state:
+            path = Path(state) / 'hermes/usage/usage.sqlite'
+            path.parent.mkdir(parents=True)
+            def current(stores):
+                rows = monitoring.note_problems(state, now, archive={'memory_problems': stores})
+                return {problem['key']: problem for problem in problems.problems({'note_problems': rows}, [], day)}
+            # A label lookup in the stores failed, then a Notes-page poll worked: its line clears.
+            stores = [{'day': day, 'kind': 'notes', 'done': 0, 'failed': 1}]
+            labels = problems._watch(current(stores)['note_labels:' + day], 1)
+            stores[0]['done'] = 1
+            self.assertTrue(problems.cleared(labels, current(stores), set()))
+            # Hermes's sidecar breaks: its own line, which the stores' next poll that works does not clear.
+            usage.note_failed('sidecar', path=path, now=now.timestamp())
+            self.assertEqual({key for key in current(stores) if key.startswith(('notes:', 'note_labels:'))}, {'notes:' + day, 'note_labels:' + day})
+            hermes = problems._watch(current(stores)['notes:' + day], 1)
+            stores[0]['done'] = 2
+            self.assertFalse(problems.cleared(hermes, current(stores), set()), 'the stores worked; Hermes still fails')
+            self.assertFalse(problems.back(labels, current(stores), set(), set()), 'nor does Hermes reopen the stores\' line')
+            usage.note_done('lookup', path=path, now=now.timestamp())
+            self.assertTrue(problems.cleared(hermes, current(stores), set()), 'Hermes worked again')
+            # Recall's ask of the forwards keeps failing in the stores while Hermes's turns read memory in full.
+            asks = [{'day': day, 'kind': 'memory_read', 'done': 0, 'failed': 3}]
+            forwards = problems._watch(current(asks)['forwards_read:' + day], 3)
+            usage.note_failed('memory_read', path=path, now=now.timestamp())
+            usage.note_done('memory_read', path=path, now=now.timestamp())
+            self.assertFalse(problems.cleared(forwards, current(asks), set()), 'a turn read memory; recall\'s ask still fails')
+            asks[0]['done'] = 1
+            self.assertTrue(problems.cleared(forwards, current(asks), set()))
 
     def test_github_flags_come_from_the_app_file_without_its_key(self):
         from tools.operations.connections import secret_file

@@ -272,26 +272,43 @@ export function issues(m: any): Issue[] {
       action: 'Messages',
     });
   }
-  // Steps that failed today telling where notes came from, in Hermes and the stores, counted per attempt, not per note,
-  // and turns that read only part of long-term memory (ADR-0257).
+  // Steps that failed today telling where notes came from, counted per attempt, not per note, and turns that read only
+  // part of long-term memory (ADR-0257): Hermes's, then the stores' own lines for labelling notes and recall's ask of the
+  // owner's forwards and files, each apart so one side working never hides the other's failure.
   const notes: any[] = Array.isArray(m.note_problems) ? m.note_problems : [];
+  const times = (count: number) => `${count} ${count === 1 ? 'time' : 'times'} today`;
   for (const row of notes)
     list.push(
       row.kind === 'memory_read'
         ? {
             tone: 'warn',
-            text: `Long-term memory couldn’t be read in full ${row.failed} ${row.failed === 1 ? 'time' : 'times'} today`,
+            text: `Long-term memory couldn’t be read in full ${times(row.failed)}`,
             detail:
               'Your forwards and files, or your memory context, were left out; replies used the rest of your memory.',
           }
-        : {
-            tone: 'warn',
-            text: `Telling where notes came from failed ${row.failed} ${row.failed === 1 ? 'time' : 'times'} today`,
-            detail:
-              'Notes written while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not available”. The notes themselves are kept.',
-            link: href('memory', {view: 'notes'}),
-            action: 'Notes',
-          },
+        : row.kind === 'forwards_read'
+          ? {
+              tone: 'warn',
+              text: `Recall couldn’t ask your forwards and files ${times(row.failed)}`,
+              detail: 'Recall answered from the rest of your memory.',
+            }
+          : row.kind === 'note_labels'
+            ? {
+                tone: 'warn',
+                text: `Looking up where notes came from failed ${times(row.failed)}`,
+                detail:
+                  'Recall and the Notes page showed those notes as “source not available right now” or without their chat. The notes and what was recorded about them are kept.',
+                link: href('memory', {view: 'notes'}),
+                action: 'Notes',
+              }
+            : {
+                tone: 'warn',
+                text: `Telling where notes came from failed ${times(row.failed)}`,
+                detail:
+                  'Notes written while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not available”. The notes themselves are kept.',
+                link: href('memory', {view: 'notes'}),
+                action: 'Notes',
+              },
     );
   const spool = m.archive?.archive?.spool_failures;
   if (Array.isArray(spool) && spool.length)

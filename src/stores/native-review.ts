@@ -36,8 +36,10 @@ CREATE TABLE IF NOT EXISTS native_review_skips (
 /** Why a source stays out of the owner's notes (ADR-0257): someone not allowed there sent it, or it is a reaction to a
  * message that was left out for that reason. */
 export type NotesSkip='sender_not_allowed'|'target_not_allowed';
-/** A source's notes reviews, and why it stays out of the owner's notes when queue decided that in the same call. */
-export interface QueuedReviews {ids:string[];left_out:NotesSkip|null}
+/** A source's notes reviews, and why it stays out of the owner's notes when queue decided that in the same call: someone
+ * not allowed there (recorded), or a pin that carried only Nocheh's own card, notice or reminder (`nocheh_message`, not
+ * recorded: nothing in it is anyone's). */
+export interface QueuedReviews {ids:string[];left_out:NotesSkip|'nocheh_message'|null}
 const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
 const protocol='hermes-native-review-v3';
 /** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
@@ -114,7 +116,7 @@ export class NativeReviewRepository {
     const asked=new Map<string,Promise<boolean>>(),options:Required<LearningContextOptions>={
       admit:reference=>{let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id).then(value=>value==='review'));return allowed;},
       admitPinned:reference=>this.pinnedSender(reference.id).then(value=>value==='not_learned'?value:value==='review'),
-      collect:{dropped:[],versions:[],refused:[],bare_reaction:false,inputs:new Map()}};
+      collect:{dropped:[],versions:[],refused:[],bare_reaction:false,empty_pin:false,inputs:new Map()}};
     let context;
     try{context=await this.contexts.prepare(source,binding,options);}
     catch(error) {
@@ -124,6 +126,9 @@ export class NativeReviewRepository {
     }
     // A reaction to a message left out has nothing left to review, so no model run is spent on it.
     if(options.collect.bare_reaction)return await leave('target_not_allowed');
+    // Nor has a pin of Nocheh's own card, notice or reminder once the card is cut out. Nobody was left out, so nothing is
+    // recorded: the source step only says why, and the pin's reviews still waiting are withdrawn.
+    if(options.collect.empty_pin){await this.withdraw(source);return {ids:kept.filter(id=>!waiting.includes(id)),left_out:'nocheh_message'};}
     const actor=this.actor(source,binding);
     await this.turns.binding(actor);await this.prepared.allow(actor,{observations:context.observations,rules:context.rules});
     const {provenance,rules,limitations}=await this.batch(source,context,options.collect);

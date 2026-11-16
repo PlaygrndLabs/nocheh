@@ -30,13 +30,15 @@ export interface PreparedLearningContext {
  * pin, which stays. `not_learned` takes it out too, but not as left out for its sender: Nocheh's own card, notice or
  * reminder is not learned. `collect` gets the ids left out (a pin's own id when only the message it pinned was), the rules kept,
  * the ids of the rules left out with them, `bare_reaction` when the source is a reaction to a message that was left out,
- * and each kept rule's recorded inputs (`inputs`: the source ids of its stored dependencies, by rule id). Honcho and
- * interpretations pass none, so what they learn from is exactly as before.
+ * `empty_pin` when the source is a pin of Nocheh's card, notice or reminder with nothing else in it, and each kept rule's
+ * recorded inputs (`inputs`: the source ids of its stored dependencies, by rule id). Honcho and interpretations pass none,
+ * so they learn from everyone's messages, as before; for every caller a pin of Nocheh's card, notice or reminder loses it,
+ * and a quote of any message of Nocheh's is left out of the message quoting it (ADR-0256, ADR-0257).
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
   admitPinned?:(reference:SourceReference)=>Promise<boolean|'not_learned'>;
-  collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;inputs:Map<string,string[]>};
+  collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;empty_pin?:boolean;inputs:Map<string,string[]>};
 }
 export class LearningContextRepository {
   constructor(readonly access:SourceAccessRepository,readonly guards:GuardRepository,readonly learned:LearnedMemoryRepository,
@@ -68,6 +70,7 @@ export class LearningContextRepository {
     // A quote repeats part of the message replied to, so it goes when that message was left out.
     const unquote=[...dropped].some(id=>targets.has(id));
     const dependencies:PreparedDependency[]=[],evidence:LearningEvidence[]=[],observations:PreparedLearningContext['observations']=[],unpinned:string[]=[];
+    let emptyPin=false;
     for(const reference of references.values()) {
       const id='events:'+reference.id,guarded=await this.guards.read(id,binding),value=guarded.value as any;
       dependencies.push({source_id:id,revision:guarded.revision,value_hash:digest(canonical(value))});
@@ -87,13 +90,19 @@ export class LearningContextRepository {
       // source references instead of smuggling embedded target content into this scope.
       const scoped=structuredClone(value);
       for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(scoped.payload?.[kind]) {
-        delete scoped.payload[kind].reply_to_message;delete scoped.payload[kind].external_reply;
-        if(unquote)delete scoped.payload[kind].quote;
+        const message=scoped.payload[kind];
+        delete message.reply_to_message;delete message.external_reply;
+        // A quote of Nocheh's own message, learned or not, is Nocheh's words, never the sender's: it goes, and the sender's
+        // own words stay. A learned one is evidence of its own; a card, notice or reminder is not learned.
+        if(unquote||message.quote&&(await this.entities.sources.repliesToNocheh([reference.id])).has(reference.id))delete message.quote;
         // A pin carries the message it pinned whole; what someone not allowed there wrote stays out of the owner's notes
-        // review, and so does Nocheh's own card, notice or reminder, which is not learned.
-        const pinned=scoped.payload[kind].pinned_message&&options.admit&&options.admitPinned?await options.admitPinned(reference):true;
-        if(pinned!==true)delete scoped.payload[kind].pinned_message;
+        // review, and Nocheh's own card, notice or reminder stays out of everything learned from it, whoever pinned it.
+        const pinned=!message.pinned_message?true:options.admit&&options.admitPinned?await options.admitPinned(reference):
+          (await this.entities.sources.pinnedNocheh([reference.id])).get(reference.id)==='unlearned'?'not_learned':true;
+        if(pinned!==true)delete message.pinned_message;
         if(pinned===false){limitations.push('sender_not_allowed');unpinned.push(reference.id);}
+        // The source itself, a pin of Nocheh's card with nothing of its own, leaves nothing to review.
+        if(pinned==='not_learned'&&reference.id===source.id&&!texts.some(text=>text.trim())&&!derivatives.length)emptyPin=true;
       }
       observations.push({source:reference,value:scoped,derivatives});evidence.push({reference,text:texts.join('\n'),space});
     }
@@ -158,8 +167,9 @@ export class LearningContextRepository {
     if(options.collect) {
       options.collect.dropped.push(...dropped,...unpinned);options.collect.versions.push(...versions);options.collect.refused.push(...unread);
       for(const [id,inputs] of recorded)options.collect.inputs.set(id,inputs);
-      // A reaction left with nothing it reacts to says nothing the owner's notes could use.
+      // A reaction left with nothing it reacts to says nothing the owner's notes could use, nor does a pin of a card alone.
       options.collect.bare_reaction=[...reacted].some(id=>dropped.has(id))&&![...reacted].some(id=>references.has(id));
+      options.collect.empty_pin=emptyPin&&references.size===1;
     }
     await this.guards.assertCurrent(binding);
     return {source,source_object:observed.object_id,space,binding,evidence,dependencies,observations,

@@ -147,11 +147,20 @@ export class NoteSourceRepository {
    * reminder. A pin of anyone else's message, another bot's included, or of one the archive does not hold, is left out.
    */
   async pinnedNocheh(ids:readonly string[]):Promise<Map<string,'learned'|'unlearned'>> {
-    const pins=await this.pinnedTo(ids),targets=await this.factsFor([...new Set([...pins.values()].flat())]),found=new Map<string,'learned'|'unlearned'>();
-    for(const [pin,list] of pins) {
-      const read=list.map(id=>targets.get(id));
+    return this.nochehOf(await this.pinnedTo(ids));
+  }
+  /** Whether each of these messages replies to Nocheh's own message, by the archive's reply relation as classesFor finds a
+   *  quote's, whoever sent it: `learned` or `unlearned` as pinnedNocheh says. A reply to anyone else's message, or to one
+   *  the archive does not hold, is left out. */
+  async repliesToNocheh(ids:readonly string[]):Promise<Map<string,'learned'|'unlearned'>> {
+    return this.nochehOf(await this.repliedTo(ids));
+  }
+  private async nochehOf(related:Map<string,string[]>):Promise<Map<string,'learned'|'unlearned'>> {
+    const targets=await this.factsFor([...new Set([...related.values()].flat())]),found=new Map<string,'learned'|'unlearned'>();
+    for(const [id,list] of related) {
+      const read=list.map(target=>targets.get(target));
       if(!read.length||read.some(item=>item?.author!=='nocheh'))continue;
-      found.set(pin,read.some(item=>eventClass(item!)==='nocheh_unlearned')?'unlearned':'learned');
+      found.set(id,read.some(item=>eventClass(item!)==='nocheh_unlearned')?'unlearned':'learned');
     }
     return found;
   }

@@ -1,9 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync,readFileSync} from 'node:fs';
-import {delimiter,join} from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {readFileSync} from 'node:fs';
 import {forwardFacts,forwardLine,forwardOrigin} from '../src/forwarded.js';
+import {servicesFile} from './services-file.js';
 
 test('a forward is read from Telegram\'s own fields: whose words it carries, never what its text claims',()=>{
   const from={id:5,first_name:'Owner'};
@@ -42,16 +41,6 @@ test('the forwarded line is Nocheh\'s own fixed words, and says the text inside 
   assert.match(forwardLine({from:'bot',name:'made_up_bot'},true)!,/^\[Forwarded: You sent this through the inline bot @made_up_bot\./);
   assert.ok(forwardLine({from:'hidden',name:'x'.repeat(64)},false)!.length<=600,'the brain refuses a longer line');
 });
-
-/** A file of the repository's Python services: in the checkout this test was built from (dist/test) or runs from (test),
- *  or under a PYTHONPATH entry, where the stores image's runner mounts them. A missing file fails, naming where it looked. */
-function servicesFile(path:string):string {
-  const tried=[...['../../','../'].map(up=>fileURLToPath(new URL(up+path,import.meta.url))),
-    ...(process.env.PYTHONPATH??'').split(delimiter).filter(Boolean).map(entry=>join(entry,path))];
-  const found=tried.find(place=>existsSync(place));
-  assert.ok(found,`${path} not found; tried ${tried.join(', ')}`);
-  return found;
-}
 
 // Hermes's parent does not count a forward of the sender's own earlier message in the message a turn answers as something
 // it read, by these exact lines (services/hermes/note_sources.py OWN_FORWARDS), so changing their words here must change

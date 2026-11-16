@@ -868,6 +868,34 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
       assert.deepEqual(rows[0]!.value,honchoPointer('pinned_nocheh'));assert.doesNotMatch(rows[0]!.content,/NOCHEHMARK|CARDMARK/);
     }
     assert.ok(card.id);
+    // The owner's quote of the card is the owner's words alone, and nothing of the card goes to the forwards and files.
+    const okay=await say('123',123,{text:'OKMARK sure',quote:{text:'CARDQUOTEMARK approve',position:0},
+      reply_to_message:{message_id:cardId,date:1700000000+cardId,chat:chatOf('123'),from:{id:bot,is_bot:true,first_name:'Nocheh'},text:'CARDMARK approve the booking?'}});
+    pins.push(...await services.memory.queueSource(okay));
+    const okayed=await written(okay);
+    assert.deepEqual(shape(okayed),[[ownerPeer,'labelled_source','conversation']],'nothing for the forwards and files');
+    assert.ok(okayed[0]!.content.includes('OKMARK')&&!okayed[0]!.content.includes('CARDQUOTEMARK'),'the quote of the card is left out');
+    // In a group, a member's pin of Nocheh's message, learned or a card, leaves only a note that it was pinned, naming no
+    // one: Nocheh's message is learned as Nocheh's where it was sent, or not at all. A member's quote of the card is the
+    // member's own words alone.
+    const groupReply=await nocheh(group,'GROUPREPLYMARK the room is booked',{send_class:'reply'}),groupReplyId=serial;
+    const groupCard=await nocheh(group,'GROUPCARDMARK approve the room?',{send_class:'card'}),groupCardId=serial;
+    const fromNocheh=(id:number,text:string)=>({message_id:id,date:1700000000+id,chat:chatOf(group),from:{id:bot,is_bot:true,first_name:'Nocheh'},text});
+    const bobPinReply=await say(group,456,{pinned_message:fromNocheh(groupReplyId,'GROUPREPLYMARK the room is booked')});
+    const bobPinCard=await say(group,456,{pinned_message:fromNocheh(groupCardId,'GROUPCARDMARK approve the room?')});
+    const bobQuote=await say(group,456,{text:'BOBOWNMARK I can approve',quote:{text:'GROUPQUOTEMARK approve',position:0},reply_to_message:fromNocheh(groupCardId,'GROUPCARDMARK approve the room?')});
+    // Nocheh's reply is learned as Nocheh's; its card is never queued, as the source step skips it.
+    for(const source of [groupReply,bobPinReply,bobPinCard,bobQuote])pins.push(...await services.memory.queueSource(source));
+    assert.ok(groupCard.id);
+    for(const source of [bobPinReply,bobPinCard]) {
+      const rows=await written(source);
+      assert.deepEqual(shape(rows),[[assistantPeer,'labelled_pointer','conversation']]);
+      assert.deepEqual(rows[0]!.value,honchoPointer('pinned_nocheh_other'));assert.doesNotMatch(rows[0]!.content,/GROUPREPLYMARK|GROUPCARDMARK|Bob/);
+    }
+    const bobQuoted=await written(bobQuote);
+    assert.ok(bobQuoted.length>0&&bobQuoted.every(row=>row.writer!==materialPeer&&row.writer!==assistantPeer&&!/GROUPQUOTEMARK|GROUPCARDMARK/.test(row.content)),
+      JSON.stringify(shape(bobQuoted)));
+    assert.ok(bobQuoted.some(row=>row.record==='labelled_source'&&row.value.source===honchoSource({part:'own'})&&row.content.includes('BOBOWNMARK')));
     // In a group, a member's forward stays on the member with its source; the owner's forward of someone else goes to the
     // forwards-and-files participant in that group's own session, and its evidence names no speaker.
     const memberForward=await say(group,456,{text:'MEMBERMARK the office closes early',forward_origin:{type:'channel',chat:{id:-1009,type:'channel',title:'News'},message_id:3,date:1}});

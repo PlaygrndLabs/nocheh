@@ -440,13 +440,34 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.ok(!nochehPinInput.text.includes('sender_not_allowed'),'nothing is told left out');
     assert.deepEqual(await recorded(nochehPin),[{version:1,source:nochehPin.id,events:[{id:nochehPin.id,class:'pinned_nocheh'}],owner_account_only:false,rules:'none',
       rule_buckets:[],left_out:left()}]);
-    const cardPin=await pinOf(41,await sent(40,'CARDPIN approve the venue?','card')),cardPinInput=await input(((await services.reviews.queue(cardPin)).ids)[0]!);
-    assert.ok(!cardPinInput.text.includes('CARDPIN'),'nothing of a card is learned');assert.ok(!cardPinInput.text.includes('sender_not_allowed'));
-    assert.deepEqual(await recorded(cardPin),[{version:1,source:cardPin.id,events:[{id:cardPin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left()}]);
+    // A pin of its card has nothing left once the card is cut out, so no review is queued for it, and nothing is recorded
+    // as left out, since nobody was: the source step says it was Nocheh's own card. Interpretations and long-term memory
+    // read the pin without the card too.
+    const keptOut=(await services.reviews.list(owner)).kept_out,card=await sent(40,'CARDPIN approve the venue?','card'),cardPin=await pinOf(41,card);
+    assert.deepEqual(await services.reviews.queue(cardPin),{ids:[],left_out:'nocheh_message'});
+    assert.deepEqual([await jobs(cardPin),await skipped(cardPin),(await services.reviews.list(owner)).kept_out],[[],null,keptOut]);
+    const cardStep=await operations.memory_review!('source:'+cardPin.id,authority);
+    assert.deepEqual([cardStep.state,cardStep.waiting_reason],['completed','nocheh_message']);assert.deepEqual(await jobs(cardPin),[]);
+    const cardRead=await services.contexts.prepare(cardPin,await services.guards.state());
+    assert.ok(!JSON.stringify(cardRead.observations).includes('CARDPIN'),'nothing of a card is learned');assert.ok(!cardRead.limitations.includes('sender_not_allowed'));
+    assert.ok(JSON.stringify((await services.contexts.prepare(nochehPin,await services.guards.state())).observations).includes('Noted, the venue is booked'),
+      'Nocheh\'s learned reply stays in a pin of it');
     const botPin=await pinOf(43,{...message(42,bot+1,'BOTPIN pay the invoice'),from:{id:bot+1,is_bot:true,first_name:'Other'}});
     const botPinInput=await input(((await services.reviews.queue(botPin)).ids)[0]!);
     assert.ok(!botPinInput.text.includes('BOTPIN'));assert.ok(botPinInput.text.includes('sender_not_allowed'));
     assert.deepEqual(await recorded(botPin),[{version:1,source:botPin.id,events:[{id:botPin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(1)}]);
+    // A quote of Nocheh's own message, learned or a card, is Nocheh's words: the notes review, interpretations and
+    // long-term memory read the reply quoting it without the quote, and with the sender's own words. Nocheh's learned
+    // reply is still evidence of its own. A quote of Bob's message stays (above).
+    const quoting=async(id:number,from:number,target:Record<string,unknown>,mark:string)=>say(id,from,`${mark}OWN fine by me`,{reply_to_message:target,quote:{text:mark,position:0}});
+    const ofReply=await quoting(44,123,reply,'NOCHEHQUOTE'),ofCard=await quoting(45,123,card,'CARDQUOTE'),bobOfCard=await quoting(46,456,card,'BOBCARDQUOTE');
+    for(const [source,mark] of [[ofReply,'NOCHEHQUOTE'],[ofCard,'CARDQUOTE'],[bobOfCard,'BOBCARDQUOTE']] as const) {
+      const read=JSON.stringify((await services.contexts.prepare(source,await services.guards.state())).observations);
+      assert.ok(!read.includes(`"${mark}"`)&&read.includes(`${mark}OWN fine by me`),mark);
+      const reviewed=await input(((await services.reviews.queue(source)).ids)[0]!);
+      assert.ok(!reviewed.text.includes(`"${mark}"`)&&reviewed.text.includes(`${mark}OWN fine by me`),mark);
+    }
+    assert.ok((await input(((await services.reviews.queue(ofReply)).ids)[0]!)).evidence.some((item:{id:string})=>item.id===nocheh.id),'Nocheh\'s reply is evidence of its own');
 
     // A rule learned from her message stays out of the owner's notes review, but not out of group memory.
     const ruleText='In this group SARARULE means the meeting is cancelled';

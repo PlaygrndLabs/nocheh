@@ -26,6 +26,10 @@ INTERNAL_KEYS = (
 )
 
 
+# The stores' memory steps (src/stores/note-sources.ts MemoryProblemKind) and the notice line each has of its own.
+STORE_NOTE_KINDS = {'notes': 'note_labels', 'memory_read': 'forwards_read'}
+
+
 def internal_keys(config):
     """Which internal key each service uses and whether it is set; never a value."""
     return [{'name': name, 'service': service, 'usage': usage, 'present': bool(config.get(name))}
@@ -116,15 +120,18 @@ def reader_problems(state, now=None):
 def note_problems(state, now=None, archive=None):
     """Today's notes whose source Hermes could not record or look up, and turns that could not read long-term memory
     in full (ADR-0257), with the steps that worked today. The stores count the same steps where Hermes can't see
-    them, labelling notes and recall's ask of the owner's forwards and files, in /v1/status's memory_problems."""
+    them, labelling notes and recall's ask of the owner's forwards and files, in /v1/status's memory_problems. Each
+    side keeps lines of its own (`note_labels` and `forwards_read` for the stores'), so a step that works on one side
+    never marks the other side's failure working again."""
     from tools.operations.provider import usage
     day=(now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')
-    rows=list(usage.note_rows(state,day) or [])
+    hermes=list(usage.note_rows(state,day) or [])
     stores=archive.get('memory_problems') if isinstance(archive,dict) else None
-    rows+=[row for row in stores if isinstance(row,dict) and row.get('day')==day and row.get('kind') in ('notes','memory_read')
-           and type(row.get('done')) is int and type(row.get('failed')) is int] if isinstance(stores,list) else []
+    stores=[row for row in stores if isinstance(row,dict) and row.get('day')==day and row.get('kind') in STORE_NOTE_KINDS
+            and type(row.get('done')) is int and type(row.get('failed')) is int] if isinstance(stores,list) else []
     found=[]
-    for kind,steps in (('notes',[row for row in rows if row['kind']!='memory_read']),('memory_read',[row for row in rows if row['kind']=='memory_read'])):
+    for kind,steps in (('notes',[row for row in hermes if row['kind']!='memory_read']),('memory_read',[row for row in hermes if row['kind']=='memory_read']),
+                       *((line,[row for row in stores if row['kind']==step]) for step,line in STORE_NOTE_KINDS.items())):
         failed=sum(row['failed'] for row in steps)
         if failed:found.append({'day':day,'kind':kind,'failed':failed,'ok':sum(row['done'] for row in steps)})
     return found

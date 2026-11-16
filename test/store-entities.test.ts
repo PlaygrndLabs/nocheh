@@ -187,6 +187,18 @@ test('people and projects keep stable identity, attributed evidence, connected r
     const own=new Map((await entities.inspect(owner,self!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
     assert.deepEqual(['quoting Nocheh','quoting a card'].map(predicate=>[own.get(predicate)?.attribution,own.get(predicate)?.speaker_entity_id??null]),
       [['direct',self!.id],['reported',self!.id]],'the owner\'s quote of Nocheh\'s learned message is the owner\'s own words; a quote of a card is passed on');
+    // The owner's pin of Nocheh's own learned message passes nothing on, so the owner's own typing beside it stays direct;
+    // a claim citing the pin itself is still never direct, since its words are Nocheh's.
+    const pin=(await archive.capture({version:1,key:`entities:${stamp}:pin:70`,origin:'live',kind:'telegram_update',bot_id:'fixture',scope:atlasGroup,source_id:'70',
+      revision:'1',occurred_at:null,text:null,payload:{update_id:Number(stamp.slice(-8))+870,message:{message_id:70,date:3,chat,from:{id:42,first_name:'Owner'},
+        pinned_message:{message_id:60,date:1,chat,from:bot,text:'Book the 9am train.'}}}})).source.reference;
+    const beside=await capture('71',42,'I keep my passport in the desk.'),besideContext=await entities.context(beside,[],'I keep my passport in the desk.');
+    assert.equal(besideContext.speaker?.id,self!.id);
+    assert.deepEqual((await entities.publishDiscoveries({...prepared,source:beside,entities:besideContext,
+      evidence:[beside,pin,learned].map(reference=>({reference,text:'',space:atlasGroup})),observations:[beside,pin].map(source=>({source,value:{},derivatives:[]}))},
+      {entity_suggestions:[],entity_claims:[ownClaim('typed beside a pin of Nocheh',beside),ownClaim('citing the pin of Nocheh',pin)]},`${stamp}:pinned-nocheh`)).rejected,[]);
+    const besidePin=new Map((await entities.inspect(owner,self!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
+    assert.deepEqual(['typed beside a pin of Nocheh','citing the pin of Nocheh'].map(predicate=>besidePin.get(predicate)?.attribution),['direct','reported']);
     await assert.rejects(entities.inspect(privateReader,context.mentioned_projects[0]!.id),{code:'entity_not_found'});
     assert.equal((await entities.list(privateReader,{query:'Beacon'})).entities.length,0,'private entity names do not leak through search');
 

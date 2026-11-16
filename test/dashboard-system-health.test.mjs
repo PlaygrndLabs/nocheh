@@ -96,6 +96,40 @@ test('failed attempts at telling where notes came from and memory read in part a
   );
 });
 
+test('the stores\' label lookups and recall\'s ask of forwards and files are lines of their own', () => {
+  // Beside Hermes's own lines, so one side working never hides the other's failure.
+  const found = issues({
+    note_problems: [
+      {day: '2026-11-14', kind: 'notes', failed: 1, ok: 0},
+      {day: '2026-11-14', kind: 'note_labels', failed: 2, ok: 7},
+      {day: '2026-11-14', kind: 'forwards_read', failed: 1, ok: 0},
+    ],
+  });
+  assert.deepEqual(found, [
+    {
+      tone: 'warn',
+      text: 'Telling where notes came from failed 1 time today',
+      detail:
+        'Notes written while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not available”. The notes themselves are kept.',
+      link: '#memory?view=notes',
+      action: 'Notes',
+    },
+    {
+      tone: 'warn',
+      text: 'Looking up where notes came from failed 2 times today',
+      detail:
+        'Recall and the Notes page showed those notes as “source not available right now” or without their chat. The notes and what was recorded about them are kept.',
+      link: '#memory?view=notes',
+      action: 'Notes',
+    },
+    {
+      tone: 'warn',
+      text: 'Recall couldn’t ask your forwards and files 1 time today',
+      detail: 'Recall answered from the rest of your memory.',
+    },
+  ]);
+});
+
 test('a task that ended shows its recorded reason as a note, and only an open one is waiting for something', () => {
   // A memory step that completed without learning Nocheh's own card waits for nothing.
   assert.deepEqual(

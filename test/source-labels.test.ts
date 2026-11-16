@@ -298,4 +298,7 @@ test('Honcho records name their part in fixed words, with names that cannot clos
     text:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files'});
   // The owner's pin of Nocheh's own message is only a note that it was pinned: its text is Nocheh's, or a card's.
   assert.deepEqual(honchoPointer('pinned_nocheh'),{source:'Nocheh\'s note',text:'the owner pinned one of Nocheh\'s own messages; its text is not kept here'});
+  // So is anyone else's, naming no one.
+  assert.deepEqual(honchoPointer('pinned_nocheh_other'),{source:'Nocheh\'s note',
+    text:'someone in this chat pinned one of Nocheh\'s own messages; its text is not kept here'});
 });

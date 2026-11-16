@@ -34,6 +34,15 @@ def reading(failed, ok=0, reader='document', failure='temp_full', day=TODAY):
     return {**monitoring(), 'reader_problems': rows if failed else []}
 
 
+def noting(hermes=None, stores=None, day=TODAY):
+    """Monitoring's note lines, as note_problems gives them: Hermes's `notes` line and the stores' `note_labels` line,
+    each (failed, ok), and the stores' counts as /v1/status gives them; `stores` 'unread' is an archive not read."""
+    rows = [{'day': day, 'kind': kind, 'failed': found[0], 'ok': found[1]}
+            for kind, found in (('notes', hermes), ('note_labels', None if stores == 'unread' else stores)) if found and found[0]]
+    archive = {'unavailable': True} if stores == 'unread' else {'memory_problems': [{'day': day, 'kind': 'notes', 'done': stores[1], 'failed': stores[0]}] if stores else []}
+    return {**monitoring(), 'note_problems': rows, 'archive': archive}
+
+
 def refusals(failed, refused, hidden=0):
     return [{'day': TODAY, 'part': 'guard', 'label': 'Secret check', 'provider': 'anthropic', 'model': 'synthetic-model',
              'failed': failed, 'refused': refused, 'hidden': hidden}]
@@ -446,6 +455,29 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 120, {**monitoring(), 'reader_problems': {'unavailable': True}})
         self.check(NOW + 3800, reading(1, reader='image'))
         self.assertEqual((len(self.sent), self.edits), (1, []), 'counts that could not be read clear nothing and are not news again')
+
+    def test_hermes_and_the_stores_each_keep_their_own_note_line(self):
+        hermes = ('Memory labels: telling where notes came from failed 1 time today. Notes written while it failed show '
+                  '“Source not recorded” or a less exact source, and replies may have seen “source not available”. '
+                  'The notes themselves are kept.')
+        stores = ('Memory labels: looking up where notes came from failed 2 times today. Recall and the Notes page showed '
+                  'those notes as “source not available right now” or without their chat. The notes and what was recorded '
+                  'about them are kept.')
+        self.check(NOW, noting(hermes=(1, 0), stores=(2, 0)))
+        self.assertEqual(self.sent[-1]['problems'], [hermes, stores])
+        # The stores' Notes-page poll works while every Hermes record still fails: only the stores' line is working again.
+        self.check(NOW + 120, noting(hermes=(1, 0), stores=(2, 1)))
+        self.assertEqual(self.edits[-1]['resolved'], [None, 'Working again since 12:02 UTC'])
+        # An archive that could not be read neither clears nor reopens the stores' line, and is no news when read again.
+        self.check(NOW + 240, noting(hermes=(1, 0), stores='unread'))
+        self.assertEqual(len(self.edits), 1)
+        self.check(NOW + 3900, noting(hermes=(1, 0), stores=(2, 1)))
+        self.assertEqual((len(self.sent), len(self.edits)), (1, 1))
+        # Hermes works again on its own step, and a new stores failure is news of its own.
+        self.check(NOW + 4020, noting(hermes=(1, 1), stores=(2, 1)))
+        self.assertEqual(self.edits[-1]['resolved'], ['Working again since 13:07 UTC', 'Working again since 12:02 UTC'])
+        self.check(NOW + 4140, noting(hermes=(1, 1), stores=(3, 1)))
+        self.assertEqual(self.sent[-1]['problems'], [stores.replace('2 times', '3 times')])
 
 
 if __name__ == '__main__':

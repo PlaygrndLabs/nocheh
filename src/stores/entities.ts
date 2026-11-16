@@ -443,7 +443,8 @@ export class EntityRepository {
    * How a direct claim reads once code has checked what it cites (ADR-0257), from the originals and never from the model:
    * direct only when the speaker typed every message it cites and sent no forward, file or quote in the batch (the
    * owner's quote of Nocheh's own learned message counts as typed); inferred when it cites anyone else's message;
-   * otherwise reported by the speaker, as something the speaker passed on.
+   * otherwise reported by the speaker, as something the speaker passed on. The owner's pin of Nocheh's own learned
+   * message passes nothing on, since Nocheh's message is learned as Nocheh's, but a claim citing it is never direct.
    */
   private async spoken(context:PreparedLearningContext):Promise<(cited:readonly SourceReference[])=>'direct'|'reported'|'inferred'> {
     const batch=context.observations.map(item=>item.source.id),ids=[...new Set([context.source.id,...batch,...context.evidence.map(item=>item.reference.id)])];
@@ -452,7 +453,8 @@ export class EntityRepository {
     // The speaker is who the archive proved wrote the source, as the trusted speaker is; a message with no single author is no one's.
     const author=new Map<string,string|null>(authors.rows.map(row=>[String(row.event_id),row.targets.length===1?String(row.targets[0]):null]));
     const speaker=author.get(context.source.id)??null,theirs=(id:string)=>speaker!==null&&author.get(id)===speaker;
-    const passedOn=batch.some(id=>theirs(id)&&!typed(classes.get(id)));
+    const nochehOwn=(id:string)=>['pinned_nocheh','quote_nocheh'].includes(classes.get(id)?.class??'');
+    const passedOn=batch.some(id=>theirs(id)&&!typed(classes.get(id))&&!nochehOwn(id));
     return cited=>!passedOn&&cited.every(ref=>theirs(ref.id)&&typed(classes.get(ref.id)))?'direct':cited.some(ref=>!theirs(ref.id))?'inferred':'reported';
   }
   async publishDiscoveries(context:PreparedLearningContext,input:unknown,operation:string) {
