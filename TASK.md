@@ -281,13 +281,19 @@ becomes your private memory"). One pull request of several commits
   as the sender's words without it, in learning too, where the owner's quote of a learned one
   stays direct; a pin of any of Nocheh's own messages, by anyone, an anonymous admin included,
   leaves only a pointer in the chat where it was pinned, and nothing learned reads a pinned card.
-  A bot's message the archive does not hold as Nocheh's learned one (its delivery not archived
-  yet, another bot's or an inline bot's) is cut from a pin or quote the same way, also from a
-  quote of a reply in another chat or inside a pinned message, and its pin's pointer names only
-  a bot; a card the owner replies to stays context of the reply (ADR-0256). In learning the
-  owner's pin of Nocheh's learned message, and the owner's pin or quote of a card or of such a
-  bot's message, passes nothing on, so the owner's claims beside it can stay direct; a claim
-  citing the pin or quote never is. A pin of only a card asks no interpretation either. Owner
+  Nocheh's own account's message the archive does not hold as Nocheh's learned one (its
+  delivery not archived yet, or a forward of Nocheh's message), told by an equality check with
+  the bot the update came to (`events.bot_id`, `isBotAccount`), is cut from a pin or quote the
+  same way, also from a quote of a reply in another chat or inside a pinned message, and its
+  pin leaves the same pointer. Only Nocheh's own words are cut: another bot's message is
+  learned labelled as someone else's (the owner's pin of it kept with the forwards and files),
+  and a message sent through an inline bot, which its sender wrote, is labelled as sent through
+  an inline bot. The owner's quote of their own forward quotes whoever wrote it, never the
+  owner's own words. A card the owner replies to stays context of the reply (ADR-0256). In
+  learning the owner's pin of Nocheh's learned message, and the owner's pin or quote of a card
+  or of Nocheh's message not archived yet, passes nothing on, so the owner's claims beside it
+  can stay direct; a claim citing the pin or quote never is. A pin of only a card, or of only
+  Nocheh's message not archived yet, asks no interpretation or notes review either. Owner
   turns read the forwards block apart from the owner's, and
   recall asks it; when that ask fails, recall keeps the other answers and says so, and
   answers stay whole under their headers within 20,000 characters. A claim resting on a
@@ -338,7 +344,13 @@ becomes your private memory"). One pull request of several commits
   stores' notice line naming replies): the build; the unit tests (the same 4 fail); the dashboard
   tests and format check; the store files that read pins and quotes (reviews, long-term memory,
   entities, learning, note sources, relationships, retrieval, actions, workflows); the notice
-  Python tests and every test/test_*.py. Pending: the whole store suite after those fixes; the
+  Python tests and every test/test_*.py. After the fifth review's fixes (only Nocheh's own
+  account's words cut, told by `events.bot_id`, so another bot's and an inline bot's text is
+  learned again as someone else's; the owner's quote of their own forward never the owner's
+  words; a pin of only Nocheh's message not archived yet neither reviewed nor interpreted): the
+  build; the unit tests (the same 4 fail); the dashboard tests and format check; the store files
+  they touch (note sources, reviews, long-term memory, entities, learning), each new check also
+  run without its fix and failing. Pending: the whole store suite after those fixes; the
   cloud tester's new and affected scenarios, with the changed `own_file_stays_recallable`
   checks and review waits; the private names scan; a live look at a
   labelled note, a forward and a skipped card on the owner's install after merge. Open owner
@@ -350,7 +362,10 @@ becomes your private memory"). One pull request of several commits
   the messages it cites; an earlier read a turn restates in its own words is not counted;
   Members step 4 must make `canLearn` check the chat is served before the owner's yes; a pin or
   quote handled before Nocheh's own message is archived, or after its capture failed, is labelled
-  as someone else's (it fails closed), and its words, a bot's, are cut from everything learned; a
+  as someone else's (it fails closed), and its words, Nocheh's own account's, are cut from
+  everything learned, except where the stored bot is not an account (an import), where it is
+  learned as someone else's; a forward of Nocheh's message sent on its own is learned as a
+  forward from a person shown as Nocheh, someone else's, card or not; a
   quote inside a pinned message the archive does not hold, of a message in the same chat, stays
   as someone else's quote; a quote of Nocheh's message is cut whole, so the notes review and
   interpretations no longer see which part was quoted; Hermes's own notes line adds up its own

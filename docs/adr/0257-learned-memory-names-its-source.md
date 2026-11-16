@@ -86,25 +86,38 @@ a recalled note names its source beside its chat).
   reviewed at all: nothing is recorded as kept out, its waiting reviews are
   withdrawn and its source step completes with `nocheh_message`; nor is it
   interpreted, and its long-term memory step, which still writes the pointer,
-  completes with `nocheh_message` too. Another bot's
-  message is cut and counted. A
-  reaction left with no target once one was dropped is skipped as
-  `target_not_allowed`, so no run is spent on a bare emoji.
+  completes with `nocheh_message` too. The same holds for a pin of Nocheh's own
+  account's message the archive does not hold as Nocheh's (see below). Another
+  bot's message is someone else's, and as a sender not allowed there it is cut
+  out of the pin and counted, in the notes review only. A reaction left with no
+  target once one was dropped is skipped as `target_not_allowed`, so no run is
+  spent on a bare emoji.
 - Only the notes review applies these filters. Group replies, Honcho,
   interpretations, search and recall still take what a person not allowed sent,
   so that person still counts for group replies and group memory. What is
-  learned (the notes review, Honcho and interpretations) cuts more, whoever sent
-  it: a pin loses Nocheh's card, notice or reminder, and any bot's message the
-  archive does not hold as Nocheh's learned one (Nocheh's own whose delivery is
-  not archived yet or failed to be, another bot's, or one sent through an
-  inline bot), read from Telegram's `from.is_bot` and `via_bot`; a quote of
-  Nocheh's own message or of a bot's, a reply in another chat included, is left
-  out of the message quoting it, and so is a quote inside the message a pin
-  carries (`NoteSourceRepository.carried`). A bot is never someone allowed, so
-  no one's words are lost. Group replies, search and recall learn nothing and
-  are unchanged, and a card the owner replies to stays whole as related context
-  of the reply in the notes review and interpretations (ADR-0256): only Honcho
-  never writes it.
+  learned (the notes review, Honcho and interpretations) cuts only Nocheh's own
+  words, whoever sent the message carrying them: a pin loses Nocheh's card,
+  notice or reminder, and Nocheh's own account's message the archive does not
+  hold as Nocheh's learned one (its delivery not archived yet or failed to be,
+  or a forward of Nocheh's message, which cannot tell a card from a learned
+  reply); a quote of Nocheh's own words, of a forward of them and of a reply in
+  another chat included, is left out of the message quoting it, and so is a
+  quote inside the message a pin carries (`NoteSourceRepository.carried`).
+  Nocheh's own account is told by equality alone: the carried message's
+  `from.id`, or its forward origin's `sender_user.id`, against the bot account
+  the archive stored with the update (`events.bot_id`, the bot token's own
+  account), in `isBotAccount` in `src/chats-telegram.ts`, so nothing else reads
+  an id's shape. When that stored bot is not an account, as for an import,
+  these fields tell nothing and the labels stay as they are, someone else's.
+  Everything else is still learned, labelled as someone else's: another bot's
+  message (a pin of it by the owner is kept with the owner's forwards and
+  files, a quote of it is someone else's quote), and a message sent through an
+  inline bot (`via_bot`), which its sender wrote, labelled as sent through an
+  inline bot. Group replies, search and recall learn nothing and are unchanged,
+  and a card the owner replies to stays whole as related context of the reply
+  in the notes review and interpretations (ADR-0256): only Honcho never writes
+  it. A reply that quotes nothing carries none of its target's words into what
+  is learned.
 - Memory › Assistant notes says how many messages were kept out this generation
   (`kept_out` on the reviews list). Long-term memory and learning still take
   such a message, so in System › Background work its Memory notes step shows as
@@ -126,7 +139,13 @@ a recalled note names its source beside its chat).
   no post in a chat's name, no quote of someone else, no pin of someone else's
   message and no file or audio text. A pin has no words of its own and carries
   those of the message it pinned: a pinned forward is a forward, someone else's
-  message is `pinned`, and only the sender's own message stays theirs.
+  message is `pinned`, and only the sender's own message stays theirs. A quote
+  is the sender's own only when the message it answers is theirs and is not a
+  forward of someone else's (`forwardFacts`, an inline bot's message included),
+  as a pin's message is read: the owner's quote of their own forward quotes
+  whoever wrote it, so it is never the owner's typing, class or bucket. A reply
+  in another chat names only who first sent it, so it is the sender's own when
+  Telegram names the sender.
 - `eventClass` gives one fixed token per message, such as `owner_message`,
   `person_message`, `forward_hidden_by_owner`, `file_by_person`, `pinned`,
   `nocheh_job_report`, `nocheh_about_forward` or `unknown`, in five groups:
@@ -267,9 +286,12 @@ a recalled note names its source beside its chat).
   is read before the post's class), leaves only a fixed pointer on the
   assistant peer, in the chat where it was pinned, private or group, saying that
   the owner, or someone in that chat, pinned one of Nocheh's messages. A pin of
-  a bot's message the archive does not hold as Nocheh's leaves a pointer that
-  names only a bot (`pinned_bot`), and a quote of one is left out as a quote of
-  Nocheh's is. Nocheh's reply about a forward goes to the forwards session.
+  Nocheh's own account's message the archive does not hold as Nocheh's (not
+  archived yet, or a forward of one) leaves the same pointer, and a quote of one
+  is left out as a quote of Nocheh's is. Another bot's message is someone
+  else's: the owner's pin of it is kept as a forward is, a member's stays on the
+  member, and a quote of it goes as anyone else's quote. Nocheh's reply about a
+  forward goes to the forwards session.
 - In a group, a member's message, forward or pin stays on the member's peer,
   except a pin of Nocheh's own message, which leaves only the pointer. The
   owner's forward, file text,
@@ -301,15 +323,17 @@ a recalled note names its source beside its chat).
   words; the owner's pin of one (`pinned_nocheh`) is not, so a claim citing it
   is never direct, but neither passes anything on, so the owner's other claims
   beside them can stay direct. Nor does a pin or quote whose words were cut from
-  what is learned: of Nocheh's card, notice or reminder, or of a bot's message
-  the archive does not hold as Nocheh's; a claim citing one is never direct.
+  what is learned: of Nocheh's card, notice or reminder, or of Nocheh's own
+  account's message the archive does not hold as Nocheh's; a claim citing one is
+  never direct. Another bot's message is someone else's, passed on.
 - A source already written in the earlier form is planned in that form again
   (the `record_kind` format guard), so its ids match and nothing goes stale.
   This change starts no Honcho rebuild, re-learn or new workspace of its own:
   only newly learned messages take the new routing, and a message already
   written is not written again unless something requeues it (an edit, a
-  correction or a rebuild). Then one whose text is now cut (a pinned card or
-  bot's message, a quote of Nocheh's or a bot's message) is written anew and its
+  correction or a rebuild). Then one whose text is now cut or kept differently
+  (a pinned card or Nocheh's message not archived yet, a quote of Nocheh's
+  words, another bot's pinned or quoted message) is written anew and its
   session rebuilt, as for any source whose text changed. Writes a rebuild
   retired count too, so a message requeued after a rebuild keeps its earlier
   form; a fresh start's new workspace has none and uses today's form. An index
@@ -475,10 +499,16 @@ a recalled note names its source beside its chat).
   - No test covers Hermes counting `forwards_unavailable` yet.
   - A pin or quote handled before Nocheh's own message is archived, or after
     its capture failed, is labelled as a pin or quote of someone else's message
-    (it fails closed). Its words are a bot's, so they are cut from the notes
-    review, interpretations and long-term memory, which keeps only a note that
-    a bot's message was pinned; Nocheh's message is learned as its own source
-    once archived.
+    (it fails closed). Its words come from Nocheh's own account, the bot the
+    update came to, so they are cut from the notes review, interpretations and
+    long-term memory, which keeps only a note that one of Nocheh's messages was
+    pinned, and a pin of only that is neither reviewed nor interpreted;
+    Nocheh's message is learned as its own source once archived. Where the
+    stored bot is not an account (an import), nothing is cut by these fields,
+    and the pin or quote is learned as someone else's.
+  - A forward of Nocheh's message, sent on its own rather than pinned or
+    quoted, is learned as a forward from a person shown as Nocheh: someone
+    else's, never the owner's words, but its text is kept, card or not.
   - A quote inside a pinned message the archive does not hold, of a message in
     the same chat, can't be traced (Telegram's pinned message carries no reply),
     so it stays as a quote of someone else's message.

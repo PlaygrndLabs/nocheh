@@ -113,9 +113,16 @@ message, a forward or a file make the note `person`, `forward`, `file` or
 Nocheh's own learned messages, alone or with the owner's own, leaves them out,
 and the owner's quote or pin of a message Nocheh learned counts as Nocheh's.
 A pin or quote of Nocheh's message that is not archived yet, or whose capture
-failed, counts as someone else's (it fails closed), and its words, a bot's, are
-cut from everything learned. The evidence instruction says a `nocheh` note is
-not the owner's own words either. What a turn read comes from its own session:
+failed, or of a forward of one, counts as someone else's (it fails closed), and
+its words, from Nocheh's own account, are cut from everything learned. Code tells
+Nocheh's own account only by comparing the sender's ID with the bot account the
+archive stored with the update (`events.bot_id`); when that is not an account,
+nothing is cut by it. Only Nocheh's own words are cut: another bot's message is
+learned as someone else's, and a message sent through an inline bot, which its
+sender wrote, as sent through an inline bot. The owner's quote of their own
+forward quotes whoever wrote it, so it is never `owner`. The evidence
+instruction says a `nocheh` note is not the owner's own words either. What a
+turn read comes from its own session:
 a search by meaning counts as reading other chats, an earlier tool result or
 another person's group message counts only when the note copies a run of 32
 characters or a distinctive token from it, and a forward of the sender's own

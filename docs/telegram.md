@@ -226,10 +226,16 @@ Nocheh's, and a card the owner replies to stays context of that reply
 ([ADR-0256](adr/0256-nochehs-own-messages-carry-a-send-class.md)). A quote of a
 card is labelled as a quote of someone else's message, without its words. Every
 review and interpretation takes a pinned card out of the pin, and a pin of a
-card with nothing else in it is neither reviewed nor interpreted. A bot's
-message the archive does not hold as Nocheh's, such as Nocheh's own before its
-delivery is archived, is cut from a pin or quote the same way, and the note in
-long-term memory then says only that a bot's message was pinned
+card with nothing else in it is neither reviewed nor interpreted. A message
+from Nocheh's own account that the archive does not hold as Nocheh's, such as
+Nocheh's own before its delivery is archived, or someone's forward of a
+Nocheh message, is cut from a pin or quote the same way, and leaves the same
+note. Nocheh tells its own account only by comparing the sender's ID with the
+bot the update came to. Only Nocheh's own words are cut: another bot's message
+that someone pins or quotes is learned as someone else's, and a message sent
+through an inline bot, which its sender wrote, is labelled as sent through an
+inline bot. The owner's quote of their own forward is a quote of whoever wrote
+it, never the owner's words
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app
