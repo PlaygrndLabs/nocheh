@@ -29,8 +29,9 @@ export type ChatAddChoice='0'|'1'|'2'|'x'|'o';
 export const chatAddData=(choice:ChatAddChoice,event:string)=>'ng'+choice+event.slice(0,32);
 /** The wait before a call that did not go is tried again, by how many tries failed before: 1, 2, 4… minutes, at most an hour. */
 export const retryMinutes=(attempts:number)=>Math.min(2**Math.max(0,attempts),60);
-/** Rows claimed at once, how long a claim holds, how many tries a notice gets, and the caps on notes to the owner in 24 hours:
- *  one per group, ten in all (a stranger making new groups cannot flood the owner). */
+/** Rows claimed at once, how long a claim holds, how many tries a notice gets, and the caps on notes about leaving a group
+ *  in 24 hours: one per group, ten in all (a stranger making new groups cannot flood the owner). A removal's line is
+ *  outside them. */
 const BATCH=20,LEASE="interval '5 minutes'",NOTICE_TRIES=10,GROUP_NOTES=1,ALL_NOTES=10;
 /** How many projects a card offers to move the group to. */
 const OFFERED=3;
@@ -197,20 +198,23 @@ export class ChatAdds {
     return {group,text:units(fillLine(lines.card,{group,project:project===null?lines.unnamed_project:quotedName(project)}),3800)};
   }
 
-  /** Nocheh was removed from a group it was on in: one line to the owner, under the cap on all notes. */
+  /** Nocheh was removed from a group it was on in: one line to the owner, outside the note caps. Only a group the owner
+   *  had on gets one, so these cannot flood the owner, and strangers' adds cannot use up a cap to hide one. */
   private async tell(row:ChatAddRow):Promise<void> {
     if(!row.outcome)await this.keep(row,{outcome:'told'});
     const {lines,words}=await this.lines(),title=(await this.chat(row.chat_id))?.title;
     await this.note(row,'chat-add-tell:',fillLine(lines.removed,{group:groupName(words,row.chat_id,title)}));
   }
 
-  /** A note to the owner, unless a cap is reached: one about leaving a group per group, and ten notes in all, in 24 hours.
-   *  No owner chat, no note. */
+  /** A note to the owner. One about leaving a group goes unless a cap is reached, counting only such notes sent: one per
+   *  group, and ten in all, in 24 hours. A removal's line always goes, once. No owner chat, no note. */
   private async note(row:ChatAddRow,kind:string,text:string):Promise<void> {
     if(!this.owner()){await this.finish(row,{});return;}
-    const sent=(await this.control.query(`SELECT count(*) FILTER (WHERE chat_id=$1 AND action='leave')::int AS here,count(*)::int AS everywhere
-      FROM chat_state_events WHERE notice='sent' AND action IN ('leave','tell') AND event_id<>$2 AND updated_at>now()-interval '24 hours'`,[row.chat_id,row.event_id])).rows[0];
-    if(row.action==='leave'&&sent.here>=GROUP_NOTES||sent.everywhere>=ALL_NOTES){await this.finish(row,{notice:'capped'});return;}
+    if(row.action==='leave') {
+      const sent=(await this.control.query(`SELECT count(*) FILTER (WHERE chat_id=$1)::int AS here,count(*)::int AS everywhere
+        FROM chat_state_events WHERE notice='sent' AND action='leave' AND event_id<>$2 AND updated_at>now()-interval '24 hours'`,[row.chat_id,row.event_id])).rows[0];
+      if(sent.here>=GROUP_NOTES||sent.everywhere>=ALL_NOTES){await this.finish(row,{notice:'capped'});return;}
+    }
     if(await this.send(digest(kind+row.event_id),units(text,3800)))await this.finish(row,{notice:'sent'});
     else await this.later(row,true);
   }
@@ -239,23 +243,26 @@ export class ChatAdds {
    * their private chat: move the group to an offered project or out of projects, in one owner command that also archives
    * the card's own project once no group is in it, or turn Nocheh off there. The card then shows the answer under its text
    * and loses its buttons. Returns the answer to the press.
+   * Each press is its own owner command, named by `press`, the press's own archived event: the same press tried again
+   * gets its receipt, and a later press runs again on the group as it is now, since a card can keep its buttons (a send
+   * whose answer was lost, or an edit that failed).
    */
-  async press(choice:ChatAddChoice,event:string):Promise<string> {
+  async press(choice:ChatAddChoice,event:string,press:string):Promise<string> {
     const {lines,words}=await this.lines();
     const row=(await this.control.query(`SELECT * FROM chat_state_events WHERE left(event_id,32)=$1 AND action='card' AND outcome='carded' AND project_id IS NOT NULL`,
       [event])).rows[0] as ChatAddRow|undefined;
     if(!row)return lines.changed;
     const {group,text}=await this.cardText(row,lines,words);
-    let reply:string;
+    const operation='chat-card:'+press;let reply:string;
     try {
       if(choice==='o') {
-        await this.chats.setState(asOwner,{chat_id:row.chat_id,state:'off',operation_id:`chat-card:${row.event_id}:o`});
+        await this.chats.setState(asOwner,{chat_id:row.chat_id,state:'off',operation_id:operation});
         reply=fillLine(lines.turned_off,{group});
       } else {
         const project=choice==='x'?null:row.offered[Number(choice)];
         if(project===undefined)return lines.changed;
         await currentChats();
-        await this.commands.run(asOwner,`chat-card:${row.event_id}:${choice}`,{kind:'chat_card',event_id:row.event_id,chat_id:row.chat_id,project_id:project},async db=>{
+        await this.commands.run(asOwner,operation,{kind:'chat_card',event_id:row.event_id,choice,chat_id:row.chat_id,project_id:project},async db=>{
           const own=(await db.query('SELECT revision FROM project_assignments WHERE space_id=$1',[row.chat_id])).rows[0];
           await writeAssignment(db,{space_id:row.chat_id,project_id:project,mode:project?'assigned':'none',expected_revision:Number(own?.revision??0)});
           // The card's own project, once no group is in it, is archived, so it does not linger in the owner's list.
