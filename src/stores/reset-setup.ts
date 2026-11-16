@@ -130,6 +130,15 @@ const order=(a:string,b:string)=>a<b?-1:a>b?1:0;
 export function sortedChats(value:{chats?:SnapshotChat[]|undefined;chat_ids?:SnapshotChatId[]|undefined}) {
   return {chats:[...value.chats??[]].sort((a,b)=>order(a.id,b.id)),chat_ids:[...value.chat_ids??[]].sort((a,b)=>order(a.app,b.app)||order(a.external_id,b.external_id))};
 }
+/**
+ * The chats as a restore writes them. A group still waiting to be left, and its topics, come back off: the reset does not
+ * carry its leave, so no add is on record, and a group seen with no add stays silent and Off (ADR-0253). Only for a
+ * snapshot's chats: a live store's are read as they are.
+ */
+export function restoredChats(value:{chats?:SnapshotChat[]|undefined;chat_ids?:SnapshotChatId[]|undefined}) {
+  const sorted=sortedChats(value);
+  return {...sorted,chats:sorted.chats.map(row=>row.state==='pending'?{...row,state:'off' as const}:row)};
+}
 
 /** Validate the content-free setup projection captured before erasure. */
 export function resetSetupSnapshot(input:unknown):SetupSnapshot {
@@ -236,7 +245,7 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     if(!same(current.memory_access_settings,defaultAccess)&&!same(current.memory_access_settings,configuration.memory_access_settings))throw Error('reset_setup_target_changed');
     for(const [name,rows] of Object.entries(current))if(name!=='memory_access_settings'&&(rows as unknown[]).length&&!same(rows,(configuration as any)[name]))throw Error('reset_setup_target_changed');
     // The chats come first, each with its own id and app ids, so every value below names the same chat (ADR-0252).
-    const existingChats=await chatRows(db),desiredChats=sortedChats(configuration);
+    const existingChats=await chatRows(db),desiredChats=restoredChats(configuration);
     if((existingChats.chats.length||existingChats.chat_ids.length)&&!same(existingChats,desiredChats))throw Error('reset_setup_target_changed');
     if(!existingChats.chats.length&&desiredChats.chats.length) {
       const connections=new Map<string,string>();
@@ -262,7 +271,7 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     for(const row of configuration.chat_tool_settings)await db.query('INSERT INTO chat_tool_settings(space_id,shell,browser,mcp,revision) VALUES($1,$2,$3,$4,1) ON CONFLICT DO NOTHING',
       [row.space_id,row.shell,row.browser,row.mcp]);
     const updated=await setupRows(db);for(const name of Object.keys(updated))if(!same(updated[name],(configuration as any)[name]))throw Error('reset_setup_target_changed');
-    if(!same(await chatRows(db),sortedChats(configuration)))throw Error('reset_setup_target_changed');
+    if(!same(await chatRows(db),desiredChats))throw Error('reset_setup_target_changed');
     await db.query('COMMIT');
   } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
   const archive=new ArchiveRepository(stores.archive),guards=new GuardRepository(stores,archive);
@@ -272,7 +281,7 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
   if(!same(restored.projects,configuration.projects)||!same(restored.project_assignments,configuration.project_assignments)||
     !same(restored.sharing_rules,configuration.sharing_rules)||!same(restored.memory_access_settings,configuration.memory_access_settings)||
     !same(restored.chat_tool_settings,configuration.chat_tool_settings)||!same(runtimeProfiles,configuration.runtime_profiles)||
-    !same(await chatRows(stores.control),sortedChats(configuration)))throw Error('reset_setup_verification_failed');
+    !same(await chatRows(stores.control),restoredChats(configuration)))throw Error('reset_setup_verification_failed');
   const binding=await guards.state();if(binding.generation!==generation||binding.mode!==configuration.guard_mode[0]!.mode)throw Error('reset_setup_verification_failed');
   return {reset_id:resetId,generation,binding,configuration_records:Object.values(configuration).reduce((count,rows)=>count+rows.length,0),
     projects:configuration.projects.length,assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,memory_access_settings:configuration.memory_access_settings.length,
