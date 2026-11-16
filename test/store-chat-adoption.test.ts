@@ -405,24 +405,30 @@ test('a fold never leaves a project naming no chat: once the card gave the new s
   }finally{await h.cleanup();await stores.close();}
 });
 
-test('when the two stay apart, the new supergroup takes the old group\'s Off, leave or could not leave, and its card never goes',fixture,async()=>{
+test('when the two stay apart, a new supergroup on only from the upgrade\'s echo takes the old group\'s Off, leave or could not leave, and a card that waits never goes; one its card said is on is never left',fixture,async()=>{
   const stores=await open(),ALICE=7841,policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'apart'),stage=await stageFor(stores,h.repository,()=>policy);
   try {
-    for(const [n,first,start,adder] of [[1,'old','off',ALICE],[2,'new','off',ALICE],[3,'old','pending',ALICE],[4,'new','pending',ALICE],
-      [5,'old','could_not_leave',ANONYMOUS]] as const) {
+    // How the new chat stands when the upgrade messages come: `waiting`, its card made its project and its notice did not go,
+    // so the row waits to send it again; or `sent`, the card told the owner Nocheh is on there. It took the upgrade's echo
+    // when waiting, or sent unless the old group is leaving: the owner's Off wins over a card that went, but Nocheh never
+    // leaves a group its card said it is on in.
+    const cases=[[1,'old','off',ALICE,'waiting'],[2,'new','off',ALICE,'waiting'],[3,'old','pending',ALICE,'waiting'],[4,'new','pending',ALICE,'waiting'],
+      [5,'old','could_not_leave',ANONYMOUS,'waiting'],[6,'new','pending',ALICE,'sent'],[7,'old','off',ALICE,'sent']] as const;
+    for(const [n,first,start,adder,stands] of cases) {
+      const echo=stands==='waiting'||stands==='sent'&&start!=='pending';
       const basic='-4'+String(h.base+n).slice(-9),next=h.group(n),old=chatIdFor('telegram',basic),fresh=chatIdFor('telegram',next);h.named.add(basic);
-      const label=JSON.stringify({n,first,start,adder});
+      const label=JSON.stringify({n,first,start,adder,stands});
       await begin(stores,h,stage,n,basic,start,adder);
       const before=await row(stores,old);
       // Telegram tells Nocheh it is in the new supergroup, from the owner who upgraded it, and the upgrade messages come
-      // late: the card made the new chat's project meanwhile, and its notice did not go, so the row waits to send it.
+      // late: the card made the new chat's project meanwhile.
       const add=await h.status(next,h.update(n*100+5),Number(OWNER),'left','member');
-      stage.answers.notice=()=>({state:'failed'});
+      if(stands!=='sent')stage.answers.notice=()=>({state:'failed'});
       try{await stage.settle([fresh]);}finally{stage.answers.notice=()=>({state:'done'});}
       const card=async()=>(await stores.control.query('SELECT chat_id,state,outcome,notice,project_id FROM chat_state_events WHERE event_id=$1',[add.reference.id])).rows[0];
-      const made=await card();
-      assert.deepEqual([made.chat_id,made.state,made.outcome,chats().served(fresh)],[fresh,'waiting','carded',true],label);
+      const made=await card(),kept=await row(stores,fresh);
+      assert.deepEqual([made.chat_id,made.state,made.outcome,made.notice,chats().served(fresh)],[fresh,stands==='sent'?'done':'waiting','carded',stands==='sent'?'sent':'none',true],label);
       // A pending group's leave, tried under its basic group's id, which Telegram no longer knows.
       if(start==='pending') {
         stage.answers.leave=()=>({state:'not_started',error_code:'telegram_chat_migrated'});
@@ -433,28 +439,38 @@ test('when the two stay apart, the new supergroup takes the old group\'s Off, le
       const fromNew=()=>h.message(next,h.update(n*100+7),{migrate_from_chat_id:Number(basic)});
       if(first==='old'){await toOld();await fromNew();}else{await fromNew();await toOld();}
 
-      // The two stay apart, the project still names the new chat, and its card ends unsent.
+      // The two stay apart, and the project still names the new chat.
       assert.equal((await stores.control.query('SELECT chat_id FROM chat_ids WHERE external_id=$1',[next])).rows[0].chat_id,fresh,label);
       assert.equal((await stores.control.query('SELECT project_id FROM project_assignments WHERE space_id=$1',[fresh])).rows[0]?.project_id,made.project_id,label);
-      assert.deepEqual(await card(),{...made,state:'done'},label);
       const now=await row(stores,fresh),then=await row(stores,old);
-      assert.deepEqual([now.state_seq,chats().served(fresh)],[null,false],label+': a system change every process sees');
-      // The new chat takes the old one's state and who added Nocheh, so the dashboard says the same of both.
-      assert.deepEqual([now.state,now.add_event,now.added_by_role,now.added_by_account_id,now.added_at],
-        [start,before.add_event,before.added_by_role,before.added_by_account_id,before.added_at],label);
-      if(start==='pending') {
-        // The stranger's leave moves to the new chat, due soon; the old chat's id is gone, so it is left.
-        assert.deepEqual([now.added_by_role,now.added_by_account_id,then.state],['other',accountIdFor('telegram',String(ALICE)),'left'],label);
-        assert.deepEqual((await stores.control.query(`SELECT chat_id,state,due_at<=now()+interval '30 seconds' AS soon FROM chat_state_events WHERE event_id=$1`,
-          [before.add_event])).rows[0],{chat_id:fresh,state:'waiting',soon:true},label);
-      } else assert.deepEqual([then.state,then.add_event],[start,before.add_event],label);
-      if(start==='could_not_leave')assert.equal(now.added_by_role,'anonymous',label);
+      if(!echo) {
+        // The owner was told Nocheh is on in a group it would leave: the new chat stays on with its card as it was, and the
+        // old group stays as it was.
+        assert.deepEqual([now,await card(),then,chats().served(fresh)],[kept,made,before,true],label);
+      } else {
+        // A card that waits ends unsent, in a system change every process sees, and the new chat takes the old one's state
+        // and who added Nocheh, so the dashboard says the same of both.
+        assert.deepEqual(await card(),{...made,state:'done'},label);
+        assert.deepEqual([now.state_seq,chats().served(fresh)],[null,false],label+': a system change every process sees');
+        assert.deepEqual([now.state,now.add_event,now.added_by_role,now.added_by_account_id,now.added_at],
+          [start,before.add_event,before.added_by_role,before.added_by_account_id,before.added_at],label);
+        if(start==='pending') {
+          // The stranger's leave moves to the new chat, due soon; the old chat's id is gone, so it is left.
+          assert.deepEqual([now.added_by_role,now.added_by_account_id,then.state],['other',accountIdFor('telegram',String(ALICE)),'left'],label);
+          assert.deepEqual((await stores.control.query(`SELECT chat_id,state,due_at<=now()+interval '30 seconds' AS soon FROM chat_state_events WHERE event_id=$1`,
+            [before.add_event])).rows[0],{chat_id:fresh,state:'waiting',soon:true},label);
+        } else assert.deepEqual([then.state,then.add_event],[start,before.add_event],label);
+        if(start==='could_not_leave')assert.equal(now.added_by_role,'anonymous',label);
+      }
 
-      // The stage sends no card; a pending group is left under its new id.
-      const calls=await stage.settle([fresh,old]);
-      assert.deepEqual(calls.filter(call=>call.operation==='telegram.notice'),[],label);
-      assert.deepEqual(calls.filter(call=>call.operation==='telegram.leave').map(call=>[call.input.id,call.input.chat_id]),start==='pending'?[[before.add_event,next]]:[],label);
-      if(start==='pending')assert.deepEqual([(await row(stores,fresh)).state,(await row(stores,old)).state],['left','left'],label);
+      // The stage: a pending group is left under its new id, unless the card told the owner Nocheh is on there; then its
+      // own leave stays at the basic group's id. No card goes.
+      if(stands==='sent')stage.answers.leave=()=>({state:'not_started',error_code:'telegram_chat_migrated'});
+      const calls=await stage.settle([fresh,old]).finally(()=>{stage.answers.leave=()=>({state:'done'});});
+      assert.equal(calls.filter(call=>call.operation==='telegram.notice'&&call.input.id===digest('chat-add-card:'+add.reference.id)).length,0,label);
+      assert.deepEqual(calls.filter(call=>call.operation==='telegram.leave').map(call=>[call.input.id,call.input.chat_id]),
+        start!=='pending'?[]:stands==='sent'?[[before.add_event,basic]]:[[before.add_event,next]],label);
+      if(start==='pending')assert.deepEqual([(await row(stores,fresh)).state,(await row(stores,old)).state],stands==='sent'?['active','pending']:['left','left'],label);
     }
   }finally{await h.cleanup();await stores.close();}
 });

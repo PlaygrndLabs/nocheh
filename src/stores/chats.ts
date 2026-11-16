@@ -422,14 +422,17 @@ export class ChatRepository {
    * and not fresh (see adopt), took the upgrade's echo. Its card ends unsent if it still waits, and its project stays
    * with it, so the project still names a chat. The new chat takes the old one's state and who added Nocheh, so the
    * dashboard says the same of both. Pending: the old chat's leave moves to the new chat, whose id is the only one
-   * Telegram still knows, and the old chat is left. System changes, so an older update recorded late never undoes them.
-   * Returns whether it changed anything.
+   * Telegram still knows, and the old chat is left. Not once the card told the owner Nocheh is on in the new chat, as it
+   * usually has by then: Nocheh would leave it with no word. The new chat stays on, and the old chat's leave stays at
+   * the id Telegram no longer knows, so it never leaves the group. System changes, so an older update recorded late
+   * never undoes them. Returns whether it changed anything.
    */
   private async apart(db:Db,old:string,next:string,at:Date):Promise<boolean> {
     const row=(await db.query(`SELECT o.state AS old_state,o.add_event AS old_add,n.add_event AS next_add FROM chats o,chats n
       WHERE o.id=$1 AND n.id=$2 AND n.state='active' AND n.added_by_role='owner' AND n.state_seq IS NOT NULL
         AND n.added_at>$3::timestamptz-interval '10 minutes' AND n.added_at<$3::timestamptz+interval '10 minutes'
         AND o.state IN ('off','pending','could_not_leave') AND NOT ${fresh('o','n.added_at')}
+        AND NOT (o.state='pending' AND EXISTS(SELECT 1 FROM chat_state_events e WHERE e.event_id=n.add_event AND e.chat_id=n.id AND e.notice='sent'))
       FOR UPDATE OF o,n`,[old,next,at])).rows[0];
     if(!row)return false;
     await db.query(`UPDATE chat_state_events SET state='done',outcome=coalesce(outcome,'superseded'),updated_at=now()
