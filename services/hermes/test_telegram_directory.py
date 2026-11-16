@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from services.chats import Served
 from tools.operations.archive import telegram_directory as directory
 
 
@@ -11,7 +12,9 @@ class TelegramDirectoryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.state = Path(self.temp.name)
         self.values = {'TELEGRAM_BOT_TOKEN': 'fixture-secret', 'TELEGRAM_OWNER_ID': '42',
-                       'TELEGRAM_GROUP_IDS': '-10042', 'TELEGRAM_GROUP_ACCESS': '{"-10042":{"granted":["91"],"denied":["73"]}}'}
+                       'TELEGRAM_GROUP_ACCESS': '{"-10042":{"granted":["91"],"denied":["73"]}}'}
+        # The groups Nocheh serves come from the app (ADR-0253), never from a setting.
+        self.served = Served.of('42', groups=['-10042'])
         mocked = patch.object(directory, 'load', return_value=self.values)
         mocked.start(); self.addCleanup(mocked.stop)
         self.observed = {'groups': [{'id': '-10042', 'external': '-10042', 'telegram_ids': ['-10042'], 'name': 'Old name',
@@ -31,7 +34,7 @@ class TelegramDirectoryTests(unittest.TestCase):
             if method == 'getChatMember': return {'user': {'id': int(params['user_id']), 'first_name': 'Known member'}}
             self.fail('unexpected method')
 
-        result = directory.directory(self.state, self.observed, api)
+        result = directory.directory(self.state, self.observed, api, self.served)
         self.assertEqual(result['groups'][0]['name'], 'Aurora group')
         people = {person['id']: person for person in result['groups'][0]['users']}
         self.assertEqual(people['42']['name'], 'Owner')
@@ -41,12 +44,22 @@ class TelegramDirectoryTests(unittest.TestCase):
         self.assertNotIn('85', people)
         self.assertEqual([method for method, _ in calls], ['getChat', 'getChatAdministrators', 'getChatMember'])
 
-    def test_selected_group_remains_visible_when_telegram_is_unavailable(self):
+    def test_served_group_remains_visible_when_telegram_is_unavailable(self):
         def unavailable(*args, **kwargs):
             raise TimeoutError('private network detail')
 
-        result = directory.directory(self.state, {'groups': [], 'truncated': False}, unavailable)
+        result = directory.directory(self.state, {'groups': [], 'truncated': False}, unavailable, self.served)
         self.assertEqual(result, {'groups': [{'id': '-10042', 'external': '-10042', 'name': None, 'users': []}], 'truncated': False})
+
+    def test_telegram_is_asked_only_about_groups_nocheh_serves_now(self):
+        # A group Nocheh is off in, or a list the app cannot give, asks Telegram nothing; storage still names its groups.
+        def asked(*args, **kwargs):
+            self.fail('Telegram was asked about a group Nocheh does not serve')
+
+        for served in (Served.of('42'), None):
+            with self.subTest(served=served), patch('tools.operations.archive.archive.served_chats', side_effect=OSError('app down')):
+                result = directory.directory(self.state, self.observed, asked, served)
+                self.assertEqual([(group['id'], group['name']) for group in result['groups']], [('-10042', 'Old name')])
 
     def test_mismatched_chat_and_user_ids_cannot_label_saved_identities(self):
         def api(token, method, **params):
@@ -54,7 +67,7 @@ class TelegramDirectoryTests(unittest.TestCase):
             if method == 'getChatAdministrators': return []
             return {'user': {'id': 999, 'first_name': 'Wrong user'}}
 
-        result = directory.directory(self.state, {'groups': [], 'truncated': False}, api)
+        result = directory.directory(self.state, {'groups': [], 'truncated': False}, api, self.served)
         self.assertEqual(result['groups'][0]['name'], None)
         self.assertEqual(result['groups'][0]['users'], [])
 
