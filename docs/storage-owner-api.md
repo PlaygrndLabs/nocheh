@@ -55,8 +55,14 @@ build or parse one; find a chat in GET `/v1/conversations`, whose `q` matches a
 chat's id, its name, its group's name and every Telegram ID it has had, current
 or old (a topic has its group's), and whose items carry `kind`, `parent_space`, `topic_key`,
 `app_ids` (each app id with `current` or `old`, so an upgraded group lists both),
-`is_forum`, `state` and `owner`. Only a group the chat directory knows, or one of
-its topics, joins a project or shares; any other id counts as a private chat.
+`is_forum`, `state` and `owner`. Optional `kind` (`private`, `group` or `topic`)
+and `state` (any chat state; a topic is in its group's) keep only matching
+chats. They apply with `q` before paging, so a page and its `next_cursor` hold
+only matches; a bad value is refused with `invalid_conversation_kind` or
+`invalid_conversation_state`. `/v1/owner/conversations` takes them too
+([ADR-0253](adr/0253-only-the-owner-adds-nocheh.md)). Only a group the chat
+directory knows, or one of its topics, joins a project or shares; any other id
+counts as a private chat.
 
 List cursors use `after`; histories use `before`. Learned filters use both
 `scope_kind=conversation|project` and `scope_id`. Sharing rules configure preparation;

@@ -152,7 +152,9 @@ Only the owner adds Nocheh to a group
 when its own status in a chat changes (`my_chat_member`), with who added or
 removed it. Nocheh acts only on a live update about a group's current Telegram
 id that is newer than the group's last change; history and imports change
-nothing.
+nothing. The first start of step 2b-2 marks where acting begins: adds and
+removals already in the archive then are kept in the record only, and never
+cause a leave, a line, a card or a change of state.
 
 - **Your add.** When you add Nocheh to a group from your own account, it is on
   there at once. About 30 s later your private chat gets one card. A group with
@@ -162,29 +164,41 @@ nothing.
   turn Nocheh off there (**Turn off**). Only your own press in your private chat acts; anyone
   else's press is answered "Only the owner can do this." After a press the card
   shows the answer and has no buttons. Move and No project archive the card's
-  project once no group is in it. A group that already has a project answer
-  keeps it and gets no card.
+  project once no group is in it. A card that kept its buttons, because the
+  edit failed, still works: each press acts again on the group as it is then.
+  A group that already has a project answer keeps it and gets no card.
 - **Anyone else's add.** A member, a stranger, another bot, an admin who
   remains anonymous or a channel: the group reads Leaving, Nocheh stays silent
   there, and about 30 s later it leaves. When the adder is a person you allowed
   in any group, you get one line naming them; when Telegram hid who added it,
   you get one line that says to turn off Remain anonymous and add Nocheh
-  yourself; a stranger's add sends nothing. Each add keeps a record with no
-  names or message text. When Telegram refuses the leave, the group reads
-  Couldn’t leave and Nocheh stays silent there; the line, when there is one,
-  says so. A leave Telegram does not answer is tried again after 1, 2, 4 and
-  up to 60 minutes, with no limit, and the group stays silent meanwhile.
-- **Caps.** You get at most one such line per group and ten lines in all
-  (these lines and removal lines) in 24 hours. A line over a cap is not sent.
-- **Adds that change nothing.** An add to a group that is on, and an add by
-  anyone but you to a group that is off within 10 minutes of Telegram upgrading
-  it to a supergroup, change nothing. A group Nocheh is already in that you
-  never turned on stays Off and silent; Nocheh never leaves it on its own.
+  yourself, and Chats says the same; a stranger's add sends nothing. Each add
+  keeps a record with no names or message text. When Telegram refuses the
+  leave, the group reads Couldn’t leave and Nocheh stays silent there; the
+  line, when there is one, says so. A leave Telegram does not answer is tried
+  again after 1, 2, 4 and up to 60 minutes, with no limit, and the group stays
+  silent meanwhile.
+- **Caps.** You get at most one such line per group and ten such lines in all
+  in 24 hours. A line over a cap is not sent.
+- **Adds that change nothing.** An add to a group that is on changes nothing. A
+  group Nocheh is already in that you never turned on stays Off and silent;
+  Nocheh never leaves it on its own.
 - **Removal.** When someone removes Nocheh from a group it was on in, you get
-  one line, and the group reads Removed. Nocheh leaving makes it Left.
-- **An upgrade.** When Telegram upgrades a group, the new supergroup's own add
-  can arrive before the upgrade messages. It then folds into the old chat when
-  only its own add served it, so the group keeps its state, project and people.
+  one line, and the group reads Removed. That line always goes, once, and does
+  not count toward the caps. Nocheh leaving makes the group Left.
+- **An upgrade.** An upgrade is never an add. Telegram reports Nocheh joining
+  the new supergroup, from whoever upgraded it. Within 10 minutes of the
+  upgrade, that join to a group that is Off, Leaving or Couldn’t leave is an
+  echo, even when it comes from you: the group keeps its state, and a group
+  that is leaving is left under its new ID. The new supergroup's own add can
+  also arrive before the upgrade messages. It then folds into the old chat when
+  only its own add served it and it has no project yet, so the group keeps its
+  state, project and people. Your add folded in turns on only a group Nocheh
+  was not in (Left, Removed or Imported history). Once the card made the new
+  chat's project, the two stay apart.
+- **A reset.** A data reset that keeps your setup brings back a group Nocheh
+  was still leaving, with its topics, as Off. Nocheh stays in it, silent, until
+  you turn it on or remove Nocheh in Telegram.
 
 Turn Nocheh on or off in a group in **Chats** ([dashboard](dashboard.md)); the
 switch applies at once. A group Nocheh left or was removed from has no switch:
@@ -197,16 +211,19 @@ short ID.
 
 `nocheh-telegram` leaves a group only when the app asks, through
 `/internal/telegram/leave`. It refuses the owner's chat, a positive ID and any
-chat that is on. Its `/health` shows what `getMe` says the bot may do:
-`can_join_groups`, `can_read_all_group_messages`, `supports_inline_queries` and
-`can_connect_to_business`.
+chat that is on. Right before it leaves, it reads the served list again and
+asks the app (`POST /internal/chats/leave`) whether the group is still waiting
+to be left from that add, so a group you turned on or off, or that was added
+again, meanwhile is not left. Its `/health` shows what `getMe` says the bot may
+do: `can_join_groups`, `can_read_all_group_messages`, `supports_inline_queries`
+and `can_connect_to_business`.
 
 ## Send records
 
 Every request `nocheh-telegram` sends to Telegram leaves one record: each reply
 chunk and retry, approved sends, approval cards and their edits, button answers,
 refusals, notices and their edits, working reactions, leaving a group (listed
-as "Left a group"), and the bot's own setup calls. A request Nocheh's own checks refused, or a reply or approved send held
+as "Leave a group"), and the bot's own setup calls. A request Nocheh's own checks refused, or a reply or approved send held
 back whole because Telegram asked the bot to wait, is recorded as not sent.
 "typing…" is never recorded, not even when it fails. Reads (`get…` calls and
 file downloads) are not recorded, and neither is a request the outbound journal
@@ -236,7 +253,10 @@ it shows on Health too ([ADR-0255](adr/0255-reminders-say-who-set-them.md)). A f
 minutes by a sent one with the same chat, method and dispatch key, such as a
 plain-text resend or a retry after a rate limit, shows as sent on a retry. It,
 an unchanged edit, an expired button answer and a reaction the chat does not
-allow are listed but never counted as problems. **Keep
+allow are listed but never counted as problems. So is a leave Telegram answers
+as gone (any 403, or "chat not found", "not a member" and the like): it reads
+"Nocheh was no longer in the chat", and it also clears an earlier failed or
+uncertain try of the same leave. A leave Telegram refuses stays a problem. **Keep
 delivery logs** in Settings › Privacy & data removes old records too. The
 dashboard's own mini app menu button call does not pass the bot yet, so it has
 no record ([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md)).

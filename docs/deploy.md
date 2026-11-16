@@ -35,6 +35,23 @@ After either apply, inspect health and the relevant read-only admin command
 from that installation. Record the revision and evidence in `TASK.md`; service
 health does not complete live release gates. See [ADR-0067](adr/0067-exact-revision-app-rollout.md).
 
+### Upgrade to step 2b-2
+
+Take a backup first ([ADR-0253](adr/0253-only-the-owner-adds-nocheh.md)).
+`nocheh-app` and `nocheh-telegram` must run the same revision: the bot asks the
+app (`POST /internal/chats/leave`) right before each leave, and a bot newer than
+the app gets no answer, so its leaves wait until both match. Use
+`./bin/nocheh up` or `update`, which rebuild what changed, the bot included;
+`deploy local` alone replaces only `nocheh-app`.
+
+Upgrading from 2b-1 is safe whether or not that build recorded each update once
+(the record-once fix, #222). The first start sets where Nocheh begins to act on
+adds and removals, and the `chat_records_ready` log line shows it as
+`adopt_after`. Adds and removals already in the archive then are kept in the
+record only: nothing is left, told or carded for them. After a reset the stores
+start empty, so the boundary is 0. A backup restore brings it back with the
+stores; a backup from before 2b-2 has none, and the next start sets it.
+
 ### Roll back to step 2b-1
 
 Take a backup before you deploy step 2b-2
@@ -64,6 +81,11 @@ the same groups are on. A group that was leaving, had left or could not leave
 keeps that state and stays silent, and 2b-1 does not leave it; someone else's
 add is not left either. The first start writes a new runtime configuration revision,
 which starts one guard epoch.
+
+Where Nocheh began to act on adds stays in the database through the rollback.
+Deploy 2b-1 from a revision with the record-once fix (#222). A 2b-1 build
+without it may leave updates it took in unrecorded, and when you deploy 2b-2
+again, Nocheh acts on their adds and removals: it may leave, tell or card them.
 
 See [service names, responsibilities, dashboards and workflow](services.md).
 Host services require Node 26.x; set `NOCHEH_NODE` when selecting a non-default executable.
@@ -247,7 +269,9 @@ shell exports. Keep values on one line; single quotes preserve `$` and `#`.
 `TELEGRAM_ENABLED` defaults to `false`. Configure `TELEGRAM_BOT_TOKEN` and
 `TELEGRAM_OWNER_ID` before enabling. `TELEGRAM_GROUP_IDS` is retired: the owner adds
 Nocheh to a group in Telegram and turns it on or off in Chats ([telegram](telegram.md#groups)).
-An old `TELEGRAM_GROUP_IDS` line in `.env` is ignored and not shown.
+An old `TELEGRAM_GROUP_IDS` line in `.env` is ignored and not shown. It never
+makes Settings ask for Apply after the upgrade, whether it is empty or lists
+groups.
 `NOCHEH_GUARD_MODE` is `on` (default) or `off`; legacy `auto` values convert to
 `on`. See [guarded-copy operations](guard.md).
 `NOCHEH_BOX_LIMIT` and the generated `NOCHEH_BOX_TOKEN` set up the sealed job box,

@@ -227,7 +227,8 @@ presses the tester injected, so approval cards are pressed like a phone would;
 it keeps the link an answer opens, as for **Answer privately**. Its `leaveChat`
 records the call and then reports the bot's own status change in a
 `my_chat_member` update, as Telegram does; a positive chat ID gets 400 and a chat
-the bot already left gets 403. Updates the fake sends on its own get IDs that are
+the bot already left gets 403, which the bot counts as left and records as
+`already_left`. Updates the fake sends on its own get IDs that are
 not multiples of ten, which the tester's own IDs are. `getUpdates` delivers only
 the update kinds the bot asks for. When Telegram connects, the owner adds Nocheh
 to the fixture's three groups and answers each card **No project**
@@ -271,7 +272,10 @@ admin; a member's second add the same day leaves with no second line; a leave
 Telegram refuses stays silent as Couldn’t leave; a removal from a group that is
 on tells the owner once; the owner's add is on at once, with one card whose
 buttons each work; and a group that is off is turned on and off through
-`/v1/chats/state`. Dashboard calls sign
+`/v1/chats/state`. Before an add that expects a line, the tester moves earlier
+sent leave notes about other groups out of the last 24 hours, so earlier runs on
+a kept fixture never fill the cap on all lines; the group's own notes stay, so
+its own cap still holds. Dashboard calls sign
 in through the preview relay like the browser
 ([client](../tools/acceptance/owner_dashboard.py)). The
 [page check](../tools/acceptance/dashboard_pages.mjs) runs in the
