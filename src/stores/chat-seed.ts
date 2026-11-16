@@ -316,7 +316,8 @@ const failure=(event:string,error:unknown)=>console.warn(JSON.stringify({event,c
 /**
  * The app's start for chat records (ADR-0252), before anything captures or runs: every chat already stored gets its
  * row (the seeder), the owner's private chat is the one active private chat (startOwnerChat; groups keep the state the
- * owner and Telegram gave them, ADR-0253), and this process loads its chat directory. A store that is not up yet is
+ * owner and Telegram gave them, ADR-0253), the first start sets where adoption begins (startAdoption: adds and removals
+ * in the archive by then are history), and this process loads its chat directory. A store that is not up yet is
  * tried again; after `attempts` the start fails, and the service restarts.
  * Then memberships are filled in from the archive in the background, in batches, until they reach the seeder's place.
  * Returns the function that stops that.
@@ -327,8 +328,8 @@ export async function startChatRecords(stores:{archive:pg.Pool;derived:pg.Pool;c
   for(let attempt=1;;attempt++) {
     try {
       const configured=policy(),started=Date.now();
-      const seeded=await new ChatSeeder(stores,configured).seed(),owner=await chats.startOwnerChat(configured);
-      console.log(JSON.stringify({event:'chat_records_ready',chats:seeded.chats,topics:seeded.topics,owner_chat_changes:owner,ms:Date.now()-started}));
+      const seeded=await new ChatSeeder(stores,configured).seed(),owner=await chats.startOwnerChat(configured),adoptAfter=await chats.startAdoption();
+      console.log(JSON.stringify({event:'chat_records_ready',chats:seeded.chats,topics:seeded.topics,owner_chat_changes:owner,adopt_after:adoptAfter,ms:Date.now()-started}));
       break;
     } catch(error) {
       failure('chat_records_start_failed',error);

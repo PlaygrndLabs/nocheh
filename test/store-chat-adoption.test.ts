@@ -30,10 +30,13 @@ async function open():Promise<StorePools> {
 function harness(stores:StorePools,policy:()=>AssistantPolicy,label:string) {
   const base=Date.now(),repository=new ChatRepository(stores,policy),archive=new ArchiveRepository(stores.archive);
   const coordinator=new CaptureCoordinator(archive,stores.control,undefined,repository);
-  let serial=0;
+  let serial=0,past=false;
   const envelope=(scope:string,payload:Record<string,unknown>):Envelope=>({version:1,key:label+':'+base+':'+(++serial),origin:'live',kind:'telegram_update',bot_id:BOT,
     scope,source_id:String(serial),revision:'1',occurred_at:null,text:null,payload} as Envelope);
-  const send=async(scope:string,payload:Record<string,unknown>)=>(await coordinator.capture(envelope(scope,payload))).source;
+  const send=async(scope:string,payload:Record<string,unknown>)=>past?(await archive.capture(envelope(scope,payload))).source
+    :(await coordinator.capture(envelope(scope,payload))).source;
+  /** Takes updates in as a build that never recorded them did: they reach the archive, and nothing records them. */
+  const unrecorded=async<T>(takeIn:()=>Promise<T>)=>{past=true;try{return await takeIn();}finally{past=false;}};
   /** A my_chat_member update: Nocheh's status in `group` went from `before` to `after`, changed by `from` (null: no sender). */
   const status=(group:string,update:number,from:number|null,before:string,after:string,type='supergroup')=>send(group,{update_id:update,
     my_chat_member:{chat:{id:Number(group),type,title:'Bakery '+group.slice(-3)},...from===null?{}:{from:{id:from,first_name:'Adder'}},date:1,
@@ -45,7 +48,7 @@ function harness(stores:StorePools,policy:()=>AssistantPolicy,label:string) {
   /** Turns this test's groups off again, so a later test's refresh never asks Telegram about them. */
   const cleanup=()=>stores.control.query(`UPDATE chats c SET state='off' FROM chat_ids i WHERE i.chat_id=c.id AND i.external_id=ANY($1::text[]) AND c.state='active'
     AND c.kind='group'`,[[...named]]).catch(()=>undefined);
-  return {base,repository,coordinator,archive,send,status,message,update,group,cleanup,named};
+  return {base,repository,coordinator,archive,send,unrecorded,status,message,update,group,cleanup,named};
 }
 const row=async(stores:StorePools,id:string)=>(await stores.control.query(`SELECT state,added_by_role,added_by_account_id,added_at,add_event,state_seq,state_bot,state_at
   FROM chats WHERE id=$1`,[id])).rows[0];
@@ -179,6 +182,47 @@ test('a bot-status update applies only when newer; a replay, an import, a privat
     await h.status(basic,h.update(15),ALICE,'member','kicked','group');
     assert.equal((await row(stores,chat)).state,'active');assert.equal((await events(stores,chat)).length,1);
   }finally{await h.cleanup();await stores.close();}
+});
+
+test('adds, removals and upgrades taken in before adoption began are history: recorded, never acted on',fixture,async()=>{
+  const stores=await open(),ALICE=7821,BOB=7822,policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
+  const h=harness(stores,()=>policy,'history');
+  try {
+    // A group on from the last 2b-1 start (no update ordered its state), a group seen with no add, and the two ids of an
+    // upgraded group that 2b-1 kept as two chats.
+    const on=h.group(1),seen=h.group(2),basic='-4'+String(h.base+3).slice(-9),next=h.group(3);h.named.add(basic);
+    const onId=chatIdFor('telegram',on),seenId=chatIdFor('telegram',seen),basicId=chatIdFor('telegram',basic),nextId=chatIdFor('telegram',next);
+    await h.message(on,h.update(1));await h.message(seen,h.update(2));await h.message(basic,h.update(3),{},'group');await h.message(next,h.update(4));
+    await stores.control.query(`UPDATE chats SET state='active' WHERE id=$1`,[onId]);
+    // Taken in by a build that never marked them recorded: Alice removed Nocheh and Bob added it back, the owner added it
+    // to the seen group, and Telegram upgraded the basic group.
+    const old=await h.unrecorded(async()=>[await h.status(on,h.update(5),ALICE,'member','kicked'),await h.status(on,h.update(6),BOB,'left','member'),
+      await h.status(seen,h.update(7),Number(OWNER),'left','member'),await h.message(basic,h.update(8),{migrate_to_chat_id:Number(next)},'group')]);
+    const boundary=await h.repository.startAdoption();
+    assert.ok(old.every(source=>Number(source.sequence)<=boundary),'the first start sets the boundary past the archive');
+    await h.message(seen,h.update(9));
+    assert.equal(await h.repository.startAdoption(),boundary,'a later start keeps it');
+
+    // The capture reconciliation's sweep records them now: their chats, names and memberships, and nothing else.
+    await stores.control.query('UPDATE capture_reconciliation SET after_sequence=$1 WHERE singleton',[String(Number(old[0]!.sequence)-1)]);
+    await h.coordinator.reconcile();
+    assert.equal(Number((await stores.control.query('SELECT count(*) FROM chat_recorded_events WHERE event_id=ANY($1::text[])',[old.map(source=>source.reference.id)])).rows[0].count),4);
+    assert.equal((await stores.control.query('SELECT 1 FROM chat_accounts WHERE id=$1',[accountIdFor('telegram',String(BOB))])).rowCount,1);
+    const saved=await row(stores,onId);
+    assert.deepEqual([saved.state,saved.state_seq,saved.state_at,saved.add_event],['active',null,null,null],'the group on stays on, with no update ordering it');
+    assert.equal((await row(stores,seenId)).state,'off');
+    assert.deepEqual([...await events(stores,onId),...await events(stores,seenId)],[],'no note, leave or card');
+    assert.equal((await stores.control.query('SELECT chat_id FROM chat_ids WHERE external_id=$1',[next])).rows[0].chat_id,nextId,'an old upgrade folds nothing');
+    assert.equal((await row(stores,basicId)).state,'off');
+
+    // Taken in after it, live: acted on as ever.
+    const removal=await h.status(on,h.update(10),ALICE,'member','kicked');
+    assert.equal((await row(stores,onId)).state,'removed');
+    assert.deepEqual((await events(stores,onId)).map(item=>[item.event_id,item.action]),[[removal.reference.id,'tell']]);
+    const add=await h.status(seen,h.update(11),Number(OWNER),'left','member');
+    assert.deepEqual([(await row(stores,seenId)).state,(await row(stores,seenId)).add_event],['active',add.reference.id]);
+    assert.deepEqual((await events(stores,seenId)).map(item=>[item.event_id,item.action]),[[add.reference.id,'card']]);
+  }finally{await stores.control.query('UPDATE chat_seed_state SET adopt_after=NULL WHERE singleton').catch(()=>undefined);await h.cleanup();await stores.close();}
 });
 
 test('an upgrade folds the new supergroup\'s own add into the old group, whichever upgrade message comes first, unless the owner served it otherwise',fixture,async()=>{

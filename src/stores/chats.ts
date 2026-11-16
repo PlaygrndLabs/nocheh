@@ -22,7 +22,8 @@ import {writeAssignment,writeProject} from './projects.js';
  *   updates show). seq, seq_bot and seq_at are the update that last set the title,
  *   closed or username (its update_id, the bot that took it in and when it was taken in), so an older update, or the
  *   capture replay, never undoes a newer one (see newerUpdate).
- * - chat_seed_state: how far the seeder (chat-seed.ts) and the membership backfill have read the archive.
+ * - chat_seed_state: how far the seeder (chat-seed.ts) and the membership backfill have read the archive, and where
+ *   adoption began (adopt_after, see startAdoption).
  * - chat_recorded_events: the archive originals whose chat records are written (see ChatRepository.capture).
  * Each is created only if missing, and nothing here rewrites a row.
  */
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS chat_seed_state (
  members_sequence bigint NOT NULL DEFAULT 0 CHECK(members_sequence>=0),
  seeded_at timestamptz
 );
+ALTER TABLE chat_seed_state ADD COLUMN IF NOT EXISTS adopt_after bigint CHECK(adopt_after IS NULL OR adopt_after>=0);
 INSERT INTO chat_seed_state(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS chat_recorded_events (
  event_id text PRIMARY KEY,
@@ -120,6 +122,14 @@ export async function namePrivateChats(db:Db,chat?:string):Promise<number> {
  */
 const newerState=(old:string,next:string)=>`(${old}.state_at IS NULL OR ${old}.state_seq IS NULL AND ${next}.state_at>${old}.state_at
   OR ${old}.state_seq IS NOT NULL AND ${newerUpdate(old,next,['state_seq','state_bot','state_at'])})`;
+/**
+ * Whether the archive original at `sequence` (its capture_sequence) came after adoption began (startAdoption). With no
+ * boundary (no app start has set one), every original is after it.
+ */
+async function adopting(db:Db,sequence:string):Promise<boolean> {
+  const row=(await db.query('SELECT adopt_after IS NULL OR adopt_after<$1::bigint AS after FROM chat_seed_state WHERE singleton',[sequence])).rows[0];
+  return row?.after!==false;
+}
 /** A state set by the owner or by Nocheh itself, never by an update: ordered by when it happened. */
 const systemChange=`state_seq=NULL,state_bot=NULL,state_at=now(),state_changed_at=now(),updated_at=now()`;
 
@@ -206,7 +216,7 @@ export class ChatRepository {
    * had, as the seeder gives one, so the derivatives and owner records imported with it name it (ADR-0252).
    */
   private async record(db:Db,source:CapturedSource,transport:'capture'|'import'):Promise<boolean> {
-    const event=(await this.stores.archive.query(`SELECT e.payload,e.received_at,e.bot_id,(SELECT o.metadata->'audience'->>'topic_id' FROM source_observations o
+    const event=(await this.stores.archive.query(`SELECT e.payload,e.received_at,e.bot_id,e.capture_sequence,(SELECT o.metadata->'audience'->>'topic_id' FROM source_observations o
       WHERE o.event_id=e.id AND o.metadata->'audience'->>'topic_state'='known' AND o.metadata->'audience'->>'chat_id'=e.scope LIMIT 1) AS topic
       FROM events e WHERE e.id=$1`,[source.reference.id])).rows[0];
     if(!event)return false;
@@ -215,9 +225,12 @@ export class ChatRepository {
     const facts=telegramUpdateFacts(payload,source.scope,bot),live=source.origin==='live'&&source.kind==='telegram_update';
     const order:UpdateOrder|null=live&&facts.update_id!==null?{seq:facts.update_id,bot,at:event.received_at as Date}:null,policy=this.policy();
     const connection=await ensureConnection(db,'telegram',live&&!imported?bot:null);
+    // Whether Nocheh acts on this update (adopts an add or removal, folds an upgrade): a live one taken in after adoption
+    // began. One an older build took in but never recorded (startAdoption) is history: recorded, never acted on.
+    const acts=live&&!imported&&(!!facts.migration||!!facts.bot_status)&&await adopting(db,String(event.capture_sequence));
     let changed=false;
     // An upgrade first, so the new id's own messages continue the same chat.
-    if(live&&facts.migration)changed=await this.migrate(db,connection,facts.migration.from,facts.migration.to,!imported)||changed;
+    if(live&&facts.migration)changed=await this.migrate(db,connection,facts.migration.from,facts.migration.to,acts)||changed;
     const at=event.received_at as Date;
     for(const person of facts.people)await ensureAccount(db,connection,person,'telegram',at);
     let chat=await chatOfApp(db,connection,source.scope);
@@ -228,8 +241,8 @@ export class ChatRepository {
     const seen=facts.message?at:null;
     if(facts.chat&&chat.current)changed=await present(db,chat.id,order,{title:facts.chat.title,app_type:facts.chat.app_type,is_forum:facts.chat.is_forum,username:facts.chat.username,seen_at:seen})||changed;
     else if(seen)await present(db,chat.id,null,{seen_at:seen});
-    // Nocheh added or removed: only a live update about the group's current id, never an import or a private chat.
-    if(order!==null&&!imported&&facts.bot_status&&chat.kind==='group'&&chat.current)
+    // Nocheh added or removed: only a live update about the group's current id, never an import, history or a private chat.
+    if(order!==null&&acts&&facts.bot_status&&chat.kind==='group'&&chat.current)
       changed=await this.adopt(db,chat.id,source.scope,source.reference.id,facts.bot_status,order,policy)||changed;
     // A forum topic: the archive's own reading of the message first, as every reader of it does.
     const key=typeof event.topic==='string'&&event.topic?event.topic:facts.topic?.key;
@@ -320,9 +333,9 @@ export class ChatRepository {
   /**
    * Telegram upgraded a basic group to a supergroup, with a new id: the new id becomes the chat's current one and the
    * old one stays, so the chat keeps its history, project, tasks, switches and state. When both ids already name chats
-   * of their own, they stay two chats, as a group upgraded before step 2b does, except in a live capture (`live`): there
-   * the new one's updates came just before its upgrade message, and it folds into the old one if only its own add ever
-   * served it (fold).
+   * of their own, they stay two chats, as a group upgraded before step 2b does, except in a live capture Nocheh acts on
+   * (`live`; never history, see startAdoption): there the new one's updates came just before its upgrade message, and it
+   * folds into the old one if only its own add ever served it (fold).
    */
   async migrate(db:Db,connection:string,from:string,to:string,live=false):Promise<boolean> {
     if(!isTelegramChat(from)||!isTelegramChat(to)||from===to)return false;
@@ -379,6 +392,19 @@ export class ChatRepository {
     await db.query('DELETE FROM chat_details WHERE chat_id=$1',[next]);
     await db.query('DELETE FROM chats WHERE id=$1',[next]);
     return true;
+  }
+
+  /**
+   * Run at app start, before anything captures (ADR-0253): the first start sets where adoption begins, once: the
+   * archive's last capture sequence then. An original at or before it was taken in by an older build, and the capture
+   * reconciliation may record it only now (one no build marked recorded): its chats, names and memberships are recorded,
+   * but an add, removal or upgrade in it is history, never acted on, so an old add is never left or carded again.
+   * Returns the boundary.
+   */
+  async startAdoption():Promise<number> {
+    const last=String((await this.stores.archive.query('SELECT coalesce(max(capture_sequence),0) AS last FROM events')).rows[0].last);
+    return Number((await this.stores.control.query('UPDATE chat_seed_state SET adopt_after=coalesce(adopt_after,$1::bigint) WHERE singleton RETURNING adopt_after',
+      [last])).rows[0]?.adopt_after??last);
   }
 
   /**
