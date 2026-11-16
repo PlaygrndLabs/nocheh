@@ -1172,6 +1172,14 @@ class ProductScenarios(Scenarios):
         chat = -(10**12+self.f.ids() % 10**9)
         return chat, group_chat(chat)
 
+    def notes_room(self, chat):
+        """Earlier leave notes about other groups drop out of the last 24 hours, so a kept fixture's earlier runs never fill
+        the daily cap on all notes. Notes about this group (`chat`, its Telegram id) stay, so the cap on notes about one
+        group still holds."""
+        self.f.query('nocheh_control', "UPDATE chat_state_events SET updated_at=updated_at-interval '25 hours' WHERE notice='sent' "
+                     "AND action='leave' AND updated_at>now()-interval '24 hours' AND chat_id NOT IN "
+                     "(SELECT chat_id FROM chat_ids WHERE external_id='"+str(int(chat))+"')")
+
     def add_record(self, event_id):
         """The content-free record an add or a removal leaves (chat_state_events): roles and outcomes, never a name."""
         raw = self.f.query('nocheh_control', "SELECT row_to_json(e) FROM (SELECT kind,role,member,action,state,outcome,notice,"
@@ -1210,6 +1218,8 @@ class ProductScenarios(Scenarios):
         every piece of `note`, or, when `note` is None, nothing at all, and the record's notice is `held` (none, or capped
         when a cap held a line back). Returns the group's Telegram id, the group and the add's record."""
         chat, group = (group['id'], group) if group else self.fresh_group()
+        if note:
+            self.notes_room(chat)
         role = 'anonymous' if by == ANONYMOUS_ADMIN else 'other'
         before, leaves = len(self.f.sent()), len(self.leave_calls(chat))
         _, event_id = self.status_change(group, by)
