@@ -410,11 +410,13 @@ test('when the two stay apart, a new supergroup on only from the upgrade\'s echo
   const h=harness(stores,()=>policy,'apart'),stage=await stageFor(stores,h.repository,()=>policy);
   try {
     // How the new chat stands when the upgrade messages come: `waiting`, its card made its project and its notice did not go,
-    // so the row waits to send it again; or `sent`, the card told the owner Nocheh is on there. It took the upgrade's echo
-    // when waiting, or sent unless the old group is leaving: the owner's Off wins over a card that went, but Nocheh never
-    // leaves a group its card said it is on in.
+    // so the row waits to send it again; `sent`, the card told the owner Nocheh is on there; `switched`, the owner then
+    // turned it off and on again by the switch; `early` and `late`, its add was taken in more than ten minutes before or
+    // after the upgrade message. It took the upgrade's echo when waiting, or sent unless the old group is leaving: the
+    // owner's Off wins over a card that went, but Nocheh never leaves a group its card said it is on in.
     const cases=[[1,'old','off',ALICE,'waiting'],[2,'new','off',ALICE,'waiting'],[3,'old','pending',ALICE,'waiting'],[4,'new','pending',ALICE,'waiting'],
-      [5,'old','could_not_leave',ANONYMOUS,'waiting'],[6,'new','pending',ALICE,'sent'],[7,'old','off',ALICE,'sent']] as const;
+      [5,'old','could_not_leave',ANONYMOUS,'waiting'],[6,'new','pending',ALICE,'sent'],[7,'old','off',ALICE,'sent'],[8,'old','off',ALICE,'switched'],
+      [9,'new','off',ALICE,'early'],[10,'old','off',ALICE,'late']] as const;
     for(const [n,first,start,adder,stands] of cases) {
       const echo=stands==='waiting'||stands==='sent'&&start!=='pending';
       const basic='-4'+String(h.base+n).slice(-9),next=h.group(n),old=chatIdFor('telegram',basic),fresh=chatIdFor('telegram',next);h.named.add(basic);
@@ -426,6 +428,8 @@ test('when the two stay apart, a new supergroup on only from the upgrade\'s echo
       const add=await h.status(next,h.update(n*100+5),Number(OWNER),'left','member');
       if(stands!=='sent')stage.answers.notice=()=>({state:'failed'});
       try{await stage.settle([fresh]);}finally{stage.answers.notice=()=>({state:'done'});}
+      if(stands==='switched')for(const state of ['off','active'])await h.repository.setState(owner,{chat_id:fresh,state,operation_id:'apart-'+state+':'+h.base+':'+n});
+      if(stands==='early'||stands==='late')await stores.control.query(`UPDATE chats SET added_at=added_at+$2::interval WHERE id=$1`,[fresh,stands==='early'?'-11 minutes':'11 minutes']);
       const card=async()=>(await stores.control.query('SELECT chat_id,state,outcome,notice,project_id FROM chat_state_events WHERE event_id=$1',[add.reference.id])).rows[0];
       const made=await card(),kept=await row(stores,fresh);
       assert.deepEqual([made.chat_id,made.state,made.outcome,made.notice,chats().served(fresh)],[fresh,stands==='sent'?'done':'waiting','carded',stands==='sent'?'sent':'none',true],label);
@@ -444,8 +448,8 @@ test('when the two stay apart, a new supergroup on only from the upgrade\'s echo
       assert.equal((await stores.control.query('SELECT project_id FROM project_assignments WHERE space_id=$1',[fresh])).rows[0]?.project_id,made.project_id,label);
       const now=await row(stores,fresh),then=await row(stores,old);
       if(!echo) {
-        // The owner was told Nocheh is on in a group it would leave: the new chat stays on with its card as it was, and the
-        // old group stays as it was.
+        // Not the upgrade's echo (the owner's own switch, or an add from another time), or the owner was told Nocheh is on
+        // in a group it would leave: the new chat stays on with its card as it was, and the old group stays as it was.
         assert.deepEqual([now,await card(),then,chats().served(fresh)],[kept,made,before,true],label);
       } else {
         // A card that waits ends unsent, in a system change every process sees, and the new chat takes the old one's state
@@ -464,10 +468,11 @@ test('when the two stay apart, a new supergroup on only from the upgrade\'s echo
       }
 
       // The stage: a pending group is left under its new id, unless the card told the owner Nocheh is on there; then its
-      // own leave stays at the basic group's id. No card goes.
+      // own leave stays at the basic group's id. A card that waits goes only for a new chat that stays on.
       if(stands==='sent')stage.answers.leave=()=>({state:'not_started',error_code:'telegram_chat_migrated'});
       const calls=await stage.settle([fresh,old]).finally(()=>{stage.answers.leave=()=>({state:'done'});});
-      assert.equal(calls.filter(call=>call.operation==='telegram.notice'&&call.input.id===digest('chat-add-card:'+add.reference.id)).length,0,label);
+      assert.equal(calls.filter(call=>call.operation==='telegram.notice'&&call.input.id===digest('chat-add-card:'+add.reference.id)).length,
+        ['switched','early','late'].includes(stands)?1:0,label);
       assert.deepEqual(calls.filter(call=>call.operation==='telegram.leave').map(call=>[call.input.id,call.input.chat_id]),
         start!=='pending'?[]:stands==='sent'?[[before.add_event,basic]]:[[before.add_event,next]],label);
       if(start==='pending')assert.deepEqual([(await row(stores,fresh)).state,(await row(stores,old)).state],stands==='sent'?['active','pending']:['left','left'],label);
