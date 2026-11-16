@@ -5,6 +5,7 @@ import {accountIdFor,chatDirectory,chatShortId} from '../src/chats.js';
 import {approvalLines,reminderLines,taskReminder} from '../src/prompts.js';
 import {fitMessage,mergedReminder,nameKeys,noteLines,reminderText,setByLine,shownCut,unitCut,wellFormed,whoLabel,
   type Names,type ReminderRow,type Who,type Words} from '../src/task-reminder-text.js';
+import {peopleNames} from '../src/stores/people-names.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,fixtureChats} from './fixture-groups.js';
 
 /** “name”, isolated, as code quotes a name. */
@@ -129,4 +130,18 @@ test('people\'s reminders due together are merged round-robin, one Set by line p
   assert.ok(cut.text.startsWith('\u{1f464} Set by '+q('Sara')+', a person you allowed in group '+q('Family')+'\n\u23f0 '));
   assert.ok(cut.text.includes('\u2026\n\n\u23f3 1 more reminders'),cut.text);
   assert.ok(!cut.text.startsWith('\u{1f514}'),'one reminder has no header');
+});
+
+test('reminder lines and note sources read people\'s names the same way: every allowed person and these people, the first row each',async()=>{
+  const asked:unknown[][]=[];
+  const db={query:async(_sql:string,values:unknown[])=>{asked.push(values);return {rows:[{id:sara,display_name:'Sara',username:'sara_example'},
+    {id:sara,display_name:'Sara',username:null},{id:gone,display_name:null,username:null}]};}} as any;
+  const policy={group_access:{[GP1]:{granted:['4561'],denied:[]}}};
+  const found=await peopleNames(db,directory,policy,[{account:gone},{account:null},{account:sara}]);
+  assert.deepEqual(asked,[[[sara,gone]]],'one read, each account once');
+  assert.deepEqual([...found.people],[[sara,{display_name:'Sara',username:'sara_example'}],[gone,{display_name:null,username:null}]]);
+  assert.deepEqual([...found.allowed??[]],[[sara,[GP1]]]);assert.equal(found.directory,directory);
+  // Without a policy nobody reads as no longer allowed, and with nobody to name nothing is read.
+  const none=await peopleNames(db,directory,undefined,[]);
+  assert.equal(none.allowed,null);assert.equal(none.people.size,0);assert.equal(asked.length,1);
 });

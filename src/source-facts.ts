@@ -1,0 +1,187 @@
+import {accountIdFor} from './chats.js';
+import {isTelegramAccount} from './chats-telegram.js';
+import {forwardFacts,type Forward} from './forwarded.js';
+import {sendClassOf,unlearnedSendClasses,type SendClass} from './send-classes.js';
+
+/*
+ * What code knows about one archived message: who wrote it and what it carries, read from the platform's own fields and
+ * Nocheh's records, never from what the message says. Labels and the notes review trust these facts, never a display
+ * name, so a person named "Owner" is still a person. Pure: one reader per channel, and a channel or kind it does not
+ * know reads as written by someone unknown, who is never the owner.
+ */
+
+/** Who wrote a message: the owner's account, another person's, an anonymous admin or a chat's own name, a bot, Nocheh
+ *  itself, or someone code cannot tell. */
+export type Author='owner'|'person'|'anonymous'|'bot'|'nocheh'|'unknown';
+/** What the archived event is: a new message, an edit, a reaction, the owner's web chat, a message Nocheh delivered,
+ *  or anything else. */
+export type Act='message'|'edit'|'reaction'|'browser'|'delivered'|'other';
+export interface SourceFacts {
+  author:Author;
+  /** The sender's account, a Nocheh account id (accountIdFor), when Telegram names one. */
+  account:string|null;
+  /** The sender's name as Telegram showed it then, unchecked: only the owner's labels write it, through labelName. */
+  name:string|null;
+  act:Act;
+  /** Where it was forwarded from (forwardFacts): 'own' is the sender's own earlier message, 'bot' an inline bot's. */
+  forward:Forward['from']|null;
+  /** The name the forward showed, unchecked, as `name` is. */
+  forward_name:string|null;
+  /** A quote inside a reply: of the sender's own message, or of someone else's. */
+  quote:'own'|'other'|null;
+  /** Text read from a file or an image the sender sent, and that file's name, unchecked. */
+  file:boolean;file_name:string|null;
+  /** A transcript of an audio file, which is not the sender's own voice. */
+  audio:boolean;
+  /** A transcript of the sender's own voice or video note. */
+  recording:boolean;
+  /** Nocheh's own message: its send class, and the message it answered (a full event id). */
+  send_class:SendClass|null;answers:string|null;
+}
+/** One archived event as the facts read it. `derivatives` are its selected transcripts and extracted texts, each with
+ *  its artifact's kind and file name; `authors` are its authored_by targets, read for a Telegram Desktop export. */
+export interface FactsInput {
+  channel:string;kind:string;payload:unknown;
+  derivatives?:readonly {kind:string;artifact:string;file_name?:string|null}[];
+  authors?:readonly {namespace:string;kind:string;external_id:string}[];
+}
+
+const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
+const text=(value:unknown):string|null=>typeof value==='string'&&value.trim()?value:null;
+const fullId=(value:unknown):string|null=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
+/** The recordings of the sender's own voice; any other transcript is of an audio file someone made. */
+const ownVoice=new Set(['voice','video_note','voice_message','video_message']);
+const none:SourceFacts={author:'unknown',account:null,name:null,act:'other',forward:null,forward_name:null,quote:null,file:false,file_name:null,
+  audio:false,recording:false,send_class:null,answers:null};
+
+/** A Telegram sender: the owner's account, another person's, or a bot's. */
+function sender(user:Record<string,any>|null,owner:string|null):Pick<SourceFacts,'author'|'account'|'name'> {
+  if(!user)return {author:'unknown',account:null,name:null};
+  const account=typeof user.id==='number'||typeof user.id==='string'?String(user.id):'';
+  const name=[text(user.first_name),text(user.last_name)].filter(Boolean).join(' ')||null;
+  if(user.is_bot===true)return {author:'bot',account:null,name};
+  if(!isTelegramAccount(account))return {author:'unknown',account:null,name};
+  return {author:owner!==null&&account===owner?'owner':'person',account:accountIdFor('telegram',account),name};
+}
+
+/** A live Telegram update: a message, an edit, a reaction, or something else. */
+function telegram(payload:unknown,owner:string|null):SourceFacts {
+  const update=record(payload);if(!update)return none;
+  const reaction=record(update.message_reaction);
+  // A reaction made in a chat's own name (actor_chat) is never the owner's, as a post in a chat's name is not.
+  if(reaction)return {...none,act:'reaction',...(record(reaction.actor_chat)?{author:'anonymous'}:sender(record(reaction.user),owner))};
+  if(update.message_reaction_count!==undefined)return {...none,act:'reaction'};
+  const channel=record(update.channel_post??update.edited_channel_post),message=record(update.message??update.edited_message)??channel;
+  if(!message)return none;
+  const act=update.edited_message!==undefined||update.edited_channel_post!==undefined?'edit':'message';
+  // An anonymous admin and a post in a channel's or group's name (sender_chat) are never the owner (ADR-0251).
+  const who=channel||record(message.sender_chat)?{author:'anonymous' as const,account:null,name:text(record(message.sender_chat)?.title)}:sender(record(message.from),owner);
+  const raw=who.account===null?null:String(record(message.from)?.id);
+  return {...none,...who,act,...forwarded(message),quote:quoteOf(message,raw),file_name:text(record(message.document)?.file_name)??text(record(message.audio)?.file_name)};
+}
+function forwarded(message:unknown):Pick<SourceFacts,'forward'|'forward_name'> {
+  const found=forwardFacts(message);
+  return {forward:found?.from??null,forward_name:found?.rawName??null};
+}
+/** Whose message a reply quotes: the sender's own only when the message it answers is theirs, by their Telegram id. */
+function quoteOf(message:Record<string,any>,sender:string|null):SourceFacts['quote'] {
+  if(!record(message.quote))return null;
+  const target=record(message.reply_to_message),external=record(record(message.external_reply)?.origin);
+  const author=target?(record(target.sender_chat)?null:record(target.from)?.id):external?.type==='user'?record(external.sender_user)?.id:null;
+  return sender!==null&&(typeof author==='number'||typeof author==='string')&&String(author)===sender?'own':'other';
+}
+
+/** A Telegram Desktop export: its author is the account the archive proved for it (authored_by), never a name. */
+function desktop(kind:string,payload:unknown,authors:FactsInput['authors'],owner:string|null):SourceFacts {
+  const body=record(payload),message=record(body?.message);
+  if(!message)return none;
+  const found=(authors??[]).length===1?authors![0]!:null;
+  const author:Author=!found?'unknown':found.kind==='conversation'?'anonymous':found.kind!=='actor'?'unknown':
+    found.namespace==='bot-api'&&owner!==null&&found.external_id===owner?'owner':'person';
+  const account=found?.kind==='actor'&&found.namespace==='bot-api'&&isTelegramAccount(found.external_id)?accountIdFor('telegram',found.external_id):null;
+  return {...none,author,account,name:text(message.from),act:kind==='telegram_desktop_message'?'message':'other',...forwarded(message),file_name:text(message.file_name)};
+}
+
+/** The owner's web chat, and Nocheh's answers there. */
+function browser(kind:string,payload:unknown):SourceFacts {
+  const body=record(payload);
+  if(kind==='browser_input'){
+    const files=Array.isArray(body?.attachments)?body!.attachments.map(record).filter(Boolean) as Record<string,any>[]:[];
+    return {...none,author:'owner',act:'browser',file_name:text(files.find(file=>['file','image'].includes(file.kind))?.name)};
+  }
+  if(kind==='browser_delivered_message')return {...none,author:'nocheh',act:'delivered',send_class:sendClassOf(body?.send_class)??'reply'};
+  return none;
+}
+
+/** The facts of one archived event. `owner` is the owner's Telegram account (policy.owner_id). */
+export function sourceFacts(input:FactsInput,owner:string|null):SourceFacts {
+  let facts:SourceFacts=none;
+  if(input.channel==='telegram'&&input.kind==='telegram_update')facts=telegram(input.payload,owner);
+  else if(input.channel==='telegram'&&input.kind==='telegram_delivered_message') {
+    const body=record(input.payload);
+    facts={...none,author:'nocheh',act:'delivered',send_class:sendClassOf(body?.send_class),answers:fullId(body?.answers)};
+  }
+  else if(input.channel==='telegram'&&input.kind.startsWith('telegram_desktop_'))facts=desktop(input.kind,input.payload,input.authors,owner);
+  else if(input.channel==='browser')facts=browser(input.kind,input.payload);
+  if(facts.author==='nocheh'||facts.act==='reaction'||facts.act==='other')return facts;
+  // What its files say: a transcript of the sender's own voice, of an audio file, or text read from a file or an image.
+  const derivatives=input.derivatives??[],read=derivatives.find(item=>item.kind==='extracted_text');
+  return {...facts,recording:derivatives.some(item=>item.kind==='transcript'&&ownVoice.has(item.artifact)),
+    audio:derivatives.some(item=>item.kind==='transcript'&&!ownVoice.has(item.artifact)),
+    file:!!read,file_name:facts.file_name??text(read?.file_name)};
+}
+
+/** Whether a message is the owner's own typing: the owner's account, a new message, edit, reaction or web chat message,
+ *  not a forward of someone else's (an inline bot's included), no quote of someone else's message, and no text read
+ *  from a file or audio file. The owner's own voice, transcribed, is the owner's. */
+export const ownerTyped=(f:SourceFacts):boolean=>f.author==='owner'&&['message','edit','reaction','browser'].includes(f.act)&&
+  (f.forward===null||f.forward==='own')&&f.quote!=='other'&&!f.file&&!f.audio;
+
+type By='owner'|'person';
+type LearnedClass=Exclude<SendClass,'card'|'card_update'|'refusal'|'notice'|'reminder'>;
+/** One fixed token for what kind of message an event is. */
+export type EventClass='owner_message'|'owner_reaction'|'owner_browser'|'person_message'|'person_reaction'|'anonymous_post'|
+  `forward_${Exclude<Forward['from'],'own'>}_by_${By}`|`file_by_${By}`|`audio_by_${By}`|'quote'|`nocheh_${LearnedClass}`|'nocheh_about_forward'|'nocheh_unlearned'|'unknown';
+const learnedClasses:readonly LearnedClass[]=['reply','follow_up','private_answer','job_report','scheduled_run','approved_post'];
+/** Every event class, for checking a stored one. */
+export const eventClasses:readonly EventClass[]=['owner_message','owner_reaction','owner_browser','person_message','person_reaction','anonymous_post',
+  ...(['person','hidden','channel','chat','bot'] as const).flatMap(from=>(['owner','person'] as const).map(by=>`forward_${from}_by_${by}` as const)),
+  'file_by_owner','file_by_person','audio_by_owner','audio_by_person','quote',...learnedClasses.map(name=>`nocheh_${name}` as const),
+  'nocheh_about_forward','nocheh_unlearned','unknown'];
+export const isEventClass=(value:unknown):value is EventClass=>typeof value==='string'&&(eventClasses as readonly string[]).includes(value);
+
+/**
+ * The class of one event. `answered` is the facts of the message Nocheh's reply answered (its `answers`), when known:
+ * a reply about someone else's forward is about that forward. Someone else's forward comes first, then a file's or an
+ * audio file's text, then a quote of someone else's message; only what is left is the sender's own message.
+ */
+export function eventClass(f:SourceFacts,answered?:SourceFacts|null):EventClass {
+  if(f.author==='nocheh') {
+    if(f.act!=='delivered')return 'unknown';
+    if(f.send_class!==null&&unlearnedSendClasses.has(f.send_class))return 'nocheh_unlearned';
+    if(answered&&answered.forward!==null&&answered.forward!=='own')return 'nocheh_about_forward';
+    // A message from before send classes: a reply, which is how it was learned then.
+    return `nocheh_${(f.send_class??'reply') as LearnedClass}`;
+  }
+  if(f.author==='anonymous')return ['message','edit','reaction'].includes(f.act)?'anonymous_post':'unknown';
+  if(f.author!=='owner'&&f.author!=='person')return 'unknown';
+  const by=f.author;
+  if(f.act==='reaction')return `${by}_reaction`;
+  if(!['message','edit','browser'].includes(f.act)||f.act==='browser'&&by!=='owner')return 'unknown';
+  if(f.forward!==null&&f.forward!=='own')return `forward_${f.forward}_by_${by}`;
+  if(f.file)return `file_by_${by}`;
+  if(f.audio)return `audio_by_${by}`;
+  if(f.quote==='other')return 'quote';
+  return f.act==='browser'?'owner_browser':`${by}_message`;
+}
+
+/** Whose words a class carries, for a note's source: the owner's, Nocheh's learned messages, other people's (anonymous
+ *  posts, quotes, Nocheh's unlearned messages and anything unknown included), forwards, or files' and audio files' text. */
+export type Bucket='owner'|'nocheh'|'person'|'forward'|'file';
+export function bucketOf(cls:EventClass):Bucket {
+  if(cls.startsWith('owner_'))return 'owner';
+  if(cls.startsWith('forward_')||cls==='nocheh_about_forward')return 'forward';
+  if(cls.startsWith('file_')||cls.startsWith('audio_'))return 'file';
+  if(cls.startsWith('nocheh_')&&cls!=='nocheh_unlearned')return 'nocheh';
+  return 'person';
+}

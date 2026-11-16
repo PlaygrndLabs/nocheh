@@ -11,9 +11,9 @@ import {chatIdSql,chats as directory,type ChatDirectory} from '../chats.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {cardName} from '../action-text.js';
 import {fillLine,placeLabel,quotedName} from '../chat-labels.js';
-import {allowedAccounts} from '../destinations.js';
-import {mergedReminder,nameKeys,reminderText,setByLine,unitCut,wellFormed,whoKeySql,type Names,type Person,type ReminderRow,type Words,type Writer} from '../task-reminder-text.js';
+import {mergedReminder,nameKeys,reminderText,setByLine,unitCut,wellFormed,whoKeySql,type Names,type ReminderRow,type Words,type Writer} from '../task-reminder-text.js';
 import {currentChats} from './chats.js';
+import {peopleNames} from './people-names.js';
 import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
 
 export const taskSchema=`
@@ -1390,15 +1390,8 @@ export class TaskRepository {
   }
   /** What reminder labels read (ADR-0255): the directory, who is allowed now, and these people and every allowed person
    * as Telegram last showed them. */
-  private async names(db:Pick<pg.Pool,'query'>,chats:ChatDirectory,people:Iterable<{account:string|null}>):Promise<Names> {
-    const policy=this.delivery?.policy?.(),allowed=policy?allowedAccounts(policy,chats):null;
-    const accounts=[...new Set([...allowed?.keys()??[],...[...people].map(who=>who.account).filter((id):id is string=>!!id)])];
-    const rows=accounts.length?(await db.query(`SELECT a.id,a.display_name,coalesce(a.username,d.username) AS username FROM chat_accounts a
-      LEFT JOIN chats c ON c.account_id=a.id AND c.kind='private' LEFT JOIN chat_details d ON d.chat_id=c.id
-      WHERE a.id=ANY($1::text[]) ORDER BY a.id,coalesce(a.username,d.username) NULLS LAST`,[accounts])).rows:[];
-    const found=new Map<string,Person>();
-    for(const item of rows)if(!found.has(item.id))found.set(item.id,{display_name:item.display_name??null,username:item.username??null});
-    return {directory:chats,allowed,people:found};
+  private names(db:Pick<pg.Pool,'query'>,chats:ChatDirectory,people:Iterable<{account:string|null}>):Promise<Names> {
+    return peopleNames(db,chats,this.delivery?.policy?.(),people);
   }
   /**
    * The owner's view of each reminder (ADR-0255): whether the owner or a person set it, and its source, the "Set by"

@@ -95,20 +95,22 @@ export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:s
 }
 
 /**
- * Whether a captured Telegram message, new or edited, was sent by the owner or by someone the owner allowed in that
- * selected group (granted and not denied). Telegram does not say who an anonymous admin is, nor who wrote a post in a
- * channel's or group's own name (sender_chat), so neither counts as allowed, nor as the owner; neither do bots, other
- * updates and senders it cannot identify (ADR-0251). Unlike conversationScope, it reads edits and does not depend on
- * Telegram replies being on. `scope` is the archive's raw Telegram chat id; the group is the chat the directory finds
- * for it, served and with its access lists under every Telegram id it has had, so a chat with no row allows only the
- * owner (ADR-0252).
+ * Whether a captured Telegram message, new or edited, or a reaction, was sent by the owner or by someone the owner
+ * allowed in that selected group (granted and not denied). Telegram does not say who an anonymous admin is, nor who
+ * wrote a post or reacted in a channel's or group's own name (sender_chat, actor_chat), so none of them counts as
+ * allowed, nor as the owner; neither do bots, reaction counts, other updates and senders it cannot identify (ADR-0251).
+ * Unlike conversationScope, it reads edits and reactions and does not depend on Telegram replies being on. `scope` is
+ * the archive's raw Telegram chat id; the group is the chat the directory finds for it, served and with its access
+ * lists under every Telegram id it has had, so a chat with no row allows only the owner (ADR-0252).
  */
 export function allowedSender(policy:AssistantPolicy,payload:unknown,scope:string):boolean {
   if(payload===null||typeof payload!=='object'||Array.isArray(payload))return false;
-  const update=payload as Record<string,unknown>,found=update.message??update.edited_message;
+  const update=payload as Record<string,unknown>,reaction=update.message_reaction,found=update.message??update.edited_message??reaction;
   if(found===null||typeof found!=='object'||Array.isArray(found))return false;
-  const message=found as Record<string,unknown>,chat=message.chat as Record<string,unknown>|undefined,sender=message.from as Record<string,unknown>|undefined;
-  if(message.sender_chat!==undefined&&message.sender_chat!==null)return false;
+  // A reaction names who reacted as `user`, or the chat it was made in the name of as `actor_chat`.
+  const message=found as Record<string,unknown>,chat=message.chat as Record<string,unknown>|undefined,
+    sender=(found===reaction?message.user:message.from) as Record<string,unknown>|undefined;
+  if(message.sender_chat!==undefined&&message.sender_chat!==null||message.actor_chat!==undefined&&message.actor_chat!==null)return false;
   if(!chat||typeof chat!=='object'||!sender||typeof sender!=='object'||sender.is_bot===true)return false;
   const user=typeof sender.id==='number'||typeof sender.id==='string'?String(sender.id):'';
   if(!isTelegramAccount(user)||String(chat.id)!==scope)return false;
@@ -118,6 +120,18 @@ export function allowedSender(policy:AssistantPolicy,payload:unknown,scope:strin
   if(id===null||directory.kind(id)!=='group'||!directory.served(id))return false;
   const access=groupAccessFor(policy,id);
   return !!access&&access.granted.includes(user)&&!access.denied.includes(user);
+}
+
+/**
+ * Whether an archived event may go into the owner's own notes review: a live Telegram update only from an allowed
+ * sender (allowedSender), and Nocheh's own messages and the owner's web chat always. Any other kind is refused, so a
+ * kind added later stays out until it is named here. Group memory and replies do not ask this.
+ */
+export function notesSender(policy:AssistantPolicy,event:{channel:string;kind:string;scope:string;payload:unknown}):'review'|'sender_not_allowed' {
+  if(event.channel==='telegram'&&event.kind==='telegram_update')return allowedSender(policy,event.payload,event.scope)?'review':'sender_not_allowed';
+  if(event.channel==='telegram'&&event.kind==='telegram_delivered_message')return 'review';
+  if(event.channel==='browser'&&['browser_input','browser_delivered_message'].includes(event.kind))return 'review';
+  return 'sender_not_allowed';
 }
 
 /**

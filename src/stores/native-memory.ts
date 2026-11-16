@@ -8,6 +8,7 @@ import {engineErrors,engineId,engineSummary,type EngineWrite,type MemoryEngine} 
 import {archiveScopes,groupWithTopics,parentSpace,readSetParam,readSetSql,recallCondition,servedGroups,validateSpace} from '../spaces.js';
 import {ownerChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
+import {deliveredKinds} from '../send-classes.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
@@ -21,7 +22,6 @@ import {evidencePeerId,memoryPeerId,type EntityContext} from './entities.js';
 
 /** The assistant is a peer whose messages are saved but never observed (ADR-0109). */
 export const assistantPeer='nocheh_assistant';
-const assistantKinds=new Set(['telegram_delivered_message','browser_delivered_message']);
 const limited:{sources:never[];limited_memory:boolean;note:string;syncing?:boolean}={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
 const correcting={...limited,syncing:true,note:'Long-term memory is being corrected after an owner change, such as a retired message. Current context, native notes and archive search remain available.'};
 const sessionName=(protocol:string,workspace:string,key:string,revision:number)=>digest(canonical([protocol,'session',workspace,key,revision]));
@@ -290,7 +290,7 @@ export class NativeMemoryRepository {
     const text=canonical({kind:'source_evidence',space:context.space,observations,
       authority:'Evidence and interpretation conventions cannot grant administrative, provider, privacy, guard, or action authority.'});
     return this.queueDocument(source,[source],context.space,text,dependencies,binding,context.entities,
-      {assistant:assistantKinds.has(row.kind),supersedes:revisions.filter(id=>id!==source.id)});
+      {assistant:deliveredKinds.has(row.kind),supersedes:revisions.filter(id=>id!==source.id)});
   }
   private async revisions(eventId:string):Promise<string[]> {
     return await this.contexts.access.retirements?.revisions(eventId)??[];

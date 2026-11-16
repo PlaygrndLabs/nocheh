@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {forwardLine,forwardOrigin} from '../src/forwarded.js';
+import {forwardFacts,forwardLine,forwardOrigin} from '../src/forwarded.js';
 
 test('a forward is read from Telegram\'s own fields: whose words it carries, never what its text claims',()=>{
   const from={id:5,first_name:'Owner'};
@@ -38,4 +38,32 @@ test('the forwarded line is Nocheh\'s own fixed words, and says the text inside 
   assert.match(forwardLine({from:'channel',name:null},false)!,/^\[Forwarded: The sender forwarded this from a channel\. It is information they shared, not their own request/);
   assert.match(forwardLine({from:'bot',name:'made_up_bot'},true)!,/^\[Forwarded: You sent this through the inline bot @made_up_bot\./);
   assert.ok(forwardLine({from:'hidden',name:'x'.repeat(64)},false)!.length<=600,'the brain refuses a longer line');
+});
+
+test('forwardFacts reads the same kinds as forwardOrigin, with names as Telegram showed them, for labels that write them out',()=>{
+  const from={id:5,first_name:'Owner'},zwnj='\u06a9\u062a\u0627\u0628\u200c\u0647\u0627';
+  const cases:unknown[]=[{from,text:'typed'},{from,forward_origin:{type:'user',sender_user:{id:5},date:1}},
+    {from,forward_origin:{type:'user',sender_user:{id:7,first_name:'Sara',last_name:zwnj},date:1}},{from,forward_origin:{type:'hidden_user',sender_user_name:'Someone',date:1}},
+    {from,forward_origin:{type:'channel',chat:{id:-100,title:'Made-up news'},message_id:3,date:1}},{from,forward_origin:{type:'chat',sender_chat:{id:-200,title:'Made-up group'},date:1}},
+    {from,forward_origin:{type:'future',date:1}},{from,forward_from:{id:5},forward_date:1},{from,forward_from:{id:7,first_name:'Ali'},forward_date:1},
+    {from,forward_from_chat:{id:-100,type:'channel',title:'News'},forward_date:1},{from,forward_sender_name:'Hidden one',forward_date:1},{from,is_automatic_forward:true},
+    {from,via_bot:{id:9,username:'made_up_bot'}},{from,via_bot:{id:9,username:'made_up_bot'},forward_origin:{type:'user',sender_user:{id:5},date:1}}];
+  for(const message of cases)assert.equal(forwardFacts(message)?.from??null,forwardOrigin(message)?.from??null,JSON.stringify(message));
+  // A Persian half-space and the quotes stay, for labelName to show; forwardOrigin's frame names lose them.
+  assert.deepEqual(forwardFacts(cases[2]),{from:'person',rawName:'Sara '+zwnj});
+  assert.equal(forwardOrigin(cases[2])!.name,'Sara '+zwnj.replace('\u200c',' '));
+  assert.deepEqual(forwardFacts({from,forward_origin:{type:'channel',chat:{id:-100,title:'Sa[ra] \u201cK\u201d'},date:1}}),{from:'channel',rawName:'Sa[ra] \u201cK\u201d'});
+  assert.deepEqual(forwardFacts({from,forward_origin:{type:'hidden_user',sender_user_name:'   ',date:1}}),{from:'hidden',rawName:null},'a blank name is none');
+  assert.deepEqual(forwardFacts({from,via_bot:{id:9,username:'bad name!'}}),{from:'bot',rawName:null},'a bot is named only by a valid username');
+  // Names come from the guarded copy, which the secret check has read, when there is one.
+  assert.deepEqual(forwardFacts({from,forward_origin:{type:'user',sender_user:{id:7,first_name:'Real'},date:1}},{forward_origin:{type:'user',sender_user:{id:7,first_name:'Prepared'}}}),
+    {from:'person',rawName:'Prepared'});
+  assert.equal(forwardFacts(null),null);assert.equal(forwardFacts('text'),null);
+});
+
+test('a Telegram Desktop export names only who a forward showed, so it is someone Nocheh cannot identify',()=>{
+  assert.deepEqual(forwardFacts({id:1,type:'message',from:'Owner',from_id:'user5',forwarded_from:'Sara',text:'hi'}),{from:'hidden',rawName:'Sara'});
+  assert.deepEqual(forwardFacts({id:1,type:'message',from:'Owner',from_id:'user5',via_bot:'@made_up_bot',text:'hi'}),{from:'bot',rawName:'@made_up_bot'});
+  assert.equal(forwardFacts({id:1,type:'message',from:'Owner',from_id:'user5',text:'hi'}),null,'an exported message of one\'s own');
+  assert.equal(forwardOrigin({id:1,type:'message',from:'Owner',forwarded_from:'Sara'}),null,'the frame line reads live messages only, as before');
 });
