@@ -26,12 +26,13 @@ export interface PreparedLearningContext {
 /**
  * What the owner's notes review asks of prepare (ADR-0257). `admit` says whether a related message, or the evidence of a
  * rule, may go into the owner's notes; one it refuses is left out, and so are the rules resting on it and any quote of
- * it. `collect` gets the ids left out, the rules kept, and `bare_reaction` when the source is a reaction to a message that
- * was left out. Honcho and interpretations pass neither, so what they learn from is exactly as before.
+ * it. `collect` gets the ids left out, the rules kept, the ids of the rules left out with them, and `bare_reaction` when
+ * the source is a reaction to a message that was left out. Honcho and interpretations pass neither, so what they learn
+ * from is exactly as before.
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
-  collect?:{dropped:string[];versions:InterpretationVersion[];bare_reaction:boolean};
+  collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean};
 }
 export class LearningContextRepository {
   constructor(readonly access:SourceAccessRepository,readonly guards:GuardRepository,readonly learned:LearnedMemoryRepository,
@@ -118,7 +119,7 @@ export class LearningContextRepository {
       ORDER BY v.author='owner' DESC,e.kind='convention' DESC,v.created_at DESC,e.id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
     // A busy chat keeps learning past 100 rules: the owner's own rules, then conventions, then the newest are kept.
     if(candidates.length>100){candidates.pop();limitations.push('rule_catalog_limit');}
-    const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>(),refused=new Set<string>();
+    const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>(),refused=new Set<string>(),unread:string[]=[];
     for(const candidate of candidates)try {
       const version=await this.learned.read(principal,candidate.id,binding,async reference=>{
         if(!(await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding)))return false;
@@ -139,11 +140,11 @@ export class LearningContextRepository {
         inputs.push({kind:'owner_guard',id:version.id,revision:candidate.rule_guard_revision,text:canonical(version)});
       for(const input of inputs)ruleInputs.set(canonical(input),input);
     } catch(error) {
-      if(error instanceof HttpError&&['learned_memory_not_found','memory_refresh_required'].includes(error.code)){if(refused.has(candidate.id))limitations.push('rule_sender_not_allowed');continue;}
+      if(error instanceof HttpError&&['learned_memory_not_found','memory_refresh_required'].includes(error.code)){if(refused.has(candidate.id)){limitations.push('rule_sender_not_allowed');unread.push(candidate.id);}continue;}
       throw error;
     }
     if(options.collect) {
-      options.collect.dropped.push(...dropped);options.collect.versions.push(...versions);
+      options.collect.dropped.push(...dropped);options.collect.versions.push(...versions);options.collect.refused.push(...unread);
       // A reaction left with nothing it reacts to says nothing the owner's notes could use.
       options.collect.bare_reaction=[...reacted].some(id=>dropped.has(id))&&![...reacted].some(id=>references.has(id));
     }

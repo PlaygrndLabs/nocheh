@@ -14,6 +14,7 @@ import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {captureEvidence} from '../src/stores/generated-capture.js';
+import {evidenceMarker,legendIntro,reviewBody} from '../src/source-labels.js';
 
 test('native review preserves profile waits, guarded inputs, durable completion and uncertain execution identity',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -290,6 +291,9 @@ test('native review runs once per source across authorization epochs and stops o
     assert.equal(starts,startsBefore+1);assert.equal((await services.reviews.inspect(failedPart)).attempts,2);
     assert.equal(await services.reviews.run(failedPart,authority),'pending');
     const failedGap=(await services.reviews.inspect(failedPart)).next_attempt.getTime();
+    const textOf=async(id:string)=>String(JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',
+      [(await services.reviews.inspect(id)).input_reference.id])).rows[0].content.toString()).text);
+    const failedText=await textOf(failedPart);
 
     // A new reply in the thread changes every fragment's evidence. Fragments whose own text is unchanged are replaced
     // by ones with the current input, the failed one keeping its attempts, failure and gap; a fragment whose text
@@ -304,6 +308,10 @@ test('native review runs once per source across authorization epochs and stops o
     assert.deepEqual(carried.map(row=>[row.attempts,row.error_code]),
       [[2,'native_review_failed'],...replacements.slice(1).map(()=>[0,null])],'each replacement keeps its own attempts and failure');
     assert.equal(carried[0]!.next_attempt.getTime(),failedGap);
+    // The new reply is in every fragment's records line, so the failed fragment is matched on its slice of the evidence.
+    const replacedText=await textOf(replacements[0]!);
+    assert.equal(replacedText.split('\n')[0],failedText.split('\n')[0]);assert.notEqual(replacedText.split('\n')[1],failedText.split('\n')[1]);
+    assert.equal(reviewBody(replacedText),reviewBody(failedText));
     assert.equal(await services.reviews.queue(longSource).then(ids=>ids.join()),renewed.join(),'a later sweep keeps them');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
@@ -337,6 +345,9 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     [source.id,(await services.guards.state()).generation])).rows[0]?.reason??null;
   const input=async(id:string)=>JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[(await services.reviews.inspect(id)).input_reference.id])).rows[0].content.toString());
   const bump=async()=>{const before=(await services.guards.state()).epoch;await services.guards.setMode('off');await services.guards.setMode('on');assert.ok((await services.guards.state()).epoch>before);};
+  // What code recorded about a source's batch when its review was queued.
+  const recorded=async(source:{id:string})=>(await stores.control.query("SELECT provenance FROM native_review_jobs WHERE source_reference->>'id'=$1",[source.id])).rows.map(row=>row.provenance);
+  const left=(sender=0,rule=0,others=0)=>({sender_not_allowed:sender,rule_sender_not_allowed:rule,rules_left_out_for_owner_label:others});
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
     const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='memory_review'")).rows[0].epoch};
@@ -362,6 +373,13 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     for(const source of [bob,alice,aliceEdit,aliceReaction,nocheh]) {
       assert.equal((await services.reviews.queue(source)).length,1);assert.equal(await skipped(source),null);
     }
+    // Each review records its batch by full id and class, read from Telegram's fields and Nocheh's own records.
+    assert.deepEqual(await recorded(alice),[{version:1,source:alice.id,events:[{id:alice.id,class:'owner_message'}],owner_account_only:true,rules:'none',left_out:left()}]);
+    assert.deepEqual(await recorded(bob),[{version:1,source:bob.id,events:[{id:bob.id,class:'person_message'}],owner_account_only:false,rules:'none',left_out:left()}]);
+    assert.deepEqual(await recorded(nocheh),[{version:1,source:nocheh.id,events:[{id:nocheh.id,class:'nocheh_reply'}],owner_account_only:false,rules:'none',left_out:left()}]);
+    // The owner's reaction comes with Bob's message it reacts to; Sara's reaction to it is left out and counted.
+    assert.deepEqual(await recorded(aliceReaction),[{version:1,source:aliceReaction.id,events:[{id:aliceReaction.id,class:'owner_reaction'},{id:bob.id,class:'person_message'}],
+      owner_account_only:false,rules:'none',left_out:left(1)}]);
 
     // The owner's reply to Sara is reviewed without her message, and without the quote of it; a quote of Bob stays.
     const answer=await say(5,123,'Yes, book it',{reply_to_message:message(2,789,'SARAMARK the party moved to Saturday'),quote:{text:'SARAMARK the party',position:0}});
@@ -370,6 +388,9 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.ok(!answerInput.evidence.some((item:{id:string})=>[sara.id,saraEdit.id].includes(item.id)),'her message is not evidence');
     assert.ok(!answerInput.text.includes('SARAMARK'),'neither her words nor the quote of them reach the review');
     assert.ok(answerInput.text.includes('sender_not_allowed'),'the review is told something was left out');
+    // Its records still call it a reply quoting another person's message: the class comes from the message as sent.
+    assert.deepEqual(await recorded(answer),[{version:1,source:answer.id,events:[{id:answer.id,class:'quote'}],owner_account_only:false,rules:'none',left_out:left(2)}]);
+    assert.match(answerInput.text.split('\n')[1],/"left_out":\{"messages_from_people_not_allowed":2,/);
     const together=await say(6,123,'Agreed',{reply_to_message:message(1,456,'Bob: the venue is booked'),quote:{text:'BOBQUOTE venue',position:0}});
     const togetherInput=await input((await services.reviews.queue(together))[0]!);
     assert.ok(togetherInput.text.includes('BOBQUOTE'));assert.ok(togetherInput.evidence.some((item:{id:string})=>item.id===bob.id));
@@ -390,6 +411,33 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     const laterInput=await input((await services.reviews.queue(later))[0]!);
     assert.ok(!laterInput.text.includes('SARARULE'));assert.ok(laterInput.text.includes('rule_sender_not_allowed'));
     assert.ok(JSON.stringify((await services.contexts.prepare(later,await services.guards.state())).rules).includes('SARARULE'));
+    assert.deepEqual(await recorded(later),[{version:1,source:later.id,events:[{id:later.id,class:'owner_message'}],owner_account_only:true,rules:'none',left_out:left(0,1)}]);
+
+    // A review of the owner's own typing reads only the owner's rules: one learned from Bob is left out of it, and
+    // only of it. A rule learned from the owner's own message stays.
+    const learn=async(label:string,from:number,id:number,word:string)=>{
+      const text=`In this group ${word} means bring snacks`,origin=await say(id,from,text),state=await services.guards.state();
+      await services.learned.publishAutomatic(digest(key+':'+label),{kind:'convention',subject:word,text,scope:{kind:'conversation',id:space},uncertainty:'explicit',
+        evidence:[origin],quote:{source_id:origin.id,text},conflicts:[]},null,key+':'+label,(await services.contexts.prepare(origin,state)).dependencies,state,'fixture',services.detect);
+    };
+    await learn('bob-rule',456,21,'BOBRULE');await learn('alice-rule',123,22,'ALICERULE');
+    const own=await say(23,123,'Alice: the agenda is ready'),[ownReview]=await services.reviews.queue(own),ownInput=await input(ownReview!);
+    assert.ok(ownInput.text.includes('ALICERULE'));assert.ok(!ownInput.text.includes('BOBRULE'));assert.ok(ownInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual(await recorded(own),[{version:1,source:own.id,events:[{id:own.id,class:'owner_message'}],owner_account_only:true,rules:'owner',left_out:left(0,1,1)}]);
+    // Line 1 as it was, then code's records line with full ids and no names, the fixed marker, and the evidence.
+    const lines=ownInput.text.split('\n');
+    assert.equal(lines.length,4);
+    assert.equal(lines[0],`Source nocheh:event:${own.id}; conversation ${space}; fragment 1. Speakers are not necessarily the owner.`);
+    assert.ok(lines[1].startsWith(legendIntro));
+    assert.deepEqual(JSON.parse(lines[1].slice(legendIntro.length)),{sent_from_the_owner_account_only:true,events:{'the owner\'s own message':[own.id]},
+      left_out:{messages_from_people_not_allowed:0,rules_from_people_not_allowed:1,rules_not_the_owners:1}});
+    assert.doesNotMatch(lines[1],/Alice|Bob|Sara/);
+    assert.equal(lines[2],evidenceMarker);assert.equal(JSON.parse(lines[3]).space,space);
+    // Bob's message reads every rule, and long-term memory reads them for the owner's message too.
+    const bobs=await say(24,456,'Bob: snacks are on me'),bobInput=await input((await services.reviews.queue(bobs))[0]!);
+    assert.ok(bobInput.text.includes('BOBRULE')&&bobInput.text.includes('ALICERULE'));assert.ok(!bobInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual(await recorded(bobs),[{version:1,source:bobs.id,events:[{id:bobs.id,class:'person_message'}],owner_account_only:false,rules:'others',left_out:left(0,1)}]);
+    assert.ok(JSON.stringify((await services.contexts.prepare(own,await services.guards.state())).rules).includes('BOBRULE'));
 
     // Bob is denied: his review still waiting is withdrawn, under a later epoch or under the current one.
     const [staleReview]=await services.reviews.queue(await say(9,456,'Bob: first'));

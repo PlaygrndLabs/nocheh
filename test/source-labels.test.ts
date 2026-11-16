@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {accountIdFor,chatDirectory} from '../src/chats.js';
 import {approvalLines,reminderLines,sourceLines} from '../src/prompts.js';
 import {eventClass,eventClasses,sourceFacts,type EventClass,type SourceFacts} from '../src/source-facts.js';
-import {MODEL_LABEL_LIMIT,evidenceMarker,fromToken,honchoSource,legendIntro,modelEventPhrase,modelLabel,ownerEventLabel,ownerLabel,provenanceOf,
-  reviewLegend,reviewOrigin,reviewOwner,type LabelEvent,type NoteOrigin,type ReviewProvenance,type SourceWords} from '../src/source-labels.js';
+import {MODEL_LABEL_LIMIT,REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,evidenceMarker,fromToken,honchoSource,legendIntro,modelEventPhrase,modelLabel,ownerEventLabel,
+  ownerLabel,provenanceOf,reviewBody,reviewFragment,reviewLegend,reviewOrigin,reviewOwner,type LabelEvent,type NoteOrigin,type ReviewProvenance,
+  type SourceWords} from '../src/source-labels.js';
 import {nameKeys,type Names} from '../src/task-reminder-text.js';
 import {GP1,GP1_TOPIC,GP2,OWNER,fixtureChats} from './fixture-groups.js';
 
@@ -158,6 +159,25 @@ test('the review legend is one JSON object of fixed words and full ids, folded t
   assert.deepEqual(parsed.left_out,{messages_from_people_not_allowed:2,rules_from_people_not_allowed:1,rules_not_the_owners:3});
   assert.ok(reviewLegend(many,100).includes('"and_more":60'),'nothing fits: all are counted');
   assert.doesNotMatch(line+evidenceMarker,/Sara|Owner\b/);
+});
+
+test('a review fragment: its first line as it was, code\'s records, the marker and a fixed slice, within what Hermes takes',()=>{
+  const first=`Source nocheh:event:${hex(1)}; conversation ${GP1_TOPIC}; fragment 27. Speakers are not necessarily the owner.`;
+  // Every class once, with the largest counts: the longest records line a batch of 30 can have.
+  const thirty=provenance(eventClasses.map((cls,i)=>[i+1,cls] as [number,EventClass]),{left_out:{sender_not_allowed:30,rule_sender_not_allowed:100,rules_left_out_for_owner_label:100}});
+  const body='🎉'.repeat(REVIEW_BODY_SLICE),fragment=reviewFragment(first,thirty,body),lines=fragment.split('\n');
+  assert.ok(Array.from(fragment).length<=REVIEW_FRAGMENT_LIMIT&&REVIEW_FRAGMENT_LIMIT<12000,String(Array.from(fragment).length));
+  assert.equal(lines[0],first,'line 1 byte for byte, as the ADR-0244 counter reads it');
+  assert.equal(lines[1],reviewLegend(thirty));assert.equal(lines[2],evidenceMarker);assert.equal(lines.slice(3).join('\n'),body);
+  assert.equal(reviewBody(fragment),body);
+  // Only the records line gives way, should a first line ever be longer than any Nocheh writes.
+  const long=reviewFragment(first+'x'.repeat(1000),thirty,body);
+  assert.ok(Array.from(long).length<=REVIEW_FRAGMENT_LIMIT);assert.ok(JSON.parse(long.split('\n')[1]!.slice(legendIntro.length)).events.and_more>0);
+  assert.equal(reviewBody(long),body);
+  // A records line that changes leaves the slice, which a waiting fragment's replacement is matched on, as it was.
+  assert.equal(reviewBody(reviewFragment(first,provenance([[1,'owner_message']]),body)),body);
+  // A fragment from before the records line is matched on its whole text, which no new slice equals.
+  const old=first+'\n{"space":"x"}';assert.equal(reviewBody(old),old);
 });
 
 test('owner labels: the owner\'s own lines, people and chats named as reminders name them, Persian half-spaces kept',()=>{

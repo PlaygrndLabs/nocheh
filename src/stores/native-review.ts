@@ -7,11 +7,15 @@ import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionA
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
 import type {GuardBinding} from './guards.js';
-import type {LearningContextOptions,LearningContextRepository} from './learning-context.js';
+import type {LearningContextOptions,LearningContextRepository,PreparedLearningContext} from './learning-context.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {notesSender,ownerChat} from '../assistant-policy.js';
 import {servedGroup,sourceChat} from '../spaces.js';
+import {applicableInterpretations,type InterpretationVersion} from '../interpretations.js';
+import {ownerTyped} from '../source-facts.js';
+import {REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,reviewBody,reviewFragment,type ReviewProvenance} from '../source-labels.js';
+import {NoteSourceRepository} from './note-sources.js';
 
 export const nativeReviewSchema=`
 CREATE TABLE IF NOT EXISTS native_review_jobs (
@@ -23,6 +27,7 @@ CREATE TABLE IF NOT EXISTS native_review_jobs (
 ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS paused boolean NOT NULL DEFAULT false;
 ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS reconciliations integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS native_review_jobs_source ON native_review_jobs((source_reference->>'id'));
+ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS provenance jsonb;
 CREATE TABLE IF NOT EXISTS native_review_skips (
  event_id text NOT NULL,generation text NOT NULL,reason text NOT NULL CHECK(reason IN ('sender_not_allowed','target_not_allowed')),
  created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(event_id,generation)
@@ -67,7 +72,8 @@ export async function requestStrandedSources(pool:pg.Pool,since:Date,limit=100):
 /** The brain's own notes remain in the brain. Nocheh stores prepared inputs and execution receipts separately. */
 export class NativeReviewRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
-    readonly turns:RuntimeTurnRepository,readonly brain:Brain,readonly token:string){}
+    readonly turns:RuntimeTurnRepository,readonly brain:Brain,readonly token:string,
+    readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy())){}
   private get control(){return this.contexts.access.stores.control;}
   private actor(source:SourceReference,binding:GuardBinding):Reader {
     // The owner's private chat (ADR-0252), the space the owner's native notes are reviewed in.
@@ -104,7 +110,7 @@ export class NativeReviewRepository {
     // Related messages are asked the same question, each once.
     const asked=new Map<string,Promise<boolean>>(),options:Required<LearningContextOptions>={
       admit:reference=>{let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id).then(value=>value==='review'));return allowed;},
-      collect:{dropped:[],versions:[],bare_reaction:false}};
+      collect:{dropped:[],versions:[],refused:[],bare_reaction:false}};
     let context;
     try{context=await this.contexts.prepare(source,binding,options);}
     catch(error) {
@@ -116,7 +122,8 @@ export class NativeReviewRepository {
     if(options.collect.bare_reaction)return await leave('target_not_allowed');
     const actor=this.actor(source,binding);
     await this.turns.binding(actor);await this.prepared.allow(actor,{observations:context.observations,rules:context.rules});
-    const text=canonical({space:context.space,observations:context.observations,rules:context.rules,limitations:context.limitations});
+    const {provenance,rules,limitations}=await this.batch(source,context,options.collect);
+    const text=canonical({space:context.space,observations:context.observations,rules,limitations});
     if(text.length>200000){if(kept.length)return await settle();throw new HttpError(413,'native_review_input_limit');}
     // Every fragment carries the whole source's evidence, so a new reply or reaction in its thread changes every fragment's
     // input. A waiting fragment whose own text is unchanged is then replaced by one with the current input, keeping its
@@ -127,12 +134,19 @@ export class NativeReviewRepository {
         [rows.map(row=>row.input_reference.id)])).rows;
       for(const row of rows) {
         const content=stored.find(input=>input.id===row.input_reference.id)?.content;
-        if(content)twins.set(digest(String(JSON.parse(content.toString()).text)),row);
+        // Matched on its slice of the evidence alone, so a records line that changed (a new message in the batch, a
+        // sender allowed or not) still finds it.
+        if(content)twins.set(digest(reviewBody(String(JSON.parse(content.toString()).text))),row);
       }
     }
-    const characters=Array.from(text);
-    for(let offset=0;offset<characters.length;offset+=8000) {
-      const content=`Source nocheh:event:${source.id}; conversation ${context.space}; fragment ${offset/8000+1}. Speakers are not necessarily the owner.\n`+characters.slice(offset,offset+8000).join('');
+    // Line 1 is kept exactly as it was: the ADR-0244 counter reads it. Code's records line and a fixed marker line come
+    // next, then a fixed-size slice of the evidence, so nothing a message says comes before the marker.
+    const characters=Array.from(text),fragments:string[]=[];
+    for(let offset=0;offset<characters.length;offset+=REVIEW_BODY_SLICE)
+      fragments.push(reviewFragment(`Source nocheh:event:${source.id}; conversation ${context.space}; fragment ${offset/REVIEW_BODY_SLICE+1}. Speakers are not necessarily the owner.`,
+        provenance,characters.slice(offset,offset+REVIEW_BODY_SLICE).join('')));
+    if(fragments.some(content=>Array.from(content).length>REVIEW_FRAGMENT_LIMIT)){if(kept.length)return await settle();throw new HttpError(413,'native_review_input_limit');}
+    for(const content of fragments) {
       const document={text:content,evidence:context.evidence.map(e=>e.reference),dependencies:context.dependencies};
       // The same prepared input keeps its identity, attempts and place in the queue; only changed input becomes a new review.
       const hash=digest(canonical(document)),same=stale.get(hash);
@@ -143,7 +157,7 @@ export class NativeReviewRepository {
           WHERE id=$1 AND state='pending' AND NOT paused`,[same.id,binding]);
         ids.push(same.id);continue;
       }
-      const twin=twins.get(digest(content));
+      const twin=twins.get(digest(reviewBody(content)));
       if(kept.length&&!(twin&&stale.get(twin.input_reference.input_hash)===twin))continue;
       if(twin)stale.delete(twin.input_reference.input_hash);
       const carried=twin??spent;
@@ -154,13 +168,34 @@ export class NativeReviewRepository {
       const db=await this.control.connect();
       try {
         await db.query('BEGIN');
-        await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding,attempts,error_code,next_attempt)
-          VALUES($1,$2,$3,$4,$5,$6,greatest(now(),$7::timestamptz)) ON CONFLICT DO NOTHING`,[id,source,input,binding,carried?.attempts??0,carried?.error_code??null,carried?.next_attempt??null]);
+        await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding,attempts,error_code,next_attempt,provenance)
+          VALUES($1,$2,$3,$4,$5,$6,greatest(now(),$7::timestamptz),$8) ON CONFLICT DO NOTHING`,
+          [id,source,input,binding,carried?.attempts??0,carried?.error_code??null,carried?.next_attempt??null,provenance]);
         await requestWorkflow(db,'memory_review','native:'+id);await db.query('COMMIT');
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
       ids.push(id);
     }
     return await settle();
+  }
+  /**
+   * What code records about a review's batch (ADR-0257), from each message's own fields: its class, whether every
+   * message was the owner's own typing, whose rules it reads, and how many messages and rules were left out. A rule is
+   * the owner's when the owner wrote it, or when every message it was learned from is the owner's own typing. In a batch
+   * of the owner's own typing only, the rules learned from anyone else are left out of that one review, so a note it
+   * writes can still read as the owner's; turns and every other review still read them.
+   */
+  private async batch(source:SourceReference,context:PreparedLearningContext,collect:Required<LearningContextOptions>['collect']) {
+    const versions=collect.versions,classes=await this.sources.classesFor([...context.observations.map(item=>item.source.id),
+      ...versions.flatMap(version=>version.evidence.map(reference=>reference.id))]);
+    const typed=(id:string)=>{const found=classes.get(id);return !!found&&ownerTyped(found.facts);};
+    const ownRule=(version:InterpretationVersion)=>version.author==='owner'||version.evidence.length>0&&version.evidence.every(reference=>typed(reference.id));
+    const ownerOnly=context.observations.every(item=>typed(item.source.id)),read=ownerOnly?versions.filter(ownRule):versions,left=versions.length-read.length;
+    const provenance:ReviewProvenance={version:1,source:source.id,
+      events:context.observations.map(item=>({id:item.source.id,class:classes.get(item.source.id)?.class??'unknown'})),owner_account_only:ownerOnly,
+      rules:!read.length?'none':read.every(ownRule)?'owner':'others',
+      left_out:{sender_not_allowed:collect.dropped.length,rule_sender_not_allowed:collect.refused.length,rules_left_out_for_owner_label:left}};
+    return {provenance,rules:left?applicableInterpretations(read):context.rules,
+      limitations:left?[...context.limitations,'rules_left_out_for_owner_label']:context.limitations};
   }
   /** Why a source's notes review should not run, or null: Nocheh's own card or notice (ADR-0256), or a source left out of
    * the owner's notes (ADR-0257), which is recorded so a later grant doesn't bring it back in this generation. */

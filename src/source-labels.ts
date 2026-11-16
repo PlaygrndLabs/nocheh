@@ -242,6 +242,26 @@ export function reviewLegend(provenance:ReviewProvenance,limit=3600):string {
   return line(0);
 }
 
+/** A review's evidence is cut into slices of this many characters whatever its records line says, so a records line
+ *  that changes never moves where a fragment is cut. */
+export const REVIEW_BODY_SLICE=7500;
+/** The longest fragment Nocheh sends: Hermes refuses a review over 12,000 characters (review_worker.py). */
+export const REVIEW_FRAGMENT_LIMIT=11900;
+/**
+ * One notes review fragment: its first line as given, the records line, the fixed marker line, then its slice of the
+ * evidence. The records line folds further when the whole would pass REVIEW_FRAGMENT_LIMIT.
+ */
+export function reviewFragment(first:string,provenance:ReviewProvenance,body:string):string {
+  const room=REVIEW_FRAGMENT_LIMIT-length(first)-length(evidenceMarker)-length(body)-3;
+  return [first,reviewLegend(provenance,Math.min(3600,room)),evidenceMarker,body].join('\n');
+}
+/** The evidence slice of a stored fragment, which a waiting fragment's replacement is matched on, so a changed records
+ *  line still finds it. A fragment from before the records line gives its whole text, which no new slice equals. */
+export function reviewBody(fragment:string):string {
+  const at=fragment.indexOf('\n'+evidenceMarker+'\n');
+  return at<0?fragment:fragment.slice(at+evidenceMarker.length+2);
+}
+
 /** The owner's words: the source lines, and the reminder lines and approval texts' chat words they share. */
 export interface SourceWords {lines:Record<SourceText,string>;reminder:Record<ReminderText,string>;places:PlaceWords}
 const quoted=(raw:string|null|undefined)=>{const name=labelName(raw);return name===null?null:quotedName(name);};

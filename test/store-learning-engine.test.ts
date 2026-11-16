@@ -66,7 +66,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.ok(!JSON.stringify(prepared.observations).includes('nested-unverified-target'));
     // Only the owner's notes review leaves anyone out (ADR-0257): letting everyone in prepares exactly what Honcho and
     // interpretations get without options, and a reaction whose message is left out has nothing left.
-    const collect=()=>({dropped:[] as string[],versions:[] as InterpretationVersion[],bare_reaction:false}),everyone=collect(),left=collect();
+    const collect=()=>({dropped:[] as string[],versions:[] as InterpretationVersion[],refused:[] as string[],bare_reaction:false}),everyone=collect(),left=collect();
     assert.equal(canonical(await contexts.prepare(reaction,await guards.state(),{admit:async()=>true,collect:everyone})),canonical(prepared));
     assert.deepEqual([everyone.dropped,everyone.bare_reaction],[[],false]);
     const without=await contexts.prepare(reaction,await guards.state(),{admit:async reference=>reference.id!==parent.id,collect:left});
@@ -164,7 +164,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.equal(canonical(await contexts.prepare(removed,await guards.state(),{admit:async()=>true,collect:ruleKept})),canonical(beforeRewrite));
     assert.deepEqual(ruleKept.versions.map(version=>version.id),[ruleId]);
     const noRule=await contexts.prepare(removed,await guards.state(),{admit:async reference=>reference.id!==convention.id,collect:ruleLeft});
-    assert.deepEqual([beforeRewrite.rule_ids,noRule.rule_ids,ruleLeft.versions,ruleLeft.dropped],[[ruleId],[],[],[]]);
+    assert.deepEqual([beforeRewrite.rule_ids,noRule.rule_ids,ruleLeft.versions,ruleLeft.dropped,ruleLeft.refused,ruleKept.refused],[[ruleId],[],[],[],[ruleId],[]]);
     assert.ok(noRule.limitations.includes('rule_sender_not_allowed'));assert.ok(!beforeRewrite.limitations.includes('rule_sender_not_allowed'));
     await learned.publishAutomatic(ruleId,{...rule,text:'A green mark signals readiness for review here.'},1,key+':rule-rephrased',
       ruleDependencies,await guards.state(),'fixture',detect);
