@@ -33,6 +33,9 @@ export const retryMinutes=(attempts:number)=>Math.min(2**Math.max(0,attempts),60
  *  in 24 hours: one per group, ten in all (a stranger making new groups cannot flood the owner). A removal's line is
  *  outside them. */
 const BATCH=20,LEASE="interval '5 minutes'",NOTICE_TRIES=10,GROUP_NOTES=1,ALL_NOTES=10;
+/** The tries after which a leave Telegram still answers with the group's upgrade ends as could_not_leave: six waits of 1,
+ *  2, 4… 32 minutes, over an hour. */
+const MIGRATED_TRIES=6;
 /** How many projects a card offers to move the group to. */
 const OFFERED=3;
 /** The owner's authority, for the commands the card makes and its buttons run. */
@@ -54,6 +57,14 @@ export function noteLine(row:Pick<ChatAddRow,'role'|'member'>,outcome:string|nul
 const points=(text:string,size:number)=>Array.from(text).slice(0,size).join('');
 /** At most `size` UTF-16 units, as Telegram counts a message, never cut inside a character. */
 const units=(text:string,size:number)=>{const part=text.slice(0,size);return /[\ud800-\udbff]$/.test(part)?part.slice(0,-1):part;};
+/** The card's own project, once no group is in it, is archived, so it does not linger in the owner's list. Returns
+ *  whether it was. */
+async function archiveEmpty(db:pg.PoolClient,project:string):Promise<boolean> {
+  const made=(await db.query('SELECT name,description,state,revision FROM projects WHERE id=$1 FOR UPDATE',[project])).rows[0];
+  if(made?.state!=='active'||(await db.query(`SELECT 1 FROM project_assignments WHERE project_id=$1 AND mode='assigned'`,[project])).rowCount)return false;
+  await writeProject(db,{id:project,name:made.name,description:made.description,state:'archived',expected_revision:Number(made.revision)});
+  return true;
+}
 /** The card's buttons: one row moving the group to each offered project still there (by its index on the row), then No
  *  project and Turn off. Labels are cut to Telegram's 40 characters. */
 export function cardRows(lines:Record<ChatAddText,string>,event:string,offered:readonly {index:number;name:string|null}[]):Button[][] {
@@ -128,7 +139,8 @@ export class ChatAdds {
    * Leave a group someone else added Nocheh to, 30 s after the add (so an upgrade's two halves fold first): only while the
    * group is still pending from this very add. The owner turning it on or off meanwhile, or adding it again, supersedes the
    * leave. Telegram leaving, or saying Nocheh is gone already, makes it left; refusing makes it could_not_leave, which the
-   * owner can still turn on or off. Then the note, for a person the owner allowed or a hidden adder.
+   * owner can still turn on or off, and so does Telegram still saying the group was upgraded after over an hour of tries.
+   * Then the note, for a person the owner allowed or a hidden adder.
    */
   private async leave(row:ChatAddRow):Promise<void> {
     if(!row.outcome) {
@@ -143,6 +155,9 @@ export class ChatAdds {
         try{result=await this.call('telegram.leave',{id:row.event_id,chat_id:chat.external},30000);}
         catch{await this.later(row);return;}
         if(result.state==='done')outcome='left';else if(result.state==='failed')outcome='could_not_leave';
+        // Still the old basic group's id after over an hour: its new id never reached storage (the upgrade's messages were
+        // lost, or the two chats stayed apart), so the dead id would be tried forever. It ends as a refusal does.
+        else if(result.error_code==='telegram_chat_migrated'&&row.attempts>=MIGRATED_TRIES)outcome='could_not_leave';
         else{await this.later(row);return;}
         await this.chats.leaveSettled(row.chat_id,row.event_id,outcome);
       }
@@ -189,6 +204,20 @@ export class ChatAdds {
       if(made.outcome!=='carded'||!made.project_id){await this.finish(row,{outcome:made.outcome});return;}
       const offered=(await this.control.query(`SELECT id FROM projects WHERE state='active' AND id<>$1 ORDER BY updated_at DESC,id LIMIT ${OFFERED}`,[made.project_id])).rows.map(item=>item.id as string);
       await this.keep(row,{outcome:'carded',project_id:made.project_id,offered});
+    } else {
+      // A card tried again after its send did not go says only what is still true: the group is on from this very add and
+      // in the card's project. Turned off, removed, added again or moved meanwhile, the row ends with no card. It stays
+      // 'carded', so a card a lost answer did deliver still answers presses on the group as it is now. The card's project,
+      // left with no group, is archived as a press archives it.
+      const now=(await this.control.query(`SELECT c.state,c.add_event,a.mode,a.project_id FROM chats c LEFT JOIN project_assignments a ON a.space_id=c.id
+        WHERE c.id=$1`,[row.chat_id])).rows[0];
+      if(!now||now.state!=='active'||now.add_event!==row.event_id||now.mode!=='assigned'||now.project_id!==row.project_id) {
+        if(row.project_id&&(await this.control.query(`SELECT 1 FROM projects p WHERE p.id=$1 AND p.state='active'
+            AND NOT EXISTS(SELECT 1 FROM project_assignments a WHERE a.project_id=p.id AND a.mode='assigned')`,[row.project_id])).rowCount)
+          await this.commands.run(asOwner,'chat-add-archive:'+row.event_id,{kind:'chat_add_archive',event_id:row.event_id,project_id:row.project_id},
+            async db=>({project_id:row.project_id,archived:await archiveEmpty(db,row.project_id!)}));
+        await this.finish(row,{});return;
+      }
     }
     const target=this.owner();if(!target){await this.finish(row,{});return;}
     const {lines,words}=await this.lines(),{text}=await this.cardText(row,lines,words);
@@ -272,10 +301,7 @@ export class ChatAdds {
         await this.commands.run(asOwner,operation,{kind:'chat_card',event_id:row.event_id,choice,chat_id:row.chat_id,project_id:project},async db=>{
           const own=(await db.query('SELECT revision FROM project_assignments WHERE space_id=$1',[row.chat_id])).rows[0];
           await writeAssignment(db,{space_id:row.chat_id,project_id:project,mode:project?'assigned':'none',expected_revision:Number(own?.revision??0)});
-          // The card's own project, once no group is in it, is archived, so it does not linger in the owner's list.
-          const made=(await db.query('SELECT name,description,state,revision FROM projects WHERE id=$1 FOR UPDATE',[row.project_id])).rows[0];
-          if(made?.state==='active'&&!(await db.query(`SELECT 1 FROM project_assignments WHERE project_id=$1 AND mode='assigned'`,[row.project_id])).rowCount)
-            await writeProject(db,{id:row.project_id!,name:made.name,description:made.description,state:'archived',expected_revision:Number(made.revision)});
+          await archiveEmpty(db,row.project_id!);
           return {chat_id:row.chat_id,project_id:project};
         });
         const name=project?labelName((await this.control.query('SELECT name FROM projects WHERE id=$1',[project])).rows[0]?.name):null;
