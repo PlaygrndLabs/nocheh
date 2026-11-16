@@ -67,6 +67,16 @@ Grant permits a participant to start a reply or tool-using turn in that group.
 Deny overrides grant. Revoke removes either decision and returns that participant
 to the owner-only default. Only the owner can administer these decisions.
 
+Not allowed does not mean unheard. A message from a participant who is not
+allowed is still archived, seen by the next group reply as context, learned by
+that group's long-term memory and found by search and by recall from the owner's
+private chat, labelled with the group. It stays out of one place only: the
+owner's own notes (Memory › Assistant notes), together with the owner's reactions
+to it, and a reply to it is reviewed without it. A message left out stays out
+after a later grant; **Memory › Assistant notes** counts them. Posts in a
+chat's own name, anonymous admins and bots count as not allowed
+([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
+
 For proactive group conversation, disable the bot's group privacy mode in
 BotFather or give it the appropriate group administrator role. Telegram otherwise
 delivers a limited set of group messages. The archive can preserve only updates
@@ -172,6 +182,36 @@ allow are listed but never counted as problems. **Keep
 delivery logs** in Settings › Privacy & data removes old records too. The
 dashboard's own mini app menu button call does not pass the bot yet, so it has
 no record ([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md)).
+
+## Send classes
+
+Each message Nocheh sends carries a send class, set where the send is decided
+and kept in the archived copy of the delivered message. It is separate from the
+send record's kind, which does not change.
+
+| Class | Sent as | Learned |
+| --- | --- | --- |
+| `reply` | an answer in the chat | yes |
+| `follow_up` | a follow-up after an approved action | yes |
+| `private_answer` | an Answer privately reply | yes |
+| `job_report` | a background or machine job's report | yes |
+| `scheduled_run` | a scheduled task's result | yes |
+| `approved_post` | a post the owner approved | yes |
+| `card` | an approval card or a fixed control reply | no |
+| `card_update` | a card's settle, a button answer or a notice edit | no |
+| `refusal` | the fixed reply to someone not allowed | no |
+| `notice` | a problem, import or memory notice, or a group's line about a job | no |
+| `reminder` | a task reminder | no |
+
+A message that is not learned is still archived and searchable, and is context
+when the owner replies to it; it never reaches the notes review, long-term memory
+or interpretations, and System › Background work shows its learning step as
+skipped ("Nocheh's own card, notice or reminder: kept, not learned"). The
+owner can turn learning on for one message, and that yes overrides the class.
+A route accepts only its own classes; an unknown class falls back to the
+route's default and never stops the send. A message with no class, everything
+sent before classes existed and the web chat's replies included, is learned
+([ADR-0256](adr/0256-nochehs-own-messages-carry-a-send-class.md)).
 
 ## Mini app
 

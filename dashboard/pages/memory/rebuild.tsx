@@ -194,7 +194,7 @@ function Relearn({
       <p className="text-[13px] text-muted">
         Long-term memory forgets what it learned from the chosen chats and learns them again from their saved messages,
         dated by when they were sent. A group includes its topics. While it re-learns, replies use notes and message
-        search.
+        search. Messages are learned again in the form they were first learned in.
       </p>
       <Segmented
         label="Which chats"
@@ -262,6 +262,12 @@ function Replace({saved, revision, cost}: {saved: number; revision: number; cost
           ? `Up to ${count(saved, 'saved message', 'saved messages')} you allowed it to learn will be sent again.`
           : 'Only messages that arrive from now on are learned.'}
       </p>
+      {from === 'archive' && (
+        <p className="text-[13px] text-muted">
+          They are learned by today’s rules: other people’s forwards and the text of your files get their own place, and
+          Nocheh’s own cards, notices and reminders are left out.
+        </p>
+      )}
       {from === 'archive' && <p className="text-xs text-muted">{cost}</p>}
       <Field label={`Type “${CONFIRM_WORD}” to confirm`} htmlFor="memory-replace-confirm" className="max-w-xs">
         <Input

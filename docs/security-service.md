@@ -92,6 +92,24 @@ as administrative authority. The memory and process-isolation settings remain in
 Fresh configurations default to `NOCHEH_SECURITY_RUNTIME=isolated` and
 `NOCHEH_MEMORY_CONTEXT=evidence`.
 
+In evidence mode each native notes block is one entry, `{source, target, title,
+usage, about, notes: [{from, label, content}]}`. `content` is the note's text
+unchanged; `from` (one of `owner`, `nocheh`, `person`, `forward`, `file`,
+`mixed`, `turn`, `turn_read`, `unknown`, `unavailable`) and `label` (fixed
+words, at most 120 characters, no person's name) come from Nocheh's own record
+of who wrote the note, which Hermes's parent keeps in
+`<profile>/nocheh-note-sources.json`, outside the folders an isolated run can
+write, and storage turns into labels when the turn starts. `about` is a fixed
+sentence saying so, and that `from=owner` means only the owner's own messages;
+it reaches the model even when the owner edited the evidence instruction. The
+child accepts only a known `from` and a plain label, else `unknown`, and a block
+of another shape stops the turn. In the owner's turns, the long-term memory
+blocks in the same evidence each carry `about`, `owner` or `forwards_and_files`. Labels are information for the model,
+not a permission, and the request guard checks them like the notes. The legacy
+memory mode (`NOCHEH_MEMORY_CONTEXT=legacy`) and the non-isolated runtime carry
+no labels, and a non-isolated run could reach the record file
+([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
+
 
 For an existing installation, stop Hermes and its native writers before running
 `python3 -m tools.operations.security.security_profiles /absolute/path/to/hermes --hermes-stopped`.

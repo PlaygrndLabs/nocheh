@@ -191,6 +191,23 @@ the next turn. Session messages are paginated in groups of 50, with a 20,000
 character preview per message. Notes are bounded to 256 KiB and explicitly show
 truncation. A note's presence does not establish source provenance.
 
+Each note is listed on its own with a label under it saying where it came from,
+coloured by kind: green for a note drawn only from your own messages, blue for
+Nocheh's own work (a review that included its replies or reports, or a note
+written while answering your own message), and amber for other people's words,
+a forward, a file, a mix, or a note written after the turn read something
+outside. Nocheh's code builds the label from its own record of who wrote the
+note, never from the note's text, and a note written during a turn is never
+labelled as yours. Notes written before labels existed say "Source not
+recorded"; a label that could not be looked up says "Source not available
+right now", and System › Health counts those. The words are yours to edit in
+Settings › Assistant under **Note sources on the Notes page**; the assistant
+reads fixed words of its own beside each note. A group's `USER.md` is titled
+**About people here**. When messages from people not allowed where they wrote
+were kept out of your notes, a line above the notes counts them; they are still
+in that group's long-term memory
+([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
+
 ```sh
 ./bin/nocheh memory list
 ./bin/nocheh memory show --scope CHAT_ID
@@ -476,6 +493,16 @@ resume. Completed imports without approval remain searchable. Review jobs use
 Hermes's native memory review, with no external-action tools. Pause/resume controls
 operate on queued work; an interrupted native write is marked ambiguous and needs
 an explicit resume. Retrying an ambiguous review may repeat a native memory edit.
+
+The owner's notes review takes only messages from the owner, from people allowed
+where they wrote, Nocheh's own learned messages and the web chat. A message from
+anyone else is recorded as kept out for the installation generation, and
+System › Background work shows its review step as skipped ("From someone not
+allowed there: kept out of your notes, still in group memory"). Nocheh's own
+cards, notices and reminders are skipped the same way ("Nocheh's own card,
+notice or reminder: kept, not learned"). `memory reviews` returns the count as
+`kept_out`. Each review also stores which kinds of messages it read, so its
+notes can be labelled later.
 
 A chat or topic is named by its Nocheh id ([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)):
 the value it was stored under before step 2b, or a digest for one first seen later. Its link in Chats
