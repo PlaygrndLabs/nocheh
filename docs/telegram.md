@@ -74,7 +74,9 @@ private chat, labelled with the group. It stays out of one place only: the
 owner's own notes (Memory › Assistant notes), together with the owner's reactions
 to it, and a reply to it or a pin of it is reviewed without it. A message left
 out stays out after a later grant; **Memory › Assistant notes** counts them.
-Posts in a chat's own name, anonymous admins and bots count as not allowed
+Posts in a chat's own name, anonymous admins and other bots count as not
+allowed. Nocheh's own messages never do: a pin of one it learns is reviewed
+with it, and a pin of its card, notice or reminder without it, uncounted
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 For proactive group conversation, disable the bot's group privacy mode in
@@ -212,6 +214,17 @@ A route accepts only its own classes; an unknown class falls back to the
 route's default and never stops the send. A message with no class, everything
 sent before classes existed and the web chat's replies included, is learned
 ([ADR-0256](adr/0256-nochehs-own-messages-carry-a-send-class.md)).
+
+A quote or a pin carries part or all of a message Nocheh sent. The owner's
+quote or pin of a message Nocheh learns, other than its reply about a forward,
+counts as Nocheh's in note labels, and long-term memory keeps that message as
+Nocheh's only: the quote is left out of the owner's record, and the pin leaves a
+fixed note that one of Nocheh's messages was pinned. A quote of a card is
+labelled and kept as a quote of someone else's message. The owner's notes
+review takes a pinned card out of any pin, and the owner's pin of a card leaves
+only that fixed note in long-term memory; a member's pin of a card still carries
+its text into that member's long-term memory, and interpretations read it
+([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app
 

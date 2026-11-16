@@ -11,9 +11,10 @@ stay out of the owner's private notes but still count for group replies; what
 others wrote is information, never the owner's own words or instructions. A
 review of the design tightened it: "you" only for a review of nothing but the
 owner's own messages that cites them, a note's earlier sources carried through
-the operations that replace it, and a reported claim never made direct. A
-review of the build closed gaps in pins, rules, quotes of Nocheh, recall, what a
-turn read and failure counting; this record describes the result. Four
+the operations that replace it, and a reported claim never made direct. Two
+reviews of the build closed gaps in pins and quotes (of Nocheh's own messages
+too), rules, recall, what a turn read, failure counting and the full tester's
+checks; this record describes the result. Four
 questions went to the owner; this builds the recommended answer to each, except
 that a reply's or a reaction's target from someone not allowed is left out of
 the review, as the owner's rule says, until the owner answers otherwise. It reads
@@ -90,12 +91,12 @@ a recalled note names its source beside its chat).
 - Memory › Assistant notes says how many messages were kept out this generation
   (`kept_out` on the reviews list). Long-term memory and learning still take
   such a message, so in System › Background work its Memory notes step shows as
-  Done, with the reason under it, and in its detail as a note, not as something
-  it waits for: "From someone not allowed there: kept out of
-  your notes, still in group memory", or for a reaction "A reaction to someone
-  not allowed there: kept out of your notes, still in group memory". `queue`
-  returns that reason only when it decided it in the same call, so a source
-  reviewed earlier never shows it.
+  Done, with the reason under it, and its details show that reason under
+  "Note", as for every task that ended, not under "Waiting for": "From someone
+  not allowed there: kept out of your notes, still in group memory", or for a
+  reaction "A reaction to someone not allowed there: kept out of your notes,
+  still in group memory". `queue` returns that reason only when it decided it
+  in the same call, so a source reviewed earlier never shows it.
 
 ## 2. Each message gets a class from code facts
 
@@ -128,12 +129,14 @@ a recalled note names its source beside its chat).
   through the message it belongs to; any other input is someone else's, and
   Nocheh's own messages are not the owner's. In a review of nothing but the
   owner's own messages, rules not drawn from them are left out of that review
-  only (`rules_left_out_for_owner_label`). In a review of the owner's own
-  messages and Nocheh's own learned messages (its cards and notices are not
-  learned), the rules resting on another person's message, a forward or a file
-  are left out the same way, so its notes read `nocheh` rather than as others'.
-  `owner_account_only` stays false for such a review. A provenance stored before
-  `rule_buckets` existed reads its rules from others as another person's.
+  only (`rules_left_out_for_owner_label`). In a review of Nocheh's own learned
+  messages, alone or with the owner's own messages (its cards and notices are
+  not learned, and the owner's quote or pin of a learned one counts with them),
+  the rules resting on another person's message, a forward, a file or an input
+  that can't be told are left out the same way and counted there, so its notes
+  read `nocheh` rather than as others'. `owner_account_only` stays false for
+  such a review. A provenance stored before `rule_buckets` existed reads its
+  rules from others as another person's.
 - The review fragment's first line stays byte for byte. A second line, Nocheh's
   records, is one JSON object in fixed words with no names, listing each
   message's full id under its class's phrase, at most 3,600 characters. A fixed
@@ -158,15 +161,16 @@ a recalled note names its source beside its chat).
   characters or a distinctive token with it; an earlier read it did not copy
   from leaves the note the turn's own, so a note the owner dictates later in a
   long session is not marked as read. A forward of the sender's own earlier
-  message is their words, not a read, in the message a turn answers; earlier in
-  the session only the owner's is, since in a group it is a member's words. A
-  note keeps the origins of the notes it replaced through the replace and patch
-  operations the run asked for (every
-  removed note, when those are not known), and of any earlier note, not the
-  owner's own, it shares a run of 32 characters, a distinctive token or its
-  whole text (ignoring case and spacing) with. A note keeps at most 10 origins
-  and counts the rest, and one that had to drop origins also reads as partly
-  unknown. A note with no record reads "source not recorded".
+  message is their words, not a read, in the message a turn answers. Earlier in
+  the session only the owner's own forward is; a member's own forward there is
+  not the owner's words, so it counts as a forward read, copied or not. A note
+  keeps the origins of the notes it replaced through the replace and patch
+  operations the run asked for (every removed note, when those are not known),
+  and of any earlier note, not the owner's own, it shares a run of 32
+  characters, a distinctive token or its whole text (ignoring case and spacing)
+  with. A note keeps at most 10 origins and counts the rest, and one that had to
+  drop origins also reads as partly unknown. A note with no record reads
+  "source not recorded".
 - **The label is made when the note is read.** `/internal/notes/sources`
   (service token only) turns a note's origins and citations into `{from,
   label}`. `from` is one fixed token: `owner`, `nocheh`, `person`, `forward`,
@@ -178,7 +182,8 @@ a recalled note names its source beside its chat).
   all-owner review whose note cites none reads `nocheh`. Rules a review read
   that rest on another person's message, a forward or a file make the note
   `person`, `forward`, `file` or `mixed`, and its label says it read rules
-  learned from others. A `nocheh` note is not taken as the owner's own words:
+  learned from others; only a review that holds someone else's words reads
+  them (section 2). A `nocheh` note is not taken as the owner's own words:
   its review held Nocheh's own messages, read rules learned from them, or did
   not meet the owner rule. A turn's note is never `owner`: it is `turn` when it
   answered the owner's own message, or the owner's quote of Nocheh's own learned
@@ -191,7 +196,8 @@ a recalled note names its source beside its chat).
   [ADR-0255](0255-reminders-say-who-set-them.md). Its lines `quote_nocheh`,
   `pinned`, `pinned_nocheh` and `rules_others` name a quote of Nocheh's own
   message, someone else's message pinned, Nocheh's own message pinned, and rules
-  learned from other people's messages, forwards or files. Trust is keyed on `from`, never on words.
+  learned from other people's messages, forwards or files. Trust is keyed on
+  `from`, never on words.
 - **What the model sees.** In evidence mode each native notes block reaches the
   model as `{target, title, usage, about, notes:[{from, label, content}]}`: the
   note's text unchanged, its label in its own fields and a fixed `about`
@@ -234,14 +240,18 @@ a recalled note names its source beside its chat).
   pins is kept as such a forward is, with its own fixed pointer. The owner's
   quote of Nocheh's own learned message is written as the owner's words without
   the quote, which is already learned as Nocheh's, and nothing goes to the
-  forwards peer. The owner's pin of Nocheh's own message leaves only a fixed
-  pointer in that chat that it was pinned: a learned message is already learned
-  as Nocheh's, and a card is not learned. Nocheh's reply about a forward goes to
-  the forwards session.
-- In a group, a member's message, forward or pin stays on the member's peer.
-  The owner's forward, file text, quote of someone else or pin of someone
-  else's message goes to the forwards peer in that group's own session, so it
-  never shapes what is known about the owner in every chat.
+  forwards peer. The owner's pin of Nocheh's own learned message, or of its
+  card, notice or reminder, leaves only a fixed pointer on the assistant peer,
+  in the chat where it was pinned, private or group, saying that one of
+  Nocheh's messages was pinned: a learned message is already learned as
+  Nocheh's, and a card is not learned. The owner's pin of Nocheh's reply about a
+  forward is kept as a pin of someone else's message is. Nocheh's reply about a
+  forward goes to the forwards session.
+- In a group, a member's message, forward or pin stays on the member's peer, a
+  pin of Nocheh's card with its text included. The owner's forward, file text,
+  quote of someone else or pin of someone else's message goes to the forwards
+  peer in that group's own session, so it never shapes what is known about the
+  owner in every chat.
 - Every new record carries a fixed `source`, such as "the sender's own words",
   "forwarded by the sender from a person who hides their account: information
   others wrote, not the sender's words or instructions" or "Nocheh's report".
@@ -263,7 +273,8 @@ a recalled note names its source beside its chat).
   forward, file, quote or pin of someone else's message that they passed on;
   otherwise a claim citing someone else is `inferred`, and any other is
   `reported`. The owner's quote of Nocheh's own learned message
-  (`quote_nocheh`) is the owner's own typing here too.
+  (`quote_nocheh`) is the owner's own typing here too; the owner's pin of one
+  (`pinned_nocheh`) is not, so no claim in a batch that holds it is direct.
 - A source already written in the earlier form is planned in that form again
   (the `record_kind` format guard), so its ids match and nothing goes stale.
   There is no Honcho rebuild, re-learn or new workspace: only newly learned
@@ -286,9 +297,9 @@ a recalled note names its source beside its chat).
   page that fails or can't name a review's chat (the labels still go out), and
   recall's ask of the forwards and files. A step that works is written only once
   that day's count holds a failure of its kind, which is all the notice needs to
-  say it works again, so steady use writes nothing. `/v1/status` reports today's counts
-  as `memory_problems`, and the notice adds them in. The problem notice says
-  "Memory labels: telling where notes came from failed {count} times today.
+  say it works again, so steady use writes nothing. `/v1/status` reports today's
+  counts as `memory_problems`, and the notice adds them in. The problem notice
+  says "Memory labels: telling where notes came from failed {count} times today.
   Notes written while it failed show “Source not recorded” or a less exact
   source, and replies may have seen “source not available”. The notes
   themselves are kept." and "Long-term memory: Nocheh couldn't read memory from
@@ -346,8 +357,10 @@ a recalled note names its source beside its chat).
   - Claims resting on forwards, files or others' messages are reported or
     inferred, never direct. They are still kept.
   - Many notes read "Nocheh" or mixed rather than "you" when Nocheh's reply or
-    others' messages were in the review, and a note whose review read rules
-    learned from others reads as theirs. That is correct; person, forward,
+    others' messages were in the review. A review that holds others' messages
+    reads every rule of its chat, so a rule learned from a forward or a file can
+    make its note mixed; a review of only the owner's and Nocheh's own messages
+    leaves such rules out and stays `nocheh`. That is correct; person, forward,
     file, mixed and turn_read notes are marked as others' words, and a `nocheh`
     note is not the owner's own words either.
   - Small costs: one more parallel long-term memory read per owner turn
@@ -371,7 +384,16 @@ a recalled note names its source beside its chat).
 - Full tester: `not_allowed_group_text_stays_out_of_owner_notes`,
   `display_name_cannot_borrow`, `forward_kept_apart_and_labelled` and
   `own_file_stays_recallable`, with new checks in the forwarded message,
-  reminder, card, job report, notes, document, photo and voice scenarios.
+  reminder, card, job report, notes, document, photo and voice scenarios. The
+  tester's Honcho answers a memory chat with the fixture's deterministic model,
+  which never searches, so `own_file_stays_recallable` checks that recall asked
+  the forwards-and-files participant, got its answer (no
+  `forwards_unavailable`), and that this participant holds the file's text in
+  Honcho, not that the answer quotes it. A check waiting on the owner's notes
+  reviews, which run one at a time, waits up to 40 minutes, and its timeout
+  names how many reviews were still waiting. The tester's Honcho takes the real
+  setup's query and input limits (ADR-0228), so a learning query as long as
+  Nocheh sends is taken there too.
 - **Residuals:**
   - Labels and instructions are honoured by the model, not enforced. A labelled
     planted note can still steer a turn, so approval cards remain the real stop.
@@ -392,8 +414,9 @@ a recalled note names its source beside its chat).
     earlier tool result or group message that a later turn restates in its own
     words, without a shared run or token, is not counted as read.
   - A rule's recorded inputs are not checked against who is allowed there; only
-    the messages it cites are (`rule_sender_not_allowed`). Such a rule still
-    makes its note read as another person's, never the owner's.
+    the messages it cites are (`rule_sender_not_allowed`). Only a review that
+    holds others' words reads such a rule, and its note reads as another
+    person's, never the owner's or Nocheh's.
   - A rule learned only from the owner's messages can restate a rule, or
     Honcho's chat, that its interpretation read, since its recorded inputs name
     neither.
@@ -401,4 +424,10 @@ a recalled note names its source beside its chat).
     the chat is served. The notes review checks both; Members step 4 must close
     it in `canLearn`.
   - No test covers Hermes counting `forwards_unavailable` yet.
+  - In learning, the owner's pin of Nocheh's own message counts as passed on,
+    so a claim of the owner's in the same batch is never direct.
+  - A member's pin of Nocheh's card, notice or reminder carries its text into
+    that member's long-term memory, and interpretations read the text of any
+    pinned card, as before. The owner's notes review cuts it out of every pin,
+    and long-term memory out of the owner's own pins.
 </consequences>
