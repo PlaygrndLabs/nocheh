@@ -144,6 +144,11 @@ test('each send reads in plain words, and what storage doesn’t count as a prob
     sendReason({state: 'failed', error_code: 'formatting_rejected', recovered: true}),
     'Formatting rejected; sent on a retry',
   );
+  // A leave the stage settled as left from Telegram's own update was never retried, so it says Nocheh left.
+  assert.equal(
+    sendReason({state: 'uncertain', kind: 'leave', error_code: 'timed_out', recovered: true}),
+    'No answer in time; Nocheh left',
+  );
 });
 
 test('backups and off-site copies that did not happen need a look and open System › Backups', () => {
