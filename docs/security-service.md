@@ -112,21 +112,25 @@ message, a forward or a file make the note `person`, `forward`, `file` or
 `mixed`. Only a review that holds someone else's words reads them; a review of
 Nocheh's own learned messages, alone or with the owner's own, leaves them out,
 and the owner's quote or pin of a message Nocheh learned counts as Nocheh's.
-The evidence instruction says a `nocheh` note is not the owner's own words
-either. What a turn read comes from its own session: a search by meaning counts
-as reading other chats, an earlier tool result or another person's group
-message counts only when the note copies a run of 32 characters or a
-distinctive token from it, and a forward of the sender's own message is not a
-read in the message the turn answers. Earlier in the session a forward the turn
-was given counts as read, except the owner's forward of their own message in
+A pin or quote of Nocheh's message that is not archived yet, or whose capture
+failed, counts as someone else's (it fails closed), and its words, a bot's, are
+cut from everything learned. The evidence instruction says a `nocheh` note is
+not the owner's own words either. What a turn read comes from its own session:
+a search by meaning counts as reading other chats, an earlier tool result or
+another person's group message counts only when the note copies a run of 32
+characters or a distinctive token from it, and a forward of the sender's own
+message is not a read in the message the turn answers. Earlier in the session a
+forward the turn was given counts as read, except the owner's forward of their own message in
 their private chat, the only one written `[Forwarded: your own earlier message]`.
 Anywhere else an own forward is written
 `[Forwarded: the sender's own earlier message]`, a member's in a group and the
 owner's own in a group or in a private answer carried from one alike, and counts
 as a forward read (it fails closed). A note from a turn whose session can't be
-read is never `turn`, and the turn is counted for the owner's notice. The legacy
-memory mode (`NOCHEH_MEMORY_CONTEXT=legacy`) and the non-isolated runtime carry
-no labels, and a non-isolated run could reach the record file
+read is never `turn`, and the turn is counted for the owner's notice. Storage
+counts a lookup that can't name a note's chat, Hermes's before a turn or review
+as well as recall's and the Notes page's, as the owner's `note_labels` line.
+The legacy memory mode (`NOCHEH_MEMORY_CONTEXT=legacy`) and the non-isolated
+runtime carry no labels, and a non-isolated run could reach the record file
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 

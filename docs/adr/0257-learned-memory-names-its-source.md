@@ -84,16 +84,27 @@ a recalled note names its source beside its chat).
   one stays, and a card, notice or reminder is cut out without being counted,
   since it is not learned. A pin of a card with nothing else to review is not
   reviewed at all: nothing is recorded as kept out, its waiting reviews are
-  withdrawn and its source step completes with `nocheh_message`. Another bot's
+  withdrawn and its source step completes with `nocheh_message`; nor is it
+  interpreted, and its long-term memory step, which still writes the pointer,
+  completes with `nocheh_message` too. Another bot's
   message is cut and counted. A
   reaction left with no target once one was dropped is skipped as
   `target_not_allowed`, so no run is spent on a bare emoji.
 - Only the notes review applies these filters. Group replies, Honcho,
-  interpretations, search and recall prepare their context exactly as before, so
-  a person not allowed still counts for group replies and group memory. For
-  every caller alike, a pin of Nocheh's card, notice or reminder loses it, and
-  a quote of any of Nocheh's own messages is left out of the message quoting
-  it (ADR-0256).
+  interpretations, search and recall still take what a person not allowed sent,
+  so that person still counts for group replies and group memory. What is
+  learned (the notes review, Honcho and interpretations) cuts more, whoever sent
+  it: a pin loses Nocheh's card, notice or reminder, and any bot's message the
+  archive does not hold as Nocheh's learned one (Nocheh's own whose delivery is
+  not archived yet or failed to be, another bot's, or one sent through an
+  inline bot), read from Telegram's `from.is_bot` and `via_bot`; a quote of
+  Nocheh's own message or of a bot's, a reply in another chat included, is left
+  out of the message quoting it, and so is a quote inside the message a pin
+  carries (`NoteSourceRepository.carried`). A bot is never someone allowed, so
+  no one's words are lost. Group replies, search and recall learn nothing and
+  are unchanged, and a card the owner replies to stays whole as related context
+  of the reply in the notes review and interpretations (ADR-0256): only Honcho
+  never writes it.
 - Memory › Assistant notes says how many messages were kept out this generation
   (`kept_out` on the reviews list). Long-term memory and learning still take
   such a message, so in System › Background work its Memory notes step shows as
@@ -124,7 +135,8 @@ a recalled note names its source beside its chat).
   `quote_nocheh` and counts with Nocheh's messages. The owner's pin of one,
   found as the same chat's message the pin names, is `pinned_nocheh`. A quote or
   pin of Nocheh's card, notice or reminder, of its reply about a forward, or of
-  a message not found stays a quote or pin of someone else's.
+  a message not found stays a quote or pin of someone else's (it fails closed),
+  whatever is cut from what is learned.
 - A review stores its `provenance` with its job: each message's class, whether
   every message was the owner's own typing, whose rules it read, whose words
   those rules rest on (`rule_buckets`: `person`, `forward`, `file`) and what was
@@ -251,10 +263,13 @@ a recalled note names its source beside its chat).
   of Nocheh's own messages, by anyone, is written as the sender's words without
   the quote, and nothing goes to the forwards peer: a learned message is already
   learned as Nocheh's, and a card is not learned. For the same reason a pin of
-  any of Nocheh's own messages, by anyone, leaves only a fixed pointer on the
+  any of Nocheh's own messages, by anyone, an anonymous admin included (the pin
+  is read before the post's class), leaves only a fixed pointer on the
   assistant peer, in the chat where it was pinned, private or group, saying that
-  the owner, or someone in that chat, pinned one of Nocheh's messages. Nocheh's
-  reply about a forward goes to the forwards session.
+  the owner, or someone in that chat, pinned one of Nocheh's messages. A pin of
+  a bot's message the archive does not hold as Nocheh's leaves a pointer that
+  names only a bot (`pinned_bot`), and a quote of one is left out as a quote of
+  Nocheh's is. Nocheh's reply about a forward goes to the forwards session.
 - In a group, a member's message, forward or pin stays on the member's peer,
   except a pin of Nocheh's own message, which leaves only the pointer. The
   owner's forward, file text,
@@ -285,14 +300,20 @@ a recalled note names its source beside its chat).
   (`quote_nocheh`) is the owner's own typing here too, without the quoted
   words; the owner's pin of one (`pinned_nocheh`) is not, so a claim citing it
   is never direct, but neither passes anything on, so the owner's other claims
-  beside them can stay direct.
+  beside them can stay direct. Nor does a pin or quote whose words were cut from
+  what is learned: of Nocheh's card, notice or reminder, or of a bot's message
+  the archive does not hold as Nocheh's; a claim citing one is never direct.
 - A source already written in the earlier form is planned in that form again
   (the `record_kind` format guard), so its ids match and nothing goes stale.
-  There is no Honcho rebuild, re-learn or new workspace: only newly learned
-  messages take the new routing. Writes a rebuild retired count too, so a
-  message requeued after a rebuild keeps its earlier form; a fresh start's new
-  workspace has none and uses today's form. An index on the source
-  (`memory_receipts_source`) keeps the check quick.
+  This change starts no Honcho rebuild, re-learn or new workspace of its own:
+  only newly learned messages take the new routing, and a message already
+  written is not written again unless something requeues it (an edit, a
+  correction or a rebuild). Then one whose text is now cut (a pinned card or
+  bot's message, a quote of Nocheh's or a bot's message) is written anew and its
+  session rebuilt, as for any source whose text changed. Writes a rebuild
+  retired count too, so a message requeued after a rebuild keeps its earlier
+  form; a fresh start's new workspace has none and uses today's form. An index
+  on the source (`memory_receipts_source`) keeps the check quick.
 - Honcho v3.6.0 makes no embeddings call for these reads: it embeds only for a
   `search_query`, which Nocheh never sends.
 
@@ -305,8 +326,9 @@ a recalled note names its source beside its chat).
   counted per day in Hermes's usage database, once per failed attempt, not per
   note, so a failure that comes back grows the count. The stores count the
   same way, in `memory_problem_days`: a label lookup for recall or the Notes
-  page that fails or can't name a review's chat (the labels still go out), and
-  recall's ask of the forwards and files. A step that works is written only once
+  page that fails, a lookup that can't name a review's chat (the labels still
+  go out), Hermes's lookups before a turn or review included, and recall's ask
+  of the forwards and files. A step that works is written only once
   that day's count holds a failure of its kind, which is all the notice needs to
   say it works again, so steady use writes nothing. `/v1/status` reports today's
   counts as `memory_problems`. The problem notice says "Memory labels: telling
@@ -319,7 +341,8 @@ a recalled note names its source beside its chat).
   a step that works on one side never clears a failure on the other: "Memory
   labels: looking up where notes came from failed {count} times today. Recall
   and the Notes page showed those notes as “source not available right now” or
-  without their chat. The notes and what was recorded about them are kept." and
+  without their chat, and replies may have seen them without their chat. The
+  notes and what was recorded about them are kept." and
   "Long-term memory: recall couldn’t ask your forwards and files {count} times
   today; it answered from the rest of your memory." They clear only when the
   stores' counts were read. System › Health says the same. A failure never
@@ -411,12 +434,15 @@ a recalled note names its source beside its chat).
   time and hold the background slot the steps that queue or skip them share, so
   every check that can wait behind them (a review, a message's notes and memory
   steps settling, an import's review steps) waits up to 40 minutes. It stops at
-  once when the review it waits for is paused, or still uncertain after a look
-  that could not confirm it, and its timeout names how many reviews were still
-  waiting, or says that count is unknown. The tester's Honcho takes the real
-  setup's query and input limits (ADR-0228), so a learning query as long as
-  Nocheh sends is taken there too, and asks for `json_object` answers at every
-  dialectic level as the real setup does, from the same settings code.
+  once when the review it waits for is paused, or still uncertain once Nocheh
+  gave up observing it (`nativeReconcileLimit` looks, read from the code; its
+  workflow then closes as `native_review_unconfirmed`), since one failed look
+  while Hermes restarts leaves later looks to find it done. Its timeout names
+  how many reviews were still waiting, or says that count is unknown. The
+  tester's Honcho takes the real setup's query and input limits (ADR-0228), so a
+  learning query as long as Nocheh sends is taken there too, and asks for
+  `json_object` answers at every dialectic level as the real setup does, from
+  the same settings code.
 - **Residuals:**
   - Labels and instructions are honoured by the model, not enforced. A labelled
     planted note can still steer a turn, so approval cards remain the real stop.
@@ -447,8 +473,21 @@ a recalled note names its source beside its chat).
     the chat is served. The notes review checks both; Members step 4 must close
     it in `canLearn`.
   - No test covers Hermes counting `forwards_unavailable` yet.
-  - A pin or quote handled before Nocheh's own message is archived is taken as
-    a pin or quote of someone else's message (it fails closed).
+  - A pin or quote handled before Nocheh's own message is archived, or after
+    its capture failed, is labelled as a pin or quote of someone else's message
+    (it fails closed). Its words are a bot's, so they are cut from the notes
+    review, interpretations and long-term memory, which keeps only a note that
+    a bot's message was pinned; Nocheh's message is learned as its own source
+    once archived.
+  - A quote inside a pinned message the archive does not hold, of a message in
+    the same chat, can't be traced (Telegram's pinned message carries no reply),
+    so it stays as a quote of someone else's message.
+  - A quote of Nocheh's message is cut whole, so the notes review and
+    interpretations no longer see which part of it was quoted.
+  - Hermes's own `notes` line adds up its own steps, so a lookup that works can
+    mark a record failure of the same day working again.
+  - On deploy day, today's store failures, already shown in Hermes's lines,
+    show once more as a `note_labels` line.
   - The owner's own forward in a group, or in a private answer carried from
     one, is written as the sender's own earlier message and counts as a forward
     read in later turns of that session, so their notes read `turn_read`

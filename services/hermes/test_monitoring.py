@@ -118,7 +118,8 @@ class MonitoringTests(unittest.TestCase):
             found = problems.problems({'note_problems': monitoring.note_problems(state, now, archive=stores)}, [], '2026-10-13')
             self.assertEqual([problems.text(problem, 1) for problem in found if problem['kind'] in ('note_labels', 'forwards_read')], [
                 'Memory labels: looking up where notes came from failed 2 times today. Recall and the Notes page showed those '
-                'notes as “source not available right now” or without their chat. The notes and what was recorded about them are kept.',
+                'notes as “source not available right now” or without their chat, and replies may have seen them without their '
+                'chat. The notes and what was recorded about them are kept.',
                 'Long-term memory: recall couldn’t ask your forwards and files 1 time today; it answered from the rest of your memory.'])
 
     def test_a_stores_step_that_works_after_its_failure_says_working_again(self):

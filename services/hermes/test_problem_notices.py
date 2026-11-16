@@ -461,8 +461,8 @@ class ProblemNoticeTests(unittest.TestCase):
                   '“Source not recorded” or a less exact source, and replies may have seen “source not available”. '
                   'The notes themselves are kept.')
         stores = ('Memory labels: looking up where notes came from failed 2 times today. Recall and the Notes page showed '
-                  'those notes as “source not available right now” or without their chat. The notes and what was recorded '
-                  'about them are kept.')
+                  'those notes as “source not available right now” or without their chat, and replies may have seen them '
+                  'without their chat. The notes and what was recorded about them are kept.')
         self.check(NOW, noting(hermes=(1, 0), stores=(2, 0)))
         self.assertEqual(self.sent[-1]['problems'], [hermes, stores])
         # The stores' Notes-page poll works while every Hermes record still fails: only the stores' line is working again.

@@ -291,8 +291,8 @@ def text(problem, new):
                 f"{_plural(count, 'time', 'times')} today; replies used the rest of your memory.")
     if kind == 'note_labels':
         return (f"Memory labels: looking up where notes came from failed {_plural(count, 'time', 'times')} today. Recall and "
-                'the Notes page showed those notes as “source not available right now” or without their chat. The notes and '
-                'what was recorded about them are kept.')
+                'the Notes page showed those notes as “source not available right now” or without their chat, and replies may '
+                'have seen them without their chat. The notes and what was recorded about them are kept.')
     if kind == 'forwards_read':
         return (f"Long-term memory: recall couldn’t ask your forwards and files {_plural(count, 'time', 'times')} today; "
                 'it answered from the rest of your memory.')

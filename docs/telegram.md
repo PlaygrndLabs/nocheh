@@ -75,9 +75,9 @@ owner's own notes (Memory › Assistant notes), together with the owner's reacti
 to it, and a reply to it or a pin of it is reviewed without it. A message left
 out stays out after a later grant; **Memory › Assistant notes** counts them.
 Posts in a chat's own name, anonymous admins and other bots count as not
-allowed. Nocheh's own messages never do: a pin of one it learns is reviewed
-with it, and a pin of its card, notice or reminder without it, uncounted
-([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
+allowed. Nocheh's own messages never do once archived: a pin of one it learns
+is reviewed with it, and a pin of its card, notice or reminder without it,
+uncounted ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 For proactive group conversation, disable the bot's group privacy mode in
 BotFather or give it the appropriate group administrator role. Telegram otherwise
@@ -218,12 +218,18 @@ sent before classes existed and the web chat's replies included, is learned
 A quote or a pin carries part or all of a message Nocheh sent. The owner's
 quote or pin of a message Nocheh learns, other than its reply about a forward,
 counts as Nocheh's in note labels. Whoever quotes or pins one of Nocheh's
-messages, a card included, what is learned keeps Nocheh's words as Nocheh's
-only: the quote is left out of the record of the message quoting it, and the
-pin leaves a fixed note in long-term memory that one of Nocheh's messages was
-pinned. A quote of a card is labelled as a quote of someone else's message,
-without its words. Every review and interpretation takes a pinned card out of
-the pin, and a pin of a card with nothing else to review is not reviewed
+messages, a card included, Nocheh's words are never learned as theirs: the
+quote is left out of the message quoting it, and in long-term memory the pin
+leaves only a fixed note that one of Nocheh's messages was pinned. The notes
+review and interpretations still read a pinned message that Nocheh learns, as
+Nocheh's, and a card the owner replies to stays context of that reply
+([ADR-0256](adr/0256-nochehs-own-messages-carry-a-send-class.md)). A quote of a
+card is labelled as a quote of someone else's message, without its words. Every
+review and interpretation takes a pinned card out of the pin, and a pin of a
+card with nothing else in it is neither reviewed nor interpreted. A bot's
+message the archive does not hold as Nocheh's, such as Nocheh's own before its
+delivery is archived, is cut from a pin or quote the same way, and the note in
+long-term memory then says only that a bot's message was pinned
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app

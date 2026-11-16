@@ -30,10 +30,11 @@ export interface NoteInput {key:string;origins:StoredOrigin[];more:number;cites:
 export interface NoteSource {from:NoteFrom;label:string}
 
 /**
- * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes for recall
- * and the Notes page, and naming their chats (`notes`), and recall's ask of the owner's forwards and files
- * (`memory_read`). /v1/status shows today's, and the owner's notice and System › Health add it to those lines. `done`
- * counts the steps that worked after the day's first failure of that kind.
+ * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes and naming
+ * their chats (`notes`), for Hermes's lookups before a turn or review as for recall and the Notes page, and recall's ask
+ * of the owner's forwards and files (`memory_read`). /v1/status shows today's, and the owner's notice and System › Health
+ * show each as a line of its own (`note_labels`, `forwards_read`), apart from Hermes's lines. `done` counts the steps
+ * that worked after the day's first failure of that kind.
  */
 export const memoryProblemSchema=`
 CREATE TABLE IF NOT EXISTS memory_problem_days (

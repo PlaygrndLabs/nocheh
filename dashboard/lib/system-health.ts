@@ -297,7 +297,7 @@ export function issues(m: any): Issue[] {
                 tone: 'warn',
                 text: `Looking up where notes came from failed ${times(row.failed)}`,
                 detail:
-                  'Recall and the Notes page showed those notes as “source not available right now” or without their chat. The notes and what was recorded about them are kept.',
+                  'Recall and the Notes page showed those notes as “source not available right now” or without their chat, and replies may have seen them without their chat. The notes and what was recorded about them are kept.',
                 link: href('memory', {view: 'notes'}),
                 action: 'Notes',
               }
