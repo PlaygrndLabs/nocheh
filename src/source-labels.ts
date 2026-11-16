@@ -57,7 +57,8 @@ export const modelSourceWords={
     person_message:'another person\'s message',person_reaction:'another person\'s reaction',anonymous_post:'a post by an anonymous admin or in a chat\'s name',
     forward:'a message {by} forwarded from {origin}',file:'text of a file {by} sent',audio:'a transcript of an audio file {by} sent',
     quote:'a reply quoting another person\'s message',quote_nocheh:'the owner\'s reply quoting Nocheh\'s own message',
-    pinned:'a pinned message by another person',nocheh_about_forward:'Nocheh\'s reply about a forwarded message',
+    pinned:'a pinned message by another person',pinned_nocheh:'the owner\'s pin of Nocheh\'s own message',
+    nocheh_about_forward:'Nocheh\'s reply about a forwarded message',
     nocheh_unlearned:'Nocheh\'s card, notice or reminder',unknown:'a message Nocheh can\'t describe'},
   by:{owner:'the owner',person:'another person'},
   origins:{person:'a person',hidden:'a person who hides their account',channel:'a channel',chat:'a group',bot:'an inline bot'},
@@ -86,7 +87,8 @@ export const modelSourceWords={
     follow_up:'Nocheh\'s follow-up',private_answer:'Nocheh\'s private answer',job_report:'Nocheh\'s report',scheduled_run:'Nocheh\'s scheduled result',
     approved_post:'Nocheh\'s post',unlearned:'Nocheh\'s card, notice or reminder',note:'Nocheh\'s note',
     pointer:'the owner forwarded a message from {origin}; its text is kept with the owner\'s forwards and files',
-    pinned_pointer:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files'},
+    pinned_pointer:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files',
+    pinned_nocheh_pointer:'the owner pinned one of Nocheh\'s own messages; its text is not kept here'},
 } as const;
 /** The longest label the model reads; the Notes page shows the whole label in the owner's words. */
 export const MODEL_LABEL_LIMIT=120;
@@ -301,7 +303,7 @@ function ownerOrigin(event:LabelEvent,words:SourceWords):string {
 /** One message in the owner's words: who sent what kind of message where. */
 export function ownerEventLabel(event:LabelEvent,words:SourceWords,names:Names,keys:NameKeys):string {
   const line=words.lines,cls=event.class,place=event.chat?placeLabel(event.chat,words.places,names.directory):words.places.unknown_chat;
-  const owner=cls.startsWith('owner_')||cls.endsWith('_by_owner')||['quote','quote_nocheh','pinned'].includes(cls)&&event.facts?.author==='owner';
+  const owner=cls.startsWith('owner_')||cls.endsWith('_by_owner')||['quote','quote_nocheh','pinned','pinned_nocheh'].includes(cls)&&event.facts?.author==='owner';
   const who=()=>ownerWho(event,owner,words,names,keys);
   if(['owner_message','owner_browser','person_message'].includes(cls))return fillLine(line.said,{who:who(),place});
   if(cls==='owner_reaction'||cls==='person_reaction')return fillLine(line.reaction,{who:who(),place});
@@ -309,6 +311,7 @@ export function ownerEventLabel(event:LabelEvent,words:SourceWords,names:Names,k
   if(cls==='quote')return fillLine(line.quote,{who:who(),place});
   if(cls==='quote_nocheh')return fillLine(line.quote_nocheh,{who:who(),place});
   if(cls==='pinned')return fillLine(line.pinned,{who:who(),place});
+  if(cls==='pinned_nocheh')return fillLine(line.pinned_nocheh,{who:who(),place});
   if(cls.startsWith('forward_'))return fillLine(line.forward,{who:who(),place,origin:ownerOrigin(event,words)});
   if(cls.startsWith('file_')){const name=quoted(event.facts?.file_name);return fillLine(name===null?line.file_unnamed:line.file,{name:name??'',who:who(),place});}
   if(cls.startsWith('audio_'))return fillLine(line.audio,{who:who(),place});
@@ -370,8 +373,10 @@ export function honchoSource(part:HonchoPart):string {
 export const honchoSources=(parts:readonly HonchoPart[]):string=>[...new Set(parts.map(honchoSource))].join('; ');
 /** What stays in the owner's private chat in place of someone else's forward, or someone else's message the owner
  *  pinned, which is kept with the owner's forwards and files: fixed words that name only the kind of origin, so the chat
- *  still shows that something was forwarded or pinned. */
-export function honchoPointer(from:Exclude<Forward['from'],'own'>|'pinned'):{source:string;text:string} {
+ *  still shows that something was forwarded or pinned. The owner's pin of Nocheh's own message is only such a note, in
+ *  the chat where it was pinned: Nocheh's message is learned as Nocheh's, or not at all when it is a card. */
+export function honchoPointer(from:Exclude<Forward['from'],'own'>|'pinned'|'pinned_nocheh'):{source:string;text:string} {
   const words=modelSourceWords.honcho;
-  return {source:words.note,text:from==='pinned'?words.pinned_pointer:fillLine(words.pointer,{origin:modelSourceWords.origins[from]})};
+  return {source:words.note,text:from==='pinned'?words.pinned_pointer:from==='pinned_nocheh'?words.pinned_nocheh_pointer:
+    fillLine(words.pointer,{origin:modelSourceWords.origins[from]})};
 }

@@ -27,14 +27,15 @@ export interface PreparedLearningContext {
  * What the owner's notes review asks of prepare (ADR-0257). `admit` says whether a related message, or the evidence of a
  * rule, may go into the owner's notes; one it refuses is left out, and so are the rules resting on it and any quote of
  * it. `admitPinned` asks the same of the message a pin carries, by its own author; one it refuses is taken out of the
- * pin, which stays. `collect` gets the ids left out (a pin's own id when only the message it pinned was), the rules kept,
+ * pin, which stays. `not_learned` takes it out too, but not as left out for its sender: Nocheh's own card, notice or
+ * reminder is not learned. `collect` gets the ids left out (a pin's own id when only the message it pinned was), the rules kept,
  * the ids of the rules left out with them, `bare_reaction` when the source is a reaction to a message that was left out,
  * and each kept rule's recorded inputs (`inputs`: the source ids of its stored dependencies, by rule id). Honcho and
  * interpretations pass none, so what they learn from is exactly as before.
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
-  admitPinned?:(reference:SourceReference)=>Promise<boolean>;
+  admitPinned?:(reference:SourceReference)=>Promise<boolean|'not_learned'>;
   collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;inputs:Map<string,string[]>};
 }
 export class LearningContextRepository {
@@ -88,10 +89,11 @@ export class LearningContextRepository {
       for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(scoped.payload?.[kind]) {
         delete scoped.payload[kind].reply_to_message;delete scoped.payload[kind].external_reply;
         if(unquote)delete scoped.payload[kind].quote;
-        // A pin carries the message it pinned whole; what someone not allowed there wrote stays out of the owner's notes review.
-        if(scoped.payload[kind].pinned_message&&options.admit&&options.admitPinned&&!await options.admitPinned(reference)) {
-          delete scoped.payload[kind].pinned_message;limitations.push('sender_not_allowed');unpinned.push(reference.id);
-        }
+        // A pin carries the message it pinned whole; what someone not allowed there wrote stays out of the owner's notes
+        // review, and so does Nocheh's own card, notice or reminder, which is not learned.
+        const pinned=scoped.payload[kind].pinned_message&&options.admit&&options.admitPinned?await options.admitPinned(reference):true;
+        if(pinned!==true)delete scoped.payload[kind].pinned_message;
+        if(pinned===false){limitations.push('sender_not_allowed');unpinned.push(reference.id);}
       }
       observations.push({source:reference,value:scoped,derivatives});evidence.push({reference,text:texts.join('\n'),space});
     }

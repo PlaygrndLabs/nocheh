@@ -423,6 +423,30 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     const gonePin=await pinOf(37,{message_id:36,date:0,chat:{id:Number(group),type:'group'}});
     assert.equal((await services.reviews.queue(gonePin)).left_out,null);
     assert.deepEqual(await recorded(gonePin),[{version:1,source:gonePin.id,events:[{id:gonePin.id,class:'owner_message'}],owner_account_only:true,rules:'none',rule_buckets:[],left_out:left()}]);
+    // Nocheh's own message, found in the archive as the pin's chat's message, is never someone not allowed: the owner's pin
+    // of its learned reply stays in the review as Nocheh's, and a pin of its card is not learned, nor counted as left out.
+    // Another bot's message is still left out and counted.
+    const sent=async(id:number,text:string,send_class:string)=>{
+      const result={...message(id,bot,text),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
+      const envelope:Envelope={version:1,key:`${key}:result-${id}`,origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:`${key}:${id}`,revision:'0',
+        occurred_at:null,text:null,payload:{intent_key:`${key}:intent-${id}`,method:'sendMessage',state:'delivered',status:200,send_class,
+          wire_base64:Buffer.from(JSON.stringify({ok:true,result})).toString('base64')}};
+      const source=(await services.capture.capture(captureEvidence(envelope).originals[0]!)).source.reference;await services.guards.prepare(source,'fixture',services.detect);
+      return result;
+    };
+    const nochehPin=await pinOf(39,reply),nochehPinned=await services.reviews.queue(nochehPin),nochehPinInput=await input(nochehPinned.ids[0]!);
+    assert.equal(nochehPinned.left_out,null);
+    assert.ok(nochehPinInput.text.includes('Noted, the venue is booked'),'Nocheh\'s learned reply stays in the pin');
+    assert.ok(!nochehPinInput.text.includes('sender_not_allowed'),'nothing is told left out');
+    assert.deepEqual(await recorded(nochehPin),[{version:1,source:nochehPin.id,events:[{id:nochehPin.id,class:'pinned_nocheh'}],owner_account_only:false,rules:'none',
+      rule_buckets:[],left_out:left()}]);
+    const cardPin=await pinOf(41,await sent(40,'CARDPIN approve the venue?','card')),cardPinInput=await input(((await services.reviews.queue(cardPin)).ids)[0]!);
+    assert.ok(!cardPinInput.text.includes('CARDPIN'),'nothing of a card is learned');assert.ok(!cardPinInput.text.includes('sender_not_allowed'));
+    assert.deepEqual(await recorded(cardPin),[{version:1,source:cardPin.id,events:[{id:cardPin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left()}]);
+    const botPin=await pinOf(43,{...message(42,bot+1,'BOTPIN pay the invoice'),from:{id:bot+1,is_bot:true,first_name:'Other'}});
+    const botPinInput=await input(((await services.reviews.queue(botPin)).ids)[0]!);
+    assert.ok(!botPinInput.text.includes('BOTPIN'));assert.ok(botPinInput.text.includes('sender_not_allowed'));
+    assert.deepEqual(await recorded(botPin),[{version:1,source:botPin.id,events:[{id:botPin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(1)}]);
 
     // A rule learned from her message stays out of the owner's notes review, but not out of group memory.
     const ruleText='In this group SARARULE means the meeting is cancelled';
@@ -474,16 +498,29 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.ok(!standaloneInput.text.includes('BOBIBAN'),'the rule resting on Bob\'s message is left out');assert.ok(standaloneInput.text.includes('ALICERULE'));
     assert.deepEqual(await recorded(standalone),[{version:1,source:standalone.id,events:[{id:standalone.id,class:'owner_message'}],owner_account_only:true,rules:'owner',
       rule_buckets:[],left_out:left(0,1,2)}]);
-    // A review of Nocheh's own reply reads every rule, and records that some rest on another person's messages; the
-    // owner's and Nocheh's own messages name nobody.
+    // A review of Nocheh's own reply leaves out the rules resting on another person's messages, as one of the owner's own
+    // typing does, so its notes stay Nocheh's; the owner's and Nocheh's own messages name nobody.
     const later_reply={...message(28,bot,'Noted, invoices go there'),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
     const replied:Envelope={version:1,key:key+':result-28',origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:key+':28',revision:'0',occurred_at:null,text:null,
       payload:{intent_key:key+':intent-28',method:'sendMessage',state:'delivered',status:200,send_class:'reply',wire_base64:Buffer.from(JSON.stringify({ok:true,result:later_reply})).toString('base64')}};
     const nochehLater=(await services.capture.capture(captureEvidence(replied).originals[0]!)).source.reference;await services.guards.prepare(nochehLater,'fixture',services.detect);
     const nochehLaterInput=await input(((await services.reviews.queue(nochehLater)).ids)[0]!);
-    assert.ok(nochehLaterInput.text.includes('BOBIBAN')&&nochehLaterInput.text.includes('ALICERULE'));
-    assert.deepEqual(await recorded(nochehLater),[{version:1,source:nochehLater.id,events:[{id:nochehLater.id,class:'nocheh_reply'}],owner_account_only:false,rules:'others',
-      rule_buckets:['person'],left_out:left(0,1)}]);
+    assert.ok(!nochehLaterInput.text.includes('BOBIBAN')&&!nochehLaterInput.text.includes('BOBRULE')&&nochehLaterInput.text.includes('ALICERULE'));
+    assert.ok(nochehLaterInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual(await recorded(nochehLater),[{version:1,source:nochehLater.id,events:[{id:nochehLater.id,class:'nocheh_reply'}],owner_account_only:false,rules:'owner',
+      rule_buckets:[],left_out:left(0,1,2)}]);
+    // A note of that review is Nocheh's, never the owner's.
+    const nochehReview=((await services.reviews.queue(nochehLater)).ids)[0]!;
+    const [nochehNote]=await services.reviews.sources.labels([{key:digest(key+':note'),origins:[{by:'review',review:nochehReview}],more:0,cites:[nochehLater.id],more_cites:false,space}]);
+    assert.equal(nochehNote!.from,'nocheh');assert.doesNotMatch(nochehNote!.label,/rules learned from others/);
+    // Nocheh's reply to Bob's message is reviewed with it, and reads every rule.
+    const toBobReply={...message(29,bot,'Noted, Bob'),from:{id:bot,is_bot:true,first_name:'Nocheh'},reply_to_message:message(25,456,'Bob: invoices go to BOBIBAN from now on')};
+    const toBob:Envelope={version:1,key:key+':result-29',origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:key+':29',revision:'0',occurred_at:null,text:null,
+      payload:{intent_key:key+':intent-29',method:'sendMessage',state:'delivered',status:200,send_class:'reply',wire_base64:Buffer.from(JSON.stringify({ok:true,result:toBobReply})).toString('base64')}};
+    const nochehToBob=(await services.capture.capture(captureEvidence(toBob).originals[0]!)).source.reference;await services.guards.prepare(nochehToBob,'fixture',services.detect);
+    const toBobInput=await input(((await services.reviews.queue(nochehToBob)).ids)[0]!);
+    assert.ok(toBobInput.text.includes('BOBIBAN')&&toBobInput.text.includes('BOBRULE'));assert.ok(!toBobInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual((await recorded(nochehToBob))[0].rule_buckets,['person']);
 
     // Bob is denied: his review still waiting is withdrawn, under a later epoch or under the current one.
     const [staleReview]=(await services.reviews.queue(await say(9,456,'Bob: first'))).ids;

@@ -183,6 +183,12 @@ const reasons: Record<string, string> = {
 };
 export const reason = (value: string | null | undefined): string => (value ? (reasons[value] ?? readable(value)) : '');
 
+/** The states in which a task has ended: its recorded reason says why it ended so, not what it waits for. */
+const endedStates = new Set(['completed', 'failed', 'skipped', 'cancelled', 'denied']);
+/** The heading of a task's recorded reason in its detail panel: what a task still open waits for, and a plain note on
+ *  one that ended, such as a memory step that completed without learning Nocheh's own card. */
+export const reasonHeading = (state: string): string => (endedStates.has(state) ? 'Note' : 'Waiting for');
+
 /** The words for a waiting-reasons row from background work health. */
 export const waitingReason = (row: {state: string; waiting_reason: string | null}): string =>
   row.waiting_reason ? reason(row.waiting_reason) : row.state === 'queued' ? 'Queued to start' : 'Reason not recorded';

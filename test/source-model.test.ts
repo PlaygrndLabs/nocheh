@@ -8,7 +8,7 @@ import pg from 'pg';
 import {canonical,digest,envelope,ingest,schema,type Envelope} from '../src/archive.js';
 import {initialize} from '../src/database.js';
 import {settings} from './fixture-settings.js';
-import {sourceDescriptor,sourceObjectId,legacySource,type SourceIdentity} from '../src/source-model.js';
+import {sourceDescriptor,sourceObjectId,legacySource,pinnedSource,type SourceIdentity} from '../src/source-model.js';
 import {evidenceGraph} from '../src/graph.js';
 import {exportPage,importRecord,readEvent,readArtifact,uploadArtifact,replay,search} from '../src/retrieval.js';
 import {prepareGuarded,guardedSchema} from '../src/guarded.js';
@@ -61,6 +61,17 @@ test('source contract keeps opaque identities and rejects ambiguous or unsupport
   const legacy=event('legacy',object('telegram'),'-20',{kind:'telegram_update',bot_id:'fixture',payload:{message:{chat:{id:-20},from:{id:42},sender_chat:{id:-30}}}});
   const author=legacySource(legacy).relations.find(r=>r.kind==='authored_by')!.target;
   assert.equal(author.external_id,'42');assert.equal(author.kind,'actor','identity kind follows the selected source field');
+});
+
+test('a pin carries the same chat\'s message it names, found as a reply\'s target is',()=>{
+  const chat={id:-20,type:'supergroup'},at=(payload:Record<string,unknown>)=>event('pin',object('telegram'),'-20',{kind:'telegram_update',bot_id:'fixture',source_id:'9',payload});
+  const reply=legacySource(at({message:{message_id:9,chat,from:{id:42},reply_to_message:{message_id:7}}}));
+  const pin=legacySource(at({message:{message_id:9,chat,from:{id:42},pinned_message:{message_id:7,date:1,chat,from:{id:5,is_bot:true}}}}));
+  assert.deepEqual(pinnedSource(pin.object,{message:{message_id:9,chat,pinned_message:{message_id:7,date:1,chat}}}),
+    reply.relations.find(relation=>relation.kind==='reply_to')!.target,'the pinned message is the object a reply to it names');
+  assert.equal(pinnedSource(pin.object,{message:{message_id:9,chat,text:'not a pin'}}),null);
+  assert.equal(pinnedSource({...pin.object,kind:'reaction_change'},{message:{pinned_message:{message_id:7}}}),null,'only a message pins');
+  assert.equal(pinnedSource(object('slack'),{message:{pinned_message:{message_id:7}}}),null,'only Telegram');
 });
 
 test('real PostgreSQL: additive migration preserves legacy originals, receipts and stable event hashes',{skip:!process.env.PGHOST},async()=>{

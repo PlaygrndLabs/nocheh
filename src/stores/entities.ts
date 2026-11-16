@@ -11,7 +11,7 @@ import type {PreparedLearningContext} from './learning-context.js';
 import {resultItems,withoutNulls,type LearningRejection} from '../interpretations.js';
 import {archiveScopes,groupSpace,parentSpace,readSetGroups} from '../spaces.js';
 import {ownerChat} from '../assistant-policy.js';
-import type {SourceFacts} from '../source-facts.js';
+import type {EventClass,SourceFacts} from '../source-facts.js';
 import {NoteSourceRepository} from './note-sources.js';
 
 const protocol='nocheh-connected-entities-v1';
@@ -105,9 +105,14 @@ export async function conversationObject(archive:Pick<StorePools['archive'],'que
 
 /** Whether a message is its author's own typing: a new message, edit, reaction or web chat message of a person or the
  *  owner, with no forward of someone else's, no quote of someone else's message, no pin of someone else's message and
- *  no text read from a file or audio file (ownerTyped, for any author). The author's own voice, transcribed, is theirs. */
-const typed=(f:SourceFacts|undefined)=>!!f&&(f.author==='owner'||f.author==='person')&&['message','edit','reaction','browser'].includes(f.act)&&
-  (f.forward===null||f.forward==='own')&&f.quote!=='other'&&f.pinned!=='other'&&!f.file&&!f.audio;
+ *  no text read from a file or audio file (ownerTyped, for any author). The author's own voice, transcribed, is theirs.
+ *  The owner's quote of Nocheh's own learned message (`quote_nocheh`, which NoteSourceRepository.classesFor finds through
+ *  the archive's reply relation) is the owner's own words too: Nocheh's message is already learned as Nocheh's. */
+const typed=(found:{facts:SourceFacts;class:EventClass}|undefined)=>{
+  const f=found?.facts;
+  return !!f&&(f.author==='owner'||f.author==='person')&&['message','edit','reaction','browser'].includes(f.act)&&
+    (f.forward===null||f.forward==='own')&&(f.quote!=='other'||found!.class==='quote_nocheh')&&f.pinned!=='other'&&!f.file&&!f.audio;
+};
 
 export class EntityRepository {
   private readonly commands:OwnerCommands;
@@ -436,18 +441,19 @@ export class EntityRepository {
   }
   /**
    * How a direct claim reads once code has checked what it cites (ADR-0257), from the originals and never from the model:
-   * direct only when the speaker typed every message it cites and sent no forward, file or quote in the batch; inferred
-   * when it cites anyone else's message; otherwise reported by the speaker, as something the speaker passed on.
+   * direct only when the speaker typed every message it cites and sent no forward, file or quote in the batch (the
+   * owner's quote of Nocheh's own learned message counts as typed); inferred when it cites anyone else's message;
+   * otherwise reported by the speaker, as something the speaker passed on.
    */
   private async spoken(context:PreparedLearningContext):Promise<(cited:readonly SourceReference[])=>'direct'|'reported'|'inferred'> {
     const batch=context.observations.map(item=>item.source.id),ids=[...new Set([context.source.id,...batch,...context.evidence.map(item=>item.reference.id)])];
-    const [facts,authors]=await Promise.all([this.sources.factsFor(ids),this.stores.archive.query(`SELECT event_id,array_agg(DISTINCT target_id) AS targets
+    const [classes,authors]=await Promise.all([this.sources.classesFor(ids),this.stores.archive.query(`SELECT event_id,array_agg(DISTINCT target_id) AS targets
       FROM source_relations WHERE event_id=ANY($1::text[]) AND kind='authored_by' GROUP BY event_id`,[ids])]);
     // The speaker is who the archive proved wrote the source, as the trusted speaker is; a message with no single author is no one's.
     const author=new Map<string,string|null>(authors.rows.map(row=>[String(row.event_id),row.targets.length===1?String(row.targets[0]):null]));
     const speaker=author.get(context.source.id)??null,theirs=(id:string)=>speaker!==null&&author.get(id)===speaker;
-    const passedOn=batch.some(id=>theirs(id)&&!typed(facts.get(id)));
-    return cited=>!passedOn&&cited.every(ref=>theirs(ref.id)&&typed(facts.get(ref.id)))?'direct':cited.some(ref=>!theirs(ref.id))?'inferred':'reported';
+    const passedOn=batch.some(id=>theirs(id)&&!typed(classes.get(id)));
+    return cited=>!passedOn&&cited.every(ref=>theirs(ref.id)&&typed(classes.get(ref.id)))?'direct':cited.some(ref=>!theirs(ref.id))?'inferred':'reported';
   }
   async publishDiscoveries(context:PreparedLearningContext,input:unknown,operation:string) {
     // Contexts saved before known people were added carry neither field.

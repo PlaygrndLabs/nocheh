@@ -8,6 +8,7 @@ import {bucketOf,eventClass,sourceFacts,type EventClass,type SourceFacts} from '
 import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
 import {nameKeys,type Who} from '../task-reminder-text.js';
+import {pinnedSource,sourceObjectId} from '../source-model.js';
 import type {SourceReference} from './archive.js';
 import {peopleNames} from './people-names.js';
 import {recallNames} from './recall-places.js';
@@ -31,7 +32,8 @@ export interface NoteSource {from:NoteFrom;label:string}
 /**
  * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes for recall
  * and the Notes page, and naming their chats (`notes`), and recall's ask of the owner's forwards and files
- * (`memory_read`). /v1/status shows today's, and the owner's notice and System › Health add it to those lines.
+ * (`memory_read`). /v1/status shows today's, and the owner's notice and System › Health add it to those lines. `done`
+ * counts the steps that worked after the day's first failure of that kind.
  */
 export const memoryProblemSchema=`
 CREATE TABLE IF NOT EXISTS memory_problem_days (
@@ -40,12 +42,15 @@ CREATE TABLE IF NOT EXISTS memory_problem_days (
 );
 `;
 export type MemoryProblemKind='notes'|'memory_read';
-/** Counts one step that worked or failed, today in UTC. A count that can't be written is left out: it never fails the
- *  step it counts. */
+/** Counts one step that worked or failed, today in UTC. Every failure is counted. A step that worked is counted only once
+ *  today's count for its kind already holds a failure, which is all the owner's notice needs to say it works again, so
+ *  the Notes page's polls, recall and each turn's lookup write nothing while nothing fails. A count that can't be
+ *  written is left out: it never fails the step it counts. */
 export async function countMemoryStep(control:Pick<pg.Pool,'query'>,kind:MemoryProblemKind,ok:boolean):Promise<void> {
   try {
-    await control.query(`INSERT INTO memory_problem_days(day,kind,done,failed) VALUES((now() AT TIME ZONE 'UTC')::date,$1,$2,$3)
-      ON CONFLICT(day,kind) DO UPDATE SET done=memory_problem_days.done+excluded.done,failed=memory_problem_days.failed+excluded.failed`,[kind,ok?1:0,ok?0:1]);
+    if(ok)await control.query(`UPDATE memory_problem_days SET done=done+1 WHERE day=(now() AT TIME ZONE 'UTC')::date AND kind=$1 AND failed>0`,[kind]);
+    else await control.query(`INSERT INTO memory_problem_days(day,kind,done,failed) VALUES((now() AT TIME ZONE 'UTC')::date,$1,0,1)
+      ON CONFLICT(day,kind) DO UPDATE SET failed=memory_problem_days.failed+1`,[kind]);
   }catch{}
 }
 /** Today's counts, in the shape the provider monitor reads Hermes's own (usage.note_rows). */
@@ -117,22 +122,38 @@ export class NoteSourceRepository {
    * The facts and class of each of these events. A reply of Nocheh's is read with the message it answered, so a reply
    * about someone else's forward is classed as being about that forward. The owner's quote is read with the message it
    * replies to, by the archive's reply relation: a quote of Nocheh's own learned message, which is already learned as
-   * Nocheh's, is `quote_nocheh`. A quote of Nocheh's card, notice or reminder, of its reply about a forward, of a message
-   * not found, or of anyone else's stays a quote of someone else's message.
+   * Nocheh's, is `quote_nocheh`. The owner's pin is read with the message it carries, found the same way (pinnedTo): a
+   * pin of Nocheh's own learned message is `pinned_nocheh`. A quote or pin of Nocheh's card, notice or reminder, of its
+   * reply about a forward, of a message not found, or of anyone else's stays a quote or pin of someone else's message.
    */
   async classesFor(ids:readonly string[]):Promise<Map<string,{facts:SourceFacts;class:EventClass}>> {
-    const facts=await this.factsFor(ids);
-    const replies=await this.repliedTo([...facts].filter(([,item])=>item.author==='owner'&&item.quote==='other').map(([id])=>id));
-    const quoted=[...new Set([...replies.values()].flat())].filter(id=>!facts.has(id));
+    const facts=await this.factsFor(ids),owners=(test:(item:SourceFacts)=>boolean)=>[...facts].filter(([,item])=>item.author==='owner'&&test(item)).map(([id])=>id);
+    const [replies,pins]=await Promise.all([this.repliedTo(owners(item=>item.quote==='other')),this.pinnedTo(owners(item=>eventClass(item)==='pinned'))]);
+    const quoted=[...new Set([...replies.values(),...pins.values()].flat())].filter(id=>!facts.has(id));
     const read=new Map([...quoted.length?await this.factsFor(quoted):[],...facts]);
     const answered=[...read.values()].map(item=>item.answers).filter((id):id is string=>!!id&&!read.has(id));
     const targets=answered.length?await this.factsFor(answered):new Map<string,SourceFacts>();
     const of=(id:string|null)=>id===null?null:read.get(id)??targets.get(id)??null,classOf=(item:SourceFacts)=>eventClass(item,of(item.answers));
     const learned=(id:string)=>{const target=read.get(id);return !!target&&target.author==='nocheh'&&bucketOf(classOf(target))==='nocheh';};
+    const all=(found:readonly string[]|undefined)=>!!found?.length&&found.every(learned);
     return new Map([...facts].map(([id,item])=>{
-      const cls=classOf(item),answers=replies.get(id)??[];
-      return [id,{facts:item,class:cls==='quote'&&answers.length>0&&answers.every(learned)?'quote_nocheh':cls}];
+      const cls=classOf(item);
+      return [id,{facts:item,class:cls==='quote'&&all(replies.get(id))?'quote_nocheh':cls==='pinned'&&all(pins.get(id))?'pinned_nocheh':cls}];
     }));
+  }
+  /**
+   * Whether each of these pins carries Nocheh's own message, found as classesFor finds it, whoever pinned it: `learned`
+   * when every revision the archive holds of it is one Nocheh learns, `unlearned` when one is Nocheh's card, notice or
+   * reminder. A pin of anyone else's message, another bot's included, or of one the archive does not hold, is left out.
+   */
+  async pinnedNocheh(ids:readonly string[]):Promise<Map<string,'learned'|'unlearned'>> {
+    const pins=await this.pinnedTo(ids),targets=await this.factsFor([...new Set([...pins.values()].flat())]),found=new Map<string,'learned'|'unlearned'>();
+    for(const [pin,list] of pins) {
+      const read=list.map(id=>targets.get(id));
+      if(!read.length||read.some(item=>item?.author!=='nocheh'))continue;
+      found.set(pin,read.some(item=>eventClass(item!)==='nocheh_unlearned')?'unlearned':'learned');
+    }
+    return found;
   }
   /** Every archived message each of these events replies to, by the archive's reply relation: each revision observed. */
   private async repliedTo(ids:readonly string[]):Promise<Map<string,string[]>> {
@@ -142,6 +163,27 @@ export class NoteSourceRepository {
       JOIN source_revisions v ON v.object_id=r.target_id JOIN source_observations o ON o.revision_id=v.id
       WHERE r.event_id=ANY($1::text[]) AND r.kind='reply_to' ORDER BY r.event_id,o.event_id`,[ids])).rows)
       found.set(String(row.event_id),[...found.get(String(row.event_id))??[],String(row.target)]);
+    return found;
+  }
+  /**
+   * Every archived message each of these pins carries: the same chat's message the pin names, from the pin's own archived
+   * message as a reply's target is (pinnedSource), then each revision observed of it, as repliedTo reads one. An event
+   * that is not a pin is left out.
+   */
+  private async pinnedTo(ids:readonly string[]):Promise<Map<string,string[]>> {
+    const found=new Map<string,string[]>(),objects=new Map<string,string>();
+    if(!ids.length)return found;
+    for(const row of (await this.stores.archive.query(`SELECT o.event_id,s.platform,s.namespace,s.kind,s.external_id,e.payload FROM source_observations o
+      JOIN source_revisions v ON v.id=o.revision_id JOIN source_objects s ON s.id=v.object_id JOIN events e ON e.id=o.event_id
+      WHERE o.event_id=ANY($1::text[])`,[ids])).rows) {
+      let payload:unknown=null;try{payload=JSON.parse((row.payload as Buffer).toString());}catch{}
+      const target=pinnedSource({platform:row.platform,namespace:row.namespace,kind:row.kind,external_id:row.external_id},payload);
+      if(target)objects.set(String(row.event_id),sourceObjectId(target));
+    }
+    if(!objects.size)return found;
+    const observed=(await this.stores.archive.query(`SELECT v.object_id,o.event_id FROM source_revisions v JOIN source_observations o ON o.revision_id=v.id
+      WHERE v.object_id=ANY($1::text[]) ORDER BY o.event_id`,[[...new Set(objects.values())]])).rows;
+    for(const [pin,object] of objects)found.set(pin,observed.filter(row=>row.object_id===object).map(row=>String(row.event_id)));
     return found;
   }
 

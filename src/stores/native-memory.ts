@@ -398,7 +398,9 @@ export class NativeMemoryRepository {
    * words and voice on the owner's participant; the text of a file or audio file, and someone else's quote, go beside it
    * in the same session on the forwards-and-files participant, so a caption still links to its file. Someone else's
    * message the owner pinned is kept as such a forward is. The owner's quote of Nocheh's own learned message is the
-   * owner's words without it: Nocheh's message is already learned as Nocheh's. Everyone else's message stays on its
+   * owner's words without it: Nocheh's message is already learned as Nocheh's. The owner's pin of Nocheh's own message
+   * leaves only a note in that chat that it was pinned: a learned one is learned as Nocheh's, and a card, notice or
+   * reminder is not learned at all. Everyone else's message stays on its
    * writer, and Nocheh's on the assistant, each naming what it is; Nocheh's reply about someone else's forward goes with
    * that forward.
    */
@@ -413,6 +415,8 @@ export class NativeMemoryRepository {
         session:about?'material':'conversation',record:'labelled_source',subjects:true}];
     }
     const guarded=(observations[0]?.value as any)?.payload;
+    if(facts.author==='owner'&&(found.class==='pinned_nocheh'||found.class==='pinned'&&(await this.sources.pinnedNocheh([source.id])).get(source.id)==='unlearned'))
+      return [{text:canonical(honchoPointer('pinned_nocheh')),writer:'assistant',session:'conversation',record:'labelled_pointer',subjects:false}];
     if(facts.forward!==null&&facts.forward!=='own'||facts.pinned==='other') {
       let original:unknown=null;try{original=JSON.parse(row.payload.toString());}catch{}
       // The kind comes from the original and the name from the guarded copy, which the secret check has read; a pin's

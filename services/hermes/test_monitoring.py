@@ -115,6 +115,32 @@ class MonitoringTests(unittest.TestCase):
                              [{'day': '2026-10-13', 'kind': 'notes', 'failed': 3, 'ok': 4},
                               {'day': '2026-10-13', 'kind': 'memory_read', 'failed': 1, 'ok': 1}])
 
+    def test_a_stores_step_that_works_after_its_failure_says_working_again(self):
+        # ADR-0257: the stores write a step that worked only once their day holds a failure of its kind, so steady use
+        # writes nothing. The merged line still clears on a step that works after the failure, and reopens on the next.
+        from datetime import datetime, timezone
+        from services.hermes import usage
+        from tools.operations.provider import problems
+        now, day = datetime(2026, 10, 13, 12, tzinfo=timezone.utc), '2026-10-13'
+        with tempfile.TemporaryDirectory() as state:
+            def current(done, failed):
+                rows = monitoring.note_problems(state, now, archive={'memory_problems': [{'day': day, 'kind': 'memory_read', 'done': done, 'failed': failed}]})
+                return {problem['key']: problem for problem in problems.problems({'note_problems': rows}, [], day)}
+            watch = problems._watch(current(0, 1)['memory_read:' + day], 1)
+            self.assertFalse(problems.cleared(watch, current(0, 1), set()), 'nothing has worked since')
+            self.assertTrue(problems.cleared(watch, current(1, 1), set()), 'a step that worked after the failure')
+            self.assertTrue(problems.back(watch, current(1, 2), set(), set()), 'a failure after it reopens the line')
+            # A failure on Hermes's side alone is cleared only by Hermes's own steps: the stores write nothing that day.
+            path = Path(state) / 'hermes/usage/usage.sqlite'
+            path.parent.mkdir(parents=True)
+            usage.note_failed('lookup', path=path, now=now.timestamp())
+            rows = monitoring.note_problems(state, now, archive={'memory_problems': []})
+            hermes = problems._watch(problems.problems({'note_problems': rows}, [], day)[0], 1)
+            self.assertFalse(problems.cleared(hermes, {problem['key']: problem for problem in problems.problems({'note_problems': rows}, [], day)}, set()))
+            usage.note_done('lookup', path=path, now=now.timestamp())
+            rows = monitoring.note_problems(state, now, archive={'memory_problems': []})
+            self.assertTrue(problems.cleared(hermes, {problem['key']: problem for problem in problems.problems({'note_problems': rows}, [], day)}, set()))
+
     def test_status_reads_the_stores_label_failures_into_the_notes_line(self):
         from datetime import datetime, timezone
         from services.hermes import usage

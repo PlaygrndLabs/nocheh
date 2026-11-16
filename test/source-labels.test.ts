@@ -85,6 +85,7 @@ test('turns are never the owner\'s, outside reads make turn_read, and inherited 
   assert.equal(fromToken([turn({answered:'quote_nocheh'})]),'turn','answering the owner\'s quote of Nocheh\'s own message reads nothing outside');
   assert.equal(fromToken([review([[1,'owner_message'],[2,'quote_nocheh']],[1])]),'nocheh');
   assert.equal(fromToken([review([[1,'owner_message'],[2,'pinned']],[1])]),'person');
+  assert.equal(fromToken([review([[1,'owner_message'],[2,'pinned_nocheh']],[1])]),'nocheh','the owner\'s pin of Nocheh\'s own message names nobody');
   assert.equal(fromToken([turn({complete:false})]),'turn_read','reads not recorded to the end');
   assert.equal(fromToken([turn({job:true})]),'turn');
   assert.equal(fromToken([]),'unknown');assert.equal(fromToken([{by:'unknown'}]),'unknown');assert.equal(fromToken([{by:'unavailable'}]),'unavailable');
@@ -231,6 +232,8 @@ test('owner labels: the owner\'s own lines, people and chats named as reminders 
   assert.equal(label(event('quote_nocheh',{author:'owner',quote:'other'},{chat:OWNER})),'a reply by you in your private chat, quoting Nocheh\'s own message');
   assert.equal(label(event('pinned',{author:'owner',pinned:'other'},{chat:OWNER})),'a message by someone else that you pinned in your private chat');
   assert.equal(label(event('pinned',{pinned:'other'})),`a message by someone else that ${q('Sara')}, a person you allowed pinned in group ${q('Family')}`);
+  assert.equal(label(event('pinned_nocheh',{author:'owner',pinned:'other'},{chat:OWNER})),'Nocheh\'s own message that you pinned in your private chat');
+  assert.equal(modelEventPhrase('pinned_nocheh'),'the owner\'s pin of Nocheh\'s own message');
   assert.equal(label(event('nocheh_approved_post',{author:'nocheh'})),`Nocheh's post in group ${q('Family')}, sent after you approved it`);
   assert.equal(label(event('nocheh_unlearned',{author:'nocheh'})),`Nocheh's card, notice or reminder in group ${q('Family')}`);
   assert.equal(label(event('unknown',{author:'unknown'},{chat:null})),'a message Nocheh can\'t describe, in a chat Nocheh no longer knows');
@@ -293,4 +296,6 @@ test('Honcho records name their part in fixed words, with names that cannot clos
   assert.equal(honchoPointer('channel').text,'the owner forwarded a message from a channel; its text is kept with the owner\'s forwards and files');
   assert.deepEqual(honchoPointer('pinned'),{source:'Nocheh\'s note',
     text:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files'});
+  // The owner's pin of Nocheh's own message is only a note that it was pinned: its text is Nocheh's, or a card's.
+  assert.deepEqual(honchoPointer('pinned_nocheh'),{source:'Nocheh\'s note',text:'the owner pinned one of Nocheh\'s own messages; its text is not kept here'});
 });

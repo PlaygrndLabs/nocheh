@@ -190,11 +190,11 @@ test('an unknown channel or kind is written by someone unknown, which is never t
 });
 
 test('every class has one bucket, and only the owner\'s own typing is in the owner\'s',()=>{
-  assert.equal(new Set(eventClasses).size,eventClasses.length);assert.equal(eventClasses.length,32);
+  assert.equal(new Set(eventClasses).size,eventClasses.length);assert.equal(eventClasses.length,33);
   for(const cls of eventClasses)assert.ok(isEventClass(cls),cls);
   for(const value of ['owner','forward_own_by_owner','nocheh_card','',null,'constructor'])assert.equal(isEventClass(value),false,String(value));
   assert.deepEqual(eventClasses.filter(cls=>bucketOf(cls)==='owner'),['owner_message','owner_reaction','owner_browser']);
-  assert.deepEqual(eventClasses.filter(cls=>bucketOf(cls)==='nocheh'),['quote_nocheh','nocheh_reply','nocheh_follow_up','nocheh_private_answer','nocheh_job_report','nocheh_scheduled_run','nocheh_approved_post']);
+  assert.deepEqual(eventClasses.filter(cls=>bucketOf(cls)==='nocheh'),['quote_nocheh','pinned_nocheh','nocheh_reply','nocheh_follow_up','nocheh_private_answer','nocheh_job_report','nocheh_scheduled_run','nocheh_approved_post']);
   assert.deepEqual(eventClasses.filter(cls=>bucketOf(cls)==='file'),['file_by_owner','file_by_person','audio_by_owner','audio_by_person']);
   assert.equal(eventClasses.filter(cls=>bucketOf(cls)==='forward').length,11);
   assert.deepEqual(eventClasses.filter(cls=>bucketOf(cls)==='person'),['person_message','person_reaction','anonymous_post','quote','pinned','nocheh_unlearned','unknown']);

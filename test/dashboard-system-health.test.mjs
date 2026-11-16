@@ -13,7 +13,7 @@ const compiled = await build({
   format: 'esm',
   platform: 'node',
 });
-const {issues, sendIssue, sendSummary, sendReason, sendState, sendWhat} = await import(
+const {issues, reason, reasonHeading, sendIssue, sendSummary, sendReason, sendState, sendWhat} = await import(
   'data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64')
 );
 
@@ -94,6 +94,17 @@ test('failed attempts at telling where notes came from and memory read in part a
     issues({note_problems: [{day: '2026-11-14', kind: 'notes', failed: 1, ok: 0}]})[0].text,
     'Telling where notes came from failed 1 time today',
   );
+});
+
+test('a task that ended shows its recorded reason as a note, and only an open one is waiting for something', () => {
+  // A memory step that completed without learning Nocheh's own card waits for nothing.
+  assert.deepEqual(
+    [reasonHeading('completed'), reason('nocheh_message')],
+    ['Note', 'Nocheh’s own card, notice or reminder: kept, not learned'],
+  );
+  for (const state of ['failed', 'skipped', 'cancelled', 'denied']) assert.equal(reasonHeading(state), 'Note', state);
+  for (const state of ['queued', 'waiting', 'running', 'retryable_failed', 'ambiguous'])
+    assert.equal(reasonHeading(state), 'Waiting for', state);
 });
 
 test('failed sends to chat apps need a look and open the Problems list', () => {

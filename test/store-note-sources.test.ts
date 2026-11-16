@@ -5,7 +5,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import {accountIdFor,installChatsForTest} from '../src/chats.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {NoteSourceRepository,memoryProblems,recallRoleWords,type NoteInput} from '../src/stores/note-sources.js';
+import {NoteSourceRepository,countMemoryStep,memoryProblems,recallRoleWords,type NoteInput} from '../src/stores/note-sources.js';
 import {HttpError} from '../src/http.js';
 import {sourceLines} from '../src/prompts.js';
 import {modelSourceWords} from '../src/source-labels.js';
@@ -72,6 +72,19 @@ test('note sources read each message\'s facts from the archive: its author, its 
     const quotes=await sources.classesFor([ofLearned,ofCard,ofBob,ofNothing]);
     assert.deepEqual([ofLearned,ofCard,ofBob,ofNothing].map(id=>quotes.get(id)!.class),['quote_nocheh','quote','quote','quote']);
     assert.equal(quotes.get(ofLearned)!.facts.quote,'other','the facts stay as Telegram tells them');
+    // The owner's pin is read with the message it carries, found the same way, never by an id's shape: a pin of Nocheh's
+    // own learned message is Nocheh's; a pin of its card, of Bob's message or of one the archive does not hold is a pin of
+    // someone else's. Whoever pinned it, a pin of Nocheh's message says whether that message is learned.
+    const pinning=(id:number,from:Record<string,unknown>,by=owner)=>capture({origin:'live',kind:'telegram_update',scope:GP1,text:'',payload:message(group,by,{
+      pinned_message:{message_id:id,date:1700000000,chat:group,from,text:'Book the 9am'}})});
+    const pinLearned=await pinning(learnedId,botUser),pinCard=await pinning(cardId,botUser),pinBob=await pinning(bobId,bob),pinNothing=await pinning(learnedId+50,botUser);
+    const otherBot={id:654321,is_bot:true,first_name:'Nocheh'},otherId=learnedId+3;
+    await capture({origin:'live',kind:'telegram_update',scope:GP1,text:'Book the 9am',payload:{update_id:++serial,message:{message_id:otherId,date:1700000000,chat:group,from:otherBot,text:'Book the 9am'}}});
+    const pinByBob=await pinning(learnedId,botUser,bob),pinOther=await pinning(otherId,otherBot);
+    const pinned=await sources.classesFor([pinLearned,pinCard,pinBob,pinNothing,pinByBob]);
+    assert.deepEqual([pinLearned,pinCard,pinBob,pinNothing,pinByBob].map(id=>pinned.get(id)!.class),['pinned_nocheh','pinned','pinned','pinned','pinned']);
+    assert.deepEqual(Object.fromEntries(await sources.pinnedNocheh([pinLearned,pinCard,pinBob,pinNothing,pinByBob,pinOther,typed,ofLearned])),
+      {[pinLearned]:'learned',[pinCard]:'unlearned',[pinByBob]:'learned'},'another bot\'s message, Bob\'s, a missing one or no pin at all is not Nocheh\'s');
     assert.equal((await sources.factsFor([])).size,0);
   } finally {restore();await Promise.all([stores.archive.end(),stores.derived.end(),stores.control.end()]);}
 });
@@ -173,16 +186,29 @@ test('each note\'s source is labelled from what was recorded about it, never fro
       {target:'memory',text:'b',...twin}]}]}) as any;
     assert.deepEqual(twinPage.memories[0].entries.map((entry:any)=>entry.from),['owner','turn_read']);
 
-    // Each labelling is counted for the owner's notice: a chat that can't be read is a failure, and the labels still go out.
+    // Each failed labelling is counted for the owner's notice: a chat that can't be read is a failure, and the labels
+    // still go out. One that works is counted only once the day holds a failure, so the notice can say it works again.
     const today=async()=>{const rows=await memoryProblems(stores.control);const row=rows.find(item=>item.kind==='notes');return {done:row?.done??0,failed:row?.failed??0};};
-    let before=await today();
-    await sources.labels([notes[0]!]);
-    assert.ok((await today()).done>before.done,'a labelling that worked');
     const placeless=new NoteSourceRepository(stores,()=>({owner_id:OWNER}),{space:async()=>{throw Error('archive down');}});
-    before=await today();
+    let before=await today();
     const partial=await placeless.labels([notes[0]!]);
     assert.equal(partial[0]!.from,'owner');assert.match(partial[0]!.label,/a chat Nocheh can't name/);
     assert.ok((await today()).failed>before.failed,'a place that could not be read');
+    before=await today();
+    await sources.labels([notes[0]!]);
+    assert.ok((await today()).done>before.done,'a labelling that worked after a failure');
+    // While nothing failed that day, the Notes page's polls, recall and each turn's lookup write nothing (rolled back, so
+    // the other counts of today stay as they are).
+    const day=await stores.control.connect();
+    try {
+      await day.query('BEGIN');await day.query(`DELETE FROM memory_problem_days WHERE day=(now() AT TIME ZONE 'UTC')::date`);
+      const rows=async()=>(await memoryProblems(day)).map(row=>[row.kind,row.done,row.failed]);
+      await countMemoryStep(day,'notes',true);await countMemoryStep(day,'memory_read',true);
+      assert.deepEqual(await rows(),[],'steps that work write nothing on a day with no failure');
+      await countMemoryStep(day,'notes',false);await countMemoryStep(day,'notes',true);await countMemoryStep(day,'notes',true);
+      await countMemoryStep(day,'memory_read',true);await countMemoryStep(day,'memory_read',false);
+      assert.deepEqual(await rows(),[['memory_read',0,1],['notes',2,1]],'every failure is counted, and what worked after one');
+    }finally{await day.query('ROLLBACK').catch(()=>{});day.release();}
     // A lookup that fails shows every note as not available right now, never anyone's, and is counted too.
     const failing=new NoteSourceRepository({...stores,control:{query:async(sql:string,values?:unknown[])=>{
       if(sql.includes('native_review_jobs'))throw Error('down');return stores.control.query(sql,values);}} as any},()=>({owner_id:OWNER}));

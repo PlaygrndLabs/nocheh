@@ -160,16 +160,16 @@ export const ownerTyped=(f:SourceFacts):boolean=>f.author==='owner'&&['message',
 type By='owner'|'person';
 type LearnedClass=Exclude<SendClass,'card'|'card_update'|'refusal'|'notice'|'reminder'>;
 /** One fixed token for what kind of message an event is. `quote_nocheh` is the owner's reply quoting Nocheh's own learned
- *  message, which only NoteSourceRepository.classesFor tells, by the archive's reply relation; eventClass alone calls it
- *  a quote. */
+ *  message, and `pinned_nocheh` the owner's pin of one, which only NoteSourceRepository.classesFor tells, by the archive's
+ *  reply relation and the pinned message found the same way; eventClass alone calls them a quote and a pin. */
 export type EventClass='owner_message'|'owner_reaction'|'owner_browser'|'person_message'|'person_reaction'|'anonymous_post'|
-  `forward_${Exclude<Forward['from'],'own'>}_by_${By}`|`file_by_${By}`|`audio_by_${By}`|'quote'|'quote_nocheh'|'pinned'|`nocheh_${LearnedClass}`|
+  `forward_${Exclude<Forward['from'],'own'>}_by_${By}`|`file_by_${By}`|`audio_by_${By}`|'quote'|'quote_nocheh'|'pinned'|'pinned_nocheh'|`nocheh_${LearnedClass}`|
   'nocheh_about_forward'|'nocheh_unlearned'|'unknown';
 const learnedClasses:readonly LearnedClass[]=['reply','follow_up','private_answer','job_report','scheduled_run','approved_post'];
 /** Every event class, for checking a stored one. */
 export const eventClasses:readonly EventClass[]=['owner_message','owner_reaction','owner_browser','person_message','person_reaction','anonymous_post',
   ...(['person','hidden','channel','chat','bot'] as const).flatMap(from=>(['owner','person'] as const).map(by=>`forward_${from}_by_${by}` as const)),
-  'file_by_owner','file_by_person','audio_by_owner','audio_by_person','quote','quote_nocheh','pinned',...learnedClasses.map(name=>`nocheh_${name}` as const),
+  'file_by_owner','file_by_person','audio_by_owner','audio_by_person','quote','quote_nocheh','pinned','pinned_nocheh',...learnedClasses.map(name=>`nocheh_${name}` as const),
   'nocheh_about_forward','nocheh_unlearned','unknown'];
 export const isEventClass=(value:unknown):value is EventClass=>typeof value==='string'&&(eventClasses as readonly string[]).includes(value);
 
@@ -200,15 +200,15 @@ export function eventClass(f:SourceFacts,answered?:SourceFacts|null):EventClass 
   return f.act==='browser'?'owner_browser':`${by}_message`;
 }
 
-/** Whose words a class carries, for a note's source: the owner's, Nocheh's learned messages (and the owner's quote of
- *  one), other people's (anonymous posts, quotes, pins of their messages, Nocheh's unlearned messages and anything unknown
- *  included), forwards, or files' and audio files' text. */
+/** Whose words a class carries, for a note's source: the owner's, Nocheh's learned messages (and the owner's quote or pin
+ *  of one), other people's (anonymous posts, quotes, pins of their messages, Nocheh's unlearned messages and anything
+ *  unknown included), forwards, or files' and audio files' text. */
 export type Bucket='owner'|'nocheh'|'person'|'forward'|'file';
 export function bucketOf(cls:EventClass):Bucket {
   if(cls.startsWith('owner_'))return 'owner';
   if(cls.startsWith('forward_')||cls==='nocheh_about_forward')return 'forward';
   if(cls.startsWith('file_')||cls.startsWith('audio_'))return 'file';
-  if(cls==='quote_nocheh')return 'nocheh';
+  if(cls==='quote_nocheh'||cls==='pinned_nocheh')return 'nocheh';
   if(cls.startsWith('nocheh_')&&cls!=='nocheh_unlearned')return 'nocheh';
   return 'person';
 }

@@ -190,7 +190,8 @@ test('a failed ask of the owner\'s forwards and files keeps the other answers, s
   const counted:unknown[][]=[],outputs:any[]=[];let recorded='';
   const control={query:async(sql:string,values:unknown[])=>{
     if(sql.includes('r.peer_id=$2'))return {rowCount:1,rows:[{}]};
-    if(sql.includes('INSERT INTO memory_problem_days')){counted.push(values);return {rowCount:1,rows:[]};}
+    // A failure is always written; a step that works only adds to a day that already holds a failure.
+    if(sql.includes('memory_problem_days')){counted.push([/^\s*UPDATE\b/.test(sql)&&sql.includes('failed>0')?'worked':'failed',...values]);return {rowCount:1,rows:[]};}
     throw Error('unexpected_control_query');
   }};
   const contexts={access:{stores:{control},policy:()=>({owner_id:'123'}),recall:(principal:Reader)=>({space:principal.space,group:'-100'})},
@@ -212,12 +213,12 @@ test('a failed ask of the owner\'s forwards and files keeps the other answers, s
   const down=await memory.recall(owner,'Where is the trip?') as any;
   assert.deepEqual(recorded.split('\n\n'),peers.map(peer=>`[related through speaker → ${peer}]\nAnswer from ${peer}`));
   assert.ok(down.sources.at(-1).limitations.includes('forwards_unavailable'));assert.equal(outputs.at(-1).configuration.forwards_and_files,undefined);
-  assert.deepEqual(counted,[['memory_read',0,1]]);
+  assert.deepEqual(counted,[['failed','memory_read']]);
   // An answer that is not text is a failed ask too, and one that works is counted as working.
-  forwards=()=>({not:'text'});await memory.recall(owner,'Where is the trip?');assert.deepEqual(counted.at(-1),['memory_read',0,1]);
+  forwards=()=>({not:'text'});await memory.recall(owner,'Where is the trip?');assert.deepEqual(counted.at(-1),['failed','memory_read']);
   forwards=()=>'Answer from '+materialPeer;
   const up=await memory.recall(owner,'Where is the trip?') as any;
-  assert.deepEqual(counted.at(-1),['memory_read',1,0]);assert.ok(!up.sources.at(-1).limitations.includes('forwards_unavailable'));
+  assert.deepEqual(counted.at(-1),['worked','memory_read']);assert.ok(!up.sources.at(-1).limitations.includes('forwards_unavailable'));
   assert.equal(outputs.at(-1).configuration.forwards_and_files,true);
   // Only the forwards were asked, and their ask failed: limited memory that says what is missing.
   peers=[];forwards=()=>{throw Error('honcho_down');};
@@ -854,6 +855,19 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     assert.deepEqual(shape(thanked),[[ownerPeer,'labelled_source','conversation']],'nothing for the forwards and files');
     assert.equal(thanked[0]!.value.source,honchoSource({part:'own'}));
     assert.ok(thanked[0]!.content.includes('Thanks')&&!thanked[0]!.content.includes('NOCHEHMARK'),'the quote of Nocheh\'s reply is left out');
+    // The owner's pin of Nocheh's own message leaves only a note in the chat that it was pinned: Nocheh's learned reply is
+    // learned as Nocheh's where it was sent, and its card is not learned at all. Nothing goes to the forwards and files.
+    const card=await nocheh('123','CARDMARK approve the booking?',{send_class:'card'}),cardId=serial;
+    const pinNocheh=(id:number,text:string)=>say('123',123,{pinned_message:{message_id:id,date:1700000000+id,chat:chatOf('123'),
+      from:{id:bot,is_bot:true,first_name:'Nocheh'},text}});
+    const pinFlight=await pinNocheh(flightId,'NOCHEHMARK your flight is at 9'),pinCard=await pinNocheh(cardId,'CARDMARK approve the booking?');
+    for(const source of [pinFlight,pinCard])pins.push(...await services.memory.queueSource(source));
+    for(const source of [pinFlight,pinCard]) {
+      const rows=await written(source);
+      assert.deepEqual(shape(rows),[[assistantPeer,'labelled_pointer','conversation']]);assert.equal(rows[0]!.key,dm);
+      assert.deepEqual(rows[0]!.value,honchoPointer('pinned_nocheh'));assert.doesNotMatch(rows[0]!.content,/NOCHEHMARK|CARDMARK/);
+    }
+    assert.ok(card.id);
     // In a group, a member's forward stays on the member with its source; the owner's forward of someone else goes to the
     // forwards-and-files participant in that group's own session, and its evidence names no speaker.
     const memberForward=await say(group,456,{text:'MEMBERMARK the office closes early',forward_origin:{type:'channel',chat:{id:-1009,type:'channel',title:'News'},message_id:3,date:1}});

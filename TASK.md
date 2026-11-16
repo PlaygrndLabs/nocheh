@@ -246,8 +246,9 @@ becomes your private memory"). One pull request in twelve commits
   the owner's own messages that cites them and reads no rule learned from anyone else; a turn's
   note never. A rule is judged by the messages code recorded it was learned from, never by what
   the model cited, and rules resting on others' words label the note as theirs. A pin carries
-  the words of the message it pinned. The owner's quote of Nocheh's own learned message counts
-  as Nocheh's. A turn's reads count a search by meaning as other chats, an earlier read in its
+  the words of the message it pinned; a pin of Nocheh's own message is never someone not allowed.
+  The owner's quote or pin of Nocheh's own learned message counts as Nocheh's, and a review of
+  only the owner's and Nocheh's own messages reads no rule learned from others. A turn's reads count a search by meaning as other chats, an earlier read in its
   session only when the note copies from it, and never a forward of the sender's own message.
   The model reads fixed words beside the unchanged note, with a fixed sentence on what they
   mean, and `from=nocheh` is not the owner's own words; the owner reads editable words ("Note
@@ -265,7 +266,8 @@ becomes your private memory"). One pull request in twelve commits
   in the chat; file and audio text is a second record in the same chat session; the owner's
   forwards and files in a group stay in that group's session. Someone else's message the owner
   pins is kept as a forward is. The owner's quote of Nocheh's own learned message is learned
-  as the owner's words without it. Owner turns read the forwards block apart from the owner's,
+  as the owner's words without it, and stays direct in learning; the owner's pin of Nocheh's
+  own message leaves only a pointer, and a pinned card is not learned. Owner turns read the forwards block apart from the owner's,
   and recall asks it; when that ask fails, recall keeps the other answers and says so, and
   answers stay whole under their headers within 20,000 characters. A claim resting on a
   forward, a file, a pin or someone else's message is reported or inferred, never direct.

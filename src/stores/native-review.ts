@@ -113,7 +113,7 @@ export class NativeReviewRepository {
     // Related messages are asked the same question, each once; a pin's message by its own author.
     const asked=new Map<string,Promise<boolean>>(),options:Required<LearningContextOptions>={
       admit:reference=>{let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id).then(value=>value==='review'));return allowed;},
-      admitPinned:reference=>this.pinnedSender(reference.id).then(value=>value==='review'),
+      admitPinned:reference=>this.pinnedSender(reference.id).then(value=>value==='not_learned'?value:value==='review'),
       collect:{dropped:[],versions:[],refused:[],bare_reaction:false,inputs:new Map()}};
     let context;
     try{context=await this.contexts.prepare(source,binding,options);}
@@ -189,7 +189,9 @@ export class NativeReviewRepository {
    * message and every one is the owner's own typing. A transcript or a file's text is judged through the message it
    * belongs to, which is recorded with it; any other input is someone else's. In a batch of the owner's own typing only,
    * the rules learned from anyone else are left out of that one review, so a note it writes can still read as the
-   * owner's; turns and every other review still read them.
+   * owner's. In a batch of the owner's own typing and Nocheh's own learned messages, the rules resting on another
+   * person's message, a forward or a file are left out of it the same way, so its notes stay Nocheh's. Turns and every
+   * other review still read them.
    */
   private async batch(source:SourceReference,context:PreparedLearningContext,collect:Required<LearningContextOptions>['collect']) {
     const versions=collect.versions,inputs=(version:InterpretationVersion)=>collect.inputs.get(version.id)??[];
@@ -198,14 +200,20 @@ export class NativeReviewRepository {
     const classes=await this.sources.classesFor([...context.observations.map(item=>item.source.id),...versions.flatMap(learnedFrom)]);
     const typed=(id:string)=>{const found=classes.get(id);return !!found&&ownerTyped(found.facts);};
     const ownRule=(version:InterpretationVersion)=>version.author==='owner'||learnedFrom(version).length>0&&told(version)&&learnedFrom(version).every(typed);
-    const ownerOnly=context.observations.every(item=>typed(item.source.id)),read=ownerOnly?versions.filter(ownRule):versions,left=versions.length-read.length;
-    // Whose words the rules it reads rest on: the owner's and Nocheh's learned messages name nobody, and a message or an
+    // Whose words a rule rests on, besides the owner's and Nocheh's learned messages, which name nobody: a message or an
     // input that can't be told is another person's.
-    const buckets=new Set<string>();
-    for(const version of read)if(version.author!=='owner') {
-      if(!learnedFrom(version).length||!told(version))buckets.add('person');
-      for(const id of learnedFrom(version)){const found=classes.get(id);buckets.add(found?bucketOf(found.class):'person');}
-    }
+    const others=(version:InterpretationVersion)=>{
+      const found=new Set<string>();if(version.author==='owner')return found;
+      if(!learnedFrom(version).length||!told(version))found.add('person');
+      for(const id of learnedFrom(version)){const item=classes.get(id);found.add(item?bucketOf(item.class):'person');}
+      return new Set([...found].filter(bucket=>(ruleBuckets as readonly string[]).includes(bucket)));
+    };
+    // Nocheh's own learned messages, and the owner's quote or pin of one, never its cards or notices, which are not learned.
+    const nocheh=(id:string)=>{const found=classes.get(id);return !!found&&bucketOf(found.class)==='nocheh';};
+    const ownerOnly=context.observations.every(item=>typed(item.source.id));
+    const ownOrNocheh=!ownerOnly&&context.observations.every(item=>typed(item.source.id)||nocheh(item.source.id));
+    const read=ownerOnly?versions.filter(ownRule):ownOrNocheh?versions.filter(version=>!others(version).size):versions,left=versions.length-read.length;
+    const buckets=new Set(read.flatMap(version=>[...others(version)]));
     const provenance:ReviewProvenance={version:1,source:source.id,
       events:context.observations.map(item=>({id:item.source.id,class:classes.get(item.source.id)?.class??'unknown'})),owner_account_only:ownerOnly,
       rules:!read.length?'none':read.every(ownRule)?'owner':'others',rule_buckets:ruleBuckets.filter((bucket:RuleBucket)=>buckets.has(bucket)),
@@ -249,11 +257,15 @@ export class NativeReviewRepository {
     return event?notesSender(this.contexts.access.policy(),event):'sender_not_allowed';
   }
   /** notesSender over the message an archived pin carries, by that message's own author in the pin's chat; a pin whose
-   *  message can't be read is not let in. A message Telegram no longer shows (date 0) carries no words to leave out. */
-  private async pinnedSender(id:string):Promise<'review'|'sender_not_allowed'> {
+   *  message can't be read is not let in. A message Telegram no longer shows (date 0) carries no words to leave out.
+   *  Nocheh's own message, found in the archive as the pin's chat's message (pinnedNocheh), is never someone not allowed:
+   *  a learned one stays, and a card, notice or reminder is not learned. Another bot's message is still left out. */
+  private async pinnedSender(id:string):Promise<'review'|'sender_not_allowed'|'not_learned'> {
     const event=await this.archived(id),update=record(event?.payload),message=record(update?.message??update?.edited_message),pinned=record(message?.pinned_message);
     if(!event||!message||!pinned)return 'sender_not_allowed';
     if(pinned.date===0&&Object.keys(pinned).every(name=>['chat','message_id','date'].includes(name)))return 'review';
+    const own=(await this.sources.pinnedNocheh([id])).get(id);
+    if(own)return own==='learned'?'review':'not_learned';
     return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...pinned,chat:message.chat}}});
   }
   private async record(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
