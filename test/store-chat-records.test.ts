@@ -20,6 +20,7 @@ import {OwnerPortabilityRepository,type OwnerRecord} from '../src/stores/owner-p
 import {telegramDirectory} from '../src/stores/telegram-directory.js';
 
 const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000};
+const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function open():Promise<StorePools> {
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -200,6 +201,56 @@ test('the process directory reloads after a capture, a newer epoch and a miss, a
   }finally{setChatLoader(loader);await stores.close();}
 });
 
+test('each update is recorded once: a replay waits on no chat row and keeps newer names, and the next replay records a failed one',fixture,async()=>{
+  const stores=await open(),base=Date.now(),group='-100'+base,update=(n:number)=>base*100+n,[alice,bob]=[1,2].map(n=>String(base%1000000000*10+n)) as [string,string];
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};let broken=false;
+  const repository=new ChatRepository(stores,()=>{if(broken)throw Object.assign(Error('records unavailable'),{code:'XX000'});return policy;});
+  const coordinator=new CaptureCoordinator(new ArchiveRepository(stores.archive),stores.control,undefined,repository);
+  const chat={id:Number(group),type:'supergroup',title:'Once group'};
+  const capture=async(n:number,name:string,extra:Record<string,unknown>={})=>(await coordinator.capture({version:1,key:'once:'+base+':'+n,origin:'live',
+    kind:'telegram_update',bot_id:'777',scope:group,source_id:String(n),revision:'1',occurred_at:null,text:null,
+    payload:{update_id:update(n),message:{message_id:n,date:n,chat,from:{id:Number(alice),first_name:name},text:'SECRET_TEXT_ONCE',...extra}}} as Envelope)).source;
+  const marked=async(event:string)=>(await stores.control.query('SELECT 1 FROM chat_recorded_events WHERE event_id=$1',[event])).rowCount;
+  const id=chatIdFor('telegram',group),account=accountIdFor('telegram',alice);
+  const name=async()=>(await stores.control.query('SELECT display_name FROM chat_accounts WHERE id=$1',[account])).rows[0]?.display_name;
+  const failures:string[]=[],warn=console.warn;
+  console.warn=(...args:unknown[])=>{const line=String(args[0]);if(line.includes('"chat_record_failed"'))failures.push(line);else warn(...args);};
+  const holder=await stores.control.connect();
+  try {
+    const first=await capture(1,'Alice Old');
+    await capture(2,'Alice New');
+    const saved=await records(stores.control,[id]);
+    assert.equal(await name(),'Alice New');assert.equal(saved.members.length,1);
+    // Another transaction holds the rows a record writes, as a live capture or the membership backfill does while the
+    // reconciliation sweeps: the sweep's replay must not wait on them.
+    await holder.query('BEGIN');
+    await holder.query('SELECT 1 FROM chat_details WHERE chat_id=$1 FOR UPDATE',[id]);
+    await holder.query('SELECT 1 FROM chat_accounts WHERE id=$1 FOR UPDATE',[account]);
+    await holder.query('SELECT 1 FROM chat_memberships WHERE chat_id=$1 FOR UPDATE',[id]);
+    const replay=coordinator.handoff(first);
+    const waited=await Promise.race([replay.then(()=>false),sleep(3000).then(()=>true)]);
+    await holder.query('ROLLBACK');await replay;
+    assert.equal(waited,false,'a replay of a recorded update writes no chat row, so it waits on none');
+    assert.equal(await name(),'Alice New','a replay never writes an older update\'s name over a newer one');
+    assert.deepEqual(await records(stores.control,[id]),saved);
+    // A record that fails leaves its update unrecorded, and the capture goes on; the next replay records it, and its
+    // names stay behind those of an update recorded meanwhile, also when that update repeats the names already stored.
+    broken=true;
+    const failed=await capture(3,'Alice Later',{new_chat_members:[{id:Number(bob),first_name:'Bob'}]});
+    assert.deepEqual(failures.map(line=>JSON.parse(line)),[{event:'chat_record_failed',code:'XX000'}]);
+    assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM source_intakes WHERE event_id=$1',[failed.reference.id])).rows[0].n,1);
+    assert.equal(await marked(failed.reference.id),0);
+    broken=false;
+    await capture(4,'Alice New');
+    assert.equal((await records(stores.control,[id])).members.some(row=>row.account_id===accountIdFor('telegram',bob)),false);
+    await coordinator.handoff(failed);
+    assert.equal(await marked(failed.reference.id),1);
+    assert.deepEqual((await records(stores.control,[id])).members.filter(row=>row.account_id===accountIdFor('telegram',bob)).map(row=>row.state),['in']);
+    assert.equal(await name(),'Alice New');
+    assert.equal(failures.length,1);
+  }finally{console.warn=warn;holder.release();await stores.close();}
+});
+
 test('memberships and names follow each bot\'s own update order, a new bot, a week\'s gap and imported history',fixture,async()=>{
   const stores=await open(),base=Date.now(),group='-100'+base,update=(n:number)=>base*100+n;
   const [carol,dave]=[1,2].map(n=>String(base%1000000000*10+n)) as [string,string];
@@ -222,9 +273,25 @@ test('memberships and names follow each bot\'s own update order, a new bot, a we
     // Within one bot an older update taken in later changes nothing, as before.
     await coordinator.capture(envelope(4,'888',4,member(carol,'member','Older name')));
     assert.equal(await state(carol),'left');assert.equal(await title(),'Renamed by the new bot');
-    // The membership backfill reads by the same rule: reading the whole archive again changes nothing.
+    // The membership backfill skips the updates capture recorded: after an app start it reads the updates taken in since
+    // the last one, and writes none of their rows again, so it waits on none of them.
     const before=await records(stores.control,[id]),last=(await stores.archive.query('SELECT max(capture_sequence) AS last FROM events')).rows[0].last;
-    await stores.control.query('UPDATE chat_seed_state SET members_sequence=0,archive_sequence=$1 WHERE singleton',[last]);
+    const rewind=()=>stores.control.query('UPDATE chat_seed_state SET members_sequence=0,archive_sequence=$1 WHERE singleton',[last]);
+    await rewind();
+    const holder=await stores.control.connect();
+    try {
+      await holder.query('BEGIN');await holder.query('SELECT 1 FROM chat_memberships WHERE chat_id=$1 FOR UPDATE',[id]);
+      const filling=(async()=>{while(await repository.backfill(500));})();
+      const waited=await Promise.race([filling.then(()=>false),sleep(3000).then(()=>true)]);
+      await holder.query('ROLLBACK');await filling;
+      assert.equal(waited,false,'the backfill waited on a membership capture had already written');
+    } finally{holder.release();}
+    assert.deepEqual(await records(stores.control,[id]),before);
+    // Updates no capture recorded it fills in by the same rule: reading them all again gives the same memberships.
+    const events=(await stores.archive.query('SELECT id FROM events WHERE scope=$1',[group])).rows.map(row=>row.id as string);
+    await stores.control.query('DELETE FROM chat_recorded_events WHERE event_id=ANY($1::text[])',[events]);
+    await stores.control.query('DELETE FROM chat_memberships WHERE chat_id=$1',[id]);
+    await rewind();
     while(await repository.backfill(500));
     assert.deepEqual(await records(stores.control,[id]),before);
     // A week with no updates: Telegram may start the bot's count anywhere, and the later update is the newer one.
