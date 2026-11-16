@@ -2,7 +2,7 @@
 import {useState} from 'react';
 import {UserPlus} from 'lucide-react';
 import {useResource} from '../../lib/resource';
-import {appIds, isAllowed, validUserId, type Chat, type IdentityGroup, type Person} from '../../lib/chats-model';
+import {appIds, isAllowed, isOn, validUserId, type Chat, type IdentityGroup, type Person} from '../../lib/chats-model';
 import {Badge, Button, Card, CardBody, CardHeader, Field, Input, Segmented} from '../../ui/core';
 import {Unsaved, type Telegram} from './shared';
 
@@ -11,7 +11,7 @@ export function WhoCanTalk({group: chat, telegram}: {group: Chat; telegram: Tele
   const identities = useResource<{groups: IdentityGroup[]}>('/telegram/identities', 60000);
   const [manual, setManual] = useState('');
   const [manualError, setManualError] = useState('');
-  const on = telegram.isOn(chat);
+  const on = isOn(chat);
   const rule = telegram.rule(chat);
   const savedRule = telegram.savedRule(chat);
   const owner = telegram.ownerAccount;

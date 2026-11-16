@@ -7,8 +7,10 @@ import {
   byTopicKey,
   chatName,
   isGroupChat,
+  isOn,
   parentOf,
   shortIdLabel,
+  switchable,
   telegramProfile,
   type Chat,
 } from '../../lib/chats-model';
@@ -62,11 +64,11 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
       : [];
   const owner = chat.kind === 'private' && chat.owner === true;
   const group = chat.kind === 'group';
-  const on = group && telegram.isOn(chat);
+  const on = group && isOn(chat);
   // Telegram lists no topics to a bot: a forum, or a group topics were already seen in, can have older ones added.
   const forum = on && (chat.is_forum === true || topics.length > 0);
   // The owner's own topics follow the private chat, so only its chat, served groups and their topics have switches.
-  const tools = owner || on || (chat.kind === 'topic' && telegram.isOn(parent ?? chat));
+  const tools = owner || on || (chat.kind === 'topic' && isOn(parent ?? chat));
   const where = owner ? 'your private chat' : chatName(chat);
   const label = appIdLabel(chat);
   const short = shortIdLabel(chat);
@@ -129,7 +131,8 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         <LoadError what="this chat’s details" onRetry={() => void refreshResources()} />
       )}
       <NochehHere chat={chat} parent={parent} telegram={telegram} />
-      {group && <WhoCanTalk group={chat} telegram={telegram} />}
+      {/* A group Nocheh left or was removed from has nobody to choose: the owner adds Nocheh there first. */}
+      {switchable(chat) && <WhoCanTalk group={chat} telegram={telegram} />}
       {(owner || on) && (
         <RoleAndSkills
           scope={space}
@@ -168,7 +171,7 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         />
       )}
       {isGroupChat(chat, find) ? (
-        <ProjectCard chat={chat} served={chat.state === 'active'} />
+        <ProjectCard chat={chat} served={on} />
       ) : (
         <PrivateChatProject chat={chat} yours={chat.owner === true} />
       )}
