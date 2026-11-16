@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from telegram import Bot
 from telegram.error import BadRequest,RetryAfter
 from telegram.request import HTTPXRequest
-from tools.acceptance.telegram_mock import TelegramMock,TOKEN
+from tools.acceptance.telegram_mock import ANONYMOUS_ADMIN,BOT_USER,TelegramMock,TOKEN,bot_status,press
 
 
 class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
@@ -147,6 +147,69 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(BadRequest):await self.bot.send_message(123,'<b>bold</b>',parse_mode='HTML')
         self.assertEqual(self.mock.state['unknown'],['sendMessage:HTML'])
         self.assertEqual(len(self.mock.state['sent']),2)
+
+    async def test_get_me_describes_the_bot_with_its_group_and_business_flags(self):
+        me=await self.bot.get_me()
+        self.assertEqual((me.id,me.can_join_groups,me.can_read_all_group_messages,me.supports_inline_queries,me.can_connect_to_business),
+                         (BOT_USER['id'],True,True,False,False))
+        sent=await self.bot.send_message(123,'x')
+        self.assertEqual(self.mock.state['sent'][0]['message']['from'],BOT_USER,'a message carries the plain user, not getMe')
+        self.assertEqual(sent.from_user.id,BOT_USER['id'])
+
+    async def test_adds_by_the_owner_someone_or_an_anonymous_admin_parse_as_telegram_sends_them(self):
+        group={'id':-1001234567890,'type':'supergroup','title':'Bakery'}
+        alice={'id':111,'is_bot':False,'first_name':'Alice'}
+        self.mock.inject({'updates':[bot_status(10,group,alice),bot_status(20,group,ANONYMOUS_ADMIN,'member','administrator'),
+                                     bot_status(30,group,alice,'administrator','kicked')]})
+        updates=await self.bot.get_updates(allowed_updates=['message','my_chat_member'])
+        changes=[(u.my_chat_member.from_user.id,u.my_chat_member.old_chat_member.status,u.my_chat_member.new_chat_member.status) for u in updates]
+        self.assertEqual(changes,[(111,'left','member'),(1087968824,'member','administrator'),(111,'administrator','kicked')])
+        self.assertTrue(all(u.my_chat_member.new_chat_member.user.id==BOT_USER['id'] and u.my_chat_member.chat.title=='Bakery' for u in updates))
+        self.assertEqual(self.mock.state['members']['-1001234567890']['status'],'kicked')
+
+    async def test_leave_chat_reports_the_bot_leaving_and_a_second_leave_is_refused(self):
+        group={'id':-1001234567890,'type':'supergroup','title':'Bakery'}
+        self.mock.inject({'updates':[bot_status(40,group,{'id':111,'is_bot':False,'first_name':'Alice'})]})
+        self.assertEqual(len(await self.bot.get_updates()),1)
+        self.assertTrue(await self.bot.leave_chat(-1001234567890))
+        left=(await self.bot.get_updates(offset=41))[0]
+        # Like Telegram: a my_chat_member update from the bot itself, numbered after every queued update.
+        self.assertEqual((left.update_id,left.my_chat_member.from_user.id,left.my_chat_member.old_chat_member.status,
+                          left.my_chat_member.new_chat_member.status,left.my_chat_member.chat.title),(41,BOT_USER['id'],'member','left','Bakery'))
+        self.assertEqual([row['chat_id'] for row in TelegramMock(self.path).state['left']],[-1001234567890])
+        from telegram.error import Forbidden
+        with self.assertRaises(Forbidden):await self.bot.leave_chat(-1001234567890)
+        with self.assertRaises(BadRequest):await self.bot.leave_chat(123)
+        self.assertEqual(len(self.mock.state['left']),1)
+        self.assertEqual(self.mock.state['unknown'],[])
+
+    async def test_updates_the_fake_sends_never_take_an_id_the_tester_keeps_and_sort_after_queued_ones(self):
+        group={'id':-1001234567890,'type':'supergroup','title':'Bakery'}
+        self.mock.inject({'updates':[self.message(9)]})
+        self.assertEqual(self.mock.next_update_id(),11,'ten is the tester\'s')
+        self.mock.state['last_update_id']=19;self.mock.state['offset']=0
+        self.assertEqual(self.mock.next_update_id(),21)
+        self.assertTrue(await self.bot.leave_chat(-1001234567890))
+        self.assertEqual([u['update_id'] for u in self.mock.state['updates']],[9,22])
+        # A tester update queued later still gets its own id: a multiple of ten after what the fake sent.
+        self.assertEqual(self.mock.inject({'updates':[self.message(30)]})['last_update_id'],30)
+        self.assertEqual([u.update_id for u in await self.bot.get_updates()],[9,22,30])
+
+    async def test_a_refused_leave_is_reported_without_leaving(self):
+        self.mock.configure({'faults':[{'method':'leaveChat','code':400,'description':'Bad Request: synthetic refusal to leave'}]})
+        with self.assertRaises(BadRequest):await self.bot.leave_chat(-1001234567890)
+        self.assertEqual((self.mock.state.get('left',[]),self.mock.state['updates']),([],[]))
+        self.assertEqual([row['status'] for row in self.mock.state['calls'] if row['method']=='leaveChat'],[400])
+        self.assertTrue(await self.bot.leave_chat(-1001234567890))
+
+    async def test_a_press_on_a_card_reaches_the_bot_and_is_answered_once(self):
+        from telegram import InlineKeyboardButton,InlineKeyboardMarkup
+        data='ngx'+'a'*32
+        card=await self.bot.send_message(123,'Nocheh is on in “Bakery”',reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('No project',callback_data=data)]]))
+        self.mock.inject({'updates':[press(50,self.mock.state['sent'][0]['message'],data,{'id':123,'is_bot':False,'first_name':'Owner'})]})
+        query=(await self.bot.get_updates())[0].callback_query
+        self.assertEqual((query.data,query.message.message_id,query.from_user.id),(data,card.message_id,123))
+        self.assertTrue(await self.bot.answer_callback_query(query.id))
 
     async def test_unknown_method_fails_loudly_and_is_preserved_for_gate(self):
         with self.assertRaises(BadRequest):await self.bot.get_chat_administrators(123)

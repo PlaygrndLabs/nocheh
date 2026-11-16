@@ -1,7 +1,7 @@
 """Fixture-only HTTP Bot API subset, with real PTB parsing and durable queue state.
 
 Contract: https://core.telegram.org/bots/api#getupdates, #sendmessage, #getfile,
-#editmessagetext, #answercallbackquery and #setmessagereaction.
+#editmessagetext, #answercallbackquery, #setmessagereaction and #leavechat.
 Unknown methods are recorded and rejected; this is not a Telegram implementation.
 """
 import asyncio
@@ -14,8 +14,36 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 TOKEN='123456:synthetic'
-BOT={'id':123456,'is_bot':True,'first_name':'Synthetic','username':'synthetic_fixture_bot',
-     'can_join_groups':True,'can_read_all_group_messages':True,'supports_inline_queries':False}
+# The bot as other updates show it, and as getMe describes it (https://core.telegram.org/bots/api#user).
+BOT_USER={'id':123456,'is_bot':True,'first_name':'Synthetic','username':'synthetic_fixture_bot'}
+BOT={**BOT_USER,'can_join_groups':True,'can_read_all_group_messages':True,'supports_inline_queries':False,
+     'can_connect_to_business':False,'has_main_web_app':False}
+# Telegram's stand-in for a group admin with Remain anonymous on: the `from` of what such an admin does.
+ANONYMOUS_ADMIN={'id':1087968824,'is_bot':True,'first_name':'Group','username':'GroupAnonymousBot'}
+# https://core.telegram.org/bots/api#chatmemberadministrator: the rights every administrator entry carries.
+ADMIN_RIGHTS=('can_manage_chat','can_delete_messages','can_manage_video_chats','can_restrict_members','can_promote_members',
+              'can_change_info','can_invite_users','can_post_stories','can_edit_stories','can_delete_stories')
+
+
+def chat_member(user,status):
+    """A ChatMember of `user` with one of the statuses a bot's own status takes: left, member, administrator or kicked."""
+    if status=='administrator':return {'status':status,'user':user,'can_be_edited':False,'is_anonymous':False,**{right:False for right in ADMIN_RIGHTS}}
+    if status=='kicked':return {'status':status,'user':user,'until_date':0}
+    if status in ('left','member'):return {'status':status,'user':user}
+    raise ValueError('fixture_member_status')
+
+
+def bot_status(update_id,chat,by,old='left',new='member',date=None):
+    """A my_chat_member update (https://core.telegram.org/bots/api#chatmemberupdated): `by`, a User, changed this bot's
+    status in `chat` from `old` to `new`. An add is left to member; Telegram reports a leave with the bot itself as `by`."""
+    return {'update_id':update_id,'my_chat_member':{'chat':chat,'from':by,'date':int(time.time()) if date is None else date,
+            'old_chat_member':chat_member(BOT_USER,old),'new_chat_member':chat_member(BOT_USER,new)}}
+
+
+def press(update_id,message,data,by):
+    """A tap on an inline button of `message`, a message the bot sent, as Telegram delivers it (callback_query)."""
+    return {'update_id':update_id,'callback_query':{'id':'cb'+str(update_id),'from':by,'chat_instance':'instance-'+str(message['chat']['id']),
+            'data':data,'message':message}}
 
 
 # https://core.telegram.org/bots/api#reactiontypeemoji: the only emoji a bot may react with.
@@ -112,14 +140,35 @@ class TelegramMock:
             known[item['update_id']]=item
         if len(known)>1000:raise ValueError('fixture_queue_limit')
         self.state['updates']=sorted(known.values(),key=lambda item:item['update_id'])
+        self.state['last_update_id']=max([self.state.get('last_update_id',0)]+[item['update_id'] for item in updates])
         presses=self.state.setdefault('presses',[])
         for item in updates:
             if isinstance(item.get('callback_query'),dict) and item not in presses:presses.append(item)
         titles=self.state.setdefault('titles',{})
         for item in updates:
-            chat=(item.get('message') or item.get('edited_message') or {}).get('chat') or {}
+            chat=(item.get('message') or item.get('edited_message') or item.get('my_chat_member') or {}).get('chat') or {}
             if isinstance(chat.get('title'),str) and type(chat.get('id')) is int:titles[str(chat['id'])]=chat['title']
-        self.save();self.changed.set();return {'queued':len(self.state['updates'])}
+            self.track(item)
+        self.save();self.changed.set();return {'queued':len(self.state['updates']),'last_update_id':self.state['last_update_id']}
+
+    def track(self,update):
+        """Keep this bot's own status in a chat from a my_chat_member update about it, so leaveChat knows whether it is in."""
+        change=update.get('my_chat_member')
+        if not isinstance(change,dict) or (change.get('new_chat_member') or {}).get('user',{}).get('id')!=BOT['id']:return
+        chat=change.get('chat') or {}
+        if type(chat.get('id')) is int:self.state.setdefault('members',{})[str(chat['id'])]={'status':change['new_chat_member'].get('status'),'chat':chat}
+
+    def next_update_id(self):
+        """The id of an update the fake sends on its own: after every update queued so far, and never a multiple of ten,
+        which the tester keeps for its own (telegram_scenarios.Fixture.ids), so neither ever takes the other's."""
+        number=max([self.state.get('last_update_id',0),self.state['offset']-1]+[item['update_id'] for item in self.state['updates']])+1
+        if number%10==0:number+=1
+        self.state['last_update_id']=number
+        return number
+
+    def emit(self,update):
+        """Queue an update Telegram itself sends, such as the one reporting the bot's own leave."""
+        self.state['updates'].append(update);self.track(update);self.changed.set()
 
     def configure(self,body):
         """Bounded synthetic files/faults; reject malformed control atomically."""
@@ -140,7 +189,7 @@ class TelegramMock:
             files[row['file_id']]=row
         for row in body.get('faults',[]):
             if (not isinstance(row,dict) or set(row)-{'method','code','description','parameters'}
-                    or row.get('method') not in ('sendMessage','getFile','getUpdates')
+                    or row.get('method') not in ('sendMessage','getFile','getUpdates','leaveChat')
                     or type(row.get('code')) is not int or not 400<=row['code']<=599
                     or not isinstance(row.get('description'),str) or len(row['description'])>200):raise ValueError('invalid_fixture_fault')
             parameters=row.get('parameters',{})
@@ -244,7 +293,7 @@ class TelegramMock:
             if topic is not None and int(topic)<=0:return self.error(400,'Bad Request: message thread not found')
             chat=int(chat);self.state['next_message_id']+=1
             # Like Telegram, the sent message carries the chat's current title.
-            result={'message_id':self.state['next_message_id'],'date':int(time.time()),'from':BOT,
+            result={'message_id':self.state['next_message_id'],'date':int(time.time()),'from':BOT_USER,
                 'chat':{'id':chat,'type':'private' if chat>0 else 'supergroup',**({'title':self.state.get('titles',{}).get(str(chat))} if self.state.get('titles',{}).get(str(chat)) else {})},'text':text,
                 **({'entities':entities} if entities else {})}
             if topic is not None:result.update(message_thread_id=int(topic),is_topic_message=True)
@@ -308,6 +357,19 @@ class TelegramMock:
             if (not isinstance(reaction,list) or len(reaction)>1 or any(not isinstance(item,dict) or item.get('type')!='emoji'
                     or item.get('emoji') not in REACTIONS for item in reaction)):return self.error(400,'Bad Request: REACTION_INVALID')
             self.state.setdefault('reactions',{})[f'{chat}:{number}']=[item['emoji'] for item in reaction];result=True
+        elif method=='leaveChat':
+            # https://core.telegram.org/bots/api#leavechat: the bot leaves a group. Telegram then reports the change of
+            # its own status like any other, in a my_chat_member update whose `from` is the bot itself. A chat the bot
+            # already left is refused; the fixture never stops delivering a chat's updates, so a late one still arrives.
+            try:chat=int(data.get('chat_id'))
+            except (TypeError,ValueError):return self.error(400,'Bad Request: chat not found')
+            if chat>=0:return self.error(400,'Bad Request: chat not found')
+            known=self.state.setdefault('members',{}).get(str(chat)) or {}
+            if known.get('status') in ('left','kicked'):return self.error(403,'Forbidden: bot is not a member of the group chat')
+            title=self.state.get('titles',{}).get(str(chat))
+            group=known.get('chat') or {'id':chat,'type':'supergroup',**({'title':title} if title else {})}
+            self.emit(bot_status(self.next_update_id(),group,BOT_USER,known.get('status') or 'member','left'))
+            self.state.setdefault('left',[]).append({'chat_id':chat,'at':time.time()});result=True
         elif method=='setChatMenuButton':result=True
         elif method in ('setMyCommands','deleteMyCommands','getMyCommands'):
             # https://core.telegram.org/bots/api#setmycommands: one list per scope

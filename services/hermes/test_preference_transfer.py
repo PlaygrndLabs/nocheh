@@ -22,7 +22,7 @@ class PreferenceTransferTests(unittest.TestCase):
         self.source.mkdir(); self.target.mkdir()
         self.env = patch.dict(os.environ, {'NOCHEH_RUNTIME_HOME': str(self.source)})
         self.env.start(); self.addCleanup(self.env.stop)
-        # The reset's own policy: the owner and groups its setup names (tools/acceptance/reset_preservation.py).
+        # The reset's own policy: the owner its setup names and the groups Nocheh is on in (tools/acceptance/reset_preservation.py).
         self.policy = SimpleNamespace(owner='42', groups=['-10'])
         save(self.source, {'agent.max_iterations': 5, 'agent.reasoning_effort': 'high'}, view(self.source)['revision'])
         save(self.source, {'agent.max_iterations': 2}, view(self.source)['revision'], job='old-schedule')

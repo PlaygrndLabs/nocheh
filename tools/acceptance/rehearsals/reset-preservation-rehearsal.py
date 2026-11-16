@@ -31,7 +31,7 @@ import {initializeStoreDatabases,connectStores} from './dist/src/stores/connecti
 const config={host:'nocheh-db',user:'nocheh',database:'nocheh',password:process.env.NOCHEH_RESET_DB_PASSWORD};
 const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
 await initializeStoreDatabases(config,passwords);const stores=connectStores(config,passwords);
-const policy={enabled:false,owner_id:'42',group_ids:['-10']};
+const policy={enabled:false,owner_id:'42',group_access:{}};
 await stores.control.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint) VALUES('assistant',1,$1,$2)",[JSON.stringify(policy),digest(canonical(policy))]);
 await stores.control.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");
 await stores.control.query("INSERT INTO projects(id,name,description,state,revision) VALUES($1,'Fixture project','Saved setup','active',1)",['a'.repeat(64)]);
@@ -68,7 +68,7 @@ def fixture_check(root):
     (memory / 'honcho.env').write_text('SYNTHETIC_HONCHO_SETUP_RETAINED')
     values = dict(configuration.DEFAULTS)
     values.update(NOCHEH_STORAGE_LAYOUT='original-only-v1', TELEGRAM_ENABLED='false', TELEGRAM_OWNER_ID='42',
-        TELEGRAM_GROUP_IDS='-10', NOCHEH_MODEL='fixture-model', POSTGRES_PASSWORD='1' * 64,
+        NOCHEH_MODEL='fixture-model', POSTGRES_PASSWORD='1' * 64,
         SERVICE_TOKEN='2' * 64, INNGEST_EVENT_KEY='3' * 64, INNGEST_SIGNING_KEY='4' * 64,
         INNGEST_POSTGRES_PASSWORD='5' * 64, NOCHEH_ARCHIVE_PASSWORD='6' * 64,
         NOCHEH_DERIVED_PASSWORD='7' * 64, NOCHEH_CONTROL_PASSWORD='8' * 64,
