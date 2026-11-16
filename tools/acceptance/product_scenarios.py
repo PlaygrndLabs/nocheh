@@ -686,8 +686,22 @@ class ProductScenarios(Scenarios):
     def learned_as(self, row, expected):
         """A message Nocheh sent that is learned, as its class says (ADR-0256): the owner's notes review reads it."""
         event_id = self.sent_as(row, expected)
-        self.wait('own_message_reviewed', lambda: self.review_of(event_id), 600)
+        self.review_wait('own_message_reviewed', lambda: self.review_of(event_id))
         return event_id
+
+    # The owner's notes reviews run one at a time, and each waits while any Honcho write waits for its first attempt, so
+    # late in a full run dozens can be waiting, and the background steps that queue or skip them can wait behind them too.
+    REVIEW_SECONDS = 2400
+
+    def review_wait(self, label, check, interval=2):
+        """wait() for a step behind the owner's notes reviews; a timeout says how many reviews were still waiting."""
+        try:
+            return self.wait(label, check, self.REVIEW_SECONDS, interval)
+        except Failed as error:
+            if str(error) != 'timeout:'+label:
+                raise
+            pending = self.f.query('nocheh_control', "SELECT count(*) FROM native_review_jobs WHERE state='pending'")
+            raise Failed('timeout:'+label+':reviews_pending='+(pending or 'unknown')) from None
 
     def review_of(self, event_id):
         """The owner's notes review of a message ({state, provenance}: what Nocheh's code recorded it read), or None."""
@@ -697,17 +711,17 @@ class ProductScenarios(Scenarios):
 
     def kept_out(self, event_id):
         """A message from someone not allowed there: a skip recorded for it, and no notes review (ADR-0257)."""
-        reason = self.wait('kept_out_of_the_owners_notes', lambda: self.f.query('nocheh_control', "SELECT reason FROM native_review_skips "
-                                                                              "WHERE event_id='"+event_id+"'"), 600)
+        skip = "SELECT reason FROM native_review_skips WHERE event_id='"+event_id+"'"
+        reason = self.review_wait('kept_out_of_the_owners_notes', lambda: self.f.query('nocheh_control', skip))
         review = self.review_of(event_id)
         self.gate('no_notes_review_of_it', reason == 'sender_not_allowed' and review is None, reason=reason, review=review)
 
     def reviewed(self, event_id, mark):
         """A message's notes review once it saved the note with this mark, as [[review-note:]] asks (installation-provider.py),
         and ended, so Hermes recorded who wrote the note."""
-        self.wait('review_saved_the_note', lambda: [event for event in self.f.brain() if event.get('directive') == 'review-note'
-                                                   and event['phase'] == 'final' and mark in (event.get('argument') or '')], 900, 10)
-        return self.wait('review_done', lambda: (lambda found: found if found and found['state'] == 'done' else None)(self.review_of(event_id)), 300)
+        self.review_wait('review_saved_the_note', lambda: [event for event in self.f.brain() if event.get('directive') == 'review-note'
+                                                          and event['phase'] == 'final' and mark in (event.get('argument') or '')], 10)
+        return self.review_wait('review_done', lambda: (lambda found: found if found and found['state'] == 'done' else None)(self.review_of(event_id)))
 
     def kept_apart(self, event_id):
         """Someone else's forward in the owner's private chat: written by the forwards-and-files participant in the owner's
@@ -800,8 +814,10 @@ class ProductScenarios(Scenarios):
     def own_file_stays_recallable(self):
         # The owner's own file: its caption stays the owner's own words and its text goes beside it in the same chat,
         # written by the forwards-and-files participant, so it no longer shapes what is known about the owner. It still
-        # reaches the owner's next turn in the forwards-and-files block, and recall still asks for it (ADR-0257). The mark
-        # is a private mark, as in forward_kept_apart_and_labelled.
+        # reaches the owner's next turn in the forwards-and-files block, and recall still asks the participant whose
+        # learned conclusions hold it (ADR-0257). The tester's Honcho answers a memory chat with its mock provider, which
+        # never searches, so the recalled answer cannot quote the file; what can be seen is that recall asked the
+        # participant holding it and got its answer back. The mark is a private mark, as in forward_kept_apart_and_labelled.
         mark = 'PRIVATEMARK'+str(self.f.ids())
         canaries.save(self.f.directory, {mark: 'own file'}, OWNER)
         content = synthetic_pdf(['Synthetic lease renewal '+mark, 'Rent is due on the fifth'])
@@ -820,7 +836,10 @@ class ProductScenarios(Scenarios):
         self.turn(self.f.message(OWNER, 'Find my lease [[recall:'+mark+']]'), OWNER)
         found = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]['result']
         self.gate('recall_asks_forwards_and_files', 'related through the owner\'s forwards and files' in found, result=found[:600])
-        self.gate('recall_finds_the_file_text', mark in found, result=found[:600])
+        self.gate('forwards_and_files_answered', 'forwards_unavailable' not in found, result=found[:600])
+        held = self.honcho("SELECT count(*) FROM documents WHERE deleted_at IS NULL AND observer='nocheh_forwards_and_files' "
+                           "AND observed='nocheh_forwards_and_files' AND content LIKE '%"+mark+"%'")
+        self.gate('recall_asks_the_participant_holding_the_file_text', held not in ('', '0'), conclusions=held)
 
     def private_chat_stays_out_of_groups(self):
         # What the owner keeps on their private side never reaches what the model sees for a group, and no group reply

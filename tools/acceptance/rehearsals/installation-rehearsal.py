@@ -22,6 +22,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.operations.installation.configuration import initialize, write_env, compose_command, compose_environment
 from tools.acceptance.github_mock import prepare as prepare_github
+from tools.operations.memory.honcho_setup import INPUT_TOKENS, QUERY_CHARACTERS
 
 # The deterministic model service, configured as an ordinary custom provider.
 # Routes accept this plain-HTTP address only inside an installation fixture.
@@ -96,6 +97,9 @@ def main():
         'DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS': '0', 'DERIVER_REPRESENTATION_BATCH_MAX_AGE_SECONDS': '1',
         'DERIVER_POLLING_STARTUP_JITTER_SECONDS': '0', 'DERIVER_POLLING_BACKOFF_ENABLED': 'false',
         'PEER_CARD_ENABLED': 'false', 'DREAM_ENABLED': 'false', 'SUMMARY_ENABLED': 'true', 'EMBED_MESSAGES': 'true', 'LOG_LEVEL': 'WARNING',
+        # The real setup's limits (honcho_setup.py), so a learning query as long as Nocheh sends is taken here too.
+        'DIALECTIC_MAX_QUERY_LENGTH': str(QUERY_CHARACTERS), 'DIALECTIC_MAX_INPUT_TOKENS': str(INPUT_TOKENS),
+        'SUMMARY_MAX_INPUT_TOKENS': str(INPUT_TOKENS),
         'EMBEDDING_VECTOR_DIMENSIONS': '1536', 'EMBEDDING_MODEL_CONFIG__TRANSPORT': 'openai',
         'EMBEDDING_MODEL_CONFIG__MODEL': 'text-embedding-3-small'}
     prefixes = ['DERIVER_MODEL_CONFIG', 'SUMMARY_MODEL_CONFIG', 'DREAM_DEDUCTION_MODEL_CONFIG', 'DREAM_INDUCTION_MODEL_CONFIG']
