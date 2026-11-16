@@ -289,6 +289,23 @@ class Scenarios:
     def cards_since(self, before, chat):
         return [row for row in self.f.sent()[before:] if self.is_card(row) and row['message']['chat']['id'] == chat]
 
+    def memory_writes(self, event_id, seconds=600):
+        """What long-term memory (Honcho) holds of a message once every write of it is done, evidence about people and
+        projects left aside: one {audience, session, writer, record} for each live write, sorted, and how many sessions they
+        are in. The audience is the owner's or a chat's; the session is conversation or material (the owner's forwards and
+        files); the writer is the message's own speaker, the forwards-and-files participant, the assistant, or another
+        (ADR-0257)."""
+        where = ("FROM memory_ingestion_receipts r JOIN memory_sessions s ON s.session_id=r.session_id WHERE r.source_reference->>'id'='"
+                 + event_id+"' AND r.retired_at IS NULL AND r.record_kind<>'labelled_entity'")
+        count = lambda condition='': self.f.query('nocheh_control', 'SELECT count(*) '+where+condition)
+        self.wait('memory_written', lambda: count() != '0' and count(" AND r.state<>'done'") == '0', seconds)
+        writer = ("CASE WHEN r.peer_id='nocheh_forwards_and_files' THEN 'forwards_and_files' WHEN r.peer_id='nocheh_assistant' THEN 'assistant' "
+                  "WHEN r.peer_id='person_'||r.speaker_entity_id THEN 'speaker' ELSE 'other' END")
+        raw = self.f.query('nocheh_control', "SELECT json_build_object('writes',json_agg(json_build_object('audience',CASE WHEN r.audience='owner' THEN 'owner' "
+                           "ELSE 'chat' END,'session',s.kind,'writer',"+writer+",'record',r.record_kind) ORDER BY s.kind,"+writer+",r.record_kind),"
+                           "'sessions',count(DISTINCT r.session_id)) "+where)
+        return json.loads(raw)
+
     def turn(self, update, chat, topic=None, expect_reply=True, attempts=1, posted=None, chunked=False):
         """Inject one update and verify its single causal reply or its silence.
 
@@ -529,6 +546,15 @@ class Scenarios:
         extracted = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='extracted_text' AND event_id='"+event_id+"'"
                                  " AND position('DOCMARK55' in convert_from(content,'UTF8'))>0")
         self.gate('document_text_extracted', extracted == '1', count=extracted)
+        self.own_file_split(event_id, 'document')
+
+    def own_file_split(self, event_id, name):
+        """The owner's own file in long-term memory: the caption stays the owner's own words, and the file's text goes
+        beside it in the same chat, written by the forwards-and-files participant, never as the owner's words (ADR-0257)."""
+        written = self.memory_writes(event_id)
+        self.gate(name+'_caption_and_text_kept_apart', written['writes'] == [
+            {'audience': 'owner', 'session': 'conversation', 'writer': 'forwards_and_files', 'record': 'labelled_material'},
+            {'audience': 'owner', 'session': 'conversation', 'writer': 'speaker', 'record': 'labelled_source'}] and written['sessions'] == 1, written=written)
 
     # Approvals --------------------------------------------------------------
 
@@ -739,6 +765,10 @@ class Scenarios:
         transcript = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id='"+event_id+"'"
                                   " AND position('VOICEMARK77' in convert_from(content,'UTF8'))>0")
         self.gate('voice_transcribed', transcript == '1', count=transcript)
+        # The owner's own voice is the owner's own words in long-term memory (ADR-0257).
+        written = self.memory_writes(event_id)
+        self.gate('own_voice_stays_the_owners_words', written['writes'] == [{'audience': 'owner', 'session': 'conversation', 'writer': 'speaker', 'record': 'labelled_source'}],
+                  written=written)
         started = time.monotonic()
         self.turn(self.f.message(OWNER, 'یک پیام متنی بعد از ویس'), OWNER)
         self.gate('next_message_not_held', time.monotonic()-started < 90, seconds=round(time.monotonic()-started, 1))
@@ -801,6 +831,8 @@ class Scenarios:
         listed = self.f.query('nocheh_archive', "SELECT jsonb_array_length(convert_from(payload,'UTF8')::jsonb->'message'->'photo') FROM events WHERE id='"
                               + event_id+"'")
         self.gate('every_size_stays_in_the_update', listed == '3', sizes=listed)
+        # What the photo was read to say is a file's text, kept apart from its caption.
+        self.own_file_split(event_id, 'photo')
 
     # Locked-down Hermes (ADR-0251) ---------------------------------------------------
 

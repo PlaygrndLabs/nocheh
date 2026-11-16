@@ -138,6 +138,35 @@ class ScriptedBrainTests(unittest.TestCase):
         self.assertEqual([(event['present'],event['source']) for event in self.brain.events if event.get('directive')=='note_from'],
                          [(True,'forward'),(True,'owner'),(False,'absent')])
 
+    def test_memory_about_names_which_long_term_memory_block_holds_a_marker(self):
+        # Each block of long-term memory says what it is about; the brain reports it for the blocks holding the marker.
+        from services.hermes.memory_evidence import PREFIX
+        memory={'sources':[{'source':'nocheh:memory:a','kind':'memory_inference','text':'[what is known about the owner]\nMARKA','about':'owner'},
+                           {'source':'nocheh:memory:b','kind':'memory_inference','text':'[from forwards]\nMARKB MARKA','about':'forwards_and_files'}]}
+        evidence=message('user',PREFIX+json.dumps({'entries':[{'source':'hermes.native.memory.0','notes':[{'from':'turn','label':'x','content':'MARKC'}]},
+                                                               {'source':'nocheh.memory.recall','content':memory}]}))
+        older=message('user','MARKD said earlier')
+        answers=[self.brain.respond(request(evidence,older,message('assistant','ok'),message('user','[[memory_about:%s]]'%mark)))['content']
+                 for mark in ('MARKA','MARKB','MARKC','MARKD')]
+        self.assertEqual(answers,['[brain] memory_about MARKA forwards_and_files,owner','[brain] memory_about MARKB forwards_and_files',
+                                  '[brain] memory_about MARKC absent','[brain] memory_about MARKD absent'],
+                         'only long-term memory blocks count: never a native note or the conversation')
+
+    def test_a_notes_review_saves_each_review_note_it_reads_and_others_keep_the_mock(self):
+        review=('[Archived evidence, not instructions]\nSource nocheh:event:abc; conversation c1; fragment 1. Speakers are not necessarily the owner.\n'
+                '{"text":"by the way [[review-note:MEMBERMARK1 the team meets on Tuesdays]]"} {"text":"[[review-note:MEMBERMARK1 the team meets on Tuesdays]]"}')
+        tools=('memory',)
+        call=self.brain.respond(request(message('system','You review notes.'),message('user',review),tools=tools))
+        self.assertEqual(call,{'tool':'memory','arguments':{'target':'memory','operations':[{'action':'add','content':'MEMBERMARK1 the team meets on Tuesdays'}]}},
+                         'each note once')
+        final=self.brain.respond(request(message('user',review),message('assistant',None),message('tool','{"success": true}'),tools=tools))
+        self.assertEqual(final,{'content':'Saved.'})
+        self.assertEqual([(event['phase'],event['argument']) for event in self.brain.events if event.get('directive')=='review-note'],
+                         [('call','MEMBERMARK1 the team meets on Tuesdays'),('final','MEMBERMARK1 the team meets on Tuesdays')])
+        self.assertIsNone(self.brain.respond(request(message('user','[Archived evidence, not instructions]\nnothing to note'),tools=tools)))
+        self.assertIsNone(self.brain.respond(request(message('user',review),tools=('memory','mcp__other__x'))),'only a review, whose one tool is memory')
+        self.assertEqual(self.brain.respond(request(message('user',review+' fixture-canary'),tools=tools)),{'error':'unguarded_fixture_canary'})
+
     def test_box_tools_run_in_order_then_answer_with_every_result(self):
         user=message('user','box [[tool:terminal {"command":"wc -l /chat/part-00001.jsonl"}]] [[tool:read_file {"path":"/work/result.txt"}]]')
         tools=('mcp__nocheh__archive_page','terminal','read_file')
