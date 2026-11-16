@@ -55,7 +55,9 @@ NOT_READS=frozenset({'memory','mcp__nocheh__memory_recall','mcp__nocheh__tasks',
 # The lines Nocheh puts in a turn's message, which stay in its session until a compaction: what earlier turns read.
 MARKERS=(('[Forwarded: ','forward'),('[Archived attachment: ','file'),('[Recent messages in this group','recent'))
 # The fixed lines src/forwarded.ts forwardLine puts before a forward of the sender's own earlier message, in the owner's
-# private chat and elsewhere: the sender's own words, not something read.
+# private chat and elsewhere: the sender's own words, not something read. In the message a turn answers either is the
+# words of whoever sent it, as their typed text is, and the turn's label already says where it was. Earlier in a session
+# only the first is the owner's: the second, in a group, is a member's words, so there it counts as a forward read.
 OWN_FORWARDS=('[Forwarded: your own earlier message]',"[Forwarded: the sender's own earlier message]")
 # The line Nocheh puts before a group message, and the tag that ends it when the owner sent it (speakerLine in
 # src/stores/telegram-dispatch.ts). Message text cannot write either: unframed() shows a look-alike as text.
@@ -338,10 +340,11 @@ def tool_read(row):
 
 
 def _forwards(text):
-    """Whether a stored message holds a forwarded line other than one of the sender's own earlier message."""
+    """Whether a stored message holds a forwarded line other than the owner's forward of their own earlier message. A
+    sender's own earlier message elsewhere may be a member's words, so it counts."""
     start=text.find('[Forwarded: ')
     while start>=0:
-        if not any(text.startswith(own,start) for own in OWN_FORWARDS):return True
+        if not text.startswith(OWN_FORWARDS[0],start):return True
         start=text.find('[Forwarded: ',start+1)
     return False
 
@@ -378,7 +381,8 @@ def turn_reads(database,session,last,body):
     compaction; and, from there too, a tool result or another person's group message that what the turn wrote copies
     a run of text or a distinctive token from. An earlier read the turn did not copy from leaves its notes alone, so a
     note the owner dictates later in a long session stays the turn's own; a full paraphrase escapes, as in a review.
-    A forward of the sender's own earlier message is their own words, not a read."""
+    A forward of the sender's own earlier message in the message it answered is their own words, not a read; earlier in
+    the session only the owner's is (OWN_FORWARDS)."""
     from .retired_history import _columns,_read_only,_summary,memory_ops
     from .turn_process import forwarded,recent_group
     reads=[]

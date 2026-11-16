@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {delimiter,join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {forwardFacts,forwardLine,forwardOrigin} from '../src/forwarded.js';
 
 test('a forward is read from Telegram\'s own fields: whose words it carries, never what its text claims',()=>{
@@ -42,11 +43,21 @@ test('the forwarded line is Nocheh\'s own fixed words, and says the text inside 
   assert.ok(forwardLine({from:'hidden',name:'x'.repeat(64)},false)!.length<=600,'the brain refuses a longer line');
 });
 
-// Hermes's parent does not count a forward of the sender's own earlier message as something a turn read, by these exact
-// lines (services/hermes/note_sources.py OWN_FORWARDS), so changing their words here must change them there too.
+/** A file of the repository's Python services: in the checkout this test was built from (dist/test) or runs from (test),
+ *  or under a PYTHONPATH entry, where the stores image's runner mounts them. A missing file fails, naming where it looked. */
+function servicesFile(path:string):string {
+  const tried=[...['../../','../'].map(up=>fileURLToPath(new URL(up+path,import.meta.url))),
+    ...(process.env.PYTHONPATH??'').split(delimiter).filter(Boolean).map(entry=>join(entry,path))];
+  const found=tried.find(place=>existsSync(place));
+  assert.ok(found,`${path} not found; tried ${tried.join(', ')}`);
+  return found;
+}
+
+// Hermes's parent does not count a forward of the sender's own earlier message in the message a turn answers as something
+// it read, by these exact lines (services/hermes/note_sources.py OWN_FORWARDS), so changing their words here must change
+// them there too.
 test('the own-forward lines are the ones Hermes leaves out of what a turn read',()=>{
-  const places=[new URL('../../services/hermes/note_sources.py',import.meta.url).pathname,join(process.env.PYTHONPATH??'/nonexistent','services/hermes/note_sources.py')];
-  const source=readFileSync(places.find(place=>existsSync(place))!,'utf8'),line=source.match(/^OWN_FORWARDS=\((.*)\)$/m);
+  const source=readFileSync(servicesFile('services/hermes/note_sources.py'),'utf8'),line=source.match(/^OWN_FORWARDS=\((.*)\)$/m);
   assert.ok(line,'OWN_FORWARDS is one tuple on one line');
   const listed=[...line[1]!.matchAll(/'([^'\\]*)'|"([^"\\]*)"/g)].map(match=>match[1]??match[2]);
   assert.deepEqual(listed,[forwardLine({from:'own',name:null},true),forwardLine({from:'own',name:null},false)]);

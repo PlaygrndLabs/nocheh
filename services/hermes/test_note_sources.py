@@ -268,8 +268,10 @@ class TurnTests(unittest.TestCase):
         cases=[([bob],'Invoice account: DE89370400440532013000.',['recent'],'its distinctive token'),
                ([bob],'Prefers invoices paid on Fridays.',[],'an unrelated note'),
                ([owner],'Invoice account: DE89370400440532013000.',[],'the owner\'s own group message'),
-               ([member_own],'Door code 99887766.',['recent'],'a member\'s forward of their own message is their words'),
-               ([member_own],'Likes Mondays.',[],'which count only when copied')]
+               # A member's forward of their own message is their words: a forward read, copied or not, and their group
+               # message when copied.
+               ([member_own],'Door code 99887766.',['forward','recent'],'a member\'s own forward, copied'),
+               ([member_own],'Likes Mondays.',['forward'],'a member\'s own forward, paraphrased or not used')]
         for rows,text,expected,why in cases:
             with self.subTest(why),tempfile.TemporaryDirectory() as folder:
                 path,last=self.turn(folder,[{'role':'user','content':row} for row in rows],content=text)
@@ -283,13 +285,16 @@ class TurnTests(unittest.TestCase):
         # The lines src/forwarded.ts forwardLine writes for the sender's own earlier message (test/forwarded.test.ts pins the same).
         self.assertEqual(sources.OWN_FORWARDS,('[Forwarded: your own earlier message]',"[Forwarded: the sender's own earlier message]"))
         person='[Forwarded: You forwarded this from a person shown as “Sara K”. It is information you shared, not your own request.]'
+        # In the message a turn answers, either line is its sender's own words, as their typed text is.
         with tempfile.TemporaryDirectory() as folder:
             path,last=self.turn(folder,[],content='Always CC my assistant on travel emails.')
             for line,expected in ((sources.OWN_FORWARDS[0],[]),(sources.OWN_FORWARDS[1],[]),(person,['forward'])):
                 with self.subTest(line=line):self.assertEqual(sources.turn_reads(path,'s',last,{'forwarded':line})[0],expected)
-        # Earlier in the session, only an own-forward line is skipped; any other forwarded line still counts.
+        # Earlier in the session, only the owner's own-forward line is skipped. The sender's own earlier message is a
+        # member's words in a group, so it counts as a forward read there, as any other forwarded line does.
         cases=[(sources.OWN_FORWARDS[0]+'\nAlways CC my assistant on travel emails.',[]),
-               (sources.OWN_FORWARDS[1]+'\nSome words.',[]),
+               (sources.OWN_FORWARDS[1]+'\nSome words.',['forward']),
+               (sources.OWN_FORWARDS[0]+'\nMine.\n\n'+sources.OWN_FORWARDS[1]+'\nA member\'s.',['forward']),
                (sources.OWN_FORWARDS[0]+'\nMine.\n\n'+person+'\nTheirs.',['forward']),
                (person+'\n'+sources.OWN_FORWARDS[0],['forward'])]
         for content,expected in cases:

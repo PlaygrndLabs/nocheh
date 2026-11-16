@@ -148,8 +148,10 @@ a recalled note names its source beside its chat).
   characters or a distinctive token with it; an earlier read it did not copy
   from leaves the note the turn's own, so a note the owner dictates later in a
   long session is not marked as read. A forward of the sender's own earlier
-  message is their words, not a read. A note keeps the origins of the notes it
-  replaced through the replace and patch operations the run asked for (every
+  message is their words, not a read, in the message a turn answers; earlier in
+  the session only the owner's is, since in a group it is a member's words. A
+  note keeps the origins of the notes it replaced through the replace and patch
+  operations the run asked for (every
   removed note, when those are not known), and of any earlier note, not the
   owner's own, it shares a run of 32 characters, a distinctive token or its
   whole text (ignoring case and spacing) with. A note keeps at most 10 origins
