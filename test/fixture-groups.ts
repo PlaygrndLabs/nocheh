@@ -24,7 +24,7 @@ export const UNSERVED='-1001000000009';
 export const P1=digest('fixture:project:P1'),P2=digest('fixture:project:P2');
 /** The served groups of P1, in the order projectGroups gives them. */
 export const P1_GROUPS=[GP1,GP2,GP3] as const;
-/** The Telegram ids TELEGRAM_GROUP_IDS names by default: GP1-GP4. */
+/** The Telegram ids of the groups a fixture serves by default (chats.state active, ADR-0253): GP1-GP4. */
 export const GP_GROUP_IDS=[GP1,GP2,GP3,GP4] as const;
 
 /** NG1, a forum supergroup first seen after step 2b, and its topic 7. */
@@ -32,7 +32,7 @@ export const NG1_TG='-1002000000001',NG1=chatIdFor('telegram',NG1_TG),NG1_TOPIC_
 /** NG2, first seen after step 2b as a basic group (NG2_OLD_TG), which Telegram then upgraded to a supergroup (NG2_TG).
  * It keeps the id made from the first Telegram id it was seen under. */
 export const NG2_OLD_TG='-4000000000002',NG2_TG='-1002000000002',NG2=chatIdFor('telegram',NG2_OLD_TG);
-/** Every Telegram id of NG1 and NG2, current and old: add them to TELEGRAM_GROUP_IDS to serve both. */
+/** Every Telegram id of NG1 and NG2, current and old: a fixture that serves both turns their chats on. */
 export const NG_GROUP_IDS=[NG1_TG,NG2_TG,NG2_OLD_TG] as const;
 /** Bob's Telegram user id and his private chat with Nocheh, first seen after step 2b. Not served. */
 export const BOB='456',BOB_CHAT=chatIdFor('telegram',BOB);

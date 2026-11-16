@@ -71,7 +71,6 @@ ORIGINAL = {
 # Chat values stored before step 2b, in the legacy layout or a version 1 snapshot: a Telegram chat id, or it and one
 # of its topics. They are read once here, to convert them; the stores read them only in their seeder (ADR-0252).
 LEGACY_SPACE = re.compile(r'(-?[1-9][0-9]{0,18})(?:/topic/([1-9][0-9]{0,15}))?')
-LEGACY_GROUP = re.compile(r'-[1-9][0-9]{0,18}')
 
 
 def legacy_group_space(value):
@@ -267,7 +266,7 @@ def original_only(snapshot_value, values, preferences, reset_id):
         # The groups Nocheh is on in are the ones the preserved preferences name (ADR-0253); the setup names none.
         owner, groups, profiles = preferences['owner'], preferences['groups'], preferences['profiles']
         if (not isinstance(groups, list) or groups != sorted(set(groups)) or
-                any(not isinstance(group, str) or not LEGACY_GROUP.fullmatch(group) for group in groups) or
+                any(not isinstance(group, str) or not configuration.TELEGRAM_GROUP.fullmatch(group) for group in groups) or
                 owner != values['TELEGRAM_OWNER_ID'] or not isinstance(profiles, list)):
             raise ValueError
         runtime_profiles = [{'id': row['id'], 'name': row['name'], 'owner_id': owner}

@@ -39,7 +39,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['src/owner-lock.ts','adapter',1,'a phone\'s sign-in pauses are kept under its Telegram account id'],
   ['src/stores/chat-sends.ts','adapter',1,'a send record\'s chat is the app\'s own chat id'],
   ['src/stores/runtime-configuration.ts','adapter',1,'the policy document holds the raw Telegram owner id'],
-  ['tools/cli/main.py','adapter',1,'configure-telegram owner and group ids'],
+  ['tools/cli/main.py','adapter',1,'configure-telegram owner id'],
   ['tools/operations/archive/telegram_directory.py','adapter',2,'Telegram group and user ids typed by the owner'],
   ['tools/operations/installation/configuration.py','adapter',3,'installer checks of TELEGRAM_OWNER_ID and TELEGRAM_GROUP_ACCESS'],
   ['tools/operations/installation/mini_app.py','adapter',1,'the bot id in the bot token'],

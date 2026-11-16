@@ -74,7 +74,7 @@ test('stored owner directory and decisions span every page without turning reads
       assert.deepEqual([unrepresentable.kind,unrepresentable.parent_space,unrepresentable.topic_key,unrepresentable.owner,unrepresentable.app_ids],
         ['group',null,null,false,[{app:'telegram',external:unrepresentableScope,state:'current'}]]);
       assert.deepEqual([oldGroup.kind,oldGroup.parent_space,oldGroup.topic_key,oldGroup.owner,oldGroup.app_ids],['group',null,null,false,[{app:'telegram',external:group,state:'current'}]]);
-      assert.equal(unrepresentable.state,'off','a chat first seen now is served only as TELEGRAM_GROUP_IDS says');
+      assert.equal(unrepresentable.state,'off','a group first seen now, with no add by the owner, starts off');
       // A topic first seen now is read as its group's topic, as an old-shaped one is.
       const newContext=await view.context(owner,topic21);
       assert.equal(newContext.conversation.kind,'topic');assert.equal(newContext.conversation.parent_space,group);

@@ -109,10 +109,11 @@ class ServiceTests(unittest.TestCase):
         self.assertIn(f'telegram:{BOT_ID}:update:5', [event['key'] for event in events])
         self.assertEqual(self.service.identify(), {'state': 'connected', 'bot_id': BOT_ID, 'username': 'synthetic_fixture_bot', 'first_name': 'Synthetic'})
         self.assertEqual(self.service.health()['state'], 'connected')
-        # What getMe says the bot may do shows in health; one it does not say is left out.
+        # What getMe says the bot may do shows in health.
         health = self.service.health()
         self.assertEqual({key: health[key] for key in ABILITIES if key in health},
-                         {'can_join_groups': True, 'can_read_all_group_messages': True, 'supports_inline_queries': False})
+                         {'can_join_groups': True, 'can_read_all_group_messages': True, 'supports_inline_queries': False,
+                          'can_connect_to_business': False})
         # No command menu is left in any scope.
         wait(lambda: not self.mock.state['commands'])
 
