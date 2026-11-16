@@ -16,6 +16,8 @@ from tools.operations.installation.workspaces import WorkspaceError
 
 ROOT = REPO_ROOT
 STATE = Path(os.environ.get("NOCHEH_STATE_DIR", str(DEFAULT_STATE))).resolve()
+GROUP_ID_RETIRED = ('--group-id is no longer used. To use Nocheh in a group, add it to the group from your own Telegram '
+                    'account: it is on there at once. Turn a group on or off in the dashboard, under Chats.')
 
 
 def bootstrap(workspace=None):
@@ -329,14 +331,17 @@ def main():
         if claimed: print(f"Workspace {claimed['workspace']}: start it with ./bin/nocheh up, then open {claimed['dashboard']}")
         return 0
     if args.command=='configure-telegram':
-        config_parser=argparse.ArgumentParser(description='Enable the owner DM and explicitly selected groups; token stays in .env.')
+        config_parser=argparse.ArgumentParser(description='Turn Telegram on for the owner; the token stays in .env. To use Nocheh in a group, '
+                                              'add it there from your own Telegram account.')
         config_parser.add_argument('--owner-id',required=True)
-        config_parser.add_argument('--group-id',action='append',default=[])
+        # Retired (ADR-0253): only the owner adding Nocheh to a group turns it on there, so a group is never listed here.
+        config_parser.add_argument('--group-id',action='append',default=[],help=argparse.SUPPRESS)
         selected=config_parser.parse_args(rest)
-        if not re.fullmatch(r'[1-9]\d{0,18}',selected.owner_id) or any(not re.fullmatch(r'-\d{1,19}',g) for g in selected.group_id):config_parser.error('Use numeric Telegram IDs; group IDs are negative.')
+        if selected.group_id:config_parser.error(GROUP_ID_RETIRED)
+        if not re.fullmatch(r'[1-9]\d{0,18}',selected.owner_id):config_parser.error('Use your numeric Telegram user ID.')
         values=load(STATE)
         if not values['TELEGRAM_BOT_TOKEN']:config_parser.error('Set TELEGRAM_BOT_TOKEN in .env first.')
-        values.update(TELEGRAM_ENABLED='true',TELEGRAM_OWNER_ID=selected.owner_id,TELEGRAM_GROUP_IDS=','.join(dict.fromkeys(selected.group_id)))
+        values.update(TELEGRAM_ENABLED='true',TELEGRAM_OWNER_ID=selected.owner_id)
         from tools.operations.installation.configuration import validate
         try:validate(values)
         except ValueError as error:config_parser.error(str(error))

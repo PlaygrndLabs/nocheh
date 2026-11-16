@@ -1,9 +1,10 @@
-"""Owner-managed per-group permission for starting Telegram assistant turns."""
+"""Owner-managed per-group permission for starting Telegram assistant turns. A group is named by any Telegram ID it has
+had, whether Nocheh is on there or not: people kept for a group that is off stay for when it is on again (ADR-0253)."""
 import argparse
 import json
 import re
 
-from tools.operations.installation.configuration import group_access, load
+from tools.operations.installation.configuration import TELEGRAM_GROUP, group_access, load
 from tools.operations.installation.settings import apply, save, view
 
 
@@ -15,17 +16,17 @@ def main(state, argv):
     parser.add_argument('--save-only', action='store_true', help='Save without applying to running services')
     args = parser.parse_args(argv)
     values = load(state)
-    groups = [value.strip() for value in values['TELEGRAM_GROUP_IDS'].split(',') if value.strip()]
     access = group_access(values)
+    if args.group_id is not None and not TELEGRAM_GROUP.fullmatch(args.group_id): parser.error('group ID must be a negative numeric Telegram ID')
     if args.action == 'list':
         if args.user_id or args.save_only: parser.error('list accepts only an optional group ID')
-        if args.group_id and args.group_id not in groups: parser.error('group is not selected')
-        selected = [args.group_id] if args.group_id else groups
+        # Every group with people kept, or the one asked for.
+        selected = [args.group_id] if args.group_id else sorted(access)
         for group in selected:
             rule = access.get(group, {'granted': [], 'denied': []})
             print(json.dumps({'group_id': group, 'owner_id': values['TELEGRAM_OWNER_ID'], **rule}, sort_keys=True))
         return 0
-    if args.group_id not in groups: parser.error('group is not selected')
+    if args.group_id is None: parser.error('group ID required')
     if not args.user_id or not re.fullmatch(r'[1-9]\d{0,18}', args.user_id): parser.error('user ID must be a positive numeric Telegram ID')
     if args.user_id == values['TELEGRAM_OWNER_ID']: parser.error('owner access cannot be changed')
     rule = access.setdefault(args.group_id, {'granted': [], 'denied': []})

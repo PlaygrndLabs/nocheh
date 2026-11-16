@@ -6,7 +6,7 @@ import stat
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from tools.operations.archive.archive import API, desktop_records, media_path, upload, send_bytes, digest, canonical
+from tools.operations.archive.archive import API, desktop_records, media_path, upload, send_bytes, digest, canonical, served_chats
 
 MAX_FILE = 50 * 1024 * 1024
 MAX_TOTAL = 512 * 1024 * 1024
@@ -25,6 +25,15 @@ def safe_name(name):
     if not name or '\\' in name or '\0' in name or path.is_absolute() or any(x in ('..', '.') for x in name.split('/')):
         raise ValueError('unsafe_upload_path')
     return path
+
+
+def check_mapping(mapping, owner, api):
+    """An exported chat may join only the owner's private chat (by the owner's Telegram ID) or a group Nocheh serves now,
+    by any Telegram ID the group has had. The served groups come from the app (ADR-0253), read only when one is named."""
+    if not isinstance(mapping, dict) or any(not isinstance(key, str) or not isinstance(value, str) for key, value in mapping.items()):
+        raise ValueError('scope_mapping_denied')
+    groups = {value for value in mapping.values() if not owner or value != owner}
+    if groups and not groups <= set(served_chats(api).served_externals()): raise ValueError('scope_mapping_denied')
 
 
 def unpack(directory):

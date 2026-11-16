@@ -73,17 +73,12 @@ class Scopes:
     """Who Nocheh's brain serves (ADR-0252). Whether it is on and each group's member access come from its environment;
     the owner, the owner's private chat and the served groups come from the app's served list (services/chats.py), by
     their Nocheh chat ids and their Telegram ids now and before. A turn's chat, space and app binding come from its
-    signed pass, and its profile is built for that chat per request. A list that cannot be read serves nothing."""
+    signed pass, and its profile is built for that chat per request. A list that cannot be read serves nothing. A policy
+    names no chat: an owner or groups in a policy file are not read (ADR-0253); a test gives its list as `served`."""
     def __init__(self, value, served=None):
         if not isinstance(value,dict) or not isinstance(value.get('enabled'),bool): raise ValueError('invalid_assistant_policy')
         from services.chats import Fixed,Served,ServedList
         self.enabled=value['enabled']
-        if served is None and ('owner_id' in value or 'group_ids' in value):
-            # A policy file of tests and checks: chats stored before step 2b, whose chat id is their Telegram id, and the
-            # topics it lists as (topic id, chat id, key).
-            owner,groups,topics=value.get('owner_id'),value.get('group_ids',[]),value.get('topics',[])
-            if owner is not None and not isinstance(owner,str) or not isinstance(groups,list) or not isinstance(topics,list):raise ValueError('invalid_assistant_policy')
-            served=Served.of(owner,groups=groups,topics=[tuple(topic) for topic in topics])
         if self.enabled and isinstance(served,Served) and not served.owner_chat:raise ValueError('owner_required')
         self.group_access=value.get('group_access',{})
         # Keyed by any Telegram id a group has had; a key that names no served group grants nothing.

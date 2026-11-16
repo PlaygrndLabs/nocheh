@@ -44,6 +44,14 @@ class API:
             return response.read() if binary else json.load(response)
 
 
+def served_chats(api=None):
+    """The chats Nocheh serves now, as the app lists them to its services (GET /internal/chats, services/chats.py). A
+    tool that needs the served groups reads them here, never from a setting: Nocheh serves a group once the owner added
+    it there or turned it on (ADR-0253)."""
+    from services.chats import Served
+    return Served((api or API()).call('/internal/chats'))
+
+
 def message_text(value):
     if isinstance(value,str):
         return value
