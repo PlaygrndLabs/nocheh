@@ -206,6 +206,13 @@ test('notes about leaving are capped at one per group and ten in all a day, a re
     assert.equal(sent().length,11);
     assert.deepEqual(sent().at(-1)!.input,{id:digest('chat-add-tell:'+removal),chat_id:OWNER,text:`Nocheh was removed from ${shown(chatIdFor('telegram',on),h.title(on))}.`});
     await h.adds.settle();assert.equal(sent().length,11,'told once');
+    // Nor does a removal's line count toward the cap: with nine notes about leaving and that line in the 24 hours, the next
+    // hidden adder's note still goes.
+    await stores.control.query(`UPDATE chat_state_events SET updated_at=updated_at-interval '2 days' WHERE event_id=$1`,[events[0]]);
+    const more=h.group(32),moreAdd=await h.status(more,32,ANONYMOUS,'left','member');
+    await h.due();await h.adds.settle();
+    assert.deepEqual([(await h.row(moreAdd)).outcome,(await h.row(moreAdd)).notice],['left','sent']);
+    assert.equal(sent().length,12);
 
     // No owner chat: Nocheh still leaves, and tells no one.
     await stores.control.query(`UPDATE chat_state_events SET updated_at=updated_at-interval '2 days' WHERE notice='sent'`);
@@ -213,7 +220,7 @@ test('notes about leaving are capped at one per group and ten in all a day, a re
     const nobody=h.group(40),nobodyAdd=await h.status(nobody,40,MEMBER,'left','member');
     await h.due();await lone.settle();
     assert.deepEqual([(await h.row(nobodyAdd)).outcome,(await h.row(nobodyAdd)).notice,(await h.chat(chatIdFor('telegram',nobody))).state],['left','none','left']);
-    assert.equal(sent().length,11);
+    assert.equal(sent().length,12);
 
     // A notice that keeps failing is given up after ten tries.
     const failing=h.group(41),failingAdd=await h.status(failing,41,MEMBER,'left','member');
