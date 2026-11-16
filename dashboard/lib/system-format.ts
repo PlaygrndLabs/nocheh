@@ -496,14 +496,20 @@ const sendReasons: Record<string, string> = {
   reaction_unbound: 'Not tied to a current message',
   refused: 'Stopped by Nocheh’s own check',
 };
-/** Why a send didn't go through, in short plain words; an unknown code shows as it is. */
-export function sendReason(row: {state: string; error_code?: string | null; recovered?: boolean}): string {
+/** Why a send didn't go through, in short plain words; an unknown code shows as it is. A recovered leave says
+ * Nocheh left, since the stage may have learned that from Telegram rather than from a retry. */
+export function sendReason(row: {
+  state: string;
+  kind?: string;
+  error_code?: string | null;
+  recovered?: boolean;
+}): string {
   const code = row.error_code;
   if (!code) return '';
   // Not sent and rate limited is Nocheh's own flood window, not the app asking.
   const reason =
     code === 'rate_limited' && row.state === 'not_sent' ? 'Held back: too many at once' : (sendReasons[code] ?? code);
-  return row.recovered ? reason + '; sent on a retry' : reason;
+  return row.recovered ? reason + (row.kind === 'leave' ? '; Nocheh left' : '; sent on a retry') : reason;
 }
 
 /* ---------- Databases ---------- */

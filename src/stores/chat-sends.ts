@@ -68,10 +68,14 @@ const RETRY_MINUTES=15;
 /** The send a reference names: a retry's ':retry:N', and a leave try's own id ('leave:<event>:<try>'), are left out. */
 const sameSend=(reference:string)=>`regexp_replace(regexp_replace(${reference},':retry:[0-9]+$',''),'^(leave:[a-f0-9]{64}):[a-f0-9]{32}$','\\1')`;
 /** An attempt a later one of the same send delivered: a plain-text resend, a short rate-limit wait, a fresh retry, or a
- *  leave tried again that went or found Nocheh gone. */
-const recovered=(s:string)=>`(${s}.state IN ('failed','uncertain') AND ${s}.reference IS NOT NULL AND EXISTS (SELECT 1 FROM chat_sends r
+ *  leave tried again that went or found Nocheh gone. A leave try is also recovered once the stage settled that add's
+ *  leave as left, at any time: Nocheh's own update often says it left before the try's answer would have, so no later
+ *  try goes. A leave that could not go, was superseded or is still waiting recovers nothing. */
+const recovered=(s:string)=>`(${s}.state IN ('failed','uncertain') AND ${s}.reference IS NOT NULL AND (EXISTS (SELECT 1 FROM chat_sends r
   WHERE (r.state='sent' OR r.error_code='already_left') AND r.at>=${s}.at AND r.at<${s}.at+interval '${RETRY_MINUTES} minutes' AND r.id<>${s}.id
-  AND r.channel=${s}.channel AND r.chat IS NOT DISTINCT FROM ${s}.chat AND r.method=${s}.method AND ${sameSend('r.reference')}=${sameSend(`${s}.reference`)}))`;
+  AND r.channel=${s}.channel AND r.chat IS NOT DISTINCT FROM ${s}.chat AND r.method=${s}.method AND ${sameSend('r.reference')}=${sameSend(`${s}.reference`)})
+  OR ${s}.kind='leave' AND EXISTS (SELECT 1 FROM chat_state_events e WHERE e.event_id=substring(${s}.reference from '^leave:([a-f0-9]{64}):[a-f0-9]{32}$')
+  AND e.action='leave' AND e.outcome='left')))`;
 const problem=(s:string)=>`(${s}.state IN ('failed','uncertain') AND coalesce(${s}.error_code,'') NOT IN (${harmlessSendCodes.map(code=>`'${code}'`).join(',')})
   AND NOT ${recovered(s)})`;
 const text=(value:unknown,pattern:RegExp)=>typeof value==='string'&&pattern.test(value);
