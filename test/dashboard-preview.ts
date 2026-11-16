@@ -36,6 +36,7 @@ if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_
 const NEW_GROUP_TG='-10088',NEW_GROUP=chatIdFor('telegram',NEW_GROUP_TG),NEW_TOPIC=chatIdFor('telegram',NEW_GROUP_TG,'3');
 const UPGRADED_OLD_TG='-4005',UPGRADED_TG='-10099',UPGRADED=chatIdFor('telegram',UPGRADED_OLD_TG);
 const LEAVING_GROUP=chatIdFor('telegram','-10091'),LEFT_GROUP=chatIdFor('telegram','-10092'),REMOVED_GROUP=chatIdFor('telegram','-10093');
+const REMOVED_TOPIC=chatIdFor('telegram','-10093','5');
 const previewChats:{id:string;kind:'private'|'group';title:string|null;ids:string[];old?:string[];is_forum?:boolean;topics?:[string,string][];state?:ChatState}[]=[
  {id:'42',kind:'private',title:'Owner',ids:['42'],state:'active'},
  {id:'73',kind:'private',title:'Mira Chen',ids:['73']},
@@ -46,7 +47,7 @@ const previewChats:{id:string;kind:'private'|'group';title:string|null;ids:strin
  {id:UPGRADED,kind:'group',title:'Garden swap',ids:[UPGRADED_TG],old:[UPGRADED_OLD_TG],state:'active'},
  {id:LEAVING_GROUP,kind:'group',title:'Book swap',ids:['-10091'],state:'pending'},
  {id:LEFT_GROUP,kind:'group',title:'Choir practice',ids:['-10092'],state:'left'},
- {id:REMOVED_GROUP,kind:'group',title:'Hiking crew',ids:['-10093'],state:'removed'},
+ {id:REMOVED_GROUP,kind:'group',title:'Hiking crew',ids:['-10093'],is_forum:true,topics:[[REMOVED_TOPIC,'5']],state:'removed'},
 ];
 /** Each chat's state, which the group switch changes; a chat with none listed starts off. */
 const chatStates=new Map<string,ChatState>(previewChats.map(chat=>[chat.id,chat.state??'off']));
@@ -226,9 +227,12 @@ const conversations:any[]=[
   added_by:'other',added_at:new Date(Date.now()-20000).toISOString()},
  {space_id:LEFT_GROUP,name:'Choir practice',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-864e5).toISOString(),configured:false,
   added_by:'anonymous',added_at:new Date(Date.now()-864e5).toISOString()},
- // Someone removed Nocheh from this one, and Telegram said so.
+ // Someone removed Nocheh from this one, and Telegram said so; the owner's refresh since found the bot not in it. Its
+ // topic follows it.
  {space_id:REMOVED_GROUP,name:'Hiking crew',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-3*864e5).toISOString(),configured:true,
-  added_by:'owner',added_at:new Date(Date.now()-30*864e5).toISOString(),removed_event:true},
+  added_by:'owner',added_at:new Date(Date.now()-30*864e5).toISOString(),removed_event:true,
+  telegram:{state:'not_member',migrate_to_chat_id:null,observed_at:new Date(Date.now()-2*864e5).toISOString()}},
+ {space_id:REMOVED_TOPIC,name:'Trail maps',kind:'topic',parent_space:REMOVED_GROUP,parent_name:'Hiking crew',observed_at:new Date(Date.now()-4*864e5).toISOString(),configured:false,closed:false},
 ];
 /** The directory as the chats' states serve it, installed for the repositories the preview runs. */
 const directoryNow=()=>installChats(previewDirectory());

@@ -2088,6 +2088,15 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
     assert.equal(await page.getByRole('switch', {name: 'Nocheh in this group'}).count(), 0, name);
     assert.equal(await page.getByRole('heading', {name: 'Who can talk to Nocheh'}).count(), 0, name);
   }
+  // A topic follows its group: one in a group Nocheh was removed from says so, in the group's own words, and has no
+  // reply mode or Telegram notice, as its group's page has none.
+  assert.equal(await card.getByText(/Add the bot in Telegram first/).count(), 0, 'Hiking crew');
+  await list.getByRole('link', {name: 'Trail maps'}).click();
+  await page.getByRole('heading', {name: 'Trail maps', level: 2}).waitFor();
+  await card.getByText('Nocheh was removed from this group.').waitFor();
+  assert.match(await card.innerText(), /Follows its group, Hiking crew: Removed\./);
+  for (const wrong of [/where Nocheh is/, /Add the bot in Telegram first/, /Answers only when called/])
+    assert.equal(await card.getByText(wrong).count(), 0, String(wrong));
   // A group Nocheh is in but off has its switch.
   await list.getByRole('link', {name: 'Weekend notes'}).click();
   await card.getByText('Nocheh doesn’t answer here.').waitFor();
