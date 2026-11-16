@@ -12,6 +12,7 @@ import {connectStores,initializeStoreDatabases,type StorePools} from '../src/sto
 import {fixtureServices,type FakeCall} from './fixture-brain.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
 import {storageServer} from '../src/stores/server.js';
+import {countMemoryStep} from '../src/stores/note-sources.js';
 import {startStorageCapture} from '../src/stores/worker.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
@@ -73,6 +74,14 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal(initialStatus.guard_mode,'on');assert.equal(initialStatus.storage_layout,'original-only-v1');
     assert.equal(typeof initialStatus.archive.events,'number');assert.ok(Array.isArray(initialStatus.archive.artifacts));
     assert.deepEqual(initialStatus.chat_sends,{window_hours:24,sent:0,failed:0,uncertain:0,not_sent:0,problems:0,problem_kinds:{},last_problem_at:null,latest_problems:[]});
+    // Today's memory steps Hermes can't see, which the owner's notice adds to its notes and memory lines (ADR-0257).
+    const memoryDay=(status:any,kind:string)=>status.memory_problems.find((row:any)=>row.kind===kind)??{done:0,failed:0};
+    const notesBefore=memoryDay(initialStatus,'notes');
+    await countMemoryStep(connected.control,'notes',false);await countMemoryStep(connected.control,'memory_read',true);
+    const memoryStatus=await request('/v1/status'),notesAfter=memoryDay(memoryStatus,'notes');
+    assert.ok(notesAfter.failed>notesBefore.failed);assert.match(notesAfter.day,/^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(memoryDay(memoryStatus,'memory_read').done>0);
+    assert.ok(memoryStatus.memory_problems.every((row:any)=>Object.keys(row).sort().join()==='day,done,failed,kind'),'counts only');
     // The worker takes the front door's send records; Health and the owner's list show what failed.
     const send={version:1,key:'send:telegram:4242:'+digest(key).slice(0,32),channel:'telegram',account:'4242',at:new Date().toISOString(),kind:'reaction',
       method:'setMessageReaction',chat:'-42',topic:null,message_id:5,detail:'👀',state:'failed',status:400,error_code:'message_not_found',reference:null,ms:80};

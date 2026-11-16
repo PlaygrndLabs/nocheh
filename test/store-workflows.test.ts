@@ -220,7 +220,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     const changed=(await stores.control.query('SELECT state,work_revision FROM memory_generations WHERE id=$1',[workspace.id])).rows[0];
     assert.equal(changed.state,'building');assert.ok(changed.work_revision>workspace.work_revision);
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM workflow_registry WHERE family='honcho' AND job_id=$1 AND generation=$2",['generation:'+workspace.id,changed.work_revision])).rows[0].count,1,'new work has a new workflow observation after an earlier generation job completed');
-    const nextNative=(await services.reviews.queue(next))[0]!,beforeReviews=reviews;
+    const nextNative=((await services.reviews.queue(next)).ids)[0]!,beforeReviews=reviews;
     assert.equal((await advance('memory_review','native:'+nextNative)).state,'waiting','new native notes leave the background slot for primary-memory ingestion');
     assert.equal(reviews,beforeReviews);assert.equal((await services.reviews.inspect(nextNative)).attempts,0,'waiting does not start a native effect');
     const nextReceipts=(await stores.control.query("SELECT id FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='pending'",[next.id])).rows;
@@ -297,7 +297,11 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       text:'A message from someone not allowed here'}}))).source.reference;
     assert.equal((await advance('preparation',stranger.id)).state,'completed');
     const reviewsBeforeStranger=reviews;
-    assert.equal((await advance('memory_review','source:'+stranger.id)).state,'completed','the source step still completes');
+    const strangerStep=await advance('memory_review','source:'+stranger.id);
+    assert.deepEqual([strangerStep.state,strangerStep.waiting_reason],['completed','sender_not_allowed'],'the source step still completes, and says why it stayed out of the notes');
+    const strangerRow=(await stores.control.query("SELECT state,waiting_reason FROM workflow_registry WHERE family='memory_review' AND job_id=$1 AND generation=$2",
+      ['source:'+stranger.id,(await services.guards.state()).epoch])).rows[0];
+    assert.deepEqual([strangerRow.state,strangerRow.waiting_reason],['completed','sender_not_allowed'],'Background work shows it');
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM native_review_jobs WHERE source_reference->>'id'=$1",[stranger.id])).rows[0].count,0);
     assert.equal((await stores.control.query('SELECT reason FROM native_review_skips WHERE event_id=$1',[stranger.id])).rows[0].reason,'sender_not_allowed');
     assert.equal(reviews,reviewsBeforeStranger);
@@ -335,11 +339,11 @@ test('Nocheh\'s own card is kept but never learned, and stays context for the ow
     const card=(await services.capture.capture(captureEvidence(delivered).originals[0]!)).source.reference;
     assert.equal((await advance('preparation',card.id)).state,'completed');
     // A notes review queued before send classes, still waiting, is withdrawn instead of run.
-    const early=await services.reviews.queue(card);assert.ok(early.length>0);
+    const early=(await services.reviews.queue(card)).ids;assert.ok(early.length>0);
     const closed=await advance('memory_review','source:'+card.id);
     assert.deepEqual([closed.state,closed.waiting_reason],['skipped','nocheh_message']);
     assert.deepEqual(await jobs(card.id),[],'no notes review is left waiting');
-    const again=await services.reviews.queue(card);
+    const again=(await services.reviews.queue(card)).ids;
     const native=await advance('memory_review','native:'+again[0]!);
     assert.deepEqual([native.state,native.waiting_reason,await jobs(card.id)],['skipped','nocheh_message',[]],'a review queued for it anyway never runs');
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true,attached_at=now() WHERE singleton');
@@ -352,7 +356,7 @@ test('Nocheh\'s own card is kept but never learned, and stays context for the ow
       payload:{update_id:51,message:{message_id:51,date:1700000010,chat:{id:Number(owner),type:'private'},from:{id:Number(owner),first_name:'Alice'},text:'Yes, send it',reply_to_message:cardMessage}}};
     const answer=(await services.capture.capture(reply)).source.reference;
     assert.equal((await advance('preparation',answer.id)).state,'completed');
-    const [review]=await services.reviews.queue(answer);assert.ok(review);
+    const [review]=(await services.reviews.queue(answer)).ids;assert.ok(review);
     const input=(await services.reviews.inspect(review!)).input_reference;
     const document=JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[input.id])).rows[0].content.toString());
     assert.ok(document.evidence.some((item:{id:string})=>item.id===card.id),'the card is evidence for the owner\'s reply');

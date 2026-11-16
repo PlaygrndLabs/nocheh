@@ -198,11 +198,12 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(kind==='source')return fenced('memory_review',authority,async()=>{
         const ready=await sourceReady(id);if('state' in ready)return ready;
         // Imported history is learned by long-term memory only: a memory-notes review of every old message costs far more than it adds.
-        if(ready.source.origin!=='import')await s.reviews.queue(ready.source.reference);
+        const notes=ready.source.origin!=='import'?await s.reviews.queue(ready.source.reference):null;
         await s.learning.renew(ready.source.reference);
         // Honcho writes each source once; a later guard epoch only asks for sources it never wrote.
         if(!await s.memory.ingested(id))await submit('honcho','source:'+id,ready.binding.epoch);
-        await s.guards.assertCurrent(ready.binding);return observation('completed','review');
+        // A source this step kept out of the owner's notes says why: it still went to group memory and learning above.
+        await s.guards.assertCurrent(ready.binding);return observation('completed','review',0,Date.now(),notes?.left_out??null);
       });
       if(kind==='interpret') {
         const attempts=async()=>Number((await control.query('SELECT attempts FROM interpretation_jobs WHERE id=$1',[id])).rows[0].attempts);
@@ -226,7 +227,7 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
           if(canonical(row.binding)!==canonical(await s.guards.state())) {
             // A newer epoch renews a waiting review (never started, or failed without changing notes) where it waits,
             // instead of closing it for the next sweep to queue again.
-            const renewed=await fenced('memory_review',authority,async()=>(await s.reviews.queue(row.source_reference)).includes(id)?
+            const renewed=await fenced('memory_review',authority,async()=>(await s.reviews.queue(row.source_reference)).ids.includes(id)?
               observation('running','review'):observation('skipped','review',0,Date.now(),'superseded'));
             if(renewed.state!=='running')return renewed;
             row=await s.reviews.inspect(id);

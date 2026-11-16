@@ -20,10 +20,13 @@ const keys=nameKeys(names,[]);
 const words:SourceWords={lines:sourceLines(undefined),reminder:reminderLines(undefined),places:approvalLines(undefined)};
 const recalled=new Map([[GP1,'Family'],[GP1_TOPIC,'Plans']]);
 const provenance=(events:[number,EventClass][],extra:Partial<ReviewProvenance>={}):ReviewProvenance=>({version:1,source:hex(events[0]?.[0]??1),
-  events:events.map(([id,cls])=>({id:hex(id),class:cls})),owner_account_only:events.every(([,cls])=>cls.startsWith('owner_')),rules:'none',
+  events:events.map(([id,cls])=>({id:hex(id),class:cls})),owner_account_only:events.every(([,cls])=>cls.startsWith('owner_')),rules:'none',rule_buckets:[],
   left_out:{sender_not_allowed:0,rule_sender_not_allowed:0,rules_left_out_for_owner_label:0},...extra});
 const review=(events:[number,EventClass][],cites:number[],extra:Partial<ReviewProvenance>={},place=OWNER)=>
   reviewOrigin(provenance(events,extra),cites.map(hex),{chat:place});
+/** A batch holds at most 30 messages: the 30 classes with the longest words, each once, in their order. */
+const longest=new Set([...eventClasses].sort((a,b)=>modelEventPhrase(b).length-modelEventPhrase(a).length).slice(0,30));
+const thirtyClasses=eventClasses.filter(cls=>longest.has(cls)).map((cls,i)=>[i+1,cls] as [number,EventClass]);
 const turn=(fields:Partial<Extract<NoteOrigin,{by:'turn'}>>={}):NoteOrigin=>({by:'turn',place:{chat:OWNER},date:'2026-11-16',reads:[],answered:'owner_message',complete:true,job:false,...fields});
 
 test('only an all-owner batch whose note cites its own messages reads as the owner\'s; the model\'s citations narrow, never grant',()=>{
@@ -43,7 +46,16 @@ test('only an all-owner batch whose note cites its own messages reads as the own
   // The rule's other parts, each on its own.
   const all:[number,EventClass][]=[[1,'owner_message'],[2,'owner_message']];
   assert.equal(fromToken([review(all,[1],{rules:'owner'})]),'owner');
-  assert.equal(fromToken([review(all,[1],{rules:'others'})]),'nocheh','a rule someone else\'s messages taught');
+  assert.equal(fromToken([review(all,[1],{rules:'others'})]),'nocheh','a rule Nocheh\'s own messages taught');
+  // A rule learned from other people's words brings those words' kind, as a message of theirs in the batch would.
+  assert.equal(fromToken([review(all,[1],{rules:'others',rule_buckets:['person']})]),'person','a rule someone else\'s messages taught');
+  assert.equal(fromToken([review(all,[1],{rules:'others',rule_buckets:['forward']})]),'forward');
+  assert.equal(fromToken([review(all,[1],{rules:'others',rule_buckets:['person','file']})]),'mixed');
+  // A provenance stored before rules named whose words they rest on reads others' rules as another person's.
+  const {rule_buckets:_others,...before}=provenance(all,{rules:'others'}),{rule_buckets:_owner,...ownRules}=provenance(all,{rules:'owner'});
+  assert.deepEqual(provenanceOf(before)?.rule_buckets,['person']);assert.equal(fromToken([reviewOrigin(before,[hex(1)],{chat:OWNER})]),'person');
+  assert.deepEqual(provenanceOf(ownRules)?.rule_buckets,[]);assert.equal(fromToken([reviewOrigin(ownRules,[hex(1)],{chat:OWNER})]),'owner');
+  assert.deepEqual(provenanceOf(provenance(all,{rules:'others',rule_buckets:['file','person']}))?.rule_buckets,['person','file'],'in a fixed order');
   assert.equal(fromToken([review(all,[1],{owner_account_only:false})]),'nocheh');
   assert.equal(fromToken([review(all,[1],{source:hex(3)})]),'nocheh','the source among the batch');
   assert.equal(fromToken([review(all,[1],{left_out:{sender_not_allowed:1,rule_sender_not_allowed:0,rules_left_out_for_owner_label:0}})]),'nocheh');
@@ -53,7 +65,9 @@ test('only an all-owner batch whose note cites its own messages reads as the own
   assert.equal(reviewOwner(null,[hex(1)]),false);
   // A stored provenance that is missing, of another version or not its shape is a review nobody recorded.
   for(const stored of [null,undefined,{},{...provenance(all),version:2},{...provenance(all),events:[{id:'x',class:'owner_message'}]},
-    {...provenance(all),events:[{id:hex(1),class:'owner'}]},{...provenance(all),rules:'all'},{...provenance(all),left_out:{sender_not_allowed:-1}},'text']) {
+    {...provenance(all),events:[{id:hex(1),class:'owner'}]},{...provenance(all),rules:'all'},{...provenance(all),left_out:{sender_not_allowed:-1}},'text',
+    {...provenance(all),rule_buckets:['owner']},{...provenance(all),rule_buckets:'person'},{...provenance(all),rule_buckets:null},
+    {...provenance(all),rule_buckets:['person','person','person','person']}]) {
     assert.equal(provenanceOf(stored),null,JSON.stringify(stored));
     const origin=reviewOrigin(stored,[hex(1)],{chat:OWNER});
     assert.equal(fromToken([origin]),'unknown');assert.equal(modelLabel([origin],recalled,directory),'source not recorded');
@@ -67,6 +81,10 @@ test('turns are never the owner\'s, outside reads make turn_read, and inherited 
   assert.equal(fromToken([turn({answered:'person_message'})]),'turn_read','answering someone else');
   assert.equal(fromToken([turn({answered:'forward_channel_by_owner'})]),'turn_read','answering a forward');
   assert.equal(fromToken([turn({answered:null})]),'turn_read','answering a message not known');
+  assert.equal(fromToken([turn({answered:'pinned'})]),'turn_read','answering a pin of someone else\'s message');
+  assert.equal(fromToken([turn({answered:'quote_nocheh'})]),'turn','answering the owner\'s quote of Nocheh\'s own message reads nothing outside');
+  assert.equal(fromToken([review([[1,'owner_message'],[2,'quote_nocheh']],[1])]),'nocheh');
+  assert.equal(fromToken([review([[1,'owner_message'],[2,'pinned']],[1])]),'person');
   assert.equal(fromToken([turn({complete:false})]),'turn_read','reads not recorded to the end');
   assert.equal(fromToken([turn({job:true})]),'turn');
   assert.equal(fromToken([]),'unknown');assert.equal(fromToken([{by:'unknown'}]),'unknown');assert.equal(fromToken([{by:'unavailable'}]),'unavailable');
@@ -105,6 +123,12 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
   assert.equal(label([review([[1,'person_message']],[1],{},GP1)]),'Nocheh\'s notes review of another person\'s message in group “Family”');
   assert.equal(label([review([[1,'person_message']],[1],{},GP1)],new Map()),'Nocheh\'s notes review of another person\'s message in a group','no name known');
   assert.equal(label([review([[1,'owner_message']],[1],{rules:'others'})]),'Nocheh\'s notes review of the owner\'s own message in the owner\'s private chat');
+  assert.equal(label([review([[1,'owner_message']],[1],{rules:'others',rule_buckets:['person']})]),
+    'Nocheh\'s notes review of the owner\'s own message in the owner\'s private chat, with rules learned from others');
+  assert.equal(label([review([[1,'owner_message'],[2,'nocheh_reply'],[3,'forward_hidden_by_owner']],[1],{rules:'others',rule_buckets:['person']},GP1_TOPIC)]),
+    'Nocheh\'s notes review of a message the owner forwarded from a…, and 2 more sources, with rules learned from others',
+    'the ending about others\' rules stays whole when the label is cut');
+  assert.equal(label([review([[1,'owner_message'],[2,'pinned']],[1])]),'Nocheh\'s notes review of a pinned message by another person in the owner\'s private chat, and 1 more sources');
   assert.equal(label([turn()]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, written while answering the owner\'s own message');
   assert.equal(label([turn({place:{chat:OWNER,web:true}})]),'Nocheh\'s note from the owner\'s web chat on 2026-11-16, written while answering the owner\'s own message');
   assert.equal(label([turn({place:{chat:GP1}})]),'Nocheh\'s note from group “Family” on 2026-11-16');
@@ -138,7 +162,7 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
 });
 
 test('the review legend is one JSON object of fixed words and full ids, folded to fit',()=>{
-  const thirty=provenance(eventClasses.map((cls,i)=>[i+1,cls] as [number,EventClass]));
+  const thirty=provenance(thirtyClasses);
   assert.equal(thirty.events.length,30);
   const line=reviewLegend(thirty);
   assert.ok(line.length<=3600,String(line.length));assert.ok(line.startsWith(legendIntro));
@@ -164,7 +188,7 @@ test('the review legend is one JSON object of fixed words and full ids, folded t
 test('a review fragment: its first line as it was, code\'s records, the marker and a fixed slice, within what Hermes takes',()=>{
   const first=`Source nocheh:event:${hex(1)}; conversation ${GP1_TOPIC}; fragment 27. Speakers are not necessarily the owner.`;
   // Every class once, with the largest counts: the longest records line a batch of 30 can have.
-  const thirty=provenance(eventClasses.map((cls,i)=>[i+1,cls] as [number,EventClass]),{left_out:{sender_not_allowed:30,rule_sender_not_allowed:100,rules_left_out_for_owner_label:100}});
+  const thirty=provenance(thirtyClasses,{left_out:{sender_not_allowed:30,rule_sender_not_allowed:100,rules_left_out_for_owner_label:100}});
   const body='🎉'.repeat(REVIEW_BODY_SLICE),fragment=reviewFragment(first,thirty,body),lines=fragment.split('\n');
   assert.ok(Array.from(fragment).length<=REVIEW_FRAGMENT_LIMIT&&REVIEW_FRAGMENT_LIMIT<12000,String(Array.from(fragment).length));
   assert.equal(lines[0],first,'line 1 byte for byte, as the ADR-0244 counter reads it');
@@ -182,7 +206,7 @@ test('a review fragment: its first line as it was, code\'s records, the marker a
 
 test('owner labels: the owner\'s own lines, people and chats named as reminders name them, Persian half-spaces kept',()=>{
   const facts=(fields:Partial<SourceFacts>):SourceFacts=>({author:'person',account:sara,name:'Sara',act:'message',forward:null,forward_name:null,quote:null,file:false,
-    file_name:null,audio:false,recording:false,send_class:null,answers:null,...fields});
+    file_name:null,audio:false,recording:false,send_class:null,answers:null,pinned:null,...fields});
   const event=(cls:EventClass,fields:Partial<SourceFacts>={},extra:Partial<LabelEvent>={}):LabelEvent=>({class:cls,facts:facts(fields),chat:GP1,allowed:true,...extra});
   const label=(item:LabelEvent)=>ownerEventLabel(item,words,names,keys);
   assert.equal(label(event('owner_message',{author:'owner'},{chat:OWNER})),'you in your private chat');
@@ -204,6 +228,9 @@ test('owner labels: the owner\'s own lines, people and chats named as reminders 
   assert.equal(label(event('file_by_owner',{author:'owner',file:true,file_name:'cv‮.pdf'},{chat:OWNER})),`the file ${q('cv[U+202E].pdf')} you sent in your private chat`);
   assert.equal(label(event('file_by_person',{file:true})),`a file ${q('Sara')}, a person you allowed sent in group ${q('Family')}`);
   assert.equal(label(event('quote',{author:'owner',quote:'other'},{chat:OWNER})),'a reply by you in your private chat, quoting someone else\'s message');
+  assert.equal(label(event('quote_nocheh',{author:'owner',quote:'other'},{chat:OWNER})),'a reply by you in your private chat, quoting Nocheh\'s own message');
+  assert.equal(label(event('pinned',{author:'owner',pinned:'other'},{chat:OWNER})),'a message by someone else that you pinned in your private chat');
+  assert.equal(label(event('pinned',{pinned:'other'})),`a message by someone else that ${q('Sara')}, a person you allowed pinned in group ${q('Family')}`);
   assert.equal(label(event('nocheh_approved_post',{author:'nocheh'})),`Nocheh's post in group ${q('Family')}, sent after you approved it`);
   assert.equal(label(event('nocheh_unlearned',{author:'nocheh'})),`Nocheh's card, notice or reminder in group ${q('Family')}`);
   assert.equal(label(event('unknown',{author:'unknown'},{chat:null})),'a message Nocheh can\'t describe, in a chat Nocheh no longer knows');
@@ -213,6 +240,8 @@ test('owner labels: the owner\'s own lines, people and chats named as reminders 
   assert.equal(ownerLabel([note(provenance([[1,'owner_message']]),[1])],words,names,keys),'Your own messages in your private chat');
   assert.equal(ownerLabel([note(provenance([[1,'owner_message'],[2,'nocheh_reply']],{rules:'owner'}),[1])],words,names,keys),
     'Nocheh\'s notes review of you in your private chat, Nocheh\'s reply in your private chat, rules Nocheh learned in your private chat');
+  assert.equal(ownerLabel([note(provenance([[1,'owner_message'],[2,'nocheh_reply']],{rules:'others',rule_buckets:['person']}),[1])],words,names,keys),
+    'Nocheh\'s notes review of you in your private chat, Nocheh\'s reply in your private chat, rules Nocheh learned in your private chat from other people\'s messages, forwards or files');
   assert.equal(ownerLabel([note(provenance(Array.from({length:8},(_,i):[number,EventClass]=>[i+1,'owner_message'])),[1]),{by:'unknown'}],words,names,keys),
     'Your own messages in your private chat; also an earlier note it replaced');
   assert.equal(ownerLabel([turn({reads:['web','past']})],words,names,keys),'Nocheh\'s note from your private chat on 2026-11-16, after reading web pages, past conversations');
@@ -251,6 +280,7 @@ test('Honcho records name their part in fixed words, with names that cannot clos
   assert.equal(honchoSource({part:'file',name:null}),'text of a file the sender sent: not the sender\'s own words');
   assert.equal(honchoSource({part:'audio'}),'a transcript of an audio file the sender sent: not the sender\'s own words');
   assert.equal(honchoSource({part:'quote'}),'a quote of another person\'s message inside the sender\'s reply');
+  assert.equal(honchoSource({part:'pinned'}),'a message by another person that the sender pinned: not the sender\'s own words');
   assert.deepEqual((['reply','follow_up','private_answer','job_report','scheduled_run','approved_post',null] as const).map(cls=>honchoSource({part:'nocheh',send_class:cls})),
     ['Nocheh\'s reply','Nocheh\'s follow-up','Nocheh\'s private answer','Nocheh\'s report','Nocheh\'s scheduled result','Nocheh\'s post','Nocheh\'s reply']);
   assert.equal(honchoSource({part:'nocheh',send_class:'reply',about_forward:true}),'Nocheh\'s reply about a message the owner forwarded');
@@ -261,4 +291,6 @@ test('Honcho records name their part in fixed words, with names that cannot clos
   assert.deepEqual(honchoPointer('person'),{source:'Nocheh\'s note',
     text:'the owner forwarded a message from a person; its text is kept with the owner\'s forwards and files'});
   assert.equal(honchoPointer('channel').text,'the owner forwarded a message from a channel; its text is kept with the owner\'s forwards and files');
+  assert.deepEqual(honchoPointer('pinned'),{source:'Nocheh\'s note',
+    text:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files'});
 });

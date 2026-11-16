@@ -29,6 +29,8 @@ export interface SourceFacts {
   forward_name:string|null;
   /** A quote inside a reply: of the sender's own message, or of someone else's. */
   quote:'own'|'other'|null;
+  /** The message a pin carries: the sender's own typed message, or one with someone else's words in it. */
+  pinned:'own'|'other'|null;
   /** Text read from a file or an image the sender sent, and that file's name, unchecked. */
   file:boolean;file_name:string|null;
   /** A transcript of an audio file, which is not the sender's own voice. */
@@ -51,7 +53,7 @@ const text=(value:unknown):string|null=>typeof value==='string'&&value.trim()?va
 const fullId=(value:unknown):string|null=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
 /** The recordings of the sender's own voice; any other transcript is of an audio file someone made. */
 export const ownVoice:ReadonlySet<string>=new Set(['voice','video_note','voice_message','video_message']);
-const none:SourceFacts={author:'unknown',account:null,name:null,act:'other',forward:null,forward_name:null,quote:null,file:false,file_name:null,
+const none:SourceFacts={author:'unknown',account:null,name:null,act:'other',forward:null,forward_name:null,quote:null,pinned:null,file:false,file_name:null,
   audio:false,recording:false,send_class:null,answers:null};
 
 /** A Telegram sender: the owner's account, another person's, or a bot's. */
@@ -77,7 +79,8 @@ function telegram(payload:unknown,owner:string|null):SourceFacts {
   // An anonymous admin and a post in a channel's or group's name (sender_chat) are never the owner (ADR-0251).
   const who=channel||record(message.sender_chat)?{author:'anonymous' as const,account:null,name:text(record(message.sender_chat)?.title)}:sender(record(message.from),owner);
   const raw=who.account===null?null:String(record(message.from)?.id);
-  return {...none,...who,act,...forwarded(message),quote:quoteOf(message,raw),file_name:text(record(message.document)?.file_name)??text(record(message.audio)?.file_name)};
+  return {...none,...who,act,...forwarded(message),quote:quoteOf(message,raw),...pinnedOf(message,raw),
+    file_name:text(record(message.document)?.file_name)??text(record(message.audio)?.file_name)};
 }
 function forwarded(message:unknown):Pick<SourceFacts,'forward'|'forward_name'> {
   const found=forwardFacts(message);
@@ -89,6 +92,23 @@ function quoteOf(message:Record<string,any>,sender:string|null):SourceFacts['quo
   const target=record(message.reply_to_message),external=record(record(message.external_reply)?.origin);
   const author=target?(record(target.sender_chat)?null:record(target.from)?.id):external?.type==='user'?record(external.sender_user)?.id:null;
   return sender!==null&&(typeof author==='number'||typeof author==='string')&&String(author)===sender?'own':'other';
+}
+
+/**
+ * What a pin carries: a pin has no words of its own, so it carries those of the message it pinned. A forward of someone
+ * else's there, an inline bot's message included, is a forward the sender passed on; a message the sender did not write
+ * (another person's, or a post in a chat's name) is someone else's; only the sender's own typed message stays theirs,
+ * with its own quote read as any quote is. A message Telegram no longer shows (date 0) carries nothing.
+ */
+function pinnedOf(message:Record<string,any>,sender:string|null):Partial<Pick<SourceFacts,'forward'|'forward_name'|'quote'|'pinned'>> {
+  const pinned=record(message.pinned_message);
+  if(!pinned||pinned.date===0)return {};
+  const found=forwardFacts(pinned);
+  if(found&&found.from!=='own')return {forward:found.from,forward_name:found.rawName,pinned:'other'};
+  const author=record(pinned.from)?.id;
+  if(sender===null||record(pinned.sender_chat)||!(typeof author==='number'||typeof author==='string')||String(author)!==sender)return {pinned:'other'};
+  const quote=quoteOf(pinned,sender);
+  return {pinned:'own',...(quote?{quote}:{})};
 }
 
 /** A Telegram Desktop export: its author is the account the archive proved for it (authored_by), never a name. */
@@ -132,28 +152,32 @@ export function sourceFacts(input:FactsInput,owner:string|null):SourceFacts {
 }
 
 /** Whether a message is the owner's own typing: the owner's account, a new message, edit, reaction or web chat message,
- *  not a forward of someone else's (an inline bot's included), no quote of someone else's message, and no text read
- *  from a file or audio file. The owner's own voice, transcribed, is the owner's. */
+ *  not a forward of someone else's (an inline bot's included), no quote of someone else's message, no pin of someone
+ *  else's message and no text read from a file or audio file. The owner's own voice, transcribed, is the owner's. */
 export const ownerTyped=(f:SourceFacts):boolean=>f.author==='owner'&&['message','edit','reaction','browser'].includes(f.act)&&
-  (f.forward===null||f.forward==='own')&&f.quote!=='other'&&!f.file&&!f.audio;
+  (f.forward===null||f.forward==='own')&&f.quote!=='other'&&f.pinned!=='other'&&!f.file&&!f.audio;
 
 type By='owner'|'person';
 type LearnedClass=Exclude<SendClass,'card'|'card_update'|'refusal'|'notice'|'reminder'>;
-/** One fixed token for what kind of message an event is. */
+/** One fixed token for what kind of message an event is. `quote_nocheh` is the owner's reply quoting Nocheh's own learned
+ *  message, which only NoteSourceRepository.classesFor tells, by the archive's reply relation; eventClass alone calls it
+ *  a quote. */
 export type EventClass='owner_message'|'owner_reaction'|'owner_browser'|'person_message'|'person_reaction'|'anonymous_post'|
-  `forward_${Exclude<Forward['from'],'own'>}_by_${By}`|`file_by_${By}`|`audio_by_${By}`|'quote'|`nocheh_${LearnedClass}`|'nocheh_about_forward'|'nocheh_unlearned'|'unknown';
+  `forward_${Exclude<Forward['from'],'own'>}_by_${By}`|`file_by_${By}`|`audio_by_${By}`|'quote'|'quote_nocheh'|'pinned'|`nocheh_${LearnedClass}`|
+  'nocheh_about_forward'|'nocheh_unlearned'|'unknown';
 const learnedClasses:readonly LearnedClass[]=['reply','follow_up','private_answer','job_report','scheduled_run','approved_post'];
 /** Every event class, for checking a stored one. */
 export const eventClasses:readonly EventClass[]=['owner_message','owner_reaction','owner_browser','person_message','person_reaction','anonymous_post',
   ...(['person','hidden','channel','chat','bot'] as const).flatMap(from=>(['owner','person'] as const).map(by=>`forward_${from}_by_${by}` as const)),
-  'file_by_owner','file_by_person','audio_by_owner','audio_by_person','quote',...learnedClasses.map(name=>`nocheh_${name}` as const),
+  'file_by_owner','file_by_person','audio_by_owner','audio_by_person','quote','quote_nocheh','pinned',...learnedClasses.map(name=>`nocheh_${name}` as const),
   'nocheh_about_forward','nocheh_unlearned','unknown'];
 export const isEventClass=(value:unknown):value is EventClass=>typeof value==='string'&&(eventClasses as readonly string[]).includes(value);
 
 /**
  * The class of one event. `answered` is the facts of the message Nocheh's reply answered (its `answers`), when known:
- * a reply about someone else's forward is about that forward. Someone else's forward comes first, then a file's or an
- * audio file's text, then a quote of someone else's message; only what is left is the sender's own message.
+ * a reply about someone else's forward is about that forward. Someone else's forward comes first, a pinned one too, then
+ * a file's or an audio file's text, then a quote of someone else's message, then a pin of someone else's message; only
+ * what is left is the sender's own message.
  */
 export function eventClass(f:SourceFacts,answered?:SourceFacts|null):EventClass {
   if(f.author==='nocheh') {
@@ -172,16 +196,19 @@ export function eventClass(f:SourceFacts,answered?:SourceFacts|null):EventClass 
   if(f.file)return `file_by_${by}`;
   if(f.audio)return `audio_by_${by}`;
   if(f.quote==='other')return 'quote';
+  if(f.pinned==='other')return 'pinned';
   return f.act==='browser'?'owner_browser':`${by}_message`;
 }
 
-/** Whose words a class carries, for a note's source: the owner's, Nocheh's learned messages, other people's (anonymous
- *  posts, quotes, Nocheh's unlearned messages and anything unknown included), forwards, or files' and audio files' text. */
+/** Whose words a class carries, for a note's source: the owner's, Nocheh's learned messages (and the owner's quote of
+ *  one), other people's (anonymous posts, quotes, pins of their messages, Nocheh's unlearned messages and anything unknown
+ *  included), forwards, or files' and audio files' text. */
 export type Bucket='owner'|'nocheh'|'person'|'forward'|'file';
 export function bucketOf(cls:EventClass):Bucket {
   if(cls.startsWith('owner_'))return 'owner';
   if(cls.startsWith('forward_')||cls==='nocheh_about_forward')return 'forward';
   if(cls.startsWith('file_')||cls.startsWith('audio_'))return 'file';
+  if(cls==='quote_nocheh')return 'nocheh';
   if(cls.startsWith('nocheh_')&&cls!=='nocheh_unlearned')return 'nocheh';
   return 'person';
 }

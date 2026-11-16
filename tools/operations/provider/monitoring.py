@@ -49,7 +49,7 @@ def status(state):
     result['routes']=attempt(lambda:routes(config))
     result['model_problems']=attempt(lambda:model_problems(state))
     result['reader_problems']=attempt(lambda:reader_problems(state))
-    result['note_problems']=attempt(lambda:note_problems(state))
+    result['note_problems']=attempt(lambda:note_problems(state,archive=result['archive']))
     result['github']=attempt(lambda:github_flags(state))
     result['backups']=attempt(lambda:backup_health(state,config))
     result['keys']=internal_keys(config)
@@ -113,12 +113,16 @@ def reader_problems(state, now=None):
             for row in usage.reader_rows(state,day) or [] for failure in ('temp_full','read_only') if row[failure]]
 
 
-def note_problems(state, now=None):
+def note_problems(state, now=None, archive=None):
     """Today's notes whose source Hermes could not record or look up, and turns that could not read long-term memory
-    in full (ADR-0257), with the steps that worked today."""
+    in full (ADR-0257), with the steps that worked today. The stores count the same steps where Hermes can't see
+    them, labelling notes and recall's ask of the owner's forwards and files, in /v1/status's memory_problems."""
     from tools.operations.provider import usage
     day=(now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')
-    rows=usage.note_rows(state,day) or []
+    rows=list(usage.note_rows(state,day) or [])
+    stores=archive.get('memory_problems') if isinstance(archive,dict) else None
+    rows+=[row for row in stores if isinstance(row,dict) and row.get('day')==day and row.get('kind') in ('notes','memory_read')
+           and type(row.get('done')) is int and type(row.get('failed')) is int] if isinstance(stores,list) else []
     found=[]
     for kind,steps in (('notes',[row for row in rows if row['kind']!='memory_read']),('memory_read',[row for row in rows if row['kind']=='memory_read'])):
         failed=sum(row['failed'] for row in steps)

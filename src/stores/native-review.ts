@@ -13,8 +13,8 @@ import type {RuntimeTurnRepository} from './turns.js';
 import {notesSender,ownerChat} from '../assistant-policy.js';
 import {servedGroup,sourceChat} from '../spaces.js';
 import {applicableInterpretations,type InterpretationVersion} from '../interpretations.js';
-import {ownerTyped} from '../source-facts.js';
-import {REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,reviewBody,reviewFragment,type ReviewProvenance} from '../source-labels.js';
+import {bucketOf,ownerTyped} from '../source-facts.js';
+import {REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,reviewBody,reviewFragment,ruleBuckets,type ReviewProvenance,type RuleBucket} from '../source-labels.js';
 import {NoteSourceRepository} from './note-sources.js';
 
 export const nativeReviewSchema=`
@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS native_review_skips (
 /** Why a source stays out of the owner's notes (ADR-0257): someone not allowed there sent it, or it is a reaction to a
  * message that was left out for that reason. */
 export type NotesSkip='sender_not_allowed'|'target_not_allowed';
+/** A source's notes reviews, and why it stays out of the owner's notes when queue decided that in the same call. */
+export interface QueuedReviews {ids:string[];left_out:NotesSkip|null}
+const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
 const protocol='hermes-native-review-v3';
 /** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
 export const nativeReconcileLimit=8;
@@ -80,9 +83,9 @@ export class NativeReviewRepository {
     const policy=this.contexts.access.policy(),owner=policy.owner_id?ownerChat(policy):null;if(!owner)throw new HttpError(409,'owner_review_required');
     return {admin:false,scope:null,space:owner,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,purpose:'memory-review'};
   }
-  async queue(source:SourceReference):Promise<string[]> {
+  async queue(source:SourceReference):Promise<QueuedReviews> {
     // A brain that keeps no notes of its own has nothing to learn them from.
-    if(!this.brain.reviewNotes)return [];
+    if(!this.brain.reviewNotes)return {ids:[],left_out:null};
     const binding=await this.contexts.guards.state();
     // Each source is reviewed once per installation generation; repeating a started review repeats its model calls.
     // A waiting review (never started, or failed without changing notes) can't run under an older authorization epoch,
@@ -101,16 +104,17 @@ export class NativeReviewRepository {
     // source gets no new fragment, but its other fragments still waiting under an earlier epoch keep their place while
     // their own text is unchanged, so its review is completed rather than cut short.
     const kept=reviewed.map(row=>String(row.id)),waiting=reviewed.filter(row=>row.waiting).map(row=>String(row.id));
-    const settle=async()=>{await retire();await this.keepWaiting([...waiting,...ids]);return [...kept,...ids];};
+    const settle=async():Promise<QueuedReviews>=>{await retire();await this.keepWaiting([...waiting,...ids]);return {ids:[...kept,...ids],left_out:null};};
     if(kept.length&&!stale.size)return await settle();
     // Someone not allowed there stays out of the owner's notes, while group memory still learns what they said. Decided
     // after the return above, so a source already reviewed in this generation keeps its review.
-    const leave=async(reason:NotesSkip)=>{await this.skip(source,binding,reason);return kept.filter(id=>!waiting.includes(id));};
+    const leave=async(reason:NotesSkip):Promise<QueuedReviews>=>{await this.skip(source,binding,reason);return {ids:kept.filter(id=>!waiting.includes(id)),left_out:reason};};
     const decision=await this.decide(source,binding);if(decision!=='review')return await leave(decision);
-    // Related messages are asked the same question, each once.
+    // Related messages are asked the same question, each once; a pin's message by its own author.
     const asked=new Map<string,Promise<boolean>>(),options:Required<LearningContextOptions>={
       admit:reference=>{let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id).then(value=>value==='review'));return allowed;},
-      collect:{dropped:[],versions:[],refused:[],bare_reaction:false}};
+      admitPinned:reference=>this.pinnedSender(reference.id).then(value=>value==='review'),
+      collect:{dropped:[],versions:[],refused:[],bare_reaction:false,inputs:new Map()}};
     let context;
     try{context=await this.contexts.prepare(source,binding,options);}
     catch(error) {
@@ -179,20 +183,32 @@ export class NativeReviewRepository {
   }
   /**
    * What code records about a review's batch (ADR-0257), from each message's own fields: its class, whether every
-   * message was the owner's own typing, whose rules it reads, and how many messages and rules were left out. A rule is
-   * the owner's when the owner wrote it, or when every message it was learned from is the owner's own typing. In a batch
-   * of the owner's own typing only, the rules learned from anyone else are left out of that one review, so a note it
-   * writes can still read as the owner's; turns and every other review still read them.
+   * message was the owner's own typing, whose rules it reads and whose words they rest on, and how many messages and
+   * rules were left out. A rule is judged by what code recorded it was learned from (its stored dependencies), never by
+   * what the model cited of them: it is the owner's when the owner wrote it, or when it was learned from at least one
+   * message and every one is the owner's own typing. A transcript or a file's text is judged through the message it
+   * belongs to, which is recorded with it; any other input is someone else's. In a batch of the owner's own typing only,
+   * the rules learned from anyone else are left out of that one review, so a note it writes can still read as the
+   * owner's; turns and every other review still read them.
    */
   private async batch(source:SourceReference,context:PreparedLearningContext,collect:Required<LearningContextOptions>['collect']) {
-    const versions=collect.versions,classes=await this.sources.classesFor([...context.observations.map(item=>item.source.id),
-      ...versions.flatMap(version=>version.evidence.map(reference=>reference.id))]);
+    const versions=collect.versions,inputs=(version:InterpretationVersion)=>collect.inputs.get(version.id)??[];
+    const learnedFrom=(version:InterpretationVersion)=>inputs(version).filter(id=>id.startsWith('events:')).map(id=>id.slice('events:'.length));
+    const told=(version:InterpretationVersion)=>inputs(version).every(id=>id.startsWith('events:')||id.startsWith('derived_artifacts:'));
+    const classes=await this.sources.classesFor([...context.observations.map(item=>item.source.id),...versions.flatMap(learnedFrom)]);
     const typed=(id:string)=>{const found=classes.get(id);return !!found&&ownerTyped(found.facts);};
-    const ownRule=(version:InterpretationVersion)=>version.author==='owner'||version.evidence.length>0&&version.evidence.every(reference=>typed(reference.id));
+    const ownRule=(version:InterpretationVersion)=>version.author==='owner'||learnedFrom(version).length>0&&told(version)&&learnedFrom(version).every(typed);
     const ownerOnly=context.observations.every(item=>typed(item.source.id)),read=ownerOnly?versions.filter(ownRule):versions,left=versions.length-read.length;
+    // Whose words the rules it reads rest on: the owner's and Nocheh's learned messages name nobody, and a message or an
+    // input that can't be told is another person's.
+    const buckets=new Set<string>();
+    for(const version of read)if(version.author!=='owner') {
+      if(!learnedFrom(version).length||!told(version))buckets.add('person');
+      for(const id of learnedFrom(version)){const found=classes.get(id);buckets.add(found?bucketOf(found.class):'person');}
+    }
     const provenance:ReviewProvenance={version:1,source:source.id,
       events:context.observations.map(item=>({id:item.source.id,class:classes.get(item.source.id)?.class??'unknown'})),owner_account_only:ownerOnly,
-      rules:!read.length?'none':read.every(ownRule)?'owner':'others',
+      rules:!read.length?'none':read.every(ownRule)?'owner':'others',rule_buckets:ruleBuckets.filter((bucket:RuleBucket)=>buckets.has(bucket)),
       left_out:{sender_not_allowed:collect.dropped.length,rule_sender_not_allowed:collect.refused.length,rules_left_out_for_owner_label:left}};
     return {provenance,rules:left?applicableInterpretations(read):context.rules,
       limitations:left?[...context.limitations,'rules_left_out_for_owner_label']:context.limitations};
@@ -221,13 +237,24 @@ export class NativeReviewRepository {
     if(row.skipped)return row.skipped as NotesSkip;
     return await this.sender(source.id);
   }
+  /** An archived event as notesSender reads it, or null when it is missing or unreadable. */
+  private async archived(id:string):Promise<{channel:string;kind:string;scope:string;payload:unknown}|null> {
+    const event=(await this.contexts.access.stores.archive.query('SELECT channel,kind,scope,payload FROM events WHERE id=$1',[id])).rows[0];
+    if(!event)return null;
+    try{return {channel:event.channel,kind:event.kind,scope:event.scope,payload:JSON.parse((event.payload as Buffer).toString())};}catch{return null;}
+  }
   /** notesSender over an archived event; one that is missing or unreadable is not let in. */
   private async sender(id:string):Promise<'review'|'sender_not_allowed'> {
-    const event=(await this.contexts.access.stores.archive.query('SELECT channel,kind,scope,payload FROM events WHERE id=$1',[id])).rows[0];
-    if(!event)return 'sender_not_allowed';
-    let payload:unknown;
-    try{payload=JSON.parse((event.payload as Buffer).toString());}catch{return 'sender_not_allowed';}
-    return notesSender(this.contexts.access.policy(),{channel:event.channel,kind:event.kind,scope:event.scope,payload});
+    const event=await this.archived(id);
+    return event?notesSender(this.contexts.access.policy(),event):'sender_not_allowed';
+  }
+  /** notesSender over the message an archived pin carries, by that message's own author in the pin's chat; a pin whose
+   *  message can't be read is not let in. A message Telegram no longer shows (date 0) carries no words to leave out. */
+  private async pinnedSender(id:string):Promise<'review'|'sender_not_allowed'> {
+    const event=await this.archived(id),update=record(event?.payload),message=record(update?.message??update?.edited_message),pinned=record(message?.pinned_message);
+    if(!event||!message||!pinned)return 'sender_not_allowed';
+    if(pinned.date===0&&Object.keys(pinned).every(name=>['chat','message_id','date'].includes(name)))return 'review';
+    return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...pinned,chat:message.chat}}});
   }
   private async record(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
     await this.control.query('INSERT INTO native_review_skips(event_id,generation,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[source.id,binding.generation,reason]);

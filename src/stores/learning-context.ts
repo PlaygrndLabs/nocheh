@@ -26,13 +26,16 @@ export interface PreparedLearningContext {
 /**
  * What the owner's notes review asks of prepare (ADR-0257). `admit` says whether a related message, or the evidence of a
  * rule, may go into the owner's notes; one it refuses is left out, and so are the rules resting on it and any quote of
- * it. `collect` gets the ids left out, the rules kept, the ids of the rules left out with them, and `bare_reaction` when
- * the source is a reaction to a message that was left out. Honcho and interpretations pass neither, so what they learn
- * from is exactly as before.
+ * it. `admitPinned` asks the same of the message a pin carries, by its own author; one it refuses is taken out of the
+ * pin, which stays. `collect` gets the ids left out (a pin's own id when only the message it pinned was), the rules kept,
+ * the ids of the rules left out with them, `bare_reaction` when the source is a reaction to a message that was left out,
+ * and each kept rule's recorded inputs (`inputs`: the source ids of its stored dependencies, by rule id). Honcho and
+ * interpretations pass none, so what they learn from is exactly as before.
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
-  collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean};
+  admitPinned?:(reference:SourceReference)=>Promise<boolean>;
+  collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;inputs:Map<string,string[]>};
 }
 export class LearningContextRepository {
   constructor(readonly access:SourceAccessRepository,readonly guards:GuardRepository,readonly learned:LearnedMemoryRepository,
@@ -63,7 +66,7 @@ export class LearningContextRepository {
     }
     // A quote repeats part of the message replied to, so it goes when that message was left out.
     const unquote=[...dropped].some(id=>targets.has(id));
-    const dependencies:PreparedDependency[]=[],evidence:LearningEvidence[]=[],observations:PreparedLearningContext['observations']=[];
+    const dependencies:PreparedDependency[]=[],evidence:LearningEvidence[]=[],observations:PreparedLearningContext['observations']=[],unpinned:string[]=[];
     for(const reference of references.values()) {
       const id='events:'+reference.id,guarded=await this.guards.read(id,binding),value=guarded.value as any;
       dependencies.push({source_id:id,revision:guarded.revision,value_hash:digest(canonical(value))});
@@ -85,6 +88,10 @@ export class LearningContextRepository {
       for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(scoped.payload?.[kind]) {
         delete scoped.payload[kind].reply_to_message;delete scoped.payload[kind].external_reply;
         if(unquote)delete scoped.payload[kind].quote;
+        // A pin carries the message it pinned whole; what someone not allowed there wrote stays out of the owner's notes review.
+        if(scoped.payload[kind].pinned_message&&options.admit&&options.admitPinned&&!await options.admitPinned(reference)) {
+          delete scoped.payload[kind].pinned_message;limitations.push('sender_not_allowed');unpinned.push(reference.id);
+        }
       }
       observations.push({source:reference,value:scoped,derivatives});evidence.push({reference,text:texts.join('\n'),space});
     }
@@ -120,6 +127,7 @@ export class LearningContextRepository {
     // A busy chat keeps learning past 100 rules: the owner's own rules, then conventions, then the newest are kept.
     if(candidates.length>100){candidates.pop();limitations.push('rule_catalog_limit');}
     const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>(),refused=new Set<string>(),unread:string[]=[];
+    const recorded=new Map<string,string[]>();
     for(const candidate of candidates)try {
       const version=await this.learned.read(principal,candidate.id,binding,async reference=>{
         if(!(await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding)))return false;
@@ -131,6 +139,8 @@ export class LearningContextRepository {
       if(version.author!=='owner'&&(await this.access.stores.archive.query(`SELECT 1 FROM source_observations o JOIN source_revisions r ON r.id=o.revision_id
         WHERE o.event_id=ANY($1::text[]) AND r.object_id=$2 LIMIT 1`,[version.evidence.map(e=>e.id),observed.object_id])).rowCount)continue;
       versions.push(version);
+      // What code recorded the rule was learned from, whatever the model cited of it.
+      recorded.set(version.id,Array.isArray(candidate.dependencies)?candidate.dependencies.map((dependency:any)=>String(dependency?.source_id??'')):[]);
       // Generated wording and model-chosen rule identities are not new evidence.
       // Automatic guidance changes only when its authorized source inputs change.
       const inputs:LearningRuleInput[]=version.author==='owner'?
@@ -144,7 +154,8 @@ export class LearningContextRepository {
       throw error;
     }
     if(options.collect) {
-      options.collect.dropped.push(...dropped);options.collect.versions.push(...versions);options.collect.refused.push(...unread);
+      options.collect.dropped.push(...dropped,...unpinned);options.collect.versions.push(...versions);options.collect.refused.push(...unread);
+      for(const [id,inputs] of recorded)options.collect.inputs.set(id,inputs);
       // A reaction left with nothing it reacts to says nothing the owner's notes could use.
       options.collect.bare_reaction=[...reacted].some(id=>dropped.has(id))&&![...reacted].some(id=>references.has(id));
     }

@@ -90,6 +90,18 @@ class MonitoringTests(unittest.TestCase):
                          'Long-term memory: Nocheh couldn’t read memory from your forwards and files, or your memory context, 1 time today; '
                          'replies used the rest of your memory.')
         self.assertIn('notes', problems.readable({'note_problems': rows}))
+        # The stores count labelling notes and recall's ask of the owner's forwards and files, which Hermes never sees.
+        stores = {'memory_problems': [{'day': '2026-10-13', 'kind': 'notes', 'done': 3, 'failed': 2},
+                                      {'day': '2026-10-13', 'kind': 'memory_read', 'done': 1, 'failed': 1},
+                                      {'day': '2026-10-12', 'kind': 'notes', 'done': 0, 'failed': 9},
+                                      {'day': '2026-10-13', 'kind': 'elsewhere', 'done': 0, 'failed': 9},
+                                      {'day': '2026-10-13', 'kind': 'notes', 'done': '1', 'failed': 1}]}
+        with tempfile.TemporaryDirectory() as state:
+            self.assertEqual(monitoring.note_problems(state, now, archive=stores),
+                             [{'day': '2026-10-13', 'kind': 'notes', 'failed': 2, 'ok': 3},
+                              {'day': '2026-10-13', 'kind': 'memory_read', 'failed': 1, 'ok': 1}],
+                             'the stores alone are counted with no tracker yet')
+            self.assertEqual(monitoring.note_problems(state, now, archive={'unavailable': True}), [], 'stores unreachable')
 
     def test_github_flags_come_from_the_app_file_without_its_key(self):
         from tools.operations.connections import secret_file

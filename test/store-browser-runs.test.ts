@@ -91,7 +91,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     await s.browserDelivery.acknowledge(owner,delivered.delivery);await drainSourceSpool(s.capture,root,receipt.event_id);
     assert.equal((await stores.archive.query('SELECT count(*)::int AS count FROM events WHERE id=$1',[receipt.event_id])).rows[0].count,1);
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(first.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
-    assert.ok((await s.reviews.queue((await s.archive.captured(first.event_id)).reference)).length>0,'completed browser originals remain available to permitted background learning');
+    assert.ok(((await s.reviews.queue((await s.archive.captured(first.event_id)).reference)).ids).length>0,'completed browser originals remain available to permitted background learning');
     const reviewBinding=await s.guards.state();
     const processing={admin:false,scope:null,space:'123',turnEvent:first.event_id,generation:reviewBinding.generation,guard_epoch:reviewBinding.epoch,revision:reviewBinding.epoch,purpose:'filter' as const};
     assert.equal((await s.turns.binding(processing)).owner,true);

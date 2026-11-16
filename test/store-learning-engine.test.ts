@@ -66,7 +66,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.ok(!JSON.stringify(prepared.observations).includes('nested-unverified-target'));
     // Only the owner's notes review leaves anyone out (ADR-0257): letting everyone in prepares exactly what Honcho and
     // interpretations get without options, and a reaction whose message is left out has nothing left.
-    const collect=()=>({dropped:[] as string[],versions:[] as InterpretationVersion[],refused:[] as string[],bare_reaction:false}),everyone=collect(),left=collect();
+    const collect=()=>({dropped:[] as string[],versions:[] as InterpretationVersion[],refused:[] as string[],bare_reaction:false,inputs:new Map<string,string[]>()}),everyone=collect(),left=collect();
     assert.equal(canonical(await contexts.prepare(reaction,await guards.state(),{admit:async()=>true,collect:everyone})),canonical(prepared));
     assert.deepEqual([everyone.dropped,everyone.bare_reaction],[[],false]);
     const without=await contexts.prepare(reaction,await guards.state(),{admit:async reference=>reference.id!==parent.id,collect:left});

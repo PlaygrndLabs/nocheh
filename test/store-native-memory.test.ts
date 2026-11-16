@@ -36,7 +36,9 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
       const found=sessions[values[1]];return {rows:found&&found.audience===values[2]?[found]:[]};
     }
     if(sql.includes("count(*) FILTER (WHERE state='done')"))return {rows:[{done:1,pending:0}]};
-    if(sql.includes('peer_ids ? $2'))return {rowCount:1,rows:[{}]};
+    // Whether the forwards and files wrote anything is read by the writer's own column, which an index covers.
+    if(sql.includes("state='done'\n      AND peer_id=$2 LIMIT 1"))return {rowCount:1,rows:[{}]};
+    if(sql.includes('peer_ids ? $2 AND ($3::text IS NULL OR session_id=$3)'))return {rowCount:1,rows:[{}]};
     throw Error('unexpected_control_query '+sql);
   }};
   const contexts={access:{stores:{control},policy:()=>({owner_id:'123'}),archive:{captured:async()=>({reference:root})}},
@@ -179,6 +181,57 @@ test('recall asks the owner\'s forwards and files beyond the four peers, under t
   await memory.recall(group,'Where is the trip?');
   assert.deepEqual(asked.map(item=>item.peer),peers.slice(0,4),'nothing learned there, nothing asked');
   assert.equal(outputs.at(-1).configuration.forwards_and_files,undefined);
+});
+
+test('a failed ask of the owner\'s forwards and files keeps the other answers, says what is missing and is counted; long answers are cut whole',async t=>{
+  t.after(installChatsForTest(recallChats()));
+  const workspace=digest('forwards-down-workspace'),root={store:'archive',kind:'event',id:digest('forwards-down-root'),revision:'1',input_hash:digest('forwards-down-root-hash')};
+  let peers=['person_a','person_b'],answer=(peer:string):unknown=>'Answer from '+peer,forwards:()=>unknown=()=>{throw Error('honcho_down');};
+  const counted:unknown[][]=[],outputs:any[]=[];let recorded='';
+  const control={query:async(sql:string,values:unknown[])=>{
+    if(sql.includes('r.peer_id=$2'))return {rowCount:1,rows:[{}]};
+    if(sql.includes('INSERT INTO memory_problem_days')){counted.push(values);return {rowCount:1,rows:[]};}
+    throw Error('unexpected_control_query');
+  }};
+  const contexts={access:{stores:{control},policy:()=>({owner_id:'123'}),recall:(principal:Reader)=>({space:principal.space,group:'-100'})},
+    guards:{prepareContext:async()=>null,read:async()=>({value:{text:recorded}})}};
+  const derived={record:async(input:any)=>{if(input.kind==='memory_result'){recorded=input.content.toString();outputs.push(input);}
+    return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
+  const binding={generation:'fixture',epoch:1,mode:'on'};
+  const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
+  const provenance={sessions:async()=>[],read:async()=>({conclusions:[],evidence:[],limitations:[],exact_citations:false})};
+  const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,honchoEngine(async(path:string)=>{
+    const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;
+    return {content:peer===materialPeer?forwards():answer(peer)};
+  }),async()=>[]);
+  Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],correcting:async()=>false,
+    current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
+    connectedPeers:async()=>({items:peers.map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
+  const owner={admin:false,scope:null,space:'123',turnEvent:root.id} as Reader;
+  // The people's answers stay, with no forwards text and no header without its answer; the failure is one count.
+  const down=await memory.recall(owner,'Where is the trip?') as any;
+  assert.deepEqual(recorded.split('\n\n'),peers.map(peer=>`[related through speaker → ${peer}]\nAnswer from ${peer}`));
+  assert.ok(down.sources.at(-1).limitations.includes('forwards_unavailable'));assert.equal(outputs.at(-1).configuration.forwards_and_files,undefined);
+  assert.deepEqual(counted,[['memory_read',0,1]]);
+  // An answer that is not text is a failed ask too, and one that works is counted as working.
+  forwards=()=>({not:'text'});await memory.recall(owner,'Where is the trip?');assert.deepEqual(counted.at(-1),['memory_read',0,1]);
+  forwards=()=>'Answer from '+materialPeer;
+  const up=await memory.recall(owner,'Where is the trip?') as any;
+  assert.deepEqual(counted.at(-1),['memory_read',1,0]);assert.ok(!up.sources.at(-1).limitations.includes('forwards_unavailable'));
+  assert.equal(outputs.at(-1).configuration.forwards_and_files,true);
+  // Only the forwards were asked, and their ask failed: limited memory that says what is missing.
+  peers=[];forwards=()=>{throw Error('honcho_down');};
+  const alone=await memory.recall(owner,'Where is the trip?') as any;
+  assert.equal(alone.limited_memory,true);assert.deepEqual(alone.limitations,['forwards_unavailable']);assert.deepEqual(alone.sources,[]);
+  // Answers past 20,000 characters: the last ones are left out whole, a first one alone too long is cut, and nothing throws.
+  peers=['person_a','person_b'];answer=peer=>(peer==='person_a'?'a':'b').repeat(15000);
+  const long=await memory.recall(owner,'Where is the trip?') as any;
+  assert.deepEqual(recorded.split('\n\n'),['[related through speaker → person_a]\n'+'a'.repeat(15000)]);
+  assert.ok(long.sources.at(-1).limitations.includes('recall_answer_cut'));assert.ok(long.sources.at(-1).limitations.includes('forwards_unavailable'));
+  peers=['person_a'];answer=()=>'🎉'.repeat(15000);
+  const cut=await memory.recall(owner,'Where is the trip?') as any;
+  assert.ok(recorded.startsWith('[related through speaker → person_a]\n🎉'));assert.ok(recorded.length<=20000);assert.doesNotMatch(recorded,/[\ud800-\udbff]$/);
+  assert.ok(cut.sources.at(-1).limitations.includes('recall_answer_cut'));
 });
 
 test('recall asks Honcho for evidence and points the agent at the archived messages behind the conclusions it read',async t=>{
@@ -780,6 +833,27 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     for(const mark of ['FORWARDMARK','FILEMARK','BAREMARK','QUOTEMARK'])
       assert.deepEqual(ownerWrites.filter(row=>row.content.includes(mark)).map(row=>[row.record,row.session,row.content]),[],'no owner write holds '+mark);
     assert.deepEqual(await services.memory.queueSource(forward),queued.filter(item=>item.receipts.includes(kept!.id)),'queued again, the same writes');
+    // A pin carries the message it pinned: the owner's pin of their own forward of someone else's message is kept as that
+    // forward is, and a pin of their own message stays theirs. The owner's quote of Nocheh's own learned reply is the
+    // owner's words alone: Nocheh's message is learned as Nocheh's where it was sent.
+    const alice={id:123,is_bot:false,first_name:'Alice'},pinned=(fields:Record<string,unknown>)=>({message_id:serial,date:1700000000,chat:chatOf('123'),from:alice,...fields});
+    const pinForward=await say('123',123,{pinned_message:pinned({forward_origin:sara,text:'PINFORWARDMARK the trip moved'})});
+    const pinOwn=await say('123',123,{pinned_message:pinned({text:'PINOWNMARK buy milk'})});
+    const flight=await nocheh('123','NOCHEHMARK your flight is at 9',{send_class:'reply'}),flightId=serial;
+    const thanks=await say('123',123,{text:'Thanks',quote:{text:'NOCHEHMARK your flight',position:0},
+      reply_to_message:{message_id:flightId,date:1700000000+flightId,chat:chatOf('123'),from:{id:bot,is_bot:true,first_name:'Nocheh'},text:'NOCHEHMARK your flight is at 9'}});
+    const pins:Queued=[];for(const source of [pinForward,pinOwn,flight,thanks])pins.push(...await services.memory.queueSource(source));
+    const [pinKept,pinPointer]=await written(pinForward);
+    assert.deepEqual(shape([pinKept!,pinPointer!]),[[materialPeer,'labelled_material','material'],[assistantPeer,'labelled_pointer','conversation']]);
+    assert.equal(pinKept!.value.source,honchoSource({part:'forward',forward:{from:'person',name:'Sara'}}));assert.ok(pinKept!.content.includes('PINFORWARDMARK'));
+    assert.deepEqual(pinPointer!.value,honchoPointer('person'));assert.ok(!pinPointer!.content.includes('PINFORWARDMARK'));
+    const ownPin=await written(pinOwn);
+    assert.deepEqual(shape(ownPin),[[ownerPeer,'labelled_source','conversation']]);assert.equal(ownPin[0]!.value.source,honchoSource({part:'own'}));
+    assert.ok(ownPin[0]!.content.includes('PINOWNMARK'));
+    const thanked=await written(thanks);
+    assert.deepEqual(shape(thanked),[[ownerPeer,'labelled_source','conversation']],'nothing for the forwards and files');
+    assert.equal(thanked[0]!.value.source,honchoSource({part:'own'}));
+    assert.ok(thanked[0]!.content.includes('Thanks')&&!thanked[0]!.content.includes('NOCHEHMARK'),'the quote of Nocheh\'s reply is left out');
     // In a group, a member's forward stays on the member with its source; the owner's forward of someone else goes to the
     // forwards-and-files participant in that group's own session, and its evidence names no speaker.
     const memberForward=await say(group,456,{text:'MEMBERMARK the office closes early',forward_origin:{type:'channel',chat:{id:-1009,type:'channel',title:'News'},message_id:3,date:1}});
@@ -789,7 +863,7 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     assert.ok([memberEntity!.writer,memberSource!.writer].every(writer=>writer===memberSource!.writer&&writer!==ownerPeer&&writer!==materialPeer));
     assert.equal(memberSource!.value.source,honchoSource({part:'forward',forward:{from:'channel',name:'News'}}));
     assert.equal(memberEntity!.value.attribution,'reported');assert.equal(memberEntity!.value.original_speaker.name,'Bob');
-    await sync([...queued,...member]);
+    await sync([...queued,...pins,...member]);
     assert.equal(await services.memory.observe(workspace),true);await swept();
     // The owner's forwards and files in the private chat are not asked in a group's recall.
     const groupReader=await reader(memberForward,group);
@@ -806,6 +880,14 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     assert.deepEqual([groupEntity!.value.original_speaker,groupEntity!.value.attribution,groupEntity!.value.observation.source],
       [null,'reported',honchoSource({part:'forward',forward:{from:'person',name:'Sara'}})]);
     await sync(groupQueued);
+    // The owner's pin of a member's message in a group is kept on the forwards-and-files participant, in the group's own session.
+    const groupPin=await say(group,123,{pinned_message:{message_id:serial,date:1700000000,chat:chatOf(group),from:{id:456,is_bot:false,first_name:'Bob'},text:'PINGROUPMARK office closed'}});
+    const groupPinQueued=await services.memory.queueSource(groupPin),pinRows=await written(groupPin);
+    assert.ok(pinRows.length>0&&pinRows.every(row=>row.writer===materialPeer),JSON.stringify(shape(pinRows)));
+    const pinMaterial=pinRows.find(row=>row.record==='labelled_material')!;
+    assert.deepEqual([pinMaterial.session,pinMaterial.key],['conversation',groupKey]);assert.equal(pinMaterial.value.source,honchoSource({part:'pinned'}));
+    assert.ok(pinMaterial.content.includes('PINGROUPMARK'));
+    await sync(groupPinQueued);
     // Honcho learns from what the participant writes, and it learns from no one else's writes.
     const forwardsSession=(await stores.control.query('SELECT session_id FROM memory_sessions WHERE workspace=$1 AND key=$2',[workspace,forwardsKey])).rows[0].session_id;
     assert.ok(calls.some(call=>call.path==='/v3/workspaces/'+workspace+'/peers'&&canonical(call.body)===canonical({id:materialPeer})));
@@ -847,5 +929,11 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     const binding=await services.guards.state();
     for(let after='',done=false;!done;)({after,done}=await services.memory.sweep(after,binding));
     assert.deepEqual((await written(legacyCard)).map(row=>row.id),earlier[2]!.map(row=>row.id),'an earlier card write stays');
+    // A source whose earlier-form writes a rebuild retired is written in the earlier form again when it is queued again.
+    const retiring=await written(legacyOwn);
+    for(const sessionKey of new Set(retiring.map(row=>row.key)))await services.memory.rebuild(workspace,sessionKey,new Set(retiring.map(row=>row.id)));
+    assert.deepEqual(await written(legacyOwn),[]);
+    await services.memory.queueSource(legacyOwn);
+    assert.deepEqual((await written(legacyOwn)).map(row=>row.record),['entity_evidence','source_evidence'],'never the labelled form for a source Honcho held before');
   } finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await services.guards.setMode('off');await services.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}
 });

@@ -5,7 +5,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import {accountIdFor,installChatsForTest} from '../src/chats.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {NoteSourceRepository,recallRoleWords,type NoteInput} from '../src/stores/note-sources.js';
+import {NoteSourceRepository,memoryProblems,recallRoleWords,type NoteInput} from '../src/stores/note-sources.js';
 import {HttpError} from '../src/http.js';
 import {sourceLines} from '../src/prompts.js';
 import {modelSourceWords} from '../src/source-labels.js';
@@ -59,6 +59,19 @@ test('note sources read each message\'s facts from the archive: its author, its 
       ['owner_message','forward_channel_by_person','file_by_owner','owner_message','nocheh_about_forward','nocheh_unlearned','nocheh_reply','forward_hidden_by_owner']);
     // A reply whose answered message was not asked for is still read with it.
     assert.equal((await sources.classesFor([reply])).get(reply)!.class,'nocheh_about_forward');
+    // The owner's quote of Nocheh's own learned message is Nocheh's, by the archive's reply relation; a quote of Nocheh's
+    // card, of someone else's message or of a message the archive does not hold stays a quote of someone else's.
+    const botUser={id:123456,is_bot:true,first_name:'Nocheh'},said=(id:number,send:Record<string,unknown>)=>capture({origin:'live',kind:'telegram_delivered_message',
+      scope:GP1,text:'Book the 9am',payload:{message:{message_id:id,date:1700000000,chat:group,text:'Book the 9am'},...send}});
+    const learnedId=900000+serial,cardId=learnedId+1,bobId=learnedId+2;
+    await said(learnedId,{send_class:'reply'});await said(cardId,{send_class:'card'});
+    await capture({origin:'live',kind:'telegram_update',scope:GP1,text:'pay now',payload:{update_id:++serial,message:{message_id:bobId,date:1700000000,chat:group,from:bob,text:'pay now'}}});
+    const quoting=(id:number,from:Record<string,unknown>)=>capture({origin:'live',kind:'telegram_update',scope:GP1,text:'yes',payload:message(group,owner,{text:'yes',
+      quote:{text:'Book',position:0},reply_to_message:{message_id:id,date:1700000000,chat:group,from,text:'Book the 9am'}})});
+    const ofLearned=await quoting(learnedId,botUser),ofCard=await quoting(cardId,botUser),ofBob=await quoting(bobId,bob),ofNothing=await quoting(learnedId+50,botUser);
+    const quotes=await sources.classesFor([ofLearned,ofCard,ofBob,ofNothing]);
+    assert.deepEqual([ofLearned,ofCard,ofBob,ofNothing].map(id=>quotes.get(id)!.class),['quote_nocheh','quote','quote','quote']);
+    assert.equal(quotes.get(ofLearned)!.facts.quote,'other','the facts stay as Telegram tells them');
     assert.equal((await sources.factsFor([])).size,0);
   } finally {restore();await Promise.all([stores.archive.end(),stores.derived.end(),stores.control.end()]);}
 });
@@ -110,7 +123,8 @@ test('each note\'s source is labelled from what was recorded about it, never fro
       note('turn-cut',[turn(typed,[],false)]),
       note('job',[turn(typed,['commands'],true,'scheduler')]),
       note('unknown',[{by:'unknown'}])];
-    const labels=await sources.labels(notes),of=(name:string)=>labels.get(digest(`${run}:note:${name}`))!;
+    const labels=await sources.labels(notes),of=(name:string)=>labels[notes.findIndex(item=>item.key===digest(`${run}:note:${name}`))]!;
+    assert.equal(labels.length,notes.length);
     assert.deepEqual(of('own'),{from:'owner',label:'the owner\'s own messages in the owner\'s private chat'});
     assert.deepEqual(of('uncited'),{from:'nocheh',label:'a notes review of the owner\'s own messages in the owner\'s private chat; the note cites none of them'});
     // A note citing someone else's message, or more messages than were sent, is never the owner's.
@@ -126,7 +140,7 @@ test('each note\'s source is labelled from what was recorded about it, never fro
     assert.equal(of('turn-forward').from,'turn_read');assert.match(of('turn-forward').label,/after reading a forwarded message$/);
     assert.equal(of('turn-cut').from,'turn_read');assert.equal(of('job').from,'turn_read');assert.match(of('job').label,/^Nocheh's note from a job or scheduled run/);
     assert.deepEqual(of('unknown'),{from:'unknown',label:modelSourceWords.labels.unknown});
-    for(const [key,value] of labels)assert.ok(!value.label.includes(typed)&&!value.label.includes(OWNER)&&value.label.length<=120,key);
+    for(const [index,value] of labels.entries())assert.ok(!value.label.includes(typed)&&!value.label.includes(OWNER)&&value.label.length<=120,String(index));
 
     // Hermes's lookup: checked whole, refused whole.
     const sent=notes.slice(0,2).map(({space,...rest})=>rest);
@@ -150,6 +164,34 @@ test('each note\'s source is labelled from what was recorded about it, never fro
     assert.deepEqual(recalled.hits.map((hit:any)=>hit.source??hit.role),[{from:'owner',label:'the owner\'s own messages in the owner\'s private chat'},
       {from:'unknown',label:modelSourceWords.labels.unknown},recallRoleWords.assistant,recallRoleWords.message]);
     assert.ok(recalled.hits.every((hit:any)=>!('note' in hit)));
+    // The same note's key in two profiles: each hit and each entry keeps its own source.
+    const twin={...sent[0]!,origins:[turn(forward)]};
+    const twins=await sources.withRecallSources({hits:[{profile:'p',space:OWNER,kind:'native_note',text:'Lisbon',note:sent[0]},
+      {profile:'q',space:GP1,kind:'native_note',text:'Lisbon',note:twin}]}) as any;
+    assert.deepEqual(twins.hits.map((hit:any)=>hit.source.from),['owner','turn_read']);
+    const twinPage=await sources.withOwnerLabels({scope:OWNER,memories:[{name:'MEMORY.md',entries:[{target:'memory',text:'a',...sent[0]},
+      {target:'memory',text:'b',...twin}]}]}) as any;
+    assert.deepEqual(twinPage.memories[0].entries.map((entry:any)=>entry.from),['owner','turn_read']);
+
+    // Each labelling is counted for the owner's notice: a chat that can't be read is a failure, and the labels still go out.
+    const today=async()=>{const rows=await memoryProblems(stores.control);const row=rows.find(item=>item.kind==='notes');return {done:row?.done??0,failed:row?.failed??0};};
+    let before=await today();
+    await sources.labels([notes[0]!]);
+    assert.ok((await today()).done>before.done,'a labelling that worked');
+    const placeless=new NoteSourceRepository(stores,()=>({owner_id:OWNER}),{space:async()=>{throw Error('archive down');}});
+    before=await today();
+    const partial=await placeless.labels([notes[0]!]);
+    assert.equal(partial[0]!.from,'owner');assert.match(partial[0]!.label,/a chat Nocheh can't name/);
+    assert.ok((await today()).failed>before.failed,'a place that could not be read');
+    // A lookup that fails shows every note as not available right now, never anyone's, and is counted too.
+    const failing=new NoteSourceRepository({...stores,control:{query:async(sql:string,values?:unknown[])=>{
+      if(sql.includes('native_review_jobs'))throw Error('down');return stores.control.query(sql,values);}} as any},()=>({owner_id:OWNER}));
+    before=await today();
+    const lost=await failing.withRecallSources({hits:[{kind:'native_note',space:OWNER,note:sent[0]}]}) as any;
+    assert.deepEqual(lost.hits[0].source,{from:'unavailable',label:modelSourceWords.labels.unavailable});
+    const lostPage=await failing.withOwnerLabels({scope:OWNER,memories:[{name:'MEMORY.md',entries:[{target:'memory',text:'t',...sent[0]}]}]}) as any;
+    assert.deepEqual(lostPage.memories[0].entries[0],{target:'memory',text:'t',from:'unavailable',label:sourceLines(undefined).unavailable});
+    assert.ok((await today()).failed>=before.failed+2,'both failures are counted');
 
     // A store that can't be read labels nothing as anyone's.
     const down=new NoteSourceRepository({...stores,control:{query:async()=>{throw Error('down');}}},()=>({owner_id:OWNER}));

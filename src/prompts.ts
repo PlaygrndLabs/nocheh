@@ -161,9 +161,9 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
     closed_by:['{who}','{place}'],merged:['{count}','{place}'],more_waiting:['{count}'],note_line:['{line}'],removed_in_group:['{count}','{times}']},
   'memory.source_texts':{said:['{who}','{place}'],reaction:['{who}','{place}'],person_not_allowed:['{name}'],anonymous:['{place}'],forward:['{who}','{place}','{origin}'],
     origin_person:['{name}'],origin_channel:['{name}'],origin_group:['{name}'],file:['{name}','{who}','{place}'],file_unnamed:['{who}','{place}'],
-    audio:['{who}','{place}'],quote:['{who}','{place}'],unknown_message:['{place}'],nocheh_reply:['{place}'],nocheh_about_forward:['{place}'],nocheh_follow_up:['{place}'],
+    audio:['{who}','{place}'],quote:['{who}','{place}'],quote_nocheh:['{who}','{place}'],pinned:['{who}','{place}'],unknown_message:['{place}'],nocheh_reply:['{place}'],nocheh_about_forward:['{place}'],nocheh_follow_up:['{place}'],
     nocheh_private_answer:['{place}'],nocheh_job_report:['{place}'],nocheh_scheduled_run:['{place}'],nocheh_approved_post:['{place}'],nocheh_unlearned:['{place}'],
-    review_owner:['{place}'],review:['{sources}'],rules:['{place}'],turn_own:['{place}','{date}'],turn:['{place}','{date}'],turn_read:['{place}','{date}','{read}'],
+    review_owner:['{place}'],review:['{sources}'],rules:['{place}'],rules_others:['{place}'],turn_own:['{place}','{date}'],turn:['{place}','{date}'],turn_read:['{place}','{date}','{read}'],
     job_turn:['{place}','{date}','{read}'],more:['{count}']},
 };
 /** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
@@ -215,11 +215,13 @@ export const sourceTexts=['said: {who} in {place}','reaction: a reaction by {who
   'anonymous: an anonymous admin, or a post in a chat\'s name, in {place}','forward: a message {who} forwarded in {place}, from {origin}',
   'origin_person: a person shown as {name}','origin_hidden: a person who hides their account','origin_channel: the channel {name}','origin_group: the group {name}',
   'origin_bot: an inline bot','origin_unnamed: someone Telegram doesn\'t name','file: the file {name} {who} sent in {place}','file_unnamed: a file {who} sent in {place}',
-  'audio: an audio file {who} sent in {place}','quote: a reply by {who} in {place}, quoting someone else\'s message','unknown_message: a message Nocheh can\'t describe, in {place}',
+  'audio: an audio file {who} sent in {place}','quote: a reply by {who} in {place}, quoting someone else\'s message',
+  'quote_nocheh: a reply by {who} in {place}, quoting Nocheh\'s own message','pinned: a message by someone else that {who} pinned in {place}','unknown_message: a message Nocheh can\'t describe, in {place}',
   'nocheh_reply: Nocheh\'s reply in {place}','nocheh_about_forward: Nocheh\'s reply in {place} about a message you forwarded','nocheh_follow_up: Nocheh\'s follow-up in {place}',
   'nocheh_private_answer: Nocheh\'s private answer in {place}','nocheh_job_report: Nocheh\'s report in {place}','nocheh_scheduled_run: Nocheh\'s scheduled result in {place}',
   'nocheh_approved_post: Nocheh\'s post in {place}, sent after you approved it','nocheh_unlearned: Nocheh\'s card, notice or reminder in {place}',
   'review_owner: Your own messages in {place}','review: Nocheh\'s notes review of {sources}','rules: rules Nocheh learned in {place}',
+  'rules_others: rules Nocheh learned in {place} from other people\'s messages, forwards or files',
   'turn_own: Nocheh\'s note from {place} on {date}, written while answering your own message','turn: Nocheh\'s note from {place} on {date}',
   'turn_read: Nocheh\'s note from {place} on {date}, after reading {read}','job_turn: Nocheh\'s note from a job or scheduled run in {place} on {date}, after reading {read}',
   'earlier: also an earlier note it replaced','read_message: the message it answered','read_forward: a forwarded message','read_file: a file',
@@ -227,8 +229,8 @@ export const sourceTexts=['said: {who} in {place}','reaction: a reaction by {who
   'read_commands: command results','read_past: past conversations','read_other: other tools','unknown: Source not recorded',
   'unavailable: Source not available right now','more: {count} more'].join('\n');
 export type SourceText='said'|'reaction'|'person_not_allowed'|'anonymous'|'forward'|'origin_person'|'origin_hidden'|'origin_channel'|'origin_group'|'origin_bot'|
-  'origin_unnamed'|'file'|'file_unnamed'|'audio'|'quote'|'unknown_message'|'nocheh_reply'|'nocheh_about_forward'|'nocheh_follow_up'|'nocheh_private_answer'|
-  'nocheh_job_report'|'nocheh_scheduled_run'|'nocheh_approved_post'|'nocheh_unlearned'|'review_owner'|'review'|'rules'|'turn_own'|'turn'|'turn_read'|'job_turn'|
+  'origin_unnamed'|'file'|'file_unnamed'|'audio'|'quote'|'quote_nocheh'|'pinned'|'unknown_message'|'nocheh_reply'|'nocheh_about_forward'|'nocheh_follow_up'|'nocheh_private_answer'|
+  'nocheh_job_report'|'nocheh_scheduled_run'|'nocheh_approved_post'|'nocheh_unlearned'|'review_owner'|'review'|'rules'|'rules_others'|'turn_own'|'turn'|'turn_read'|'job_turn'|
   'earlier'|'read_message'|'read_forward'|'read_file'|'read_recent'|'read_archive'|'read_web'|'read_notion'|'read_tools'|'read_commands'|'read_past'|'read_other'|
   'unknown'|'unavailable'|'more';
 /** The source lines, with any line the owner removed or left empty, or stored without a value it must keep, taken from

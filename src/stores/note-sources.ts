@@ -4,7 +4,7 @@ import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
 import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.js';
 import {sourceChat} from '../spaces.js';
-import {eventClass,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
+import {bucketOf,eventClass,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
 import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
 import {nameKeys,type Who} from '../task-reminder-text.js';
@@ -27,6 +27,32 @@ export type StoredOrigin={by:'review';review:string}|
 export interface NoteInput {key:string;origins:StoredOrigin[];more:number;cites:string[];more_cites:boolean;space:string|null}
 /** A note's source: the fixed token trust is keyed on, and its label. */
 export interface NoteSource {from:NoteFrom;label:string}
+
+/**
+ * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes for recall
+ * and the Notes page, and naming their chats (`notes`), and recall's ask of the owner's forwards and files
+ * (`memory_read`). /v1/status shows today's, and the owner's notice and System › Health add it to those lines.
+ */
+export const memoryProblemSchema=`
+CREATE TABLE IF NOT EXISTS memory_problem_days (
+ day date NOT NULL,kind text NOT NULL CHECK(kind IN ('notes','memory_read')),done integer NOT NULL DEFAULT 0,failed integer NOT NULL DEFAULT 0,
+ PRIMARY KEY(day,kind)
+);
+`;
+export type MemoryProblemKind='notes'|'memory_read';
+/** Counts one step that worked or failed, today in UTC. A count that can't be written is left out: it never fails the
+ *  step it counts. */
+export async function countMemoryStep(control:Pick<pg.Pool,'query'>,kind:MemoryProblemKind,ok:boolean):Promise<void> {
+  try {
+    await control.query(`INSERT INTO memory_problem_days(day,kind,done,failed) VALUES((now() AT TIME ZONE 'UTC')::date,$1,$2,$3)
+      ON CONFLICT(day,kind) DO UPDATE SET done=memory_problem_days.done+excluded.done,failed=memory_problem_days.failed+excluded.failed`,[kind,ok?1:0,ok?0:1]);
+  }catch{}
+}
+/** Today's counts, in the shape the provider monitor reads Hermes's own (usage.note_rows). */
+export async function memoryProblems(control:Pick<pg.Pool,'query'>):Promise<{day:string;kind:MemoryProblemKind;done:number;failed:number}[]> {
+  return (await control.query(`SELECT to_char(day,'YYYY-MM-DD') AS day,kind,done,failed FROM memory_problem_days
+    WHERE day=(now() AT TIME ZONE 'UTC')::date ORDER BY kind`)).rows;
+}
 
 function storedOrigin(value:unknown):StoredOrigin|null {
   const found=record(value),keys=found?Object.keys(found).sort().join(','):'';
@@ -87,14 +113,36 @@ export class NoteSourceRepository {
     return found;
   }
 
-  /** The facts and class of each of these events. A reply of Nocheh's is read with the message it answered, so a reply
-   *  about someone else's forward is classed as being about that forward. */
+  /**
+   * The facts and class of each of these events. A reply of Nocheh's is read with the message it answered, so a reply
+   * about someone else's forward is classed as being about that forward. The owner's quote is read with the message it
+   * replies to, by the archive's reply relation: a quote of Nocheh's own learned message, which is already learned as
+   * Nocheh's, is `quote_nocheh`. A quote of Nocheh's card, notice or reminder, of its reply about a forward, of a message
+   * not found, or of anyone else's stays a quote of someone else's message.
+   */
   async classesFor(ids:readonly string[]):Promise<Map<string,{facts:SourceFacts;class:EventClass}>> {
     const facts=await this.factsFor(ids);
-    const answered=[...facts.values()].map(item=>item.answers).filter((id):id is string=>!!id&&!facts.has(id));
+    const replies=await this.repliedTo([...facts].filter(([,item])=>item.author==='owner'&&item.quote==='other').map(([id])=>id));
+    const quoted=[...new Set([...replies.values()].flat())].filter(id=>!facts.has(id));
+    const read=new Map([...quoted.length?await this.factsFor(quoted):[],...facts]);
+    const answered=[...read.values()].map(item=>item.answers).filter((id):id is string=>!!id&&!read.has(id));
     const targets=answered.length?await this.factsFor(answered):new Map<string,SourceFacts>();
-    const of=(id:string|null)=>id===null?null:facts.get(id)??targets.get(id)??null;
-    return new Map([...facts].map(([id,item])=>[id,{facts:item,class:eventClass(item,of(item.answers))}]));
+    const of=(id:string|null)=>id===null?null:read.get(id)??targets.get(id)??null,classOf=(item:SourceFacts)=>eventClass(item,of(item.answers));
+    const learned=(id:string)=>{const target=read.get(id);return !!target&&target.author==='nocheh'&&bucketOf(classOf(target))==='nocheh';};
+    return new Map([...facts].map(([id,item])=>{
+      const cls=classOf(item),answers=replies.get(id)??[];
+      return [id,{facts:item,class:cls==='quote'&&answers.length>0&&answers.every(learned)?'quote_nocheh':cls}];
+    }));
+  }
+  /** Every archived message each of these events replies to, by the archive's reply relation: each revision observed. */
+  private async repliedTo(ids:readonly string[]):Promise<Map<string,string[]>> {
+    const found=new Map<string,string[]>();
+    if(!ids.length)return found;
+    for(const row of (await this.stores.archive.query(`SELECT r.event_id,o.event_id AS target FROM source_relations r
+      JOIN source_revisions v ON v.object_id=r.target_id JOIN source_observations o ON o.revision_id=v.id
+      WHERE r.event_id=ANY($1::text[]) AND r.kind='reply_to' ORDER BY r.event_id,o.event_id`,[ids])).rows)
+      found.set(String(row.event_id),[...found.get(String(row.event_id))??[],String(row.target)]);
+    return found;
   }
 
   /**
@@ -102,13 +150,16 @@ export class NoteSourceRepository {
    * place from its source message, and the note's citations; a turn from the class of the message it answered and the
    * chat of its profile. A review whose row is gone reads as not recorded; a note that cites more than were sent can't
    * be the owner's; one that had to drop origins has an unknown one too. `detail` also reads each message's chat and
-   * whether its sender is allowed there now, which only the owner's words name.
+   * whether its sender is allowed there now, which only the owner's words name. Origins come back in the order of
+   * `notes`, so two notes with the same key in different profiles keep their own; `partial` says a place read failed.
    */
   private async resolve(notes:readonly NoteInput[],detail:boolean) {
     const reviewIds=[...new Set(notes.flatMap(note=>note.origins.flatMap(origin=>origin.by==='review'?[origin.review]:[])))];
     const rows=reviewIds.length?(await this.stores.control.query('SELECT id,provenance,source_reference FROM native_review_jobs WHERE id=ANY($1::text[])',[reviewIds])).rows:[];
-    // Each review's place is read from its source message, all at once; one that can't be read is a chat Nocheh can't name.
-    const places=await Promise.all(rows.map(row=>this.access?this.access.space(row.source_reference).catch(()=>null):null));
+    // Each review's place is read from its source message, all at once; one that can't be read is a chat Nocheh can't
+    // name. A message that is gone has no place; any other failure is counted, and the labels still go out.
+    let partial=false;
+    const places=await Promise.all(rows.map(row=>this.access?this.access.space(row.source_reference).catch(error=>{if(!(error instanceof HttpError))partial=true;return null;}):null));
     const reviews=new Map<string,{provenance:unknown;place:string|null;events:string[]}>(rows.map((row,index)=>[String(row.id),{provenance:row.provenance,
       place:places[index]??null,events:Array.isArray(row.provenance?.events)?row.provenance.events.map((event:any)=>event?.id).filter(fullId):[]}]));
     const ids=new Set<string>();
@@ -136,38 +187,43 @@ export class NoteSourceRepository {
       if(stored.by==='unknown')return {by:'unknown'};
       if(stored.by==='review') {
         const row=reviews.get(stored.review);
-        if(!row)return {by:'review',place:{chat:null},events:[],outside:[],owner:false,cited:false,rules:false};
+        if(!row)return {by:'review',place:{chat:null},events:[],outside:[],owner:false,cited:false,rules:false,rule_buckets:[]};
         const found=reviewOrigin(row.provenance,note.cites,{chat:row.place},known);
         return note.more_cites&&found.by==='review'?{...found,owner:false}:found;
       }
       return {by:'turn',place:{chat:place(note.space),web:stored.channel==='browser'},date:stored.at,reads:stored.reads,
         answered:classes.get(stored.event)?.class??null,complete:stored.complete,job:stored.channel==='scheduler'||stored.channel==='background'};
     };
-    const origins=new Map(notes.map(note=>[note.key,[...note.origins.map(stored=>origin(stored,note)),...note.more?[{by:'unknown'} as NoteOrigin]:[]]]));
+    const origins=notes.map(note=>[...note.origins.map(stored=>origin(stored,note)),...note.more?[{by:'unknown'} as NoteOrigin]:[]]);
     const chatsNamed=new Set<string>();
-    for(const list of origins.values())for(const item of list)if(item.by==='review'||item.by==='turn')if(item.place.chat)chatsNamed.add(item.place.chat);
+    for(const list of origins)for(const item of list)if(item.by==='review'||item.by==='turn')if(item.place.chat)chatsNamed.add(item.place.chat);
     for(const item of known.values())if(item.chat)chatsNamed.add(item.chat);
-    return {origins,known,chats:[...chatsNamed]};
+    return {origins,known,chats:[...chatsNamed],partial};
   }
+  /** Counts one labelling in the stores' day count: it failed when it threw or could not name a chat. */
+  private async counted(ok:boolean){await countMemoryStep(this.stores.control,'notes',ok);}
 
-  /** Each note's source in the model's fixed words, by its key (ADR-0257): no person is named, and only group and topic
-   *  names Nocheh saved appear, which the request guard still checks since they are never let through beforehand. */
-  async labels(notes:readonly NoteInput[]):Promise<Map<string,NoteSource>> {
-    if(!notes.length)return new Map();
-    const {origins,chats:named}=await this.resolve(notes,false),names=await recallNames(this.stores,named);
-    return new Map([...origins].map(([key,list])=>[key,{from:fromToken(list),label:modelLabel(list,names)}]));
+  /** Each note's source in the model's fixed words, in the order of `notes` (ADR-0257): no person is named, and only
+   *  group and topic names Nocheh saved appear, which the request guard still checks since they are never let through
+   *  beforehand. */
+  async labels(notes:readonly NoteInput[]):Promise<NoteSource[]> {
+    if(!notes.length)return [];
+    const {origins,chats:named,partial}=await this.resolve(notes,false),names=await recallNames(this.stores,named);
+    await this.counted(!partial);
+    return origins.map(list=>({from:fromToken(list),label:modelLabel(list,names)}));
   }
 
   /** Each note's source in the owner's own words (memory.source_texts), naming people and chats as reminders do, for
-   *  the Notes page. */
-  async ownerLabels(notes:readonly NoteInput[]):Promise<Map<string,NoteSource>> {
-    if(!notes.length)return new Map();
-    const {origins,known}=await this.resolve(notes,true),prompts=await ownerPrompts(this.stores.control);
+   *  the Notes page, in the order of `notes`. */
+  async ownerLabels(notes:readonly NoteInput[]):Promise<NoteSource[]> {
+    if(!notes.length)return [];
+    const {origins,known,partial}=await this.resolve(notes,true),prompts=await ownerPrompts(this.stores.control);
     const words:SourceWords={lines:sourceLines(prompts['memory.source_texts']),reminder:reminderLines(prompts['tasks.reminder_texts']),
       places:approvalLines(prompts['telegram.approval_texts'])};
     const people:Who[]=[...known.values()].flatMap(item=>item.facts?.author==='person'?[{by:'person' as const,account:item.facts.account,name:item.facts.name}]:[]);
     const names=await peopleNames(this.stores.control,chats(),this.policy() as AssistantPolicy,people),keys=nameKeys(names,people);
-    return new Map([...origins].map(([key,list])=>[key,{from:fromToken(list),label:ownerLabel(list,words,names,keys)}]));
+    await this.counted(!partial);
+    return origins.map(list=>({from:fromToken(list),label:ownerLabel(list,words,names,keys)}));
   }
 
   /**
@@ -178,9 +234,11 @@ export class NoteSourceRepository {
     const found=record(body),space=found?.space;
     if(!found||!Array.isArray(found.notes)||found.notes.length>200||Object.keys(found).some(name=>name!=='notes'&&name!=='space')||
       space!==undefined&&(typeof space!=='string'||!space||space.length>200))throw new HttpError(400,'invalid_note_sources');
-    const notes=found.notes.map(note=>noteInput(note,space??null));
+    const notes=found.notes.map(note=>noteInput(note,space??null)) as (NoteInput|null)[];
     if(notes.some(note=>note===null))throw new HttpError(400,'invalid_note_sources');
-    return {labels:Object.fromEntries(await this.labels(notes as NoteInput[]))};
+    // One profile's notes: two with the same key are the same entry, so keying by it loses nothing.
+    const labels=await this.labels(notes as NoteInput[]);
+    return {labels:Object.fromEntries((notes as NoteInput[]).map((note,index)=>[note.key,labels[index]!]))};
   }
 
   /**
@@ -198,13 +256,15 @@ export class NoteSourceRepository {
     let count=0;
     const memories=value.memories.map(memory=>{
       const item=record(memory);
-      return item&&Array.isArray(item.entries)?{item,entries:item.entries.map(entry=>({entry:record(entry),input:input(entry,count++)}))}:{item:memory,entries:null};
+      return item&&Array.isArray(item.entries)?{item,entries:item.entries.map(entry=>{const index=count++;return {entry:record(entry),input:input(entry,index),index};})}:
+        {item:memory,entries:null};
     });
-    let labels:Map<string,NoteSource>|null=null;
-    try{labels=await this.ownerLabels(memories.flatMap(memory=>memory.entries?.map(entry=>entry.input)??[]));}catch{}
+    // A failed lookup is counted for the owner's notice, and every note still shows, as not available right now.
+    let labels:NoteSource[]|null=null;
+    try{labels=await this.ownerLabels(memories.flatMap(memory=>memory.entries?.map(entry=>entry.input)??[]));}catch{await this.counted(false);}
     const unavailable:NoteSource={from:'unavailable',label:sourceLines(undefined).unavailable};
-    return {...value,memories:memories.map(({item,entries})=>entries===null?item:{...item as object,entries:entries.map(({entry,input})=>
-      ({target:entry?.target,text:entry?.text,...labels?.get(input.key)??unavailable}))})};
+    return {...value,memories:memories.map(({item,entries})=>entries===null?item:{...item as object,entries:entries.map(({entry,index})=>
+      ({target:entry?.target,text:entry?.text,...labels?.[index]??unavailable}))})};
   }
 
   /**
@@ -217,12 +277,14 @@ export class NoteSourceRepository {
     if(!value||!Array.isArray(value.hits))return result;
     const hits=value.hits.map(hit=>record(hit)).filter(hit=>hit!==null);
     const inputs=hits.map(hit=>hit.kind==='native_note'?noteInput(hit.note,typeof hit.space==='string'?hit.space:null):null);
-    let labels:Map<string,NoteSource>|null=null;
-    try{labels=await this.labels(inputs.filter(input=>input!==null));}catch{}
+    // Each hit is labelled on its own, by its place among the notes asked: the same note in two profiles keeps each one's source.
+    const asked=inputs.flatMap((input,index)=>input?[{input,index}]:[]),position=new Map(asked.map((item,at)=>[item.index,at]));
+    let labels:NoteSource[]|null=null;
+    try{labels=await this.labels(asked.map(item=>item.input));}catch{await this.counted(false);}
     const words=modelSourceWords.labels,unknown:NoteSource={from:'unknown',label:words.unknown};
     return {...value,hits:hits.map((hit,index)=>{
-      const {note,role,...rest}=hit,input=inputs[index];
-      if(hit.kind==='native_note')return {...rest,source:labels===null?{from:'unavailable',label:words.unavailable}:input&&labels.get(input.key)||unknown};
+      const {note,role,...rest}=hit,at=position.get(index);
+      if(hit.kind==='native_note')return {...rest,source:labels===null?{from:'unavailable',label:words.unavailable}:at!==undefined&&labels[at]||unknown};
       if(hit.kind==='native_session')return {...rest,role:role==='assistant'?recallRoleWords.assistant:role==='tool'?recallRoleWords.tool:recallRoleWords.message};
       return rest;
     })};

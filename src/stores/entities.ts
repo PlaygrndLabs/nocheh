@@ -104,10 +104,10 @@ export async function conversationObject(archive:Pick<StorePools['archive'],'que
 }
 
 /** Whether a message is its author's own typing: a new message, edit, reaction or web chat message of a person or the
- *  owner, with no forward of someone else's, no quote of someone else's message and no text read from a file or audio
- *  file (ownerTyped, for any author). The author's own voice, transcribed, is theirs. */
+ *  owner, with no forward of someone else's, no quote of someone else's message, no pin of someone else's message and
+ *  no text read from a file or audio file (ownerTyped, for any author). The author's own voice, transcribed, is theirs. */
 const typed=(f:SourceFacts|undefined)=>!!f&&(f.author==='owner'||f.author==='person')&&['message','edit','reaction','browser'].includes(f.act)&&
-  (f.forward===null||f.forward==='own')&&f.quote!=='other'&&!f.file&&!f.audio;
+  (f.forward===null||f.forward==='own')&&f.quote!=='other'&&f.pinned!=='other'&&!f.file&&!f.audio;
 
 export class EntityRepository {
   private readonly commands:OwnerCommands;

@@ -27,21 +27,26 @@ export interface Place {chat:string|null;web?:boolean}
 /** One message a label may name: its class, and for the owner's words its facts, its chat and whether its sender is
  *  allowed there now. */
 export interface LabelEvent {class:EventClass;facts?:SourceFacts|null;chat?:string|null;allowed?:boolean}
+/** Whose words a learned rule a review read rests on, when they are not the owner's or Nocheh's: another person's
+ *  messages, forwards, or files' text. */
+export const ruleBuckets=['person','forward','file'] as const;
+export type RuleBucket=typeof ruleBuckets[number];
 /**
  * One origin of a note, resolved by code. A review names its batch (`events`), the cited messages outside it
- * (`outside`), whether the owner rule held (`owner`, reviewOwner), whether the note cited any batch message, and whether
- * it read learned rules; a review with no recorded batch is unknown. A turn names where and when it ran, what it read,
+ * (`outside`), whether the owner rule held (`owner`, reviewOwner), whether the note cited any batch message, whether
+ * it read learned rules, and whose words those rules rest on (`rule_buckets`); a review with no recorded batch is unknown. A turn names where and when it ran, what it read,
  * the class of the message it answered (null when not known), whether its reads were recorded to the end, and whether it
  * was a job or scheduled run. The first origin is the note's writer; the rest are notes it replaced.
  */
 export type NoteOrigin=
-  {by:'review';place:Place;events:readonly LabelEvent[];outside:readonly LabelEvent[];owner:boolean;cited:boolean;rules:boolean}|
+  {by:'review';place:Place;events:readonly LabelEvent[];outside:readonly LabelEvent[];owner:boolean;cited:boolean;rules:boolean;rule_buckets:readonly RuleBucket[]}|
   {by:'turn';place:Place;date:string;reads:readonly ReadToken[];answered:EventClass|null;complete:boolean;job:boolean}|
   {by:'unknown'}|{by:'unavailable'};
 
-/** What a notes review recorded about its batch when it was queued: event ids and fixed class tokens only. */
+/** What a notes review recorded about its batch when it was queued: event ids and fixed class tokens only, and whose
+ *  words the rules it read rest on, by the messages code recorded each rule was learned from. */
 export interface ReviewProvenance {
-  version:1;source:string;events:{id:string;class:EventClass}[];owner_account_only:boolean;rules:'none'|'owner'|'others';
+  version:1;source:string;events:{id:string;class:EventClass}[];owner_account_only:boolean;rules:'none'|'owner'|'others';rule_buckets:RuleBucket[];
   left_out:{sender_not_allowed:number;rule_sender_not_allowed:number;rules_left_out_for_owner_label:number};
 }
 
@@ -51,13 +56,15 @@ export const modelSourceWords={
   events:{owner_message:'the owner\'s own message',owner_reaction:'the owner\'s reaction',owner_browser:'the owner\'s message in the web chat',
     person_message:'another person\'s message',person_reaction:'another person\'s reaction',anonymous_post:'a post by an anonymous admin or in a chat\'s name',
     forward:'a message {by} forwarded from {origin}',file:'text of a file {by} sent',audio:'a transcript of an audio file {by} sent',
-    quote:'a reply quoting another person\'s message',nocheh_about_forward:'Nocheh\'s reply about a forwarded message',
+    quote:'a reply quoting another person\'s message',quote_nocheh:'the owner\'s reply quoting Nocheh\'s own message',
+    pinned:'a pinned message by another person',nocheh_about_forward:'Nocheh\'s reply about a forwarded message',
     nocheh_unlearned:'Nocheh\'s card, notice or reminder',unknown:'a message Nocheh can\'t describe'},
   by:{owner:'the owner',person:'another person'},
   origins:{person:'a person',hidden:'a person who hides their account',channel:'a channel',chat:'a group',bot:'an inline bot'},
   nocheh:{reply:'Nocheh\'s reply',follow_up:'Nocheh\'s follow-up',private_answer:'Nocheh\'s private answer',job_report:'Nocheh\'s job report',
     scheduled_run:'Nocheh\'s scheduled result',approved_post:'Nocheh\'s post'},
   labels:{review_owner:'the owner\'s own messages in {place}',review:'Nocheh\'s notes review of {main} in {place}',more:', and {count} more sources',
+    rules_others:', with rules learned from others',
     review_uncited:'a notes review of the owner\'s own messages in {place}; the note cites none of them',
     turn_own:'Nocheh\'s note from {place} on {date}, written while answering the owner\'s own message',turn:'Nocheh\'s note from {place} on {date}',
     turn_read:'Nocheh\'s note from {place} on {date}, after reading {reads}',job_turn:'Nocheh\'s note from a job or scheduled run in {place} on {date}',
@@ -74,10 +81,12 @@ export const modelSourceWords={
     origin_chat:'a group shown as “{name}”',origin_bot:'the inline bot @{name}',unnamed_person:'a person',unnamed_channel:'a channel',unnamed_chat:'a group',
     unnamed_bot:'an inline bot',file:'text of a file the sender sent (“{name}”): not the sender\'s own words',
     file_unnamed:'text of a file the sender sent: not the sender\'s own words',audio:'a transcript of an audio file the sender sent: not the sender\'s own words',
-    quote:'a quote of another person\'s message inside the sender\'s reply',reply:'Nocheh\'s reply',about_forward:'Nocheh\'s reply about a message the owner forwarded',
+    quote:'a quote of another person\'s message inside the sender\'s reply',
+    pinned:'a message by another person that the sender pinned: not the sender\'s own words',reply:'Nocheh\'s reply',about_forward:'Nocheh\'s reply about a message the owner forwarded',
     follow_up:'Nocheh\'s follow-up',private_answer:'Nocheh\'s private answer',job_report:'Nocheh\'s report',scheduled_run:'Nocheh\'s scheduled result',
     approved_post:'Nocheh\'s post',unlearned:'Nocheh\'s card, notice or reminder',note:'Nocheh\'s note',
-    pointer:'the owner forwarded a message from {origin}; its text is kept with the owner\'s forwards and files'},
+    pointer:'the owner forwarded a message from {origin}; its text is kept with the owner\'s forwards and files',
+    pinned_pointer:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files'},
 } as const;
 /** The longest label the model reads; the Notes page shows the whole label in the owner's words. */
 export const MODEL_LABEL_LIMIT=120;
@@ -108,17 +117,19 @@ export function modelEventPhrase(cls:EventClass):string {
   return Object.hasOwn(words.events,cls)?words.events[cls as keyof typeof words.events]:words.events.unknown;
 }
 
-/** A stored review provenance (version 1), or null when it is missing or not that shape: such a batch is never the owner's. */
+/** A stored review provenance (version 1), or null when it is missing or not that shape: such a batch is never the owner's.
+ *  One stored before rules named whose words they rest on reads rules learned from others as another person's. */
 export function provenanceOf(value:unknown):ReviewProvenance|null {
-  const found=record(value),left=record(found?.left_out);
+  const found=record(value),left=record(found?.left_out),buckets=found?.rule_buckets;
   if(!found||found.version!==1||!fullId(found.source)||typeof found.owner_account_only!=='boolean'||!['none','owner','others'].includes(found.rules))return null;
+  if(buckets!==undefined&&(!Array.isArray(buckets)||buckets.length>ruleBuckets.length||buckets.some(bucket=>!(ruleBuckets as readonly unknown[]).includes(bucket))))return null;
   if(!Array.isArray(found.events)||found.events.length>200)return null;
   const events=found.events.map(record);
   if(events.some(event=>!event||!fullId(event.id)||!isEventClass(event.class)))return null;
   const counts=['sender_not_allowed','rule_sender_not_allowed','rules_left_out_for_owner_label'] as const;
   if(!left||counts.some(name=>!Number.isSafeInteger(left[name])||left[name]<0))return null;
   return {version:1,source:found.source,events:events.map(event=>({id:event!.id,class:event!.class})),owner_account_only:found.owner_account_only,
-    rules:found.rules,left_out:{sender_not_allowed:left.sender_not_allowed,rule_sender_not_allowed:left.rule_sender_not_allowed,
+    rules:found.rules,rule_buckets:buckets===undefined?found.rules==='others'?['person']:[]:ruleBuckets.filter(bucket=>buckets.includes(bucket)),left_out:{sender_not_allowed:left.sender_not_allowed,rule_sender_not_allowed:left.rule_sender_not_allowed,
       rules_left_out_for_owner_label:left.rules_left_out_for_owner_label}};
 }
 
@@ -138,36 +149,41 @@ export function reviewOwner(provenance:ReviewProvenance|null,cites:readonly stri
 
 /** A review origin from its stored provenance and the note's citations. `known` holds what labels need of each message
  *  (its facts, chat and whether its sender is allowed), by event id; a cited message outside the batch with nothing
- *  known reads as unknown, which is never the owner's. The class stored at queue time always wins. */
+ *  known reads as unknown, which is never the owner's. The class stored at queue time always wins, and the rules it read
+ *  bring whose words they rest on. */
 export function reviewOrigin(value:unknown,cites:readonly string[],place:Place,known:ReadonlyMap<string,LabelEvent>=new Map()):NoteOrigin {
   const provenance=provenanceOf(value),cited=[...new Set(cites.filter(fullId))];
-  if(!provenance)return {by:'review',place,events:[],outside:[],owner:false,cited:false,rules:false};
+  if(!provenance)return {by:'review',place,events:[],outside:[],owner:false,cited:false,rules:false,rule_buckets:[]};
   const ids=new Set(provenance.events.map(event=>event.id));
   return {by:'review',place,events:provenance.events.map(event=>({...known.get(event.id),class:event.class})),
     outside:cited.filter(id=>!ids.has(id)).map(id=>known.get(id)??{class:'unknown'}),owner:reviewOwner(provenance,cited),
-    cited:cited.some(id=>ids.has(id)),rules:provenance.rules!=='none'};
+    cited:cited.some(id=>ids.has(id)),rules:provenance.rules!=='none',rule_buckets:provenance.rule_buckets};
 }
 
 /** What a turn read, in order: the message it answered when that was not the owner's own typing (a forward or a file
- *  by name), then its recorded reads; a turn whose reads were not recorded to the end read other tools too. */
+ *  by name; the owner's quote of Nocheh's own learned message reads nothing outside), then its recorded reads; a turn
+ *  whose reads were not recorded to the end read other tools too. */
 export function turnReads(origin:Extract<NoteOrigin,{by:'turn'}>):ReadToken[] {
   const reads:ReadToken[]=[],bucket=origin.answered===null?null:bucketOf(origin.answered);
-  if(bucket!=='owner')reads.push(bucket==='forward'?'forward':bucket==='file'?'file':'message');
+  if(bucket!=='owner'&&origin.answered!=='quote_nocheh')reads.push(bucket==='forward'?'forward':bucket==='file'?'file':'message');
   for(const read of origin.reads)if((readTokens as readonly string[]).includes(read)&&!reads.includes(read))reads.push(read);
   if(!origin.complete&&!reads.length)reads.push('other');
   return reads;
 }
 
 /**
- * The `from` of a note with these origins. Any other person's message, forward or file in a review's batch or its
- * citations names that, or mixed for several; then a source not recorded; then a turn, which read outside the owner's
+ * The `from` of a note with these origins. Any other person's message, forward or file in a review's batch, its
+ * citations or the rules it read names that, or mixed for several; then a source not recorded; then a turn, which read outside the owner's
  * message or not; then Nocheh, for a review with Nocheh's own messages or one that did not meet the owner rule; and only
  * then the owner. A note written during a turn is never the owner's.
  */
 export function fromToken(origins:readonly NoteOrigin[]):NoteFrom {
   if(!origins.length)return 'unknown';
   const buckets=new Set<Bucket>();
-  for(const origin of origins)if(origin.by==='review')for(const event of [...origin.events,...origin.outside])buckets.add(bucketOf(event.class));
+  for(const origin of origins)if(origin.by==='review') {
+    for(const event of [...origin.events,...origin.outside])buckets.add(bucketOf(event.class));
+    for(const bucket of origin.rule_buckets)buckets.add(bucket);
+  }
   const others=(['person','forward','file'] as const).filter(bucket=>buckets.has(bucket));
   if(others.length)return others.length>1?'mixed':others[0]!;
   if(origins.some(origin=>origin.by==='unavailable'))return 'unavailable';
@@ -190,15 +206,16 @@ function modelPlace(place:Place,names:ReadonlyMap<string,string>,size:number,dir
   return label;
 }
 const dayOf=(date:string)=>/^\d{4}-\d{2}-\d{2}$/.test(date)?date:modelSourceWords.labels.no_date;
-/** A label's words, and the ending that stays whole when the label is cut: how many more sources a review had. */
+/** A label's words, and the ending that stays whole when the label is cut: how many more sources a review had, and
+ *  that it read rules learned from others' words. */
 function modelCore(origin:Extract<NoteOrigin,{by:'review'|'turn'}>,place:string,directory:ChatDirectory):[string,string] {
   const words=modelSourceWords.labels;
   if(origin.by==='review') {
-    const all=[...origin.events,...origin.outside];
-    if(all.every(owned)&&(origin.owner||!origin.cited))return [fillLine(origin.owner?words.review_owner:words.review_uncited,{place}),''];
+    const all=[...origin.events,...origin.outside],ruled=origin.rule_buckets.length?words.rules_others:'';
+    if(all.every(owned)&&(origin.owner||!origin.cited))return [fillLine(origin.owner?words.review_owner:words.review_uncited,{place}),ruled];
     // The batch is named by another person's message, a forward or a file first, so none is hidden behind the owner's.
     const main=all.find(event=>['person','forward','file'].includes(bucketOf(event.class)))??all.find(event=>!owned(event))??all[0]!;
-    return [fillLine(words.review,{main:modelEventPhrase(main.class),place}),all.length>1?fillLine(words.more,{count:String(all.length-1)}):''];
+    return [fillLine(words.review,{main:modelEventPhrase(main.class),place}),(all.length>1?fillLine(words.more,{count:String(all.length-1)}):'')+ruled];
   }
   const reads=turnReads(origin).map(read=>modelSourceWords.reads[read]).join(', '),values={place,date:dayOf(origin.date),reads};
   if(origin.job)return [fillLine(words.job_turn,values)+(reads?fillLine(words.job_read,values):''),''];
@@ -284,12 +301,14 @@ function ownerOrigin(event:LabelEvent,words:SourceWords):string {
 /** One message in the owner's words: who sent what kind of message where. */
 export function ownerEventLabel(event:LabelEvent,words:SourceWords,names:Names,keys:NameKeys):string {
   const line=words.lines,cls=event.class,place=event.chat?placeLabel(event.chat,words.places,names.directory):words.places.unknown_chat;
-  const owner=cls.startsWith('owner_')||cls.endsWith('_by_owner')||cls==='quote'&&event.facts?.author==='owner';
+  const owner=cls.startsWith('owner_')||cls.endsWith('_by_owner')||['quote','quote_nocheh','pinned'].includes(cls)&&event.facts?.author==='owner';
   const who=()=>ownerWho(event,owner,words,names,keys);
   if(['owner_message','owner_browser','person_message'].includes(cls))return fillLine(line.said,{who:who(),place});
   if(cls==='owner_reaction'||cls==='person_reaction')return fillLine(line.reaction,{who:who(),place});
   if(cls==='anonymous_post')return fillLine(line.anonymous,{place});
   if(cls==='quote')return fillLine(line.quote,{who:who(),place});
+  if(cls==='quote_nocheh')return fillLine(line.quote_nocheh,{who:who(),place});
+  if(cls==='pinned')return fillLine(line.pinned,{who:who(),place});
   if(cls.startsWith('forward_'))return fillLine(line.forward,{who:who(),place,origin:ownerOrigin(event,words)});
   if(cls.startsWith('file_')){const name=quoted(event.facts?.file_name);return fillLine(name===null?line.file_unnamed:line.file,{name:name??'',who:who(),place});}
   if(cls.startsWith('audio_'))return fillLine(line.audio,{who:who(),place});
@@ -311,7 +330,7 @@ export function ownerLabel(origins:readonly NoteOrigin[],words:SourceWords,names
     if(first.owner&&all.every(owned))label=fillLine(line.review_owner,{place:place(first.place)});
     else {
       const phrases=[...new Set(all.map(event=>ownerEventLabel(event,words,names,keys)))],parts=phrases.slice(0,shownSources);
-      if(first.rules)parts.push(fillLine(line.rules,{place:place(first.place)}));
+      if(first.rules)parts.push(fillLine(first.rule_buckets.length?line.rules_others:line.rules,{place:place(first.place)}));
       if(phrases.length>shownSources)parts.push(fillLine(line.more,{count:String(phrases.length-shownSources)}));
       label=fillLine(line.review,{sources:parts.join(', ')});
     }
@@ -324,7 +343,7 @@ export function ownerLabel(origins:readonly NoteOrigin[],words:SourceWords,names
 }
 
 /** One part of a message as Honcho stores it, for its `source`. A forward's names are its guarded copy's (forwardOrigin). */
-export type HonchoPart={part:'own'|'recording'|'audio'|'quote'}|{part:'forward';forward:Forward}|{part:'file';name:string|null}|
+export type HonchoPart={part:'own'|'recording'|'audio'|'quote'|'pinned'}|{part:'forward';forward:Forward}|{part:'file';name:string|null}|
   {part:'nocheh';send_class:SendClass|null;about_forward?:boolean};
 /** The fixed `source` of a Honcho record. Names pass through frameName, so none can close its quotes. */
 export function honchoSource(part:HonchoPart):string {
@@ -349,9 +368,10 @@ export function honchoSource(part:HonchoPart):string {
 }
 /** Several parts of one message as one `source`, in order, each named once. */
 export const honchoSources=(parts:readonly HonchoPart[]):string=>[...new Set(parts.map(honchoSource))].join('; ');
-/** What stays in the owner's private chat in place of someone else's forward, which is kept with the owner's forwards and
- *  files: fixed words that name only the kind of origin, so the chat still shows that something was forwarded. */
-export function honchoPointer(from:Exclude<Forward['from'],'own'>):{source:string;text:string} {
+/** What stays in the owner's private chat in place of someone else's forward, or someone else's message the owner
+ *  pinned, which is kept with the owner's forwards and files: fixed words that name only the kind of origin, so the chat
+ *  still shows that something was forwarded or pinned. */
+export function honchoPointer(from:Exclude<Forward['from'],'own'>|'pinned'):{source:string;text:string} {
   const words=modelSourceWords.honcho;
-  return {source:words.note,text:fillLine(words.pointer,{origin:modelSourceWords.origins[from]})};
+  return {source:words.note,text:from==='pinned'?words.pinned_pointer:fillLine(words.pointer,{origin:modelSourceWords.origins[from]})};
 }
