@@ -44,14 +44,22 @@ DAY=re.compile(r'\d{4}-\d{2}-\d{2}')
 # letters and digits with a digit in it.
 TOKENS=(re.compile(r'\d{6,}'),re.compile(r'[^\s@<>()"\']+@[^\s@<>()"\']+\.[^\s@<>()"\']+'),re.compile(r'https?://([^/\s:?#<>"\']+)'),
         re.compile(r'(?<![0-9a-z])(?=[0-9a-z]*[0-9])[0-9a-z]{15,}(?![0-9a-z])'))
-# What a turn's tools read, as read tokens. The notes and long-term memory are labelled already, and the project's
-# tasks and a job's own to-do list are Nocheh's own records, so they are not outside reads; any other tool is.
+# What a turn's tools read, as read tokens. A search by meaning returns archived messages as they were sent, with no
+# source, so it reads other chats as the archive tools do. Only the notes and long-term memory recall are labelled
+# already, and the project's tasks and a job's own to-do list are Nocheh's own records, so they are not outside reads;
+# any other tool is.
 TOOL_READS={'mcp__nocheh__archive_search':'archive','mcp__nocheh__archive_read':'archive','mcp__nocheh__archive_page':'archive',
-            'mcp__nocheh__browser':'web','mcp__nocheh__notion':'notion','mcp__nocheh__mcp':'tools','mcp__nocheh__shell':'commands',
-            'session_search':'past'}
-NOT_READS=frozenset({'memory','mcp__nocheh__memory_search','mcp__nocheh__memory_recall','mcp__nocheh__tasks','todo_list'})
+            'mcp__nocheh__memory_search':'archive','mcp__nocheh__browser':'web','mcp__nocheh__notion':'notion','mcp__nocheh__mcp':'tools',
+            'mcp__nocheh__shell':'commands','session_search':'past'}
+NOT_READS=frozenset({'memory','mcp__nocheh__memory_recall','mcp__nocheh__tasks','todo_list'})
 # The lines Nocheh puts in a turn's message, which stay in its session until a compaction: what earlier turns read.
 MARKERS=(('[Forwarded: ','forward'),('[Archived attachment: ','file'),('[Recent messages in this group','recent'))
+# The fixed lines src/forwarded.ts forwardLine puts before a forward of the sender's own earlier message, in the owner's
+# private chat and elsewhere: the sender's own words, not something read.
+OWN_FORWARDS=('[Forwarded: your own earlier message]',"[Forwarded: the sender's own earlier message]")
+# The line Nocheh puts before a group message, and the tag that ends it when the owner sent it (speakerLine in
+# src/stores/telegram-dispatch.ts). Message text cannot write either: unframed() shows a look-alike as text.
+SPEAKER,OWNER_SPEAKER='[Group message from ','] [the owner]'
 
 
 def key(target,entry):
@@ -322,17 +330,61 @@ def _called(row):
     return {call['function'].get('name') for call in calls if isinstance(call,dict) and isinstance(call.get('function'),dict)} if isinstance(calls,list) else set()
 
 
+def tool_read(row):
+    """The read token of a stored tool result, by its tool's name, or None for a tool that is not an outside read. A row
+    without a tool name, as an older schema stores it, is another tool."""
+    name=row.get('tool_name')
+    return None if name in NOT_READS else TOOL_READS.get(name,'other')
+
+
+def _forwards(text):
+    """Whether a stored message holds a forwarded line other than one of the sender's own earlier message."""
+    start=text.find('[Forwarded: ')
+    while start>=0:
+        if not any(text.startswith(own,start) for own in OWN_FORWARDS):return True
+        start=text.find('[Forwarded: ',start+1)
+    return False
+
+
+def _others(text):
+    """Whether a stored message holds a group message someone other than the owner sent."""
+    return any(line.startswith(SPEAKER) and not line.endswith(OWNER_SPEAKER) for line in text.split('\n'))
+
+
+def _written(ops):
+    """What a run's memory operations wrote, as the copy check reads it: the runs of RUN characters and the distinctive
+    tokens of each text."""
+    runs,tokens=set(),set()
+    for op in ops:
+        if isinstance(op.get('content'),str):
+            plain=_plain(op['content']);runs|=_runs(plain);tokens|=_tokens(plain)
+    return runs,tokens
+
+
+def _copied(text,written):
+    """Whether a stored message shares a run of RUN characters or a distinctive token with what a run wrote, as
+    inheritance tells a note's text carried forward. A long message is read once: its runs are looked up in the
+    written ones, and the written tokens are looked for in it, never the other way round."""
+    runs,tokens=written
+    if not isinstance(text,str) or not runs and not tokens:return False
+    plain=_plain(text)
+    return any(token in plain for token in tokens) or any(plain[start:start+RUN] in runs for start in range(len(plain)-RUN+1))
+
+
 def turn_reads(database,session,last,body):
     """What a turn read besides the message it answered, as read tokens, the memory operations it asked for, and whether
     its stored rows could be read: the forward, files and recent group messages it was given; the tools it called
-    before its last memory call; and the forwards, files and recent group messages earlier in its session since the
-    last compaction."""
+    before its last memory call; the forwards, files and recent group messages earlier in its session since the last
+    compaction; and, from there too, a tool result or another person's group message that what the turn wrote copies
+    a run of text or a distinctive token from. An earlier read the turn did not copy from leaves its notes alone, so a
+    note the owner dictates later in a long session stays the turn's own; a full paraphrase escapes, as in a review.
+    A forward of the sender's own earlier message is their own words, not a read."""
     from .retired_history import _columns,_read_only,_summary,memory_ops
     from .turn_process import forwarded,recent_group
     reads=[]
     def add(token):
         if token not in reads:reads.append(token)
-    if forwarded(body.get('forwarded')):add('forward')
+    if forwarded(body.get('forwarded')) and body['forwarded'] not in OWN_FORWARDS:add('forward')
     if body.get('files'):add('file')
     if recent_group(body.get('recent_group')):add('recent')
     database=Path(database)
@@ -348,19 +400,25 @@ def turn_reads(database,session,last,body):
             earlier=[dict(row) for row in connection.execute('SELECT '+','.join(selected)+' FROM messages WHERE session_id=? AND id<=? ORDER BY id',(session,last))]
         finally:connection.close()
     except sqlite3.Error:return reads,None,False
+    ops=[op for row in new if row['role']=='assistant' for op in memory_ops(row)]
+    written=_written(ops)
     start=max((index+1 for index,row in enumerate(earlier) if _summary(row)),default=0)
     for row in earlier[start:]:
-        if row['role']=='user' and isinstance(row['content'],str):
+        content=row['content'] if isinstance(row['content'],str) else None
+        if row['role']=='user' and content is not None:
             for marker,token in MARKERS:
-                if marker in row['content']:add(token)
+                if marker in content and (token!='forward' or _forwards(content)):add(token)
+            if 'recent' not in reads and _others(content) and _copied(content,written):add('recent')
+        elif row['role']=='tool':
+            token=tool_read(row)
+            if token and token not in reads and _copied(content,written):add(token)
     # Only what came back before the turn's last memory call can be in a note it wrote.
     cut=max((row['id'] for row in new if row['role']=='assistant' and 'memory' in _called(row)),default=None)
     for row in new:
         if cut is None or row['id']>=cut:break
-        if row['role']!='tool':continue
-        name=row.get('tool_name')
-        if name not in NOT_READS:add(TOOL_READS.get(name,'other'))
-    return reads,[op for row in new if row['role']=='assistant' for op in memory_ops(row)],True
+        token=tool_read(row) if row['role']=='tool' else None
+        if token:add(token)
+    return reads,ops,True
 
 
 def space_of(profile):
@@ -407,11 +465,14 @@ def turn_origin(body,reads,complete,now=None):
 
 
 def after_turn(profile,body,session,watch,result):
-    """Record the notes a turn wrote, with what it read; reads it could not read in full are incomplete."""
+    """Record the notes a turn wrote, with what it read; reads it could not read in full are incomplete. A turn whose
+    stored messages could not be read counts once, when it added or changed a note, whose label that made less exact."""
     try:
         from .isolated_profile import database_path
         reads,ops,ok=turn_reads(database_path(profile),session,watch['last'],body)
     except Exception:
         reads,ops,ok=[],None,False
     complete=ok and isinstance(result,dict) and result.get('state')=='done'
-    return after(profile,watch,turn_origin(body,reads,complete),ops)
+    recorded=after(profile,watch,turn_origin(body,reads,complete),ops)
+    if not ok and recorded:failed('read')
+    return recorded

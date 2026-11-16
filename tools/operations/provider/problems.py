@@ -176,8 +176,8 @@ def problems(monitoring, usage_rows, today):
                 label=row.get('label') or row['reader'], failure=row['failure'],
                 # Reads that worked today, so a notice can say when reading works again.
                 ok=row.get('ok') if type(row.get('ok')) is int else None)
-    # Notes whose source could not be recorded or looked up, and turns that could not read long-term memory in full
-    # (ADR-0257; services/hermes/usage.py NOTE_KINDS).
+    # Steps that failed to record or look up where notes came from, counted per attempt so a failure that comes back
+    # grows the count, and turns that could not read long-term memory in full (ADR-0257; services/hermes/usage.py NOTE_KINDS).
     notes = monitoring.get('note_problems')
     for row in notes if isinstance(notes, list) else []:
         if row.get('day') == today and row.get('kind') in ('notes', 'memory_read') and type(row.get('failed')) is int:
@@ -279,8 +279,9 @@ def text(problem, new):
         return (f"{label}: {_plural(count, one, many)} couldn’t be {verb} today because {WRITE_FAILURES[problem['failure']]}. "
                 f"The originals are kept: Make a new version on a message’s page {'reads' if verb == 'read' else 'transcribes'} one again.")
     if kind == 'notes':
-        return (f"Memory labels: Nocheh couldn’t record or look up where {_plural(count, 'note', 'notes')} came from today, "
-                'so they show “source not available”.')
+        return (f"Memory labels: telling where notes came from failed {_plural(count, 'time', 'times')} today. Notes written "
+                'while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not '
+                'available”. The notes themselves are kept.')
     if kind == 'memory_read':
         return (f"Long-term memory: Nocheh couldn’t read memory from your forwards and files, or your memory context, "
                 f"{_plural(count, 'time', 'times')} today; replies used the rest of your memory.")

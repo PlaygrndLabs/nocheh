@@ -84,8 +84,12 @@ class MonitoringTests(unittest.TestCase):
                                 {'day': '2026-10-13', 'kind': 'memory_read', 'failed': 1, 'ok': 2}])
         found = problems.problems({'note_problems': rows}, [], '2026-10-13')
         self.assertEqual([(problem['kind'], problem['count'], problem['ok']) for problem in found], [('notes', 4, 1), ('memory_read', 1, 2)])
+        # Each failed step counts, not each note, so a failure that comes back grows the count and reopens the line.
         self.assertEqual(problems.text(found[0], 1),
-                         'Memory labels: Nocheh couldn’t record or look up where 4 notes came from today, so they show “source not available”.')
+                         'Memory labels: telling where notes came from failed 4 times today. Notes written while it failed show '
+                         '“Source not recorded” or a less exact source, and replies may have seen “source not available”. '
+                         'The notes themselves are kept.')
+        self.assertTrue(problems.text(dict(found[0], count=1), 1).startswith('Memory labels: telling where notes came from failed 1 time today.'))
         self.assertEqual(problems.text(found[1], 1),
                          'Long-term memory: Nocheh couldn’t read memory from your forwards and files, or your memory context, 1 time today; '
                          'replies used the rest of your memory.')
@@ -102,6 +106,36 @@ class MonitoringTests(unittest.TestCase):
                               {'day': '2026-10-13', 'kind': 'memory_read', 'failed': 1, 'ok': 1}],
                              'the stores alone are counted with no tracker yet')
             self.assertEqual(monitoring.note_problems(state, now, archive={'unavailable': True}), [], 'stores unreachable')
+            # Hermes's own steps and the stores' add up in one line.
+            path = Path(state) / 'hermes/usage/usage.sqlite'
+            path.parent.mkdir(parents=True)
+            usage.note_failed('read', path=path, now=now.timestamp())
+            usage.note_done('record', path=path, now=now.timestamp())
+            self.assertEqual(monitoring.note_problems(state, now, archive=stores),
+                             [{'day': '2026-10-13', 'kind': 'notes', 'failed': 3, 'ok': 4},
+                              {'day': '2026-10-13', 'kind': 'memory_read', 'failed': 1, 'ok': 1}])
+
+    def test_status_reads_the_stores_label_failures_into_the_notes_line(self):
+        from datetime import datetime, timezone
+        from services.hermes import usage
+        from tools.operations.provider import problems
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        def call(route, timeout=None):
+            if route != '/v1/status':
+                raise ConnectionError('down')
+            return {'archive': {}, 'memory_problems': [{'day': today, 'kind': 'notes', 'done': 5, 'failed': 2}]}
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            path = state / 'hermes/usage/usage.sqlite'
+            path.parent.mkdir(parents=True)
+            usage.note_failed('lookup', path=path)
+            with patch.object(monitoring, 'load', return_value={}), patch.object(monitoring, 'compose', return_value=(['docker'], {})),\
+                 patch.object(monitoring.subprocess, 'check_output', return_value=''), patch.object(monitoring, 'API') as api:
+                api.return_value.call.side_effect = call
+                result = monitoring.status(state)
+        self.assertEqual(result['note_problems'], [{'day': today, 'kind': 'notes', 'failed': 3, 'ok': 5}])
+        found = problems.problems(result, [], today)
+        self.assertEqual([(problem['kind'], problem['count']) for problem in found if problem['kind'] == 'notes'], [('notes', 3)])
 
     def test_github_flags_come_from_the_app_file_without_its_key(self):
         from tools.operations.connections import secret_file

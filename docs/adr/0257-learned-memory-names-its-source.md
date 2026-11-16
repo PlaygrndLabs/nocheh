@@ -115,8 +115,15 @@ a recalled note names its source beside its chat).
   folders an isolated run can write. An origin is a notes review by its id, or a
   turn by the message it answered, its channel, its day and what it read up to
   its last memory call: a forwarded message, a file, recent group messages,
-  other chats, web pages, Notion, tool servers, command results, past
-  conversations or other tools. A note keeps the origins of the notes it
+  other chats (a search by meaning included, since its hits carry no source),
+  web pages, Notion, tool servers, command results, past conversations or other
+  tools. Earlier in its session since the last compaction, the forwards, files
+  and recent group messages it was given count too, and so does a tool result
+  or another person's group message when what the turn wrote shares a run of 32
+  characters or a distinctive token with it; an earlier read it did not copy
+  from leaves the note the turn's own, so a note the owner dictates later in a
+  long session is not marked as read. A forward of the sender's own earlier
+  message is their words, not a read. A note keeps the origins of the notes it
   replaced through the replace and patch operations the run asked for (every
   removed note, when those are not known), and of any earlier note, not the
   owner's own, it shares a run of 32 characters, a distinctive token or its
@@ -205,14 +212,21 @@ a recalled note names its source beside its chat).
 ## 6. Failures reach the owner
 
 - A label lookup, a record, a notes read, a lock wait given up, a record file
-  that can't be read, a restore, and a turn whose memory came without the
+  that can't be read, a restore, a turn that wrote a note but whose stored
+  messages could not be read, and a turn whose memory came without the
   forwards block (`forwards_unavailable`) or without its context are each
-  counted per day in Hermes's usage database. The problem notice and System ›
-  Health say "Memory labels: Nocheh couldn't record or look up where {count}
-  notes came from today, so they show “source not available”" and "Long-term
-  memory: Nocheh couldn't read memory from your forwards and files, or your
-  memory context, {count} times today; replies used the rest of your memory." A
-  failure never stops a turn.
+  counted per day in Hermes's usage database, once per failed attempt, not per
+  note, so a failure that comes back grows the count. The stores count the
+  same way, in `memory_problem_days`, the labels they look up for recall and
+  the Notes page and recall's ask of the forwards and files; `/v1/status`
+  reports today's counts and the notice adds them in. The problem notice says
+  "Memory labels: telling where notes came from failed {count} times today.
+  Notes written while it failed show “Source not recorded” or a less exact
+  source, and replies may have seen “source not available”. The notes
+  themselves are kept." and "Long-term memory: Nocheh couldn't read memory from
+  your forwards and files, or your memory context, {count} times today; replies
+  used the rest of your memory." System › Health says the same. A failure never
+  stops a turn.
 
 </decision>
 
@@ -299,7 +313,9 @@ a recalled note names its source beside its chat).
   - The legacy memory-context mode and the non-isolated mode are unlabelled, and
     in non-isolated mode a run could reach the record file. Fresh installations
     use evidence mode, isolated.
-  - A turn's reads are listed up to its last memory call, not per note.
+  - A turn's reads are listed up to its last memory call, not per note. An
+    earlier tool result or group message that a later turn restates in its own
+    words, without a shared run or token, is not counted as read.
   - Members: `canLearn` reads the owner's yes on a message before it checks that
     the chat is served. The notes review checks both; Members step 4 must close
     it in `canLearn`.

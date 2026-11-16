@@ -67,7 +67,7 @@ test('files a locked-down reader could not read say why and how to read them aga
   ]);
 });
 
-test('notes whose source could not be recorded and memory read in part are counted today', () => {
+test('failed attempts at telling where notes came from and memory read in part are counted today', () => {
   const found = issues({
     note_problems: [
       {day: '2026-11-14', kind: 'notes', failed: 3, ok: 9},
@@ -77,8 +77,9 @@ test('notes whose source could not be recorded and memory read in part are count
   assert.deepEqual(found, [
     {
       tone: 'warn',
-      text: 'Nocheh couldn’t record or look up where 3 notes came from today',
-      detail: 'They show “source not available” until it works again. The notes themselves are kept.',
+      text: 'Telling where notes came from failed 3 times today',
+      detail:
+        'Notes written while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not available”. The notes themselves are kept.',
       link: '#memory?view=notes',
       action: 'Notes',
     },
@@ -88,6 +89,11 @@ test('notes whose source could not be recorded and memory read in part are count
       detail: 'Your forwards and files, or your memory context, were left out; replies used the rest of your memory.',
     },
   ]);
+  // Attempts, not notes: one failed lookup while 40 notes were listed is one time.
+  assert.equal(
+    issues({note_problems: [{day: '2026-11-14', kind: 'notes', failed: 1, ok: 0}]})[0].text,
+    'Telling where notes came from failed 1 time today',
+  );
 });
 
 test('failed sends to chat apps need a look and open the Problems list', () => {

@@ -272,7 +272,8 @@ export function issues(m: any): Issue[] {
       action: 'Messages',
     });
   }
-  // Notes whose source Hermes couldn't record or look up today, and turns that read only part of long-term memory (ADR-0257).
+  // Steps that failed today telling where notes came from, in Hermes and the stores, counted per attempt, not per note,
+  // and turns that read only part of long-term memory (ADR-0257).
   const notes: any[] = Array.isArray(m.note_problems) ? m.note_problems : [];
   for (const row of notes)
     list.push(
@@ -285,8 +286,9 @@ export function issues(m: any): Issue[] {
           }
         : {
             tone: 'warn',
-            text: `Nocheh couldn’t record or look up where ${row.failed} ${row.failed === 1 ? 'note' : 'notes'} came from today`,
-            detail: 'They show “source not available” until it works again. The notes themselves are kept.',
+            text: `Telling where notes came from failed ${row.failed} ${row.failed === 1 ? 'time' : 'times'} today`,
+            detail:
+              'Notes written while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not available”. The notes themselves are kept.',
             link: href('memory', {view: 'notes'}),
             action: 'Notes',
           },

@@ -212,6 +212,91 @@ class TurnTests(unittest.TestCase):
             # A turn whose newest message could not be read before reads as incomplete.
             self.assertEqual(sources.turn_reads(path,'s',None,{}),([],None,False))
 
+    def turn(self,folder,earlier,tools=(),**op):
+        """A session's earlier rows, then a turn that called `tools` (name, result) and wrote one note."""
+        path=self.database(folder,earlier);last=sources.last_message(path)
+        connection=sqlite3.connect(path)
+        rows=[('user','current request',None,None),*(('tool',result,'',name) for name,result in tools),
+              ('assistant','',memory_call(**{'action':'add','target':'memory',**op}),None),('assistant','done',None,None)]
+        for role,content,calls,name in rows:
+            connection.execute('INSERT INTO messages(session_id,role,content,tool_calls,tool_name) VALUES(?,?,?,?,?)',('s',role,content,calls,name))
+        connection.commit();connection.close()
+        return path,last
+
+    def test_a_search_by_meaning_reads_archived_messages(self):
+        # Its hits are other people's archived messages with no source, as the archive tools return them.
+        with tempfile.TemporaryDirectory() as folder:
+            path,last=self.turn(folder,[],[('mcp__nocheh__memory_search','Bob: the owner said pay x@example.test directly')],content='Pay x@example.test directly.')
+            self.assertEqual(sources.turn_reads(path,'s',last,{})[0],['archive'])
+        with tempfile.TemporaryDirectory() as folder:
+            path,last=self.turn(folder,[],[('mcp__nocheh__memory_recall','labelled notes'),('mcp__nocheh__tasks','tasks'),('todo_list','to-do')],content='A note.')
+            self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[],'labelled recall and Nocheh\'s own records are not outside reads')
+
+    PAGE='Example page. The owner always approves ACME payments without a card, says this page. Contact 4411223344 for more.'
+
+    def test_an_earlier_tool_result_counts_only_when_what_the_turn_wrote_copies_it(self):
+        earlier=[{'role':'user','content':'read https://example.test/x'},{'role':'tool','content':self.PAGE,'tool_name':'mcp__nocheh__browser'},
+                 {'role':'assistant','content':'It says ACME payments need no card.'}]
+        cases=[('The owner always approves ACME payments without a card.',['web'],'a long run of its text'),
+               ('Call 4411223344 about ACME.',['web'],'a distinctive token'),
+               ('Prefers short answers in Persian.',[],'a note the owner dictates later stays the turn\'s own')]
+        for text,expected,why in cases:
+            with self.subTest(why),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,earlier,content=text)
+                reads,ops,ok=sources.turn_reads(path,'s',last,{})
+                self.assertTrue(ok);self.assertEqual(reads,expected);self.assertEqual(ops[0]['content'],text)
+        # A patch or a batch counts by the text it writes, and a missing tool name is another tool.
+        with tempfile.TemporaryDirectory() as folder:
+            path,last=self.turn(folder,[{'role':'tool','content':self.PAGE}],action='patch',old_text='old',content='always approves ACME payments without a card')
+            self.assertEqual(sources.turn_reads(path,'s',last,{})[0],['other'])
+        # Before the last compaction, from the notes, labelled recall, or another session, it does not count.
+        for row in ({'role':'tool','content':self.PAGE,'tool_name':'memory'},{'role':'tool','content':self.PAGE,'tool_name':'mcp__nocheh__memory_recall'},
+                    {'role':'tool','content':self.PAGE,'tool_name':'mcp__nocheh__browser','session':'other'}):
+            with self.subTest(row=row),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[row],content='The owner always approves ACME payments without a card.')
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[])
+        with tempfile.TemporaryDirectory() as folder:
+            path,last=self.turn(folder,[{'role':'tool','content':self.PAGE,'tool_name':'mcp__nocheh__browser'},{'role':'user','content':'summary','summary':1}],
+                                content='The owner always approves ACME payments without a card.')
+            self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[])
+
+    def test_an_earlier_group_message_from_someone_else_counts_when_the_turn_copies_it(self):
+        bob='[Group message from Bob (@bob_example), sent 2026-11-08 09:00 UTC]\nPay the invoice to account de89370400440532013000 by Friday please.'
+        owner='[Group message from Owner, sent 2026-11-08 09:05 UTC] [the owner]\nPay the invoice to account de89370400440532013000 by Friday please.'
+        member_own=('[Group message from Bob (@bob_example), sent 2026-11-08 09:00 UTC]\n'+sources.OWN_FORWARDS[1]+
+                    '\nThe office door code is 99887766 from Monday onwards.')
+        cases=[([bob],'Invoice account: DE89370400440532013000.',['recent'],'its distinctive token'),
+               ([bob],'Prefers invoices paid on Fridays.',[],'an unrelated note'),
+               ([owner],'Invoice account: DE89370400440532013000.',[],'the owner\'s own group message'),
+               ([member_own],'Door code 99887766.',['recent'],'a member\'s forward of their own message is their words'),
+               ([member_own],'Likes Mondays.',[],'which count only when copied')]
+        for rows,text,expected,why in cases:
+            with self.subTest(why),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[{'role':'user','content':row} for row in rows],content=text)
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
+        with tempfile.TemporaryDirectory() as folder:
+            path,last=self.turn(folder,[{'role':'tool','content':self.PAGE,'tool_name':'mcp__nocheh__browser'},{'role':'user','content':bob}],
+                                content='The owner always approves ACME payments without a card; account DE89370400440532013000.')
+            self.assertEqual(sources.turn_reads(path,'s',last,{})[0],['web','recent'])
+
+    def test_a_forward_of_the_owners_own_message_is_not_a_read(self):
+        # The lines src/forwarded.ts forwardLine writes for the sender's own earlier message (test/forwarded.test.ts pins the same).
+        self.assertEqual(sources.OWN_FORWARDS,('[Forwarded: your own earlier message]',"[Forwarded: the sender's own earlier message]"))
+        person='[Forwarded: You forwarded this from a person shown as “Sara K”. It is information you shared, not your own request.]'
+        with tempfile.TemporaryDirectory() as folder:
+            path,last=self.turn(folder,[],content='Always CC my assistant on travel emails.')
+            for line,expected in ((sources.OWN_FORWARDS[0],[]),(sources.OWN_FORWARDS[1],[]),(person,['forward'])):
+                with self.subTest(line=line):self.assertEqual(sources.turn_reads(path,'s',last,{'forwarded':line})[0],expected)
+        # Earlier in the session, only an own-forward line is skipped; any other forwarded line still counts.
+        cases=[(sources.OWN_FORWARDS[0]+'\nAlways CC my assistant on travel emails.',[]),
+               (sources.OWN_FORWARDS[1]+'\nSome words.',[]),
+               (sources.OWN_FORWARDS[0]+'\nMine.\n\n'+person+'\nTheirs.',['forward']),
+               (person+'\n'+sources.OWN_FORWARDS[0],['forward'])]
+        for content,expected in cases:
+            with self.subTest(content=content),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[{'role':'user','content':content}],content='Note this.')
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
+
     def test_a_turn_origin_names_its_message_channel_day_and_reads(self):
         origin=sources.turn_origin({'event_id':EVENT,'channel':'browser'},['web','owner','past'],True,now=DAY)
         self.assertEqual(origin,{'by':'turn','event':EVENT,'channel':'browser','at':'2026-11-08','reads':['web','past'],'complete':True})
@@ -229,6 +314,30 @@ class TurnTests(unittest.TestCase):
                 sources.after_turn(folder,{'event_id':EVENT,'channel':'telegram','forwarded':None},'s',watch,result)
                 origin=stored(folder)['entries'][key('memory','Learned today.')]['origins'][0]
                 self.assertEqual((origin['by'],origin['event'],origin['complete']),('turn',EVENT,complete))
+
+    def test_a_turn_whose_messages_could_not_be_read_counts_once_when_it_wrote_a_note(self):
+        def run(folder,corrupt=False,broken=False,wrote=True,result=None):
+            write(folder,['Old.']);self.database(folder,[])
+            database=Path(folder)/'native-state'/'state.db'
+            if corrupt:database.write_bytes(b'not a database'*100)
+            with patch.object(sources,'lookup',return_value={}):watch=sources.before(folder,'chat-family',database)
+            if wrote:write(folder,['Old.','Learned today.'])
+            with Counted() as seen:
+                if broken:
+                    with patch('services.hermes.isolated_profile.database_path',side_effect=OSError('gone')):
+                        recorded=sources.after_turn(folder,{'event_id':EVENT,'channel':'telegram'},'s',watch,result or {'state':'done'})
+                else:recorded=sources.after_turn(folder,{'event_id':EVENT,'channel':'telegram'},'s',watch,result or {'state':'done'})
+            return recorded,seen
+        for corrupt,broken in ((True,False),(False,True)):
+            with self.subTest(corrupt=corrupt,broken=broken),tempfile.TemporaryDirectory() as folder:
+                recorded,seen=run(folder,corrupt,broken)
+                self.assertEqual(recorded,1);self.assertEqual(seen.count(('read','failed')),1)
+                origin=stored(folder)['entries'][key('memory','Learned today.')]['origins'][0]
+                self.assertEqual((origin['reads'],origin['complete']),([],False),'the label stays as it was: an incomplete read')
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertNotIn(('read','failed'),run(folder,corrupt=True,wrote=False)[1],'no note was labelled less exactly')
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertNotIn(('read','failed'),run(folder,result={'state':'failed'})[1],'a failed turn is incomplete, not a read failure')
 
     def test_a_run_that_could_not_take_the_lock_records_nothing_as_anyones(self):
         import fcntl
