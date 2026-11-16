@@ -39,6 +39,7 @@ source identifiers and links do not change when a derivative is activated.
 | POST `/v1/learned/:id/correct` | Owner correction or retirement with an expected revision |
 | GET/POST `/v1/projects` | List, with each project's served `groups`, or create/edit/archive a project |
 | GET/POST `/v1/projects/assignments` | A group's project, or none; a topic only follows its group |
+| POST `/v1/chats/state` | Turn Nocheh on or off in a group it is in, at once and as one owner command: `chat_id`, `state` (`active` or `off`), `operation_id`, and, only when turning it on, an optional `project` (`{"mode":"new"}` for a new project named after the group, `{"mode":"assigned","project_id":…}` or `{"mode":"none"}`); answers `chat_id`, `state` and `project_id`; 400 `chat_not_group`, 404 `chat_not_found`, 409 `chat_not_joined` for a group Nocheh left, was removed from or knows only from imported history ([ADR-0253](adr/0253-only-the-owner-adds-nocheh.md)) |
 | GET `/v1/projects/effective?space=…` | Effective membership, with inheritance shown |
 | GET/POST `/v1/sharing/rules` | Selected source spaces, exact destination, mode and enabled state |
 | POST `/v1/sharing/preview`; GET `/v1/sharing/previews[/:id]`; POST `/v1/sharing/previews/:id/approve` | Prepare, inspect or approve a release from chosen sources |
