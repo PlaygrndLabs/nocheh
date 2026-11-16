@@ -153,6 +153,13 @@ export class ChatAdds {
     const name=line==='left_anonymous'||row.role==='anonymous'?lines.someone:await this.person(row.account_id,lines.someone);
     await this.note(row,'chat-add-note:',fillLine(lines[line],{name,group:groupName(words,row.chat_id,title)}));
   }
+  /** The bot's last check before it leaves (POST /internal/chats/leave): whether the group whose Telegram id is now
+   *  `external` is still pending from the add `event`. One the owner turned on or off, or that was added again, while the
+   *  leave waited behind other sends is not left. */
+  async leaveStands(event:string,external:string):Promise<boolean> {
+    return !!(await this.control.query(`SELECT 1 FROM chats c JOIN chat_ids i ON i.chat_id=c.id AND i.state='current'
+      WHERE c.state='pending' AND c.add_event=$1 AND i.external_id=$2`,[event,external])).rowCount;
+  }
 
   /**
    * The owner added Nocheh, so the group is on: 30 s later it gets its own project, named after it, in one owner command,

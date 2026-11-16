@@ -174,6 +174,27 @@ test('someone else\'s add is left after the wait, as one leave call, and only a 
   }finally{await h.cleanup();await stores.close();}
 });
 
+test('the bot\'s last check before a leave holds only while the group is pending from that add',fixture,async()=>{
+  const stores=await open(),h=await harness(stores,'stands');
+  try {
+    const off=h.group(1),again=h.group(2),offId=chatIdFor('telegram',off),againId=chatIdFor('telegram',again);
+    const offAdd=await h.status(off,1,STRANGER,'left','member'),firstAdd=await h.status(again,2,STRANGER,'left','member');
+    assert.equal(await h.adds.leaveStands(offAdd,off),true,'pending from this add, under its Telegram id now');
+    assert.equal(await h.adds.leaveStands(offAdd,again),false,'another group');
+    assert.equal(await h.adds.leaveStands(firstAdd,again),true);
+    // While the leaves wait behind other sends, the owner turns one group off, and the other is removed and added again.
+    await h.repository.setState(owner,{chat_id:offId,state:'off',operation_id:'adds-off:'+h.update(0)});
+    assert.equal(await h.adds.leaveStands(offAdd,off),false,'turned off: Nocheh stays there, silent');
+    await h.status(again,3,STRANGER,'member','left');const secondAdd=await h.status(again,4,STRANGER,'left','member');
+    assert.equal(await h.adds.leaveStands(firstAdd,again),false,'added again: the newer add\'s leave decides');
+    assert.equal(await h.adds.leaveStands(secondAdd,again),true);
+    // Once the stage settles it, a late try of the same leave leaves nothing.
+    assert.equal(await h.repository.leaveSettled(againId,secondAdd,'left'),true);
+    assert.equal(await h.adds.leaveStands(secondAdd,again),false);
+    assert.deepEqual([(await h.chat(offId)).state,(await h.chat(againId)).state],['off','left']);
+  }finally{await h.cleanup();await stores.close();}
+});
+
 test('notes are capped at one per group and ten in all a day, and none goes without the owner\'s private chat',fixture,async()=>{
   const stores=await open(),h=await harness(stores,'caps');
   try {

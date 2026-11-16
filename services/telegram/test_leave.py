@@ -2,13 +2,17 @@
 owner's, leaveChat and nothing else, at most once by its id, with Telegram's answer read as storage needs it."""
 import asyncio
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError
 
 from services.chats import Served, ServedList
+from services.durable import canonical
+from . import checks
 from .capture import OUTBOUND_CHECK, DISPATCH_KEY, Held
 from .checks import leave_check
 from .gateway import TelegramService
@@ -56,6 +60,13 @@ class Gate(asyncio.Lock):
 
 
 class LeaveTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # The app's last word before each leave (POST /internal/chats/leave): the leave stands unless a test queues
+        # another answer.
+        self.stands = []
+        patcher = patch('services.telegram.gateway.check_leave_policy', side_effect=lambda body: self.stands.pop(0) if self.stands else True)
+        self.asked = patcher.start(); self.addCleanup(patcher.stop)
+
     def service(self, root, policy=None):
         # The served list: the owner's chat and one served group, which had OLD as its id before an upgrade.
         value = TelegramService(policy or Policy.of(True, OWNER, [GROUP], {}, old={GROUP: [OLD]}), '123456:synthetic', root / 'spool', root / 'state')
@@ -194,6 +205,49 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             served[0], now[0] = Served.of(OWNER), now[0] + 2.0
             self.assertEqual(await service.leave_chat({'id': 'b' * 64, 'chat_id': OTHER}), {'state': 'done'})
             self.assertEqual(service.bot.calls, [int(OTHER)])
+
+    async def test_a_group_turned_off_or_added_again_while_the_leave_waits_is_not_left(self):
+        # The served list cannot tell an off group from a pending one: once the lock is free, right before the request
+        # would go, the app says whether the group is still pending from this add. No receipt is kept, so the stage asks
+        # again later and finds the group superseded.
+        async def waiting(body, answer):
+            service.action_lock.waiting.clear()
+            await service.action_lock.acquire()
+            leaving = asyncio.create_task(service.leave_chat(body))
+            await service.action_lock.waiting.wait()
+            self.stands.append(answer)
+            service.action_lock.release()
+            return await leaving
+        body = {'id': ID, 'chat_id': STRANGER}
+        with tempfile.TemporaryDirectory() as folder:
+            service = self.service(Path(folder))
+            service.action_lock = Gate()
+            self.assertEqual(await waiting(body, False), {'state': 'not_started', 'error_code': 'leave_superseded'})
+            self.assertEqual(await waiting(body, None), {'state': 'not_started', 'error_code': 'leave_check_unavailable'})
+            self.assertEqual(service.bot.calls, [])
+            self.assertEqual(list((Path(folder) / 'spool/dispatch').glob('leave-*')), [], 'neither keeps a receipt')
+            self.assertEqual([call.args[0] for call in self.asked.call_args_list], [body, body], 'this add and this chat')
+            # While it stands, the leave goes; a repeat answers from its receipt and asks nothing.
+            self.assertEqual(await service.leave_chat(body), {'state': 'done'})
+            self.assertEqual(await service.leave_chat(body), {'state': 'done'})
+            self.assertEqual((service.bot.calls, self.asked.call_count), ([int(STRANGER)], 3))
+
+    def test_the_app_is_asked_about_this_add_and_this_chat_alone(self):
+        sent, answers = [], [b'{"valid":true}', b'{"valid":false}', b'{"valid":"yes"}', OSError('down')]
+        class Response:
+            def __init__(self, body): self.body = body
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, _size): return self.body
+        def urlopen(request, timeout):
+            sent.append((request.full_url, request.get_method(), request.data, request.get_header('Authorization')))
+            answer = answers.pop(0)
+            if isinstance(answer, Exception): raise answer
+            return Response(answer)
+        with patch.dict(os.environ, {'SERVICE_TOKEN': 's' * 32, 'ARCHIVE_URL': 'http://app.test'}), patch.object(checks.urllib.request, 'urlopen', urlopen):
+            self.assertEqual([checks.check_leave_policy({'id': ID, 'chat_id': STRANGER, 'extra': 1}) for _ in range(4)], [True, False, None, None],
+                             'only a yes or a no counts; anything else, or no answer, is neither')
+        self.assertEqual(sent[0], ('http://app.test/internal/chats/leave', 'POST', canonical({'id': ID, 'chat_id': STRANGER}), 'Bearer ' + 's' * 32))
 
     def test_the_bound_check_admits_only_leaving_that_chat(self):
         check = leave_check(STRANGER)

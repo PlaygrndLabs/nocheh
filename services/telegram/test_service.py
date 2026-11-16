@@ -63,7 +63,7 @@ class ServiceTests(unittest.TestCase):
                                               'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true'})
         environment.start(); self.addCleanup(environment.stop)
         self.allowed = True
-        for name in ('check_delivery_policy', 'check_action_policy'):
+        for name in ('check_delivery_policy', 'check_action_policy', 'check_leave_policy'):
             patcher = patch('services.telegram.gateway.' + name, side_effect=lambda *_: self.allowed)
             patcher.start(); self.addCleanup(patcher.stop)
         self.mock = TelegramMock(self.root / 'telegram.json')
