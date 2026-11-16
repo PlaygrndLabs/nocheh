@@ -118,3 +118,30 @@ test('a served list that fits one page is whole; one not read yet, or unreadable
   assert.equal(cut.complete, false);
   assert.equal(cut.loading, false);
 });
+
+test('a failed read again keeps the groups read before but is not whole, so the page says some may be missing', () => {
+  // The pages after the same cursor were read whole before; the read again failed, so a group turned on after the cursor
+  // since then may be missing.
+  const kept = servedList(firstPage(groups(0, 99), 'g099'), {
+    cursor: 'g099',
+    items: groups(100, 129),
+    complete: true,
+    error: 'offline',
+  });
+  assert.equal(kept.items.length, 130);
+  assert.equal(kept.complete, false);
+  assert.equal(kept.loading, false);
+  assert.equal(kept.error, 'offline');
+  // The first page failed to read again: what it read before stays, not whole, with or without pages after it.
+  const stale = servedList(firstPage(groups(0, 3), null, 'offline'), null);
+  assert.deepEqual(stale, {items: groups(0, 3), complete: false, loading: false, error: 'offline'});
+  const staleFirst = servedList(firstPage(groups(0, 99), 'g099', 'offline'), {
+    cursor: 'g099',
+    items: groups(100, 129),
+    complete: true,
+    error: '',
+  });
+  assert.equal(staleFirst.items.length, 130);
+  assert.equal(staleFirst.complete, false);
+  assert.equal(staleFirst.error, 'offline');
+});

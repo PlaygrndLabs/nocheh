@@ -136,18 +136,20 @@ export type ServedRest = {cursor: string; items: Chat[]; complete: boolean; erro
 /**
  * The served list now: the first page, then the pages read after its cursor. Pages read after another cursor are never
  * used, since a group that moved between the two would be in neither. `complete` says every served group is in
- * `items`; `loading` that the list is still being read, so an incomplete list is not yet a problem.
+ * `items`; `loading` that the list is still being read, so an incomplete list is not yet a problem. A read that failed
+ * keeps the pages read before, so nothing flickers away, but the list is not complete: a group turned on or off since
+ * may be missing or still listed.
  */
 export function servedList(first: Snapshot<Directory>, rest: ServedRest | null) {
   if (!first.data) return {items: [] as Chat[], complete: false, loading: !first.error, error: first.error};
   const page = first.data.items ?? [],
     cursor = first.data.next_cursor ?? null;
-  if (!cursor) return {items: page, complete: true, loading: false, error: first.error};
+  if (!cursor) return {items: page, complete: !first.error, loading: false, error: first.error};
   const after = rest?.cursor === cursor ? rest : null;
   const seen = new Set(page.map(chat => chat.space_id));
   return {
     items: after ? [...page, ...after.items.filter(chat => !seen.has(chat.space_id))] : page,
-    complete: !!after?.complete,
+    complete: !first.error && !!after?.complete && !after.error,
     loading: !after,
     error: first.error || (after?.error ?? ''),
   };
@@ -170,7 +172,8 @@ export function useServedGroups(interval = 60000) {
       (error: unknown) => {
         if (!live) return;
         const why = error instanceof Error ? error.message : 'Request unavailable';
-        // A failed read again after the same cursor keeps what was read before; after a new cursor it has nothing.
+        // A failed read again after the same cursor keeps what was read before, which may be out of date, so the list
+        // says it is not complete; after a new cursor it has nothing.
         setRest(current =>
           current?.cursor === cursor ? {...current, error: why} : {cursor, items: [], complete: false, error: why},
         );
