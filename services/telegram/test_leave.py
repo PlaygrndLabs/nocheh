@@ -12,6 +12,7 @@ from services.chats import Served, ServedList
 from .capture import OUTBOUND_CHECK, DISPATCH_KEY, Held
 from .checks import leave_check
 from .gateway import TelegramService
+from .sends import already_left
 from .settings import Policy
 
 OWNER, GROUP, OLD, STRANGER, OTHER = '111', '-1001234567890', '-1234567', '-1009876543210', '-1005555555555'
@@ -109,6 +110,20 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await service.leave_chat({'id': ID, 'chat_id': STRANGER}), refused)
             self.assertEqual(await service.leave_chat({'id': ID, 'chat_id': STRANGER}), refused, 'kept, not tried again')
             self.assertEqual(len(service.bot.calls), 6)
+
+    async def test_the_route_and_the_send_record_read_a_leave_answer_alike(self):
+        # The route counts a leave done exactly when its send record calls it already left, so Health never counts a
+        # leave that worked as a problem, and a refusal that left Nocheh in the chat stays one.
+        answers = ((403, 'Forbidden: the group chat was deleted'), (400, 'Bad Request: chat not found'), (400, 'Bad Request: PEER_ID_INVALID'),
+                   (400, 'Bad Request: group chat was deleted'), (400, 'Bad Request: not enough rights'), (400, 'Bad Request: synthetic refusal'))
+        with tempfile.TemporaryDirectory() as folder:
+            service = self.service(Path(folder))
+            for number, (status, description) in enumerate(answers):
+                service.bot.answers.append((Forbidden if status == 403 else BadRequest)(description))
+                with self.subTest(description):
+                    done = await service.leave_chat({'id': str(number) * 64, 'chat_id': STRANGER}) == {'state': 'done'}
+                    self.assertEqual(done, already_left(status, json.dumps({'ok': False, 'error_code': status, 'description': description})))
+                    self.assertEqual(done, number < 4)
 
     async def test_a_leave_whose_answer_never_came_is_tried_again(self):
         with tempfile.TemporaryDirectory() as folder:

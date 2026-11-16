@@ -22,6 +22,7 @@ from . import settings
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK
 from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, delivery_failure,
                      leave_check, no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
+from .sends import GONE
 
 # Telegram shows "typing…" for about five seconds per chat action, so presence renews it a little sooner.
 TYPING_INTERVAL = 4.0
@@ -33,8 +34,6 @@ HEX = re.compile(r'[a-f0-9]{64}')
 CHAT = re.compile(r'-?[1-9]\d{0,18}')
 MESSAGE = re.compile(r'[1-9]\d{0,15}')
 ERROR_NAME = re.compile(r'[A-Za-z_]{1,64}')
-# Telegram's answers to a leave that mean Nocheh is not in the chat any more, so there is nothing left to leave.
-GONE = ('chat not found', 'not a member', 'user_not_participant', 'channel_private', 'peer_id_invalid', 'was kicked', 'deactivated', 'was deleted')
 
 
 def topic_of(value):
