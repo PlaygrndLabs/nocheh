@@ -144,6 +144,17 @@ export class NativeReviewRepository {
     }
     return await settle();
   }
+  /** Why a source's notes review should not run, or null: for now, Nocheh's own card or notice (ADR-0256). */
+  async unwanted(source:SourceReference):Promise<'nocheh_message'|null> {
+    return this.contexts.access.notLearned(source);
+  }
+  /** Withdraws a source's reviews still waiting to run in this installation generation; their workflows close as
+   * superseded, and a review that started keeps its row. */
+  async withdraw(source:SourceReference):Promise<void> {
+    const binding=await this.contexts.guards.state();
+    await this.control.query(`DELETE FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$2 AND state='pending' AND NOT paused`,
+      [source.id,binding.generation]);
+  }
   /** A waiting review keeps an open workflow. One whose workflow closed before it ran (an epoch once closed a failed
    * review's retry that way) gets a new one, so it still runs in its turn. */
   private async keepWaiting(ids:string[]) {

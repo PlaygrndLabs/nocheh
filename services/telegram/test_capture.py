@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from services.durable import canonical, digest
-from .capture import Capture, DISPATCH_KEY, clear_command_menu, instrument_request
+from .capture import Capture, DISPATCH_KEY, SEND_ANSWERS, SEND_CLASS, clear_command_menu, instrument_request
 
 
 class Request:
@@ -101,11 +101,50 @@ class CaptureTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.calls,1)
         finally: DISPATCH_KEY.reset(token)
 
+    async def test_a_delivered_result_carries_its_send_class_and_answer_but_its_key_does_not(self):
+        def results():
+            events = [json.loads(p.read_bytes()) for p in (self.root/'pending').glob('*.json')]
+            return {e['payload']['intent_key']: e['payload'] for e in events if e['kind'] == 'outbound_result'}
+        request = instrument_request(Request((200, b'{"ok":true,"result":{"message_id":8,"chat":{"id":20},"date":1}}')), self.capture)
+        args = lambda text: {'url': 'https://api.telegram.org/botredacted/sendMessage', 'request_data': SimpleNamespace(parameters={'chat_id': 20, 'text': text})}
+        answered = digest('telegram:testbot:update:3')
+        tokens = DISPATCH_KEY.set('telegram:testbot:update:3'), SEND_CLASS.set('follow_up'), SEND_ANSWERS.set(answered)
+        try:
+            # The send runs its journal and result off the event loop; the class still reaches it.
+            await request.do_request(**args('declared'))
+        finally:
+            for variable, token in zip((DISPATCH_KEY, SEND_CLASS, SEND_ANSWERS), tokens): variable.reset(token)
+        tokens = DISPATCH_KEY.set('notice:' + 'a' * 64), SEND_ANSWERS.set('not an event id')
+        try: await request.do_request(**args('by its key'))
+        finally: DISPATCH_KEY.reset(tokens[0]); SEND_ANSWERS.reset(tokens[1])
+        tokens = DISPATCH_KEY.set('something-new:1'), SEND_CLASS.set('unknown')
+        try: await request.do_request(**args('unknown'))
+        finally: DISPATCH_KEY.reset(tokens[0]); SEND_CLASS.reset(tokens[1])
+        found = results()
+        key = lambda dispatch, text: f"outbound:testbot:{dispatch}:sendMessage:{digest(canonical({'chat_id': 20, 'text': text}))}:intent"
+        declared = found[key('telegram:testbot:update:3', 'declared')]
+        self.assertEqual((declared['send_class'], declared['answers'], declared['state']), ('follow_up', answered, 'delivered'))
+        self.assertEqual((found[key('notice:' + 'a' * 64, 'by its key')]['send_class'], 'answers' in found[key('notice:' + 'a' * 64, 'by its key')]),
+                         ('notice', False), 'the dispatch key decides when the route names no class; only an event id is an answer')
+        self.assertEqual(set(found[key('something-new:1', 'unknown')]), {'intent_key', 'method', 'state', 'status', 'wire_base64'},
+                         'with no class known the result is as it always was')
+        # A retry finds the saved result by the same key whatever class it now runs under, and sends nothing again.
+        token = DISPATCH_KEY.set('telegram:testbot:update:3'), SEND_CLASS.set('card')
+        try: await request.do_request(**args('declared'))
+        finally: DISPATCH_KEY.reset(token[0]); SEND_CLASS.reset(token[1])
+        self.assertEqual(request.calls, 3)
+        self.assertEqual(results()[key('telegram:testbot:update:3', 'declared')]['send_class'], 'follow_up', 'a replayed result keeps what it had')
+
     async def test_orphan_intent_is_recorded_as_ambiguous_at_restart(self):
         self.capture.outbound('sendMessage',{'chat_id':20,'text':'hello'},'crashed-dispatch')
         Capture(self.root,'testbot')
         results=[json.loads(p.read_bytes()) for p in (self.root/'pending').glob('*.json')]
         self.assertEqual(next(e for e in results if e['kind']=='outbound_result')['payload']['state'],'ambiguous')
+        # A restart has no route to ask, so the class comes from the dispatch key.
+        self.capture.outbound('sendMessage',{'chat_id':20,'text':'reminder'},'notice:'+'b'*64)
+        Capture(self.root,'testbot')
+        results=[json.loads(p.read_bytes()) for p in (self.root/'pending').glob('*.json')]
+        self.assertIn('notice',[e['payload'].get('send_class') for e in results if e['kind']=='outbound_result'])
 
     async def test_rate_limit_wait_survives_restart_then_success_is_reused(self):
         parameters={'chat_id':20,'text':'synthetic rate limit'}

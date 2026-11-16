@@ -14,6 +14,7 @@ import {safeMetadata} from '../src/workflows/boundary.js';
 import {observation} from '../src/workflows/pipeline.js';
 import {requestWorkflow,retireSupersededSourceWorkflows,type WorkflowFamily} from '../src/workflows/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {captureEvidence} from '../src/stores/generated-capture.js';
 
 test('storage workflow admission leaves pool capacity for nested publications',async()=>{
   let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let calls=0;
@@ -289,5 +290,54 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       'Honcho reads the imported message');
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM interpretation_jobs WHERE source_reference->>'id'=$1",[imported.id])).rows[0].count,0,
       'no learning question is asked about each imported message');
+  }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('Nocheh\'s own card is kept but never learned, and stays context for the owner\'s reply to it',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-send-class-')),key='send-class:'+Date.now(),owner='123',bot=1000+Date.now()%1000;
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:owner,group_ids:[]}),
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('unexpected runtime operation');},
+    memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  const operations=storageWorkflowOperations(services,async()=>{throw Error('no source files in this fixture');});let run=0;
+  const advance=async(family:WorkflowFamily,job:string)=>{
+    const generation=job.startsWith('source:')?(await services.guards.state()).epoch:1,db=await stores.control.connect();let id:string;
+    try{await db.query('BEGIN');id=await requestWorkflow(db,family,job,generation);await db.query('COMMIT');}catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    const result=await advanceWorkflow(stores.control,id,1,family,'fixture-'+(++run),operations[family]!);safeMetadata(result);return result;
+  };
+  const jobs=async(id:string)=>(await stores.control.query("SELECT id FROM native_review_jobs WHERE source_reference->>'id'=$1",[id])).rows.map(row=>String(row.id));
+  const cardMessage={message_id:50,date:1700000000,chat:{id:Number(owner),type:'private'},from:{id:bot,is_bot:true,first_name:'Nocheh'},text:'Send this to Family?'};
+  // The card as the bot captured it: its delivered original carries the class the approval route stamped.
+  const delivered:Envelope={version:1,key:key+':result',origin:'generated',bot_id:key,kind:'outbound_result',scope:owner,source_id:key,revision:'0',occurred_at:null,text:null,
+    payload:{intent_key:key+':intent',method:'sendMessage',state:'delivered',status:200,send_class:'card',wire_base64:Buffer.from(JSON.stringify({ok:true,result:cardMessage})).toString('base64')}};
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const card=(await services.capture.capture(captureEvidence(delivered).originals[0]!)).source.reference;
+    assert.equal((await advance('preparation',card.id)).state,'completed');
+    // A notes review queued before send classes, still waiting, is withdrawn instead of run.
+    const early=await services.reviews.queue(card);assert.ok(early.length>0);
+    const closed=await advance('memory_review','source:'+card.id);
+    assert.deepEqual([closed.state,closed.waiting_reason],['skipped','nocheh_message']);
+    assert.deepEqual(await jobs(card.id),[],'no notes review is left waiting');
+    const again=await services.reviews.queue(card);
+    const native=await advance('memory_review','native:'+again[0]!);
+    assert.deepEqual([native.state,native.waiting_reason,await jobs(card.id)],['skipped','nocheh_message',[]],'a review queued for it anyway never runs');
+    await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true,attached_at=now() WHERE singleton');
+    const honcho=await advance('honcho','source:'+card.id);
+    assert.deepEqual([honcho.state,honcho.waiting_reason],['skipped','nocheh_message']);
+    assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1",[card.id])).rows[0].n,0,'nothing is written to long-term memory');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM interpretation_jobs WHERE source_reference->>'id'=$1",[card.id])).rows[0].n,0);
+    // canLearn is untouched, so the owner's reply to the card is reviewed with the card as its context.
+    const reply:Envelope={version:1,key:key+':reply',origin:'live',kind:'telegram_update',bot_id:key,scope:owner,source_id:'51',revision:'1',occurred_at:null,text:'Yes, send it',
+      payload:{update_id:51,message:{message_id:51,date:1700000010,chat:{id:Number(owner),type:'private'},from:{id:Number(owner),first_name:'Alice'},text:'Yes, send it',reply_to_message:cardMessage}}};
+    const answer=(await services.capture.capture(reply)).source.reference;
+    assert.equal((await advance('preparation',answer.id)).state,'completed');
+    const [review]=await services.reviews.queue(answer);assert.ok(review);
+    const input=(await services.reviews.inspect(review!)).input_reference;
+    const document=JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[input.id])).rows[0].content.toString());
+    assert.ok(document.evidence.some((item:{id:string})=>item.id===card.id),'the card is evidence for the owner\'s reply');
   }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
 });

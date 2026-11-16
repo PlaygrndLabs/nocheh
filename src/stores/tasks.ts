@@ -1349,10 +1349,11 @@ export class TaskRepository {
     if(sent.kind==='refused'||sent.kind==='retry')await this.problem(id,target,state==='failed'?'failed':'uncertain',sent.status);
     return {handled:rows.length,stop:false};
   }
-  /** One notice to the owner, and what its answer means for the reminder. */
+  /** One reminder notice to the owner, and what its answer means for the reminder. It is sent as a reminder, which memory
+   * keeps but does not learn (ADR-0256). */
   private async notice(id:string,target:{chat_id:string;topic?:number},text:string):Promise<Outcome> {
     try {
-      const result=await this.delivery!.call('telegram.notice',{id,...target,text},30000);
+      const result=await this.delivery!.call('telegram.notice',{id,...target,text,send_class:'reminder'},30000);
       return {kind:result.state==='done'?'done':result.state==='not_started'?'not_started':'ambiguous',status:200};
     } catch(error) {
       if(!(error instanceof HttpError))return {kind:'stop',status:0};

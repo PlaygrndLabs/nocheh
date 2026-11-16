@@ -134,6 +134,10 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       return observed.audience||observed.reaction?waiting('review','prerequisite'):observation('skipped','review',0,Date.now(),'no_conversation');
     }
     if(!await s.access.canLearn(source.reference,binding))return observation('denied','review',0,Date.now(),'consent_required');
+    // Nocheh's own cards, notices and reminders are kept but not learned (ADR-0256). Checked here, after canLearn, so a card
+    // is still context for the owner's reply to it; a review already waiting for one is withdrawn.
+    const skip=await s.access.notLearned(source.reference);
+    if(skip){await s.reviews.withdraw(source.reference);return observation('skipped','review',0,Date.now(),skip);}
     const ready=await s.preparation.status(id);if(ready.state==='failed')return ready;
     if(ready.state!=='completed')return waiting(ready.stage,'prerequisite',Math.max(1000,ready.next_attempt-Date.now()));
     return {source,binding};
@@ -214,6 +218,9 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(row.paused)return waiting('review','owner_paused');
       if(row.state==='done')return observation('completed','review',row.attempts);
       if(row.state==='pending') {
+        // A review queued before its source stopped being learned (such as a card queued before send classes) never runs.
+        const stop=await s.reviews.unwanted(row.source_reference);
+        if(stop)return fenced('memory_review',authority,async()=>{await s.reviews.withdraw(row.source_reference);return observation('skipped','review',0,Date.now(),stop);});
         try {
           if(canonical(row.binding)!==canonical(await s.guards.state())) {
             // A newer epoch renews a waiting review (never started, or failed without changing notes) where it waits,

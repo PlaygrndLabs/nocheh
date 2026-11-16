@@ -3,6 +3,7 @@ import {HttpError} from '../http.js';
 import {originalEnvelope,type CapturedSource} from './archive.js';
 import {DerivedRepository} from './derived.js';
 import {OperationRepository} from './operations.js';
+import {sendClassOf} from '../send-classes.js';
 
 const messageMethods=new Set(['sendMessage','sendPhoto','sendAudio','sendDocument','sendVideo','sendAnimation',
   'sendVoice','sendVideoNote','sendMediaGroup','sendLocation','sendVenue','sendContact','sendPoll','sendDice',
@@ -24,6 +25,9 @@ export function captureEvidence(input:unknown):{value:Envelope;originals:Envelop
   try {wire=record(JSON.parse(Buffer.from(payload.wire_base64,'base64').toString()));}
   catch {return {value,originals,generated:true};}
   if(wire.ok!==true)return {value,originals,generated:true};
+  // What kind of message Nocheh sent and the message it answered, from the bot (ADR-0256). Each is kept only when valid; a
+  // result without them makes the same original as before, so a spool drained across an upgrade keeps its identity.
+  const sendClass=sendClassOf(payload.send_class),answers=typeof payload.answers==='string'&&/^[a-f0-9]{64}$/.test(payload.answers)?payload.answers:null;
   for(const raw of Array.isArray(wire.result)?wire.result:[wire.result]) {
     const message=record(raw),chat=record(message.chat);
     if(!Number.isSafeInteger(message.message_id)||Number(message.message_id)<1||
@@ -34,7 +38,7 @@ export function captureEvidence(input:unknown):{value:Envelope;originals:Envelop
       key:canonical(['telegram-delivered',value.bot_id,String(chat.id),sourceId,revision]),
       kind:'telegram_delivered_message',scope:String(chat.id),source_id:sourceId,revision,
       occurred_at:String(message.edit_date??message.date),text:typeof message.text==='string'?message.text:typeof message.caption==='string'?message.caption:null,
-      payload:{message},wire_base64:Buffer.from(canonical(message)).toString('base64')}));
+      payload:{message,...(sendClass?{send_class:sendClass}:{}),...(answers?{answers}:{})},wire_base64:Buffer.from(canonical(message)).toString('base64')}));
   }
   return {value,originals,generated:true};
 }

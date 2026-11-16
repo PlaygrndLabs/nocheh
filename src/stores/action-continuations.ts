@@ -163,7 +163,7 @@ export class ActionContinuationRepository {
     }
     const target=replyTarget(input,attempt,credential);
     if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
-    const sent=await sendReply(this.call,target,String(input.body.source_key)+':continuation:'+row.action_id,receipt.reply,{notify:true,presence:true});
+    const sent=await sendReply(this.call,target,String(input.body.source_key)+':continuation:'+row.action_id,receipt.reply,{notify:true,presence:true,sendClass:'follow_up'});
     if(!sent||!closedTurnStates.has(String(sent.state)))return await this.receive(row,{state:'running'});
     return await this.storeResult(row,deliveredReceipt(receipt,sent));
   }

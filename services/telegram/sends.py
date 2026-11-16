@@ -20,6 +20,14 @@ from services.durable import canonical, digest, immutable_file
 # The dispatch key a request ran under names the kind of send it was.
 KINDS = (('telegram:', 'reply'), ('action:', 'approved_send'), ('approval:', 'approval_card'), ('approval-settle:', 'card_update'),
          ('approval-answer:', 'button_answer'), ('refusal:', 'refusal'), ('notice:', 'notice'), ('notice-edit:', 'notice_update'))
+# What kind of message Nocheh sent, kept with each delivered message (ADR-0256): replies and reports are learned, while
+# cards, card updates, refusals, notices and reminders are not. src/send-classes.ts holds the same list.
+SEND_CLASSES = ('reply', 'follow_up', 'private_answer', 'job_report', 'scheduled_run', 'approved_post',
+                'card', 'card_update', 'refusal', 'notice', 'reminder')
+# A send whose route named no class gets one from the dispatch key it ran under.
+DEFAULT_CLASSES = (('telegram:', 'reply'), ('action:', 'approved_post'), ('approval:', 'card'), ('approval-settle:', 'card_update'),
+                   ('approval-answer:', 'card_update'), ('refusal:', 'refusal'), ('notice:', 'notice'), ('notice-edit:', 'card_update'),
+                   ('control:', 'card'))
 # Telegram's description decides a refusal's code, first hit wins; its HTTP status is the fallback.
 REJECTIONS = ((('bot was blocked',), 'bot_blocked'), (('user is deactivated',), 'user_deactivated'),
               (('bot was kicked', 'bot is not a member'), 'bot_removed'), (('chat not found',), 'chat_not_found'),
@@ -41,6 +49,18 @@ def kind_of(method, dispatch):
     if method == 'setMessageReaction': return 'reaction'
     if dispatch is None or dispatch.startswith('control:'): return 'setup'
     return next((kind for prefix, kind in KINDS if dispatch.startswith(prefix)), 'other')
+
+
+def class_of(dispatch, declared=None):
+    """A send's class: the one its route declared when it is known, else its dispatch key's default, else None."""
+    if isinstance(declared, str) and declared in SEND_CLASSES: return declared
+    if not isinstance(dispatch, str): return None
+    return next((name for prefix, name in DEFAULT_CLASSES if dispatch.startswith(prefix)), None)
+
+
+def route_class(value, allowed, default):
+    """The class a caller asked for when its route sends that kind; otherwise the route's own. A label never costs a send."""
+    return value if isinstance(value, str) and value in allowed else default
 
 
 def _number(value):

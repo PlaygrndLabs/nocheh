@@ -177,6 +177,8 @@ const reasons: Record<string, string> = {
   input_limit: 'The message and its context were too long to learn from',
   invalid_model_output: 'The model’s answer couldn’t be used',
   no_conversation: 'Not part of a chat, so there is nothing to learn',
+  nocheh_message: 'Nocheh’s own card, notice or reminder: kept, not learned',
+  sender_not_allowed: 'From someone not allowed there: kept out of your notes, still in group memory',
 };
 export const reason = (value: string | null | undefined): string => (value ? (reasons[value] ?? readable(value)) : '');
 

@@ -33,6 +33,19 @@ test('only confirmed Telegram Message responses become original evidence',()=>{
   assert.notEqual(captureEvidence(response('edited',{...message,text:'Edited',edit_date:1700000001})).originals[0]!.key,result.originals[0]!.key);
 });
 
+test('a delivered original keeps its send class and the message it answered only when the bot gave valid ones',()=>{
+  const plain=captureEvidence(response('plain')).originals[0]!,answered=digest('telegram:999:update:1');
+  const classed=(patch:Record<string,unknown>,result:unknown=message)=>{const value=response('classed',result);
+    return captureEvidence({...value,payload:{...value.payload,...patch}}).originals;};
+  const [card]=classed({send_class:'card',answers:answered});
+  assert.deepEqual(card!.payload,{message,send_class:'card',answers:answered});
+  assert.equal(card!.key,plain.key,'the class rides in the payload, never in the key');
+  assert.deepEqual(classed({send_class:'reminder'},[message,{...message,message_id:8}]).map(item=>item.payload.send_class),['reminder','reminder'],'each message of an album');
+  for(const patch of [{send_class:'other'},{send_class:['card']},{send_class:null},{answers:'x'},{answers:answered.toUpperCase()},{answers:7}])
+    assert.deepEqual(classed(patch)[0]!.payload,{message},canonical(patch));
+  assert.deepEqual(plain.payload,{message},'a result with no class makes the same original as before');
+});
+
 test('generated journals recover outside archive and preserve delivered originals through outages',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
@@ -49,7 +62,8 @@ test('generated journals recover outside archive and preserve delivered original
   const ambiguous={...response(key+':uncertain'),payload:{...response(key+':uncertain').payload,state:'ambiguous'}};
   const schedule:Envelope={...sent,key:key+':schedule',channel:'scheduler',kind:'scheduled_trigger',text:'Private scheduled prompt',payload:{prompt:'Private scheduled prompt'}};
   const incoming:Envelope={...sent,key:key+':incoming',origin:'live',kind:'telegram_update',text:'Received',payload:{message:{...message,text:'Received'}}};
-  const inputs=[intent,sent,ambiguous,schedule,incoming];
+  const delivered=response(key+':notice',{...message,message_id:Date.now()+1}),noticed:Envelope={...delivered,payload:{...delivered.payload,send_class:'notice'}};
+  const inputs=[intent,sent,ambiguous,schedule,incoming,noticed];
   try {
     await guards.reconcile();await guards.setMode('on');
     for(const item of inputs)await immutableFile(spool,digest(item.key)+'.json',Buffer.from(canonical(item)));
@@ -59,6 +73,8 @@ test('generated journals recover outside archive and preserve delivered original
     const original=captureEvidence(sent).originals[0]!;
     assert.equal((await archive.captured(digest(original.key))).kind,'telegram_delivered_message','delivery evidence commits even when control is unavailable');
     assert.equal((await archive.captured(digest(incoming.key))).kind,'telegram_update');
+    const kept=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[digest(captureEvidence(noticed).originals[0]!.key)])).rows[0];
+    assert.equal(JSON.parse(kept.payload.toString()).send_class,'notice','the archived original carries its class');
     for(const item of [intent,sent,ambiguous,schedule])await assert.rejects(archive.captured(digest(item.key)),{code:'source_not_found'});
     await drainSourceSpool(coordinator,root);assert.equal((await readdir(spool)).length,0);
     const operation=await operations.record({key:schedule.key,kind:schedule.kind,scope:schedule.scope,input_hash:digest(canonical(schedule))});
