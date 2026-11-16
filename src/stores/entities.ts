@@ -11,6 +11,8 @@ import type {PreparedLearningContext} from './learning-context.js';
 import {resultItems,withoutNulls,type LearningRejection} from '../interpretations.js';
 import {archiveScopes,groupSpace,parentSpace,readSetGroups} from '../spaces.js';
 import {ownerChat} from '../assistant-policy.js';
+import type {SourceFacts} from '../source-facts.js';
+import {NoteSourceRepository} from './note-sources.js';
 
 const protocol='nocheh-connected-entities-v1';
 export type EntityKind='person'|'project';
@@ -101,9 +103,16 @@ export async function conversationObject(archive:Pick<StorePools['archive'],'que
   return topics.length===1?topics[0].id:own[0]?.id;
 }
 
+/** Whether a message is its author's own typing: a new message, edit, reaction or web chat message of a person or the
+ *  owner, with no forward of someone else's, no quote of someone else's message and no text read from a file or audio
+ *  file (ownerTyped, for any author). The author's own voice, transcribed, is theirs. */
+const typed=(f:SourceFacts|undefined)=>!!f&&(f.author==='owner'||f.author==='person')&&['message','edit','reaction','browser'].includes(f.act)&&
+  (f.forward===null||f.forward==='own')&&f.quote!=='other'&&!f.file&&!f.audio;
+
 export class EntityRepository {
   private readonly commands:OwnerCommands;
-  constructor(readonly stores:StorePools,readonly access:SourceAccessRepository,readonly projects:ProjectRepository){this.commands=new OwnerCommands(stores.control);}
+  constructor(readonly stores:StorePools,readonly access:SourceAccessRepository,readonly projects:ProjectRepository,
+    readonly sources=new NoteSourceRepository(stores,()=>access.policy(),access)){this.commands=new OwnerCommands(stores.control);}
 
   private async row(id:string):Promise<MemoryEntity> {
     const row=(await this.stores.control.query('SELECT * FROM memory_entities WHERE id=$1',[entityId(id)])).rows[0];
@@ -425,6 +434,21 @@ export class EntityRepository {
       await db.query('UPDATE entity_claims SET active_revision=$2 WHERE id=$1',[claim,next]);await db.query('COMMIT');return {id:claim,revision:next};
     } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
+  /**
+   * How a direct claim reads once code has checked what it cites (ADR-0257), from the originals and never from the model:
+   * direct only when the speaker typed every message it cites and sent no forward, file or quote in the batch; inferred
+   * when it cites anyone else's message; otherwise reported by the speaker, as something the speaker passed on.
+   */
+  private async spoken(context:PreparedLearningContext):Promise<(cited:readonly SourceReference[])=>'direct'|'reported'|'inferred'> {
+    const batch=context.observations.map(item=>item.source.id),ids=[...new Set([context.source.id,...batch,...context.evidence.map(item=>item.reference.id)])];
+    const [facts,authors]=await Promise.all([this.sources.factsFor(ids),this.stores.archive.query(`SELECT event_id,array_agg(DISTINCT target_id) AS targets
+      FROM source_relations WHERE event_id=ANY($1::text[]) AND kind='authored_by' GROUP BY event_id`,[ids])]);
+    // The speaker is who the archive proved wrote the source, as the trusted speaker is; a message with no single author is no one's.
+    const author=new Map<string,string|null>(authors.rows.map(row=>[String(row.event_id),row.targets.length===1?String(row.targets[0]):null]));
+    const speaker=author.get(context.source.id)??null,theirs=(id:string)=>speaker!==null&&author.get(id)===speaker;
+    const passedOn=batch.some(id=>theirs(id)&&!typed(facts.get(id)));
+    return cited=>!passedOn&&cited.every(ref=>theirs(ref.id)&&typed(facts.get(ref.id)))?'direct':cited.some(ref=>!theirs(ref.id))?'inferred':'reported';
+  }
   async publishDiscoveries(context:PreparedLearningContext,input:unknown,operation:string) {
     // Contexts saved before known people were added carry neither field.
     const value=object(input),known=[context.entities.speaker,context.entities.project,...context.entities.mentioned_projects,...context.entities.mentioned_people,
@@ -468,6 +492,7 @@ export class EntityRepository {
       predicate:'contextual',content:`${target.name} was mentioned in ${context.entities.project.name} context.`,object_entity_id:target.id,relationship_kind:'contextual',
       attribution:'inferred',uncertainty:'supported',evidence:[context.source],
       ...(context.entities.speaker?{speaker_entity_id:context.entities.speaker.id}:{})},context.binding,operation+':contextual:'+target.id));
+    let spoken:ReturnType<EntityRepository['spoken']>|undefined;
     for(const raw of resultItems(value.entity_claims,20,'entity_claims',rejected)) {
       const claim=checked('entity_claims',():EntityClaimInput=>{
         const row=exact(withoutNulls(raw),['subject_id','predicate','content','object_entity_id','relationship_kind','attribution','speaker_entity_id','uncertainty','evidence_ids']);
@@ -484,7 +509,15 @@ export class EntityRepository {
         return {subject_id:subject,predicate,content,attribution:row.attribution as EntityClaimInput['attribution'],uncertainty:row.uncertainty as EntityClaimInput['uncertainty'],evidence:references,
           ...(objectId?{object_entity_id:objectId,relationship_kind:row.relationship_kind as RelationshipKind}:{}),...(speaker?{speaker_entity_id:speaker}:{})};
       });
-      if(claim)published.push(await this.publishClaim(claim,context.binding,operation+':claim:'+published.length));
+      if(!claim)continue;
+      // A direct claim stands only on the speaker's own typed words; anything else is kept as reported or inferred.
+      if(claim.attribution==='direct') {
+        spoken??=this.spoken(context);
+        const attribution=(await spoken)(claim.evidence),{speaker_entity_id:_speaker,...rest}=claim;
+        if(attribution==='reported')Object.assign(claim,{attribution,speaker_entity_id:context.entities.speaker!.id});
+        else if(attribution==='inferred'){published.push(await this.publishClaim({...rest,attribution},context.binding,operation+':claim:'+published.length));continue;}
+      }
+      published.push(await this.publishClaim(claim,context.binding,operation+':claim:'+published.length));
     }
     return {published,suggestions,rejected};
   }

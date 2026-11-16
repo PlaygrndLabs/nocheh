@@ -76,7 +76,8 @@ export const modelSourceWords={
     file_unnamed:'text of a file the sender sent: not the sender\'s own words',audio:'a transcript of an audio file the sender sent: not the sender\'s own words',
     quote:'a quote of another person\'s message inside the sender\'s reply',reply:'Nocheh\'s reply',about_forward:'Nocheh\'s reply about a message the owner forwarded',
     follow_up:'Nocheh\'s follow-up',private_answer:'Nocheh\'s private answer',job_report:'Nocheh\'s report',scheduled_run:'Nocheh\'s scheduled result',
-    approved_post:'Nocheh\'s post',unlearned:'Nocheh\'s card, notice or reminder'},
+    approved_post:'Nocheh\'s post',unlearned:'Nocheh\'s card, notice or reminder',note:'Nocheh\'s note',
+    pointer:'the owner forwarded a message from {origin}; its text is kept with the owner\'s forwards and files'},
 } as const;
 /** The longest label the model reads; the Notes page shows the whole label in the owner's words. */
 export const MODEL_LABEL_LIMIT=120;
@@ -345,4 +346,12 @@ export function honchoSource(part:HonchoPart):string {
     return part.about_forward?words.about_forward:words[cls as Exclude<SendClass,'card'|'card_update'|'refusal'|'notice'|'reminder'>];
   }
   return words[part.part];
+}
+/** Several parts of one message as one `source`, in order, each named once. */
+export const honchoSources=(parts:readonly HonchoPart[]):string=>[...new Set(parts.map(honchoSource))].join('; ');
+/** What stays in the owner's private chat in place of someone else's forward, which is kept with the owner's forwards and
+ *  files: fixed words that name only the kind of origin, so the chat still shows that something was forwarded. */
+export function honchoPointer(from:Exclude<Forward['from'],'own'>):{source:string;text:string} {
+  const words=modelSourceWords.honcho;
+  return {source:words.note,text:fillLine(words.pointer,{origin:modelSourceWords.origins[from]})};
 }

@@ -47,6 +47,8 @@ test('one invalid model entity item is dropped and recorded while valid items ar
   const entities=Object.create(EntityRepository.prototype) as EntityRepository;
   (entities as any).suggest=async(_kind:string,name:string)=>{suggested.push(name);return {name};};
   (entities as any).publishClaim=async(input:any)=>{claims.push(input);return {id:digest(String(claims.length)),revision:1};};
+  // Code finds the cited message to be the speaker's own typing, so a direct claim stays direct.
+  (entities as any).spoken=async()=>()=>'direct';
   const context:any={source,evidence:[{reference:source,text:'synthetic evidence',space:'synthetic'}],binding:{},
     entities:{speaker:{id:speaker,kind:'person',name:'Synthetic person'},project:null,mentioned_projects:[{id:project,kind:'project',name:'Synthetic project'}],mentioned_people:[]}};
   const claim={subject_id:speaker,predicate:'commitment',content:'Synthetic commitment.',attribution:'direct',uncertainty:'supported',evidence_ids:[source.id]};
@@ -145,6 +147,25 @@ test('people and projects keep stable identity, attributed evidence, connected r
     const beaconMemory=await entities.inspect(atlasReader,context.mentioned_projects[0]!.id);
     const reported=beaconMemory.claims.find((claim:any)=>claim.predicate==='commitment');
     assert.equal(reported.attribution,'reported');assert.equal(reported.speaker_entity_id,sam!.id);
+    // A direct claim stands only on the speaker's own typing, which code checks from the originals, never from the model:
+    // one resting on a forward is what the speaker passed on, and one resting on someone else's message is inferred.
+    const forwardText='Beacon ships in May.',forwarded=(await archive.capture({version:1,key:`entities:${stamp}:5`,origin:'live',kind:'telegram_update',bot_id:'fixture',
+      scope:atlasGroup,source_id:'5',revision:'1',occurred_at:null,text:forwardText,payload:{update_id:Number(stamp.slice(-8))+700,message:{message_id:5,date:1,
+        chat:{id:Number(atlasGroup),type:'supergroup',is_forum:false},from:{id:userBase+1,first_name:'Alex'},text:forwardText,
+        forward_origin:{type:'channel',chat:{id:-1009,type:'channel',title:'News'},message_id:3,date:1}}}})).source.reference;
+    // A direct claim is the speaker's own word about themselves.
+    const cite=(predicate:string,source:{id:string})=>({subject_id:sam!.id,predicate,content:`Synthetic ${predicate}.`,attribution:'direct',
+      uncertainty:'supported',evidence_ids:[source.id]});
+    const batch=(observed:{id:string}[])=>({...prepared,evidence:[samSource,forwarded,otherAlexSource].map(reference=>({reference,text:'',space:atlasGroup})),
+      observations:observed.map(source=>({source,value:{},derivatives:[]}))});
+    const direct=await entities.publishDiscoveries(batch([samSource]),{entity_suggestions:[],entity_claims:[cite('typed',samSource),cite('forwarded',forwarded),
+      cite('someone else',otherAlexSource)]},`${stamp}:direct`);
+    const passedOn=await entities.publishDiscoveries(batch([samSource,forwarded]),{entity_suggestions:[],entity_claims:[cite('typed beside a forward',samSource)]},`${stamp}:passed-on`);
+    assert.deepEqual([direct.rejected,passedOn.rejected],[[],[]]);
+    const checked=new Map((await entities.inspect(atlasReader,sam!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
+    assert.deepEqual(['typed','forwarded','someone else','typed beside a forward'].map(predicate=>[checked.get(predicate)?.attribution,checked.get(predicate)?.speaker_entity_id??null]),
+      [['direct',sam!.id],['reported',sam!.id],['inferred',null],['reported',sam!.id]],
+      'the speaker\'s own typing stays direct; a forward, or typing sent with one, is reported; another person\'s message is inferred');
     await assert.rejects(entities.inspect(privateReader,context.mentioned_projects[0]!.id),{code:'entity_not_found'});
     assert.equal((await entities.list(privateReader,{query:'Beacon'})).entities.length,0,'private entity names do not leak through search');
 

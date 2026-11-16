@@ -50,7 +50,7 @@ const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='obj
 const text=(value:unknown):string|null=>typeof value==='string'&&value.trim()?value:null;
 const fullId=(value:unknown):string|null=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
 /** The recordings of the sender's own voice; any other transcript is of an audio file someone made. */
-const ownVoice=new Set(['voice','video_note','voice_message','video_message']);
+export const ownVoice:ReadonlySet<string>=new Set(['voice','video_note','voice_message','video_message']);
 const none:SourceFacts={author:'unknown',account:null,name:null,act:'other',forward:null,forward_name:null,quote:null,file:false,file_name:null,
   audio:false,recording:false,send_class:null,answers:null};
 

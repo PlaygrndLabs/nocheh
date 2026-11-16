@@ -96,7 +96,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     await operations.verify(reference);return reference;
   },options.detectorVersion);
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
-  const projects=new ProjectRepository(stores.control,servedGroups),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
+  // One reader of where messages and notes came from, for reviews, Hermes's lookups, the Notes page, recall and Honcho.
+  const noteSources=new NoteSourceRepository(stores,options.policy,access);
+  const projects=new ProjectRepository(stores.control,servedGroups),entities=new EntityRepository(stores,access,projects,noteSources),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new MemoryProvenanceRepository(stores,archive,guards,options.memoryEngine);
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
@@ -118,7 +120,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
-  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect);
+  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect,noteSources);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
@@ -158,8 +160,6 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
   jobs.stopped=async id=>{await controlledActions.stopJob(id);};
   controlledExecution.settled=id=>actionCommands.settle('controlled',id).then(()=>{},()=>{});
-  // One reader of where notes came from, for reviews, Hermes's lookups, the Notes page and recall.
-  const noteSources=new NoteSourceRepository(stores,options.policy,access);
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,chats,memoryAccess});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};

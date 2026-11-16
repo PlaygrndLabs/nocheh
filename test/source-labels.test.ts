@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {accountIdFor,chatDirectory} from '../src/chats.js';
 import {approvalLines,reminderLines,sourceLines} from '../src/prompts.js';
 import {eventClass,eventClasses,sourceFacts,type EventClass,type SourceFacts} from '../src/source-facts.js';
-import {MODEL_LABEL_LIMIT,REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,evidenceMarker,fromToken,honchoSource,legendIntro,modelEventPhrase,modelLabel,ownerEventLabel,
+import {MODEL_LABEL_LIMIT,REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,evidenceMarker,fromToken,honchoPointer,honchoSource,honchoSources,legendIntro,modelEventPhrase,modelLabel,ownerEventLabel,
   ownerLabel,provenanceOf,reviewBody,reviewFragment,reviewLegend,reviewOrigin,reviewOwner,type LabelEvent,type NoteOrigin,type ReviewProvenance,
   type SourceWords} from '../src/source-labels.js';
 import {nameKeys,type Names} from '../src/task-reminder-text.js';
@@ -254,4 +254,11 @@ test('Honcho records name their part in fixed words, with names that cannot clos
   assert.deepEqual((['reply','follow_up','private_answer','job_report','scheduled_run','approved_post',null] as const).map(cls=>honchoSource({part:'nocheh',send_class:cls})),
     ['Nocheh\'s reply','Nocheh\'s follow-up','Nocheh\'s private answer','Nocheh\'s report','Nocheh\'s scheduled result','Nocheh\'s post','Nocheh\'s reply']);
   assert.equal(honchoSource({part:'nocheh',send_class:'reply',about_forward:true}),'Nocheh\'s reply about a message the owner forwarded');
+  // A message of several parts names each once, in order.
+  assert.equal(honchoSources([{part:'own'},{part:'file',name:'cv.pdf'},{part:'own'}]),
+    'the sender\'s own words; text of a file the sender sent (“cv.pdf”): not the sender\'s own words');
+  // What stays in the private chat in place of someone else's forward names only the kind of origin, never a name.
+  assert.deepEqual(honchoPointer('person'),{source:'Nocheh\'s note',
+    text:'the owner forwarded a message from a person; its text is kept with the owner\'s forwards and files'});
+  assert.equal(honchoPointer('channel').text,'the owner forwarded a message from a channel; its text is kept with the owner\'s forwards and files');
 });
