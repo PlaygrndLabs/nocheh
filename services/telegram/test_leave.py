@@ -1,5 +1,6 @@
 """Nocheh leaves a group someone other than the owner added it to (ADR-0253): only a chat that is not served and not the
-owner's, leaveChat and nothing else, at most once by its id, with Telegram's answer read as storage needs it."""
+owner's, leaveChat and nothing else, at most once by its id at each Telegram id, with Telegram's answer read as storage
+needs it."""
 import asyncio
 import json
 import os
@@ -21,6 +22,11 @@ from .settings import Policy
 
 OWNER, GROUP, OLD, STRANGER, OTHER = '111', '-1001234567890', '-1234567', '-1009876543210', '-1005555555555'
 ID = 'a' * 64
+
+
+def receipt(folder, chat, event=ID):
+    """Where a leave's answer is kept: by the add and the Telegram id."""
+    return Path(folder) / 'spool/dispatch' / ('leave-' + event + '-' + chat.lstrip('-') + '.result')
 
 
 class Bot:
@@ -81,10 +87,11 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await service.leave_chat(body), {'state': 'done'}, 'a repeat answers from its receipt')
             self.assertEqual(service.bot.calls, [int(STRANGER)], 'leaveChat once')
             self.assertTrue(service.bot.keys[0].startswith('leave:' + ID + ':'))
-            receipt = json.loads((Path(folder) / 'spool/dispatch' / ('leave-' + ID + '.result')).read_bytes())
-            self.assertEqual(receipt, {'state': 'done', 'chat_id': STRANGER})
-            with self.assertRaisesRegex(ValueError, 'invalid_leave'):
-                await service.leave_chat({'id': ID, 'chat_id': OTHER})
+            self.assertEqual(json.loads(receipt(folder, STRANGER).read_bytes()), {'state': 'done', 'chat_id': STRANGER})
+            # The same add at another Telegram id has no answer yet, so the app is asked whether that id is the group's now.
+            self.stands.append(False)
+            self.assertEqual(await service.leave_chat({'id': ID, 'chat_id': OTHER}), {'state': 'not_started', 'error_code': 'leave_superseded'})
+            self.assertEqual(service.bot.calls, [int(STRANGER)])
             self.assertEqual(await service.leave_chat({'id': 'b' * 64, 'chat_id': -1005555555555}), {'state': 'done'}, 'a number is taken too')
             self.assertEqual(service.bot.calls, [int(STRANGER), int(OTHER)])
 
@@ -105,6 +112,24 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, 'leave_chat_not_allowed'):
                 await owner.leave_chat({'id': ID, 'chat_id': '-777'})
             self.assertEqual(service.bot.calls + owner.bot.calls, [])
+
+    async def test_a_refused_leave_is_asked_again_at_the_upgraded_id(self):
+        # Telegram refused to leave the basic group, but that answer never reached the stage, and the group became a
+        # supergroup before the stage asked again. The refusal kept for the old id does not answer for the new one: once the
+        # app confirms the new id is the group's now, Nocheh leaves there, and each id keeps its own answer.
+        basic, refused = '-7654321', {'state': 'failed', 'error_code': 'telegram_refused'}
+        with tempfile.TemporaryDirectory() as folder:
+            service = self.service(Path(folder))
+            service.bot.answers.append(BadRequest('Bad Request: not enough rights'))
+            self.assertEqual(await service.leave_chat({'id': ID, 'chat_id': basic}), refused)
+            self.assertEqual(await service.leave_chat({'id': ID, 'chat_id': STRANGER}), {'state': 'done'})
+            self.assertEqual(service.bot.calls, [int(basic), int(STRANGER)])
+            self.assertEqual(self.asked.call_args.args[0], {'id': ID, 'chat_id': STRANGER}, 'the app confirmed the new id')
+            self.assertEqual([json.loads(receipt(folder, chat).read_bytes()) for chat in (basic, STRANGER)],
+                             [{**refused, 'chat_id': basic}, {'state': 'done', 'chat_id': STRANGER}])
+            self.assertEqual(await service.leave_chat({'id': ID, 'chat_id': basic}), refused, 'each answers from its receipt')
+            self.assertEqual(await service.leave_chat({'id': ID, 'chat_id': STRANGER}), {'state': 'done'})
+            self.assertEqual((service.bot.calls, self.asked.call_count), ([int(basic), int(STRANGER)], 2))
 
     async def test_telegram_saying_nocheh_is_gone_is_done_and_another_refusal_failed(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -143,7 +168,7 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             service.bot.answers += [NetworkError('Bad Gateway'), ChatMigrated(-1007777777777)]
             self.assertEqual(await service.leave_chat(body), {'state': 'not_started', 'error_code': 'telegram_leave_unconfirmed'})
             self.assertEqual(await service.leave_chat(body), {'state': 'not_started', 'error_code': 'telegram_chat_migrated'})
-            self.assertFalse((Path(folder) / 'spool/dispatch' / ('leave-' + ID + '.result')).exists())
+            self.assertFalse(receipt(folder, STRANGER).exists())
             self.assertEqual(await service.leave_chat(body), {'state': 'done'})
             self.assertEqual(len(service.bot.calls), 3)
             self.assertEqual(len(set(service.bot.keys)), 3, 'each try has its own journal entry')
@@ -158,7 +183,7 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await unread.leave_chat({'id': ID, 'chat_id': STRANGER}), {'state': 'not_started', 'error_code': 'served_list_unavailable'},
                              'a list that cannot be read proves nothing is served')
             self.assertEqual(service.bot.calls + unread.bot.calls, [])
-            self.assertFalse((Path(folder) / 'spool/dispatch' / ('leave-' + ID + '.result')).exists())
+            self.assertFalse(receipt(folder, STRANGER).exists())
 
     async def test_a_list_that_says_not_served_is_read_again_before_leaving(self):
         # The owner turned the group on after the list was read: the list is read again (at most once a second) before
