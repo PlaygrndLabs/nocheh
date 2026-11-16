@@ -218,7 +218,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(row.paused)return waiting('review','owner_paused');
       if(row.state==='done')return observation('completed','review',row.attempts);
       if(row.state==='pending') {
-        // A review queued before its source stopped being learned (such as a card queued before send classes) never runs.
+        // A review queued before its source stopped being learned (such as a card queued before send classes) never runs,
+        // nor one for a message whose sender is no longer allowed there.
         const stop=await s.reviews.unwanted(row.source_reference);
         if(stop)return fenced('memory_review',authority,async()=>{await s.reviews.withdraw(row.source_reference);return observation('skipped','review',0,Date.now(),stop);});
         try {

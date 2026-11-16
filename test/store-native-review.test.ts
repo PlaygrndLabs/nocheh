@@ -12,6 +12,8 @@ import {fixtureServices} from './fixture-brain.js';
 import {NativeReviewRepository,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
+import {captureEvidence} from '../src/stores/generated-capture.js';
 
 test('native review preserves profile waits, guarded inputs, durable completion and uncertain execution identity',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -303,5 +305,114 @@ test('native review runs once per source across authorization epochs and stops o
       [[2,'native_review_failed'],...replacements.slice(1).map(()=>[0,null])],'each replacement keeps its own attempts and failure');
     assert.equal(carried[0]!.next_attempt.getTime(),failedGap);
     assert.equal(await services.reviews.queue(longSource).then(ids=>ids.join()),renewed.join(),'a later sweep keeps them');
+  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('people not allowed there stay out of the owner\'s notes, with the rules, quotes and reactions that rest on them',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-senders-')),key='review-senders:'+Date.now();
+  const group='-'+Date.now(),unserved='-'+(Date.now()+7),owner:Reader={admin:true,scope:null},bot=1000+Date.now()%1000;
+  // Alice (123) owns Nocheh, Bob (456) is allowed in the group and Sara (789) is not.
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['456'],denied:[]}}};
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:'synthetic-review-service-credential-only',policy:()=>policy,
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('no notes review runs in this test');},
+    memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
+  let serial=0;
+  const capture=async(payload:Record<string,any>,chat=group)=>{
+    const update=++serial,message=payload.message??payload.edited_message,text=message?.text??null;
+    const event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,source_id:String(message?.message_id??payload.message_reaction.message_id),
+      revision:String(update),occurred_at:null,text,payload:{update_id:update,...payload}};
+    const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
+  };
+  const message=(id:number,from:number,text:string,extra:Record<string,unknown>={},chat=group)=>({message_id:id,date:1700000000+id,chat:{id:Number(chat),type:'group'},
+    from:{id:from,is_bot:false,first_name:from===123?'Alice':from===456?'Bob':'Sara'},text,...extra});
+  const say=(id:number,from:number,text:string,extra:Record<string,unknown>={},chat=group)=>capture({message:message(id,from,text,extra,chat)},chat);
+  const react=(id:number,from:number)=>capture({message_reaction:{chat:{id:Number(group),type:'group'},message_id:id,date:1700000100+serial,user:{id:from,is_bot:false},
+    old_reaction:[],new_reaction:[{type:'emoji',emoji:'🎉'}]}});
+  const jobs=async(source:{id:string})=>(await stores.control.query("SELECT id FROM native_review_jobs WHERE source_reference->>'id'=$1 ORDER BY id",[source.id])).rows.map(row=>String(row.id));
+  const skipped=async(source:{id:string})=>(await stores.control.query('SELECT reason FROM native_review_skips WHERE event_id=$1 AND generation=$2',
+    [source.id,(await services.guards.state()).generation])).rows[0]?.reason??null;
+  const input=async(id:string)=>JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[(await services.reviews.inspect(id)).input_reference.id])).rows[0].content.toString());
+  const bump=async()=>{const before=(await services.guards.state()).epoch;await services.guards.setMode('off');await services.guards.setMode('on');assert.ok((await services.guards.state()).epoch>before);};
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='memory_review'")).rows[0].epoch};
+    const operations=storageWorkflowOperations(services,async()=>{throw Error('no source files in this fixture');});
+
+    // Sara's message, her edit of it and her reaction stay out of the owner's notes, each recorded as left out.
+    const bob=await say(1,456,'Bob: the venue is booked');
+    const sara=await say(2,789,'SARAMARK the party moved to Saturday');
+    const saraEdit=await capture({edited_message:{...message(2,789,'SARAMARK the party moved to Sunday'),edit_date:1700000050}});
+    const saraReaction=await react(1,789);
+    for(const source of [sara,saraEdit,saraReaction]) {
+      assert.deepEqual(await services.reviews.queue(source),[],'nothing of hers is reviewed into the owner\'s notes');
+      assert.deepEqual(await jobs(source),[]);assert.equal(await skipped(source),'sender_not_allowed');
+    }
+    // The owner's messages, edits and reactions, Bob's message and Nocheh's own reply are reviewed.
+    const alice=await say(3,123,'Alice: bring the cake');
+    const aliceEdit=await capture({edited_message:{...message(3,123,'Alice: bring the big cake'),edit_date:1700000060}});
+    const aliceReaction=await react(1,123);
+    const reply={...message(4,bot,'Noted, the venue is booked'),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
+    const delivered:Envelope={version:1,key:key+':result',origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:key,revision:'0',occurred_at:null,text:null,
+      payload:{intent_key:key+':intent',method:'sendMessage',state:'delivered',status:200,send_class:'reply',wire_base64:Buffer.from(JSON.stringify({ok:true,result:reply})).toString('base64')}};
+    const nocheh=(await services.capture.capture(captureEvidence(delivered).originals[0]!)).source.reference;await services.guards.prepare(nocheh,'fixture',services.detect);
+    for(const source of [bob,alice,aliceEdit,aliceReaction,nocheh]) {
+      assert.equal((await services.reviews.queue(source)).length,1);assert.equal(await skipped(source),null);
+    }
+
+    // The owner's reply to Sara is reviewed without her message, and without the quote of it; a quote of Bob stays.
+    const answer=await say(5,123,'Yes, book it',{reply_to_message:message(2,789,'SARAMARK the party moved to Saturday'),quote:{text:'SARAMARK the party',position:0}});
+    const [answerReview]=await services.reviews.queue(answer);
+    const answerInput=await input(answerReview!);
+    assert.ok(!answerInput.evidence.some((item:{id:string})=>[sara.id,saraEdit.id].includes(item.id)),'her message is not evidence');
+    assert.ok(!answerInput.text.includes('SARAMARK'),'neither her words nor the quote of them reach the review');
+    assert.ok(answerInput.text.includes('sender_not_allowed'),'the review is told something was left out');
+    const together=await say(6,123,'Agreed',{reply_to_message:message(1,456,'Bob: the venue is booked'),quote:{text:'BOBQUOTE venue',position:0}});
+    const togetherInput=await input((await services.reviews.queue(together))[0]!);
+    assert.ok(togetherInput.text.includes('BOBQUOTE'));assert.ok(togetherInput.evidence.some((item:{id:string})=>item.id===bob.id));
+    // Long-term memory and interpretations still read her message as context for the owner's reply.
+    assert.ok((await services.contexts.prepare(answer,await services.guards.state())).evidence.some(item=>item.reference.id===sara.id));
+
+    // The owner's reaction to her message has nothing left to review.
+    const bare=await react(2,123);
+    assert.deepEqual(await services.reviews.queue(bare),[]);assert.equal(await skipped(bare),'target_not_allowed');assert.deepEqual(await jobs(bare),[]);
+
+    // A rule learned from her message stays out of the owner's notes review, but not out of group memory.
+    const ruleText='In this group SARARULE means the meeting is cancelled';
+    const ruleSource=await say(7,789,ruleText),space=(await services.access.space(ruleSource))!;
+    const binding=await services.guards.state(),dependencies=(await services.contexts.prepare(ruleSource,binding)).dependencies;
+    await services.learned.publishAutomatic(digest(key+':rule'),{kind:'convention',subject:'SARARULE',text:ruleText,scope:{kind:'conversation',id:space},uncertainty:'explicit',
+      evidence:[ruleSource],quote:{source_id:ruleSource.id,text:ruleText},conflicts:[]},null,key+':rule',dependencies,binding,'fixture',services.detect);
+    const later=await say(8,123,'Alice: see you all there');
+    const laterInput=await input((await services.reviews.queue(later))[0]!);
+    assert.ok(!laterInput.text.includes('SARARULE'));assert.ok(laterInput.text.includes('rule_sender_not_allowed'));
+    assert.ok(JSON.stringify((await services.contexts.prepare(later,await services.guards.state())).rules).includes('SARARULE'));
+
+    // Bob is denied: his review still waiting is withdrawn, under a later epoch or under the current one.
+    const [staleReview]=await services.reviews.queue(await say(9,456,'Bob: first'));
+    const current=await say(10,456,'Bob: second'),[currentReview]=await services.reviews.queue(current);
+    policy.group_access={[group]:{granted:['456'],denied:['456']}};
+    const nativeRun=await operations.memory_review!('native:'+currentReview,authority);
+    assert.deepEqual([nativeRun.state,nativeRun.waiting_reason],['skipped','sender_not_allowed']);
+    assert.deepEqual(await jobs(current),[]);assert.equal(await skipped(current),'sender_not_allowed');
+    await bump();
+    const staleSource=(await services.reviews.inspect(staleReview!)).source_reference;
+    assert.deepEqual(await services.reviews.queue(staleSource),[]);assert.deepEqual(await jobs(staleSource),[],'nothing is left for requestStrandedSources to renew');
+    assert.equal((await stores.control.query(`SELECT count(*)::int AS n FROM native_review_jobs WHERE source_reference->>'id'=$1 AND state='pending'`,[staleSource.id])).rows[0].n,0);
+    const strandedSteps=async()=>(await stores.control.query("SELECT count(*)::int AS n FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['source:'+staleSource.id])).rows[0].n;
+    await stores.control.query("UPDATE workflow_registry SET state='completed',created_at=now()-interval '1 hour' WHERE family='memory_review' AND job_id=$1",['source:'+staleSource.id]);
+    const steps=await strandedSteps();await requestStrandedSources(stores.control,new Date(Date.now()-60000));assert.equal(await strandedSteps(),steps);
+
+    // Allowing Sara later doesn't bring her old messages into the notes; the owner's yes on one does, in a served group only.
+    policy.group_access={[group]:{granted:['789'],denied:[]}};await bump();
+    assert.deepEqual(await services.reviews.queue(sara),[]);assert.deepEqual(await jobs(sara),[]);
+    await services.access.setConsent(owner,sara,{enabled:true,expected_revision:0,operation_id:key+':consent'});
+    assert.equal((await services.reviews.queue(sara)).length,1,'the owner\'s yes reviews it');
+    const elsewhere=await say(1,789,'Sara elsewhere',{},unserved);
+    await services.access.setConsent(owner,elsewhere,{enabled:true,expected_revision:0,operation_id:key+':consent-elsewhere'});
+    assert.deepEqual(await services.reviews.queue(elsewhere),[],'never in a chat Nocheh does not serve');assert.equal(await skipped(elsewhere),'sender_not_allowed');
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

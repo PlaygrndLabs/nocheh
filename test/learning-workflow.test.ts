@@ -149,5 +149,11 @@ test('Nocheh\'s own cards, notices and reminders close every learning step unlea
   skip=null;calls.length=0;
   assert.equal((await operations.memory_review!('source:'+card,authority)).state,'completed');
   assert.deepEqual(calls,['queue','renew','submit']);
-  safeMetadata(observation('skipped','review',0,Date.now(),'sender_not_allowed'));
+  // A review waiting for a message whose sender is no longer allowed there, or for a reaction to one, is withdrawn the
+  // same way (ADR-0257).
+  for(const reason of ['sender_not_allowed','target_not_allowed'] as const) {
+    services.reviews.unwanted=async()=>reason;calls.length=0;
+    const left=await operations.memory_review!('native:'+waitingReview.id,authority);
+    assert.deepEqual([left.state,left.waiting_reason,calls],['skipped',reason,['withdraw:'+card]]);safeMetadata(left);
+  }
 });

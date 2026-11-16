@@ -16,7 +16,7 @@ import {LearningContextRepository} from '../src/stores/learning-context.js';
 import {installChatsForTest} from '../src/chats.js';
 import {seededDirectory} from './fixture-seeded-chats.js';
 import {ContextualLearningRepository,terminalLearningCodes} from '../src/stores/learning-engine.js';
-import {learningResultSchema} from '../src/interpretations.js';
+import {learningResultSchema,type InterpretationVersion} from '../src/interpretations.js';
 import {MemoryProvenanceRepository} from '../src/stores/memory-provenance.js';
 import {requestStrandedSources} from '../src/stores/native-review.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -64,6 +64,14 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     const prepared=await contexts.prepare(reaction,await guards.state());
     assert.equal(prepared.evidence.length,2);assert.ok(prepared.evidence.some(e=>e.reference.id===parent.id));
     assert.ok(!JSON.stringify(prepared.observations).includes('nested-unverified-target'));
+    // Only the owner's notes review leaves anyone out (ADR-0257): letting everyone in prepares exactly what Honcho and
+    // interpretations get without options, and a reaction whose message is left out has nothing left.
+    const collect=()=>({dropped:[] as string[],versions:[] as InterpretationVersion[],bare_reaction:false}),everyone=collect(),left=collect();
+    assert.equal(canonical(await contexts.prepare(reaction,await guards.state(),{admit:async()=>true,collect:everyone})),canonical(prepared));
+    assert.deepEqual([everyone.dropped,everyone.bare_reaction],[[],false]);
+    const without=await contexts.prepare(reaction,await guards.state(),{admit:async reference=>reference.id!==parent.id,collect:left});
+    assert.deepEqual(without.evidence.map(item=>item.reference.id),[reaction.id]);assert.ok(without.limitations.includes('sender_not_allowed'));
+    assert.deepEqual([left.dropped,left.bare_reaction],[[parent.id],true]);
     const binding=await guards.state(),workspace=digest(key+':workspace');
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true');
     await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[workspace,binding.generation,binding.epoch,space]);
@@ -151,6 +159,13 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     assert.equal((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='organization' AND job_id=$1",['learning:'+withConvention])).rows[0].count,'1',
       'normal completion also commits exactly one organization follow-up without another model request');
     const beforeRewrite=await contexts.prepare(removed,await guards.state());
+    // A rule resting on a message the owner's notes leave out is left out of that review too, and only there.
+    const ruleKept=collect(),ruleLeft=collect();
+    assert.equal(canonical(await contexts.prepare(removed,await guards.state(),{admit:async()=>true,collect:ruleKept})),canonical(beforeRewrite));
+    assert.deepEqual(ruleKept.versions.map(version=>version.id),[ruleId]);
+    const noRule=await contexts.prepare(removed,await guards.state(),{admit:async reference=>reference.id!==convention.id,collect:ruleLeft});
+    assert.deepEqual([beforeRewrite.rule_ids,noRule.rule_ids,ruleLeft.versions,ruleLeft.dropped],[[ruleId],[],[],[]]);
+    assert.ok(noRule.limitations.includes('rule_sender_not_allowed'));assert.ok(!beforeRewrite.limitations.includes('rule_sender_not_allowed'));
     await learned.publishAutomatic(ruleId,{...rule,text:'A green mark signals readiness for review here.'},1,key+':rule-rephrased',
       ruleDependencies,await guards.state(),'fixture',detect);
     const workspaceNow=async(label:string)=>{

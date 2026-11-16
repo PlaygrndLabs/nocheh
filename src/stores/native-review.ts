@@ -7,10 +7,11 @@ import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionA
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
 import type {GuardBinding} from './guards.js';
-import type {LearningContextRepository} from './learning-context.js';
+import type {LearningContextOptions,LearningContextRepository} from './learning-context.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
-import {ownerChat} from '../assistant-policy.js';
+import {notesSender,ownerChat} from '../assistant-policy.js';
+import {servedGroup,sourceChat} from '../spaces.js';
 
 export const nativeReviewSchema=`
 CREATE TABLE IF NOT EXISTS native_review_jobs (
@@ -22,7 +23,14 @@ CREATE TABLE IF NOT EXISTS native_review_jobs (
 ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS paused boolean NOT NULL DEFAULT false;
 ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS reconciliations integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS native_review_jobs_source ON native_review_jobs((source_reference->>'id'));
+CREATE TABLE IF NOT EXISTS native_review_skips (
+ event_id text NOT NULL,generation text NOT NULL,reason text NOT NULL CHECK(reason IN ('sender_not_allowed','target_not_allowed')),
+ created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(event_id,generation)
+);
 `;
+/** Why a source stays out of the owner's notes (ADR-0257): someone not allowed there sent it, or it is a reaction to a
+ * message that was left out for that reason. */
+export type NotesSkip='sender_not_allowed'|'target_not_allowed';
 const protocol='hermes-native-review-v3';
 /** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
 export const nativeReconcileLimit=8;
@@ -89,13 +97,23 @@ export class NativeReviewRepository {
     const kept=reviewed.map(row=>String(row.id)),waiting=reviewed.filter(row=>row.waiting).map(row=>String(row.id));
     const settle=async()=>{await retire();await this.keepWaiting([...waiting,...ids]);return [...kept,...ids];};
     if(kept.length&&!stale.size)return await settle();
+    // Someone not allowed there stays out of the owner's notes, while group memory still learns what they said. Decided
+    // after the return above, so a source already reviewed in this generation keeps its review.
+    const leave=async(reason:NotesSkip)=>{await this.skip(source,binding,reason);return kept.filter(id=>!waiting.includes(id));};
+    const decision=await this.decide(source,binding);if(decision!=='review')return await leave(decision);
+    // Related messages are asked the same question, each once.
+    const asked=new Map<string,Promise<boolean>>(),options:Required<LearningContextOptions>={
+      admit:reference=>{let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id).then(value=>value==='review'));return allowed;},
+      collect:{dropped:[],versions:[],bare_reaction:false}};
     let context;
-    try{context=await this.contexts.prepare(source,binding);}
+    try{context=await this.contexts.prepare(source,binding,options);}
     catch(error) {
       if(!(error instanceof HttpError&&error.code==='learning_consent_required'))throw error;
       if(kept.length)return await settle();
       await retire();throw error;
     }
+    // A reaction to a message left out has nothing left to review, so no model run is spent on it.
+    if(options.collect.bare_reaction)return await leave('target_not_allowed');
     const actor=this.actor(source,binding);
     await this.turns.binding(actor);await this.prepared.allow(actor,{observations:context.observations,rules:context.rules});
     const text=canonical({space:context.space,observations:context.observations,rules:context.rules,limitations:context.limitations});
@@ -144,9 +162,44 @@ export class NativeReviewRepository {
     }
     return await settle();
   }
-  /** Why a source's notes review should not run, or null: for now, Nocheh's own card or notice (ADR-0256). */
-  async unwanted(source:SourceReference):Promise<'nocheh_message'|null> {
-    return this.contexts.access.notLearned(source);
+  /** Why a source's notes review should not run, or null: Nocheh's own card or notice (ADR-0256), or a source left out of
+   * the owner's notes (ADR-0257), which is recorded so a later grant doesn't bring it back in this generation. */
+  async unwanted(source:SourceReference):Promise<'nocheh_message'|NotesSkip|null> {
+    const own=await this.contexts.access.notLearned(source);if(own)return own;
+    const binding=await this.contexts.guards.state(),decision=await this.decide(source,binding);
+    if(decision==='review')return null;
+    await this.record(source,binding,decision);return decision;
+  }
+  /**
+   * Whether a source goes into the owner's notes review: what the owner or someone allowed there sent, and Nocheh's own
+   * messages and the owner's web chat (notesSender). The owner's yes on that message lets it in, but only in the owner's
+   * own chat or a group Nocheh serves, never in someone else's private chat. A source left out once stays out for the
+   * installation generation, so allowing the person later doesn't review their old messages one model run each.
+   */
+  private async decide(source:SourceReference,binding:GuardBinding):Promise<'review'|NotesSkip> {
+    const row=(await this.control.query(`SELECT (SELECT enabled FROM learning_consent WHERE event_id=$1) AS consent,
+      (SELECT reason FROM native_review_skips WHERE event_id=$1 AND generation=$2) AS skipped`,[source.id,binding.generation])).rows[0];
+    if(row.consent===true) {
+      const chat=sourceChat(await this.contexts.access.archive.verify(source));
+      if(chat!==null&&(chat===ownerChat(this.contexts.access.policy())||servedGroup(chat)))return 'review';
+    }
+    if(row.skipped)return row.skipped as NotesSkip;
+    return await this.sender(source.id);
+  }
+  /** notesSender over an archived event; one that is missing or unreadable is not let in. */
+  private async sender(id:string):Promise<'review'|'sender_not_allowed'> {
+    const event=(await this.contexts.access.stores.archive.query('SELECT channel,kind,scope,payload FROM events WHERE id=$1',[id])).rows[0];
+    if(!event)return 'sender_not_allowed';
+    let payload:unknown;
+    try{payload=JSON.parse((event.payload as Buffer).toString());}catch{return 'sender_not_allowed';}
+    return notesSender(this.contexts.access.policy(),{channel:event.channel,kind:event.kind,scope:event.scope,payload});
+  }
+  private async record(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
+    await this.control.query('INSERT INTO native_review_skips(event_id,generation,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[source.id,binding.generation,reason]);
+  }
+  /** Leaves a source out of the owner's notes and withdraws its reviews still waiting; their workflows close as superseded. */
+  private async skip(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
+    await this.record(source,binding,reason);await this.withdraw(source);
   }
   /** Withdraws a source's reviews still waiting to run in this installation generation; their workflows close as
    * superseded, and a review that started keeps its row. */

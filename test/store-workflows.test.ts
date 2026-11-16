@@ -144,7 +144,9 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-workflow-')),key='workflows:'+Date.now(),group='-'+Date.now(),owner='123';
   let sends=0,reviews=0,reasoning=0,engines=0,loseReply=true,sequence=0,targetIds:string[]=[],duringObserve:(()=>Promise<void>)|undefined;
   const remote=new Map<string,any[]>(),runtimeCalls:string[]=[];let reviewRunning=false,reviewObservations=0;
-  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:owner,group_ids:[group]}),
+  // Person 9 is allowed in the group, so what they say also goes into the owner's notes; person 10 is not (ADR-0257).
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),
+    policy:()=>({enabled:true,owner_id:owner,group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}}}),
     runtime:async(operation,input)=>{
       runtimeCalls.push(operation);
       if(operation==='guard.detect')return {literals:[]};
@@ -179,7 +181,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
   try {
     await services.guards.reconcile();await services.guards.setMode('off');await services.guards.setMode('on');
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');
-    const reaction=(await services.capture.capture(event('reaction',{message_reaction:{chat:{id:Number(group)},message_id:1,date:1700000020,user:{id:9},old_reaction:[],new_reaction:[{type:'emoji',emoji:'🌟'}]}}))).source.reference;
+    const reaction=(await services.capture.capture(event('reaction',{message_reaction:{chat:{id:Number(group),type:'supergroup'},message_id:1,date:1700000020,user:{id:9},old_reaction:[],new_reaction:[{type:'emoji',emoji:'🌟'}]}}))).source.reference;
     assert.equal((await advance('preparation',reaction.id)).state,'completed');
     assert.equal((await advance('memory_review','source:'+reaction.id)).state,'waiting','an unresolved old reaction waits for independently captured context');
     const parent=(await services.capture.capture(event('parent',{message:{message_id:1,date:1700000000,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Please review this package'}}))).source.reference;
@@ -290,6 +292,21 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       'Honcho reads the imported message');
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM interpretation_jobs WHERE source_reference->>'id'=$1",[imported.id])).rows[0].count,0,
       'no learning question is asked about each imported message');
+    // Someone not allowed there stays out of the owner's notes, while the group's long-term memory still learns what they said.
+    const stranger=(await services.capture.capture(event('stranger',{message:{message_id:6,date:1700000050,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:10},
+      text:'A message from someone not allowed here'}}))).source.reference;
+    assert.equal((await advance('preparation',stranger.id)).state,'completed');
+    const reviewsBeforeStranger=reviews;
+    assert.equal((await advance('memory_review','source:'+stranger.id)).state,'completed','the source step still completes');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM native_review_jobs WHERE source_reference->>'id'=$1",[stranger.id])).rows[0].count,0);
+    assert.equal((await stores.control.query('SELECT reason FROM native_review_skips WHERE event_id=$1',[stranger.id])).rows[0].reason,'sender_not_allowed');
+    assert.equal(reviews,reviewsBeforeStranger);
+    assert.equal((await advance('honcho','source:'+stranger.id)).state,'waiting');
+    for(const row of (await stores.control.query("SELECT id FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='pending'",[stranger.id])).rows)
+      assert.equal((await advance('honcho','receipt:'+row.id)).state,'completed');
+    assert.equal((await advance('honcho','source:'+stranger.id)).state,'completed');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='done'",[stranger.id])).rows[0].count,1,
+      'group memory learns it');
   }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

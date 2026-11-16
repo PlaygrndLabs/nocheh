@@ -23,11 +23,21 @@ export interface PreparedLearningContext {
   organization_context?:{assignment:{space_id:string;project_id:string|null;revision:number;inherited:boolean;follows_group?:string};projects:{id:string;name:string;revision:number}[]};
   limitations:string[];
 }
+/**
+ * What the owner's notes review asks of prepare (ADR-0257). `admit` says whether a related message, or the evidence of a
+ * rule, may go into the owner's notes; one it refuses is left out, and so are the rules resting on it and any quote of
+ * it. `collect` gets the ids left out, the rules kept, and `bare_reaction` when the source is a reaction to a message that
+ * was left out. Honcho and interpretations pass neither, so what they learn from is exactly as before.
+ */
+export interface LearningContextOptions {
+  admit?:(reference:SourceReference)=>Promise<boolean>;
+  collect?:{dropped:string[];versions:InterpretationVersion[];bare_reaction:boolean};
+}
 export class LearningContextRepository {
   constructor(readonly access:SourceAccessRepository,readonly guards:GuardRepository,readonly learned:LearnedMemoryRepository,
     readonly selections:SelectionRepository,readonly projects:ProjectRepository,readonly entities:EntityRepository){}
 
-  async prepare(source:SourceReference,binding:GuardBinding):Promise<PreparedLearningContext> {
+  async prepare(source:SourceReference,binding:GuardBinding,options:LearningContextOptions={}):Promise<PreparedLearningContext> {
     const space=await this.access.space(source);
     if(!space)throw new HttpError(409,'learning_context_pending');
     if(!await this.access.canLearn(source,binding))throw new HttpError(403,'learning_consent_required');
@@ -35,18 +45,23 @@ export class LearningContextRepository {
     const audience=observed.audience;
     // Relations within this very conversation only (its Nocheh chat or topic, ADR-0252), never its group's others.
     const relations=await this.access.relationships.context(source,audience?{kind:'recall',scope:{space,group:null}}:{kind:'owner'},30);
-    const references=new Map([[source.id,source]]),limitations:string[]=[];
+    const references=new Map([[source.id,source]]),limitations:string[]=[],dropped=new Set<string>(),targets=new Set<string>(),reacted=new Set<string>();
     for(const target of relations.targets) {
       if(target.unresolved)limitations.push('target_not_observed');
       if(target.next)limitations.push('target_history_truncated');
+      for(const reference of target.references){targets.add(reference.id);if(target.kind==='reaction_to')reacted.add(reference.id);}
       const activity=await this.access.relationships.activity(target.identity,'',30);
       if(activity.next)limitations.push('activity_history_truncated');
       for(const reference of [...target.references,...activity.references]) {
         if(references.size>=30){limitations.push('evidence_limit');break;}
-        if(await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding))references.set(reference.id,reference);
-        else limitations.push('target_context_not_permitted');
+        if(!(await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding)))limitations.push('target_context_not_permitted');
+        // What someone not allowed there sent is left out of the owner's notes review, without taking one of the 30 places.
+        else if(options.admit&&!references.has(reference.id)&&!await options.admit(reference)){limitations.push('sender_not_allowed');dropped.add(reference.id);}
+        else references.set(reference.id,reference);
       }
     }
+    // A quote repeats part of the message replied to, so it goes when that message was left out.
+    const unquote=[...dropped].some(id=>targets.has(id));
     const dependencies:PreparedDependency[]=[],evidence:LearningEvidence[]=[],observations:PreparedLearningContext['observations']=[];
     for(const reference of references.values()) {
       const id='events:'+reference.id,guarded=await this.guards.read(id,binding),value=guarded.value as any;
@@ -68,6 +83,7 @@ export class LearningContextRepository {
       const scoped=structuredClone(value);
       for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(scoped.payload?.[kind]) {
         delete scoped.payload[kind].reply_to_message;delete scoped.payload[kind].external_reply;
+        if(unquote)delete scoped.payload[kind].quote;
       }
       observations.push({source:reference,value:scoped,derivatives});evidence.push({reference,text:texts.join('\n'),space});
     }
@@ -102,10 +118,14 @@ export class LearningContextRepository {
       ORDER BY v.author='owner' DESC,e.kind='convention' DESC,v.created_at DESC,e.id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
     // A busy chat keeps learning past 100 rules: the owner's own rules, then conventions, then the newest are kept.
     if(candidates.length>100){candidates.pop();limitations.push('rule_catalog_limit');}
-    const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>();
+    const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>(),refused=new Set<string>();
     for(const candidate of candidates)try {
-      const version=await this.learned.read(principal,candidate.id,binding,async reference=>
-        await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding));
+      const version=await this.learned.read(principal,candidate.id,binding,async reference=>{
+        if(!(await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding)))return false;
+        // A rule resting on what someone not allowed there sent stays out of the owner's notes review with it.
+        if(options.admit&&!await options.admit(reference)){refused.add(candidate.id);return false;}
+        return true;
+      });
       if(version.author!=='owner'&&version.kind!=='convention'&&version.uncertainty!=='explicit')continue;
       if(version.author!=='owner'&&(await this.access.stores.archive.query(`SELECT 1 FROM source_observations o JOIN source_revisions r ON r.id=o.revision_id
         WHERE o.event_id=ANY($1::text[]) AND r.object_id=$2 LIMIT 1`,[version.evidence.map(e=>e.id),observed.object_id])).rowCount)continue;
@@ -119,7 +139,13 @@ export class LearningContextRepository {
         inputs.push({kind:'owner_guard',id:version.id,revision:candidate.rule_guard_revision,text:canonical(version)});
       for(const input of inputs)ruleInputs.set(canonical(input),input);
     } catch(error) {
-      if(error instanceof HttpError&&['learned_memory_not_found','memory_refresh_required'].includes(error.code))continue;throw error;
+      if(error instanceof HttpError&&['learned_memory_not_found','memory_refresh_required'].includes(error.code)){if(refused.has(candidate.id))limitations.push('rule_sender_not_allowed');continue;}
+      throw error;
+    }
+    if(options.collect) {
+      options.collect.dropped.push(...dropped);options.collect.versions.push(...versions);
+      // A reaction left with nothing it reacts to says nothing the owner's notes could use.
+      options.collect.bare_reaction=[...reacted].some(id=>dropped.has(id))&&![...reacted].some(id=>references.has(id));
     }
     await this.guards.assertCurrent(binding);
     return {source,source_object:observed.object_id,space,binding,evidence,dependencies,observations,
