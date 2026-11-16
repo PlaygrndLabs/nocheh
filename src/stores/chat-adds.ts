@@ -243,23 +243,26 @@ export class ChatAdds {
    * their private chat: move the group to an offered project or out of projects, in one owner command that also archives
    * the card's own project once no group is in it, or turn Nocheh off there. The card then shows the answer under its text
    * and loses its buttons. Returns the answer to the press.
+   * Each press is its own owner command, named by `press`, the press's own archived event: the same press tried again
+   * gets its receipt, and a later press runs again on the group as it is now, since a card can keep its buttons (a send
+   * whose answer was lost, or an edit that failed).
    */
-  async press(choice:ChatAddChoice,event:string):Promise<string> {
+  async press(choice:ChatAddChoice,event:string,press:string):Promise<string> {
     const {lines,words}=await this.lines();
     const row=(await this.control.query(`SELECT * FROM chat_state_events WHERE left(event_id,32)=$1 AND action='card' AND outcome='carded' AND project_id IS NOT NULL`,
       [event])).rows[0] as ChatAddRow|undefined;
     if(!row)return lines.changed;
     const {group,text}=await this.cardText(row,lines,words);
-    let reply:string;
+    const operation='chat-card:'+press;let reply:string;
     try {
       if(choice==='o') {
-        await this.chats.setState(asOwner,{chat_id:row.chat_id,state:'off',operation_id:`chat-card:${row.event_id}:o`});
+        await this.chats.setState(asOwner,{chat_id:row.chat_id,state:'off',operation_id:operation});
         reply=fillLine(lines.turned_off,{group});
       } else {
         const project=choice==='x'?null:row.offered[Number(choice)];
         if(project===undefined)return lines.changed;
         await currentChats();
-        await this.commands.run(asOwner,`chat-card:${row.event_id}:${choice}`,{kind:'chat_card',event_id:row.event_id,chat_id:row.chat_id,project_id:project},async db=>{
+        await this.commands.run(asOwner,operation,{kind:'chat_card',event_id:row.event_id,choice,chat_id:row.chat_id,project_id:project},async db=>{
           const own=(await db.query('SELECT revision FROM project_assignments WHERE space_id=$1',[row.chat_id])).rows[0];
           await writeAssignment(db,{space_id:row.chat_id,project_id:project,mode:project?'assigned':'none',expected_revision:Number(own?.revision??0)});
           // The card's own project, once no group is in it, is archived, so it does not linger in the owner's list.

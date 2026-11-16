@@ -665,7 +665,7 @@ export class ActionCommandRepository {
     if(query?.data===retryButton&&typeof query.id==='string')return this.retryPressed(query);
     if((query?.data===memberPause||query?.data===memberResume)&&typeof query.id==='string')return this.memberJobsPressed(query,query.data===memberPause);
     const added=typeof query?.data==='string'?chatAddButton.exec(query.data):null;
-    if(added&&typeof query.id==='string')return this.chatAddPressed(query,added[1] as ChatAddChoice,added[2]!);
+    if(added&&typeof query.id==='string')return this.chatAddPressed(query,added[1] as ChatAddChoice,added[2]!,source);
     const privately=typeof query?.data==='string'?answerButton.exec(query.data):null;
     if(privately&&typeof query.id==='string')return this.answerPressed(privately[1]!,query,source);
     if(!data||typeof query.id!=='string')return false;
@@ -823,13 +823,14 @@ export class ActionCommandRepository {
     return true;
   }
   /** A button on the card after the owner added Nocheh to a group (ADR-0253): only the owner's press in their private
-   *  chat moves the group to another project or out of projects, or turns Nocheh off there. */
-  private async chatAddPressed(query:any,choice:ChatAddChoice,event:string):Promise<boolean> {
+   *  chat moves the group to another project or out of projects, or turns Nocheh off there, as its own owner command named
+   *  by the press's archived event. */
+  private async chatAddPressed(query:any,choice:ChatAddChoice,event:string,source:SourceReference):Promise<boolean> {
     const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),owner=ownerChat(policy);
     const lines=chatAddLines((await ownerPrompts(this.access.stores.control))['telegram.chat_adds']);
     let reply=lines.only_owner;
     // The owner's own press (their account), in their private chat (its chat id), as for Retry failed.
-    if(owner&&policy.owner_id&&String(query.from?.id??'')===policy.owner_id&&telegramChat(chat)===owner)reply=this.adds?await this.adds.press(choice,event):lines.changed;
+    if(owner&&policy.owner_id&&String(query.from?.id??'')===policy.owner_id&&telegramChat(chat)===owner)reply=this.adds?await this.adds.press(choice,event,source.id):lines.changed;
     await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(reply).slice(0,200).join('')},10000);
     return true;
   }

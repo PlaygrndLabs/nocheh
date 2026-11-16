@@ -74,13 +74,14 @@ async function harness(stores:StorePools,label:string) {
   const row=async(event:string)=>(await stores.control.query('SELECT * FROM chat_state_events WHERE event_id=$1',[event])).rows[0];
   const chat=async(chatId:string)=>(await stores.control.query('SELECT state,state_seq,state_bot,state_at,add_event FROM chats WHERE id=$1',[chatId])).rows[0];
   const epoch=async()=>Number((await stores.control.query('SELECT epoch FROM guard_state WHERE singleton')).rows[0].epoch);
-  /** The owner's press on a button of a notice, through the button routing the dispatch uses. Returns the press's answer. */
-  const press=async(data:string,from=Number(OWNER),where=Number(OWNER))=>{
+  /** The owner's press on a button of a notice, through the button routing the dispatch uses. Each press is its own archived
+   *  update; `source` names an earlier one's, as when the dispatch tries that press again. Returns the press's answer. */
+  const press=async(data:string,from=Number(OWNER),where=Number(OWNER),source=digest(label+':press:'+base+':'+(++serial)))=>{
     const query={id:'q'+(++serial),data,from:{id:from},message:{message_id:9,chat:{id:where,type:where===Number(OWNER)?'private':'supergroup'}}};
     const access={policy:served,archive:{verify:async()=>({kind:'telegram_update',origin:'live'})},
       stores:{archive:{query:async()=>({rows:[{payload:Buffer.from(JSON.stringify({callback_query:query}))}]})},control:stores.control}};
     const actions=new ActionCommandRepository(access as any,{} as any,{} as any,call,undefined,undefined,undefined,adds);
-    assert.equal(await actions.callback({store:'archive',kind:'event',id:'e'.repeat(64),revision:'1',input_hash:'f'.repeat(64)} as any),true);
+    assert.equal(await actions.callback({store:'archive',kind:'event',id:source,revision:'1',input_hash:'f'.repeat(64)} as any),true);
     return calls.filter(item=>item.operation==='telegram.approval'&&item.input.callback_query_id===query.id).at(-1)?.input.text as string;
   };
   /** Leaves nothing of this test due, and its groups off, for a later test. */
@@ -282,18 +283,24 @@ test('the owner\'s add gets its own project and a card, in one owner command; th
     // Move to the first offered project: one owner command; the card's own project, now empty, is archived; the card shows
     // the answer and loses its buttons.
     let epoch=await h.epoch();
-    const moved=await h.press(chatAddData('0',freshAdd));
+    const first=digest('card:press:'+h.update(10)),moved=await h.press(chatAddData('0',freshAdd),Number(OWNER),Number(OWNER),first);
     assert.equal(moved,`${shown(freshId,h.title(fresh))} is now in ${quoted('Shop 4')}.`);
     assert.equal(await h.epoch(),epoch+1);
     assert.deepEqual((await stores.control.query('SELECT project_id,mode FROM project_assignments WHERE space_id=$1',[freshId])).rows[0],{project_id:p4,mode:'assigned'});
     assert.equal((await stores.control.query('SELECT state FROM projects WHERE id=$1',[auto(freshAdd)])).rows[0].state,'archived');
     const edit=h.calls.filter(item=>item.operation==='telegram.notice'&&item.input.edit).at(-1)!.input;
     assert.deepEqual(edit,{id:digest('chat-add-card:'+freshAdd),chat_id:OWNER,text:text(freshId,fresh)+'\n\n'+moved,edit:true});
-    // The same press again is its receipt; another one still moves it.
+    // The dispatch trying the same press again gets its receipt: nothing runs again.
     epoch=await h.epoch();
-    assert.equal(await h.press(chatAddData('0',freshAdd)),moved);assert.equal(await h.epoch(),epoch);
+    assert.equal(await h.press(chatAddData('0',freshAdd),Number(OWNER),Number(OWNER),first),moved);assert.equal(await h.epoch(),epoch);
+    // A card can keep its buttons (an edit that failed), and each later press runs on the group as it is now: Move to Shop
+    // 2, then to Shop 4 again, ends in Shop 4, and each answer says where it is.
+    const assigned=async()=>(await stores.control.query('SELECT project_id FROM project_assignments WHERE space_id=$1',[freshId])).rows[0].project_id;
     assert.equal(await h.press(chatAddData('2',freshAdd)),`${shown(freshId,h.title(fresh))} is now in ${quoted('Shop 2')}.`);
-    assert.equal((await stores.control.query('SELECT project_id FROM project_assignments WHERE space_id=$1',[freshId])).rows[0].project_id,p2);
+    assert.equal(await assigned(),p2);
+    epoch=await h.epoch();
+    assert.equal(await h.press(chatAddData('0',freshAdd)),moved);
+    assert.equal(await h.epoch(),epoch+1);assert.equal(await assigned(),p4);
 
     // No project, in the old-shaped family.
     assert.equal(await h.press(chatAddData('x',legacyAdd)),`${shown(legacy,h.title(legacy))} is in no project now.`);
@@ -312,9 +319,19 @@ test('the owner\'s add gets its own project and a card, in one owner command; th
     const saved=await h.chat(thirdId);assert.deepEqual([saved.state,saved.state_seq],['off',null]);
     assert.equal(chats().served(thirdId),false);
     assert.equal(h.calls.filter(item=>item.operation==='telegram.notice'&&item.input.edit).at(-1)!.input.text,text(thirdId,third)+'\n\n'+off);
+    // Turned on again from the dashboard, Turn off on the same card turns it off again; pressed once more while off, it
+    // writes only a receipt.
+    await h.repository.setState(owner,{chat_id:thirdId,state:'active',operation_id:'card-on:'+h.update(8)});
+    assert.equal(chats().served(thirdId),true);
+    epoch=await h.epoch();
+    assert.equal(await h.press(chatAddData('o',thirdAdd)),off);
+    assert.equal(await h.epoch(),epoch+1);
+    assert.equal((await h.chat(thirdId)).state,'off');assert.equal(chats().served(thirdId),false);
+    assert.equal(await h.press(chatAddData('o',thirdAdd)),off);
+    assert.equal(await h.epoch(),epoch+2);assert.equal((await h.chat(thirdId)).state,'off');
     // Off is refused once Nocheh is out of the group, and a press for no card says the card is out of date.
     await h.status(third,6,ALICE,'member','kicked');
-    assert.equal(await h.press(chatAddData('o',thirdAdd)),off,'the same press again is its receipt');
+    assert.equal(await h.press(chatAddData('o',thirdAdd)),'This card is out of date. Change it in the dashboard.');
     const removed=await h.status(fresh,7,ALICE,'member','kicked');
     await stores.control.query('UPDATE chat_state_events SET state=\'done\' WHERE event_id=$1',[removed]);
     assert.equal(await h.press(chatAddData('o',freshAdd)),'This card is out of date. Change it in the dashboard.');
