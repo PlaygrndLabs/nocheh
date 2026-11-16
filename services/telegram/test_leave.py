@@ -33,6 +33,27 @@ class Bot:
         return answer
 
 
+class Listing:
+    """/internal/chats answering with a served list."""
+    def __init__(self, served): self.served = served
+    def __enter__(self): return self
+    def __exit__(self, *_): return False
+    def read(self, _size):
+        return json.dumps({'epoch': 0, 'owner_chat': self.served.owner_chat, 'owner_account': self.served.owner_account,
+                           'chats': list(self.served.chats.values())}).encode()
+
+
+class Gate(asyncio.Lock):
+    """The action lock, saying when a leave starts waiting on it."""
+    def __init__(self):
+        super().__init__()
+        self.waiting = asyncio.Event()
+
+    async def acquire(self):
+        if self.locked(): self.waiting.set()
+        return await super().acquire()
+
+
 class LeaveTests(unittest.IsolatedAsyncioTestCase):
     def service(self, root, policy=None):
         # The served list: the owner's chat and one served group, which had OLD as its id before an upgrade.
@@ -118,16 +139,9 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
         # Nocheh leaves on its word, and the newer list refuses the leave.
         before, after = Served.of(OWNER), Served.of(OWNER, groups=[STRANGER])
         reads, now = [], [0.0]
-        class Response:
-            def __init__(self, served): self.served = served
-            def __enter__(self): return self
-            def __exit__(self, *_): return False
-            def read(self, _size):
-                return json.dumps({'epoch': 0, 'owner_chat': self.served.owner_chat, 'owner_account': self.served.owner_account,
-                                   'chats': list(self.served.chats.values())}).encode()
         def opener(request, timeout):
             reads.append(request.full_url)
-            return Response(before if len(reads) == 1 else after)
+            return Listing(before if len(reads) == 1 else after)
         with tempfile.TemporaryDirectory() as folder:
             service = self.service(Path(folder), Policy(True, {}, ServedList('http://app.test', 's' * 32, opener=opener, clock=lambda: now[0])))
             self.assertEqual(await service.leave_chat({'id': 'b' * 64, 'chat_id': OTHER}), {'state': 'done'})
@@ -135,6 +149,35 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, 'leave_chat_not_allowed'):
                 await service.leave_chat({'id': ID, 'chat_id': STRANGER})
             self.assertEqual(len(reads), 2)
+            self.assertEqual(service.bot.calls, [int(OTHER)])
+
+    async def test_a_group_turned_on_while_the_leave_waits_behind_another_send_is_not_left(self):
+        # Another send holds the lock while the owner turns the group on: the list is read again once the lock is free,
+        # right before the request would go, and refuses the leave. A list that cannot be read by then leaves nothing.
+        served, now = [Served.of(OWNER)], [0.0]
+        def opener(request, timeout):
+            if served[0] is None: raise OSError('down')
+            return Listing(served[0])
+        async def waiting(body, later):
+            service.action_lock.waiting.clear()
+            await service.action_lock.acquire()
+            leaving = asyncio.create_task(service.leave_chat(body))
+            await service.action_lock.waiting.wait()
+            served[0], now[0] = later, now[0] + 2.0
+            service.action_lock.release()
+            return await leaving
+        with tempfile.TemporaryDirectory() as folder:
+            service = self.service(Path(folder), Policy(True, {}, ServedList('http://app.test', 's' * 32, opener=opener, clock=lambda: now[0])))
+            service.action_lock = Gate()
+            with self.assertRaisesRegex(ValueError, 'leave_chat_not_allowed'):
+                await waiting({'id': ID, 'chat_id': STRANGER}, Served.of(OWNER, groups=[STRANGER]))
+            served[0], now[0] = Served.of(OWNER), now[0] + 2.0
+            self.assertEqual(await waiting({'id': 'b' * 64, 'chat_id': OTHER}, None), {'state': 'not_started', 'error_code': 'served_list_unavailable'})
+            self.assertEqual(service.bot.calls, [])
+            self.assertEqual(list((Path(folder) / 'spool/dispatch').glob('leave-*')), [], 'a refusal keeps no receipt')
+            # Tried again once the list reads, the leave goes.
+            served[0], now[0] = Served.of(OWNER), now[0] + 2.0
+            self.assertEqual(await service.leave_chat({'id': 'b' * 64, 'chat_id': OTHER}), {'state': 'done'})
             self.assertEqual(service.bot.calls, [int(OTHER)])
 
     def test_the_bound_check_admits_only_leaving_that_chat(self):

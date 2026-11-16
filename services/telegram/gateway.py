@@ -598,16 +598,21 @@ class TelegramService:
     async def leave_chat(self, body):
         """Nocheh leaves a group, supergroup or channel that someone other than the owner added it to (ADR-0253), when
         storage asks. Never the owner's chat or a chat that is served now: the app's served list decides, read again when
-        it says the chat is not served, and one that cannot be read leaves nothing. At most once by its id: Telegram's
+        it says the chat is not served and once more right before Telegram is asked, and one that cannot be read leaves
+        nothing. At most once by its id: Telegram's
         answer is kept, and a chat Nocheh is not in any more counts as left. Leaving twice changes nothing, so a leave whose
         answer never came keeps no receipt and is tried again with its own journal entry, rather than left ambiguous."""
         chat=str(body.get('chat_id') or '')
         # A group, supergroup or channel: Telegram gives each a negative id, and a person a positive one.
         if not HEX.fullmatch(str(body.get('id',''))) or not CHAT.fullmatch(chat) or int(chat)>=0:raise ValueError('invalid_leave')
-        served=await asyncio.to_thread(self.policy.current,None,5.0,lambda served:served.served(served.resolve(chat)))
-        if not served.available:return {'state':'not_started','error_code':'served_list_unavailable'}
-        found=served.resolve(chat)
-        if served.is_owner(found) or served.served(found):raise ValueError('leave_chat_not_allowed')
+        async def unserved():
+            """None when the chat may be left; refuses the owner's chat and a served one, and answers not_started when the
+            list cannot be read."""
+            served=await asyncio.to_thread(self.policy.current,None,5.0,lambda served:served.served(served.resolve(chat)))
+            if not served.available:return {'state':'not_started','error_code':'served_list_unavailable'}
+            found=served.resolve(chat)
+            if served.is_owner(found) or served.served(found):raise ValueError('leave_chat_not_allowed')
+        if refused:=await unserved():return refused
         if not self.connected():return {'state':'not_started','error_code':'telegram_not_connected'}
         name='leave-'+body['id']
         from telegram.error import BadRequest, ChatMigrated, Forbidden
@@ -617,6 +622,9 @@ class TelegramService:
                 saved=json.loads(receipt.read_bytes())
                 if saved.get('chat_id')!=chat:raise ValueError('invalid_leave')
                 return {key:value for key,value in saved.items() if key!='chat_id'}
+            # The owner may have turned the chat on while this leave waited behind other sends: the list decides again,
+            # just before the request goes, and a refusal keeps no receipt.
+            if refused:=await unserved():return refused
             token=DISPATCH_KEY.set('leave:'+body['id']+':'+uuid.uuid4().hex)
             check=OUTBOUND_CHECK.set(leave_check(chat))
             try:
