@@ -136,9 +136,10 @@ test('each send reads in plain words, and what storage doesn’t count as a prob
   assert.equal(sendReason({state: 'not_sent', error_code: 'rate_limited'}), 'Held back: too many at once');
   assert.equal(sendReason({state: 'failed', error_code: 'something_new'}), 'something_new');
   assert.equal(sendReason({state: 'sent', error_code: null}), '');
-  // A leave is named as the request, so a refused one never reads as done; one that found Nocheh gone says so.
+  // A leave is named as the request, so a refused one never reads as done; one that found Nocheh gone says so, in
+  // words that also fit a group that was deleted or that removed Nocheh.
   assert.equal(sendWhat({kind: 'leave', detail: null}), 'Leave a group');
-  assert.equal(sendReason({state: 'failed', error_code: 'already_left'}), 'Nocheh had already left');
+  assert.equal(sendReason({state: 'failed', error_code: 'already_left'}), 'Nocheh was no longer in the chat');
   assert.equal(
     sendReason({state: 'failed', error_code: 'formatting_rejected', recovered: true}),
     'Formatting rejected; sent on a retry',
