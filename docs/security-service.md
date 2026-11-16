@@ -104,10 +104,20 @@ sentence saying so, and that `from=owner` means only the owner's own messages;
 it reaches the model even when the owner edited the evidence instruction. The
 child accepts only a known `from` and a plain label, else `unknown`, and a block
 of another shape stops the turn. In the owner's turns, the long-term memory
-blocks in the same evidence each carry `about`, `owner` or `forwards_and_files`. Labels are information for the model,
-not a permission, and the request guard checks them like the notes. The legacy
-memory mode (`NOCHEH_MEMORY_CONTEXT=legacy`) and the non-isolated runtime carry
-no labels, and a non-isolated run could reach the record file
+blocks in the same evidence each carry `about`, `owner` or
+`forwards_and_files`. Labels are information for the model, not a permission,
+and the request guard checks them like the notes. A review's rules count by the
+messages code recorded each was learned from: rules resting on another person's
+message, a forward or a file make the note `person`, `forward`, `file` or
+`mixed`, and the evidence instruction says a `nocheh` note is not the owner's
+own words either. What a turn read comes from its own session: a search by
+meaning counts as reading other chats, an earlier tool result or another
+person's group message counts only when the note copies a run of 32 characters
+or a distinctive token from it, and a forward of the sender's own message is
+not a read. A note from a turn whose session can't be read is never `turn`, and
+the turn is counted for the owner's notice. The legacy memory mode
+(`NOCHEH_MEMORY_CONTEXT=legacy`) and the non-isolated runtime carry no labels,
+and a non-isolated run could reach the record file
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 

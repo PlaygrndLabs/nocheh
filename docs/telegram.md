@@ -72,9 +72,9 @@ allowed is still archived, seen by the next group reply as context, learned by
 that group's long-term memory and found by search and by recall from the owner's
 private chat, labelled with the group. It stays out of one place only: the
 owner's own notes (Memory › Assistant notes), together with the owner's reactions
-to it, and a reply to it is reviewed without it. A message left out stays out
-after a later grant; **Memory › Assistant notes** counts them. Posts in a
-chat's own name, anonymous admins and bots count as not allowed
+to it, and a reply to it or a pin of it is reviewed without it. A message left
+out stays out after a later grant; **Memory › Assistant notes** counts them.
+Posts in a chat's own name, anonymous admins and bots count as not allowed
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 For proactive group conversation, disable the bot's group privacy mode in

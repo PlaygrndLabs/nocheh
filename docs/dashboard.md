@@ -196,16 +196,18 @@ coloured by kind: green for a note drawn only from your own messages, blue for
 Nocheh's own work (a review that included its replies or reports, or a note
 written while answering your own message), and amber for other people's words,
 a forward, a file, a mix, or a note written after the turn read something
-outside. Nocheh's code builds the label from its own record of who wrote the
-note, never from the note's text, and a note written during a turn is never
-labelled as yours. Notes written before labels existed say "Source not
-recorded"; a label that could not be looked up says "Source not available
-right now", and System › Health counts those. The words are yours to edit in
-Settings › Assistant under **Note sources on the Notes page**; the assistant
-reads fixed words of its own beside each note. A group's `USER.md` is titled
-**About people here**. When messages from people not allowed where they wrote
-were kept out of your notes, a line above the notes counts them; they are still
-in that group's long-term memory
+outside. A note whose review read rules learned from other people is amber too,
+and a pin counts as the words of the message it pinned. Nocheh's code builds
+the label from its own record of who wrote the note, never from the note's
+text, and a note written during a turn is never labelled as yours. Notes
+written before labels existed say "Source not recorded"; a label that could not
+be looked up says "Source not available right now". System › Health counts
+each failure to tell where notes came from, and says what you see while it
+fails. The words are yours to edit in Settings › Assistant under **Note sources
+on the Notes page**; the assistant reads fixed words of its own beside each
+note. A group's `USER.md` is titled **About people here**. When messages from
+people not allowed where they wrote were kept out of your notes, a line above
+the notes counts them; they are still in that group's long-term memory
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ```sh
@@ -496,12 +498,16 @@ an explicit resume. Retrying an ambiguous review may repeat a native memory edit
 
 The owner's notes review takes only messages from the owner, from people allowed
 where they wrote, Nocheh's own learned messages and the web chat. A message from
-anyone else is recorded as kept out for the installation generation, and
-System › Background work shows its review step as skipped ("From someone not
-allowed there: kept out of your notes, still in group memory"). Nocheh's own
-cards, notices and reminders are skipped the same way ("Nocheh's own card,
-notice or reminder: kept, not learned"). `memory reviews` returns the count as
-`kept_out`. Each review also stores which kinds of messages it read, so its
+anyone else is recorded as kept out for the installation generation. Long-term
+memory and learning still take it, so in System › Background work its Memory
+notes step shows as Done, with the reason under it: "From someone not allowed
+there: kept out of your notes, still in group memory", or "A reaction to
+someone not allowed there: kept out of your notes, still in group memory". A
+pin of such a message is reviewed without the message it pinned. Nocheh's own
+cards, notices and reminders are not learned anywhere, so their step shows as
+skipped ("Nocheh's own card, notice or reminder: kept, not learned").
+`memory reviews` returns the count as `kept_out`. Each review also stores which
+kinds of messages it read, and whose words the rules it read rest on, so its
 notes can be labelled later.
 
 A chat or topic is named by its Nocheh id ([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)):
