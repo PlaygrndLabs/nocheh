@@ -235,10 +235,13 @@ const conversations:any[]=[
  {space_id:REMOVED_TOPIC,name:'Trail maps',kind:'topic',parent_space:REMOVED_GROUP,parent_name:'Hiking crew',observed_at:new Date(Date.now()-4*864e5).toISOString(),configured:false,closed:false},
 ];
 /** The `many-chats` scenario: 120 more groups Nocheh is on in, listed only. Their ids sort before every digest id, so
- * 'Garden swap' falls past the first 100 chats and past the first 100 groups Nocheh is on in. */
-const manyChats=Array.from({length:120},(_,i)=>{const n=String(i+1).padStart(3,'0'),id='-2000000000'+n;
+ * 'Garden swap' falls past the first 100 chats and past the first 100 groups Nocheh is on in. In `many-chats-moved` one
+ * more, 'Club 000', sorts first, so 'Club 099' moves off the first page of those groups, and no page after the first can
+ * be read. */
+const club=(i:number)=>{const n=String(i).padStart(3,'0'),id='-2000000000'+n;
  return {space_id:id,name:'Club '+n,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true,topic_key:null,
-  app_ids:[{app:'telegram',external:id,state:'current'}],is_forum:false,state:'active',owner:false,short_id:chatShortId(id),added_by:'owner',added_at:null,removed_event:false};});
+  app_ids:[{app:'telegram',external:id,state:'current'}],is_forum:false,state:'active',owner:false,short_id:chatShortId(id),added_by:'owner',added_at:null,removed_event:false};};
+const manyChats=Array.from({length:120},(_,i)=>club(i+1));
 /** The directory as the chats' states serve it, installed for the repositories the preview runs. */
 const directoryNow=()=>installChats(previewDirectory());
 /** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252), and who
@@ -680,7 +683,8 @@ const server=createServer((req,res)=>{void(async()=>{
   // A search matches a chat's name, its group's name and its Telegram ids, as the server's does; a search and the kind
   // and state filters apply before the list, sorted by id, is paged, as the store pages it.
   if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'',after=url.searchParams.get('after')??'',limit=Math.min(100,Number(url.searchParams.get('limit')||50));
-   const all=[...conversations.map(conversationItem),...(mode==='many-chats'?manyChats:[])].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)
+   if(mode==='many-chats-moved'&&after)throw new HttpError(503,'fixture_observation_unavailable');
+   const all=[...conversations.map(conversationItem),...(mode==='many-chats'?manyChats:mode==='many-chats-moved'?[club(0),...manyChats]:[])].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)
     .filter(row=>(!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)))&&(!kind||row.kind===kind)&&(!state||row.state===state));
    const remaining=all.filter(row=>row.space_id>after),items=remaining.slice(0,limit);
    return json(res,200,{items,total:all.length,next_cursor:remaining.length>limit?items.at(-1).space_id:null,state:'current',observed_at:new Date().toISOString()});}

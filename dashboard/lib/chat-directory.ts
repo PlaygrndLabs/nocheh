@@ -7,7 +7,7 @@
  */
 import {useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {apiGet} from './api';
-import {useResource} from './resource';
+import {useResource, type Snapshot} from './resource';
 import {appIds, groupOf, parentOf, type Chat, type Directory} from './chats-model';
 
 const lookups = new Map<string, Chat | null>();
@@ -130,6 +130,29 @@ export async function readPages(
   return {items, complete: !after};
 }
 
+/** The pages read after the first page's cursor: a read that failed holds none and says why. */
+export type ServedRest = {cursor: string; items: Chat[]; complete: boolean; error: string};
+
+/**
+ * The served list now: the first page, then the pages read after its cursor. Pages read after another cursor are never
+ * used, since a group that moved between the two would be in neither. `complete` says every served group is in
+ * `items`; `loading` that the list is still being read, so an incomplete list is not yet a problem.
+ */
+export function servedList(first: Snapshot<Directory>, rest: ServedRest | null) {
+  if (!first.data) return {items: [] as Chat[], complete: false, loading: !first.error, error: first.error};
+  const page = first.data.items ?? [],
+    cursor = first.data.next_cursor ?? null;
+  if (!cursor) return {items: page, complete: true, loading: false, error: first.error};
+  const after = rest?.cursor === cursor ? rest : null;
+  const seen = new Set(page.map(chat => chat.space_id));
+  return {
+    items: after ? [...page, ...after.items.filter(chat => !seen.has(chat.space_id))] : page,
+    complete: !!after?.complete,
+    loading: !after,
+    error: first.error || (after?.error ?? ''),
+  };
+}
+
 /**
  * Every group Nocheh is on in, whatever page of the whole directory each falls on: the groups the import page offers
  * and the name refresh asks Telegram about. The first page is a shared resource; the pages after it, rare, are read
@@ -138,24 +161,24 @@ export async function readPages(
 export function useServedGroups(interval = 60000) {
   const first = useResource<Directory>(servedPath, interval);
   const cursor = first.data?.next_cursor ?? null;
-  const [rest, setRest] = useState<{items: Chat[]; error: string}>({items: [], error: ''});
+  const [rest, setRest] = useState<ServedRest | null>(null);
   useEffect(() => {
     if (!cursor) return;
     let live = true;
     readPages(path => apiGet<Directory>(path), servedPath, cursor, servedPages).then(
-      read => live && setRest({items: read.items, error: ''}),
-      (error: unknown) =>
-        live &&
-        setRest(current => ({...current, error: error instanceof Error ? error.message : 'Request unavailable'})),
+      read => live && setRest({cursor, ...read, error: ''}),
+      (error: unknown) => {
+        if (!live) return;
+        const why = error instanceof Error ? error.message : 'Request unavailable';
+        // A failed read again after the same cursor keeps what was read before; after a new cursor it has nothing.
+        setRest(current =>
+          current?.cursor === cursor ? {...current, error: why} : {cursor, items: [], complete: false, error: why},
+        );
+      },
     );
     return () => {
       live = false;
     };
   }, [cursor, first.receivedAt]);
-  const items = first.data?.items ?? [];
-  const seen = new Set(items.map(chat => chat.space_id));
-  return {
-    items: cursor ? [...items, ...rest.items.filter(chat => !seen.has(chat.space_id))] : items,
-    error: first.error || (cursor ? rest.error : ''),
-  };
+  return servedList(first, rest);
 }

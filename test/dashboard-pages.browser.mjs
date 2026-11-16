@@ -2143,6 +2143,39 @@ test('every group Nocheh is on in can be shared with and refreshed, past the fir
   }
 });
 
+test('a group that moves to a page not read yet is never dropped quietly, and sharing it still asks first', async () => {
+  writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats');
+  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  try {
+    const problems = [];
+    page.on('pageerror', error => problems.push('page error: ' + error.message));
+    // The served list is read again each minute: the test moves the page's clock on instead of waiting.
+    await page.clock.install();
+    await page.goto(origin + '/#messages?view=import&job=11111111-1111-4111-8111-111111111111');
+    const map = page.locator('#map-chat-1');
+    await map.locator('option', {hasText: 'Share with Club 099'}).waitFor({state: 'attached'});
+    await map.selectOption({label: 'Share with Club 099'});
+    // Club 000 is turned on and sorts first, so Club 099 leaves the first page; the pages after it can't be read.
+    writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats-moved');
+    await page.clock.fastForward(61000);
+    await page.getByText('Some groups may be missing').waitFor();
+    await map.locator('option', {hasText: 'Share with Club 000'}).waitFor({state: 'attached'});
+    assert.equal(await map.locator('option', {hasText: 'Share with Club 099'}).count(), 0);
+    assert.equal(await map.locator('option', {hasText: 'Share with Garden swap'}).count(), 0);
+    assert.equal(await map.inputValue(), '-2000000000099');
+    // The mapping still goes to a group, so starting asks first. Cancelling starts nothing.
+    await page.getByRole('button', {name: 'Start import'}).click();
+    const dialog = page.getByRole('dialog', {name: 'Share imported history with a group?'});
+    await dialog.getByRole('button', {name: 'Cancel'}).click();
+    await dialog.waitFor({state: 'detached'});
+    await page.getByRole('button', {name: 'Start import'}).waitFor();
+    assert.deepEqual(problems, []);
+  } finally {
+    await page.close();
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+});
+
 test('a sharing rule finds messages from its groups by their chat, a new-id group and an upgraded one included', async () => {
   // Hits name their Nocheh chat; the archive's scope stays the Telegram ID the message came with.
   const rule = {

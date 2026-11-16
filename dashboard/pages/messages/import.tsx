@@ -287,7 +287,9 @@ function ImportReview({job}: {job: ImportJob}) {
   const groupName = (id: string) => targets.get(id) ?? chatName(id);
   const chosenMapping = resume ? (job.mapping ?? {}) : mapping;
   const chosenLearn = resume ? (job.review_approved ?? false) : learn;
-  const shared = Object.values(chosenMapping).some(target => groups.includes(target));
+  // A chat mapped anywhere but the owner's private chat goes to a group, as the server checks it: the owner confirms
+  // sharing whether or not this page has loaded that group.
+  const shared = Object.values(chosenMapping).some(target => !owner || target !== owner);
 
   async function act(action: 'start' | 'cancel') {
     if (action === 'start' && shared && editable) {
@@ -387,6 +389,12 @@ function ImportReview({job}: {job: ImportJob}) {
               ? 'Chosen when the import started. They can’t change, even when it resumes.'
               : 'By default an imported chat is private to you. Mapping it to a group lets the assistant use it there.'}
           </p>
+          {editable && !served.complete && !served.loading && (
+            <Notice tone="warn" title="Some groups may be missing">
+              Couldn’t load every group Nocheh is on in, so the choices below may not list them all. This page tries
+              again in a minute.
+            </Notice>
+          )}
           <ul className="divide-y divide-line rounded-lg border border-line">
             {preview.chats.map(chat => (
               <li

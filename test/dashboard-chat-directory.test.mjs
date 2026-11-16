@@ -13,7 +13,7 @@ const compiled = await build({
   format: 'esm',
   platform: 'node',
 });
-const {readPages} = await import(
+const {readPages, servedList} = await import(
   'data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64')
 );
 
@@ -63,4 +63,58 @@ test('a failed page fails the read, so no partial list passes as whole', async (
     ),
     /offline/,
   );
+});
+const groups = (from, to) =>
+  Array.from({length: to - from + 1}, (_, i) => ({space_id: 'g' + String(from + i).padStart(3, '0'), kind: 'group'}));
+const firstPage = (items, next_cursor, error = '') => ({
+  data: {items, next_cursor},
+  error,
+  loading: false,
+  receivedAt: 1,
+});
+const ids = list => list.items.map(group => group.space_id);
+
+test('the pages after the first count only when read after its cursor, so a group that moved is never lost', () => {
+  // g099 was the first page's last group; a new group n000 sorts first, so g099 is now on no page read so far.
+  const moved = firstPage([{space_id: 'n000', kind: 'group'}, ...groups(0, 98)], 'g098');
+  const old = {cursor: 'g099', items: groups(100, 150), complete: true, error: ''};
+  const reading = servedList(moved, old);
+  assert.deepEqual(ids(reading), ['n000', ...ids({items: groups(0, 98)})]);
+  assert.equal(reading.complete, false);
+  assert.equal(reading.loading, true);
+  // The read after the new cursor failed: the list is short, says why, and is no longer loading.
+  const failed = servedList(moved, {cursor: 'g098', items: [], complete: false, error: 'offline'});
+  assert.deepEqual(failed, {items: moved.data.items, complete: false, loading: false, error: 'offline'});
+  // Read after the new cursor, every group is there once.
+  const read = servedList(moved, {cursor: 'g098', items: groups(99, 150), complete: true, error: ''});
+  assert.equal(read.items.length, 152);
+  assert.ok(ids(read).includes('g099'));
+  assert.equal(read.complete, true);
+});
+
+test('a served list that fits one page is whole; one not read yet, or unreadable, is not', () => {
+  assert.deepEqual(servedList(firstPage(groups(0, 3), null), null), {
+    items: groups(0, 3),
+    complete: true,
+    loading: false,
+    error: '',
+  });
+  const none = {data: null, error: '', loading: true, receivedAt: null};
+  assert.deepEqual(servedList(none, null), {items: [], complete: false, loading: true, error: ''});
+  assert.deepEqual(servedList({...none, loading: false, error: 'offline'}, null), {
+    items: [],
+    complete: false,
+    loading: false,
+    error: 'offline',
+  });
+  // Pages read after the first stop at their bound: the list is not whole.
+  const cut = servedList(firstPage(groups(0, 99), 'g099'), {
+    cursor: 'g099',
+    items: groups(100, 199),
+    complete: false,
+    error: '',
+  });
+  assert.equal(cut.items.length, 200);
+  assert.equal(cut.complete, false);
+  assert.equal(cut.loading, false);
 });
