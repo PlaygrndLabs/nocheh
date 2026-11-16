@@ -252,18 +252,20 @@ test('adds, removals and upgrades taken in before adoption began are history: re
   }finally{await stores.control.query('UPDATE chat_seed_state SET adopt_after=NULL WHERE singleton').catch(()=>undefined);await h.cleanup();await stores.close();}
 });
 
-/** How a basic group stands before Telegram upgrades it: seen only (off, never added), on from the owner's add, turned
- *  off by the owner after that, pending from Alice's add, could not be left after it, or Nocheh removed after the owner's add. */
-type Start='seen'|'on'|'off'|'pending'|'could_not_leave'|'removed';
+/** How a basic group stands before Telegram upgrades it: seen only (off, never added; its own add not recorded yet), seen
+ *  only an hour ago (stale: a group long known off, or carried off from step 2b-1), on from the owner's add, turned off by
+ *  the owner after that, pending from Alice's add, could not be left after it, or Nocheh removed after the owner's add. */
+type Start='seen'|'stale'|'on'|'off'|'pending'|'could_not_leave'|'removed';
 async function begin(stores:StorePools,h:ReturnType<typeof harness>,stage:Awaited<ReturnType<typeof stageFor>>,n:number,basic:string,start:Start,alice:number) {
   const old=chatIdFor('telegram',basic),at=(k:number)=>h.update(n*100+k);
-  if(start==='seen')await h.message(basic,at(0),{},'group');
+  if(start==='seen'||start==='stale')await h.message(basic,at(0),{},'group');
+  if(start==='stale')await stores.control.query(`UPDATE chats SET created_at=now()-interval '1 hour' WHERE id=$1`,[old]);
   if(['on','off','removed'].includes(start))await h.status(basic,at(0),Number(OWNER),'left','member','group');
   if(start==='off')await h.repository.setState(owner,{chat_id:old,state:'off',operation_id:'upgrade-off:'+h.base+':'+n});
   if(start==='removed')await h.status(basic,at(1),alice,'member','kicked','group');
   if(start==='pending'||start==='could_not_leave')await h.status(basic,at(0),alice,'left','member','group');
   if(start==='could_not_leave'){stage.answers.leave=()=>({state:'failed'});try{await stage.settle([old]);}finally{stage.answers.leave=()=>({state:'done'});}}
-  assert.equal((await row(stores,old)).state,start==='seen'?'off':start==='on'?'active':start,JSON.stringify({n,start}));
+  assert.equal((await row(stores,old)).state,start==='seen'||start==='stale'?'off':start==='on'?'active':start,JSON.stringify({n,start}));
 }
 
 test('an upgrade folds the new supergroup\'s own add into the old group, whichever upgrade message comes first, and an echo never changes the old group',fixture,async()=>{
@@ -273,8 +275,10 @@ test('an upgrade folds the new supergroup\'s own add into the old group, whichev
   const h=harness(stores,()=>policy,'fold'),stage=await stageFor(stores,h.repository,()=>policy);
   try {
     const cases=[[1,'old',ALICE,'seen'],[2,'new',ALICE,'on'],[3,'old',Number(OWNER),'off'],[4,'new',Number(OWNER),'off'],[5,'new',Number(OWNER),'on'],
-      [6,'old',Number(OWNER),'pending'],[7,'new',ALICE,'could_not_leave'],[8,'old',Number(OWNER),'could_not_leave'],[9,'new',Number(OWNER),'removed']] as const;
-    const folded:{n:number;start:Start;next:string;old:string;own:string|null;add:string}[]=[];
+      [6,'old',Number(OWNER),'pending'],[7,'new',ALICE,'could_not_leave'],[8,'old',Number(OWNER),'could_not_leave'],[9,'new',Number(OWNER),'removed'],
+      [15,'old',Number(OWNER),'seen'],[16,'new',Number(OWNER),'seen'],[17,'old',Number(OWNER),'stale']] as const;
+    // `on`: the owner's add turns the group on, and the stage sends its card; `fold`: the add's row moved to the old chat.
+    const folded:{n:number;start:Start|'unknown';next:string;old:string;own:string|null;add:string;on:boolean;fold:boolean}[]=[];
     for(const [n,first,adder,start] of cases) {
       const basic='-4'+String(h.base+n).slice(-9),next=h.group(n),old=chatIdFor('telegram',basic),fresh=chatIdFor('telegram',next);h.named.add(basic);
       await begin(stores,h,stage,n,basic,start,ALICE);
@@ -291,27 +295,51 @@ test('an upgrade folds the new supergroup\'s own add into the old group, whichev
         .map(item=>[item.external_id,item.state,item.reason]),[[next,'current',null],[basic,'old','migrated']],label);
       assert.deepEqual((await events(stores,old)).map(item=>item.event_id),[...startEvents,add.reference.id],label+': the add\'s event moved with it');
       const after=await row(stores,old);
-      // Only an owner add into a group Nocheh was not in turns it on. Into one Nocheh is still in, the add is the
-      // upgrade's echo: the group keeps its state and its add, and the stage finds the moved card or leave superseded.
-      if(start==='removed')assert.deepEqual([after.state,after.add_event,after.added_by_role],['active',add.reference.id,'owner'],label);
+      // Only an owner add into a group Nocheh was not in, or is not known to be in (seen a moment ago, its own add not
+      // recorded yet), turns it on. Into one Nocheh is still in, or was long known off, the add is the upgrade's echo:
+      // the group keeps its state and its add, and the stage finds the moved card or leave superseded.
+      const on=start==='removed'||start==='seen'&&adder===Number(OWNER);
+      if(on)assert.deepEqual([after.state,after.add_event,after.added_by_role],['active',add.reference.id,'owner'],label);
       else assert.deepEqual([after.state,after.add_event],[before.state,before.add_event],label);
-      folded.push({n,start,next,old,own:before.add_event,add:add.reference.id});
+      // The owner's own add to the basic group, recorded last, names an old id and changes nothing.
+      if(start==='seen'&&on) {
+        await h.status(basic,h.update(n*100+1),Number(OWNER),'left','member','group');
+        assert.deepEqual(await row(stores,old),after,label);
+      }
+      folded.push({n,start,next,old,own:before.add_event,add:add.reference.id,on,fold:true});
     }
 
     // The add arrives after the upgrade linked the ids: within ten minutes of it, any add to a group Nocheh is still in,
-    // the owner's too, is the upgrade's echo and changes nothing.
-    const echoes=[[10,ALICE,'seen'],[11,Number(OWNER),'off'],[12,Number(OWNER),'pending'],[13,ALICE,'could_not_leave'],[14,Number(OWNER),'could_not_leave']] as const;
+    // the owner's too, is the upgrade's echo and changes nothing. A group seen a moment ago, whose own add is not recorded
+    // yet, is not known to have Nocheh in it: there the owner's add is an add.
+    const echoes=[[10,ALICE,'seen'],[11,Number(OWNER),'off'],[12,Number(OWNER),'pending'],[13,ALICE,'could_not_leave'],[14,Number(OWNER),'could_not_leave'],
+      [18,Number(OWNER),'seen'],[19,Number(OWNER),'stale']] as const;
     for(const [n,adder,start] of echoes) {
       const basic='-4'+String(h.base+n).slice(-9),next=h.group(n),old=chatIdFor('telegram',basic);h.named.add(basic);
       await begin(stores,h,stage,n,basic,start,ALICE);
       const before=await row(stores,old),startEvents=await events(stores,old);
       await h.message(basic,h.update(n*100+6),{migrate_to_chat_id:Number(next)},'group');
       const add=await h.status(next,h.update(n*100+7),adder,'left','member');
-      const label=JSON.stringify({n,adder,start}),after=await row(stores,old);
-      assert.deepEqual([after.state,after.add_event,await events(stores,old)],[before.state,before.add_event,startEvents],label);
+      const label=JSON.stringify({n,adder,start}),after=await row(stores,old),on=start==='seen'&&adder===Number(OWNER);
+      if(on)assert.deepEqual([after.state,after.add_event,(await events(stores,old)).map(item=>[item.event_id,item.action])],
+        ['active',add.reference.id,[[add.reference.id,'card']]],label);
+      else assert.deepEqual([after.state,after.add_event,await events(stores,old)],[before.state,before.add_event,startEvents],label);
       assert.equal(Number(after.state_seq),h.update(n*100+7),label+': only the order moves');
-      folded.push({n,start,next,old,own:before.add_event,add:add.reference.id});
+      folded.push({n,start,next,old,own:before.add_event,add:add.reference.id,on,fold:false});
     }
+    // The owner adds Nocheh to a basic group and upgrades it, and the upgrade message is recorded before the add (the drain
+    // split a backlog, or the add's record failed and the sweep records it later): the chat the upgrade message makes is
+    // fresh, so the owner's add on the new id is an add, and the add on the old id, recorded last, changes nothing.
+    const lateBasic='-4'+String(h.base+21).slice(-9),lateNext=h.group(21),late=chatIdFor('telegram',lateBasic);h.named.add(lateBasic);
+    await h.message(lateBasic,h.update(2106),{migrate_to_chat_id:Number(lateNext)},'group');
+    await h.message(lateNext,h.update(2107),{migrate_from_chat_id:Number(lateBasic)});
+    const lateAdd=await h.status(lateNext,h.update(2108),Number(OWNER),'left','member');
+    const lateRow=await row(stores,late);
+    assert.deepEqual([lateRow.state,lateRow.add_event,lateRow.added_by_role,(await events(stores,late)).map(item=>[item.event_id,item.action])],
+      ['active',lateAdd.reference.id,'owner',[[lateAdd.reference.id,'card']]]);
+    await h.status(lateBasic,h.update(2101),Number(OWNER),'left','member','group');
+    assert.deepEqual(await row(stores,late),lateRow);
+    folded.push({n:21,start:'unknown',next:lateNext,old:late,own:null,add:lateAdd.reference.id,on:true,fold:false});
     // A real add after the upgrade still is one: someone removes Nocheh, and then the owner adds it again.
     const readd=chatIdFor('telegram','-4'+String(h.base+10).slice(-9));
     await h.status(h.group(10),h.update(1008),ALICE,'member','kicked');
@@ -326,17 +354,17 @@ test('an upgrade folds the new supergroup\'s own add into the old group, whichev
     for(const item of folded) {
       const label=JSON.stringify(item),moved=await outcome(item.add),leaves=calls.filter(call=>call.operation==='telegram.leave'&&call.input.chat_id===item.next);
       const notices=calls.filter(call=>call.operation==='telegram.notice'&&[digest('chat-add-note:'+item.add),digest('chat-add-card:'+item.add)].includes(call.input.id));
-      if(item.start==='removed') {
-        assert.deepEqual([moved,notices.length],[{state:'done',outcome:'carded'},1],label+': the owner\'s add is carded');
+      if(item.on) {
+        assert.deepEqual([moved,notices.length,(await row(stores,item.old)).state],[{state:'done',outcome:'carded'},1,'active'],label+': the owner\'s add is carded');
         continue;
       }
-      if(item.n<10)assert.deepEqual(moved,{state:'done',outcome:'superseded'},label);
+      if(item.fold)assert.deepEqual(moved,{state:'done',outcome:'superseded'},label);
       assert.equal(notices.length,0,label);
       if(item.start==='pending') {
         assert.deepEqual(leaves.map(call=>call.input.id),[item.own],label+': its own leave goes ahead');
         assert.deepEqual([(await row(stores,item.old)).state,(await outcome(item.own!)).outcome],['left','left'],label);
       } else assert.deepEqual(leaves,[],label);
-      if(item.start==='off')assert.equal((await row(stores,item.old)).state,'off',label);
+      if(item.start==='off'||item.start==='seen'||item.start==='stale')assert.equal((await row(stores,item.old)).state,'off',label);
       if(item.start==='could_not_leave')assert.equal((await row(stores,item.old)).state,'could_not_leave',label);
     }
 

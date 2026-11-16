@@ -132,6 +132,12 @@ async function adopting(db:Db,sequence:string):Promise<boolean> {
 }
 /** A state set by the owner or by Nocheh itself, never by an update: ordered by when it happened. */
 const systemChange=`state_seq=NULL,state_bot=NULL,state_at=now(),state_changed_at=now(),updated_at=now()`;
+/**
+ * SQL: whether chat `c` was first recorded within ten minutes before `at` (or after it), with no add and no state change
+ * on record: a group whose own add has not been recorded yet, so nothing says Nocheh is in it. A group long known off,
+ * one carried off from step 2b-1, and one the owner turned off are not fresh.
+ */
+const fresh=(c:string,at:string)=>`(${c}.state_at IS NULL AND ${c}.add_event IS NULL AND ${c}.created_at>${at}-interval '10 minutes')`;
 
 /**
  * One update's place in a chat's history: Telegram's update_id, the bot that took it in, and when Nocheh took it in.
@@ -299,22 +305,24 @@ export class ChatRepository {
    * group that is off, pending or could not be left and was upgraded in the last ten minutes: Nocheh is still in it,
    * and Telegram tells Nocheh it joined the new supergroup, from whoever upgraded it, which is the same group. So an
    * upgrade never undoes the owner's Off, and a pending group's own leave goes ahead (an add that came before the
-   * upgrade folds instead, see fold). Nocheh leaving on its own makes it left; anyone removing it makes it removed.
-   * Promotions, demotions and restrictions change nothing. Each add or removal writes one content-free chat_state_events
-   * row; `member` says the adder is a person the owner let use Nocheh in some group. Never the guard epoch: the
-   * directory revision tells every process.
+   * upgrade folds instead, see fold). One off group is not known to have Nocheh in it: one first recorded in those ten
+   * minutes, with no add and no state change on record (fresh), whose own add is recorded late, after the upgrade
+   * message; there the owner's add is an add. Nocheh leaving on its own makes it left; anyone removing it makes it
+   * removed. Promotions, demotions and restrictions change nothing. Each add or removal writes one content-free
+   * chat_state_events row; `member` says the adder is a person the owner let use Nocheh in some group. Never the guard
+   * epoch: the directory revision tells every process.
    */
   private async adopt(db:Db,chat:string,external:string,event:string,status:TelegramBotStatus,order:UpdateOrder,policy:AssistantPolicy):Promise<boolean> {
     if(status.was_in===status.now_in)return false;
     const row=(await db.query(`SELECT c.state,${newerState('c','u')} AS newer,EXISTS(SELECT 1 FROM chat_ids i WHERE i.chat_id=c.id AND i.state='old'
-        AND i.reason='migrated' AND i.changed_at>u.state_at-interval '10 minutes') AS upgraded
+        AND i.reason='migrated' AND i.changed_at>u.state_at-interval '10 minutes') AS upgraded,${fresh('c','u.state_at')} AS fresh
       FROM chats c,(SELECT $2::numeric AS state_seq,$3::text AS state_bot,$4::timestamptz AS state_at) u WHERE c.id=$1 FOR UPDATE OF c`,[chat,order.seq,order.bot,order.at])).rows[0];
     if(!row?.newer)return false;
     const previous=row.state as ChatState,owner=policy.owner_id,by=status.by;
     const role=status.anonymous?'anonymous':owner&&by?.external===owner?'owner':'other',account=by?accountIdFor('telegram',by.external):null;
     let state:ChatState=previous,kind:'added'|'removed'|null=null,action:'card'|'leave'|'tell'|'none'='none';
     if(status.now_in) {
-      const echo=previous==='active'||row.upgraded&&['off','pending','could_not_leave'].includes(previous);
+      const echo=previous==='active'||row.upgraded&&['off','pending','could_not_leave'].includes(previous)&&!(previous==='off'&&row.fresh&&role==='owner');
       if(!echo){kind='added';state=role==='owner'?'active':'pending';action=role==='owner'?'card':'leave';}
     } else if(status.self) {
       if(['pending','could_not_leave','off','active'].includes(previous))state='left';
@@ -369,14 +377,15 @@ export class ChatRepository {
    * it is not on, or it is on only from an owner add whose card still waits, and it has no project (the card made one
    * already, or the owner gave it one). Its ids, memberships, topics (but one whose key the old chat has) and state
    * events move to the old chat, which keeps its state and its add, unless an owner add folds into an old chat Nocheh
-   * was not in (left, removed or archived): the owner added it again, so it is on. Into an old chat that is off,
-   * pending or could not be left, where Nocheh still is, the add is the upgrade's echo: the stage finds the moved card
-   * or leave superseded, and the old chat's own leave goes ahead. Returns whether it folded.
+   * was not in (left, removed or archived), or not known to be in (off and fresh: first recorded within ten minutes of
+   * the add, with no add on record, see adopt): the owner added it, so it is on, and the moved card goes. Into an old
+   * chat that is off, pending or could not be left, where Nocheh still is, the add is the upgrade's echo: the stage
+   * finds the moved card or leave superseded, and the old chat's own leave goes ahead. Returns whether it folded.
    */
   private async fold(db:Db,connection:string,old:string,next:string):Promise<boolean> {
     const row=(await db.query(`SELECT n.state<>'active' OR n.added_by_role='owner' AND n.state_seq IS NOT NULL
         AND EXISTS(SELECT 1 FROM chat_state_events e WHERE e.event_id=n.add_event AND e.chat_id=n.id AND e.action='card' AND e.state='waiting') AS folds,
-      n.state='active' AS owner_add,o.state AS old_state FROM chats n,chats o WHERE n.id=$1 AND o.id=$2 FOR UPDATE OF n,o`,[next,old])).rows[0];
+      n.state='active' AS owner_add,o.state AS old_state,${fresh('o','n.added_at')} AS old_fresh FROM chats n,chats o WHERE n.id=$1 AND o.id=$2 FOR UPDATE OF n,o`,[next,old])).rows[0];
     if(!row?.folds)return false;
     // A project of the new chat's own (its card made one, or the owner gave it one) would be left naming no chat: the two
     // stay apart. Asked after the lock, in a statement of its own, so it sees a card's project committed meanwhile.
@@ -393,7 +402,7 @@ export class ChatRepository {
     await db.query(`DELETE FROM chats WHERE id IN (${twins})`,[next,old]);
     await db.query('UPDATE chats SET parent_id=$2,updated_at=now() WHERE parent_id=$1',[next,old]);
     await db.query('UPDATE chat_state_events SET chat_id=$2,updated_at=now() WHERE chat_id=$1',[next,old]);
-    if(row.owner_add&&['left','removed','archived'].includes(row.old_state))await db.query(`UPDATE chats o SET state='active',state_changed_at=now(),updated_at=now(),
+    if(row.owner_add&&(['left','removed','archived'].includes(row.old_state)||row.old_state==='off'&&row.old_fresh))await db.query(`UPDATE chats o SET state='active',state_changed_at=now(),updated_at=now(),
       added_by_account_id=n.added_by_account_id,added_by_role=n.added_by_role,added_at=n.added_at,add_event=n.add_event,
       state_seq=n.state_seq,state_bot=n.state_bot,state_at=n.state_at FROM chats n WHERE o.id=$1 AND n.id=$2`,[old,next]);
     await db.query(`UPDATE chats SET app_type='supergroup',updated_at=now() WHERE id=$1 AND app_type IS DISTINCT FROM 'supergroup'`,[old]);
