@@ -14,7 +14,7 @@ import re
 import subprocess
 import time
 from tools.paths import ROOT
-from tools.acceptance.telegram_mock import TOKEN
+from tools.acceptance.telegram_mock import TOKEN,bot_status,press
 
 # The real-model rehearsal's only egress, attached to the model relay alone.
 MODEL_EGRESS='model-egress'
@@ -24,6 +24,65 @@ TELEGRAM_SERVICE='nocheh-telegram'
 TELEGRAM_HEALTH='http://nocheh-telegram:8784/health'
 # The service's folders that must be this fixture's: its incident file and the capture spool.
 TELEGRAM_STATE={'/telegram-state':'state/telegram','/data/spool':'state/spool'}
+# The synthetic owner, and the groups the owner adds Nocheh to before anything else (telegram_scenarios: GROUP,
+# OTHER_GROUP and THIRD_GROUP). Only the owner adds Nocheh to a group (ADR-0253).
+OWNER=123
+GROUPS=(-10042,-10043,-10044)
+
+
+def group_chat(chat):
+    """A fixture group as its messages show it (telegram_scenarios.Fixture.message)."""
+    return {'id':chat,'type':'supergroup','title':'Synthetic Forum '+str(chat),'is_forum':True}
+
+
+def person(user):
+    return {'id':user,'is_bot':False,'first_name':'Synthetic '+str(user)}
+
+
+def served(query,chat):
+    """Whether Nocheh is on in a group: its chat is active, by any Telegram id it has had (ADR-0253)."""
+    return query('nocheh_control',"SELECT count(*) FROM chats c JOIN chat_ids i ON i.chat_id=c.id WHERE i.external_id='"+str(int(chat))
+                 +"' AND c.kind='group' AND c.state='active'")=='1'
+
+
+def sent_buttons(row):
+    """The inline buttons a message was sent with, which an edit may since have removed."""
+    markup=row['parameters'].get('reply_markup') or {}
+    markup=json.loads(markup) if isinstance(markup,str) else markup
+    return [button for line in markup.get('inline_keyboard') or [] for button in line]
+
+
+def add_card(sent,event_id,owner=OWNER):
+    """The card Nocheh sends the owner after they add it to a group: every button names the add's event (ADR-0253)."""
+    return next((row for row in sent if row['message']['chat']['id']==owner and sent_buttons(row) and all(
+        re.fullmatch('ng[012xo]'+event_id[:32],str(button.get('callback_data') or '')) for button in sent_buttons(row))),None)
+
+
+def adopt(http,query,wait,number,chats=GROUPS,owner=OWNER):
+    """The owner adds Nocheh to each group (Telegram's my_chat_member, from the owner): it is on there at once. The card
+    it sends the owner about 30 seconds later is answered No project, so each group starts on and in no project. A group
+    already on is left as it is. Returns the next unused update number."""
+    added={}
+    for chat in chats:
+        if served(query,chat):continue
+        update=bot_status(number,group_chat(chat),person(owner));number+=1
+        http('/fixture/telegram',{'updates':[update]});added[chat]=update['update_id']
+    for chat,update_id in added.items():
+        label=str(chat).replace('-','minus')
+        event_id=wait('owner_add_captured_'+label,lambda update_id=update_id:query('nocheh_archive',"SELECT id FROM events WHERE kind='telegram_update' AND "
+                      "(convert_from(payload,'UTF8')::jsonb->>'update_id')='"+str(update_id)+"'"))
+        wait('on_at_once_'+label,lambda chat=chat:served(query,chat),60)
+        card=wait('add_card_'+label,lambda event_id=event_id:add_card(http('/fixture/telegram')['sent'],event_id,owner),180)
+        data=next(button['callback_data'] for button in sent_buttons(card) if button['callback_data'].startswith('ngx'))
+        tap=press(number,card['message'],data,person(owner));number+=1
+        http('/fixture/telegram',{'updates':[tap]})
+        def answered(card=card,tap=tap):
+            state=http('/fixture/telegram')
+            shown=next(row for row in state['sent'] if row['message']['chat']['id']==owner and row['message']['message_id']==card['message']['message_id'])
+            return any(row['callback_query_id']==tap['callback_query']['id'] for row in state.get('answers',[])) and shown.get('edits') and not shown['message'].get('reply_markup')
+        wait('add_card_answered_no_project_'+label,answered,120)
+        wait('still_on_'+label,lambda chat=chat:served(query,chat),30)
+    return number
 
 
 def telegram_health(command):
@@ -155,8 +214,15 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait','hermes')
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait',TELEGRAM_SERVICE)
         wait_telegram_connected(wait,command,'telegram_polling_connected')
-        initial=http('/fixture/telegram');sent_before=len(initial['sent']);base=int(time.time())
+        initial=http('/fixture/telegram')
         assert not initial['faults'],'previous fixture faults remain pending'
+        # Without an explicit list Telegram leaves out reactions; with one, it sends only what is listed. An add is one
+        # of those updates (my_chat_member), so the service must ask for it.
+        assert any('my_chat_member' in row['parameters'].get('allowed_updates',[]) for row in initial['calls'] if row['method']=='getUpdates')
+        # The groups the scenarios use, each added by the owner, before any probe there; the card each add brings is
+        # answered here, so the probes below count only their own replies.
+        base=adopt(http,query,wait,max(int(time.time()),initial.get('last_update_id',0)+1,initial['offset']))
+        sent_before=len(http('/fixture/telegram')['sent'])
         probes=[('owner_private',123,None),('named_topic',-10042,7),('general_topic',-10042,None)]
         if args.scenario=='faults-and-files':probes=[('rate_limited_topic',-10042,7),('file_retry',123,None)]
         for index,(label,chat,topic) in enumerate(probes):

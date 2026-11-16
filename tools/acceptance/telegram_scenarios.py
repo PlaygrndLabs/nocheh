@@ -22,13 +22,17 @@ from tools.paths import ROOT
 from tools.acceptance.telegram_rehearsal import (TELEGRAM_SERVICE, archived_delivery, telegram_health, validate_fixture,
                                                  wait_telegram_connected)
 
+# Only the owner adds Nocheh to a group (ADR-0253). The owner adds it to GROUP and OTHER_GROUP when the fake Telegram
+# connects (telegram_rehearsal.adopt), and answers No project on the card that follows. UNSELECTED_GROUP is a group
+# Nocheh is in that nobody added it to while it watched: it stays Off and silent and is never left.
 OWNER, GROUP, OTHER_GROUP, UNSELECTED_GROUP, PARTICIPANT = 123, -10042, -10043, -10099, 777
-# A third served group, so two groups can share a project while GROUP stays in none (project_groups_stay_apart).
+# A third group the owner adds Nocheh to at the start, so two groups can share a project while GROUP stays in none
+# (project_groups_stay_apart).
 THIRD_GROUP = -10044
-# Groups Nocheh first sees after step 2b, so their Nocheh ids are digests (ADR-0252). NEW_GROUP (NG1) is turned on with
-# the 2b-1 switch and joins P1; UPGRADED_GROUP is a basic group Telegram upgrades to UPGRADED_SUPERGROUP, which Nocheh
-# learns from Telegram's service messages; REFRESHED_GROUP is one whose upgrade the owner's refresh finds. No other
-# scenario posts in either upgraded group.
+# Groups Nocheh first sees after step 2b, so their Nocheh ids are digests (ADR-0252). NEW_GROUP (NG1) is seen Off until
+# the owner adds Nocheh there, and joins P1; UPGRADED_GROUP is a basic group Telegram upgrades to UPGRADED_SUPERGROUP,
+# which Nocheh learns from Telegram's service messages; REFRESHED_GROUP is one whose upgrade the owner's refresh finds.
+# No other scenario posts in either upgraded group.
 NEW_GROUP, NEW_TOPIC = -10045, 5
 UPGRADED_GROUP, UPGRADED_SUPERGROUP = -4046, -10047
 REFRESHED_GROUP, REFRESHED_SUPERGROUP = -4048, -10049
@@ -178,11 +182,13 @@ const text=await response.text();if(!response.ok)throw Error('native_http_'+resp
         return next(item for item in self.conversations() if item['space_id'] == chat)
 
     def ids(self):
+        """A new update id, also used as a message id. The tester's are multiples of ten: the fake Telegram numbers the
+        updates it sends on its own, such as the one reporting the bot's own leave, in between (telegram_mock.next_update_id)."""
         if self.next_id is None:
             state = self.telegram()
-            known = [item['update_id'] for item in state['updates']]+[state['offset'], int(time.time())]
-            self.next_id = max(known)+1000
-        self.next_id += 1
+            known = [item['update_id'] for item in state['updates']]+[state['offset'], state.get('last_update_id', 0), int(time.time())]
+            self.next_id = (max(known)+1000)//10*10
+        self.next_id += 10
         return self.next_id
 
     def message(self, chat, text=None, sender=OWNER, topic=None, mention=None, reply_to=None, extra=None):
@@ -642,8 +648,27 @@ class Scenarios:
     def participant_not_permitted(self):
         self.not_allowed_reply(self.f.message(GROUP, 'سلام ربات', sender=PARTICIPANT, topic=16), 16)
 
+    def leave_calls(self, chat):
+        """Every leaveChat the Telegram service made for a chat, refused ones included."""
+        return [call for call in self.f.telegram()['calls'] if call['method'] == 'leaveChat' and str(call['parameters'].get('chat_id')) == str(chat)]
+
+    def add_records(self, chat):
+        """How many content-free records of Nocheh being added to or removed from a chat there are (ADR-0253)."""
+        return int(self.f.query('nocheh_control', "SELECT count(*) FROM chat_state_events e JOIN chat_ids i ON i.chat_id=e.chat_id "
+                                "WHERE i.external_id='"+str(int(chat))+"'"))
+
     def unselected_group(self):
+        # A group Nocheh is in that nobody added it to while it watched (ADR-0253): it is Off, so a message there gets no
+        # reply and no refusal, Nocheh never leaves it on its own and the owner hears nothing. The owner's chat list shows it
+        # Off, where they can turn Nocheh on.
+        before = len(self.f.sent())
         self.turn(self.f.message(UNSELECTED_GROUP, 'سلام'), UNSELECTED_GROUP, expect_reply=False)
+        item = self.f.chat_item(UNSELECTED_GROUP)
+        self.gate('listed_off', item.get('kind') == 'group' and item.get('state') == 'off', state=item.get('state'))
+        self.gate('no_add_recorded', self.add_records(UNSELECTED_GROUP) == 0)
+        self.gate('never_left', not self.leave_calls(UNSELECTED_GROUP))
+        self.gate('nothing_sent_there_or_about_it', not [row for row in self.f.sent()[before:] if row['message']['chat']['id'] == UNSELECTED_GROUP
+                                                        or 'Synthetic Forum '+str(UNSELECTED_GROUP) in (row['message'].get('text') or '')])
 
     def group_answers_only_when_addressed(self):
         # A question to the whole group gets no reply; the bot's name opening a
