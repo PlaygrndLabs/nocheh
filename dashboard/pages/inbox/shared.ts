@@ -193,7 +193,7 @@ export function problemText(error: unknown): string {
   if (code === 'action_already_started_or_closed') return 'This was already decided, or it has started.';
   if (code === 'action_delivery_denied') return 'Your security settings don’t allow sending this message.';
   if (code === 'destination_not_served')
-    return 'Nocheh doesn’t serve that chat now, so nothing was sent. Select the group, or allow the person in a selected group, on the Chats page.';
+    return 'Nocheh doesn’t serve that chat now, so nothing was sent. Select the group on the Chats page, or make the person a member in a selected group on the Members page.';
   if (code === 'job_report_not_served')
     return 'The job finished, but its chat is not served now, so its report was not sent.';
   if (code === 'job_report_not_delivered') return 'The job finished, but its report could not be delivered.';

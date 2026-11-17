@@ -14,7 +14,7 @@ export type Repeat = {
 export type Attachment =
   {kind: 'message'; id: string; url: null; title: string} | {kind: 'link'; id: null; url: string; title: string};
 /**
- * One reminder as the owner sees it (ADR-0255): whether the owner or a person they allowed set it, and `source`, the
+ * One reminder as the owner sees it (ADR-0255): whether the owner or one of their members set it, and `source`, the
  * "Set by" line Telegram shows above it, rendered by the server from the owner's reminder lines; null when it was set in
  * the owner's private chat or the dashboard. 'failed' is one Telegram refused.
  */

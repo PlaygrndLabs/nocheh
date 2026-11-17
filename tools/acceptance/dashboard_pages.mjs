@@ -20,6 +20,7 @@ const routes = [
     ['inbox', 'Inbox'],
     ['tasks', 'Tasks'],
     ['chats', 'Chats'],
+    ['members', 'Members'],
     ['messages', 'Messages'],
     ['memory', 'Memory'],
     ['usage', 'Usage'],

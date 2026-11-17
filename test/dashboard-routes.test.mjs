@@ -9,6 +9,12 @@ test('current page names open as they are',()=>{
  for(const page of pageIds)assert.deepEqual(resolveRoute('#'+page+'?view=x'),{page,hash:null});
 });
 
+test('Members is its own page, right after Chats, and opens a member or the add flow by its details',()=>{
+ assert.equal(pageIds.indexOf('members'),pageIds.indexOf('chats')+1);
+ assert.deepEqual(resolveRoute('#members?member='+'a'.repeat(64)),{page:'members',hash:null});
+ assert.equal(href('members',{add:'b'.repeat(64)}),'#members?add='+'b'.repeat(64));
+});
+
 test('links Nocheh already sent keep working, with their details',()=>{
  assert.deepEqual(resolveRoute('#inbox?kind=memory_access&decision=abc'),{page:'inbox',hash:null});
  assert.deepEqual(resolveRoute('#inbox?action=abc'),{page:'inbox',hash:null});
