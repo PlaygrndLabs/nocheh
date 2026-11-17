@@ -87,7 +87,7 @@ def directory(state, archive=None, bot_api=_bot_api, served=None):
                     person['state'] = user['state']
                 if isinstance(user.get('seen'), bool):
                     person['seen'] = user['seen']
-                # A member with a switch for this group, whether Nocheh ever saw them there or not (step 3).
+                # A member switched on in this group, whether Nocheh ever saw them there or not (step 3).
                 if user.get('member') is True:
                     person['member'] = True
                 users[person['id']] = person

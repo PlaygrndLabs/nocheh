@@ -117,8 +117,9 @@ group a person is denied in. A list for a group Nocheh was never in is not
 carried. The carry runs once; a later start, or a reset that keeps your setup,
 never runs it again.
 
-The old `TELEGRAM_GROUP_ACCESS` line in `.env` is ignored: Settings hides it, it
-never asks for Apply, and no service reads it. You may delete it. The
+The old `TELEGRAM_GROUP_ACCESS` line in `.env` is ignored: Settings hides it, and
+no service reads it. Keeping it never asks for Apply. You may delete it; Settings
+then asks for one Apply, which changes nothing in the services. The
 `group-access` command is gone; manage members on the **Members** page
 ([telegram](telegram.md#members)). Making the bot an admin in your members' groups
 lets Nocheh see more joins and leaves; it is recommended, not required.

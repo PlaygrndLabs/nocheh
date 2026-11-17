@@ -278,8 +278,11 @@ adding each by Telegram user ID and sending only the switches that differ, and
 the member scenarios check that no container restarted. They cover the owner
 adding a member on the dashboard, who then talks at once; a member switched off
 in one group and a paused member, who get the same fixed reply as a stranger,
-once a day per group; a member's web page read without a card; read-only tasks;
-posting to other groups turned off (`member_post_not_allowed`); a member who
+once a day per group (these, and the stranger's fixed reply and a member added
+by ID and then switched off, each ask as a person new to the fixture, so a second
+run on the same UTC day still sees the reply); a member's web page read without a
+card; read-only tasks; posting to other groups turned off
+(`member_post_not_allowed`); a member who
 left a group and is no longer reached there; four member jobs in one day, with
 no daily count; a member over a low daily message cap, who gets the limit reply
 once; and posts made in a chat's own name, which get nothing. Before an add that expects a line, the tester moves earlier

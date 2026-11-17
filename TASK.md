@@ -26,24 +26,28 @@ members live in the control store and are managed on the Members page.
   [runs](test/store-controlled-execution.test.ts), [jobs](test/store-background-jobs.test.ts)).
   Task calls check the member again (`member_access_changed`), and read-only tasks give a
   read-only turn ([tasks](test/store-member-tasks.test.ts)). The bot keeps no list: a paused or
-  switched-off member gets the stranger's fixed reply, once a UTC day per group, and a post in a
-  chat's own name gets nothing ([dispatch](test/store-telegram-dispatch.test.ts),
+  switched-off member gets the stranger's fixed reply, once a UTC day per group, a reply Telegram
+  refused or that never left does not use up the day, and a post in a chat's own name gets
+  nothing ([dispatch](test/store-telegram-dispatch.test.ts),
   [bot](services/telegram/test_approval_cards.py)). The owner's own group
   requests skip the tool card behind `let ownerGroupTools=true`.
 - The carry: at the first start, the lists the last start admitted become members with exactly
-  their reach, on rows for granted groups and off rows for every other group chat Nocheh is in, once, with
-  skips counted in the `member_carry` log line ([carry](test/store-member-carry.test.ts)).
+  their reach, on rows for granted groups and off rows for every other group chat Nocheh is in,
+  once, with skips counted in the `member_carry` log line; a group Nocheh is added to again later is a
+  new group, on by default ([carry](test/store-member-carry.test.ts)).
   Reset snapshots are v3 only and carry the members
   ([reset](test/store-reset-setup.test.ts), [acceptance](test/store-reset-acceptance.test.ts),
   [Python](services/hermes/test_reset_configuration.py)). The runtime document is
-  `{enabled, owner_id}`, and an old `.env` line is hidden and never asks for Apply
+  `{enabled, owner_id}`, and an old `.env` line is hidden; keeping it never asks for Apply, and
+  deleting it asks for one Apply that changes nothing in the services
   ([configuration](test/store-runtime-configuration.test.ts),
   [settings](services/hermes/test_settings.py)). The `group-access` command, the installer's
   checks and Hermes's person checks are gone ([scopes](services/hermes/test_scopes.py),
   [configuration](services/hermes/test_configuration.py)). The add card's own new project moves
   no guard epoch ([adds](test/store-chat-adds.test.ts)).
 - The dashboard: Members after Chats, with permissions, groups, pause, remove, the daily cap and
-  both add flows, every control saving at once; Chats shows a read-only "Members here"; the
+  both add flows, every switch saving at once and the daily cap ("Times each member may ask
+  Nocheh a day") with its own Save; Chats shows a read-only "Members here"; the
   Save path for people, Settings' group access and System's daily member jobs are gone; three new
   editable texts ([model](test/dashboard-members-model.test.mjs),
   [routes](test/dashboard-routes.test.mjs), [identities](test/store-member-identities.test.ts),
@@ -51,16 +55,33 @@ members live in the control store and are managed on the Members page.
 - Full tester: members are set up through the owner's Members routes, with no restart; new
   scenarios add a member on the dashboard, switch one off in a group, pause one, read a web page
   without a card, keep tasks read only, turn posting off, follow a member who left, run four
-  member jobs in a day, reach the daily cap, and post in a chat's own name
-  ([scenarios](tools/acceptance/product_scenarios.py), [seeding](test/test_tester_members.py),
-  [fake](services/telegram/test_telegram_http_fixture.py)).
+  member jobs in a day, reach the daily cap, and post in a chat's own name. The three
+  fixed-reply scenarios ask as a person new to the fixture, so a second run the same UTC day
+  still sees the reply ([scenarios](tools/acceptance/product_scenarios.py),
+  [seeding](test/test_tester_members.py), [fake](services/telegram/test_telegram_http_fixture.py)).
+- Review fixes (2026-11-17): a post a member confirmed on their own card is cancelled when they
+  no longer reach its target, and the owner's card keeps the owner's word
+  ([gates](test/store-member-gates.test.ts)); a member's job stops between its report's parts
+  ([runs](test/store-background-job-runs.test.ts)); an upgrade copies switches also when the new
+  chat neither folds nor takes the old one's state ([adoption](test/store-chat-adoption.test.ts));
+  the carry writes off rows only in the groups Nocheh is in; identities list only members switched
+  on in groups Nocheh is in ([identities](test/store-member-identities.test.ts)), and the
+  management side asks Telegram once per unnamed person a read, with a refusal ending only that
+  lookup and flood control ending the group's ([directory](services/hermes/test_telegram_directory.py));
+  a reply running across a new group's own project sends on its first try
+  ([dispatch](test/store-telegram-dispatch-chats.test.ts)). The dashboard shows a saved member
+  change at once, gives a change made again a new operation ID, says why for the daily cap and
+  `member_changed`, leaves out of "Members here" a member Telegram never showed there whose switch
+  is off or who left, points Settings › Telegram to Members, and says where web pages and outside
+  tools skip the card ([model](test/dashboard-members-model.test.mjs),
+  [pages](test/dashboard-pages.browser.mjs)).
 
-  Checks on the integrated branch (2026-11-17): the build; node unit tests (671: 428 pass, 239
-  skipped, and only the 4 workflow tests that also fail on main fail); the chat id format gate;
-  all 104 store test files (282 pass, 0 fail); Python Telegram (147), Hermes (973, 4 skipped,
-  with the 2 environment errors that also occur on main) and the repository's Python tests (125,
-  2 skipped); the dashboard build, type and format checks and its tests (60 of 60); the browser
-  tests (59: 56 pass, and the 3 that also fail on main).
+  Checks on the integrated branch with the review fixes (2026-11-17): the build; node unit tests
+  (676: 431 pass, 241 skipped, and only the 4 workflow tests that also fail on main fail); the
+  chat id format gate; all 104 store test files (284 pass, 0 fail); Python Telegram (148), Hermes
+  (976, 4 skipped, with the 2 environment errors that also occur on main) and the repository's
+  Python tests (126, 2 skipped); the dashboard build, type and format checks and its tests (63 of
+  63); the browser tests (62: 59 pass, and the 3 that also fail on main).
   Pending:
   - The whole full tester on images. It has not run on this step.
   - The add card's own project moving no epoch has no tester scenario; a store test covers it.

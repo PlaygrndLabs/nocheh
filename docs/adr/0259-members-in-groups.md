@@ -69,7 +69,8 @@ earlier wording where the two differ.
    2026-11-12). A member talks in a served group unless its switch for them is
    off. The "New here" badge only informs. Decisions made without a message from
    that group still need Telegram's 'in'. The carry keeps today's exact reach
-   in the groups Nocheh is in; a group it is added to again later is a new
+   in the groups Nocheh is in at the carry: it writes switched-off rows only for
+   those, so a group Nocheh is not in then and is added to again later is a new
    group, on by default. The add flow writes a row for every group it shows.
 2. **No "Asked, not allowed" list.** There is no `not_allowed_people` table, no
    record at dispatch and no list on the page. Someone who writes in a group
@@ -275,22 +276,27 @@ groups. Here each effect checks the member again just before it happens:
   changes an existing row, or makes one only where Telegram shows them 'in'.
 - On the page:
   - Members sits in the sidebar after Chats.
-  - Every switch saves at once as an owner command, with no Save bar; the daily
-    cap, typed in, has its own Save.
+  - Every switch saves at once as an owner command, with no Save bar. The daily
+    cap, "Times each member may ask Nocheh a day" on the "Daily messages" card
+    beside the members list, is typed in and has its own Save.
   - Each member page has "Talk to Nocheh in groups they joined", with its three
     switches disabled while it is off, "Read and write / Read only" for tasks,
     and each group with its switch and what Telegram last said ("Seen here",
     "Left the group (Telegram says)", "Nothing from Telegram yet", and "New
-    here"). It also has "Pause this member", Remove, which asks first, and the
-    daily cap for every member.
+    here"). It also has "Pause this member" and Remove, which asks first.
   - Add picks someone seen in the groups, with their groups all ticked, or takes
     a Telegram user ID with every group Nocheh is in shown and none ticked. Every
     group shown is sent, ticked or not.
   - Names come from `/v1/telegram/identities`. It now lists each member account
     switched on in a group Nocheh is in (`member: true`), seen there or not, and
     the management side asks Telegram for those names only (`getChatMember`). A
-    switch that is off neither lists a group nor a person. Nothing at runtime
-    asks Telegram who is a member.
+    switch that is off neither lists a group nor a person. Each refresh asks
+    about the owner and the members still unnamed, up to 40 a group. A name
+    Telegram gave in one group, from its administrators or a lookup, serves the
+    others in that refresh, so no one is asked again once named. A refusal for
+    one person ends only that person's lookup in that group; flood control (429)
+    or an outage ends the group's lookups. Nothing at runtime asks
+    Telegram who is a member.
 - The group card in Chats becomes "Members here", read only:
   - You, always.
   - Each member Telegram shows there, or whose switch there is on while
@@ -330,16 +336,17 @@ groups. Here each effect checks the member again just before it happens:
   - becomes a member with every permission on and tasks read and write;
   - keeps exact reach: a switched-on row for each group they were granted in, and
     a switched-off row for every other group chat Nocheh is in (not left, removed
-    or archived; owner decision 1). A group Nocheh is added to again later counts
-    as a new group, on by default. This keeps the table, and the reset snapshot
+    or archived; owner decision 1). A group Nocheh is not in at the carry and is
+    added to again later counts as a new group, on by default. This keeps the table, and the reset snapshot
     that carries it, to the groups that matter.
   - Telegram's rows are not asked, because the owner's list is the authority.
   - A database error stops the start, like any start step.
 - **Retired.** `TELEGRAM_GROUP_ACCESS` leaves the policy, Compose, `.env.example`,
   the installer's defaults and checks, the dashboard's settings, `nocheh-telegram`
   and Hermes. The `group-access` command is deleted. An old `.env` line is hidden
-  and cannot be saved. It never makes Settings ask for Apply, and no service
-  reads it.
+  and cannot be saved, and no service reads it. Keeping it never makes Settings
+  ask for Apply; deleting it asks for one Apply, which changes nothing in the
+  services.
 - **Reset snapshots.** A reset snapshot is format v3 only. It carries `members`,
   `member_accounts` (`member_id`, `app`, `external_id`), `member_chats` and
   `daily_messages`. A restore makes the accounts again with `ensureAccount`,
@@ -400,9 +407,10 @@ groups. Here each effect checks the member again just before it happens:
   goes to the owner's card. A member who left silently, which a bot that is not
   an admin may not see, keeps reach there until a leave arrives. The docs
   recommend making the bot an admin in member groups, but do not require it.
-- A carried member keeps exactly the groups they had. A group Nocheh is in for
-  the first time after the carry has no row for them, so it counts as on, like
-  it does for every member.
+- A carried member keeps exactly the groups they had, among the groups Nocheh is
+  in at the carry. A group Nocheh is in for the first time after the carry, or
+  is added to again after leaving it before the carry, has no row for them, so it
+  counts as on, like it does for every member.
 - A member someone added by Telegram user ID talks from their first message.
   Posts into a group from another one, and jobs there, wait until Telegram shows
   them in it.

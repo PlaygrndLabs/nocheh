@@ -182,6 +182,8 @@ cause a leave, a line, a card or a change of state.
   supergroup's own add can also arrive before the upgrade messages. It then
   folds into the old chat when only its own add served it and it has no
   project yet, so the group keeps its state, project and members' switches.
+  Whenever the two stay apart, members' switches are copied to the new chat, and
+  one already off there stays off.
   Your add folded in turns on only a group Nocheh was not in (Left, Removed or Imported
   history) or had only just seen. Once the card made the new chat's project,
   the two stay apart, but the new one still takes the old one's Off, Couldn’t
@@ -237,28 +239,36 @@ guard epoch.
   switch saved yet; it only informs.
 - **Pause this member** stops everything they can do, in every group. **Remove**,
   which asks first, takes the member away; their tasks and reminders stay.
-- **Daily messages**: each member may start 200 turns a UTC day across all groups
-  by default, 1 to 10,000. A turn past it is not started and uses no model, and
-  the member gets **Reply to a member past the daily limit** from Settings ›
-  Assistant › Built-in instructions, at most once a UTC day per group. You are
-  never counted.
+- **Daily messages**: **Times each member may ask Nocheh a day**, beside the
+  members list and saved with its own Save. Each member may start 200 turns a
+  UTC day across all groups by default, 1 to 10,000. A turn past it is not
+  started and uses no model, and the member gets **Reply to a member past the
+  daily limit** from Settings › Assistant › Built-in instructions, at most once a
+  UTC day per group. You are never counted.
 
 **Add a member** picks someone Nocheh has seen in your groups, with the groups they
 were seen in ticked, or takes a Telegram user ID, with every group Nocheh is in shown
 and none ticked. A group you untick is saved off. A person you add by ID can talk
 from their first message; a group they were never seen in can be ticked only this
 way. A group's page in **Chats** shows **Members here**, read only, with **Make
-member** for people seen there who are not members.
+member** for people seen there who are not members. The Members page names a
+member who never wrote in a group by asking Telegram (`getChatMember`) about the
+members switched on in the groups Nocheh is in: each time it reads names, a
+person Telegram names is asked once, at most 40 are asked a group, and flood
+control ends a group's lookups until the next read.
 
 What a member asked for is checked against them again just before it happens:
 a reply before it is delivered, a message Nocheh sends, a web page read or outside
 tool, a job and a task change. A member paused mid-reply gets no reply, and a
 message they asked for is cancelled with the reason on its card. A post into
 another group and a running job need Telegram to have shown them in that group,
-and a send to their private chat needs it in one of their groups. A member's first
-message in a group is enough to talk there, and shows them in it; until then, a
-post into that group from another one goes to your card. The bot asks Telegram
-nothing at runtime about who is a member, and a bot that is not a group admin
+and a send to their private chat needs it in one of their groups. A post they
+confirmed on their own card still needs that just before it goes; a post your
+card approved keeps your word for the target group. A pause, a switch turned off
+or a leave also stops a member's job between the parts of its report. A member's
+first message in a group is enough to talk there, and shows them in it; until
+then, a post into that group from another one goes to your card. The bot asks
+Telegram nothing at runtime about who is a member, and a bot that is not a group admin
 sees joins and leaves only from Telegram's service messages, so a member who left
 quietly keeps their place until Telegram says so.
 Making the bot an admin in your members' groups is recommended, not required.
@@ -266,8 +276,9 @@ Making the bot an admin in your members' groups is recommended, not required.
 Someone who addresses Nocheh in a group and may not talk there, a stranger or a
 member who is paused, has talk switched off or is off in that group, gets
 **Reply to people who may not talk in a group** at most once a UTC day per group,
-with no model. A post in a chat's own name, such as an anonymous admin's, gets
-nothing.
+with no model. A reply Telegram refused, such as in a closed topic, or that never
+left does not use up the day: their next message that day gets it. A post in a
+chat's own name, such as an anonymous admin's, gets nothing.
 
 A member's web page read or outside tool in a live group turn runs without a
 card while their permission is on, and so does your own request in a group. Deny
@@ -281,8 +292,9 @@ first start of step 3, the people in the lists the last start admitted became
 members who talk in exactly the groups they could talk in before: a group they
 were granted in is on, and every other group Nocheh is in is off; a group Nocheh
 is added to again later is a new group, on by default. An old
-`TELEGRAM_GROUP_ACCESS` line in `.env` is hidden in Settings, never asks for
-Apply, and no service reads it ([deploy](deploy.md#upgrade-to-step-3)).
+`TELEGRAM_GROUP_ACCESS` line in `.env` is hidden in Settings, and no service reads
+it. Keeping it never asks for Apply; deleting it asks for one Apply, which changes
+nothing in the services ([deploy](deploy.md#upgrade-to-step-3)).
 
 ## Send records
 
