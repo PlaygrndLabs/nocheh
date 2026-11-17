@@ -869,6 +869,27 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
       assert.deepEqual(rows[0]!.value,honchoPointer('pinned_nocheh'));assert.doesNotMatch(rows[0]!.content,/NOCHEHMARK|CARDMARK/);
     }
     assert.ok(card.id);
+    // The owner's message holding someone else's words that is not a pin, here the owner's forward of their own checklist
+    // others could add tasks to, is kept with the forwards and files, and the note left in the chat says what it was,
+    // never that something was pinned. In the owner's own private chat nobody else can add tasks, so the owner's checklist
+    // sent there stays the owner's own words, even one marked as open to others. A member's tasks-done message on the owner's checklist in a group
+    // keeps the checklist, labelled as someone else's, on the member.
+    const alicesList=(shared:boolean)=>({title:'LISTMARK Trip',tasks:[{id:1,text:'TASKMARK send the keys'}],others_can_add_tasks:shared});
+    const listForward=await say('123',123,{forward_origin:{type:'user',sender_user:alice,date:1},checklist:alicesList(true)});
+    const listEdit=await say('123',123,{checklist:alicesList(true)});
+    const listDone=await say(group,456,{checklist_tasks_done:{checklist_message:{message_id:7,date:1700000000,chat:chatOf(group),from:alice,checklist:alicesList(true)},
+      marked_as_done_task_ids:[1]}});
+    for(const source of [listForward,listEdit,listDone])pins.push(...await services.memory.queueSource(source));
+    const [listKept,listPointer]=await written(listForward);
+    assert.deepEqual(shape([listKept!,listPointer!]),[[materialPeer,'labelled_material','material'],[assistantPeer,'labelled_pointer','conversation']]);
+    assert.equal(listKept!.value.source,honchoSource({part:'held'}));assert.ok(listKept!.content.includes('TASKMARK'));
+    assert.deepEqual(listPointer!.value,honchoPointer('held'));assert.doesNotMatch(listPointer!.content,/pinned|TASKMARK/);
+    const edited=await written(listEdit);
+    assert.deepEqual(shape(edited),[[ownerPeer,'labelled_source','conversation']]);assert.equal(edited[0]!.value.source,honchoSource({part:'own'}));
+    assert.ok(edited[0]!.content.includes('TASKMARK'));
+    const done=await written(listDone);
+    assert.ok(done.some(row=>row.record==='labelled_source'&&row.value.source===honchoSource({part:'held'})&&row.content.includes('TASKMARK')),JSON.stringify(shape(done)));
+    assert.ok(done.every(row=>row.writer!==ownerPeer&&row.writer!==materialPeer),'on the member, never the owner');
     // The owner's quote of the card is the owner's words alone, and nothing of the card goes to the forwards and files.
     const okay=await say('123',123,{text:'OKMARK sure',quote:{text:'CARDQUOTEMARK approve',position:0},
       reply_to_message:{message_id:cardId,date:1700000000+cardId,chat:chatOf('123'),from:{id:bot,is_bot:true,first_name:'Nocheh'},text:'CARDMARK approve the booking?'}});

@@ -129,7 +129,7 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
   assert.equal(label([review([[1,'owner_message'],[2,'nocheh_reply'],[3,'forward_hidden_by_owner']],[1],{rules:'others',rule_buckets:['person']},GP1_TOPIC)]),
     'Nocheh\'s notes review of a message the owner forwarded from a…, and 2 more sources, with rules learned from others',
     'the ending about others\' rules stays whole when the label is cut');
-  assert.equal(label([review([[1,'owner_message'],[2,'pinned']],[1])]),'Nocheh\'s notes review of a pinned message by another person in the owner\'s private chat, and 1 more sources');
+  assert.equal(label([review([[1,'owner_message'],[2,'pinned']],[1])]),'Nocheh\'s notes review of a pin or message holding another person\'s words in the owner\'s private chat, and 1 more sources');
   assert.equal(label([turn()]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, written while answering the owner\'s own message');
   assert.equal(label([turn({place:{chat:OWNER,web:true}})]),'Nocheh\'s note from the owner\'s web chat on 2026-11-16, written while answering the owner\'s own message');
   assert.equal(label([turn({place:{chat:GP1}})]),'Nocheh\'s note from group “Family” on 2026-11-16');
@@ -207,7 +207,7 @@ test('a review fragment: its first line as it was, code\'s records, the marker a
 
 test('owner labels: the owner\'s own lines, people and chats named as reminders name them, Persian half-spaces kept',()=>{
   const facts=(fields:Partial<SourceFacts>):SourceFacts=>({author:'person',account:sara,name:'Sara',act:'message',forward:null,forward_name:null,quote:null,file:false,
-    file_name:null,audio:false,recording:false,send_class:null,answers:null,pinned:null,...fields});
+    file_name:null,audio:false,recording:false,send_class:null,answers:null,pinned:null,held:false,...fields});
   const event=(cls:EventClass,fields:Partial<SourceFacts>={},extra:Partial<LabelEvent>={}):LabelEvent=>({class:cls,facts:facts(fields),chat:GP1,allowed:true,...extra});
   const label=(item:LabelEvent)=>ownerEventLabel(item,words,names,keys);
   assert.equal(label(event('owner_message',{author:'owner'},{chat:OWNER})),'you in your private chat');
@@ -232,6 +232,11 @@ test('owner labels: the owner\'s own lines, people and chats named as reminders 
   assert.equal(label(event('quote_nocheh',{author:'owner',quote:'other'},{chat:OWNER})),'a reply by you in your private chat, quoting Nocheh\'s own message');
   assert.equal(label(event('pinned',{author:'owner',pinned:'other'},{chat:OWNER})),'a message by someone else that you pinned in your private chat');
   assert.equal(label(event('pinned',{pinned:'other'})),`a message by someone else that ${q('Sara')}, a person you allowed pinned in group ${q('Family')}`);
+  // A message holding someone else's words that is not a pin never says it was pinned.
+  assert.equal(label(event('pinned',{author:'owner',pinned:'other',held:true},{chat:OWNER})),
+    'a message you sent in your private chat holding someone else\'s words, such as a shared checklist or poll');
+  assert.equal(label(event('pinned',{pinned:'other',held:true})),
+    `a message ${q('Sara')}, a person you allowed sent in group ${q('Family')} holding someone else's words, such as a shared checklist or poll`);
   assert.equal(label(event('pinned_nocheh',{author:'owner',pinned:'other'},{chat:OWNER})),'Nocheh\'s own message that you pinned in your private chat');
   assert.equal(modelEventPhrase('pinned_nocheh'),'the owner\'s pin of Nocheh\'s own message');
   assert.equal(label(event('nocheh_approved_post',{author:'nocheh'})),`Nocheh's post in group ${q('Family')}, sent after you approved it`);
@@ -284,6 +289,8 @@ test('Honcho records name their part in fixed words, with names that cannot clos
   assert.equal(honchoSource({part:'audio'}),'a transcript of an audio file the sender sent: not the sender\'s own words');
   assert.equal(honchoSource({part:'quote'}),'a quote of another person\'s message inside the sender\'s reply');
   assert.equal(honchoSource({part:'pinned'}),'a message by another person that the sender pinned: not the sender\'s own words');
+  assert.equal(honchoSource({part:'held'}),
+    'a message the sender sent holding others\' words (a shared checklist or poll, or a message shown in it): not the sender\'s own words','not a pin');
   assert.deepEqual((['reply','follow_up','private_answer','job_report','scheduled_run','approved_post',null] as const).map(cls=>honchoSource({part:'nocheh',send_class:cls})),
     ['Nocheh\'s reply','Nocheh\'s follow-up','Nocheh\'s private answer','Nocheh\'s report','Nocheh\'s scheduled result','Nocheh\'s post','Nocheh\'s reply']);
   assert.equal(honchoSource({part:'nocheh',send_class:'reply',about_forward:true}),'Nocheh\'s reply about a message the owner forwarded');
@@ -296,6 +303,9 @@ test('Honcho records name their part in fixed words, with names that cannot clos
   assert.equal(honchoPointer('channel').text,'the owner forwarded a message from a channel; its text is kept with the owner\'s forwards and files');
   assert.deepEqual(honchoPointer('pinned'),{source:'Nocheh\'s note',
     text:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files'});
+  // The owner's message holding others' words is not a pin, and its note never says one was pinned.
+  assert.deepEqual(honchoPointer('held'),{source:'Nocheh\'s note',
+    text:'the owner sent a message holding other people\'s words, such as a shared checklist or poll; its text is kept with the owner\'s forwards and files'});
   // The owner's pin of Nocheh's own message is only a note that it was pinned: its text is Nocheh's, or a card's.
   assert.deepEqual(honchoPointer('pinned_nocheh'),{source:'Nocheh\'s note',text:'the owner pinned one of Nocheh\'s own messages; its text is not kept here'});
   // So is anyone else's, naming no one.

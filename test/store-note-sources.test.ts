@@ -9,7 +9,7 @@ import {NoteSourceRepository,countMemoryStep,memoryProblems,recallRoleWords,type
 import {HttpError} from '../src/http.js';
 import {sourceLines} from '../src/prompts.js';
 import {modelSourceWords} from '../src/source-labels.js';
-import {BOB,GP1,OWNER,fixtureDirectory} from './fixture-groups.js';
+import {BOB,GP1,GP2,OWNER,fixtureDirectory} from './fixture-groups.js';
 
 test('note sources read each message\'s facts from the archive: its author, its selected texts and Nocheh\'s own send class',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async()=>{
@@ -98,11 +98,27 @@ test('note sources read each message\'s facts from the archive: its author, its 
     const otherQuote=await quoting(otherId,otherBot);
     const unknownPin=await capture({origin:'live',bot_id:'fixture',kind:'telegram_update',scope:GP1,text:'',payload:message(group,owner,{
       pinned_message:{message_id:learnedId+60,date:1700000000,chat:group,from:botUser,text:'Book the 9am'}})});
-    assert.deepEqual(Object.fromEntries(await sources.carried([pinLearned,pinCard,pinNothing,pinOther,pinForward,quoteForward,viaPin,otherQuote,unknownPin,ofLearned,ofCard,ofNothing,typed])),{
-      [pinLearned]:{pinned:'learned',quote:false,pinned_quote:false},[pinCard]:{pinned:'unlearned',quote:false,pinned_quote:false},
-      [pinNothing]:{pinned:'bot',quote:false,pinned_quote:false},[pinForward]:{pinned:'bot',quote:false,pinned_quote:false},
-      [quoteForward]:{pinned:null,quote:true,pinned_quote:false},[ofLearned]:{pinned:null,quote:true,pinned_quote:false},
-      [ofCard]:{pinned:null,quote:true,pinned_quote:false},[ofNothing]:{pinned:null,quote:true,pinned_quote:false}});
+    // A message another message embeds is Nocheh's own words the same way, by its place in the message (`held`).
+    const nochehPoll=(from:Record<string,unknown>)=>({poll_option_added:{poll_message:{message_id:learnedId+70,date:1700000000,chat:group,from,poll:{id:'p',question:'Q',
+      options:[]}},option_persistent_id:'a',option_text:'mine'}});
+    const heldNocheh=await capture({origin:'live',kind:'telegram_update',scope:GP1,text:'',payload:message(group,owner,nochehPoll(botUser))});
+    const heldOther=await capture({origin:'live',kind:'telegram_update',scope:GP1,text:'',payload:message(group,owner,nochehPoll(otherBot))});
+    assert.deepEqual(Object.fromEntries(await sources.carried([pinLearned,pinCard,pinNothing,pinOther,pinForward,quoteForward,viaPin,otherQuote,unknownPin,ofLearned,ofCard,ofNothing,typed,
+      heldNocheh,heldOther])),{
+      [pinLearned]:{pinned:'learned',quote:false,pinned_quote:false,held:[]},[pinCard]:{pinned:'unlearned',quote:false,pinned_quote:false,held:[]},
+      [pinNothing]:{pinned:'bot',quote:false,pinned_quote:false,held:[]},[pinForward]:{pinned:'bot',quote:false,pinned_quote:false,held:[]},
+      [quoteForward]:{pinned:null,quote:true,pinned_quote:false,held:[]},[ofLearned]:{pinned:null,quote:true,pinned_quote:false,held:[]},
+      [ofCard]:{pinned:null,quote:true,pinned_quote:false,held:[]},[ofNothing]:{pinned:null,quote:true,pinned_quote:false,held:[]},
+      [heldNocheh]:{pinned:null,quote:false,pinned_quote:false,held:['["poll_option_added","poll_message"]']}});
+    // In the owner's own private chat, told by equality with the policy's owner chat, nobody else can add tasks: the owner's
+    // checklist there stays the owner's own, even one open to others. In a group the same checklist may hold others' tasks,
+    // and so may it in a chat the policy does not name as the owner's.
+    const listIn=(chat:{id:number;type:string},scope:string)=>capture({origin:'live',kind:'telegram_update',scope,text:'',payload:message(chat,owner,{
+      checklist:{title:'Trip',tasks:[{id:1,text:'keys'}],others_can_add_tasks:true}})});
+    const listPrivate=await listIn(privateChat,OWNER),listGroup=await listIn(group,GP1),lists=await sources.classesFor([listPrivate,listGroup]);
+    assert.deepEqual([lists.get(listPrivate)!.class,lists.get(listGroup)!.class,lists.get(listGroup)!.facts.held],['owner_message','pinned',true]);
+    const elsewhere=new NoteSourceRepository(stores,()=>({owner_id:OWNER,owner_chat:GP2}));
+    assert.equal((await elsewhere.classesFor([listPrivate])).get(listPrivate)!.class,'pinned');
     // The owner's quote of their own forward of Nocheh's message is a quote of someone else's, never the owner's own words.
     const quotedForward=(await sources.classesFor([quoteForward])).get(quoteForward)!;
     assert.deepEqual([quotedForward.facts.quote,quotedForward.class],['other','quote']);

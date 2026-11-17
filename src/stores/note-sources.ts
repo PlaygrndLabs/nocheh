@@ -1,10 +1,10 @@
 import type pg from 'pg';
-import {notesSender,type AssistantPolicy} from '../assistant-policy.js';
+import {notesSender,ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
 import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.js';
 import {sourceChat} from '../spaces.js';
-import {bucketOf,eventClass,nochehPinned,nochehQuoted,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
+import {bucketOf,eventClass,nochehHeld,nochehPinned,nochehQuoted,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
 import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
 import {nameKeys,type Who} from '../task-reminder-text.js';
@@ -28,6 +28,8 @@ export type StoredOrigin={by:'review';review:string}|
 export interface NoteInput {key:string;origins:StoredOrigin[];more:number;cites:string[];more_cites:boolean;space:string|null}
 /** A note's source: the fixed token trust is keyed on, and its label. */
 export interface NoteSource {from:NoteFrom;label:string}
+/** What of the words a message carries is Nocheh's own (NoteSourceRepository.carried). */
+export interface Carried {pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;pinned_quote:boolean;held:string[]}
 
 /**
  * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes and naming
@@ -92,12 +94,13 @@ export class NoteSourceRepository {
   constructor(readonly stores:Pools,readonly policy:()=>Pick<AssistantPolicy,'owner_id'>&Partial<AssistantPolicy>,
     readonly access?:{space(reference:SourceReference):Promise<string|null>}){}
 
-  /** The facts of each of these events, by id, in three batched reads. */
+  /** The facts of each of these events, by id, in three batched reads. Whether an event is in the owner's own private
+   *  chat with Nocheh is told by equality with ownerChat, as the notes review tells it, never by an id's shape. */
   async factsFor(ids:readonly string[]):Promise<Map<string,SourceFacts>> {
     const wanted=[...new Set(ids.filter(fullId))],found=new Map<string,SourceFacts>();
     if(!wanted.length)return found;
     // The authors the archive proved for an event (authored_by): only a Telegram Desktop export reads them.
-    const events=(await this.stores.archive.query(`SELECT e.id,e.kind,e.channel,e.payload,a.authors FROM events e
+    const events=(await this.stores.archive.query(`SELECT e.id,e.kind,e.channel,e.scope,e.payload,a.authors FROM events e
       LEFT JOIN LATERAL (SELECT coalesce(json_agg(json_build_object('namespace',o.namespace,'kind',o.kind,'external_id',o.external_id) ORDER BY o.id),'[]') AS authors
         FROM source_relations r JOIN source_objects o ON o.id=r.target_id WHERE r.event_id=e.id AND r.kind='authored_by') a ON true
       WHERE e.id=ANY($1::text[])`,[wanted])).rows;
@@ -107,14 +110,16 @@ export class NoteSourceRepository {
     const files=[...new Set(selected.map(item=>item.artifact_id).filter((id):id is string=>typeof id==='string'))];
     if(files.length)for(const item of (await this.stores.archive.query(`SELECT id,kind,metadata->>'file_name' AS file_name FROM artifacts WHERE id=ANY($1::text[])`,[files])).rows)
       artifacts.set(item.id,{kind:item.kind,file_name:item.file_name??null});
-    const owner=this.policy().owner_id;
+    const policy=this.policy(),owner=policy.owner_id,ownChat=owner===null?null:ownerChat(policy);
     for(const event of events) {
       let payload:unknown=null;
       try{payload=JSON.parse((event.payload as Buffer).toString());}catch{}
       // A derivative whose artifact is not found reads as an audio file's transcript or a file's text: never the sender's own voice.
       const derivatives=selected.filter(item=>item.event_id===event.id).map(item=>({kind:item.kind as string,artifact:artifacts.get(item.artifact_id)?.kind??'',
         file_name:artifacts.get(item.artifact_id)?.file_name??null}));
-      found.set(event.id,sourceFacts({channel:event.channel,kind:event.kind,payload,derivatives,authors:Array.isArray(event.authors)?event.authors:[]},owner));
+      const chat=ownChat===null?null:sourceChat({channel:event.channel,scope:event.scope});
+      found.set(event.id,sourceFacts({channel:event.channel,kind:event.kind,payload,derivatives,authors:Array.isArray(event.authors)?event.authors:[],
+        owner_chat:chat!==null&&chat===ownChat},owner));
     }
     return found;
   }
@@ -165,11 +170,12 @@ export class NoteSourceRepository {
    * pin of a forward of Nocheh's message, which cannot tell a card from a learned reply. `quote`: its quote is of Nocheh's
    * own words (repliesToNocheh, or nochehQuoted: a forward of Nocheh's message and a reply in another chat included).
    * `pinned_quote`: the message a pin carries quotes Nocheh's words, as the pin shows it or as the archive holds that
-   * message. Only a message that carries any of these is in the result. Another bot's message, and one sent through an
-   * inline bot, is someone else's: it carries none of these, and is learned labelled as someone else's.
+   * message. `held`: the places (heldKey) of what it holds that is Nocheh's own words (nochehHeld: a message it embeds,
+   * or the quote inside one). Only a message that carries any of these is in the result. Another bot's message, and one
+   * sent through an inline bot, is someone else's: it carries none of these, and is learned labelled as someone else's.
    */
-  async carried(ids:readonly string[]):Promise<Map<string,{pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;pinned_quote:boolean}>> {
-    const wanted=[...new Set(ids.filter(fullId))],found=new Map<string,{pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;pinned_quote:boolean}>();
+  async carried(ids:readonly string[]):Promise<Map<string,Carried>> {
+    const wanted=[...new Set(ids.filter(fullId))],found=new Map<string,Carried>();
     if(!wanted.length)return found;
     const [messages,pinnedTo,replies]=await Promise.all([this.messages(wanted),this.pinnedTo(wanted),this.repliesToNocheh(wanted)]);
     const held=[...new Set([...pinnedTo.values()].flat())];
@@ -180,7 +186,8 @@ export class NoteSourceRepository {
       const pinned=pins.get(id)??(nochehPinned(message,bot)?'bot':null),quote=replies.has(id)||nochehQuoted(message,bot);
       const pinnedQuote=!!record(inner?.quote)&&(nochehQuoted(inner,bot)||
         (pinnedTo.get(id)??[]).some(target=>heldReplies.has(target)||nochehQuoted(heldMessages.get(target)?.message,bot)));
-      if(pinned||quote||pinnedQuote)found.set(id,{pinned,quote,pinned_quote:pinnedQuote});
+      const held=nochehHeld(message,bot);
+      if(pinned||quote||pinnedQuote||held.length)found.set(id,{pinned,quote,pinned_quote:pinnedQuote,held});
     }
     return found;
   }

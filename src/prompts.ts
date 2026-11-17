@@ -161,7 +161,7 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
     closed_by:['{who}','{place}'],merged:['{count}','{place}'],more_waiting:['{count}'],note_line:['{line}'],removed_in_group:['{count}','{times}']},
   'memory.source_texts':{said:['{who}','{place}'],reaction:['{who}','{place}'],person_not_allowed:['{name}'],anonymous:['{place}'],forward:['{who}','{place}','{origin}'],
     origin_person:['{name}'],origin_channel:['{name}'],origin_group:['{name}'],file:['{name}','{who}','{place}'],file_unnamed:['{who}','{place}'],
-    audio:['{who}','{place}'],quote:['{who}','{place}'],quote_nocheh:['{who}','{place}'],pinned:['{who}','{place}'],pinned_nocheh:['{who}','{place}'],unknown_message:['{place}'],nocheh_reply:['{place}'],nocheh_about_forward:['{place}'],nocheh_follow_up:['{place}'],
+    audio:['{who}','{place}'],quote:['{who}','{place}'],quote_nocheh:['{who}','{place}'],pinned:['{who}','{place}'],held:['{who}','{place}'],pinned_nocheh:['{who}','{place}'],unknown_message:['{place}'],nocheh_reply:['{place}'],nocheh_about_forward:['{place}'],nocheh_follow_up:['{place}'],
     nocheh_private_answer:['{place}'],nocheh_job_report:['{place}'],nocheh_scheduled_run:['{place}'],nocheh_approved_post:['{place}'],nocheh_unlearned:['{place}'],
     review_owner:['{place}'],review:['{sources}'],rules:['{place}'],rules_others:['{place}'],turn_own:['{place}','{date}'],turn:['{place}','{date}'],turn_read:['{place}','{date}','{read}'],
     job_turn:['{place}','{date}','{read}'],more:['{count}']},
@@ -217,6 +217,7 @@ export const sourceTexts=['said: {who} in {place}','reaction: a reaction by {who
   'origin_bot: an inline bot','origin_unnamed: someone Telegram doesn\'t name','file: the file {name} {who} sent in {place}','file_unnamed: a file {who} sent in {place}',
   'audio: an audio file {who} sent in {place}','quote: a reply by {who} in {place}, quoting someone else\'s message',
   'quote_nocheh: a reply by {who} in {place}, quoting Nocheh\'s own message','pinned: a message by someone else that {who} pinned in {place}',
+  'held: a message {who} sent in {place} holding someone else\'s words, such as a shared checklist or poll',
   'pinned_nocheh: Nocheh\'s own message that {who} pinned in {place}','unknown_message: a message Nocheh can\'t describe, in {place}',
   'nocheh_reply: Nocheh\'s reply in {place}','nocheh_about_forward: Nocheh\'s reply in {place} about a message you forwarded','nocheh_follow_up: Nocheh\'s follow-up in {place}',
   'nocheh_private_answer: Nocheh\'s private answer in {place}','nocheh_job_report: Nocheh\'s report in {place}','nocheh_scheduled_run: Nocheh\'s scheduled result in {place}',
@@ -230,7 +231,7 @@ export const sourceTexts=['said: {who} in {place}','reaction: a reaction by {who
   'read_commands: command results','read_past: past conversations','read_other: other tools','unknown: Source not recorded',
   'unavailable: Source not available right now','more: {count} more'].join('\n');
 export type SourceText='said'|'reaction'|'person_not_allowed'|'anonymous'|'forward'|'origin_person'|'origin_hidden'|'origin_channel'|'origin_group'|'origin_bot'|
-  'origin_unnamed'|'file'|'file_unnamed'|'audio'|'quote'|'quote_nocheh'|'pinned'|'pinned_nocheh'|'unknown_message'|'nocheh_reply'|'nocheh_about_forward'|'nocheh_follow_up'|'nocheh_private_answer'|
+  'origin_unnamed'|'file'|'file_unnamed'|'audio'|'quote'|'quote_nocheh'|'pinned'|'held'|'pinned_nocheh'|'unknown_message'|'nocheh_reply'|'nocheh_about_forward'|'nocheh_follow_up'|'nocheh_private_answer'|
   'nocheh_job_report'|'nocheh_scheduled_run'|'nocheh_approved_post'|'nocheh_unlearned'|'review_owner'|'review'|'rules'|'rules_others'|'turn_own'|'turn'|'turn_read'|'job_turn'|
   'earlier'|'read_message'|'read_forward'|'read_file'|'read_recent'|'read_archive'|'read_web'|'read_notion'|'read_tools'|'read_commands'|'read_past'|'read_other'|
   'unknown'|'unavailable'|'more';

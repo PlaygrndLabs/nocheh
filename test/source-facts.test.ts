@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {accountIdFor} from '../src/chats.js';
-import {bucketOf,cutEmbeddedMessages,eventClass,eventClasses,isEventClass,nochehPinned,nochehQuoted,ownerTyped,sourceFacts,type FactsInput,type SourceFacts} from '../src/source-facts.js';
+import {bucketOf,cutHeld,embeddedMessages,eventClass,eventClasses,heldBy,heldKey,isEventClass,nochehHeld,nochehPinned,nochehQuoted,ownerTyped,sourceFacts,type FactsInput,
+  type SourceFacts} from '../src/source-facts.js';
 
 const OWNER='5001',SARA='5002';
 const group={id:-20,type:'supergroup'};
@@ -14,7 +15,7 @@ const hex=(n:number)=>n.toString(16).padStart(64,'0');
 test('who wrote a message comes from the account Telegram names, never from a display name',()=>{
   const typed=live(update({from:owner,text:'hi'}));
   assert.deepEqual(typed,{author:'owner',account:accountIdFor('telegram',OWNER),name:'Owner',act:'message',forward:null,forward_name:null,quote:null,file:false,file_name:null,
-    audio:false,recording:false,send_class:null,answers:null,pinned:null});
+    audio:false,recording:false,send_class:null,answers:null,pinned:null,held:false});
   assert.equal(ownerTyped(typed),true);assert.equal(classOf(typed),'owner_message');assert.equal(bucketOf('owner_message'),'owner');
   const edit=live(update({from:owner,text:'hi',edit_date:2},'edited_message'));
   assert.equal(edit.act,'edit');assert.equal(ownerTyped(edit),true);assert.equal(classOf(edit),'owner_message');
@@ -158,11 +159,13 @@ test('a checklist that may hold someone else\'s tasks is never the sender\'s own
   // once others have added tasks. So a shared checklist, and any checklist shown again, can't be told to be the owner's.
   const checklist=(shared:boolean)=>({title:'Trip',tasks:[{id:1,text:'BOBTASK send the keys'}],others_can_add_tasks:shared,others_can_mark_tasks_as_done:true});
   const pinOf=(shared:boolean)=>live({update_id:1,message:{message_id:8,date:2,chat:group,from:owner,pinned_message:{message_id:7,date:1,chat:group,from:owner,checklist:checklist(shared)}}});
-  const sent=live(update({from:owner,checklist:checklist(true)})),own=live(update({from:owner,forward_origin:{type:'user',sender_user:owner,date:1},checklist:checklist(true)}));
+  const sent=live(update({from:owner,checklist:checklist(true)})),own=(shared:boolean)=>live(update({from:owner,forward_origin:{type:'user',sender_user:owner,date:1},checklist:checklist(shared)}));
   const edited=(shared:boolean)=>live(update({from:owner,checklist:checklist(shared),edit_date:2},'edited_message'));
-  for(const [name,facts] of [['sent',sent],['own forward',own],['edited',edited(true)],['edited, no longer shared',edited(false)],['pinned',pinOf(true)],
-    ['pinned, no longer shared',pinOf(false)]] as const)
+  // The owner's forward of their own checklist shows it again: others may have added tasks before sharing was turned off.
+  for(const [name,facts] of [['sent',sent],['own forward',own(true)],['own forward, no longer shared',own(false)],['edited',edited(true)],
+    ['edited, no longer shared',edited(false)],['pinned',pinOf(true)],['pinned, no longer shared',pinOf(false)]] as const)
     assert.deepEqual([facts.author,facts.pinned,ownerTyped(facts),classOf(facts),bucketOf(classOf(facts))],['owner','other',false,'pinned','person'],name);
+  assert.deepEqual([sent.held,own(false).held,edited(false).held,pinOf(false).held],[true,true,true,false],'only a pin is a pin');
   // The owner's quote of their own checklist, shared or not, is a quote of someone else's message.
   for(const shared of [true,false]) {
     const quoted=live(update({from:owner,text:'done?',reply_to_message:{message_id:6,date:1,chat:group,from:owner,checklist:checklist(shared)},reply_to_checklist_task_id:1,
@@ -171,43 +174,139 @@ test('a checklist that may hold someone else\'s tasks is never the sender\'s own
   }
   // A new checklist only the owner can add to holds only the owner's tasks: it stays the owner's own typing.
   const closed=live(update({from:owner,checklist:checklist(false)}));
-  assert.deepEqual([closed.pinned,ownerTyped(closed),classOf(closed)],[null,true,'owner_message']);
+  assert.deepEqual([closed.pinned,closed.held,ownerTyped(closed),classOf(closed)],[null,false,true,'owner_message']);
   // Someone else's forward of one is still a forward first, and Bob's checklist is Bob's.
   assert.equal(classOf(live(update({from:owner,forward_origin:{type:'user',sender_user:sara,date:1},checklist:checklist(true)}))),'forward_person_by_owner');
   assert.equal(classOf(live(update({from:bob,checklist:checklist(true)}))),'pinned');
   assert.equal(ownerTyped(live(update({from:bob,checklist:checklist(false)}))),false);
 });
 
-test('every message a message embeds is taken out but the one a pin carries, whatever field holds it',()=>{
+test('in the owner\'s own private chat nobody else can add tasks, so the owner\'s checklist there stays the owner\'s',()=>{
+  // Told by the caller's equality with ownerChat (owner_chat), never by the chat's id; a group keeps the rule above.
+  const chat={id:Number(OWNER),type:'private'},checklist={title:'Groceries',tasks:[{id:1,text:'milk'}],others_can_add_tasks:true};
+  const mine=(payload:unknown)=>live(payload,{owner_chat:true});
+  const sent=mine({update_id:1,message:{message_id:9,date:1,chat,from:owner,checklist}});
+  const edited=mine({update_id:1,edited_message:{message_id:9,date:1,edit_date:2,chat,from:owner,checklist:{...checklist,others_can_add_tasks:false}}});
+  const pinned=mine({update_id:1,message:{message_id:10,date:2,chat,from:owner,pinned_message:{message_id:9,date:1,chat,from:owner,checklist}}});
+  const quoted=mine({update_id:1,message:{message_id:11,date:2,chat,from:owner,text:'done?',reply_to_message:{message_id:9,date:1,chat,from:owner,checklist},
+    quote:{text:'milk',position:0}}});
+  const done=mine({update_id:1,message:{message_id:12,date:3,chat,from:owner,checklist_tasks_done:{checklist_message:{message_id:9,date:1,chat,from:owner,checklist},
+    marked_as_done_task_ids:[1]}}});
+  for(const [name,facts] of [['sent',sent],['edited',edited],['pinned',pinned],['quoted',quoted],['tasks done',done]] as const)
+    assert.deepEqual([facts.pinned===null||facts.pinned==='own',facts.quote===null||facts.quote==='own',facts.held,ownerTyped(facts),classOf(facts)],
+      [true,true,false,true,'owner_message'],name);
+  // A forward of the owner's checklist from elsewhere, even their own, may hold others' tasks.
+  const forwarded=mine({update_id:1,message:{message_id:13,date:3,chat,from:owner,forward_origin:{type:'user',sender_user:owner,date:1},checklist}});
+  assert.deepEqual([forwarded.pinned,ownerTyped(forwarded),classOf(forwarded)],['other',false,'pinned']);
+  // The same updates outside the owner's chat fail closed.
+  assert.equal(ownerTyped(live({update_id:1,edited_message:{message_id:9,date:1,edit_date:2,chat,from:owner,checklist:{...checklist,others_can_add_tasks:false}}})),false);
+});
+
+test('a poll an option was added to by someone else, or deleted from, is never the sender\'s own typing',()=>{
+  const poll=(...added:Record<string,unknown>[])=>({id:'p1',question:'Lunch?',options:[{persistent_id:'a',text:'Pizza',voter_count:0},
+    ...added.map((by,index)=>({persistent_id:'x'+index,text:'SARAOPT wire the deposit to account 99',voter_count:0,...by,addition_date:3}))],total_voter_count:0,
+    is_closed:false,is_anonymous:false,type:'regular',allows_multiple_answers:false});
+  const bySara={added_by_user:sara},byChat={added_by_chat:{id:-30,type:'supergroup',title:'Other'}},byOwner={added_by_user:owner};
+  const ownPoll=(added:Record<string,unknown>[],extra:Record<string,unknown>={},key='message')=>live(update({from:owner,poll:poll(...added),...extra},key));
+  // The owner's own poll keeps the owner's label while every option is the owner's.
+  for(const [name,facts] of [['new',ownPoll([])],['the owner added one',ownPoll([byOwner])]] as const)
+    assert.deepEqual([facts.pinned,facts.held,ownerTyped(facts),classOf(facts)],[null,false,true,'owner_message'],name);
+  // An option someone else added, or one added in a chat's name: sent, edited or forwarded as the owner's own.
+  for(const [name,facts] of [['sara',ownPoll([bySara])],['a chat',ownPoll([byChat])],['edited',ownPoll([bySara],{edit_date:2},'edited_message')],
+    ['own forward',ownPoll([bySara],{forward_origin:{type:'user',sender_user:owner,date:1}})]] as const)
+    assert.deepEqual([facts.author,facts.pinned,facts.held,ownerTyped(facts),classOf(facts),bucketOf(classOf(facts))],['owner','other',true,false,'pinned','person'],name);
+  // The owner's pin of their own poll Sara added to, and the owner's quote of the option she added.
+  const pin=live({update_id:1,message:{message_id:8,date:2,chat:group,from:owner,pinned_message:{message_id:7,date:1,chat:group,from:owner,poll:poll(bySara)}}});
+  assert.deepEqual([pin.pinned,pin.held,ownerTyped(pin),classOf(pin)],['other',false,false,'pinned']);
+  const quoted=live(update({from:owner,text:'yes this one',reply_to_message:{message_id:6,date:1,chat:group,from:owner,poll:poll(bySara)},reply_to_poll_option_id:'x0',
+    quote:{text:'SARAOPT wire the deposit',position:0}}));
+  assert.deepEqual([quoted.quote,ownerTyped(quoted),classOf(quoted)],['other',false,'quote']);
+  const ownQuoted=live(update({from:owner,text:'yes',reply_to_message:{message_id:6,date:1,chat:group,from:owner,poll:poll(byOwner)},quote:{text:'Pizza',position:0}}));
+  assert.equal(ownQuoted.quote,'own','a quote of the owner\'s own poll');
+  // Deleting an option: Telegram names no adder for it, so it is someone else's.
+  const deleted=live(update({from:owner,poll_option_deleted:{poll_message:{message_id:6,date:1,chat:group,from:owner,poll:poll()},option_persistent_id:'x0',
+    option_text:'SARADEL wire the deposit'}}));
+  assert.deepEqual([deleted.pinned,deleted.held,ownerTyped(deleted),classOf(deleted)],['other',true,false,'pinned']);
+  // Adding an option to the owner's own poll that nobody else added to stays the owner's.
+  const added=live(update({from:owner,poll_option_added:{poll_message:{message_id:6,date:1,chat:group,from:owner,poll:poll(byOwner)},option_persistent_id:'x0',
+    option_text:'Sushi'}}));
+  assert.deepEqual([added.pinned,ownerTyped(added)],[null,true]);
+});
+
+test('a message another embeds is kept, and makes its holder someone else\'s unless it is the sender\'s own typed message',()=>{
   const bobs=(text:string)=>({message_id:30,date:1,chat:group,from:bob,checklist:{title:text,tasks:[{id:1,text:text+' task'}]}});
-  // The owner marks tasks of Bob's checklist done, or adds tasks to it: Bob's checklist goes, the owner's own data stays.
-  const done={message_id:77,date:5,chat:group,from:owner,checklist_tasks_done:{checklist_message:bobs('BOBDONE'),marked_as_done_task_ids:[1]}};
-  assert.equal(cutEmbeddedMessages(done),true);
-  assert.deepEqual(done.checklist_tasks_done,{marked_as_done_task_ids:[1]});
-  const added={message_id:78,date:5,chat:group,from:owner,checklist_tasks_added:{checklist_message:bobs('BOBADDED'),tasks:[{id:2,text:'OWNERTASK bring tea'}]}};
-  assert.equal(cutEmbeddedMessages(added),true);
-  assert.deepEqual(added.checklist_tasks_added,{tasks:[{id:2,text:'OWNERTASK bring tea'}]});
-  for(const [field,inner] of [['giveaway_completed','giveaway_message'],['suggested_post_approved','suggested_post_message'],['suggested_post_paid','suggested_post_message']] as const) {
-    const service:Record<string,any>={message_id:79,date:5,chat:group,from:owner,[field]:{[inner]:bobs('BOBSERVICE'),winner_count:1}};
-    assert.equal(cutEmbeddedMessages(service),true,field);assert.ok(!JSON.stringify(service).includes('BOBSERVICE'),field);
-  }
-  // A field Telegram adds later fails closed: a message it holds goes, at any depth and in a list, inaccessible ones too.
-  const future:Record<string,any>={message_id:80,date:5,chat:group,from:owner,text:'OWNWORDS see this',future_thing:{deep:{items:[{note:'kept'},bobs('BOBFUTURE')],
-    earlier:{message_id:3,date:0,chat:group}}}};
-  assert.equal(cutEmbeddedMessages(future),true);
-  assert.deepEqual(future,{message_id:80,date:5,chat:group,from:owner,text:'OWNWORDS see this',future_thing:{deep:{items:[{note:'kept'}]}}});
-  // A reply goes too; a forward's origin names a channel post the same way but is no message, and stays.
-  const reply:Record<string,any>={message_id:81,date:5,chat:group,from:owner,text:'yes',reply_to_message:bobs('BOBREPLY'),
-    forward_origin:{type:'channel',chat:{id:-100,title:'News'},message_id:3,date:1}};
-  assert.equal(cutEmbeddedMessages(reply),true);assert.deepEqual(Object.keys(reply),['message_id','date','chat','from','text','forward_origin']);
-  // The message a pin carries stays, with what it embeds taken out.
-  const pin:Record<string,any>={message_id:82,date:5,chat:group,from:owner,pinned_message:{...bobs('BOBPIN'),checklist_tasks_done:{checklist_message:bobs('BOBINNER'),marked_as_done_task_ids:[1]}}};
-  assert.equal(cutEmbeddedMessages(pin),true);
-  assert.ok(JSON.stringify(pin).includes('BOBPIN'));assert.ok(!JSON.stringify(pin).includes('BOBINNER'));
-  assert.deepEqual(pin.pinned_message.checklist_tasks_done,{marked_as_done_task_ids:[1]});
-  // A message embedding nothing is left as it was.
-  const plain={message_id:83,date:5,chat:group,from:owner,text:'hi',quote:{text:'x',position:0}},before=structuredClone(plain);
-  assert.equal(cutEmbeddedMessages(plain),false);assert.deepEqual(plain,before);
+  const owns=(text:string)=>({message_id:31,date:1,chat:group,from:owner,checklist:{title:text,tasks:[{id:1,text:text+' task'}],others_can_add_tasks:false}});
+  // The owner marks tasks of Bob's checklist done, or adds tasks to it: the service message holds Bob's words.
+  const done=(inner:Record<string,unknown>)=>live(update({from:owner,checklist_tasks_done:{checklist_message:inner,marked_as_done_task_ids:[1]}}));
+  const added=live(update({from:owner,checklist_tasks_added:{checklist_message:bobs('BOBADDED'),tasks:[{id:2,text:'OWNERTASK bring tea'}]}}));
+  for(const [name,facts] of [['done',done(bobs('BOBDONE'))],['added',added]] as const)
+    assert.deepEqual([facts.pinned,facts.held,ownerTyped(facts),classOf(facts),bucketOf(classOf(facts))],['other',true,false,'pinned','person'],name);
+  // Giveaways, suggested posts, and a field Telegram adds later, at any depth and in a list.
+  for(const [field,inner] of [['giveaway_completed','giveaway_message'],['suggested_post_approved','suggested_post_message'],['suggested_post_paid','suggested_post_message']] as const)
+    assert.equal(classOf(live(update({from:owner,[field]:{[inner]:bobs('BOBSERVICE'),winner_count:1}}))),'pinned',field);
+  const future=live(update({from:owner,text:'OWNWORDS see this',future_thing:{deep:{items:[{note:'kept'},bobs('BOBFUTURE')]}}}));
+  assert.deepEqual([future.held,ownerTyped(future)],[true,false]);
+  // The owner's own embedded message, a forward of someone else's, a post in a chat's name, and one holding others' words.
+  // A checklist shown again may hold others' tasks, so even the owner's own reads as someone else's in a group.
+  assert.equal(ownerTyped(done(owns('OWNLIST'))),false,'a group checklist shown again');
+  assert.equal(ownerTyped(live(update({from:owner,poll_option_added:{poll_message:{message_id:6,date:1,chat:group,from:owner,poll:{id:'p',question:'Q',options:[]}},
+    option_persistent_id:'a',option_text:'mine'}}))),true,'the owner\'s own poll');
+  assert.equal(ownerTyped(live(update({from:owner,giveaway_completed:{giveaway_message:{message_id:6,date:1,chat:group,from:owner,sender_chat:group,giveaway:{}},winner_count:1}}))),
+    false,'a post in a chat\'s name');
+  assert.equal(ownerTyped(live(update({from:owner,giveaway_completed:{giveaway_message:{message_id:6,date:1,chat:group,from:owner,forward_origin:{type:'user',sender_user:sara,date:1},
+    text:'x'},winner_count:1}}))),false,'a forward of someone else\'s');
+  // A message Telegram no longer shows carries nothing; a forward's origin names a post but is no message.
+  assert.equal(ownerTyped(live(update({from:owner,poll_option_added:{poll_message:{message_id:6,date:0,chat:group},option_persistent_id:'a',option_text:'mine'}}))),true);
+  assert.equal(ownerTyped(live(update({from:owner,text:'mine',forward_origin:{type:'channel',chat:{id:-100,title:'News'},message_id:3,date:1}}))),false,'still a forward');
+  // A pin of the owner's tasks-done message on Bob's checklist carries Bob's words, as a pin.
+  const pin=live({update_id:1,message:{message_id:8,date:2,chat:group,from:owner,pinned_message:{message_id:7,date:1,chat:group,from:owner,
+    checklist_tasks_done:{checklist_message:bobs('BOBINNER'),marked_as_done_task_ids:[1]}}}});
+  assert.deepEqual([pin.pinned,pin.held,classOf(pin)],['other',false,'pinned']);
+});
+
+test('what a message holds is listed by place and taken out only where asked, the rest of it kept',()=>{
+  const bobs=(text:string)=>({message_id:30,date:1,chat:group,from:bob,checklist:{title:text,tasks:[{id:1,text:text+' task'}]}});
+  const message:Record<string,any>={message_id:77,date:5,chat:group,from:owner,text:'OWNWORDS',reply_to_message:bobs('BOBREPLY'),
+    checklist_tasks_done:{checklist_message:{...bobs('BOBDONE'),quote:{text:'q',position:0},reply_to_message:bobs('BOBNESTED')},marked_as_done_task_ids:[1]},
+    future:{items:[{note:'kept'},bobs('BOBFIRST'),bobs('BOBSECOND')]},poll:{question:'Q',options:[{text:'mine'},{text:'SARAOPT',added_by_user:sara},{text:'CHATOPT',added_by_chat:group}]},
+    poll_option_deleted:{option_persistent_id:'d',option_text:'SARADEL'},forward_origin:{type:'channel',chat:{id:-100,title:'News'},message_id:3,date:1},
+    pinned_message:{...bobs('BOBPIN'),checklist_tasks_done:{checklist_message:bobs('BOBINNER'),marked_as_done_task_ids:[1]}}};
+  // The message replied to is not one it embeds, nor is the one a pin carries; a reply inside an embedded one is skipped.
+  assert.deepEqual(embeddedMessages(message).map(item=>heldKey(item.path)),
+    ['["checklist_tasks_done","checklist_message"]','["future","items",1]','["future","items",2]']);
+  assert.deepEqual(embeddedMessages(message,true).map(item=>heldKey(item.path)).at(-1),'["pinned_message","checklist_tasks_done","checklist_message"]');
+  const held=heldBy(message);
+  assert.deepEqual(held.map(item=>[item.kind,heldKey(item.path)]),[
+    ['message','["checklist_tasks_done","checklist_message"]'],['quote','["checklist_tasks_done","checklist_message","quote"]'],
+    ['message','["future","items",1]'],['message','["future","items",2]'],['message','["pinned_message","checklist_tasks_done","checklist_message"]'],
+    ['option','["poll","options",1]'],['option','["poll","options",2]'],['deleted_option','["poll_option_deleted"]']]);
+  // Nothing asked, nothing cut.
+  const before=structuredClone(message);cutHeld(message,[]);assert.deepEqual(message,before);
+  // Each place goes alone; a list keeps its order and its other items.
+  cutHeld(message,held.filter(item=>['["future","items",1]','["future","items",2]','["poll","options",1]','["poll_option_deleted"]',
+    '["checklist_tasks_done","checklist_message","quote"]'].includes(heldKey(item.path))));
+  assert.deepEqual(message.future,{items:[{note:'kept'}]});
+  assert.deepEqual(message.poll.options.map((option:{text:string})=>option.text),['mine','CHATOPT']);
+  assert.deepEqual(message.poll_option_deleted,{option_persistent_id:'d'});
+  assert.equal(message.checklist_tasks_done.checklist_message.quote,undefined);assert.ok(JSON.stringify(message).includes('BOBDONE'));
+  assert.ok(JSON.stringify(message).includes('BOBPIN')&&JSON.stringify(message).includes('BOBINNER')&&message.text==='OWNWORDS');
+});
+
+test('Nocheh\'s own words a message holds are told by the bot\'s own account, compared by equality',()=>{
+  const BOT='9001',nocheh={id:Number(BOT),is_bot:true,first_name:'Nocheh'},other={id:9002,is_bot:true,first_name:'Release bot'};
+  const poll=(from:Record<string,unknown>,extra:Record<string,unknown>={})=>({message_id:6,date:1,chat:group,from,poll:{id:'p',question:'NOCHEHPOLL',options:[]},...extra});
+  const added=(inner:Record<string,unknown>)=>({message_id:7,date:2,chat:group,from:owner,poll_option_added:{poll_message:inner,option_persistent_id:'a',option_text:'mine'}});
+  assert.deepEqual(nochehHeld(added(poll(nocheh)),BOT),['["poll_option_added","poll_message"]']);
+  assert.deepEqual(nochehHeld(added(poll(owner,{forward_origin:{type:'user',sender_user:nocheh,date:1}})),BOT),['["poll_option_added","poll_message"]'],'a forward of one');
+  for(const [name,inner,bot] of [['another bot\'s',poll(other),BOT],['a person\'s',poll(sara),BOT],['no known bot',poll(nocheh),null]] as const)
+    assert.deepEqual(nochehHeld(added(inner),bot),[],name);
+  // A quote inside an embedded message of Nocheh's own words.
+  const quoting=added({...poll(owner),quote:{text:'CARD',position:0},reply_to_message:{message_id:3,date:1,chat:group,from:nocheh,text:'CARD'}});
+  assert.deepEqual(nochehHeld(quoting,BOT),['["poll_option_added","poll_message","quote"]']);
+  assert.deepEqual(nochehHeld(added({...poll(owner),quote:{text:'CARD',position:0},external_reply:{origin:{type:'user',sender_user:nocheh,date:1},chat:group,message_id:3}}),BOT),
+    ['["poll_option_added","poll_message","quote"]'],'in another chat');
+  assert.deepEqual(nochehHeld(added({...poll(owner),quote:{text:'CARD',position:0}}),BOT),[],'a quote with no reply to tell it by');
+  assert.deepEqual(nochehHeld(null,BOT),[]);
 });
 
 test('a pin or quote carries Nocheh\'s own words only by the bot\'s own account, compared by equality; another bot\'s is someone else\'s',()=>{
@@ -316,6 +415,15 @@ test('a Telegram Desktop export is read by the author the archive proved, never 
   assert.equal(exported({from:'Owner',text:'hi'},[]).author,'unknown');
   assert.equal(exported({from:'Owner',text:'hi'},[{namespace:'bot-api',kind:'actor',external_id:OWNER},{namespace:'bot-api',kind:'actor',external_id:SARA}]).author,'unknown','two authors');
   assert.equal(classOf(exported({action:'pin_message'},[{namespace:'bot-api',kind:'actor',external_id:OWNER}],'telegram_desktop_service')),'unknown');
+  // An export's checklist and poll name no one per task or answer and show their final state: someone else's may be in
+  // them, shared or not, so the owner's reads as holding someone else's words. Its text is still learned.
+  const owned=[{namespace:'bot-api',kind:'actor',external_id:OWNER}];
+  for(const [name,fields] of [['todo_list',{todo_list:{title:'Trip',others_can_append:'false',answers:[{text:'mine',id:'1'},{text:'BOBX keys',id:'2'}]}}],
+    ['poll',{poll:{question:'Lunch?',closed:false,total_voters:0,answers:[{text:'Pizza',voters:0,chosen:false},{text:'BOBX wire',voters:0,chosen:false}]}}]] as const) {
+    const facts=exported({from:'Owner',from_id:'user'+OWNER,text:'',...fields},owned);
+    assert.deepEqual([facts.author,facts.pinned,facts.held,ownerTyped(facts),classOf(facts),bucketOf(classOf(facts))],['owner','other',true,false,'pinned','person'],name);
+  }
+  assert.equal(ownerTyped(exported({from:'Owner',from_id:'user'+OWNER,text:'hi'},owned)),true,'a plain message stays the owner\'s');
 });
 
 test('an unknown channel or kind is written by someone unknown, which is never the owner',()=>{

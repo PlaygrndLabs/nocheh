@@ -57,7 +57,7 @@ export const modelSourceWords={
     person_message:'another person\'s message',person_reaction:'another person\'s reaction',anonymous_post:'a post by an anonymous admin or in a chat\'s name',
     forward:'a message {by} forwarded from {origin}',file:'text of a file {by} sent',audio:'a transcript of an audio file {by} sent',
     quote:'a reply quoting another person\'s message',quote_nocheh:'the owner\'s reply quoting Nocheh\'s own message',
-    pinned:'a pinned message by another person',pinned_nocheh:'the owner\'s pin of Nocheh\'s own message',
+    pinned:'a pin or message holding another person\'s words',pinned_nocheh:'the owner\'s pin of Nocheh\'s own message',
     nocheh_about_forward:'Nocheh\'s reply about a forwarded message',
     nocheh_unlearned:'Nocheh\'s card, notice or reminder',unknown:'a message Nocheh can\'t describe'},
   by:{owner:'the owner',person:'another person'},
@@ -83,11 +83,13 @@ export const modelSourceWords={
     unnamed_bot:'an inline bot',file:'text of a file the sender sent (“{name}”): not the sender\'s own words',
     file_unnamed:'text of a file the sender sent: not the sender\'s own words',audio:'a transcript of an audio file the sender sent: not the sender\'s own words',
     quote:'a quote of another person\'s message inside the sender\'s reply',
-    pinned:'a message by another person that the sender pinned: not the sender\'s own words',reply:'Nocheh\'s reply',about_forward:'Nocheh\'s reply about a message the owner forwarded',
+    pinned:'a message by another person that the sender pinned: not the sender\'s own words',
+    held:'a message the sender sent holding others\' words (a shared checklist or poll, or a message shown in it): not the sender\'s own words',reply:'Nocheh\'s reply',about_forward:'Nocheh\'s reply about a message the owner forwarded',
     follow_up:'Nocheh\'s follow-up',private_answer:'Nocheh\'s private answer',job_report:'Nocheh\'s report',scheduled_run:'Nocheh\'s scheduled result',
     approved_post:'Nocheh\'s post',unlearned:'Nocheh\'s card, notice or reminder',note:'Nocheh\'s note',
     pointer:'the owner forwarded a message from {origin}; its text is kept with the owner\'s forwards and files',
     pinned_pointer:'the owner pinned a message by another person; its text is kept with the owner\'s forwards and files',
+    held_pointer:'the owner sent a message holding other people\'s words, such as a shared checklist or poll; its text is kept with the owner\'s forwards and files',
     pinned_nocheh_pointer:'the owner pinned one of Nocheh\'s own messages; its text is not kept here',
     pinned_nocheh_other_pointer:'someone in this chat pinned one of Nocheh\'s own messages; its text is not kept here'},
 } as const;
@@ -311,7 +313,8 @@ export function ownerEventLabel(event:LabelEvent,words:SourceWords,names:Names,k
   if(cls==='anonymous_post')return fillLine(line.anonymous,{place});
   if(cls==='quote')return fillLine(line.quote,{who:who(),place});
   if(cls==='quote_nocheh')return fillLine(line.quote_nocheh,{who:who(),place});
-  if(cls==='pinned')return fillLine(line.pinned,{who:who(),place});
+  // A message holding someone else's words that is not a pin (a shared checklist or poll, a message shown inside it).
+  if(cls==='pinned')return fillLine(event.facts?.held?line.held:line.pinned,{who:who(),place});
   if(cls==='pinned_nocheh')return fillLine(line.pinned_nocheh,{who:who(),place});
   if(cls.startsWith('forward_'))return fillLine(line.forward,{who:who(),place,origin:ownerOrigin(event,words)});
   if(cls.startsWith('file_')){const name=quoted(event.facts?.file_name);return fillLine(name===null?line.file_unnamed:line.file,{name:name??'',who:who(),place});}
@@ -347,7 +350,7 @@ export function ownerLabel(origins:readonly NoteOrigin[],words:SourceWords,names
 }
 
 /** One part of a message as Honcho stores it, for its `source`. A forward's names are its guarded copy's (forwardOrigin). */
-export type HonchoPart={part:'own'|'recording'|'audio'|'quote'|'pinned'}|{part:'forward';forward:Forward}|{part:'file';name:string|null}|
+export type HonchoPart={part:'own'|'recording'|'audio'|'quote'|'pinned'|'held'}|{part:'forward';forward:Forward}|{part:'file';name:string|null}|
   {part:'nocheh';send_class:SendClass|null;about_forward?:boolean};
 /** The fixed `source` of a Honcho record. Names pass through frameName, so none can close its quotes. */
 export function honchoSource(part:HonchoPart):string {
@@ -372,14 +375,16 @@ export function honchoSource(part:HonchoPart):string {
 }
 /** Several parts of one message as one `source`, in order, each named once. */
 export const honchoSources=(parts:readonly HonchoPart[]):string=>[...new Set(parts.map(honchoSource))].join('; ');
-/** What stays in the owner's private chat in place of someone else's forward, or someone else's message the owner
- *  pinned, which is kept with the owner's forwards and files: fixed words that name only the kind of origin, so the chat
- *  still shows that something was forwarded or pinned. A pin of Nocheh's own message, by anyone, is only such a note, in
- *  the chat where it was pinned: Nocheh's message is learned as Nocheh's, or not at all when it is a card, or when the
- *  archive does not hold it as Nocheh's (not archived yet, or a forward of one). Another bot's message is someone else's. */
-export function honchoPointer(from:Exclude<Forward['from'],'own'>|'pinned'|'pinned_nocheh'|'pinned_nocheh_other'):{source:string;text:string} {
+/** What stays in the owner's private chat in place of someone else's forward, someone else's message the owner
+ *  pinned, or the owner's message holding others' words (`held`: a shared checklist or poll, a message shown inside it,
+ *  which is not a pin), each kept with the owner's forwards and files: fixed words that name only the kind of origin, so
+ *  the chat still shows that something was forwarded, pinned or sent. A pin of Nocheh's own message, by anyone, is only
+ *  such a note, in the chat where it was pinned: Nocheh's message is learned as Nocheh's, or not at all when it is a card,
+ *  or when the archive does not hold it as Nocheh's (not archived yet, or a forward of one). Another bot's message is
+ *  someone else's. */
+export function honchoPointer(from:Exclude<Forward['from'],'own'>|'pinned'|'held'|'pinned_nocheh'|'pinned_nocheh_other'):{source:string;text:string} {
   const words=modelSourceWords.honcho;
-  return {source:words.note,text:from==='pinned'?words.pinned_pointer:from==='pinned_nocheh'?words.pinned_nocheh_pointer:
+  return {source:words.note,text:from==='pinned'?words.pinned_pointer:from==='held'?words.held_pointer:from==='pinned_nocheh'?words.pinned_nocheh_pointer:
     from==='pinned_nocheh_other'?words.pinned_nocheh_other_pointer:
     fillLine(words.pointer,{origin:modelSourceWords.origins[from]})};
 }

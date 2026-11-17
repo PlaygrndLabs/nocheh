@@ -10,7 +10,7 @@ import {ownerChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {forwardOrigin,type Forward} from '../forwarded.js';
 import {deliveredKinds} from '../send-classes.js';
-import {cutEmbeddedMessages,ownVoice} from '../source-facts.js';
+import {ownVoice} from '../source-facts.js';
 import {honchoPointer,honchoSource,honchoSources,type HonchoPart} from '../source-labels.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
@@ -64,15 +64,16 @@ function fileName(payload:any):string|null {
   const name=message?.document?.file_name??message?.audio?.file_name??files.find((file:any)=>['file','image'].includes(file?.kind))?.name;
   return typeof name==='string'?name:null;
 }
-/** A guarded copy without the quote its reply carries, nor the quote or reply inside a message it pinned, nor any other
- *  message it embeds (cutEmbeddedMessages), as LearningContextRepository.prepare leaves it. */
+/** A prepared observation without the quote its reply carries, nor the quote inside a message it pinned. Only
+ *  LearningContextRepository.prepare's observations come here, which hold no message a reply answers already; a message
+ *  that embeds another never does, since it holds words that may be someone else's (SourceFacts.held) and is written
+ *  whole as such. */
 function unquoted(value:unknown):unknown {
   const copy=structuredClone(value) as any;
   for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(copy?.payload?.[kind]) {
     delete copy.payload[kind].quote;
     const pinned=copy.payload[kind].pinned_message;
-    if(pinned&&typeof pinned==='object'){delete pinned.quote;delete pinned.reply_to_message;delete pinned.external_reply;}
-    if(copy.payload[kind]&&typeof copy.payload[kind]==='object')cutEmbeddedMessages(copy.payload[kind]);
+    if(pinned&&typeof pinned==='object')delete pinned.quote;
   }
   return copy;
 }
@@ -400,7 +401,9 @@ export class NativeMemoryRepository {
    * that something was forwarded, and in a group in that group's session. The owner's own message keeps the owner's typed
    * words and voice on the owner's participant; the text of a file or audio file, and someone else's quote, go beside it
    * in the same session on the forwards-and-files participant, so a caption still links to its file. Someone else's
-   * message the owner pinned is kept as such a forward is. A quote of Nocheh's own message, by anyone, is the sender's
+   * message the owner pinned is kept as such a forward is, and so is the owner's message holding words that may be someone
+   * else's (a checklist or poll others may have added to, a message Telegram shows inside it), whose words say it is not a
+   * pin. A quote of Nocheh's own message, by anyone, is the sender's
    * words without it, and is written nowhere else: a learned one is already learned as Nocheh's, and a card, notice or
    * reminder is not learned at all. A pin of Nocheh's own message, by anyone, an anonymous admin included, leaves only a
    * note in that chat that it was pinned, for the same reason. So does a quote or pin of Nocheh's own account's message the
@@ -432,10 +435,13 @@ export class NativeMemoryRepository {
       // forward is read from the message it pinned.
       const from=facts.forward!==null&&facts.forward!=='own'?facts.forward:null,pin=facts.pinned!==null?carried:(message:any)=>message;
       const shown=from?forwardOrigin(pin(messageOf(original)),pin(messageOf(guarded))):null,forward:Forward|null=from?shown?.from===from?shown:{from,name:null}:null;
-      const text=document(observations,honchoSource(forward?{part:'forward',forward}:{part:'pinned'}));
+      // A message that holds someone else's words itself (SourceFacts.held: a checklist or poll others may have added to,
+      // a message Telegram shows inside it) is not a pin, and its fixed words say so.
+      const kind=facts.held?'held' as const:'pinned' as const;
+      const text=document(observations,honchoSource(forward?{part:'forward',forward}:{part:kind}));
       if(facts.author!=='owner')return [{text,writer:'speaker',session:'conversation',record:'labelled_source',subjects:true}];
       return [{text,writer:'material',session:'material',record:'labelled_material',subjects:true},
-        ...(audience==='owner'?[{text:canonical(honchoPointer(from??'pinned')),writer:'assistant' as const,session:'conversation' as const,record:'labelled_pointer' as const,subjects:false}]:[])];
+        ...(audience==='owner'?[{text:canonical(honchoPointer(from??kind)),writer:'assistant' as const,session:'conversation' as const,record:'labelled_pointer' as const,subjects:false}]:[])];
     }
     const kinds=await this.artifactKinds(observations.flatMap(item=>item.derivatives.map(derivative=>derivative.id)));
     const voice=(derivative:{kind:string;id:string})=>derivative.kind==='transcript'&&ownVoice.has(kinds.get(derivative.id)??'');
