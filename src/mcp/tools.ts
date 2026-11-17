@@ -14,8 +14,9 @@ export const memoryRoutes={recall:'/v1/memory/longterm/recall',search:'/v1/memor
 /** What a job request may be told to correct; any other refusal stays opaque. The broker relays exactly these. */
 export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
   'job_machine_not_allowed','job_machine_not_found','job_card_too_long','job_hidden_characters']);
-/** What a message request may be told: the chat is not one Nocheh serves (ADR-0254). The broker relays exactly these. */
-export const actionErrors=new Set(['destination_not_served']);
+/** What a message request may be told: the chat is not one Nocheh serves (ADR-0254), or the member who asked may not post
+ * to their other groups (ADR-0260). The broker relays exactly these. */
+export const actionErrors=new Set(['destination_not_served','member_post_not_allowed']);
 /** What a task change may be told about its reminders, so the person can be asked for another time (ADR-0255). The broker
  * relays exactly these. */
 export const taskErrors=new Set(['task_reminder_past','task_reminder_limit','invalid_task_reminders','invalid_task_reminder']);
