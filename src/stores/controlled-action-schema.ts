@@ -3,6 +3,11 @@ export const ownerResolutions=['ran','not_run','dismissed'] as const;
 /** How an unclear outcome was closed. Only an unclear one carries it: a later receipt's state replaces it (ADR-0218). */
 export const closedAs=(row:{state:string;resolution?:string|null;resolved_at?:Date|string|null})=>row.state==='ambiguous'&&row.resolution?
   {resolution:row.resolution as string,resolved_at:row.resolved_at??null}:{resolution:null,resolved_at:null};
+/** Why an operation runs without the owner's card, kept on its row (controlled_actions.authority) and evaluated at its
+ * claim: 'group_tools', a group's tools permission let a live group turn's web page or outside tool run (step 3). Null:
+ * a grant or the owner's approval, as before. */
+export const controlledAuthorities=['group_tools'] as const;
+export type ControlledAuthority=typeof controlledAuthorities[number];
 export const controlledActionSchema=`
 CREATE TABLE IF NOT EXISTS controlled_actions (
  id text PRIMARY KEY,event_id text NOT NULL,source_reference jsonb NOT NULL,proposal_reference jsonb NOT NULL,
@@ -36,6 +41,10 @@ ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS resolution text CHECK(re
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
 -- What the asker says an operation does, as content beside its proposal, for its card only (ADR-0224).
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS summary_reference jsonb;
+-- The member whose turn asked (a chat_accounts id; null when the owner asked), checked again at the claim, and why it
+-- runs without a card (controlledAuthorities; null for a grant or the owner's approval) (step 3).
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS asker_account text CHECK(asker_account IS NULL OR asker_account ~ '^[a-f0-9]{64}$');
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS authority text CHECK(authority IS NULL OR authority IN (${controlledAuthorities.map(value=>`'${value}'`).join(',')}));
 -- Page reads that ended unclear before reads closed themselves.
 UPDATE controlled_actions SET resolution='read_closed',resolved_at=updated_at WHERE state='ambiguous' AND kind='browser' AND resolution IS NULL;
 CREATE TABLE IF NOT EXISTS action_owner_commands (

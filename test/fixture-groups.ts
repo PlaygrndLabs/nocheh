@@ -1,10 +1,12 @@
-// Synthetic groups and projects shared by the Members tests (ADR-0247, ADR-0248, ADR-0249, ADR-0252). Never live values.
+// Synthetic groups, projects and members shared by the Members tests (ADR-0247, ADR-0248, ADR-0249, ADR-0252, step 3).
+// Never live values.
 import type pg from 'pg';
 import {digest} from '../src/archive.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {accountIdFor,chatDirectory,chatIdFor,connectionIdFor,installChatsForTest,type ChatDirectory,type ChatIdRow,type ChatRow,
   type ChatSnapshot,type ChatState} from '../src/chats.js';
 import {legacyChat} from '../src/chats-telegram.js';
+import {memberDirectory,memberIdFor,type MemberDirectory,type MemberRow,type MemberSnapshot} from '../src/members.js';
 
 /* Two families of chats, so no test hides a parsing site behind old-shaped ids:
  * - old-shaped chats, stored before step 2b, keep their Telegram value as their Nocheh id: OWNER, GP1-GP4, GP1_TOPIC,
@@ -103,7 +105,7 @@ export const policyDirectory=(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat
  * fixture directory with the policy's group_ids on: group_ids is derived from chats.state (servedPolicy), so the
  * policy and the directory a test sees agree. */
 export function groupsPolicy(overrides:Partial<AssistantPolicy>={}):AssistantPolicy {
-  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[...GP_GROUP_IDS],group_access:{},topic_memory:'group',owner_chat:OWNER,...overrides};
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[...GP_GROUP_IDS],topic_memory:'group',owner_chat:OWNER,...overrides};
   if(overrides.owner_chat===undefined&&overrides.owner_id!==undefined)policy.owner_chat=overrides.owner_id;
   installChatsForTest(fixtureDirectory(policy.group_ids));
   return policy;
@@ -130,4 +132,53 @@ export async function seedChats(db:Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'que
       [chat.id,connection,chat.kind,chat.parent_id,chat.topic_key,chat.app_type??null,chat.account_id??null,chat.title??null,chat.is_forum===true,chat.state]);
   for(const row of fixture.ids)await db.query(`INSERT INTO chat_ids(connection_id,external_id,chat_id,state,reason) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
     [connection,row.external_id,row.chat_id,row.state,row.state==='old'?'migrated':null]);
+}
+
+/*
+ * Members (step 3), one in each family. Synthetic Telegram user ids; their accounts are accountIdFor('telegram', id) and
+ * their member ids memberIdFor(account). Both are active with every permission on and tasks read and write unless a test
+ * changes them (fixtureMembers(changes)).
+ * - MEMBER_GP: GP1 and GP2 switched on, GP3 switched off. Telegram last saw them 'in' GP1 and GP3, 'left' GP2, and 'in'
+ *   UNSERVED. GP4 has no row and no Telegram row: they talk there (no row counts as on) but do not reach it.
+ * - MEMBER_NG: NG1 switched on; NG2 has no row. Telegram saw them 'in' both, so NG2 is "New here" and reached.
+ * BOB stays a stranger; the owner is never a member.
+ */
+export const MEMBER_GP='701',MEMBER_NG='702';
+export const OWNER_ACCOUNT=accountIdFor('telegram',OWNER),BOB_ACCOUNT=accountIdFor('telegram',BOB);
+export const MEMBER_GP_ACCOUNT=accountIdFor('telegram',MEMBER_GP),MEMBER_NG_ACCOUNT=accountIdFor('telegram',MEMBER_NG);
+export const MEMBER_GP_ID=memberIdFor(MEMBER_GP_ACCOUNT),MEMBER_NG_ID=memberIdFor(MEMBER_NG_ACCOUNT);
+
+/** A member directory snapshot with the member people's accounts, for seedMembers. */
+export interface FixtureMembers extends MemberSnapshot {people:{id:string;app:'telegram';external_id:string}[]}
+const allOn=(id:string):MemberRow=>({id,state:'active',group_talk:true,group_jobs:true,group_post_other:true,group_tools:true,tasks:'write'});
+/** Both fixture members as directory rows, each members row changed by `changes` (keyed by member id). */
+export function fixtureMembers(changes:Readonly<Record<string,Partial<Omit<MemberRow,'id'>>>>={}):FixtureMembers {
+  const row=(id:string):MemberRow=>({...allOn(id),...changes[id],id});
+  return {members:[row(MEMBER_GP_ID),row(MEMBER_NG_ID)],
+    accounts:[{account_id:MEMBER_GP_ACCOUNT,member_id:MEMBER_GP_ID},{account_id:MEMBER_NG_ACCOUNT,member_id:MEMBER_NG_ID}],
+    chats:[{member_id:MEMBER_GP_ID,chat_id:GP1,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP2,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP3,enabled:false},
+      {member_id:MEMBER_NG_ID,chat_id:NG1,enabled:true}],
+    presence:[{account_id:MEMBER_GP_ACCOUNT,chat_id:GP1,state:'in'},{account_id:MEMBER_GP_ACCOUNT,chat_id:GP2,state:'left'},
+      {account_id:MEMBER_GP_ACCOUNT,chat_id:GP3,state:'in'},{account_id:MEMBER_GP_ACCOUNT,chat_id:UNSERVED,state:'in'},
+      {account_id:MEMBER_NG_ACCOUNT,chat_id:NG1,state:'in'},{account_id:MEMBER_NG_ACCOUNT,chat_id:NG2,state:'in'}],
+    owner_account:OWNER_ACCOUNT,daily_messages:200,revision:0,
+    people:[MEMBER_GP,MEMBER_NG].map(account)};
+}
+/** The fixture member directory; install it with installMembersForTest. */
+export const fixtureMemberDirectory=(changes:Parameters<typeof fixtureMembers>[0]={}):MemberDirectory=>memberDirectory(fixtureMembers(changes));
+
+/** Writes a fixture's members into a control database that already holds its chats (seedChats with both families):
+ * the member people's accounts, the members rows linked from them, their group switches and Telegram's membership rows.
+ * Plain inserts that skip rows already there, and no revision move, so repeated calls change nothing. */
+export async function seedMembers(db:Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>,fixture:FixtureMembers=fixtureMembers()):Promise<void> {
+  const connection=connectionIdFor('telegram');
+  for(const person of fixture.people)await db.query(`INSERT INTO chat_accounts(id,connection_id,external_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
+    [person.id,connection,person.external_id]);
+  for(const row of fixture.members)await db.query(`INSERT INTO members(id,state,group_talk,group_jobs,group_post_other,group_tools,tasks)
+    VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,[row.id,row.state,row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.tasks]);
+  for(const link of fixture.accounts)await db.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1 AND member_id IS NULL',[link.account_id,link.member_id]);
+  for(const row of fixture.chats)await db.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
+    [row.member_id,row.chat_id,row.enabled]);
+  for(const row of fixture.presence)await db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source) VALUES($1,$2,$3,'message') ON CONFLICT DO NOTHING`,
+    [row.chat_id,row.account_id,row.state]);
 }

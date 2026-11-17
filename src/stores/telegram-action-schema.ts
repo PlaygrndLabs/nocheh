@@ -15,6 +15,9 @@ ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS resolution text CH
 ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
 -- The chat or topic (a chat id) its card was posted in, kept before posting, so its decision settles there (ADR-0254).
 ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS card_space text;
+-- The member whose turn asked for the send (a chat_accounts id); null when the owner asked. A send a member asked for is
+-- checked against that member again just before it is sent (step 3).
+ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS asker_account text CHECK(asker_account IS NULL OR asker_account ~ '^[a-f0-9]{64}$');
 CREATE TABLE IF NOT EXISTS telegram_action_decisions (
  operation_id text PRIMARY KEY,request_hash text NOT NULL,action_id text NOT NULL REFERENCES telegram_action_requests(id),
  decision text NOT NULL CHECK(decision IN ('approve','deny')),revision integer NOT NULL,source_reference jsonb,

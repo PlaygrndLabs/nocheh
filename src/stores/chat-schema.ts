@@ -14,8 +14,8 @@ const appId=(column:string)=>`${column} ~ '^[A-Za-z0-9._:-]{1,128}$'`;
  *
  * - chat_connections: one per app (UNIQUE app). The bot or app account it uses can change; the connection stays.
  *   secret_ref names where the credential lives ('env:TELEGRAM_BOT_TOKEN'), never the credential.
- * - chat_accounts: a person or bot in an app (team '' on Telegram). member_id stays null until step 3 adds members and
- *   its foreign key; standing is Slack's member, external, guest or deleted.
+ * - chat_accounts: a person or bot in an app (team '' on Telegram). member_id links a person to their member (step 3:
+ *   member-schema.ts adds its foreign key and index); standing is Slack's member, external, guest or deleted.
  * - chats: private chats, groups and topics. A topic has a parent and a topic_key and is found by them. A private chat
  *   names its person (account_id). The added_by_* columns and add_event record who last added Nocheh (ADR-0253);
  *   state_seq, state_bot and state_at order state changes, so an older bot-status update never undoes a newer change

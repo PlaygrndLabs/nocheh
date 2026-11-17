@@ -67,6 +67,7 @@ import {PrivateAnswerRepository} from './private-answers.js';
 import {ChatRepository} from './chats.js';
 import {ChatAdds} from './chat-adds.js';
 import {accountIdFor} from '../chats.js';
+import {unwiredMembers,type MemberRepository} from './member-api.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -163,7 +164,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,chats,memoryAccess});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
-  return {brain:options.brain,chats,chatAdds,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  // The owner's Members routes (step 3, src/stores/member-api.ts).
+  const members:MemberRepository=unwiredMembers;
+  return {brain:options.brain,chats,chatAdds,members,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,
