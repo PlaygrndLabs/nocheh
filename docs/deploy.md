@@ -89,7 +89,7 @@ again, Nocheh acts on their adds and removals: it may leave, tell or card them.
 
 ### Upgrade to step 3
 
-Take a backup first ([ADR-0259](adr/0259-members-in-groups.md)). Step 3 moves who
+Take a backup first ([ADR-0260](adr/0260-members-in-groups.md)). Step 3 moves who
 may talk in groups out of `.env` and into members kept in the control store.
 
 1. On 2b-2, apply any change to who can talk in groups that is still waiting for

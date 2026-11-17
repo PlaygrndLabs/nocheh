@@ -134,6 +134,10 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       return observed.audience||observed.reaction?waiting('review','prerequisite'):observation('skipped','review',0,Date.now(),'no_conversation');
     }
     if(!await s.access.canLearn(source.reference,binding))return observation('denied','review',0,Date.now(),'consent_required');
+    // Nocheh's own cards, notices and reminders are kept but not learned (ADR-0256). Checked here, after canLearn, so a card
+    // is still context for the owner's reply to it; a review already waiting for one is withdrawn.
+    const skip=await s.access.notLearned(source.reference);
+    if(skip){await s.reviews.withdraw(source.reference);return observation('skipped','review',0,Date.now(),skip);}
     const ready=await s.preparation.status(id);if(ready.state==='failed')return ready;
     if(ready.state!=='completed')return waiting(ready.stage,'prerequisite',Math.max(1000,ready.next_attempt-Date.now()));
     return {source,binding};
@@ -194,11 +198,12 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(kind==='source')return fenced('memory_review',authority,async()=>{
         const ready=await sourceReady(id);if('state' in ready)return ready;
         // Imported history is learned by long-term memory only: a memory-notes review of every old message costs far more than it adds.
-        if(ready.source.origin!=='import')await s.reviews.queue(ready.source.reference);
+        const notes=ready.source.origin!=='import'?await s.reviews.queue(ready.source.reference):null;
         await s.learning.renew(ready.source.reference);
         // Honcho writes each source once; a later guard epoch only asks for sources it never wrote.
         if(!await s.memory.ingested(id))await submit('honcho','source:'+id,ready.binding.epoch);
-        await s.guards.assertCurrent(ready.binding);return observation('completed','review');
+        // A source this step kept out of the owner's notes says why: it still went to group memory and learning above.
+        await s.guards.assertCurrent(ready.binding);return observation('completed','review',0,Date.now(),notes?.left_out??null);
       });
       if(kind==='interpret') {
         const attempts=async()=>Number((await control.query('SELECT attempts FROM interpretation_jobs WHERE id=$1',[id])).rows[0].attempts);
@@ -214,11 +219,15 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       if(row.paused)return waiting('review','owner_paused');
       if(row.state==='done')return observation('completed','review',row.attempts);
       if(row.state==='pending') {
+        // A review queued before its source stopped being learned (such as a card queued before send classes) never runs,
+        // nor one for a message whose sender is no longer allowed there.
+        const stop=await s.reviews.unwanted(row.source_reference);
+        if(stop)return fenced('memory_review',authority,async()=>{await s.reviews.withdraw(row.source_reference);return observation('skipped','review',0,Date.now(),stop);});
         try {
           if(canonical(row.binding)!==canonical(await s.guards.state())) {
             // A newer epoch renews a waiting review (never started, or failed without changing notes) where it waits,
             // instead of closing it for the next sweep to queue again.
-            const renewed=await fenced('memory_review',authority,async()=>(await s.reviews.queue(row.source_reference)).includes(id)?
+            const renewed=await fenced('memory_review',authority,async()=>(await s.reviews.queue(row.source_reference)).ids.includes(id)?
               observation('running','review'):observation('skipped','review',0,Date.now(),'superseded'));
             if(renewed.state!=='running')return renewed;
             row=await s.reviews.inspect(id);
@@ -265,9 +274,10 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
         const selected=queued.find(value=>value.audience===audience);if(!selected)return observation('failed','sync');
         // Learning waits for this source's own sessions, not for the whole workspace.
         if(!await s.memory.settled(selected.receipts))return waiting('sync','prerequisite');
-        // Imported history is read and summarized by Honcho, without a learning question about each old message.
-        if(ready.source.origin!=='import')await s.learning.request(ready.source.reference,selected.workspace,selected.audience);
-        return observation('completed','sync');
+        // Imported history is read and summarized by Honcho, without a learning question about each old message. A pin of
+        // Nocheh's own card, notice or reminder alone asks none either, and says why, as its notes review step does.
+        const asked=ready.source.origin!=='import'?await s.learning.request(ready.source.reference,selected.workspace,selected.audience):undefined;
+        return observation('completed','sync',0,Date.now(),asked===null?'nocheh_message':null);
       });
       if(kind==='projection')return fenced('honcho',authority,async()=>{await s.memory.queueProjection(id);return observation('completed','sync');});
       if(kind==='generation')return fenced('honcho',authority,async()=>{

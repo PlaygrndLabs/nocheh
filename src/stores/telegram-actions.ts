@@ -28,6 +28,7 @@ import type {PreparedContextRepository} from './prepared-context.js';
 import {closedAs,ownerResolutions} from './controlled-action-schema.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {currentChats} from './chats.js';
+import type {SendClass} from '../send-classes.js';
 
 const protocol='telegram-action-v2';
 // Owner-approved memory wording uses the memory input bound; native Telegram
@@ -44,8 +45,10 @@ const chatOf=(space:string)=>chats().parentOf(space)??space;
 const otherGroup=(scope:string,destination:string,directory:ChatDirectory=chats())=>{
   const group=directory.groupOf(destination);return group!==null&&group!==directory.groupOf(scope);
 };
+/** The classes an action's send may carry (ADR-0256); the schema's CHECK holds the same list. */
+export type ActionSendClass=Extract<SendClass,'approved_post'|'job_report'|'scheduled_run'|'notice'>;
 type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
-  scope:string|null;space:string;profile:string;destination:string;fingerprint:string;text_hash:string;guard_revision:number|null};
+  scope:string|null;space:string;profile:string;destination:string;fingerprint:string;text_hash:string;guard_revision:number|null;send_class:ActionSendClass};
 /** A trusted send's identity: its workflow key, source, authorization, destination and exact text. */
 const systemActionId=(source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string)=>
   digest(canonical(['nocheh-trusted-telegram-v1',key,source,binding,destination,text]));
@@ -128,7 +131,7 @@ export class TelegramActionRepository {
       // Only the owner or a member who talks to Nocheh in a group may post there without the owner.
       if(channel==='telegram')requester=await this.requester(source.id,original.scope);
     }
-    return this.propose(principal,turn,binding,source,input,channel,requester);
+    return this.propose(principal,turn,binding,source,input,'approved_post',channel,requester);
   }
   /** Only a trusted completion path can stage delivery from a closed scheduled
    * run. This creates an exact proposal; it never reopens the runtime capability. */
@@ -158,7 +161,7 @@ export class TelegramActionRepository {
     if(text.length>3500)return {state:'withheld',reason:'result_exceeds_telegram_limit'};
     const audience:Reader={admin:false,scope:row.scope===ownerChat(this.access.policy())?null:row.scope,space:row.space_id,
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
-    return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text});
+    return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text},'scheduled_run');
   }
   /** The person who wrote a live group turn, when they may talk to Nocheh there (the owner or a member who talks there);
    *  null for the owner's private chat. */
@@ -231,7 +234,7 @@ export class TelegramActionRepository {
       note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. Nocheh posts only in the owner\'s private chat and its topics, the owner\'s selected groups and their topics, and the private chats of the owner\'s members in those groups. A message to this same group is posted without approval; a member confirms their own message to another group from this list on a card, and a message to any other chat is shown to the owner to approve first.'};
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
-    source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string,requester:string|null=null){
+    source:SourceReference|OperationReference,input:Record<string,unknown>,sendClass:ActionSendClass,channel?:string,requester:string|null=null){
     // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0252), and
     // either must be a chat Nocheh serves (ADR-0254). An unknown chat and one not served answer alike, so nothing is learned
     // by asking. A turn with no live Telegram message (a job, a schedule, the web chat) has no 'current': a bad request as
@@ -257,9 +260,9 @@ export class TelegramActionRepository {
     const fingerprint=digest(canonical({destination,text:preparedText})),db=await this.stores.control.connect();
     try {
       await db.query('BEGIN');await this.fence(db,binding);
-      await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,asker_account)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
-        [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision,asker]);
+      await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,asker_account,send_class)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING`,
+        [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision,asker,sendClass]);
       const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
       const effect=this.effect(row);let decision=await evaluate(db,effect);
@@ -298,8 +301,8 @@ export class TelegramActionRepository {
   /** Stage an exact message from a trusted owner-policy workflow. The caller
    * supplies the durable source and audience; the normal guard, security,
    * delivery authorization, workflow, and receipt path still applies. */
-  async approvedSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string) {
-    const prepared=await this.prepareSystem(principal,source,binding,destination,text,key),db=await this.stores.control.connect();
+  async approvedSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string,sendClass:ActionSendClass) {
+    const prepared=await this.prepareSystem(principal,source,binding,destination,text,key,sendClass),db=await this.stores.control.connect();
     try {await db.query('BEGIN');const action=await this.stageSystem(db,prepared);await db.query('COMMIT');return action;}
     catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
@@ -307,8 +310,9 @@ export class TelegramActionRepository {
   async systemPrepared(source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string):Promise<boolean> {
     return !!(await this.stores.derived.query('SELECT 1 FROM derived_artifacts WHERE operation_id=$1',['telegram-system-proposal:'+systemActionId(source,binding,destination,text,key)])).rowCount;
   }
-  /** Prepare derived bytes before acquiring control locks; preparation can itself publish guard records. */
-  async prepareSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string):Promise<PreparedSystemAction> {
+  /** Prepare derived bytes before acquiring control locks; preparation can itself publish guard records. Every caller says
+   * what kind of message it sends; the class is not part of the action's identity. */
+  async prepareSystem(principal:Reader,source:SourceReference,binding:GuardBinding,destination:string,text:string,key:string,sendClass:ActionSendClass):Promise<PreparedSystemAction> {
     if(principal.admin||!principal.space||!principal.logical_profile)throw new HttpError(403,'bound_guard_context_required');
     if(!text.trim()||text.length>trustedTextLimit)throw new HttpError(400,'invalid_action');
     if(!servedDestination(this.access.policy(),destination,await currentChats()))throw new HttpError(403,'destination_not_served');
@@ -321,15 +325,15 @@ export class TelegramActionRepository {
     if(!preparedText.trim())throw new HttpError(400,'invalid_action');
     // The owner's own audience is stored by the owner's chat, as their requests are.
     return {id,source,proposal,binding,scope:principal.scope??ownerChat(this.access.policy()),space:principal.space,profile:principal.logical_profile,destination,
-      fingerprint:digest(canonical({destination,text:preparedText})),text_hash:digest(preparedText),guard_revision:representation.revision};
+      fingerprint:digest(canonical({destination,text:preparedText})),text_hash:digest(preparedText),guard_revision:representation.revision,send_class:sendClass};
   }
   /** Trusted callers commit this action and its workflow request with their own control decision. */
   async stageSystem(db:pg.PoolClient,prepared:PreparedSystemAction,options:{resumeUnstarted?:boolean}={}) {
-    const {id,source,proposal,binding,scope,space,profile,destination,fingerprint,text_hash,guard_revision}=prepared;
+    const {id,source,proposal,binding,scope,space,profile,destination,fingerprint,text_hash,guard_revision,send_class}=prepared;
     await this.fence(db,binding);
-    await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,state,authority)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved','exact_owner_approval') ON CONFLICT DO NOTHING`,
-        [id,source,proposal,binding,scope,space,profile,destination,fingerprint,text_hash,guard_revision]);
+    await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,state,authority,send_class)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved','exact_owner_approval',$12) ON CONFLICT DO NOTHING`,
+        [id,source,proposal,binding,scope,space,profile,destination,fingerprint,text_hash,guard_revision,send_class]);
     let row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1 FOR UPDATE',[id])).rows[0];
     if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
     // Exact owner-command recovery may finish an older interrupted handoff.
@@ -555,7 +559,7 @@ export class TelegramActionRepository {
       let target:ReturnType<typeof telegramTarget>|null=null;
       if(!observe)try{target=telegramTarget(row.destination);}catch(error){if(!(error instanceof HttpError))throw error;}
       try {response=observe?await this.call('action.execute',{id,observe_only:true},10000):
-        target?await this.call('action.execute',{id,destination:row.destination,...target,text:text!},60000):{state:'not_started'};}
+        target?await this.call('action.execute',{id,destination:row.destination,...target,text:text!,send_class:row.send_class??'approved_post'},60000):{state:'not_started'};}
       catch {response={state:'ambiguous'};}
       if(!observe&&response.state==='not_started') {
         // The runtime refused before recording any send intent: nothing was

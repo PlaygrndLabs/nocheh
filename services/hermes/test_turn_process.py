@@ -49,7 +49,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         signature=base64.urlsafe_b64encode(hmac.new(self.secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
 
-    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None,progress=None,scope=None):
+    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None,progress=None,scope=None,labels=None):
         with tempfile.TemporaryDirectory() as folder:
             self.env=None;original=asyncio.create_subprocess_exec
             async def spawn(*args,**kwargs):
@@ -60,7 +60,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 result=await _run_process(Path(folder),scope or Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
                     SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1',
-                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress)
+                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress,labels)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 return result,events
     async def test_a_private_answer_says_first_where_it_was_asked_and_needs_its_pass(self):
@@ -119,6 +119,39 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                                         '"failure_reason":"provider_error","failure_cause":"overloaded:529"}))')
         self.assertEqual((record.call_args.args[3],record.call_args.kwargs['reason'],record.call_args.kwargs['cause']),(True,'provider_error','overloaded:529'))
         self.assertEqual(result,{'state':'failed','error_code':'assistant_runtime_unavailable'})
+    async def test_a_turn_reads_its_note_labels_and_counts_memory_it_could_not_read(self):
+        # The labels the parent looked up go to the turn; a turn that read long-term memory only in part says so, and the
+        # parent counts it for the owner's notice and keeps it out of the result (ADR-0257).
+        labels={'d'*64:{'from':'owner','label':'the owner\'s own messages in the owner\'s private chat'}}
+        counted=[]
+        with patch('services.hermes.usage.note_failed',side_effect=lambda kind,*a:counted.append((kind,'failed'))),\
+             patch('services.hermes.usage.note_done',side_effect=lambda kind,*a:counted.append((kind,'done'))):
+            result,_=await self.execute('import sys,json; body=json.load(sys.stdin); assert body["note_sources"]=='+json.dumps(labels)+
+                                        '; print(json.dumps({"state":"done","text":"hi","memory_problem":"memory_read"}))',labels=labels)
+            self.assertNotIn('memory_problem',result);self.assertEqual(counted,[('memory_read','failed')])
+            counted.clear()
+            await self.execute('import sys,json; body=json.load(sys.stdin); assert body["note_sources"]=={}; print(json.dumps({"state":"done","text":"hi"}))')
+            self.assertEqual(counted,[('memory_read','done')])
+    async def test_the_parent_records_who_wrote_the_notes_a_turn_added_even_when_it_stopped(self):
+        from . import note_sources
+        event='e'*64
+        for outcome in ('done','failed','raised'):
+            with self.subTest(outcome=outcome),tempfile.TemporaryDirectory() as folder:
+                profile=Path(folder);(profile/'memories').mkdir()
+                async def child(*args):
+                    (profile/'memories'/'MEMORY.md').write_text('Learned in this turn.')
+                    self.assertEqual(args[9],{'f'*64:{'from':'nocheh','label':'Nocheh\'s note'}},'the labels go to the turn')
+                    if outcome=='raised':raise RuntimeError('assistant_process_failed')
+                    return {'state':outcome}
+                with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\
+                     patch('services.hermes.retired_history.withhold_retired'),patch('services.hermes.turn_process._run_process',side_effect=child),\
+                     patch.object(note_sources,'lookup',return_value={'f'*64:{'from':'nocheh','label':'Nocheh\'s note'}}):
+                    body={'archive_credential':'turn.e30.signature','event_id':event,'channel':'telegram'}
+                    if outcome=='raised':
+                        with self.assertRaises(RuntimeError):await run_process(profile,Scope('42','42',True,'owner'),body,'model',None,'session')
+                    else:await run_process(profile,Scope('42','42',True,'owner'),body,'model',None,'session')
+                origin=note_sources.load(profile)[note_sources.key('memory','Learned in this turn.')]['origins'][0]
+                self.assertEqual((origin['by'],origin['event'],origin['channel'],origin['complete']),('turn',event,'telegram',outcome=='done'))
     def job(self,**changes):
         """A job run's context as storage sends it, its deadlines from now."""
         now=time.time()

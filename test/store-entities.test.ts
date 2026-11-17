@@ -47,6 +47,8 @@ test('one invalid model entity item is dropped and recorded while valid items ar
   const entities=Object.create(EntityRepository.prototype) as EntityRepository;
   (entities as any).suggest=async(_kind:string,name:string)=>{suggested.push(name);return {name};};
   (entities as any).publishClaim=async(input:any)=>{claims.push(input);return {id:digest(String(claims.length)),revision:1};};
+  // Code finds the cited message to be the speaker's own typing, so a direct claim stays direct.
+  (entities as any).spoken=async()=>()=>'direct';
   const context:any={source,evidence:[{reference:source,text:'synthetic evidence',space:'synthetic'}],binding:{},
     entities:{speaker:{id:speaker,kind:'person',name:'Synthetic person'},project:null,mentioned_projects:[{id:project,kind:'project',name:'Synthetic project'}],mentioned_people:[]}};
   const claim={subject_id:speaker,predicate:'commitment',content:'Synthetic commitment.',attribution:'direct',uncertainty:'supported',evidence_ids:[source.id]};
@@ -145,6 +147,72 @@ test('people and projects keep stable identity, attributed evidence, connected r
     const beaconMemory=await entities.inspect(atlasReader,context.mentioned_projects[0]!.id);
     const reported=beaconMemory.claims.find((claim:any)=>claim.predicate==='commitment');
     assert.equal(reported.attribution,'reported');assert.equal(reported.speaker_entity_id,sam!.id);
+    // A direct claim stands only on the speaker's own typing, which code checks from the originals, never from the model:
+    // one resting on a forward is what the speaker passed on, and one resting on someone else's message is inferred.
+    const forwardText='Beacon ships in May.',forwarded=(await archive.capture({version:1,key:`entities:${stamp}:5`,origin:'live',kind:'telegram_update',bot_id:'fixture',
+      scope:atlasGroup,source_id:'5',revision:'1',occurred_at:null,text:forwardText,payload:{update_id:Number(stamp.slice(-8))+700,message:{message_id:5,date:1,
+        chat:{id:Number(atlasGroup),type:'supergroup',is_forum:false},from:{id:userBase+1,first_name:'Alex'},text:forwardText,
+        forward_origin:{type:'channel',chat:{id:-1009,type:'channel',title:'News'},message_id:3,date:1}}}})).source.reference;
+    // A direct claim is the speaker's own word about themselves.
+    const cite=(predicate:string,source:{id:string})=>({subject_id:sam!.id,predicate,content:`Synthetic ${predicate}.`,attribution:'direct',
+      uncertainty:'supported',evidence_ids:[source.id]});
+    const batch=(observed:{id:string}[])=>({...prepared,evidence:[samSource,forwarded,otherAlexSource].map(reference=>({reference,text:'',space:atlasGroup})),
+      observations:observed.map(source=>({source,value:{},derivatives:[]}))});
+    const direct=await entities.publishDiscoveries(batch([samSource]),{entity_suggestions:[],entity_claims:[cite('typed',samSource),cite('forwarded',forwarded),
+      cite('someone else',otherAlexSource)]},`${stamp}:direct`);
+    const passedOn=await entities.publishDiscoveries(batch([samSource,forwarded]),{entity_suggestions:[],entity_claims:[cite('typed beside a forward',samSource)]},`${stamp}:passed-on`);
+    assert.deepEqual([direct.rejected,passedOn.rejected],[[],[]]);
+    const checked=new Map((await entities.inspect(atlasReader,sam!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
+    assert.deepEqual(['typed','forwarded','someone else','typed beside a forward'].map(predicate=>[checked.get(predicate)?.attribution,checked.get(predicate)?.speaker_entity_id??null]),
+      [['direct',sam!.id],['reported',sam!.id],['inferred',null],['reported',sam!.id]],
+      'the speaker\'s own typing stays direct; a forward, or typing sent with one, is reported; another person\'s message is inferred');
+    // The owner's reply quoting Nocheh's own learned message is the owner's own words, found through the archive's reply
+    // relation and never an id's shape; a reply quoting Nocheh's card is what the owner passed on, as before.
+    const chat={id:Number(atlasGroup),type:'supergroup',is_forum:false},bot={id:userBase+9,is_bot:true,first_name:'Nocheh'};
+    const said=async(id:number,send_class:string)=>(await archive.capture({version:1,key:`entities:${stamp}:said:${id}`,origin:'live',kind:'telegram_delivered_message',
+      bot_id:'fixture',scope:atlasGroup,source_id:String(id),revision:'1',occurred_at:null,text:'Book the 9am train.',
+      payload:{message:{message_id:id,date:1,chat,text:'Book the 9am train.'},send_class}})).source.reference;
+    const quoting=async(id:number)=>(await archive.capture({version:1,key:`entities:${stamp}:quoting:${id}`,origin:'live',kind:'telegram_update',bot_id:'fixture',
+      scope:atlasGroup,source_id:String(id+1),revision:'1',occurred_at:null,text:'I will take the 9am.',payload:{update_id:Number(stamp.slice(-8))+800+id,
+        message:{message_id:id+1,date:2,chat,from:{id:42,first_name:'Owner'},text:'I will take the 9am.',quote:{text:'Book the 9am',position:0},
+          reply_to_message:{message_id:id,date:1,chat,from:bot,text:'Book the 9am train.'}}}})).source.reference;
+    const learned=await said(60,'reply'),card=await said(62,'card'),ofLearned=await quoting(60),ofCard=await quoting(62);
+    const ownerContext=await entities.context(ofLearned,[],'I will take the 9am.');assert.equal(ownerContext.speaker?.id,self!.id);
+    const ownClaim=(predicate:string,source:{id:string})=>({subject_id:self!.id,predicate,content:`Synthetic ${predicate}.`,attribution:'direct',
+      uncertainty:'supported',evidence_ids:[source.id]});
+    for(const [predicate,quote,target] of [['quoting Nocheh',ofLearned,learned],['quoting a card',ofCard,card]] as const)
+      assert.deepEqual((await entities.publishDiscoveries({...prepared,source:quote,entities:ownerContext,
+        evidence:[quote,target].map(reference=>({reference,text:'',space:atlasGroup})),observations:[quote,target].map(source=>({source,value:{},derivatives:[]}))},
+        {entity_suggestions:[],entity_claims:[ownClaim(predicate,quote)]},`${stamp}:${predicate}`)).rejected,[]);
+    const own=new Map((await entities.inspect(owner,self!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
+    assert.deepEqual(['quoting Nocheh','quoting a card'].map(predicate=>[own.get(predicate)?.attribution,own.get(predicate)?.speaker_entity_id??null]),
+      [['direct',self!.id],['reported',self!.id]],'the owner\'s quote of Nocheh\'s learned message is the owner\'s own words; a quote of a card is passed on');
+    // The owner's pin of Nocheh's own learned message passes nothing on, so the owner's own typing beside it stays direct;
+    // a claim citing the pin itself is still never direct, since its words are Nocheh's.
+    const pin=(await archive.capture({version:1,key:`entities:${stamp}:pin:70`,origin:'live',kind:'telegram_update',bot_id:'fixture',scope:atlasGroup,source_id:'70',
+      revision:'1',occurred_at:null,text:null,payload:{update_id:Number(stamp.slice(-8))+870,message:{message_id:70,date:3,chat,from:{id:42,first_name:'Owner'},
+        pinned_message:{message_id:60,date:1,chat,from:bot,text:'Book the 9am train.'}}}})).source.reference;
+    const beside=await capture('71',42,'I keep my passport in the desk.'),besideContext=await entities.context(beside,[],'I keep my passport in the desk.');
+    assert.equal(besideContext.speaker?.id,self!.id);
+    assert.deepEqual((await entities.publishDiscoveries({...prepared,source:beside,entities:besideContext,
+      evidence:[beside,pin,learned].map(reference=>({reference,text:'',space:atlasGroup})),observations:[beside,pin].map(source=>({source,value:{},derivatives:[]}))},
+      {entity_suggestions:[],entity_claims:[ownClaim('typed beside a pin of Nocheh',beside),ownClaim('citing the pin of Nocheh',pin)]},`${stamp}:pinned-nocheh`)).rejected,[]);
+    const besidePin=new Map((await entities.inspect(owner,self!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
+    assert.deepEqual(['typed beside a pin of Nocheh','citing the pin of Nocheh'].map(predicate=>besidePin.get(predicate)?.attribution),['direct','reported']);
+    // Nor do the owner's pin and quote of Nocheh's card, whose words are cut from everything learned: the owner's own typing
+    // beside either stays direct, and a claim citing the pin or the quote itself is still never direct.
+    const cardPin=(await archive.capture({version:1,key:`entities:${stamp}:pin:72`,origin:'live',kind:'telegram_update',bot_id:'fixture',scope:atlasGroup,source_id:'72',
+      revision:'1',occurred_at:null,text:null,payload:{update_id:Number(stamp.slice(-8))+872,message:{message_id:72,date:3,chat,from:{id:42,first_name:'Owner'},
+        pinned_message:{message_id:62,date:1,chat,from:bot,text:'Book the 9am train.'}}}})).source.reference;
+    for(const [label,carrier,id] of [['a pin of a card',cardPin,'73'],['a quote of a card',ofCard,'74']] as const) {
+      const typedHere=await capture(id,42,'I keep my keys by the door.'),here=await entities.context(typedHere,[],'I keep my keys by the door.');
+      assert.deepEqual((await entities.publishDiscoveries({...prepared,source:typedHere,entities:here,
+        evidence:[typedHere,carrier,card].map(reference=>({reference,text:'',space:atlasGroup})),observations:[typedHere,carrier].map(source=>({source,value:{},derivatives:[]}))},
+        {entity_suggestions:[],entity_claims:[ownClaim('typed beside '+label,typedHere),ownClaim('citing '+label,carrier)]},`${stamp}:${label}`)).rejected,[]);
+    }
+    const besideCard=new Map((await entities.inspect(owner,self!.id)).claims.map((claim:any)=>[claim.predicate,claim]));
+    assert.deepEqual(['a pin of a card','a quote of a card'].map(label=>[besideCard.get('typed beside '+label)?.attribution,besideCard.get('citing '+label)?.attribution]),
+      [['direct','reported'],['direct','reported']]);
     await assert.rejects(entities.inspect(privateReader,context.mentioned_projects[0]!.id),{code:'entity_not_found'});
     assert.equal((await entities.list(privateReader,{query:'Beacon'})).entities.length,0,'private entity names do not leak through search');
 

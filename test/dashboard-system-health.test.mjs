@@ -13,7 +13,7 @@ const compiled = await build({
   format: 'esm',
   platform: 'node',
 });
-const {issues, sendIssue, sendSummary, sendReason, sendState, sendWhat} = await import(
+const {issues, reason, reasonHeading, sendIssue, sendSummary, sendReason, sendState, sendWhat} = await import(
   'data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64')
 );
 
@@ -65,6 +65,80 @@ test('files a locked-down reader could not read say why and how to read them aga
       action: 'Messages',
     },
   ]);
+});
+
+test('failed attempts at telling where notes came from and memory read in part are counted today', () => {
+  const found = issues({
+    note_problems: [
+      {day: '2026-11-14', kind: 'notes', failed: 3, ok: 9},
+      {day: '2026-11-14', kind: 'memory_read', failed: 1, ok: 4},
+    ],
+  });
+  assert.deepEqual(found, [
+    {
+      tone: 'warn',
+      text: 'Telling where notes came from failed 3 times today',
+      detail:
+        'Notes written while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not available”. The notes themselves are kept.',
+      link: '#memory?view=notes',
+      action: 'Notes',
+    },
+    {
+      tone: 'warn',
+      text: 'Long-term memory couldn’t be read in full 1 time today',
+      detail: 'Your forwards and files, or your memory context, were left out; replies used the rest of your memory.',
+    },
+  ]);
+  // Attempts, not notes: one failed lookup while 40 notes were listed is one time.
+  assert.equal(
+    issues({note_problems: [{day: '2026-11-14', kind: 'notes', failed: 1, ok: 0}]})[0].text,
+    'Telling where notes came from failed 1 time today',
+  );
+});
+
+test('the stores\' label lookups and recall\'s ask of forwards and files are lines of their own', () => {
+  // Beside Hermes's own lines, so one side working never hides the other's failure.
+  const found = issues({
+    note_problems: [
+      {day: '2026-11-14', kind: 'notes', failed: 1, ok: 0},
+      {day: '2026-11-14', kind: 'note_labels', failed: 2, ok: 7},
+      {day: '2026-11-14', kind: 'forwards_read', failed: 1, ok: 0},
+    ],
+  });
+  assert.deepEqual(found, [
+    {
+      tone: 'warn',
+      text: 'Telling where notes came from failed 1 time today',
+      detail:
+        'Notes written while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not available”. The notes themselves are kept.',
+      link: '#memory?view=notes',
+      action: 'Notes',
+    },
+    {
+      tone: 'warn',
+      text: 'Looking up where notes came from failed 2 times today',
+      detail:
+        'Recall and the Notes page showed those notes as “source not available right now” or without their chat, and replies may have seen them without their chat. The notes and what was recorded about them are kept.',
+      link: '#memory?view=notes',
+      action: 'Notes',
+    },
+    {
+      tone: 'warn',
+      text: 'Recall couldn’t ask your forwards and files 1 time today',
+      detail: 'Recall answered from the rest of your memory.',
+    },
+  ]);
+});
+
+test('a task that ended shows its recorded reason as a note, and only an open one is waiting for something', () => {
+  // A memory step that completed without learning Nocheh's own card waits for nothing.
+  assert.deepEqual(
+    [reasonHeading('completed'), reason('nocheh_message')],
+    ['Note', 'Nocheh’s own card, notice or reminder: kept, not learned'],
+  );
+  for (const state of ['failed', 'skipped', 'cancelled', 'denied']) assert.equal(reasonHeading(state), 'Note', state);
+  for (const state of ['queued', 'waiting', 'running', 'retryable_failed', 'ambiguous'])
+    assert.equal(reasonHeading(state), 'Waiting for', state);
 });
 
 test('failed sends to chat apps need a look and open the Problems list', () => {

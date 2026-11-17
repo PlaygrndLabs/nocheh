@@ -199,7 +199,7 @@ test('a send names its destination by chat id: unknown and unserved ids fail clo
     for(const destination of [BOB_CHAT,UNSERVED,GP2])
       await assert.rejects(actions.request(principal,{destination,text:'Never proposed'}),{status:403,code:'destination_not_served'},destination);
     await assert.rejects(actions.request(principal,{destination:GP1,text:'   '}),{status:400,code:'invalid_action'});
-    await assert.rejects(actions.prepareSystem({...principal,logical_profile:'fixture-profile'},source,binding,BOB_CHAT,'Never prepared','fixture-key'),
+    await assert.rejects(actions.prepareSystem({...principal,logical_profile:'fixture-profile'},source,binding,BOB_CHAT,'Never prepared','fixture-key','approved_post'),
       {status:403,code:'destination_not_served'});
     assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM telegram_action_requests WHERE destination=ANY($1)',[[BOB_CHAT,UNSERVED,GP2]])).rows[0].n,0);
     // A Telegram id or link is read once, into the chat it names: NG2 by its old Telegram id, NG1's topic by its link.
@@ -210,15 +210,23 @@ test('a send names its destination by chat id: unknown and unserved ids fail clo
       (await actions.inspect(owner,byId.id)).arguments.destination],[NG2,NG1_TOPIC,NG2]);
     assert.deepEqual((await stores.control.query('SELECT DISTINCT scope FROM telegram_action_requests WHERE id=ANY($1)',[[upgraded.id,topic.id,byId.id]])).rows,
       [{scope:GP1}],'each request names its own chat by its chat id');
+    const approve=async(id:string)=>{const view=await actions.inspect(owner,id);return actions.decide(owner,{id,fingerprint:view.fingerprint,decision:'approve'});};
     for(const proposal of [upgraded,topic,byId]){
       const view=await actions.inspect(owner,proposal.id);await actions.decide(owner,{id:proposal.id,fingerprint:view.fingerprint,decision:'approve'});
       assert.equal((await actions.run(proposal.id,authority)).state,'completed');
     }
     // Each goes where its chat is in Telegram now: NG2 at its current id, never its old one; NG1's topic as its thread.
     assert.deepEqual(calls.map(call=>[call.destination,call.chat_id,call.topic??null]),[[NG2,NG2_TG,null],[NG1_TOPIC,NG1_TG,7],[NG2,NG2_TG,null]]);
+    // A model's request is an approved post, which memory learns (ADR-0256); the row keeps its class.
+    assert.deepEqual(calls.map(call=>call.send_class),Array(3).fill('approved_post'));
+    assert.deepEqual((await stores.control.query('SELECT DISTINCT send_class FROM telegram_action_requests WHERE id=ANY($1)',[[upgraded.id,topic.id,byId.id]])).rows,[{send_class:'approved_post'}]);
+    // A row from before send classes has none, and is sent as an approved post.
+    const older=await actions.request(principal,{destination:NG2,text:'Approved before send classes'});
+    await stores.control.query('UPDATE telegram_action_requests SET send_class=NULL WHERE id=$1',[older.id]);
+    await approve(older.id);assert.equal((await actions.run(older.id,authority)).state,'completed');
+    assert.equal(calls.at(-1)!.send_class,'approved_post');
 
     // Bob is a member who reaches GP1, a served group: his private chat is served, and a send there always waits for the owner's card.
-    const approve=async(id:string)=>{const view=await actions.inspect(owner,id);return actions.decide(owner,{id,fingerprint:view.fingerprint,decision:'approve'});};
     const closed=async(id:string)=>{const view=await actions.inspect(owner,id);return [view.state,view.error_code];};
     const allowBob=()=>members({[GP1]:{granted:[BOB]}});
     allowBob();

@@ -11,7 +11,7 @@ from telegram.error import NetworkError, TimedOut
 
 from services.durable import canonical, digest
 from .capture import Capture, DISPATCH_KEY, Held, OUTBOUND_CHECK, instrument_request
-from .sends import Sends, already_left, exception_code, kind_of, not_sent_code, outcome
+from .sends import SEND_CLASSES, Sends, already_left, class_of, exception_code, kind_of, not_sent_code, outcome, route_class
 
 URL = 'https://api.telegram.org/bot123456:synthetic-token/'
 FIELDS = {'version', 'key', 'channel', 'account', 'at', 'kind', 'method', 'chat', 'thread', 'message_id', 'detail',
@@ -47,6 +47,24 @@ class HelperTests(unittest.TestCase):
                 ('sendMessage', 'notice:' + 'a' * 64, 'notice'), ('editMessageText', 'notice-edit:notice-a:b', 'notice_update'),
                 ('sendMessage', 'something-new:1', 'other')):
             self.assertEqual(kind_of(method, dispatch), kind, (method, dispatch))
+
+    def test_a_send_class_is_the_routes_own_or_its_dispatch_keys_default_and_never_a_send_record_kind(self):
+        for dispatch, declared, expected in (
+                ('telegram:1:update:2', None, 'reply'), ('telegram:1:update:2:continuation:' + 'a' * 64, 'follow_up', 'follow_up'),
+                ('telegram:1:update:2', 'private_answer', 'private_answer'), ('telegram:1:update:2', 'other', 'reply'),
+                ('telegram:1:update:2', ['reply'], 'reply'), ('action:' + 'a' * 64, None, 'approved_post'),
+                ('action:' + 'a' * 64, 'job_report', 'job_report'), ('approval:' + 'a' * 64, None, 'card'),
+                ('approval-settle:' + 'a' * 64, None, 'card_update'), ('approval-answer:1', None, 'card_update'),
+                ('refusal:' + 'a' * 64, None, 'refusal'), ('notice:' + 'a' * 64, None, 'notice'), ('notice:' + 'a' * 64, 'reminder', 'reminder'),
+                ('notice-edit:notice-a:b', None, 'card_update'), ('control:' + 'a' * 32, None, 'card'),
+                # A leave sends no message, and its key still names a class that is never learned (ADR-0253, ADR-0256).
+                ('leave:' + 'a' * 64 + ':' + 'b' * 32, None, 'notice'),
+                ('something-new:1', None, None), (None, None, None), (None, 'notice', 'notice')):
+            self.assertEqual(class_of(dispatch, declared), expected, (dispatch, declared))
+        self.assertEqual(route_class('job_report', ('approved_post', 'job_report'), 'approved_post'), 'job_report')
+        for value in ('reminder', 'Job_report', None, 3, ['job_report'], {'job_report': 1}):
+            self.assertEqual(route_class(value, ('approved_post', 'job_report'), 'approved_post'), 'approved_post', value)
+        self.assertEqual(len(set(SEND_CLASSES)), 11)
 
     def test_telegram_answers_become_states_and_codes_never_descriptions(self):
         delivered = canonical({'ok': True, 'result': {'message_id': 42, 'chat': {'id': -20}, 'text': 'synthetic'}})

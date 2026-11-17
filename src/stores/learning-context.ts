@@ -10,6 +10,7 @@ import {ProjectRepository} from './projects.js';
 import {SelectionRepository,selectionId} from './selections.js';
 import {RECORDINGS} from './reprocessing.js';
 import {EntityRepository,type EntityContext,type KnownPeople,type WaitingCards} from './entities.js';
+import {cutHeld,embeddedMessages,heldBy,heldKey,heldWithin,type Held} from '../source-facts.js';
 
 export type LearningRuleInput={kind:'source';dependency:PreparedDependency}|{kind:'owner'|'owner_guard';id:string;revision:number;text:string};
 export interface PreparedLearningContext {
@@ -23,11 +24,45 @@ export interface PreparedLearningContext {
   organization_context?:{assignment:{space_id:string;project_id:string|null;revision:number;inherited:boolean;follows_group?:string};projects:{id:string;name:string;revision:number}[]};
   limitations:string[];
 }
+/**
+ * What the owner's notes review asks of prepare (ADR-0257). `admit` says whether a related message, or the evidence of a
+ * rule, may go into the owner's notes; one it refuses is left out, and so are the rules resting on it and any quote of
+ * it. `admitPinned` asks the same of the message a pin carries, by its own author; one it refuses is taken out of the
+ * pin, which stays. `not_learned` takes it out too, but not as left out for its sender: Nocheh's own card, notice or
+ * reminder is not learned. `admitQuoted` asks the same of the message a quote repeats part of, even one never archived
+ * (another bot's, or one in a chat this review does not read); one it refuses is taken out of the message quoting it,
+ * which stays. `admitPinnedQuote` asks the same of the message a quote inside a pinned message repeats part of; one it
+ * refuses is taken out of the pinned message, which stays. Either says `not_traced` for a quote the archive holds nothing
+ * to judge by: it is taken out the same way, and counted as not traced (`quote_not_traced`), not as left out for a
+ * sender. `collect` gets the ids left out (a pin's or a quote's own id
+ * when only what it carried was), the rules kept, the ids of the rules left out with them, `bare_reaction` when the
+ * source is a reaction to a message that was left out, `empty_pin` when the source is a pin of Nocheh's card, notice or
+ * reminder, or of Nocheh's message not archived yet, with nothing else in it, and each kept rule's recorded inputs
+ * (`inputs`: the source ids of its stored dependencies, by rule id). Honcho passes none and interpretations only
+ * `collect`, so they learn from everyone's messages, as before, other bots' included. `admitHeld` names the places
+ * (heldKey) of what a message holds that may go in (heldBy: a message it embeds, by its own author, a poll option, by who
+ * added it), and apart from them the places of the quotes inside embedded messages the archive holds nothing to judge
+ * by (`untraced`); everything else it holds is taken out of it, which stays. For every caller a pin loses Nocheh's card,
+ * notice or reminder, and Nocheh's own account's message the archive does not hold as Nocheh's learned one (not archived
+ * yet, or a forward of one); a quote of Nocheh's own words is left out of the message quoting it, and out of a message a
+ * pin carries (NoteSourceRepository.carried, ADR-0256, ADR-0257); and a message embeds is kept, labelled by the class
+ * of the message holding it, except Nocheh's own words (nochehHeld), which go, and a quote inside one that can't be
+ * traced through the archive (carried: `untraced`), which goes too and is counted (`quote_not_traced`; `collect` gets
+ * its message's id in `untraced`, once, as for every quote counted as not traced).
+ */
+export interface LearningContextOptions {
+  admit?:(reference:SourceReference)=>Promise<boolean>;
+  admitPinned?:(reference:SourceReference)=>Promise<boolean|'not_learned'>;
+  admitQuoted?:(reference:SourceReference)=>Promise<boolean|'not_traced'>;
+  admitPinnedQuote?:(reference:SourceReference)=>Promise<boolean|'not_traced'>;
+  admitHeld?:(reference:SourceReference)=>Promise<{admitted:ReadonlySet<string>;untraced:ReadonlySet<string>}>;
+  collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;empty_pin?:boolean;inputs:Map<string,string[]>;untraced?:string[]};
+}
 export class LearningContextRepository {
   constructor(readonly access:SourceAccessRepository,readonly guards:GuardRepository,readonly learned:LearnedMemoryRepository,
     readonly selections:SelectionRepository,readonly projects:ProjectRepository,readonly entities:EntityRepository){}
 
-  async prepare(source:SourceReference,binding:GuardBinding):Promise<PreparedLearningContext> {
+  async prepare(source:SourceReference,binding:GuardBinding,options:LearningContextOptions={}):Promise<PreparedLearningContext> {
     const space=await this.access.space(source);
     if(!space)throw new HttpError(409,'learning_context_pending');
     if(!await this.access.canLearn(source,binding))throw new HttpError(403,'learning_consent_required');
@@ -35,19 +70,26 @@ export class LearningContextRepository {
     const audience=observed.audience;
     // Relations within this very conversation only (its Nocheh chat or topic, ADR-0252), never its group's others.
     const relations=await this.access.relationships.context(source,audience?{kind:'recall',scope:{space,group:null}}:{kind:'owner'},30);
-    const references=new Map([[source.id,source]]),limitations:string[]=[];
+    const references=new Map([[source.id,source]]),limitations:string[]=[],dropped=new Set<string>(),targets=new Set<string>(),reacted=new Set<string>();
     for(const target of relations.targets) {
       if(target.unresolved)limitations.push('target_not_observed');
       if(target.next)limitations.push('target_history_truncated');
+      for(const reference of target.references){targets.add(reference.id);if(target.kind==='reaction_to')reacted.add(reference.id);}
       const activity=await this.access.relationships.activity(target.identity,'',30);
       if(activity.next)limitations.push('activity_history_truncated');
       for(const reference of [...target.references,...activity.references]) {
         if(references.size>=30){limitations.push('evidence_limit');break;}
-        if(await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding))references.set(reference.id,reference);
-        else limitations.push('target_context_not_permitted');
+        if(!(await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding)))limitations.push('target_context_not_permitted');
+        // What someone not allowed there sent is left out of the owner's notes review, without taking one of the 30 places.
+        else if(options.admit&&!references.has(reference.id)&&!await options.admit(reference)){limitations.push('sender_not_allowed');dropped.add(reference.id);}
+        else references.set(reference.id,reference);
       }
     }
-    const dependencies:PreparedDependency[]=[],evidence:LearningEvidence[]=[],observations:PreparedLearningContext['observations']=[];
+    // A quote repeats part of the message replied to, so it goes when that message was left out.
+    const unquote=[...dropped].some(id=>targets.has(id));
+    const dependencies:PreparedDependency[]=[],evidence:LearningEvidence[]=[],observations:PreparedLearningContext['observations']=[],unpinned:string[]=[],unquoted:string[]=[],unheld:string[]=[],
+      untraced:string[]=[];
+    let emptyPin=false;
     for(const reference of references.values()) {
       const id='events:'+reference.id,guarded=await this.guards.read(id,binding),value=guarded.value as any;
       dependencies.push({source_id:id,revision:guarded.revision,value_hash:digest(canonical(value))});
@@ -67,7 +109,71 @@ export class LearningContextRepository {
       // source references instead of smuggling embedded target content into this scope.
       const scoped=structuredClone(value);
       for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(scoped.payload?.[kind]) {
-        delete scoped.payload[kind].reply_to_message;delete scoped.payload[kind].external_reply;
+        const message=scoped.payload[kind];
+        const carried=message.quote||message.pinned_message||embeddedMessages(message).length?(await this.entities.sources.carried([reference.id])).get(reference.id):undefined;
+        delete message.reply_to_message;delete message.external_reply;
+        // A pinned message carries its own reply too, with the words of the message it answers (a poll, a contact), and so
+        // would a message it embeds, though Telegram leaves that reply out.
+        if(message.pinned_message&&typeof message.pinned_message==='object'){delete message.pinned_message.reply_to_message;delete message.pinned_message.external_reply;}
+        for(const item of embeddedMessages(message,true)){delete item.message.reply_to_message;delete item.message.external_reply;}
+        // A quote of Nocheh's own words, learned or not, is never the sender's: it goes, and the sender's own words stay. A
+        // learned message is evidence of its own; a card, notice or reminder is not learned, and Nocheh's own account's
+        // message the archive does not hold as Nocheh's (not archived yet, or a forward of one) is cut as a card is.
+        // Another bot's message is someone else's, and its quote stays, as anyone else's does, except in the owner's notes
+        // review, where a quote of what someone not allowed there wrote goes, another bot's included, archived or not.
+        // A quote cut there is counted by why: the sender of the message it is from is not allowed there (false), or
+        // nothing in the archive tells whose words it repeats (`not_traced`).
+        const leftOut=(verdict:boolean|'not_traced')=>{
+          if(verdict===false){limitations.push('sender_not_allowed');unquoted.push(reference.id);}
+          else if(verdict==='not_traced'){limitations.push('quote_not_traced');untraced.push(reference.id);}
+        };
+        const quoted=!message.quote||unquote||carried?.quote||!options.admit||!options.admitQuoted?true:await options.admitQuoted(reference);
+        if(unquote||carried?.quote||quoted!==true)delete message.quote;
+        leftOut(quoted);
+        // A pin carries the message it pinned whole. Nocheh's own card, notice or reminder stays out of everything learned
+        // from it, whoever pinned it, and so does Nocheh's own account's message the archive does not hold as Nocheh's
+        // (carried: `bot`); what someone not allowed there wrote, another bot's message included, stays out of the owner's
+        // notes review only. A quote inside the pinned message goes as a quote does: Nocheh's words for everyone, and in
+        // the owner's notes review a quote of what someone not allowed there wrote (admitPinnedQuote).
+        const pinned:boolean|'not_learned'=!message.pinned_message?true:carried?.pinned==='unlearned'||carried?.pinned==='bot'?'not_learned':
+          options.admit&&options.admitPinned?await options.admitPinned(reference):true;
+        if(pinned!==true)delete message.pinned_message;
+        else if(carried?.pinned_quote&&message.pinned_message&&typeof message.pinned_message==='object')delete message.pinned_message.quote;
+        // In the owner's notes review, a quote inside the pinned message goes when what it quotes is by someone not
+        // allowed there, or can't be told; the pin and the pinned message's own words stay.
+        else if(options.admit&&options.admitPinnedQuote&&message.pinned_message?.quote) {
+          const kept=await options.admitPinnedQuote(reference);
+          if(kept!==true)delete message.pinned_message.quote;
+          leftOut(kept);
+        }
+        if(pinned===false){limitations.push('sender_not_allowed');unpinned.push(reference.id);}
+        // A message it embeds stays, as a pin's does, and the message is labelled as holding someone else's words unless it
+        // is the sender's own (SourceFacts.held): the checklist a service message reports on, a giveaway's or suggested
+        // post's message, a poll's, or one in a field Telegram adds later. Nocheh's own words in one go for everyone
+        // (carried: `held`), and so does a quote inside one that can't be traced through the archive, counted as such
+        // (carried: `untraced`). In the owner's notes review, what someone not allowed there wrote, or what can't be told,
+        // goes too and is counted: a message it embeds by its own author, the quote inside one by the message it is from,
+        // a poll option by who added it, and a deleted option's text, whose adder Telegram does not name (admitHeld). A
+        // quote there that the archive holds nothing to judge by is counted as not traced (admitHeld: `untraced`), not as
+        // left out for a sender.
+        const held=heldBy(message);
+        if(held.length) {
+          const nocheh=new Set(carried?.held??[]),unknown=new Set(carried?.untraced??[]),judged=options.admit&&options.admitHeld?await options.admitHeld(reference):null;
+          const cut:Held[]=[];let refused=false,untold=false;
+          for(const item of held) {
+            // What is inside something already cut goes with it; a deleted option loses only its text.
+            if(cut.some(outer=>outer.kind!=='deleted_option'&&heldWithin(item.path,outer.path)))continue;
+            const place=heldKey(item.path);
+            if(nocheh.has(place))cut.push(item);
+            else if(unknown.has(place)||judged?.untraced.has(place)){cut.push(item);untold=true;}
+            else if(judged&&!judged.admitted.has(place)){cut.push(item);refused=true;}
+          }
+          cutHeld(message,cut);
+          if(refused){limitations.push('sender_not_allowed');unheld.push(reference.id);}
+          if(untold){limitations.push('quote_not_traced');untraced.push(reference.id);}
+        }
+        // The source itself, a pin of only Nocheh's card or of Nocheh's message not archived yet, leaves nothing to review.
+        if(pinned==='not_learned'&&reference.id===source.id&&!texts.some(text=>text.trim())&&!derivatives.length)emptyPin=true;
       }
       observations.push({source:reference,value:scoped,derivatives});evidence.push({reference,text:texts.join('\n'),space});
     }
@@ -102,14 +208,21 @@ export class LearningContextRepository {
       ORDER BY v.author='owner' DESC,e.kind='convention' DESC,v.created_at DESC,e.id LIMIT 101`,[space,project?.state==='active'?project.id:null])).rows;
     // A busy chat keeps learning past 100 rules: the owner's own rules, then conventions, then the newest are kept.
     if(candidates.length>100){candidates.pop();limitations.push('rule_catalog_limit');}
-    const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>();
+    const versions:InterpretationVersion[]=[],ruleInputs=new Map<string,LearningRuleInput>(),refused=new Set<string>(),unread:string[]=[];
+    const recorded=new Map<string,string[]>();
     for(const candidate of candidates)try {
-      const version=await this.learned.read(principal,candidate.id,binding,async reference=>
-        await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding));
+      const version=await this.learned.read(principal,candidate.id,binding,async reference=>{
+        if(!(await this.access.canLearn(reference,binding)&&await this.access.canRead(principal,reference,binding)))return false;
+        // A rule resting on what someone not allowed there sent stays out of the owner's notes review with it.
+        if(options.admit&&!await options.admit(reference)){refused.add(candidate.id);return false;}
+        return true;
+      });
       if(version.author!=='owner'&&version.kind!=='convention'&&version.uncertainty!=='explicit')continue;
       if(version.author!=='owner'&&(await this.access.stores.archive.query(`SELECT 1 FROM source_observations o JOIN source_revisions r ON r.id=o.revision_id
         WHERE o.event_id=ANY($1::text[]) AND r.object_id=$2 LIMIT 1`,[version.evidence.map(e=>e.id),observed.object_id])).rowCount)continue;
       versions.push(version);
+      // What code recorded the rule was learned from, whatever the model cited of it.
+      recorded.set(version.id,Array.isArray(candidate.dependencies)?candidate.dependencies.map((dependency:any)=>String(dependency?.source_id??'')):[]);
       // Generated wording and model-chosen rule identities are not new evidence.
       // Automatic guidance changes only when its authorized source inputs change.
       const inputs:LearningRuleInput[]=version.author==='owner'?
@@ -119,7 +232,16 @@ export class LearningContextRepository {
         inputs.push({kind:'owner_guard',id:version.id,revision:candidate.rule_guard_revision,text:canonical(version)});
       for(const input of inputs)ruleInputs.set(canonical(input),input);
     } catch(error) {
-      if(error instanceof HttpError&&['learned_memory_not_found','memory_refresh_required'].includes(error.code))continue;throw error;
+      if(error instanceof HttpError&&['learned_memory_not_found','memory_refresh_required'].includes(error.code)){if(refused.has(candidate.id)){limitations.push('rule_sender_not_allowed');unread.push(candidate.id);}continue;}
+      throw error;
+    }
+    if(options.collect) {
+      options.collect.dropped.push(...new Set([...dropped,...unpinned,...unquoted,...unheld]));options.collect.versions.push(...versions);options.collect.refused.push(...unread);
+      options.collect.untraced?.push(...new Set(untraced));
+      for(const [id,inputs] of recorded)options.collect.inputs.set(id,inputs);
+      // A reaction left with nothing it reacts to says nothing the owner's notes could use, nor does a pin of a card alone.
+      options.collect.bare_reaction=[...reacted].some(id=>dropped.has(id))&&![...reacted].some(id=>references.has(id));
+      options.collect.empty_pin=emptyPin&&references.size===1;
     }
     await this.guards.assertCurrent(binding);
     return {source,source_object:observed.object_id,space,binding,evidence,dependencies,observations,

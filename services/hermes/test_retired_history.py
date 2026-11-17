@@ -194,6 +194,22 @@ class RetiredHistoryTests(unittest.TestCase):
             withhold_retired(database,Lookup(answered=()),notes)
             self.assertEqual(self.entries(notes,'MEMORY.md'),['Kite: '+FACT,rain,'Sun'],'a span this short marks no entry')
 
+    def test_memory_operations_are_read_one_by_one_from_a_rows_raw_calls(self):
+        # Who wrote a note follows the replace and patch operations a run asked for (ADR-0257).
+        from .retired_history import memory_ops
+        batch={'operations':[{'action':'patch','target':'user','old_text':'tea','new_text':'coffee'},'{"action":"remove","old_text":"Bob"}'],'target':'memory'}
+        row={'tool_calls':json.dumps([
+            {'id':'1','type':'function','function':{'name':'memory','arguments':json.dumps({'action':'replace','target':'user','old_text':'old','content':'new'})}},
+            {'id':'2','type':'function','function':{'name':'memory','arguments':json.dumps(batch)}},
+            {'id':'3','type':'function','function':{'name':'web_extract','arguments':'{"url":"https://example.test"}'}},
+            {'id':'4','type':'function','function':{'name':'memory','arguments':'not json'}}])}
+        self.assertEqual(memory_ops(row),[
+            {'action':'replace','target':'user','old_text':'old','content':'new'},
+            {'action':None,'target':'memory','old_text':None,'content':None},
+            {'action':'patch','target':'user','old_text':'tea','content':'coffee'},
+            {'action':'remove','target':'memory','old_text':'Bob','content':None}])
+        self.assertEqual(memory_ops({'tool_calls':None}),[])
+
     def test_owner_recall_skips_native_notes_citing_a_retired_message(self):
         import sys
         from types import SimpleNamespace

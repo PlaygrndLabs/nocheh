@@ -14,7 +14,7 @@ from telegram.error import BadRequest, ChatMigrated, Forbidden, NetworkError
 from services.chats import Served, ServedList
 from services.durable import canonical
 from . import checks
-from .capture import OUTBOUND_CHECK, DISPATCH_KEY, Held
+from .capture import OUTBOUND_CHECK, DISPATCH_KEY, SEND_CLASS, Held
 from .checks import leave_check
 from .gateway import TelegramService
 from .sends import already_left
@@ -32,13 +32,14 @@ def receipt(folder, chat, event=ID):
 class Bot:
     """leaveChat as Telegram answers it: True, or the next queued error."""
     def __init__(self):
-        self.calls, self.answers, self.keys = [], [], []
+        self.calls, self.answers, self.keys, self.classes = [], [], [], []
 
     async def leave_chat(self, chat_id):
         # The bound outbound check admits only leaveChat for this chat, as the capture boundary asks it.
         OUTBOUND_CHECK.get()('leaveChat', {'chat_id': chat_id})
         self.calls.append(chat_id)
         self.keys.append(DISPATCH_KEY.get())
+        self.classes.append(SEND_CLASS.get())
         answer = self.answers.pop(0) if self.answers else True
         if isinstance(answer, Exception): raise answer
         return answer
@@ -87,6 +88,9 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await service.leave_chat(body), {'state': 'done'}, 'a repeat answers from its receipt')
             self.assertEqual(service.bot.calls, [int(STRANGER)], 'leaveChat once')
             self.assertTrue(service.bot.keys[0].startswith('leave:' + ID + ':'))
+            # A leave sends no message, and still runs under a class that is never learned (ADR-0256).
+            self.assertEqual(service.bot.classes, ['notice'])
+            self.assertIsNone(SEND_CLASS.get(), 'the leave resets its class')
             self.assertEqual(json.loads(receipt(folder, STRANGER).read_bytes()), {'state': 'done', 'chat_id': STRANGER})
             # The same add at another Telegram id has no answer yet, so the app is asked whether that id is the group's now.
             self.stands.append(False)

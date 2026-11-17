@@ -118,7 +118,7 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     assert.equal((await follow(one.id)).state,'completed');assert.equal(resumes.at(-1).attempt,'c1-'+one.id.slice(0,40));
     // The bot sends the follow-up as a reply to the asking message in its topic, and it alerts.
     const reply=sends.filter(item=>item.operation==='telegram.reply').at(-1);
-    assert.deepEqual(pick(reply,'chat_id','topic','attempt','notify','presence','text'),{chat_id:group,topic:17,attempt:'c1-'+one.id.slice(0,40),notify:true,presence:true,text:'Fixture reply'});
+    assert.deepEqual(pick(reply,'chat_id','topic','attempt','notify','presence','text','send_class'),{chat_id:group,topic:17,attempt:'c1-'+one.id.slice(0,40),notify:true,presence:true,text:'Fixture reply',send_class:'follow_up'});
     assert.match(reply.dispatch_key,new RegExp(':continuation:'+one.id+'$'));
     assert.equal((await row(one.id)).state,'done');
     assert.equal((await stores.derived.query('SELECT 1 FROM derived_artifacts WHERE operation_id=$1',['action-continuation-result:'+one.id+':1'])).rowCount,1);

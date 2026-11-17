@@ -38,6 +38,11 @@ export function telegramMessageAudience(message:Record<string,any>,chatId:string
   return {chat_id:chatId,topic_state:'unknown'};
 }
 
+/** Whether a Telegram Desktop export's message answers one in another chat: the export then writes reply_to_peer_id
+ *  beside reply_to_message_id, which is that chat's message id, so it names no message of this chat. Told by presence
+ *  alone, never the value's shape. */
+export const repliesElsewhere=(message:unknown):boolean=>{const peer=record(message).reply_to_peer_id;return peer!==undefined&&peer!==null;};
+
 const desktopActor=(value:unknown):SourceIdentity|undefined=>{
   const match=/^(user|channel)([1-9][0-9]{0,15})$/.exec(external(value)??'');
   return !match?undefined:match[1]==='user'?{platform:'telegram',namespace:'bot-api',kind:'actor',external_id:match[2]!}:conversation('-100'+match[2]);
@@ -53,7 +58,10 @@ function desktopSource(value:Envelope,base:SourceDescriptor):SourceDescriptor {
   if(base.adapter!=='telegram.desktop')return base;
   const body=record(value.payload),chat=record(body.chat),id=external(chat.id),type=external(chat.type);
   const live=id&&type&&desktopChannelTypes.has(type)&&/^[1-9][0-9]{0,15}$/.test(id)&&value.scope==='-100'+id?'-100'+id:undefined;
-  const relations=base.relations.map(relation=>{
+  // A reply to another chat has no reply relation: the id it records is that chat's, and this chat's message with that id
+  // is another message, which no reader may take for the one it answers.
+  const elsewhere=repliesElsewhere(body.message);
+  const relations=base.relations.filter(relation=>relation.kind!=='reply_to'||!elsewhere).map(relation=>{
     if(relation.kind==='authored_by'){const target=desktopActor(record(body.message).from_id);return target?{...relation,target}:relation;}
     if(!live)return relation;
     if(relation.kind==='contained_in')return {...relation,target:conversation(live)};
@@ -71,7 +79,7 @@ function desktopSource(value:Envelope,base:SourceDescriptor):SourceDescriptor {
     const chat=legacyChat(eventSpace(value.scope,body));
     audience=chat?.kind==='topic'&&chat.parent_id===value.scope?{chat_id:value.scope,topic_state:'known',topic_id:chat.topic_key!}:{chat_id:value.scope,topic_state:'none'};
   }
-  const descriptor:SourceDescriptor={...base,adapter_version:'3',object:live?messageIdentity(live,base.object.external_id):base.object,relations,
+  const descriptor:SourceDescriptor={...base,adapter_version:'4',object:live?messageIdentity(live,base.object.external_id):base.object,relations,
     ...(audience?{metadata:{...base.metadata,audience}}:{})};
   try{return sourceDescriptor(descriptor);}catch{return base;}
 }

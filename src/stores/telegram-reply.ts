@@ -3,6 +3,7 @@ import type {TurnReceipt} from '../brain/brain.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {TurnInput} from './telegram-turn.js';
 import {telegramTarget} from '../frontdoor/telegram.js';
+import type {SendClass} from '../send-classes.js';
 
 /**
  * Nocheh's own bot answers a Telegram turn (ADR-0235). The brain only returns the reply; Nocheh shows typing and the
@@ -48,12 +49,13 @@ export const unansweredFinish=(state:string):ReplyFinish=>state==='failed'?'fail
 export interface ReplyButton {text:string;data:string}
 /**
  * Send a done turn's reply. A follow-up notifies, as nobody watched it being typed. The answer is the bot's closed
- * receipt, `running` while it still sends, or null when the bot did not answer, so the same call is made again.
+ * receipt, `running` while it still sends, or null when the bot did not answer, so the same call is made again. The send
+ * class says what kind of message it is, so memory can leave Nocheh's own cards out (ADR-0256).
  */
 export async function sendReply(call:RuntimeCall,target:ReturnType<typeof replyTarget>,dispatchKey:string,reply:{text:string;session_id:string},
-  options:{notify:boolean;presence:boolean;button?:ReplyButton}):Promise<Record<string,unknown>|null> {
-  const {button,...rest}=options;
-  try{return await call('telegram.reply',{...target,dispatch_key:dispatchKey,text:reply.text,session_id:reply.session_id,...rest,...(button?{button}:{})},30000);}
+  options:{notify:boolean;presence:boolean;button?:ReplyButton;sendClass:SendClass}):Promise<Record<string,unknown>|null> {
+  const {button,sendClass,...rest}=options;
+  try{return await call('telegram.reply',{...target,dispatch_key:dispatchKey,text:reply.text,session_id:reply.session_id,...rest,send_class:sendClass,...(button?{button}:{})},30000);}
   catch{return null;}
 }
 

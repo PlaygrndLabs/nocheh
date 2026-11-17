@@ -177,8 +177,17 @@ const reasons: Record<string, string> = {
   input_limit: 'The message and its context were too long to learn from',
   invalid_model_output: 'The model’s answer couldn’t be used',
   no_conversation: 'Not part of a chat, so there is nothing to learn',
+  nocheh_message: 'Nocheh’s own card, notice or reminder: kept, not learned',
+  sender_not_allowed: 'From someone not allowed there: kept out of your notes, still in group memory',
+  target_not_allowed: 'A reaction to someone not allowed there: kept out of your notes, still in group memory',
 };
 export const reason = (value: string | null | undefined): string => (value ? (reasons[value] ?? readable(value)) : '');
+
+/** The states in which a task has ended: its recorded reason says why it ended so, not what it waits for. */
+const endedStates = new Set(['completed', 'failed', 'skipped', 'cancelled', 'denied']);
+/** The heading of a task's recorded reason in its detail panel: what a task still open waits for, and a plain note on
+ *  one that ended, such as a memory step that completed without learning Nocheh's own card. */
+export const reasonHeading = (state: string): string => (endedStates.has(state) ? 'Note' : 'Waiting for');
 
 /** The words for a waiting-reasons row from background work health. */
 export const waitingReason = (row: {state: string; waiting_reason: string | null}): string =>

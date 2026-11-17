@@ -16,6 +16,7 @@ import {machineSchema} from './machines.js';
 import {runtimeProfileSchema} from './runtime-profiles.js';
 import {securityCoreSchema} from '../security/store.js';
 import {nativeReviewSchema} from './native-review.js';
+import {memoryProblemSchema} from './note-sources.js';
 import {sharingContentSchema} from './sharing-schema.js';
 import {portableHistorySchema} from './portable-schema.js';
 import {storageWorkflowSchema} from './workflow-schema.js';
@@ -153,6 +154,7 @@ ${backgroundJobSchema}
 ${machineSchema}
 ${securityCoreSchema}
 ${nativeReviewSchema}
+${memoryProblemSchema}
 ${sharingContentSchema}
 ${memoryAccessSchema}
 ${ownerAutonomySchema}

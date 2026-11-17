@@ -56,6 +56,18 @@ Besides you, only your members may address Nocheh in a selected group. You add a
 manage them on the **Members** page ([members](#members)); no setting lists them,
 and there is no command for them.
 
+Not allowed does not mean unheard. A message from a participant who is not
+allowed is still archived, seen by the next group reply as context, learned by
+that group's long-term memory and found by search and by recall from the owner's
+private chat, labelled with the group. It stays out of one place only: the
+owner's own notes (Memory › Assistant notes), together with the owner's reactions
+to it, and a reply to it or a pin of it is reviewed without it. A message left
+out stays out after a later grant; **Memory › Assistant notes** counts them.
+Posts in a chat's own name, anonymous admins and other bots count as not
+allowed. Nocheh's own messages never do once archived: a pin of one it learns
+is reviewed with it, and a pin of its card, notice or reminder without it,
+uncounted ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
+
 For proactive group conversation, disable the bot's group privacy mode in
 BotFather or give it the appropriate group administrator role. Telegram otherwise
 delivers a limited set of group messages. The archive can preserve only updates
@@ -220,7 +232,7 @@ and `can_connect_to_business`.
 ## Members
 
 Members are the people besides you who may talk to Nocheh in groups
-([ADR-0259](adr/0259-members-in-groups.md)). Members are allowed by default in
+([ADR-0260](adr/0260-members-in-groups.md)). Members are allowed by default in
 the groups they are in: a group you never switched off for a member is on for
 them, a group they join later included. Manage them on the **Members** page
 ([dashboard](dashboard.md)); every switch saves at once (the daily cap has its
@@ -343,6 +355,103 @@ leaves that group for the same add. **Keep
 delivery logs** in Settings › Privacy & data removes old records too. The
 dashboard's own mini app menu button call does not pass the bot yet, so it has
 no record ([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md)).
+
+## Send classes
+
+Each message Nocheh sends carries a send class, set where the send is decided
+and kept in the archived copy of the delivered message. It is separate from the
+send record's kind, which does not change.
+
+| Class | Sent as | Learned |
+| --- | --- | --- |
+| `reply` | an answer in the chat | yes |
+| `follow_up` | a follow-up after an approved action | yes |
+| `private_answer` | an Answer privately reply | yes |
+| `job_report` | a background or machine job's report | yes |
+| `scheduled_run` | a scheduled task's result | yes |
+| `approved_post` | a post the owner approved | yes |
+| `card` | an approval card or a fixed control reply | no |
+| `card_update` | a card's settle, a button answer or a notice edit | no |
+| `refusal` | the fixed reply to someone not allowed | no |
+| `notice` | a problem, import or memory notice, a group's line about a job, or the card and lines about a group someone added Nocheh to | no |
+| `reminder` | a task reminder | no |
+
+A message that is not learned is still archived and searchable, and is context
+when the owner replies to it; it never reaches the notes review, long-term memory
+or interpretations, and System › Background work shows its learning step as
+skipped ("Nocheh's own card, notice or reminder: kept, not learned"). The
+owner can turn learning on for one message, and that yes overrides the class.
+A route accepts only its own classes; an unknown class falls back to the
+route's default and never stops the send. Leaving a group sends no message, but
+runs under `notice` too, so nothing it returns could be learned. A message with no class, everything
+sent before classes existed and the web chat's replies included, is learned
+([ADR-0256](adr/0256-nochehs-own-messages-carry-a-send-class.md)).
+
+A quote or a pin carries part or all of a message Nocheh sent. The owner's
+quote or pin of a message Nocheh learns, other than its reply about a forward,
+counts as Nocheh's in note labels. Whoever quotes or pins one of Nocheh's
+messages, a card included, Nocheh's words are never learned as theirs: the
+quote is left out of the message quoting it, and in long-term memory the pin
+leaves only a fixed note that one of Nocheh's messages was pinned. The notes
+review and interpretations still read a pinned message that Nocheh learns, as
+Nocheh's, and a card the owner replies to stays context of that reply
+([ADR-0256](adr/0256-nochehs-own-messages-carry-a-send-class.md)). A quote of a
+card is labelled as a quote of someone else's message, without its words. Every
+review and interpretation takes a pinned card out of the pin, and a pin of a
+card with nothing else in it is neither reviewed nor interpreted. A message
+from Nocheh's own account that the archive does not hold as Nocheh's, such as
+Nocheh's own before its delivery is archived, or someone's forward of a
+Nocheh message, is cut from a pin or quote the same way, and leaves the same
+note. Nocheh tells its own account only by comparing the sender's ID with the
+bot the update came to. Only Nocheh's own words are cut: another bot's message
+that someone pins or quotes is learned as someone else's, and a message sent
+through an inline bot, which its sender wrote, is labelled as sent through an
+inline bot. The owner's quote of their own forward is a quote of whoever wrote
+it, never the owner's words, and so is a quote of a message in another chat or
+topic: Telegram shows only who first sent it, and in a forum topic it also points
+the reply at the topic's first message, which the quote is not from. In the
+owner's notes review a quote is judged by who wrote the message it answers, as a
+pin is: another bot's message, which Telegram never sends to Nocheh, is cut out
+and counted, and a quote of a message in another chat or topic stays only when
+Nocheh holds that message and its sender is allowed there. A quote inside a
+pinned message is judged the same way, by the message it quotes as Nocheh holds
+the pinned message; Telegram sends a pinned message without its reply, so the
+quote inside one Nocheh never got is cut, counted as a quote that could not be
+traced. A Telegram Desktop export records a reply to another chat by that
+chat's message id, which names a different message in this chat: an export
+imported now is not linked to that message, and the owner's notes review never
+judges a quote by the link an earlier import made. A pinned message's own
+reply, such as a poll it answers in another chat, is never learned with the
+pin. Any other
+message one carries (the checklist that a "tasks done" or "tasks added" service
+message reports on, a giveaway's or a suggested post's message, the poll an
+option was added to, or one in a field Telegram adds later) is kept and
+labelled: Nocheh tells such a message by its shape, never by a field's name,
+cuts only its own words from it, and in the owner's notes review cuts one from
+someone not allowed there, counted as kept out. Telegram sends such a message
+with its quote but without its reply, so a quote inside one is traced through
+that message as Nocheh holds it in the same chat, as a pinned message's quote
+is: one quoting Nocheh's words is cut from everything learned, and so is one
+Nocheh can't trace (the message never archived, or archived answering
+nothing), counted as a quote that could not be traced, whoever it quoted. One
+that keeps its reply to a message in another chat is judged in the owner's
+notes review by that message, and cut and counted as not traced when Nocheh
+holds no copy of the message carrying the quote. A
+poll option someone added is judged by who added it there the same way, one
+added in a chat's name never let in, and a deleted option's text is cut there,
+except in the owner's private chat, where an option the owner deleted from
+their own poll stays the owner's own; interpretations and long-term memory
+keep them, labelled. Telegram names no one per checklist task,
+and the owner can stop sharing a checklist after others added tasks, so a
+checklist others can add tasks to, and any checklist edited, pinned, quoted or
+forwarded, is labelled as someone else's words, never as the owner's own; in
+the owner's private chat with Nocheh no one else can add tasks, so the owner's
+own checklist there stays the owner's. A poll someone else added an option to,
+a deleted option and a message carrying someone else's, or one with a quote,
+are labelled the same way, and the owner's pin of such a message of their own
+as a message holding someone else's words that the owner pinned. All of it is
+still learned
+([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app
 

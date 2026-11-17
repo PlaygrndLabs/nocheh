@@ -60,6 +60,7 @@ import {SourceRetirementRepository} from './source-retirement.js';
 import {ReactionStateRepository} from './reaction-state.js';
 import {KnowledgeManagementRepository} from './knowledge-management.js';
 import {OwnerSupervisionRepository} from './owner-supervision.js';
+import {NoteSourceRepository} from './note-sources.js';
 import {BackgroundJobRepository} from './background-jobs.js';
 import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
@@ -99,7 +100,9 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     await operations.verify(reference);return reference;
   },options.detectorVersion);
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
-  const projects=new ProjectRepository(stores.control,servedGroups),entities=new EntityRepository(stores,access,projects),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
+  // One reader of where messages and notes came from, for reviews, Hermes's lookups, the Notes page, recall and Honcho.
+  const noteSources=new NoteSourceRepository(stores,options.policy,access);
+  const projects=new ProjectRepository(stores.control,servedGroups),entities=new EntityRepository(stores,access,projects,noteSources),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new MemoryProvenanceRepository(stores,archive,guards,options.memoryEngine);
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
@@ -123,7 +126,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
-  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect);
+  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect,noteSources);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
@@ -189,7 +192,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>ownerChat(options.policy())}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,
-    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??''),
+    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??'',noteSources),noteSources,
     shared,
     detectorVersion:options.detectorVersion,detect};
 }

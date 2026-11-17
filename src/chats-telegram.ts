@@ -17,6 +17,16 @@ const chatPattern=new RegExp(`^${telegramChat}$`),accountPattern=new RegExp(`^${
 export const telegramAccountSource=telegramAccount;
 export const isTelegramChat=(value:unknown):value is string=>typeof value==='string'&&chatPattern.test(value);
 export const isTelegramAccount=(value:unknown):value is string=>typeof value==='string'&&accountPattern.test(value);
+/**
+ * Whether a Telegram user, as a message shows it, is the bot an update came to: a bot account whose id equals the bot's
+ * own account the archive stored with that update (events.bot_id, the bot token's own account). Told by equality alone,
+ * so no caller reads an id's shape; a bot id the archive holds in another form (an import's, a fixture's) names no
+ * account, and then no user is the bot.
+ */
+export function isBotAccount(user:unknown,bot:unknown):boolean {
+  const found=user&&typeof user==='object'&&!Array.isArray(user)?user as Record<string,unknown>:null;
+  return !!found&&found.is_bot===true&&isTelegramAccount(bot)&&(typeof found.id==='number'||typeof found.id==='string')&&String(found.id)===bot;
+}
 
 /**
  * The frozen shape of a chat value stored before step 2b: a Telegram chat id, optionally followed by one of its

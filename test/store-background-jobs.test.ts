@@ -134,7 +134,7 @@ test('a background job is started with one call, approved on its card, runs as o
     assert.deepEqual([kept.tokens,Number(kept.cost_usd)],[{input_tokens:100000,output_tokens:10000,cache_read_tokens:500000,cache_write_tokens:40000,calls:3},0.5]);
     // The answer that ends on its own is the report, sent to the group by the job's approval.
     const action=(await stores.control.query('SELECT a.* FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id WHERE b.job_id=$1',[proposed.id])).rows[0];
-    assert.deepEqual([action.destination,action.state],[group,'approved']);
+    assert.deepEqual([action.destination,action.state,action.send_class],[group,'approved','job_report']);
     assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'waiting','the report waits for Telegram');
     await stores.control.query("UPDATE telegram_action_requests SET state='done' WHERE id=$1",[action.id]);
     assert.equal((await s.jobs.operation('job:'+proposed.id,await authority())).state,'completed');

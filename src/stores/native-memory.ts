@@ -8,27 +8,84 @@ import {engineErrors,engineId,engineSummary,type EngineWrite,type MemoryEngine} 
 import {archiveScopes,groupWithTopics,parentSpace,readSetParam,readSetSql,recallCondition,servedGroups,validateSpace} from '../spaces.js';
 import {ownerChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
+import {forwardOrigin,type Forward} from '../forwarded.js';
+import {deliveredKinds} from '../send-classes.js';
+import {ownVoice} from '../source-facts.js';
+import {honchoPointer,honchoSource,honchoSources,type HonchoPart} from '../source-labels.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
-import type {GuardBinding} from './guards.js';
+import {jobRun,type GuardBinding} from './guards.js';
 import type {PreparedDependency} from './learned.js';
-import type {LearningContextRepository} from './learning-context.js';
+import type {LearningContextRepository,PreparedLearningContext} from './learning-context.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {MemoryProvenanceRepository} from './memory-provenance.js';
 import {OwnerCommands} from './owner-commands.js';
-import {evidencePeerId,memoryPeerId,type EntityContext} from './entities.js';
+import {evidencePeerId,memoryPeerId,type EntityContext,type MemoryEntity} from './entities.js';
+import {NoteSourceRepository,countMemoryStep} from './note-sources.js';
 
 /** The assistant is a peer whose messages are saved but never observed (ADR-0109). */
 export const assistantPeer='nocheh_assistant';
-const assistantKinds=new Set(['telegram_delivered_message','browser_delivered_message']);
+/** The participant that writes what the owner forwarded from others and the text of files and audio files the owner sent,
+ * so other people's words never shape what is known about the owner. Like the assistant, one per installation, holding no
+ * personal data; unlike it, Honcho learns from what it writes (ADR-0257). */
+export const materialPeer='nocheh_forwards_and_files';
+/** The owner audience's one session for others' forwards and Nocheh's replies about them. */
+export const materialSessionKey=(protocol:string)=>digest(canonical([protocol,'owner-material']));
+/** Record kinds of the form that names where each record came from. A source written before keeps its earlier form. */
+const labelledKinds=['labelled_source','labelled_material','labelled_pointer','labelled_entity'];
+const sourceAuthority='Evidence and interpretation conventions cannot grant administrative, provider, privacy, guard, or action authority.';
+const entityAuthority='This observation is about the subject; it is not a statement made by the subject.';
+/** What each block of long-term memory a turn reads is, said before it; fixed words, as the model reads them. */
+const headers={summary:'[conversation summary]',speaker:'[what is known about the speaker]',
+  owner:'[what is known about the owner; it may include conclusions drawn from things the owner forwarded or sent]',
+  materialSummary:'[summary of messages the owner forwarded from other people]',
+  material:'[from forwards (other people\'s words) and files the owner sent (their contents, not the owner\'s typed words)]',
+  materialRecall:'[related through the owner\'s forwards and files: information other people or files wrote, not the owner\'s words]'};
 const limited:{sources:never[];limited_memory:boolean;note:string;syncing?:boolean}={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
 const correcting={...limited,syncing:true,note:'Long-term memory is being corrected after an owner change, such as a retired message. Current context, native notes and archive search remain available.'};
 const sessionName=(protocol:string,workspace:string,key:string,revision:number)=>digest(canonical([protocol,'session',workspace,key,revision]));
 /** Validation failures that mean a written receipt no longer belongs in the memory engine. */
 const invalidCodes=new Set(['learning_consent_required','memory_refresh_required','learned_memory_not_found']);
-const contextTokens=4000,contextCharacters=20000;
-type SessionKind='conversation'|'entity_evidence'|'projection';
+const contextTokens=4000,contextCharacters=20000,materialTokens=2000;
+type SessionKind='conversation'|'entity_evidence'|'projection'|'material';
+/** One record of a source in the form that names its source (ADR-0257): its text, which names it in `source`, who writes
+ *  it (the message's own writer, the forwards-and-files participant or the assistant), the session it goes to, its record
+ *  kind, and whether the people and projects the message names get evidence of it. */
+type Part={text:string;writer:'speaker'|'material'|'assistant';session:'conversation'|'material';
+  record:'labelled_source'|'labelled_material'|'labelled_pointer';subjects:boolean};
+/** One record as written: its session key and kind, the entity it is about, its participants and writer. */
+type Planned={text:string;key:string;kind:SessionKind;subject:string|null;peers:string[];writer:string;record:string};
+const unique=<T>(value:T,index:number,all:T[])=>all.indexOf(value)===index;
+const messageOf=(payload:any)=>payload?.message??payload?.edited_message??payload?.channel_post??payload?.edited_channel_post??null;
+/** The name of the file a message carries, from its guarded copy, whose names the secret check has read. */
+function fileName(payload:any):string|null {
+  const message=messageOf(payload),files=Array.isArray(payload?.attachments)?payload.attachments:[];
+  const name=message?.document?.file_name??message?.audio?.file_name??files.find((file:any)=>['file','image'].includes(file?.kind))?.name;
+  return typeof name==='string'?name:null;
+}
+/** A prepared observation without the quote its reply carries, nor the quote inside a message it pinned. Only
+ *  LearningContextRepository.prepare's observations come here, which hold no message a reply answers already. A quote
+ *  inside a message it embeds is never left here: Telegram leaves the reply out of an embedded message but keeps its
+ *  quote, which makes the message holding it someone else's words (SourceFacts.held), written whole as such, never the
+ *  sender's own. */
+function unquoted(value:unknown):unknown {
+  const copy=structuredClone(value) as any;
+  for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(copy?.payload?.[kind]) {
+    delete copy.payload[kind].quote;
+    const pinned=copy.payload[kind].pinned_message;
+    if(pinned&&typeof pinned==='object')delete pinned.quote;
+  }
+  return copy;
+}
+/** The message whose words a message carries: the one it pinned, when it is a pin. */
+const carried=(message:any)=>message?.pinned_message&&typeof message.pinned_message==='object'?message.pinned_message:message;
+/** At most `size` UTF-16 units of `text`, never cutting a character in half. */
+function fitted(text:string,size:number):string {
+  if(text.length<=size)return text;
+  const end=size>0&&/[\uD800-\uDBFF]/.test(text[size-1]!)?size-1:size;
+  return text.slice(0,Math.max(0,end));
+}
 /** The installation's memory space; only a fresh start, an installation reset or another engine changes it. */
 const workspaceId=(protocol:string,generation:string,revision:number)=>digest(canonical(revision===1?[protocol,generation]:[protocol,generation,revision]));
 type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
@@ -38,7 +95,8 @@ type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
  * One memory space serves the installation; sessions bound conversations; guard epochs never rebuild it. */
 export class NativeMemoryRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
-    readonly provenance:MemoryProvenanceRepository,readonly engine:MemoryEngine,readonly detect:(text:string,background?:boolean)=>Promise<unknown>){}
+    readonly provenance:MemoryProvenanceRepository,readonly engine:MemoryEngine,readonly detect:(text:string,background?:boolean)=>Promise<unknown>,
+    readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy(),contexts.access)){}
   private get protocol(){return this.engine.protocol;}
   private get control(){return this.contexts.access.stores.control;}
   private get guards(){return this.contexts.guards;}
@@ -192,9 +250,9 @@ export class NativeMemoryRepository {
     return row as {session_id:string;revision:number;audience:string};
   }
   private async queueDocument(source:SourceReference,evidence:SourceReference[],space:string,text:string,dependencies:PreparedDependency[],binding:GuardBinding,
-    entities:EntityContext,options:{projection?:{id:string;revision:number};assistant?:boolean;supersedes?:string[]}={}):Promise<{audience:string;workspace:string;receipts:string[]}[]> {
-    if(evidence.length<1||evidence.length>30||text.length>600000)throw new HttpError(413,'memory_input_limit');
-    const {projection,assistant=false,supersedes=[]}=options,audience=this.audienceOf(space);
+    entities:EntityContext,options:{projection?:{id:string;revision:number};assistant?:boolean;supersedes?:string[];parts?:Part[]}={}):Promise<{audience:string;workspace:string;receipts:string[]}[]> {
+    if(evidence.length<1||evidence.length>30||[text,...(options.parts??[]).map(part=>part.text)].some(value=>value.length>600000))throw new HttpError(413,'memory_input_limit');
+    const {projection,assistant=false,supersedes=[],parts}=options,audience=this.audienceOf(space);
     const workspace=await this.ensureWorkspace(source,binding),generation=await this.current(workspace);
     // Engine egress is prepared as the space owner; reply context is prepared for the audience.
     const writers=[this.principal(audience,source.id,binding),...(audience==='owner'?[]:[generation.principal])];
@@ -205,21 +263,22 @@ export class NativeMemoryRepository {
     const allPeers=[peer,...subjects.map(value=>memoryPeerId(value!))].filter((value,index,all)=>all.indexOf(value)===index);
     const conversation=entities.session_id;
     const protocol=this.protocol;
-    const records=[{text,key:projection?digest(canonical([protocol,'projection',conversation,projection.id])):conversation,
-      kind:(projection?'projection':'conversation') as SessionKind,subject:projection?null:speaker?.id??null,peers:allPeers,
+    // In the earlier form, and for interpretations, one writer writes every record of the source.
+    const records:Planned[]=parts?this.labelledRecords(parts,{reference:source,peer,speaker,subjects:subjects as MemoryEntity[],conversation,audience}):[{text,key:projection?digest(canonical([protocol,'projection',conversation,projection.id])):conversation,
+      kind:(projection?'projection':'conversation') as SessionKind,subject:projection?null:speaker?.id??null,peers:allPeers,writer:peer,
       record:projection?'learned_interpretation':'source_evidence'},
       ...subjects.map(subject=>({text:canonical({kind:'entity_evidence',subject:{id:subject!.id,kind:subject!.kind,name:subject!.name},
         original_speaker:speaker?{id:speaker.id,name:speaker.name}:null,source,attribution:projection||!speaker?'inferred':'reported',observation:JSON.parse(text),
-        authority:'This observation is about the subject; it is not a statement made by the subject.'}),
+        authority:entityAuthority}),
         // An interpretation's subject evidence has its own session, so correcting it never rebuilds source evidence.
         key:digest(canonical([protocol,'entity-evidence',conversation,subject!.id,...(projection?[projection.id]:[])])),kind:'entity_evidence' as SessionKind,subject:subject!.id as string|null,
-        peers:[peer,memoryPeerId(subject!)],record:'entity_evidence'}))];
+        peers:[peer,memoryPeerId(subject!)],writer:peer,record:'entity_evidence'}))];
     // Logical identities do not depend on a session's revision, so a rebuild can carry valid writes forward.
     const planned=records.flatMap(record=>{
       const chars=Array.from(record.text),chunks=[];
       for(let offset=0;offset<chars.length;offset+=12000) {
         const content=`[nocheh:event:${source.id}]\n`+chars.slice(offset,offset+12000).join(''),hash=digest(content);
-        chunks.push({record,offset,content,logical:digest(canonical([workspace,record.key,peer,record.subject,evidence,dependencies,projection??null,binding.mode,offset,hash]))});
+        chunks.push({record,offset,content,logical:digest(canonical([workspace,record.key,record.writer,record.subject,evidence,dependencies,projection??null,binding.mode,offset,hash]))});
       }
       return chunks;
     });
@@ -248,7 +307,7 @@ export class NativeMemoryRepository {
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) ON CONFLICT DO NOTHING RETURNING id`,
           [id,workspace,audience,item.record.key,item.logical,binding.mode,source,JSON.stringify(evidence),'events:'+source.id,
             dependencies.find(d=>d.source_id==='events:'+source.id)?.revision??null,prepared.id,prepared.input_hash,JSON.stringify(dependencies),projection??null,
-            peer,JSON.stringify(item.record.peers),session.session_id,item.record.subject,speaker?.id??null,item.record.record]);
+            item.record.writer,JSON.stringify(item.record.peers),session.session_id,item.record.subject,speaker?.id??null,item.record.record]);
         if(added.rowCount)await this.changed(db,workspace,item.record.key);
         await requestWorkflow(db,'honcho','receipt:'+id);
         await db.query('COMMIT');
@@ -256,7 +315,30 @@ export class NativeMemoryRepository {
       receipts.push(id);
     }
     await this.guards.assertCurrent(binding);
+    // One entry for the audience with every part's writes, so learning waits for all of them.
     return [{audience,workspace,receipts}];
+  }
+  /**
+   * The records of a source in the form that names its source: each part with its own writer and session, and evidence
+   * of it for the people and projects the message names. Evidence of what is kept apart (the forwards-and-files
+   * participant's, or the owner's forwards session) has sessions of its own, so it never sits beside the owner's own words
+   * about the same person or project, and it names no speaker: it is reported, not said. Its observation names its source.
+   */
+  private labelledRecords(parts:Part[],plan:{reference:SourceReference;peer:string;speaker:MemoryEntity|null;subjects:MemoryEntity[];conversation:string;audience:string}):Planned[] {
+    const protocol=this.protocol,forwards=materialSessionKey(protocol);
+    return parts.flatMap(part=>{
+      const writer=part.writer==='material'?materialPeer:part.writer==='assistant'?assistantPeer:plan.peer,material=part.writer==='material';
+      // Only the owner audience has a session of forwards; in a group, what is kept apart stays in the group's own session.
+      const kept=part.session==='material'&&plan.audience==='owner',key=kept?forwards:plan.conversation,apart=material||kept;
+      const main:Planned={text:part.text,key,kind:kept?'material':'conversation',subject:part.writer==='speaker'?plan.speaker?.id??null:null,
+        peers:[writer,...(part.subjects?plan.subjects.map(memoryPeerId):[])].filter(unique),writer,record:part.record};
+      if(!part.subjects)return [main];
+      return [main,...plan.subjects.map(subject=>({text:canonical({kind:'entity_evidence',subject:{id:subject.id,kind:subject.kind,name:subject.name},
+        original_speaker:material||!plan.speaker?null:{id:plan.speaker.id,name:plan.speaker.name},source:plan.reference,
+        attribution:material||plan.speaker?'reported':'inferred',observation:JSON.parse(part.text),authority:entityAuthority}),
+        key:digest(canonical(apart?[protocol,'entity-evidence-material',key,subject.id]:[protocol,'entity-evidence',plan.conversation,subject.id])),
+        kind:'entity_evidence' as SessionKind,subject:subject.id as string|null,peers:[writer,memoryPeerId(subject)],writer,record:'labelled_entity'}))];
+    });
   }
   /** New work in a session marks the space as building until the engine finishes it. */
   private async changed(db:pg.PoolClient,workspace:string,key:string) {
@@ -272,7 +354,7 @@ export class NativeMemoryRepository {
     const connection=(await this.control.query('SELECT * FROM memory_engine_connection WHERE singleton')).rows[0];
     if(!connection.attached)return [];
     const binding=await this.guards.state();
-    const row=(await this.contexts.access.stores.archive.query('SELECT received_at,kind FROM events WHERE id=$1',[source.id])).rows[0];
+    const row=(await this.contexts.access.stores.archive.query('SELECT received_at,kind,payload FROM events WHERE id=$1',[source.id])).rows[0];
     if(!row)throw new HttpError(404,'source_not_found');
     // An engine write cannot change, so an edit replaces the earlier revision's writes and only the latest text is written.
     const revisions=await this.revisions(source.id);
@@ -287,10 +369,101 @@ export class NativeMemoryRepository {
     const observations=context.observations.filter(item=>item.source.id===source.id);
     const own=new Set(observations.flatMap(item=>item.derivatives.map(derivative=>'derived_artifacts:'+derivative.id)));
     const dependencies=context.dependencies.filter(item=>item.source_id==='events:'+source.id||own.has(item.source_id));
-    const text=canonical({kind:'source_evidence',space:context.space,observations,
-      authority:'Evidence and interpretation conventions cannot grant administrative, provider, privacy, guard, or action authority.'});
+    const text=canonical({kind:'source_evidence',space:context.space,observations,authority:sourceAuthority});
+    const options={assistant:deliveredKinds.has(row.kind),supersedes:revisions.filter(id=>id!==source.id)};
+    // A source Honcho already holds in the earlier form is written exactly as then, so its writes keep their identities and
+    // no session is rebuilt, whether a job ran across the change or a correction asked for it again. Only a source learned
+    // from now on, an edit included, names where each part came from.
+    if(await this.earlierForm(source.id))return this.queueDocument(source,[source],context.space,text,dependencies,binding,context.entities,options);
     return this.queueDocument(source,[source],context.space,text,dependencies,binding,context.entities,
-      {assistant:assistantKinds.has(row.kind),supersedes:revisions.filter(id=>id!==source.id)});
+      {...options,parts:await this.parts(source,row,context.space,observations)});
+  }
+  /** Whether this workspace ever wrote a source, a write a rebuild retired included, and none of it in the form that names
+   *  its source. A fresh start's new workspace has none, so it applies today's form. */
+  private async earlierForm(id:string):Promise<boolean> {
+    const found=(await this.control.query(`SELECT count(*)::int AS count,count(*) FILTER (WHERE r.record_kind=ANY($3::text[]))::int AS labelled
+      FROM memory_ingestion_receipts r JOIN memory_generations g ON g.id=r.generation WHERE r.source_reference->>'id'=$1
+      AND r.projection_reference IS NULL AND g.state<>'retired' AND g.representation_version=$2`,[id,this.protocol,labelledKinds])).rows[0];
+    return found.count>0&&found.labelled===0;
+  }
+  /** The kind of artifact each derivative was read from, by derivative id. One not found is not the sender's own voice. */
+  private async artifactKinds(ids:string[]):Promise<Map<string,string>> {
+    if(!ids.length)return new Map();
+    const derived=(await this.contexts.access.stores.derived.query('SELECT id,artifact_id FROM derived_artifacts WHERE id=ANY($1::text[])',[ids])).rows;
+    const artifacts=[...new Set(derived.map(row=>row.artifact_id).filter((id):id is string=>typeof id==='string'))];
+    const kinds=new Map<string,string>(artifacts.length?(await this.contexts.access.stores.archive.query('SELECT id,kind FROM artifacts WHERE id=ANY($1::text[])',
+      [artifacts])).rows.map(row=>[String(row.id),String(row.kind)]):[]);
+    return new Map(derived.map(row=>[String(row.id),kinds.get(row.artifact_id)??'']));
+  }
+  /**
+   * How a source is written when each record names its source, from what code reads of the original, never what it says
+   * (ADR-0257). Someone else's forward the owner sent, an inline bot's message included, is kept whole on the
+   * forwards-and-files participant: in the owner's private chat in the session of forwards, with a note left in the chat
+   * that something was forwarded, and in a group in that group's session. The owner's own message keeps the owner's typed
+   * words and voice on the owner's participant; the text of a file or audio file, and someone else's quote, go beside it
+   * in the same session on the forwards-and-files participant, so a caption still links to its file. Someone else's
+   * message the owner pinned is kept as such a forward is, and so is the owner's message holding words that may be someone
+   * else's (a checklist or poll others may have added to, a message Telegram shows inside it, or one quoting a message),
+   * whose words say it is not a pin, and the owner's pin of such a message of their own, whose words say no one else wrote
+   * it. A quote of Nocheh's own message, by anyone, is the sender's
+   * words without it, and is written nowhere else: a learned one is already learned as Nocheh's, and a card, notice or
+   * reminder is not learned at all. A pin of Nocheh's own message, by anyone, an anonymous admin included, leaves only a
+   * note in that chat that it was pinned, for the same reason. So does a quote or pin of Nocheh's own account's message the
+   * archive does not hold as Nocheh's (not archived yet, or a forward of one), told by the bot the message came to
+   * (NoteSourceRepository.carried). Another bot's message, and one sent through an inline bot, is someone else's: the
+   * owner's pin of it is kept as a forward is, and a quote of it as anyone else's quote. Everyone else's message stays on
+   * its writer, and Nocheh's on the assistant, each naming what it is; Nocheh's reply about someone else's forward goes
+   * with that forward.
+   */
+  private async parts(source:SourceReference,row:{payload:Buffer},space:string,observations:PreparedLearningContext['observations']):Promise<Part[]> {
+    const found=(await this.sources.classesFor([source.id])).get(source.id);
+    if(!found)throw new HttpError(404,'source_not_found');
+    const {facts}=found,audience=this.audienceOf(space),document=(items:typeof observations,named:string)=>
+      canonical({kind:'source_evidence',space,source:named,observations:items,authority:sourceAuthority});
+    if(facts.author==='nocheh') {
+      const about=found.class==='nocheh_about_forward';
+      return [{text:document(observations,honchoSource({part:'nocheh',send_class:facts.send_class,about_forward:about})),writer:'assistant',
+        session:about?'material':'conversation',record:'labelled_source',subjects:true}];
+    }
+    const guarded=(observations[0]?.value as any)?.payload;
+    // Checked before any class, so an anonymous admin's pin, a post in the chat's name, is read the same way.
+    const cut=facts.pinned!==null||facts.quote!==null?(await this.sources.carried([source.id])).get(source.id):undefined;
+    const by=facts.author==='owner'?'':'_other' as const;
+    if(found.class==='pinned_nocheh'||facts.pinned!==null&&cut?.pinned)
+      return [{text:canonical(honchoPointer(`pinned_nocheh${by}`)),writer:'assistant',session:'conversation',record:'labelled_pointer',subjects:false}];
+    if(facts.forward!==null&&facts.forward!=='own'||facts.pinned==='other') {
+      let original:unknown=null;try{original=JSON.parse(row.payload.toString());}catch{}
+      // The kind comes from the original and the name from the guarded copy, which the secret check has read; a pin's
+      // forward is read from the message it pinned.
+      const from=facts.forward!==null&&facts.forward!=='own'?facts.forward:null,pin=facts.pinned!==null?carried:(message:any)=>message;
+      const shown=from?forwardOrigin(pin(messageOf(original)),pin(messageOf(guarded))):null,forward:Forward|null=from?shown?.from===from?shown:{from,name:null}:null;
+      // A message that holds someone else's words itself (SourceFacts.held: a checklist or poll others may have added to,
+      // a message Telegram shows inside it) is not a pin, and its fixed words say so; a pin of the sender's own such
+      // message (pinned_held) never says someone else wrote it.
+      const kind=facts.held?'held' as const:facts.pinned_held?'pinned_held' as const:'pinned' as const;
+      const text=document(observations,honchoSource(forward?{part:'forward',forward}:{part:kind}));
+      if(facts.author!=='owner')return [{text,writer:'speaker',session:'conversation',record:'labelled_source',subjects:true}];
+      return [{text,writer:'material',session:'material',record:'labelled_material',subjects:true},
+        ...(audience==='owner'?[{text:canonical(honchoPointer(from??kind)),writer:'assistant' as const,session:'conversation' as const,record:'labelled_pointer' as const,subjects:false}]:[])];
+    }
+    const kinds=await this.artifactKinds(observations.flatMap(item=>item.derivatives.map(derivative=>derivative.id)));
+    const voice=(derivative:{kind:string;id:string})=>derivative.kind==='transcript'&&ownVoice.has(kinds.get(derivative.id)??'');
+    const derivatives=observations.flatMap(item=>item.derivatives),recorded=derivatives.some(voice);
+    const said=observations.some(item=>String((item.value as any)?.text??'').trim());
+    // A quote of Nocheh's own words, learned or not, is left out of the sender's words, and written nowhere else; so is one
+    // inside a message the sender pinned.
+    const nocheh=found.class==='quote_nocheh'||facts.quote==='other'&&!!(cut?.quote||cut?.pinned_quote);
+    const others=facts.quote==='other'&&!nocheh;
+    const kept:HonchoPart[]=[...(derivatives.some(item=>item.kind==='extracted_text')?[{part:'file' as const,name:fileName(guarded)}]:[]),
+      ...(derivatives.some(item=>item.kind==='transcript'&&!voice(item))?[{part:'audio' as const}]:[]),...(others?[{part:'quote' as const}]:[])];
+    const own:HonchoPart[]=[...(said||!recorded&&!kept.length?[{part:'own' as const}]:[]),...(recorded?[{part:'recording' as const}]:[])];
+    if(facts.author!=='owner'||!kept.length)return [{text:document(nocheh?observations.map(item=>({...item,value:unquoted(item.value)})):observations,
+      honchoSources([...own,...kept])),writer:'speaker',session:'conversation',record:'labelled_source',subjects:true}];
+    // A file sent without a caption leaves nothing of the owner's own to write.
+    return [...(own.length?[{text:document(observations.map(item=>({...item,value:facts.quote==='other'?unquoted(item.value):item.value,derivatives:item.derivatives.filter(voice)})),
+      honchoSources(own)),writer:'speaker' as const,session:'conversation' as const,record:'labelled_source' as const,subjects:true}]:[]),
+      {text:document(observations.map(item=>({...item,derivatives:item.derivatives.filter(derivative=>!voice(derivative))})),honchoSources(kept)),
+        writer:'material',session:'conversation',record:'labelled_material',subjects:true}];
   }
   private async revisions(eventId:string):Promise<string[]> {
     return await this.contexts.access.retirements?.revisions(eventId)??[];
@@ -666,21 +839,23 @@ export class NativeMemoryRepository {
     const db=await this.control.connect();
     try {
       await db.query('BEGIN');
-      const sessions=(await db.query(`SELECT session_id,work_revision FROM memory_sessions WHERE workspace=$1 AND kind='conversation'
+      const sessions=(await db.query(`SELECT session_id,work_revision FROM memory_sessions WHERE workspace=$1 AND kind IN ('conversation','material')
         AND prefetched_revision<work_revision ORDER BY updated_at DESC LIMIT 100`,[id])).rows;
       for(const session of sessions)await requestWorkflow(db,'honcho','context:'+session.session_id,session.work_revision);
       await db.query('COMMIT');return sessions.length;
     } catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
-  /** Prefetch one conversation's guarded context for its latest speaker, so the next turn reads it without new detection. */
+  /** Prefetch one conversation's guarded context for its latest speaker, so the next turn reads it without new detection.
+   * The owner's forwards and files are read with the owner's private chat, and on their own when their session changed. */
   async prefetch(sessionId:string):Promise<boolean> {
     const session=(await this.control.query('SELECT * FROM memory_sessions WHERE session_id=$1',[sessionId])).rows[0];
-    if(!session||session.kind!=='conversation')return false;
+    if(!session||!['conversation','material'].includes(session.kind))return false;
     const current=await this.current(session.workspace);
     const latest=(await this.control.query(`SELECT source_reference FROM memory_ingestion_receipts WHERE session_id=$1 AND retired_at IS NULL
       AND state='done' AND projection_reference IS NULL ORDER BY peer_id=$2,created_at DESC,id LIMIT 1`,[sessionId,assistantPeer])).rows[0];
     if(!latest)return false;
-    await this.sessionContext(current,session.audience,latest.source_reference);
+    if(session.kind==='material')await this.materialContext(current,latest.source_reference);
+    else await this.sessionContext(current,session.audience,latest.source_reference,session.audience==='owner');
     await this.control.query('UPDATE memory_sessions SET prefetched_revision=GREATEST(prefetched_revision,$2) WHERE session_id=$1',[sessionId,session.work_revision]);
     return true;
   }
@@ -739,8 +914,15 @@ export class NativeMemoryRepository {
     return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial,clarification:undefined};
   }
   /** Read the engine's context for the current conversation and its speaker, guarded once per distinct result.
-   * Owner reads span the workspace; any other audience reads only its own session. */
-  private async sessionContext(current:Current,audience:string,source:SourceReference) {
+   * Owner reads span the workspace; any other audience reads only its own session. With `material`, the owner's
+   * forwards and files are read beside it as their own block; `material` is null when only that read failed. */
+  private async sessionContext(current:Current,audience:string,source:SourceReference,material=false) {
+    const own=this.conversationContext(current,audience,source);
+    if(!material)return {...await own,material:undefined};
+    const [read,forwards]=await Promise.all([own,this.materialContext(current,source).catch(()=>null)]);
+    return {...read,material:forwards};
+  }
+  private async conversationContext(current:Current,audience:string,source:SourceReference) {
     const entities=await this.contexts.entities.context(source,[]),workspace=current.row.id;
     const session=(await this.control.query('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2 AND audience=$3',[workspace,entities.session_id,audience])).rows[0];
     const written=session?(await this.control.query(`SELECT count(*) FILTER (WHERE state='done')::int AS done,count(*) FILTER (WHERE state<>'done')::int AS pending
@@ -750,18 +932,51 @@ export class NativeMemoryRepository {
       AND peer_ids ? $2 AND ($3::text IS NULL OR session_id=$3) LIMIT 1`,[workspace,speaker,audience==='owner'?null:session?.session_id??''])).rowCount;
     const empty={text:'',session:session?.session_id??null,syncing:written.pending>0};
     // A summary of a person across every session, such as a Honcho peer card, is never read, for any audience (ADR-0225).
+    // The owner's block says what it is, since it may still hold what the owner forwarded before forwards were kept apart.
+    const owner=audience==='owner',block=owner?{block:'owner'}:{};
     let configuration:Record<string,unknown>,summary='',representation='';
     if(session&&written.done) {
       const options={subject:known?speaker:null,limitToSession:known&&audience!=='owner',tokens:contextTokens};
-      configuration={engine:this.engine.id,workspace,audience,session:session.session_id,subject:options.subject,limit_to_session:options.limitToSession,tokens:options.tokens};
+      configuration={engine:this.engine.id,workspace,audience,session:session.session_id,subject:options.subject,limit_to_session:options.limitToSession,tokens:options.tokens,...block};
       ({summary,subject:representation}=await this.engine.context(workspace,session.session_id,options));
-    } else if(audience==='owner'&&known) {
-      configuration={engine:this.engine.id,workspace,audience,peer:speaker,profile:true};
+    } else if(owner&&known) {
+      configuration={engine:this.engine.id,workspace,audience,peer:speaker,profile:true,...block};
       representation=await this.engine.profile(workspace,speaker!);
     } else return empty;
-    const text=string([summary.trim()?'[conversation summary]\n'+summary:'',representation.trim()?'[what is known about the speaker]\n'+representation:'']
+    const text=string([summary.trim()?headers.summary+'\n'+summary:'',representation.trim()?(owner?headers.owner:headers.speaker)+'\n'+representation:'']
       .filter(Boolean).join('\n\n'),2*1024*1024);
     if(!text)return empty;
+    return {...empty,text:await this.guardedContext(current,audience,source,configuration,text)};
+  }
+  /** What the owner forwarded from others and the files the owner sent, as the forwards-and-files participant holds them
+   * across the whole space, with the summary of the session of forwards: the owner audience only. */
+  private async materialContext(current:Current,source:SourceReference) {
+    const workspace=current.row.id;
+    const session=(await this.control.query('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2 AND audience=$3',
+      [workspace,materialSessionKey(this.protocol),'owner'])).rows[0];
+    const written=session?(await this.control.query(`SELECT count(*) FILTER (WHERE state='done')::int AS done,count(*) FILTER (WHERE state<>'done')::int AS pending
+      FROM memory_ingestion_receipts WHERE session_id=$1 AND retired_at IS NULL`,[session.session_id])).rows[0]:{done:0,pending:0};
+    // The participant only ever writes its own records, so it is their writer (memory_receipts_live_writer).
+    const known=!!(await this.control.query(`SELECT 1 FROM memory_ingestion_receipts WHERE generation=$1 AND retired_at IS NULL AND state='done'
+      AND peer_id=$2 LIMIT 1`,[workspace,materialPeer])).rowCount;
+    const empty={text:'',session:session?.session_id??null,syncing:written.pending>0};
+    let configuration:Record<string,unknown>,summary='',representation='';
+    if(session&&written.done) {
+      const options={subject:known?materialPeer:null,limitToSession:false,tokens:materialTokens};
+      configuration={engine:this.engine.id,workspace,audience:'owner',block:'material',session:session.session_id,subject:options.subject,limit_to_session:false,tokens:options.tokens};
+      ({summary,subject:representation}=await this.engine.context(workspace,session.session_id,options));
+    } else if(known) {
+      configuration={engine:this.engine.id,workspace,audience:'owner',block:'material',peer:materialPeer,profile:true};
+      representation=await this.engine.profile(workspace,materialPeer);
+    } else return empty;
+    const text=string([summary.trim()?headers.materialSummary+'\n'+summary:'',representation.trim()?headers.material+'\n'+representation:'']
+      .filter(Boolean).join('\n\n'),2*1024*1024);
+    if(!text)return empty;
+    return {...empty,text:await this.guardedContext(current,'owner',source,configuration,text)};
+  }
+  /** One block of context, guarded once per distinct result and bounded on its own. */
+  private async guardedContext(current:Current,audience:string,source:SourceReference,configuration:Record<string,unknown>,text:string):Promise<string> {
+    const workspace=current.row.id;
     // Identical engine output reuses its guarded copy, so a prefetched context needs no new detection on arrival.
     const key='native-context:'+digest(canonical([configuration,digest(text)]));
     const raw=await this.derived.record({operation_id:key,source:current.row.root_reference,kind:'memory_result',content:Buffer.from(text),
@@ -771,7 +986,7 @@ export class NativeMemoryRepository {
       configuration:{max_characters:contextCharacters,workspace,audience},provenance:{limitations:['representation_has_no_exact_citations']}});
     await this.guards.prepareContext(output,this.protocol,this.principal(audience,source.id,current.binding),this.prepared,this.detect);
     const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
-    return {...empty,text:String(value.text??'')};
+    return String(value.text??'');
   }
   /** An owner decision, such as retiring a message, can make engine writes invalid. The engine keeps them until a
    * correction sweep at that decision's epoch or later rebuilds their sessions and the engine deletes the old ones with
@@ -785,7 +1000,9 @@ export class NativeMemoryRepository {
     if(uncorrected.rowCount)return true;
     return !!(await this.control.query(`SELECT 1 FROM memory_session_deletions WHERE workspace=$1 AND state<>'done' LIMIT 1`,[current.row.id])).rowCount;
   }
-  /** Freshness is checked when a message arrives: the turn reads the engine's current context for its own conversation. */
+  /** Freshness is checked when a message arrives: the turn reads the engine's current context for its own conversation.
+   * An owner turn also reads the owner's forwards and files, side by side, as a block of its own; when only that read
+   * fails, the rest is kept and says so (forwards_unavailable), so the turn's parent counts it. */
   async context(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
     // An answer reader reads long-term memory by plain search only: no summary or representation (ADR-0249).
@@ -794,14 +1011,22 @@ export class NativeMemoryRepository {
       const current=await this.current(workspace.id),audience=this.principalAudience(principal);
       if(await this.correcting(current))return correcting;
       const source=(await this.contexts.access.archive.captured(principal.turnEvent)).reference;
-      const read=await this.sessionContext(current,audience,source);
+      // A job's run reads what it read before; the forwards-and-files block is for the owner's own turns.
+      const material=audience==='owner'&&!jobRun(principal),read=await this.sessionContext(current,audience,source,material);
       await this.current(workspace.id);await this.prepared.audience.assert(principal);
-      const syncing=read.syncing||current.row.state==='building';
-      if(!read.text)return {sources:[],limited_memory:false,syncing};
-      await this.prepared.allow(principal,{text:read.text});
-      return {sources:[{source:'nocheh:memory:'+(read.session??workspace.id),kind:'memory_inference',text:read.text,exact_citations:false,
-        limitations:['representation_has_no_exact_citations']}],limited_memory:false,syncing};
-    } catch(error){await this.prepared.audience.assert(principal);return limited;}
+      const syncing=read.syncing||!!read.material?.syncing||current.row.state==='building';
+      const failed=material&&read.material===null?['forwards_unavailable']:[],about=(name:string)=>material?{about:name}:{};
+      const sources=[...(read.text?[{source:'nocheh:memory:'+(read.session??workspace.id),kind:'memory_inference',text:read.text,exact_citations:false,
+        limitations:['representation_has_no_exact_citations',...failed],...about('owner')}]:[]),
+        ...(read.material?.text?[{source:'nocheh:memory:'+(read.material.session??materialPeer),kind:'memory_inference',text:read.material.text,exact_citations:false,
+          limitations:['representation_has_no_exact_citations'],...about('forwards_and_files')}]:[])];
+      if(!sources.length)return {sources:[],limited_memory:false,syncing,...(failed.length?{limitations:failed}:{})};
+      for(const item of sources)await this.prepared.allow(principal,{text:item.text});
+      return {sources,limited_memory:false,syncing};
+    } catch(error) {
+      // A failed read says so, so the turn's parent counts it for the owner's notice (ADR-0257); the turn still runs.
+      await this.prepared.audience.assert(principal);return {...limited,error:'memory_context_failed'};
+    }
   }
   private async relevantOwnerCorrections(principal:Reader,query:string,binding:GuardBinding) {
     const space=principal.space??principal.scope;
@@ -866,18 +1091,38 @@ export class NativeMemoryRepository {
       // Group and topic recall reads only that audience's own sessions, or every session of its group when
       // the group's topics share memory; owner recall spans the space.
       const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
-      // Each peer is asked side by side, so recall waits for the slowest engine answer rather than their sum.
-      const asked=sessions?.length===0?[]:connected.items.slice(0,4);
+      // Each peer is asked side by side, so recall waits for the slowest engine answer rather than their sum. The owner's
+      // forwards and files are asked too, beyond the four, when they hold something learned before this question: in a
+      // group only within its own sessions, and headed as other people's words.
+      const asked=sessions?.length===0?[]:[...connected.items.slice(0,4).map(item=>({peer:item.peer,head:`[related through ${item.path}]`})),
+        ...(await this.materialLearned(id,sessions,principal.turnEvent)?[{peer:materialPeer,head:headers.materialRecall}]:[])];
       if(asked.length)await this.current(id);
-      const responses=await Promise.all(asked.map(item=>this.engine.ask(id,item.peer,String(question),{sessions,evidence:true})));
-      for(const [index,response] of responses.entries())
-        answers.push(`[related through ${asked[index]!.path}]\n${string(response.text,20000)}`);
-      if(!answers.length)return corrections.length?{sources:corrections,limited_memory:false,syncing}:
-        {...limited,note:'No authorized person or project memory matched this request.'};
-      const evidence=await this.evidence(id,audience,responses,current.binding);
-      const limitations=['reasoning_response_has_no_exact_conclusion_citations',...evidence.limitations];
-      const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(string(answers.join('\n\n'),20000)),
-        producer:this.engine.id,producer_version:this.protocol,configuration:{workspace:id,audience,reasoning_level:'low',peers:connected.items.slice(0,4)},
+      // The forwards-and-files ask fails on its own: the people and projects asked keep their answers, the result says
+      // what is missing, and the stores count it for the owner's notice. Any other failed ask fails the recall, as before.
+      const responses=await Promise.all(asked.map(item=>{
+        const ask=this.engine.ask(id,item.peer,String(question),{sessions,evidence:true});
+        return item.peer===materialPeer?ask.then(response=>typeof response.text==='string'?response:null,()=>null):ask;
+      }));
+      const read=asked.flatMap((item,index)=>responses[index]?[{item,response:responses[index]!}]:[]);
+      const forwards=asked.some(item=>item.peer===materialPeer)?read.some(({item})=>item.peer===materialPeer):null;
+      if(forwards!==null)await countMemoryStep(this.control,'memory_read',forwards);
+      const missing=forwards===false?['forwards_unavailable']:[];
+      // Whole answers, each under its header, up to 20,000 characters: the last ones that do not fit are left out, and a
+      // first one alone too long is cut, so no answer is ever without its header.
+      for(const {item,response} of read) {
+        const answer=`${item.head}\n${string(response.text,Number.MAX_SAFE_INTEGER)}`,used=answers.reduce((total,text)=>total+text.length+2,0);
+        if(answers.length&&used+answer.length>20000)break;
+        answers.push(answers.length?answer:fitted(answer,20000));
+      }
+      const cut=answers.length<read.length||read.some(({item,response},index)=>index===0&&`${item.head}\n${response.text}`.length>20000);
+      if(!answers.length)return corrections.length?{sources:corrections,limited_memory:false,syncing,...missing.length?{limitations:missing}:{}}:
+        missing.length?{...limited,limitations:missing}:{...limited,note:'No authorized person or project memory matched this request.'};
+      const included=read.slice(0,answers.length);
+      const evidence=await this.evidence(id,audience,included.map(({response})=>response),current.binding);
+      const limitations=['reasoning_response_has_no_exact_conclusion_citations',...evidence.limitations,...missing,...cut?['recall_answer_cut']:[]];
+      const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(answers.join('\n\n')),
+        producer:this.engine.id,producer_version:this.protocol,configuration:{workspace:id,audience,reasoning_level:'low',peers:connected.items.slice(0,4),
+          ...(included.some(({item})=>item.peer===materialPeer)?{forwards_and_files:true}:{})},
         provenance:{partial:connected.partial,evidence:evidence.references,limitations}});
       await this.current(id);await this.guards.prepareContext(output,this.protocol,actor,this.prepared,this.detect);
       const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
@@ -886,6 +1131,15 @@ export class NativeMemoryRepository {
         evidence_sources:evidence.references.map(reference=>'nocheh:event:'+reference.id),limitations}],partial:connected.partial,
         limited_memory:!current.row.last_ready_at&&current.row.state!=='ready',syncing};
     } catch(error){await this.prepared.audience.assert(principal);return corrections.length?{...limited,sources:corrections}:limited;}
+  }
+  /** Whether the forwards-and-files participant wrote something done in these sessions (null: the whole space) that rests
+   * on a message other than this turn's own, so a question is never answered from itself alone. */
+  private async materialLearned(workspace:string,sessions:string[]|null,turnSource?:string):Promise<boolean> {
+    return !!(await this.control.query(`SELECT 1 FROM memory_ingestion_receipts r WHERE r.generation=$1 AND r.state='done' AND r.retired_at IS NULL
+      AND r.peer_id=$2 AND ($3::text[] IS NULL OR r.session_id=ANY($3::text[])) AND ($4::text IS NULL OR EXISTS (
+        SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_array_length(r.source_references)>0 THEN r.source_references
+          ELSE jsonb_build_array(r.source_reference) END) evidence(value) WHERE evidence.value->>'id'<>$4)) LIMIT 1`,
+      [workspace,materialPeer,sessions,turnSource??null])).rowCount;
   }
   /** Archived messages the engine finds by meaning among what was learned for this audience, best first.
    * Only their ids leave here: the reader gets the messages back through the archive's own access check. */

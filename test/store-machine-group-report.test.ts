@@ -49,7 +49,7 @@ test('a job on the owner\'s machine asked in a group reports to the owner\'s pri
   const authority=async()=>({owner:'inngest' as const,epoch:Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0].epoch)});
   const tick=async(id:string)=>s.jobs.operation('job:'+id,await authority());
   const job=async(id:string)=>(await stores.control.query('SELECT * FROM background_jobs WHERE id=$1',[id])).rows[0];
-  const reports=async(id:string)=>(await stores.control.query(`SELECT b.part,a.id,a.destination,a.text_hash,a.state FROM background_reports b
+  const reports=async(id:string)=>(await stores.control.query(`SELECT b.part,a.id,a.destination,a.text_hash,a.state,a.send_class FROM background_reports b
     JOIN telegram_action_requests a ON a.id=b.action_id WHERE b.job_id=$1 ORDER BY b.part`,[id])).rows;
   const delivered=(id:string,state='done')=>stores.control.query('UPDATE telegram_action_requests SET state=$2 WHERE id=$1',[id,state]);
   /** Approve a job, start its run and claim it as Hermes does. */
@@ -112,6 +112,8 @@ test('a job on the owner\'s machine asked in a group reports to the owner\'s pri
     parts=await reports(grouped.id);
     assert.deepEqual(parts.map(row=>[row.part,row.destination]),[[1,'123'],[2,project]]);
     assert.equal(parts[1].text_hash,digest(groupLine),'the group\'s line names no machine, plan or report');
+    // The report is learned as the job's report; the group's fixed line is a notice, kept but not learned (ADR-0256).
+    assert.deepEqual(parts.map(row=>row.send_class),['job_report','notice']);
     assert.equal((await job(grouped.id)).state,'reporting');
     await delivered(parts[1].id);
     assert.equal((await tick(grouped.id)).state,'completed');assert.equal((await job(grouped.id)).state,'done');

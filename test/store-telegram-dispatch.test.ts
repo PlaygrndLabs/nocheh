@@ -136,8 +136,8 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const generalSends=sends.filter(item=>item.input.event_id===general.id);
     assert.deepEqual(generalSends.map(item=>item.operation),['telegram.presence','telegram.reply']);
     const answer=generalSends[1]!.input;
-    assert.deepEqual({chat:answer.chat_id,message:answer.message_id,topic:answer.topic,key:answer.dispatch_key,text:answer.text,session:answer.session_id,notify:answer.notify,presence:answer.presence},
-      {chat:group,message:String((generalValue.payload as any).message.message_id),topic:undefined,key:generalValue.key,text:'Fixture reply',session:'fixture-session',notify:false,presence:true});
+    assert.deepEqual({chat:answer.chat_id,message:answer.message_id,topic:answer.topic,key:answer.dispatch_key,text:answer.text,session:answer.session_id,notify:answer.notify,presence:answer.presence,class:answer.send_class},
+      {chat:group,message:String((generalValue.payload as any).message.message_id),topic:undefined,key:generalValue.key,text:'Fixture reply',session:'fixture-session',notify:false,presence:true,class:'reply'});
     assert.equal(answer.id,digest(general.id+':1'),'one reply id per attempt, shared with its presence');assert.equal(generalSends[0]!.input.id,answer.id);
     assert.equal(reader({headers:{authorization:'Bearer '+answer.archive_credential}} as any,token).space,group,'the send carries a pass for the same conversation');
     assert.equal((await advance(general.id)).state,'completed');
@@ -256,7 +256,8 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal((await run(ownerCommand.reference.id)).state,'completed');
     assert.ok(!calls.some(c=>c.input.event_id===ownerCommand.reference.id),'a fixed command reply needs no brain');
     const command=sends.filter(item=>item.input.event_id===ownerCommand.reference.id);
-    assert.deepEqual(command.map(item=>[item.operation,item.input.session_id,item.input.presence]),[['telegram.reply','owner-control',false]]);
+    // A command's fixed reply is Nocheh's own card: kept, never learned (ADR-0256).
+    assert.deepEqual(command.map(item=>[item.operation,item.input.session_id,item.input.presence,item.input.send_class]),[['telegram.reply','owner-control',false,'card']]);
     assert.equal(typeof command[0]!.input.text,'string');
     const columns=(await stores.control.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='dispatches'")).rows.map(r=>r.column_name);
     assert.ok(!columns.some(name=>['text','content','payload','transcripts'].includes(name)));

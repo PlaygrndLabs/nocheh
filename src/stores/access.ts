@@ -12,6 +12,7 @@ import type {SourceRetirementRepository} from './source-retirement.js';
 import type {ReactionStateRepository} from './reaction-state.js';
 import {bindAnswerReads} from './private-answers.js';
 import {chats} from '../chats.js';
+import {deliveredKinds,sendClassOf,unlearnedSendClasses} from '../send-classes.js';
 
 /** Source access is independent of project membership and sharing configuration. */
 export class SourceAccessRepository {
@@ -73,6 +74,20 @@ export class SourceAccessRepository {
     if(!observed||observed.topic_state==='unknown')return false;
     await this.guards.assertCurrent(binding);return true;
   }
+  /**
+   * Why an original is kept but not learned, or null (ADR-0256): Nocheh's own card, card update, refusal, notice or
+   * reminder, by the send class the bot kept with it, unless the owner turned learning on for that message. It is never
+   * part of canLearn, so a card stays context for the owner's reply to it and what memory already holds stays valid.
+   */
+  async notLearned(reference:SourceReference):Promise<'nocheh_message'|null> {
+    const source=await this.archive.verify(reference);
+    if(!deliveredKinds.has(source.kind))return null;
+    const row=(await this.stores.archive.query('SELECT payload FROM events WHERE id=$1',[reference.id])).rows[0];
+    const sendClass=row?sendClassOf(JSON.parse((row.payload as Buffer).toString()).send_class):null;
+    if(!sendClass||!unlearnedSendClasses.has(sendClass))return null;
+    const consent=(await this.stores.control.query('SELECT enabled FROM learning_consent WHERE event_id=$1',[reference.id])).rows[0];
+    return consent?.enabled===true?null:'nocheh_message';
+  }
   /** The conversations a scoped principal recalls; null for the owner and administration, which read everything.
    * For an answer reader, the asking group or topic (its read set's home): what its shared and granted context is for
    * (ADR-0249). An answer reader whose read set was not bound reads nothing. */
@@ -129,9 +144,11 @@ export class SourceAccessRepository {
     admin(principal);const source=await this.archive.verify(reference),binding=await this.guards.state();
     const saved=(await this.stores.control.query('SELECT enabled,revision,updated_at FROM learning_consent WHERE event_id=$1',[reference.id])).rows[0];
     const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[reference.id])).rows[0];
-    const effective=await this.canLearn(reference,binding);await this.guards.assertCurrent(binding);
+    // Nocheh's own card or notice is not learned unless the owner turns it on, which the existing switch does.
+    const skipped=!saved&&await this.notLearned(reference)!==null;
+    const effective=!skipped&&await this.canLearn(reference,binding);await this.guards.assertCurrent(binding);
     return {source:reference,enabled:saved?.enabled??null,revision:saved?.revision??0,effective,
-      authority:saved?'owner':'capture_policy',transport:intake?.transport??source.origin,intake_state:intake?.state??null,updated_at:saved?.updated_at??null};
+      authority:saved?'owner':skipped?'send_class':'capture_policy',transport:intake?.transport??source.origin,intake_state:intake?.state??null,updated_at:saved?.updated_at??null};
   }
   principal(space:string):Reader {
     return {admin:false,scope:space===ownerChat(this.policy())?null:parentSpace(space)??space,space};

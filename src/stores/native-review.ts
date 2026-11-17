@@ -7,10 +7,16 @@ import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionA
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository} from './derived.js';
 import type {GuardBinding} from './guards.js';
-import type {LearningContextRepository} from './learning-context.js';
+import type {LearningContextOptions,LearningContextRepository,PreparedLearningContext} from './learning-context.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
-import {ownerChat} from '../assistant-policy.js';
+import {notesSender,ownerChat} from '../assistant-policy.js';
+import {servedGroup,sourceChat} from '../spaces.js';
+import {applicableInterpretations,type InterpretationVersion} from '../interpretations.js';
+import {bucketOf,heldBy,heldKey,inaccessible,ownDeletedOption,ownerTyped,type Held} from '../source-facts.js';
+import {REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,reviewBody,reviewFragment,ruleBuckets,type ReviewProvenance,type RuleBucket} from '../source-labels.js';
+import {NoteSourceRepository} from './note-sources.js';
+import {repliesElsewhere} from '../observed-source.js';
 
 export const nativeReviewSchema=`
 CREATE TABLE IF NOT EXISTS native_review_jobs (
@@ -22,7 +28,29 @@ CREATE TABLE IF NOT EXISTS native_review_jobs (
 ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS paused boolean NOT NULL DEFAULT false;
 ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS reconciliations integer NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS native_review_jobs_source ON native_review_jobs((source_reference->>'id'));
+ALTER TABLE native_review_jobs ADD COLUMN IF NOT EXISTS provenance jsonb;
+CREATE TABLE IF NOT EXISTS native_review_skips (
+ event_id text NOT NULL,generation text NOT NULL,reason text NOT NULL CHECK(reason IN ('sender_not_allowed','target_not_allowed')),
+ created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(event_id,generation)
+);
 `;
+/** Why a source stays out of the owner's notes (ADR-0257): someone not allowed there sent it, or it is a reaction to a
+ * message that was left out for that reason. */
+export type NotesSkip='sender_not_allowed'|'target_not_allowed';
+/** A source's notes reviews, and why it stays out of the owner's notes when queue decided that in the same call: someone
+ * not allowed there (recorded), or a pin that carried only Nocheh's own card, notice or reminder (`nocheh_message`, not
+ * recorded: nothing in it is anyone's). */
+export interface QueuedReviews {ids:string[];left_out:NotesSkip|'nocheh_message'|null}
+const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
+/** An archived event as notesSender reads it. */
+type Archived={channel:string;kind:string;scope:string;payload:unknown};
+/** Reads an archived event (NativeReviewRepository.archived), once per review being queued. */
+type Read=(id:string)=>Promise<Archived|null>;
+/** How the owner's notes review judges a quote (quotedSender): let in, refused for the sender of the message it is from,
+ *  or with nothing in the archive to tell whose words it repeats. */
+type QuoteVerdict='review'|'sender_not_allowed'|'quote_not_traced';
+/** A quote's verdict as the learning context takes it (LearningContextOptions.admitQuoted). */
+const quoteVerdict=(value:QuoteVerdict):boolean|'not_traced'=>value==='review'||(value==='quote_not_traced'?'not_traced':false);
 const protocol='hermes-native-review-v3';
 /** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
 export const nativeReconcileLimit=8;
@@ -59,16 +87,17 @@ export async function requestStrandedSources(pool:pg.Pool,since:Date,limit=100):
 /** The brain's own notes remain in the brain. Nocheh stores prepared inputs and execution receipts separately. */
 export class NativeReviewRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
-    readonly turns:RuntimeTurnRepository,readonly brain:Brain,readonly token:string){}
+    readonly turns:RuntimeTurnRepository,readonly brain:Brain,readonly token:string,
+    readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy(),contexts.access)){}
   private get control(){return this.contexts.access.stores.control;}
   private actor(source:SourceReference,binding:GuardBinding):Reader {
     // The owner's private chat (ADR-0252), the space the owner's native notes are reviewed in.
     const policy=this.contexts.access.policy(),owner=policy.owner_id?ownerChat(policy):null;if(!owner)throw new HttpError(409,'owner_review_required');
     return {admin:false,scope:null,space:owner,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,purpose:'memory-review'};
   }
-  async queue(source:SourceReference):Promise<string[]> {
+  async queue(source:SourceReference):Promise<QueuedReviews> {
     // A brain that keeps no notes of its own has nothing to learn them from.
-    if(!this.brain.reviewNotes)return [];
+    if(!this.brain.reviewNotes)return {ids:[],left_out:null};
     const binding=await this.contexts.guards.state();
     // Each source is reviewed once per installation generation; repeating a started review repeats its model calls.
     // A waiting review (never started, or failed without changing notes) can't run under an older authorization epoch,
@@ -87,18 +116,39 @@ export class NativeReviewRepository {
     // source gets no new fragment, but its other fragments still waiting under an earlier epoch keep their place while
     // their own text is unchanged, so its review is completed rather than cut short.
     const kept=reviewed.map(row=>String(row.id)),waiting=reviewed.filter(row=>row.waiting).map(row=>String(row.id));
-    const settle=async()=>{await retire();await this.keepWaiting([...waiting,...ids]);return [...kept,...ids];};
+    const settle=async():Promise<QueuedReviews>=>{await retire();await this.keepWaiting([...waiting,...ids]);return {ids:[...kept,...ids],left_out:null};};
     if(kept.length&&!stale.size)return await settle();
+    // Someone not allowed there stays out of the owner's notes, while group memory still learns what they said. Decided
+    // after the return above, so a source already reviewed in this generation keeps its review.
+    const leave=async(reason:NotesSkip):Promise<QueuedReviews>=>{await this.skip(source,binding,reason);return {ids:kept.filter(id=>!waiting.includes(id)),left_out:reason};};
+    const decision=await this.decide(source,binding);if(decision!=='review')return await leave(decision);
+    // Related messages are asked the same question, each once; a pin's message by its own author, a quote's by the
+    // message it answers, and what a message holds by whoever wrote or added each part. Each archived event is read once.
+    const reads=new Map<string,Promise<Archived|null>>(),read=(id:string)=>{let found=reads.get(id);if(!found)reads.set(id,found=this.archived(id));return found;};
+    const asked=new Map<string,Promise<boolean>>(),admit=(reference:SourceReference)=>{
+      let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id,read).then(value=>value==='review'));return allowed;};
+    const options:Required<LearningContextOptions>={admit,
+      admitPinned:reference=>this.pinnedSender(reference.id,read).then(value=>value==='not_learned'?value:value==='review'),
+      admitQuoted:reference=>this.quotedSender(reference.id,admit,read).then(quoteVerdict),
+      admitPinnedQuote:reference=>this.pinnedQuotedSender(reference.id,admit,read).then(quoteVerdict),
+      admitHeld:reference=>this.heldSenders(reference.id,admit,read),
+      collect:{dropped:[],versions:[],refused:[],bare_reaction:false,empty_pin:false,inputs:new Map(),untraced:[]}};
     let context;
-    try{context=await this.contexts.prepare(source,binding);}
+    try{context=await this.contexts.prepare(source,binding,options);}
     catch(error) {
       if(!(error instanceof HttpError&&error.code==='learning_consent_required'))throw error;
       if(kept.length)return await settle();
       await retire();throw error;
     }
+    // A reaction to a message left out has nothing left to review, so no model run is spent on it.
+    if(options.collect.bare_reaction)return await leave('target_not_allowed');
+    // Nor has a pin of Nocheh's own card, notice or reminder once the card is cut out. Nobody was left out, so nothing is
+    // recorded: the source step only says why, and the pin's reviews still waiting are withdrawn.
+    if(options.collect.empty_pin){await this.withdraw(source);return {ids:kept.filter(id=>!waiting.includes(id)),left_out:'nocheh_message'};}
     const actor=this.actor(source,binding);
     await this.turns.binding(actor);await this.prepared.allow(actor,{observations:context.observations,rules:context.rules});
-    const text=canonical({space:context.space,observations:context.observations,rules:context.rules,limitations:context.limitations});
+    const {provenance,rules,limitations}=await this.batch(source,context,options.collect);
+    const text=canonical({space:context.space,observations:context.observations,rules,limitations});
     if(text.length>200000){if(kept.length)return await settle();throw new HttpError(413,'native_review_input_limit');}
     // Every fragment carries the whole source's evidence, so a new reply or reaction in its thread changes every fragment's
     // input. A waiting fragment whose own text is unchanged is then replaced by one with the current input, keeping its
@@ -109,12 +159,19 @@ export class NativeReviewRepository {
         [rows.map(row=>row.input_reference.id)])).rows;
       for(const row of rows) {
         const content=stored.find(input=>input.id===row.input_reference.id)?.content;
-        if(content)twins.set(digest(String(JSON.parse(content.toString()).text)),row);
+        // Matched on its slice of the evidence alone, so a records line that changed (a new message in the batch, a
+        // sender allowed or not) still finds it.
+        if(content)twins.set(digest(reviewBody(String(JSON.parse(content.toString()).text))),row);
       }
     }
-    const characters=Array.from(text);
-    for(let offset=0;offset<characters.length;offset+=8000) {
-      const content=`Source nocheh:event:${source.id}; conversation ${context.space}; fragment ${offset/8000+1}. Speakers are not necessarily the owner.\n`+characters.slice(offset,offset+8000).join('');
+    // Line 1 is kept exactly as it was: the ADR-0244 counter reads it. Code's records line and a fixed marker line come
+    // next, then a fixed-size slice of the evidence, so nothing a message says comes before the marker.
+    const characters=Array.from(text),fragments:string[]=[];
+    for(let offset=0;offset<characters.length;offset+=REVIEW_BODY_SLICE)
+      fragments.push(reviewFragment(`Source nocheh:event:${source.id}; conversation ${context.space}; fragment ${offset/REVIEW_BODY_SLICE+1}. Speakers are not necessarily the owner.`,
+        provenance,characters.slice(offset,offset+REVIEW_BODY_SLICE).join('')));
+    if(fragments.some(content=>Array.from(content).length>REVIEW_FRAGMENT_LIMIT)){if(kept.length)return await settle();throw new HttpError(413,'native_review_input_limit');}
+    for(const content of fragments) {
       const document={text:content,evidence:context.evidence.map(e=>e.reference),dependencies:context.dependencies};
       // The same prepared input keeps its identity, attempts and place in the queue; only changed input becomes a new review.
       const hash=digest(canonical(document)),same=stale.get(hash);
@@ -125,7 +182,7 @@ export class NativeReviewRepository {
           WHERE id=$1 AND state='pending' AND NOT paused`,[same.id,binding]);
         ids.push(same.id);continue;
       }
-      const twin=twins.get(digest(content));
+      const twin=twins.get(digest(reviewBody(content)));
       if(kept.length&&!(twin&&stale.get(twin.input_reference.input_hash)===twin))continue;
       if(twin)stale.delete(twin.input_reference.input_hash);
       const carried=twin??spent;
@@ -136,13 +193,226 @@ export class NativeReviewRepository {
       const db=await this.control.connect();
       try {
         await db.query('BEGIN');
-        await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding,attempts,error_code,next_attempt)
-          VALUES($1,$2,$3,$4,$5,$6,greatest(now(),$7::timestamptz)) ON CONFLICT DO NOTHING`,[id,source,input,binding,carried?.attempts??0,carried?.error_code??null,carried?.next_attempt??null]);
+        await db.query(`INSERT INTO native_review_jobs(id,source_reference,input_reference,binding,attempts,error_code,next_attempt,provenance)
+          VALUES($1,$2,$3,$4,$5,$6,greatest(now(),$7::timestamptz),$8) ON CONFLICT DO NOTHING`,
+          [id,source,input,binding,carried?.attempts??0,carried?.error_code??null,carried?.next_attempt??null,provenance]);
         await requestWorkflow(db,'memory_review','native:'+id);await db.query('COMMIT');
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
       ids.push(id);
     }
     return await settle();
+  }
+  /**
+   * What code records about a review's batch (ADR-0257), from each message's own fields: its class, whether every
+   * message was the owner's own typing, whose rules it reads and whose words they rest on, and how many messages and
+   * rules were left out. A rule is the owner's only when the owner wrote it: one learned automatically, even from the
+   * owner's own message alone, may restate a rule or a forward its interpretation read. Whose words a rule rests on is
+   * judged by what code recorded it was learned from (its stored dependencies), never by what the model cited of them:
+   * a transcript or a file's text is judged through the message it belongs to, which is recorded with it; any other
+   * input is someone else's. In a batch of the owner's own typing only, every rule the owner did not write is left out of
+   * that one review, so a note it writes can still read as the owner's. In a batch of the owner's own typing and
+   * Nocheh's own learned messages, the rules resting on another person's message, a forward or a file are left out of it
+   * the same way, so its notes stay Nocheh's; a rule learned from the owner's own typing stays there, since such a
+   * review's notes are never the owner's. Turns and every other review still read them.
+   */
+  private async batch(source:SourceReference,context:PreparedLearningContext,collect:Required<LearningContextOptions>['collect']) {
+    const versions=collect.versions,inputs=(version:InterpretationVersion)=>collect.inputs.get(version.id)??[];
+    const learnedFrom=(version:InterpretationVersion)=>inputs(version).filter(id=>id.startsWith('events:')).map(id=>id.slice('events:'.length));
+    const told=(version:InterpretationVersion)=>inputs(version).every(id=>id.startsWith('events:')||id.startsWith('derived_artifacts:'));
+    const classes=await this.sources.classesFor([...context.observations.map(item=>item.source.id),...versions.flatMap(learnedFrom)]);
+    const typed=(id:string)=>{const found=classes.get(id);return !!found&&ownerTyped(found.facts);};
+    const ownRule=(version:InterpretationVersion)=>version.author==='owner';
+    // Whose words a rule rests on, besides the owner's and Nocheh's learned messages, which name nobody: a message or an
+    // input that can't be told is another person's.
+    const others=(version:InterpretationVersion)=>{
+      const found=new Set<string>();if(version.author==='owner')return found;
+      if(!learnedFrom(version).length||!told(version))found.add('person');
+      for(const id of learnedFrom(version)){const item=classes.get(id);found.add(item?bucketOf(item.class):'person');}
+      return new Set([...found].filter(bucket=>(ruleBuckets as readonly string[]).includes(bucket)));
+    };
+    // Nocheh's own learned messages, and the owner's quote or pin of one, never its cards or notices, which are not learned.
+    const nocheh=(id:string)=>{const found=classes.get(id);return !!found&&bucketOf(found.class)==='nocheh';};
+    const ownerOnly=context.observations.every(item=>typed(item.source.id));
+    const ownOrNocheh=!ownerOnly&&context.observations.every(item=>typed(item.source.id)||nocheh(item.source.id));
+    const read=ownerOnly?versions.filter(ownRule):ownOrNocheh?versions.filter(version=>!others(version).size):versions,left=versions.length-read.length;
+    const buckets=new Set(read.flatMap(version=>[...others(version)]));
+    const provenance:ReviewProvenance={version:1,source:source.id,
+      events:context.observations.map(item=>({id:item.source.id,class:classes.get(item.source.id)?.class??'unknown'})),owner_account_only:ownerOnly,
+      rules:!read.length?'none':read.every(ownRule)?'owner':'others',rule_buckets:ruleBuckets.filter((bucket:RuleBucket)=>buckets.has(bucket)),
+      left_out:{sender_not_allowed:collect.dropped.length,rule_sender_not_allowed:collect.refused.length,rules_left_out_for_owner_label:left,
+        quote_not_traced:collect.untraced?.length??0}};
+    return {provenance,rules:left?applicableInterpretations(read):context.rules,
+      limitations:left?[...context.limitations,'rules_left_out_for_owner_label']:context.limitations};
+  }
+  /** Why a source's notes review should not run, or null: Nocheh's own card or notice (ADR-0256), or a source left out of
+   * the owner's notes (ADR-0257), which is recorded so a later grant doesn't bring it back in this generation. */
+  async unwanted(source:SourceReference):Promise<'nocheh_message'|NotesSkip|null> {
+    const own=await this.contexts.access.notLearned(source);if(own)return own;
+    const binding=await this.contexts.guards.state(),decision=await this.decide(source,binding);
+    if(decision==='review')return null;
+    await this.record(source,binding,decision);return decision;
+  }
+  /**
+   * Whether a source goes into the owner's notes review: what the owner or someone allowed there sent, and Nocheh's own
+   * messages and the owner's web chat (notesSender). The owner's yes on that message lets it in, but only in the owner's
+   * own chat or a group Nocheh serves, never in someone else's private chat. A source left out once stays out for the
+   * installation generation, so allowing the person later doesn't review their old messages one model run each.
+   */
+  private async decide(source:SourceReference,binding:GuardBinding):Promise<'review'|NotesSkip> {
+    const row=(await this.control.query(`SELECT (SELECT enabled FROM learning_consent WHERE event_id=$1) AS consent,
+      (SELECT reason FROM native_review_skips WHERE event_id=$1 AND generation=$2) AS skipped`,[source.id,binding.generation])).rows[0];
+    if(row.consent===true) {
+      const chat=sourceChat(await this.contexts.access.archive.verify(source));
+      if(chat!==null&&(chat===ownerChat(this.contexts.access.policy())||servedGroup(chat)))return 'review';
+    }
+    if(row.skipped)return row.skipped as NotesSkip;
+    return await this.sender(source.id);
+  }
+  /** An archived event as notesSender reads it, or null when it is missing or unreadable. */
+  private async archived(id:string):Promise<Archived|null> {
+    const event=(await this.contexts.access.stores.archive.query('SELECT channel,kind,scope,payload FROM events WHERE id=$1',[id])).rows[0];
+    if(!event)return null;
+    try{return {channel:event.channel,kind:event.kind,scope:event.scope,payload:JSON.parse((event.payload as Buffer).toString())};}catch{return null;}
+  }
+  /** notesSender over an archived event; one that is missing or unreadable is not let in. */
+  private async sender(id:string,read:Read=id=>this.archived(id)):Promise<'review'|'sender_not_allowed'> {
+    const event=await read(id);
+    return event?notesSender(this.contexts.access.policy(),event):'sender_not_allowed';
+  }
+  /** notesSender over a message an archived event shows (`shown`: the message a pin carries, one it embeds, or the one it
+   *  answers), by that message's own author as if it were sent in the holding message's chat. */
+  private askedInChat(event:Archived,holder:Record<string,any>,shown:Record<string,any>):'review'|'sender_not_allowed' {
+    return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...shown,chat:holder.chat}}});
+  }
+  /** notesSender over the message an archived pin carries, by that message's own author in the pin's chat; a pin whose
+   *  message can't be read is not let in. A message Telegram no longer shows (date 0) carries no words to leave out.
+   *  Nocheh's own message (NoteSourceRepository.carried) is never someone not allowed: a learned one stays, and a card,
+   *  notice or reminder is not learned, nor is Nocheh's own account's message the archive does not hold as Nocheh's (not
+   *  archived yet, or a forward of one), which is cut as a card is. Anyone else's, another bot's included, is asked as
+   *  its sender is. */
+  private async pinnedSender(id:string,read:Read):Promise<'review'|'sender_not_allowed'|'not_learned'> {
+    const event=await read(id),update=record(event?.payload),message=record(update?.message??update?.edited_message),pinned=record(message?.pinned_message);
+    if(!event||!message||!pinned)return 'sender_not_allowed';
+    if(inaccessible(pinned))return 'review';
+    const own=(await this.sources.carried([id])).get(id)?.pinned;
+    if(own)return own==='learned'?'review':'not_learned';
+    return this.askedInChat(event,message,pinned);
+  }
+  /**
+   * The places (heldKey) of what an archived message holds that may go into the owner's notes (heldBy, ADR-0257): a
+   * message it embeds by that message's own author, and a poll option by who added it, each asked as notesSender asks a
+   * message sent in the holding message's chat, as pinnedSender asks a pin's. A post in a chat's name is never let in, nor
+   * is an option added in a chat's name. A message Telegram no longer shows (inaccessible) holds no words. A quote inside
+   * an embedded message is judged as a pinned message's is (pinnedQuotedSender): by that message as the archive holds it
+   * (embeddedTo, every quote, one whose embedded copy keeps external_reply included), each revision asked as a message
+   * quoting is (quotedSender), which judges one answering a message in another chat by that message alone. One the
+   * archive holds no revision of to judge it by (never archived, or held only as Telegram Desktop exports of a reply to
+   * another chat) tells nothing of whose words it repeats: it is not let in, and its place is named in `untraced`, apart
+   * from the places refused for a sender. A deleted option's text, whose adder Telegram does not name, is let in only when
+   * it is the owner's own (heldAllowed). Nocheh's own words, and a quote that can't be traced for any reader, are cut for
+   * everyone before this is asked.
+   */
+  private async heldSenders(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<{admitted:Set<string>;untraced:Set<string>}> {
+    const event=await read(id),update=record(event?.payload),admitted=new Set<string>(),untraced=new Set<string>();
+    const message=record(update?.message??update?.edited_message??update?.channel_post??update?.edited_channel_post);
+    if(!event||!message)return {admitted,untraced};
+    const held=heldBy(message),traced=held.some(item=>item.kind==='quote')?(await this.sources.embeddedTo([id],true)).get(id):undefined;
+    for(const item of held) {
+      const place=heldKey(item.path);
+      if(item.kind!=='quote'){if(this.heldAllowed(event,message,item))admitted.add(place);continue;}
+      const verdict=await this.shownQuoteSender(traced?.get(place)??[],admit,read);
+      if(verdict==='review')admitted.add(place);else if(verdict==='quote_not_traced')untraced.add(place);
+    }
+    return {admitted,untraced};
+  }
+  /** Whether one thing a message holds (heldBy) may go into the owner's notes, as heldSenders asks it: a message it embeds,
+   *  a poll option, or, in the owner's own private chat (told by equality with ownerChat), the text of an option deleted
+   *  from the sender's own poll, which no one else can have added there (ownDeletedOption). A quote is asked apart. */
+  private heldAllowed(event:Archived,message:Record<string,any>,item:Held):boolean {
+    if(item.kind==='message')return inaccessible(item.value)||this.askedInChat(event,message,item.value)==='review';
+    if(item.kind==='option')return (item.value.added_by_chat===undefined||item.value.added_by_chat===null)&&this.askedInChat(event,message,{from:item.value.added_by_user})==='review';
+    if(item.kind==='deleted_option') {
+      const policy=this.contexts.access.policy(),chat=sourceChat(event);
+      return chat!==null&&!!policy.owner_id&&chat===ownerChat(policy)&&ownDeletedOption(item.value,message,true);
+    }
+    return false;
+  }
+  /**
+   * Whether the message an archived event quotes may go into the owner's notes, by that message's own author (ADR-0257):
+   * the message it answers as the archive holds it, each revision asked as a related message is (`admit`). A quote of a
+   * message in another chat or topic (external_reply) is judged by that message alone, and stays only when the archive
+   * holds it and its sender is allowed where they wrote it. A quote of one in this chat the archive never got (another
+   * bot's message, or one sent before Nocheh was there) is judged by its author as the reply shows it, in this chat, as
+   * pinnedSender judges a pin's. A quote repeats part of that message, so whatever that message holds (heldBy: a poll
+   * option someone added, a message it embeds) must be let in too, as heldSenders asks it, both as the archive holds it
+   * and as the reply shows it now. A quote with nothing to judge it by is not let in. A Telegram Desktop export's revision
+   * of a reply to another chat (repliesElsewhere) names that chat's message by an id the archive can't place, and an
+   * export archived before such replies lost their reply relation (observedSource) names this chat's message with that id
+   * instead: it is never judged by that relation, and tells nothing of whose words the quote repeats (`quote_not_traced`).
+   */
+  private async quotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<QuoteVerdict> {
+    const event=await read(id),update=record(event?.payload);
+    const message=record(update?.message??update?.edited_message??update?.channel_post??update?.edited_channel_post);
+    if(!event||!message)return 'sender_not_allowed';
+    if(event.kind.startsWith('telegram_desktop_')&&repliesElsewhere(message))return 'quote_not_traced';
+    const external=!!record(message.external_reply),relationships=this.contexts.access.relationships;
+    // The archive's reply relation for one in another chat or topic is marked external (observedSource).
+    const targets=(await this.contexts.access.stores.archive.query(`SELECT o.platform,o.namespace,o.kind,o.external_id FROM source_relations r
+      JOIN source_objects o ON o.id=r.target_id WHERE r.event_id=$1 AND r.kind='reply_to' AND coalesce(r.metadata->>'external','false')=$2`,[id,String(external)])).rows;
+    const held=(await Promise.all(targets.map(target=>relationships.observations({platform:target.platform,namespace:target.namespace,kind:target.kind,
+      external_id:target.external_id},'',30)))).flatMap(page=>page.references);
+    // The reply shows the message as it is now, which an archived revision may not: a poll gets the options added later
+    // without an edit of its message.
+    const replied=record(message.reply_to_message);
+    if(replied&&!external&&heldBy(replied).some(item=>!this.heldAllowed(event,message,item)))return 'sender_not_allowed';
+    if(held.length) {
+      for(const reference of held) {
+        if(!await admit(reference))return 'sender_not_allowed';
+        const target=await read(reference.id),found=record(target?.payload),shown=record(found?.message??found?.edited_message);
+        if(target&&shown&&heldBy(shown).some(item=>!this.heldAllowed(target,shown,item)))return 'sender_not_allowed';
+      }
+      return 'review';
+    }
+    if(external||!replied)return 'sender_not_allowed';
+    return this.askedInChat(event,message,replied);
+  }
+  /**
+   * Whether the quote inside the message an archived pin carries may go into the owner's notes, by the message that quote
+   * repeats part of (ADR-0257): the pinned message as the archive holds it is asked as any quote is (shownQuoteSender),
+   * each revision, so its quote stays only when the message it answers is archived and admitted, or, when that one was
+   * never archived, its author as the pinned message shows it is allowed in that chat. Telegram leaves the reply out of a
+   * pinned message, so the quote inside one the archive never got, or holds only as Telegram Desktop exports of a reply to
+   * another chat, has nothing to judge it by: it is not let in, and nothing tells whose words it repeats.
+   */
+  private async pinnedQuotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<QuoteVerdict> {
+    return this.shownQuoteSender((await this.sources.pinnedTo([id])).get(id)??[],admit,read);
+  }
+  /** Whether the quote inside a message another shows may go into the owner's notes, by that message's archived revisions
+   *  (`targets`), each asked as a message quoting is (quotedSender): refused when one is refused, and otherwise let in when
+   *  one is, so a Telegram Desktop export's revision that can't be traced is judged by the revisions beside it. With none
+   *  that tells anything (none archived, or only such exports), nothing tells whose words it repeats. */
+  private async shownQuoteSender(targets:readonly string[],admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<QuoteVerdict> {
+    let traced=false;
+    for(const target of targets) {
+      const verdict=await this.quotedSender(target,admit,read);
+      if(verdict==='sender_not_allowed')return verdict;
+      if(verdict==='review')traced=true;
+    }
+    return traced?'review':'quote_not_traced';
+  }
+  private async record(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
+    await this.control.query('INSERT INTO native_review_skips(event_id,generation,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[source.id,binding.generation,reason]);
+  }
+  /** Leaves a source out of the owner's notes and withdraws its reviews still waiting; their workflows close as superseded. */
+  private async skip(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
+    await this.record(source,binding,reason);await this.withdraw(source);
+  }
+  /** Withdraws a source's reviews still waiting to run in this installation generation; their workflows close as
+   * superseded, and a review that started keeps its row. */
+  async withdraw(source:SourceReference):Promise<void> {
+    const binding=await this.contexts.guards.state();
+    await this.control.query(`DELETE FROM native_review_jobs WHERE source_reference->>'id'=$1 AND binding->>'generation'=$2 AND state='pending' AND NOT paused`,
+      [source.id,binding.generation]);
   }
   /** A waiting review keeps an open workflow. One whose workflow closed before it ran (an epoch once closed a failed
    * review's retry that way) gets a new one, so it still runs in its turn. */
@@ -243,7 +513,10 @@ export class NativeReviewRepository {
   }
   async list(principal:Reader,after='') {
     admin(principal);const rows=(await this.control.query('SELECT * FROM native_review_jobs WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;
-    return {jobs:rows.slice(0,100),next:rows.length>100?rows[99].id:null};
+    // How many messages from people not allowed where they wrote stayed out of the owner's notes this generation.
+    const generation=(await this.contexts.guards.state()).generation;
+    const kept=(await this.control.query("SELECT count(*)::int AS n FROM native_review_skips WHERE generation=$1 AND reason='sender_not_allowed'",[generation])).rows[0];
+    return {jobs:rows.slice(0,100),next:rows.length>100?rows[99].id:null,kept_out:Number(kept?.n??0)};
   }
   async controlJob(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=object(input);

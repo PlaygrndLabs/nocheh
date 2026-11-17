@@ -428,6 +428,30 @@ class ServiceTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'invalid_action'):
                 self.service.action({**body, 'id': 'c' * 64, **change})
 
+    def test_replies_and_approved_sends_carry_the_class_storage_asked_for_or_their_routes_own(self):
+        def classes():
+            events = [json.loads(path.read_bytes()) for path in (self.root / 'spool/pending').glob('*.json')]
+            return {event['payload']['intent_key'].split(':sendMessage:')[0]: (event['payload'].get('send_class'), event['payload'].get('answers'))
+                    for event in events if event['kind'] == 'outbound_result' and event['payload']['state'] == 'delivered'}
+        follow = self.turn(40, text='Done.', send_class='follow_up')
+        follow['dispatch_key'] += ':continuation:' + 'f' * 64
+        for body in (self.turn(41, text='Hi.'), follow, self.turn(42, text='Here.', send_class='private_answer'),
+                     self.turn(43, text='Card.', send_class='card'), self.turn(44, text='Odd.', send_class='job_report'),
+                     self.turn(45, text='Odd.', send_class={'x': 1})):
+            with self.subTest(body=body.get('send_class')):
+                # A class this route does not send is never a reason to refuse the reply.
+                self.assertEqual(self.service.reply(body)['state'], 'done')
+        action = {'id': 'a' * 64, 'destination': GROUP, 'chat_id': GROUP, 'text': 'Report'}
+        for index, declared in enumerate((None, 'job_report', 'scheduled_run', 'notice', 'reminder', 'card')):
+            self.assertEqual(self.service.action({**action, 'id': str(index) * 64, **({'send_class': declared} if declared else {})}), {'state': 'done'})
+        found = {key.split(':', 2)[2]: value for key, value in classes().items()}
+        update = lambda number: f'telegram:{BOT_ID}:update:{number}'
+        self.assertEqual(found[update(41)], ('reply', digest(update(41))))
+        self.assertEqual(found[update(40) + ':continuation:' + 'f' * 64], ('follow_up', digest(update(40))))
+        self.assertEqual([found[update(number)][0] for number in (42, 43, 44, 45)], ['private_answer', 'card', 'reply', 'reply'])
+        self.assertEqual([found['action:' + str(index) * 64] for index in range(6)],
+                         [('approved_post', None), ('job_report', None), ('scheduled_run', None), ('notice', None), ('approved_post', None), ('approved_post', None)])
+
     def test_restart_marks_unfinished_sends_ambiguous(self):
         receipts = self.root / 'spool/dispatch'
         (receipts / ('reply-' + 'c' * 64 + '.intent')).write_text('{}')

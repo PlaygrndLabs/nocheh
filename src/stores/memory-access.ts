@@ -149,7 +149,7 @@ export class MemoryAccessRepository {
     const row=(await this.stores.control.query('SELECT * FROM memory_access_requests WHERE id=$1',[id])).rows[0];
     if(setting.notify_owner&&!row.notification_action_id) {
       const owner=ownerChat(this.access.policy());if(owner)try {const action=await this.actions.approvedSystem({...principal,logical_profile:logical},source,binding,owner,
-        `A memory access suggestion needs review: ${this.dashboardLink(id)}`,'memory-access-notification:'+id);
+        `A memory access suggestion needs review: ${this.dashboardLink(id)}`,'memory-access-notification:'+id,'notice');
         await this.stores.control.query('UPDATE memory_access_requests SET notification_action_id=$2,updated_at=now() WHERE id=$1 AND notification_action_id IS NULL',[id,action.id]);} catch {/* The request remains durable and visible in the dashboard. */}
     }
     return {id};
@@ -184,7 +184,7 @@ export class MemoryAccessRepository {
     const fact=await this.fact(grant.fact_id);if(await this.access.privateEvidence(fact.evidence))return;
     if(!await this.actions.systemPrepared(request.source_reference,binding,request.destination,text,'memory-access-followup:'+grantId))return;
     const prepared=await this.actions.prepareSystem(this.principal(request),request.source_reference,binding,
-      request.destination,text,'memory-access-followup:'+grantId);
+      request.destination,text,'memory-access-followup:'+grantId,'approved_post');
     if(prepared.text_hash!==grant.text_hash)throw new HttpError(409,'memory_access_wording_changed');
     const db=await this.stores.control.connect();
     try {
@@ -247,7 +247,7 @@ export class MemoryAccessRepository {
     const grantId=digest(canonical([protocol,'grant',operation,requestId,decision,representation.hash]));
     const setting=(await this.effective(request.destination)).effective,post=decision==='one_time'||(typeof body.post==='boolean'?body.post:setting.auto_followup);
     const followup=post?await this.actions.prepareSystem(this.principal(request),request.source_reference,binding,
-      request.destination,representation.text,'memory-access-followup:'+grantId):null;
+      request.destination,representation.text,'memory-access-followup:'+grantId,'approved_post'):null;
     if(followup&&followup.text_hash!==representation.hash)throw new HttpError(409,'memory_access_wording_changed');
     const db=await this.stores.control.connect();
     try {await db.query('BEGIN');const concurrent=await this.lockDecision(db,operation);

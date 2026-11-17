@@ -7,7 +7,7 @@ import {appBinding,reader,turnToken} from '../src/access.js';
 import {assistantPolicy,ownerChat} from '../src/assistant-policy.js';
 import {accountIdFor,chatDirectory,chatIdFor,chatShortId,chatIdListSql,chatIdPattern,chatIdSql,chats,connectionIdFor,conversationFields,installChats,
   installChatsForTest,isChatId,refreshChatsOnEpoch,servedChats,setChatLoader,topicKey,type ChatSnapshot} from '../src/chats.js';
-import {isTelegramAccount,isTelegramChat,legacyChat,parseTelegramLink,telegramTopicId} from '../src/chats-telegram.js';
+import {isBotAccount,isTelegramAccount,isTelegramChat,legacyChat,parseTelegramLink,telegramTopicId} from '../src/chats-telegram.js';
 import {telegramTopicId as spacesTopicId} from '../src/spaces.js';
 import {BOB,BOB_CHAT,GP1,GP1_TOPIC,GP1_TOPIC_KEY,GP2,GP4,GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG1_TOPIC_KEY,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,
   UNSERVED,fixtureChats,fixtureDirectory,groupsPolicy,legacyChats,legacyDirectory,policyDirectory} from './fixture-groups.js';
@@ -57,6 +57,11 @@ test('only the Telegram adapter reads an old value, once, into what it names',()
   for(const bad of ['https://t.me/nocheh_group/7','https://t.me/c/0/7','https://example.com/c/1/2',7])assert.equal(parseTelegramLink(bad),null);
   assert.ok(isTelegramChat(GP1)&&isTelegramChat(OWNER)&&!isTelegramChat(NG1)&&!isTelegramChat(GP1_TOPIC));
   assert.ok(isTelegramAccount(OWNER)&&!isTelegramAccount(GP1));
+  // The bot an update came to is told by equality with the account the archive stored for it, and only a bot account is.
+  const bot={id:9001,is_bot:true,first_name:'Nocheh'};
+  assert.ok(isBotAccount(bot,'9001')&&isBotAccount({...bot,id:'9001'},'9001'));
+  for(const [user,id] of [[bot,'9002'],[{...bot,is_bot:false},'9001'],[{...bot,is_bot:undefined},'9001'],[bot,'fixture'],[bot,''],[bot,null],[bot,9001],
+    [{...bot,id:'09001'},'9001'],[{...bot,id:null},'null'],[null,'9001'],['9001','9001']] as const)assert.equal(isBotAccount(user,id),false,JSON.stringify([user,id]));
   assert.equal(spacesTopicId,telegramTopicId,'spaces.ts still exports the moved helper');
   assert.equal(telegramTopicId({chat:{type:'supergroup',is_forum:true},message_thread_id:7}),7);
   assert.equal(telegramTopicId({chat:{type:'supergroup'},message_thread_id:7}),undefined,'a reply chain is not a topic');

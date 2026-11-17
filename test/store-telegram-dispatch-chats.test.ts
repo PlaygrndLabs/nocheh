@@ -160,7 +160,7 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
 });
 
 // The owner's add card gives a new group its own new project about 30 s after the add, as one owner command that moves no
-// guard epoch (ADR-0259): it changes no one's reach. So a reply already running in that group when the project is made
+// guard epoch (ADR-0260): it changes no one's reach. So a reply already running in that group when the project is made
 // goes out on its first try, with no guard_context_changed and no second turn.
 test('a reply running while the owner\'s add card gives the group its own project is sent on its first try',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{

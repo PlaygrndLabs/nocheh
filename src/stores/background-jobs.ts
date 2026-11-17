@@ -917,7 +917,9 @@ export class BackgroundJobRepository {
     if(!line&&(!run||!await carriesForward(this.control,run.run_binding,binding)))return this.finish(row,'failed','job_report_outdated');
     try {
       // Checked for secrets with the job's own audience, wherever the part goes.
-      const target=targets[part-1]!,prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,target.to,target.text,'background-report:'+row.id+':'+part);
+      // The group's fixed line is a notice; every other part is the job's report.
+      const target=targets[part-1]!,prepared=await this.telegram.prepareSystem(this.audience(row,binding),row.source_reference,binding,target.to,target.text,
+        'background-report:'+row.id+':'+part,line?'notice':'job_report');
       // A part's message and its record commit together under the job's lock, so neither a retry
       // in a later epoch nor a second tick sends a part twice, and none is staged after Stop.
       const db=await this.control.connect();

@@ -10,7 +10,7 @@ import {DerivedRepository,type DerivativeReference} from './derived.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
 import {MemoryProvenanceRepository} from './memory-provenance.js';
 import {LearnedMemoryRepository,type LearnedPublication} from './learned.js';
-import {LearningContextRepository,type PreparedLearningContext} from './learning-context.js';
+import {LearningContextRepository,type LearningContextOptions,type PreparedLearningContext} from './learning-context.js';
 import {evidencePeerId,memoryPeerId} from './entities.js';
 import {ownerChat} from '../assistant-policy.js';
 
@@ -55,24 +55,29 @@ export class ContextualLearningRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly guards:GuardRepository,
     readonly learned:LearnedMemoryRepository,readonly provenance:MemoryProvenanceRepository,readonly engine:MemoryEngine){}
 
-  /** The source's learning inputs under the binding; the hash leaves out the binding and rule wording. */
+  /** The source's learning inputs under the binding; the hash leaves out the binding and rule wording. `empty_pin` says
+   *  the source is a pin of Nocheh's card, notice or reminder with nothing else in it, as the owner's notes review reads it. */
   private async prepare(source:SourceReference,workspace:string,audience:string,binding:GuardBinding) {
     await this.provenance.current(workspace,audience,binding);
-    const context=await this.contexts.prepare(source,binding);
+    const collect:NonNullable<LearningContextOptions['collect']>={dropped:[],versions:[],refused:[],bare_reaction:false,empty_pin:false,inputs:new Map()};
+    const context=await this.contexts.prepare(source,binding,{collect});
     const owner=ownerChat(this.contexts.access.policy());
     if(audience!==(context.space===owner?'owner':context.space))throw new HttpError(403,'learning_workspace_scope_mismatch');
     // Waiting cards change as learning and the owner work through them; like rules, they never make a
     // finished message learn again.
     const {binding:_,rules:_rules,rule_ids:_ruleIds,entities:{waiting:_waiting,...entities},limitations,...rest}=context;
     const inputs={...rest,entities,limitations:limitations.filter(code=>code!=='waiting_suggestion_limit')};
-    return {context,contextHash:digest(canonical([protocol,audience,inputs])),id:digest(canonical([protocol,workspace,context]))};
+    return {context,contextHash:digest(canonical([protocol,audience,inputs])),id:digest(canonical([protocol,workspace,context])),empty_pin:collect.empty_pin};
   }
   private async record(source:SourceReference,id:string,context:PreparedLearningContext,binding:GuardBinding) {
     return this.derived.record({operation_id:'learning-input:'+id,source,kind:'runtime_context',content:Buffer.from(canonical(context)),
       producer:'nocheh',producer_version:protocol,configuration:{},provenance:{purpose:'contextual_learning',binding}});
   }
-  async request(source:SourceReference,workspace:string,audience:string):Promise<string> {
-    const binding=await this.guards.state(),{context,contextHash,id}=await this.prepare(source,workspace,audience,binding);
+  /** Asks for a source's learning, or says null when nothing is left to learn from: a pin of Nocheh's card, notice or
+   *  reminder alone, cut out as the owner's notes review cuts it, so no model run is spent on it. */
+  async request(source:SourceReference,workspace:string,audience:string):Promise<string|null> {
+    const binding=await this.guards.state(),{context,contextHash,id,empty_pin}=await this.prepare(source,workspace,audience,binding);
+    if(empty_pin)return null;
     // Unrelated epochs and regenerated rule wording cannot cause a reasoning loop.
     // Every source, selected result and applicable convention is still revalidated above.
     const completed=(await this.contexts.access.stores.control.query("SELECT id FROM interpretation_jobs WHERE context_hash=$1 AND state='done' ORDER BY created_at DESC LIMIT 1",[contextHash])).rows[0];
@@ -99,7 +104,7 @@ export class ContextualLearningRepository {
       // A never-started job still in the queue rebinds itself when its turn comes.
       .filter(job=>!job.current&&(job.state==='pending'&&!job.queued||job.state==='failed'&&!terminalRenewalCodes.has(job.error_code)));
     const ids:string[]=[];
-    for(const job of stale)try{ids.push(await this.request(source,job.workspace,job.audience));}
+    for(const job of stale)try{const asked=await this.request(source,job.workspace,job.audience);if(asked)ids.push(asked);}
     catch(error){if(!(error instanceof HttpError&&['learning_consent_required','learning_workspace_scope_mismatch','memory_context_retired'].includes(error.code)))throw error;}
     // A never-started job of an earlier epoch can never run, so it is not kept as a second copy.
     await this.contexts.access.stores.control.query(`DELETE FROM interpretation_jobs WHERE source_reference->>'id'=$1 AND state='pending' AND attempts=0

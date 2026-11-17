@@ -81,8 +81,16 @@ audience checks still control source reads, search, files, and graph resolution.
 
 Telegram Bot API and Desktop parsing is confined to the legacy v1 source adapter.
 Desktop identifiers stay in their own namespace even when mapped to an existing
-Telegram audience. Browser and scheduler sources also receive typed identities.
-Unrecognized legacy event kinds use conservative event-level identities.
+Telegram audience. A Desktop export records a reply to another chat as that
+chat's message id beside `reply_to_peer_id`, so the Desktop adapter (version 4)
+makes no reply relation for it: this chat's message with that id is another
+message. Projections are made once, at capture, so an export archived earlier
+keeps the relation it was given; importing the same export again keeps it too
+(the archive keeps a source it already holds), and only a portable restore into
+an empty archive rebuilds it. The owner's notes review never judges a quote by
+it. Browser and scheduler sources also receive
+typed identities. Unrecognized legacy event kinds use conservative event-level
+identities.
 
 An original's `scope` stays the chat id its app gave it, such as a Telegram chat
 id, after Nocheh gives the chat its own id and after Telegram upgrades a group to

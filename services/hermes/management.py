@@ -90,7 +90,12 @@ def dispatch(root, model, policy, body):
         return {'scope': body['scope'], **result}
     if action != 'memory': raise ValueError('unknown_management_action')
     memories = []
-    for name in ('MEMORY.md', 'USER.md'):
+    # Each note on its own, with what this parent recorded about who wrote it, for storage to put in the owner's words
+    # (ADR-0257). A file Hermes could not read either has no notes listed, and the page shows it whole.
+    from . import note_sources
+    found = note_sources.entries(path)
+    records = note_sources.load(path) if found else {}
+    for target, name in note_sources.TARGETS:
         file = path / 'memories' / name
         if file.is_symlink() or not file.resolve().is_relative_to(path.resolve()): raise ValueError('memory_path_denied')
         raw = b''
@@ -99,7 +104,9 @@ def dispatch(root, model, policy, body):
         truncated = len(raw) > 256 * 1024; text = raw[:256 * 1024].decode('utf-8', errors='replace')
         memories.append({'name': name, 'text': text, 'exists': file.exists(), 'truncated': truncated,
                          'sha256': hashlib.sha256(raw).hexdigest() if not truncated else None,
-                         'citations': sorted(set(re.findall(r'nocheh:event:([a-f0-9]{64})', text)))})
+                         'citations': sorted(set(re.findall(r'nocheh:event:([a-f0-9]{64})', text))),
+                         **({'entries': [{'target': target, 'text': entry, **note_sources.note(records, target, entry)}
+                                         for entry in found[target]]} if found is not None else {})})
     result = {'scope': body['scope'], 'profile': path.name, 'memories': memories,
               'sessions': [], 'messages': [], 'next_offset': None,
               'provenance': 'Native notes are model-maintained; only explicit citations identify source evidence.'}

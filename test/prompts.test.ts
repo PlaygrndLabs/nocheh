@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,withPrompts} from '../src/prompts.js';
+import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
 import {brainSummary} from '../src/brain/brain.js';
 import {fixtureBrain,type FakeCall} from './fixture-brain.js';
 
@@ -20,7 +20,7 @@ test('owner instruction texts need content, a known name and the values Nocheh f
 test('turns and calls that run an instruction text carry only the owner’s valid replacements',async()=>{
   const control={query:async()=>({rows:[{texts:{'reply.owner':'Mine','reply.group':' ','bogus':'Ignored',
     'learning.interpret':'Stays in Nocheh {trigger_id} {citable_ids}','telegram.not_allowed':'Also stays in Nocheh','telegram.approval_card':'Card {text}','telegram.approval_texts':'sent: Sent',
-    'telegram.action_continued':'Ended {actions}'}}]})} as any;
+    'telegram.action_continued':'Ended {actions}','memory.source_texts':'said: {who} at {place}'}}]})} as any;
   const seen:[string,Record<string,unknown>][]=[],record:FakeCall=async(operation,input)=>{seen.push([operation,input]);return {};};
   const call=withPrompts(record,control),brain=brainWithPrompts(fixtureBrain(record),control);
   await brain.startTurn({channel:'telegram',event_id:'e',attempt:1},{});await call('guard.detect',{text:'t'});await call('usage.price',{});
@@ -100,7 +100,7 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
   assert.equal(promptProblem('telegram.approval_texts','sent: Sent!\ntopic: in a topic'),null,'lines a card has today keep their freedom');
   assert.equal(promptProblem('tasks.reminder_texts',reminderTexts),null);assert.equal(promptProblem('telegram.approval_texts',approvalTexts),null);
   for(const [key,required] of Object.entries(labeledPlaceholders))for(const [name,values] of Object.entries(required!)) {
-    const line=(key==='tasks.reminder_texts'?reminderLines(''):approvalLines(''))[name as never] as string|undefined;
+    const line=(key==='tasks.reminder_texts'?reminderLines(''):key==='memory.source_texts'?sourceLines(''):approvalLines(''))[name as never] as string|undefined;
     assert.ok(line&&values.every(value=>line.includes(value)),`${key} ${name}: its default keeps its values`);
   }
   // A stored text with such a line is still read, so the owner's other lines stay.
@@ -108,6 +108,33 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
   const stored=await ownerPrompts(control);
   assert.equal(approvalLines(stored['telegram.approval_texts']).sent,'Sent!');assert.equal(approvalLines(stored['telegram.approval_texts']).not_sent,lines.not_sent);
   assert.equal(reminderLines(stored['tasks.reminder_texts']).set_by,'\u{1f464} Set by {who} in {place}');
+});
+
+test('a note\'s source has its own lines in the owner\'s words, which keep every value Nocheh fills in and never reach Hermes',()=>{
+  assert.ok((promptKeys as readonly string[]).includes('memory.source_texts'));
+  const lines=sourceLines(undefined);
+  assert.equal(lines.said,'{who} in {place}');assert.equal(lines.person_not_allowed,'{name}, a person not allowed there now');
+  assert.equal(lines.forward,'a message {who} forwarded in {place}, from {origin}');assert.equal(lines.origin_hidden,'a person who hides their account');
+  assert.equal(lines.nocheh_approved_post,'Nocheh\'s post in {place}, sent after you approved it');assert.equal(lines.review_owner,'Your own messages in {place}');
+  assert.equal(lines.turn_read,'Nocheh\'s note from {place} on {date}, after reading {read}');assert.equal(lines.unknown,'Source not recorded');
+  assert.equal(lines.unknown_message,'a message Nocheh can\'t describe, in {place}');assert.equal(lines.more,'{count} more');
+  assert.equal(lines.pinned_nocheh,'Nocheh\'s own message that {who} pinned in {place}');
+  assert.equal(lines.held,'a message {who} sent in {place} holding someone else\'s words, such as a shared checklist or poll');
+  assert.equal(lines.pinned_held,'a message holding someone else\'s words, such as a shared checklist or poll, that {who} pinned in {place}');
+  assert.equal(Object.keys(lines).length,52);
+  // Every value a default line holds is one its edited line must keep.
+  const required=labeledPlaceholders['memory.source_texts']!;
+  for(const [name,line] of Object.entries(lines)) {
+    const values=[...line.matchAll(/\{[a-z_]+\}/g)].map(match=>match[0]);
+    assert.deepEqual([...(Object.hasOwn(required,name)?required[name]!:[])].sort(),values.sort(),name);
+  }
+  assert.equal(promptProblem('memory.source_texts',sourceTexts),null);
+  assert.equal(promptProblem('memory.source_texts','said: {who} said it'),'prompt_placeholder_missing','{place} dropped');
+  assert.equal(promptProblem('memory.source_texts','said: someone in {place}'),'prompt_placeholder_missing','{who} dropped');
+  assert.equal(promptProblem('memory.source_texts','turn_read: a note from {place} on {date}'),'prompt_placeholder_missing','{read} dropped');
+  assert.equal(promptProblem('memory.source_texts','said: {who}, in {place}\nunknown: Not known'),null);
+  assert.equal(sourceLines('said: {who} said it\nunknown: Not known').said,lines.said,'a stored line without its values reads as its default');
+  assert.equal(sourceLines('said: {who} said it\nunknown: Not known').unknown,'Not known','the other lines stay');
 });
 
 test('a line named like an Object property is just a line: a save of it is checked as any other, and a stored one reads the defaults',()=>{

@@ -1,4 +1,4 @@
-# ADR-0259: Members in groups
+# ADR-0260: Members in groups
 
 <status>
 Accepted on 2026-11-17, as step 3 of the Members design, "Members in groups".
@@ -28,6 +28,8 @@ card's own project moves no guard epoch) and
 Also amends [ADR-0244](0244-owner-defaults-posts-and-machine-reports-stay-private.md)'s
 owner ID guard, [ADR-0254](0254-sends-go-only-to-chats-nocheh-serves.md)'s person
 destination, [ADR-0251](0251-fixes-that-lose-nothing.md)'s voice cut,
+[ADR-0257](0257-learned-memory-names-its-source.md)'s owner's notes review
+(someone not allowed there is someone who is not a member who talks there),
 [ADR-0159](0159-group-members-post-freely-and-approvals-go-private.md) and
 [ADR-0161](0161-requesters-review-their-own-cross-group-messages.md) on posts
 to other groups, [ADR-0182](0182-strangers-cost-nothing-and-reach-no-model.md)
@@ -198,8 +200,12 @@ groups. Here each effect checks the member again just before it happens:
   for that person's next message. The private reply works the same way and is
   otherwise unchanged. A post in a chat's own name or from a proxy account gets
   nothing.
-- **Voice notes.** `allowedSender` asks `talks`, so someone who is not the owner
-  or a member who talks there has a live recording cut to 15 minutes (ADR-0251).
+- **Voice notes and the owner's notes.** `allowedSender` asks `talks`, so someone
+  who is not the owner or a member who talks there has a live recording cut to 15
+  minutes (ADR-0251), and what they send, react or pin stays out of the owner's
+  notes review (`notesSender`, ADR-0257). Its reactions, edits and the people
+  names its labels read (`peopleNames`, the members who reach a served group)
+  follow the member directory the same way.
 - **Tasks.** A non-owner sender must still pass `talks` in the group at each task
   call, or gets 403 `member_access_changed`, so a member paused mid-turn writes
   no task or reminder. A member whose tasks are read only gets a read-only turn,

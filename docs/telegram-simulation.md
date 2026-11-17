@@ -272,7 +272,7 @@ admin; a member's second add the same day leaves with no second line; a leave
 Telegram refuses stays silent as Couldn’t leave; a removal from a group that is
 on tells the owner once; the owner's add is on at once, with one card whose
 buttons each work; and a group that is off is turned on and off through
-`/v1/chats/state`. Members ([ADR-0259](adr/0259-members-in-groups.md)): the tester
+`/v1/chats/state`. Members ([ADR-0260](adr/0260-members-in-groups.md)): the tester
 sets them up through the owner's Members routes behind the dashboard proxy,
 adding each by Telegram user ID and sending only the switches that differ, and
 the member scenarios check that no container restarted. They cover the owner

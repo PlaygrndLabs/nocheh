@@ -92,6 +92,93 @@ as administrative authority. The memory and process-isolation settings remain in
 Fresh configurations default to `NOCHEH_SECURITY_RUNTIME=isolated` and
 `NOCHEH_MEMORY_CONTEXT=evidence`.
 
+In evidence mode each native notes block is one entry, `{source, target, title,
+usage, about, notes: [{from, label, content}]}`. `content` is the note's text
+unchanged; `from` (one of `owner`, `nocheh`, `person`, `forward`, `file`,
+`mixed`, `turn`, `turn_read`, `unknown`, `unavailable`) and `label` (fixed
+words, at most 120 characters, no person's name) come from Nocheh's own record
+of who wrote the note, which Hermes's parent keeps in
+`<profile>/nocheh-note-sources.json`, outside the folders an isolated run can
+write, and storage turns into labels when the turn starts. `about` is a fixed
+sentence saying so, and that `from=owner` means only the owner's own messages;
+it reaches the model even when the owner edited the evidence instruction. The
+child accepts only a known `from` and a plain label, else `unknown`, and a block
+of another shape stops the turn. In the owner's turns, the long-term memory
+blocks in the same evidence each carry `about`, `owner` or
+`forwards_and_files`. Labels are information for the model, not a permission,
+and the request guard checks them like the notes. A review's rules count by the
+messages code recorded each was learned from: rules resting on another person's
+message, a forward or a file make the note `person`, `forward`, `file` or
+`mixed`. Only a review that holds someone else's words reads them; a review of
+Nocheh's own learned messages, alone or with the owner's own, leaves them out,
+and the owner's quote or pin of a message Nocheh learned counts as Nocheh's. A
+review of only the owner's own messages reads only the rules the owner wrote,
+since a rule learned automatically, even from the owner's own messages, can
+restate a rule or chat that its interpretation read.
+A pin or quote of Nocheh's message that is not archived yet, or whose capture
+failed, or of a forward of one, counts as someone else's (it fails closed), and
+its words, from Nocheh's own account, are cut from everything learned. Code tells
+Nocheh's own account only by comparing the sender's ID with the bot account the
+archive stored with the update (`events.bot_id`); when that is not an account,
+nothing is cut by it. Only Nocheh's own words are cut: another bot's message is
+learned as someone else's, and a message sent through an inline bot, which its
+sender wrote, as sent through an inline bot. The owner's quote of their own
+forward quotes whoever wrote it, so it is never `owner`, and neither is a quote
+of a message in another chat or topic, which Telegram does not show as a forward
+or as sent through an inline bot; a Telegram Desktop export's message with any
+of its forward fields is a forward. A checklist others can add tasks to, and
+any checklist edited, pinned, quoted or forwarded, is never `owner` either:
+Telegram names no one per task, and the owner can stop sharing one after others
+added tasks; only the owner's own in the owner's private chat with Nocheh, where
+no one else can add tasks, stays `owner`. Nor is a poll someone else added an
+option to, a deleted option (except, in that private chat, one deleted from the
+owner's own poll that is not a forward), a Telegram Desktop export's checklist
+or poll, or a message that embeds one its sender did not type or one that
+quotes a message: Telegram keeps an embedded message's quote but leaves out its
+reply, so that quote is never read as the sender's own words. The owner's pin
+of such a message of their own is labelled as a message holding someone else's
+words that the owner pinned. A pinned message's own reply
+is never learned with the pin. A message another embeds, which code finds by
+its shape alone (a `message_id` and a `chat`), never a field's name, so one in a
+field Telegram adds later is found too (the checklist a service message reports
+on, a giveaway's or a suggested post's message, the poll an option was added
+to), is kept and labelled: only Nocheh's own words in it are cut, and a quote
+inside it is traced through the archived event of the embedded message itself,
+as a pinned message's quote is: one quoting Nocheh's words is cut from
+everything learned, and so is one the archive can't trace (that message never
+archived, archived in a revision answering nothing, or archived only as
+Telegram Desktop exports), counted as `quote_not_traced`, whoever it quoted.
+The owner's notes review cuts one from someone not allowed there, a quote inside
+one of such a person's message (one of a message in another chat included,
+judged as a top-level quote of one is), a poll option such a person added or
+one added in a chat's name, and a deleted option's text other than the owner's
+own in the owner's private chat, counting the message as kept out. In the
+owner's notes review a quote inside a pinned message is judged by who wrote the
+message it quotes, and cut when that can't be traced, counted as
+`quote_not_traced`, as is a quote inside an embedded message that answers one
+in another chat when the archive holds no revision of the embedded message to
+judge it by. A Telegram Desktop export's reply to another chat
+(`reply_to_peer_id`) gets no reply relation, since its id is that chat's, and
+the review never judges a quote by one an earlier export was given. The evidence
+instruction says a `nocheh` note is not the owner's own words either. What a
+turn read comes from its own session:
+a search by meaning counts as reading other chats, an earlier tool result or
+another person's group message counts only when the note copies a run of 32
+characters or a distinctive token from it, and a forward of the sender's own
+message is not a read in the message the turn answers. Earlier in the session a
+forward the turn was given counts as read, except the owner's forward of their own message in
+their private chat, the only one written `[Forwarded: your own earlier message]`.
+Anywhere else an own forward is written
+`[Forwarded: the sender's own earlier message]`, a member's in a group and the
+owner's own in a group or in a private answer carried from one alike, and counts
+as a forward read (it fails closed). A note from a turn whose session can't be
+read is never `turn`, and the turn is counted for the owner's notice. Storage
+counts a lookup that can't name a note's chat, Hermes's before a turn or review
+as well as recall's and the Notes page's, as the owner's `note_labels` line.
+The legacy memory mode (`NOCHEH_MEMORY_CONTEXT=legacy`) and the non-isolated
+runtime carry no labels, and a non-isolated run could reach the record file
+([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
+
 
 For an existing installation, stop Hermes and its native writers before running
 `python3 -m tools.operations.security.security_profiles /absolute/path/to/hermes --hermes-stopped`.

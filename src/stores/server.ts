@@ -33,6 +33,7 @@ import {fillTemplate,labeledLines,ownerPrompts,problemButtons,problemNotice} fro
 import {retryButton} from './action-commands.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
+import {memoryProblems} from './note-sources.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {currentChats} from './chats.js';
@@ -76,6 +77,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       authorize(req,config.token);const ids=object(await readJson(req,64*1024)).event_ids;
       if(!Array.isArray(ids)||ids.length>500||ids.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(400,'invalid_event_ids');
       return json(res,200,await s.retirements.historyRetirements(ids as string[]));
+    }
+    if(req.method==='POST'&&path==='/internal/notes/sources') {
+      // Hermes asks where its notes came from before each turn and review (ADR-0257). The labels name groups only as
+      // Nocheh saved them and are never let through beforehand, so the request guard still reads them.
+      authorize(req,config.token);
+      return json(res,200,await s.noteSources.lookup(await readJson(req,256*1024)));
     }
     if(req.method==='POST'&&path==='/internal/memory/prepare') {
       if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
@@ -228,7 +235,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const operation=({profiles:'listProfiles',memory:'readNotes',preferences:writes?'writeSettings':'readSettings',
         persona:writes?'writePersona':'readPersona'} as Record<string,BrainOperation>)[string(action,20)];
       if(!operation)throw new HttpError(400,'unknown_management_action');
-      return json(res,200,await brainOperation(s.brain,operation)(input));
+      // Each note says where it came from in the owner's words; what Hermes recorded about it stays behind.
+      const value=await brainOperation(s.brain,operation)(input);
+      return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value):value);
     }
     if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
@@ -429,8 +438,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
       const input=object(await readJson(req)),binding=await s.guards.state();
       if(!principal.admin)await s.turns.binding(principal);
-      // Each hit says in words which chat it came from, never by its raw ID (ADR-0251).
-      return result(await withRecallPlaces(s.stores,await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation})));
+      // Each hit says in words which chat it came from, never by its raw ID (ADR-0251), and each note where it came from (ADR-0257).
+      const found=await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation});
+      return result(await withRecallPlaces(s.stores,await s.noteSources.withRecallSources(found)));
     }
     if(path==='/v1/memory/reviews'&&req.method==='GET'){admin(principal);return json(res,200,await s.reviews.list(principal,url.searchParams.get('after')??''));}
     if(path==='/v1/memory/reviews/control'&&req.method==='POST') {
@@ -493,18 +503,20 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         return json(res,200,{records,next});
       }
       if(path==='/v1/status') {
-        const [guard,archive,services,spool,dispatches,sends]=await Promise.all([s.guards.state(),s.sources.status(principal),
+        const [guard,archive,services,spool,dispatches,sends,memoryDay]=await Promise.all([s.guards.state(),s.sources.status(principal),
           s.stores.control.query('SELECT service,seen_at FROM service_heartbeats ORDER BY service'),
           // Health shows incoming updates that could not be saved and the latest replies' states.
           s.stores.control.query('SELECT attempts,error_code,seen_at FROM spool_failures ORDER BY seen_at DESC LIMIT 100'),
           s.stores.control.query('SELECT event_id,state,attempts,error_code,updated_at FROM dispatches ORDER BY created_at DESC LIMIT 50'),
           // And what the chat apps refused or never answered in the last day.
-          s.chatSends.summary()]);
+          s.chatSends.summary(),
+          // And the memory steps that failed today where Hermes can't see them: labelling notes, and recall's ask of the owner's forwards and files.
+          memoryProblems(s.stores.control)]);
         const received=new Map((await s.stores.archive.query('SELECT id,received_at FROM events WHERE id=ANY($1::text[])',
           [dispatches.rows.map(row=>row.event_id)])).rows.map(row=>[row.id,row.received_at]));
         return json(res,200,{service:config.service,storage_layout:'original-only-v1',guard,guard_mode:guard.mode,
           archive:{...archive,spool_failures:spool.rows,workflows:dispatches.rows.map(row=>({...row,received_at:received.get(row.event_id)??null}))},
-          chat_sends:sends,services:services.rows,workers:status()});
+          chat_sends:sends,memory_problems:memoryDay,services:services.rows,workers:status()});
       }
     }
     throw new HttpError(404,'not_found');

@@ -8,7 +8,7 @@ import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {digest,ingest,type Envelope} from '../src/archive.js';
 import {immutableFile} from '../src/storage.js';
-import {allowedSender,assistantPolicy,conversationScope,outsideChat,settleTelegramChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
+import {allowedSender,assistantPolicy,conversationScope,notesSender,outsideChat,settleTelegramChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
 import {installChats,installChatsForTest,setChatLoader} from '../src/chats.js';
 import {BOB,BOB_CHAT,GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ID,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,UNSERVED,fixtureDirectory,fixtureMemberDirectory,fixtureMembers,policyDirectory} from './fixture-groups.js';
 import {installMembersForTest,memberDirectory} from '../src/members.js';
@@ -139,6 +139,48 @@ test('an allowed sender is the owner or a member who talks in that served group,
   assert.equal(allowedSender(policy,update(-20,123),'-30'),false,'a message from another chat');
   assert.equal(allowedSender(policy,null,'-20'),false);
   assert.equal(allowedSender({...policy,enabled:false},update(-20,123),'-20'),true,'it does not depend on replies being on');
+});
+
+test('a reaction\'s sender is who reacted: the owner or a member who talks there, never a reaction in a chat\'s name or a count (step 3)',()=>{
+  const reaction=(chat:number,type:string,who:Record<string,unknown>)=>({update_id:9,message_reaction:{chat:{id:chat,type},message_id:7,date:1,
+    old_reaction:[],new_reaction:[{type:'emoji',emoji:'\u{1f44d}'}],...who}});
+  assert.equal(allowedSender(policy,reaction(123,'private',{user:{id:123,is_bot:false}}),'123'),true,'the owner in their private chat');
+  assert.equal(allowedSender(policy,reaction(-20,'supergroup',{user:{id:123,is_bot:false}}),'-20'),true,'the owner in a group');
+  assert.equal(allowedSender(policy,reaction(-20,'supergroup',{user:{id:456,is_bot:false}}),'-20'),false,'not a member');
+  let people=grantMembers({'-20':{granted:['456']}},{owner:'123',groups:['-30']});
+  try {
+    assert.equal(allowedSender(policy,reaction(-20,'supergroup',{user:{id:456,is_bot:false}}),'-20'),true,'a member');
+    assert.equal(allowedSender(policy,reaction(-30,'supergroup',{user:{id:456,is_bot:false}}),'-30'),false,'switched off in that group');
+  }finally{people();}
+  people=grantMembers({'-20':{granted:['456']}},{owner:'123',changes:{'456':{state:'paused'}}});
+  try{assert.equal(allowedSender(policy,reaction(-20,'supergroup',{user:{id:456,is_bot:false}}),'-20'),false,'a paused member');}finally{people();}
+  assert.equal(allowedSender(policy,reaction(123,'private',{user:{id:456,is_bot:false}}),'123'),false,'a stranger in private');
+  assert.equal(allowedSender(policy,reaction(-20,'supergroup',{actor_chat:{id:-20,type:'supergroup'}}),'-20'),false,'a reaction in the group\'s own name, which may be the owner');
+  assert.equal(allowedSender(policy,reaction(-20,'supergroup',{user:{id:123,is_bot:false},actor_chat:{id:-20,type:'supergroup'}}),'-20'),false,'a chat\'s name wins over a user');
+  assert.equal(allowedSender(policy,reaction(-20,'supergroup',{}),'-20'),false,'no one named');
+  assert.equal(allowedSender(policy,reaction(-20,'supergroup',{user:{id:123,is_bot:true}}),'-20'),false,'a bot');
+  assert.equal(allowedSender(policy,reaction(-20,'supergroup',{user:{id:123,is_bot:false}}),'-30'),false,'a reaction from another chat');
+  assert.equal(allowedSender(policy,{update_id:10,message_reaction_count:{chat:{id:-20,type:'supergroup'},message_id:7,date:1,reactions:[]}},'-20'),false,'counts name no one');
+});
+
+test('the owner\'s notes take a Telegram update only from an allowed sender, Nocheh\'s own messages and the web chat always, and nothing else',()=>{
+  const event=(kind:string,payload:unknown,scope='-20',channel='telegram')=>({channel,kind,scope,payload});
+  assert.equal(notesSender(policy,event('telegram_update',update(-20,123))),'review','the owner in a group');
+  assert.equal(notesSender(policy,event('telegram_update',update(123,123,'private'),'123')),'review','the owner in their private chat');
+  const people=grantMembers({'-20':{granted:['456']}},{owner:'123'});
+  try{assert.equal(notesSender(policy,event('telegram_update',update(-20,456))),'review','a member who talks there');}finally{people();}
+  assert.equal(notesSender(policy,event('telegram_update',update(-20,456))),'sender_not_allowed','not a member');
+  assert.equal(notesSender(policy,event('telegram_update',{update_id:2,edited_message:{...update(-20,456).message,edit_date:9}})),'sender_not_allowed','their edit');
+  assert.equal(notesSender(policy,event('telegram_update',{update_id:3,message_reaction:{chat:{id:-20,type:'supergroup'},user:{id:456,is_bot:false},message_id:7,date:1,
+    old_reaction:[],new_reaction:[]}})),'sender_not_allowed','their reaction');
+  assert.equal(notesSender(policy,event('telegram_update',{update_id:4,message:{message_id:8,chat:{id:-20,type:'supergroup'},from:{id:1000001,is_bot:true},
+    sender_chat:{id:-20,type:'supergroup'}}})),'sender_not_allowed','an anonymous admin');
+  assert.equal(notesSender(policy,event('telegram_delivered_message',{message:{message_id:9,chat:{id:-20,type:'supergroup'}}})),'review','Nocheh\'s own message');
+  assert.equal(notesSender(policy,event('browser_input',{text:'hi'},'123','browser')),'review','the owner\'s web chat');
+  assert.equal(notesSender(policy,event('browser_delivered_message',{},'123','browser')),'review','Nocheh\'s answer there');
+  for(const [kind,channel] of [['telegram_desktop_message','telegram'],['telegram_wire','telegram'],['browser_input','telegram'],['telegram_update','browser'],
+    ['scheduled_result','scheduler'],['future_kind','telegram']])
+    assert.equal(notesSender(policy,event(kind!,update(-20,123),'-20',channel)),'sender_not_allowed',kind+' '+channel);
 });
 
 test('an allowed sender is judged in the chat the directory finds: digest groups and an upgraded group under either id (ADR-0252, step 3)',()=>{

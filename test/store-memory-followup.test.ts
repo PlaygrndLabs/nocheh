@@ -127,6 +127,7 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
       const f=await fixture(17);await f.approve();const request=await f.saved();assert.ok(request.followup_action_id,'topic approval must stage its follow-up');
       assert.equal((await f.services.telegramActions.inspect(owner,request.followup_action_id)).arguments.destination,f.destination);
       await f.services.telegramActions.run(request.followup_action_id,f.authority);assert.equal(f.sent[0]!.destination,f.destination);
+      assert.equal(f.sent[0]!.send_class,'approved_post','an approved follow-up is a post, which memory learns');
     });
     await t.test('long approved wording remains complete in the exact follow-up',async()=>{
       const wording='Orion launch schedule milestone is October. '.repeat(130);assert.ok(wording.length>4096&&wording.length<=12000);
@@ -222,7 +223,7 @@ test('memory approvals preserve exact wording, topic, recovery and delivery auth
       assert.equal((await f.services.telegramActions.run(id,f.authority)).state,'cancelled');assert.equal(f.sent.length,0);
       const action=await f.services.telegramActions.inspect(owner,id);
       const automatic=await f.services.telegramActions.approvedSystem({...f.principal,logical_profile:request.logical_profile},f.source,request.binding,
-        f.destination,action.arguments.text,'memory-access-followup:'+approval.grant_id);
+        f.destination,action.arguments.text,'memory-access-followup:'+approval.grant_id,'approved_post');
       assert.equal(automatic.state,'cancelled','automatic restaging cannot revive a cancelled action');
       assert.deepEqual(await f.approve(),approval);
       assert.equal((await f.services.telegramActions.run(id,f.authority)).state,'completed');
