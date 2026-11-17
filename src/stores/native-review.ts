@@ -297,8 +297,9 @@ export class NativeReviewRepository {
    * message it embeds by that message's own author, and a poll option by who added it, each asked as notesSender asks a
    * message sent in the holding message's chat, as pinnedSender asks a pin's. A post in a chat's name is never let in, nor
    * is an option added in a chat's name. A message Telegram no longer shows (inaccessible) holds no words. A quote inside
-   * an embedded message, whose reply Telegram leaves out, is judged as a pinned message's is (pinnedQuotedSender): by that
-   * message as the archive holds it (embeddedTo), each revision asked as a message quoting is (quotedSender); one the
+   * an embedded message is judged as a pinned message's is (pinnedQuotedSender): by that message as the archive holds it
+   * (embeddedTo, every quote, one whose embedded copy keeps external_reply included), each revision asked as a message
+   * quoting is (quotedSender), which judges one answering a message in another chat by that message alone; one the
    * archive does not hold has nothing to judge it by and is not let in. A deleted option's text, whose adder Telegram does
    * not name, is let in only when it is the owner's own (heldAllowed). Nocheh's own words, and a quote that can't be
    * traced, are cut for everyone before this is asked.
@@ -307,7 +308,7 @@ export class NativeReviewRepository {
     const event=await read(id),update=record(event?.payload),admitted=new Set<string>();
     const message=record(update?.message??update?.edited_message??update?.channel_post??update?.edited_channel_post);
     if(!event||!message)return admitted;
-    const held=heldBy(message),traced=held.some(item=>item.kind==='quote')?(await this.sources.embeddedTo([id])).get(id):undefined;
+    const held=heldBy(message),traced=held.some(item=>item.kind==='quote')?(await this.sources.embeddedTo([id],true)).get(id):undefined;
     for(const item of held) {
       const place=heldKey(item.path);
       if(item.kind==='quote'?await this.shownQuoteSender(traced?.get(place)??[],admit,read)==='review':this.heldAllowed(event,message,item))admitted.add(place);

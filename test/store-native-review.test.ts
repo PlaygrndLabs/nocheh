@@ -322,9 +322,9 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-senders-')),key='review-senders:'+Date.now();
-  const group='-'+Date.now(),unserved='-'+(Date.now()+7),owner:Reader={admin:true,scope:null},bot=1000+Date.now()%1000;
-  // Alice (123) owns Nocheh, Bob (456) is allowed in the group and Sara (789) is not.
-  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['456'],denied:[]}}};
+  const group='-'+Date.now(),unserved='-'+(Date.now()+7),other='-'+(Date.now()+11),owner:Reader={admin:true,scope:null},bot=1000+Date.now()%1000;
+  // Alice (123) owns Nocheh, Bob (456) is allowed in the group and in another one, and Sara (789) is not.
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['456'],denied:[]},[other]:{granted:['456'],denied:[]}}};
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:'synthetic-review-service-credential-only',policy:()=>policy,
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('no notes review runs in this test');},
     memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
@@ -628,6 +628,23 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
       for(const text of [reviewed,learned])assert.ok(text.includes(`${mark}POLL lunch?`)&&text.includes(`${mark}OPTION Friday`),mark);
       assert.deepEqual((await recorded(added))[0].left_out,counted,mark);
       assert.equal((await services.contexts.prepare(added,await services.guards.state())).limitations.includes('quote_not_traced'),counted.quote_not_traced===1,mark);
+    }
+    // A quote inside an embedded message that keeps its reply to a message in another chat (external_reply) is judged as a
+    // quote of one in another chat is, by that message as the archive holds it: Bob's, in a group where he is allowed,
+    // stays in the owner's notes review and nothing is counted; Sara's goes from it only, counted as hers. Interpretations
+    // read both.
+    await say(160,456,'BOBFAR the caterer called',{},other);await say(161,789,'SARAFAR wire the deposit',{},other);
+    for(const [poll,target,from,mark,inReview,counted] of [[136,160,bobUser,'EXTBOBQ',true,left()],
+      [137,161,{id:789,is_bot:false,first_name:'Sara'},'EXTSARAQ',false,left(1)]] as const) {
+      const elsewhere={external_reply:{origin:{type:'user',sender_user:from,date:1},chat:{id:Number(other),type:'group'},message_id:target}};
+      await capture({message:pollQuoting(poll,mark,elsewhere)});
+      const added=await capture({message:textless(poll+10,456,{poll_option_added:{poll_message:pollQuoting(poll,mark,elsewhere),option_persistent_id:'z',
+        option_text:`${mark}OPTION Friday`}})});
+      const reviewed=(await input(((await services.reviews.queue(added)).ids)[0]!)).text as string,learned=await read(added);
+      assert.equal(reviewed.includes(`"${mark}TEXT"`),inReview,mark);assert.ok(learned.includes(`"${mark}TEXT"`),mark);
+      for(const text of [reviewed,learned])assert.ok(text.includes(`${mark}POLL lunch?`)&&text.includes(`${mark}OPTION Friday`),mark);
+      assert.deepEqual((await recorded(added))[0].left_out,counted,mark);
+      assert.ok(!(await services.contexts.prepare(added,await services.guards.state())).limitations.includes('quote_not_traced'),mark);
     }
     // In the owner's own private chat nobody else can add options, so the text of an option deleted from the owner's own
     // poll there is the owner's own words: it stays in the owner's notes, labelled as the owner's, and nothing is counted.

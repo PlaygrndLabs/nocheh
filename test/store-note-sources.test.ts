@@ -135,6 +135,25 @@ test('note sources read each message\'s facts from the archive: its author, its 
     const traced=await sources.embeddedTo([addedCard,addedBob,addedBare,addedLost,addedElsewhere,typed]);
     assert.deepEqual([...traced.keys()].sort(),[addedCard,addedBob,addedBare].sort(),'only a message the archive holds in the same chat is traced');
     assert.deepEqual([...traced.get(addedBob)!.keys()],[quotePlace]);assert.equal(traced.get(addedBob)!.get(quotePlace)!.length,1);
+    // A Telegram Desktop export of a supergroup Nocheh serves is another revision of the same message, which records its
+    // reply as reply_to_message_id: beside the live revision that shows it, the quote is traced as that one traces it. An
+    // export alone shows no reply Nocheh's card can be told by, so its quote still can't be traced.
+    const exportedAs=(id:number,fields:Record<string,unknown>)=>archive.capture({version:1,key:`${run}:export:${id}`,bot_id:'desktop-export',source_id:String(id),revision:'1',
+      occurred_at:null,origin:'import',kind:'telegram_desktop_message',scope:GP1,text:'',payload:{chat:{id:1000000001,type:'private_supergroup',name:'Example group'},
+        message:{type:'message',id,from:'Owner',from_id:'user'+OWNER,poll:{question:'Lunch?',answers:[]},text:'',...fields}}} as Envelope);
+    const bothPollId=learnedId+84,exportPollId=learnedId+85;
+    await archivedAs(bothPollId,pollQuoting(bothPollId,{reply_to_message:{message_id:bobId,date:1700000000,chat:group,from:bob,text:'pay now'}}));
+    await exportedAs(bothPollId,{reply_to_message_id:bobId});await exportedAs(exportPollId,{reply_to_message_id:bobId});
+    const addedBoth=await optionAdded(bothPollId),addedExport=await optionAdded(exportPollId);
+    assert.equal((await sources.embeddedTo([addedBoth])).get(addedBoth)?.get(quotePlace)?.length,2,'the live and the exported revision');
+    // Telegram keeps the reply of an embedded message that answers one in another chat (external_reply): that quote is not
+    // traced or cut here, and the owner's notes review judges it by that message (embeddedTo with every quote).
+    const addedFar=await capture({origin:'live',kind:'telegram_update',scope:GP1,text:'',payload:message(group,bob,{poll_option_added:{poll_message:pollQuoting(bobPollId,
+      {external_reply:{origin:{type:'user',sender_user:bob,date:1},chat:{id:Number(GP2),type:'supergroup'},message_id:bobId}}),option_persistent_id:'a',option_text:'Friday'}})});
+    assert.deepEqual(Object.fromEntries(await sources.carried([addedBoth,addedExport,addedFar])),{
+      [addedExport]:{pinned:null,quote:false,pinned_quote:false,held:[],untraced:[quotePlace]}});
+    assert.equal((await sources.embeddedTo([addedFar])).size,0);
+    assert.deepEqual([...((await sources.embeddedTo([addedFar],true)).get(addedFar)??new Map())].map(([place,found])=>[place,found.length]),[[quotePlace,1]]);
     // In the owner's own private chat, told by equality with the policy's owner chat, nobody else can add tasks: the owner's
     // checklist there stays the owner's own, even one open to others. In a group the same checklist may hold others' tasks,
     // and so may it in a chat the policy does not name as the owner's.

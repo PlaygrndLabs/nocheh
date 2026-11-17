@@ -4,7 +4,7 @@ import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
 import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.js';
 import {sourceChat} from '../spaces.js';
-import {bucketOf,eventClass,heldKey,nochehHeld,nochehPinned,nochehQuoted,quotesToTrace,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
+import {bucketOf,eventClass,heldBy,heldKey,nochehHeld,nochehPinned,nochehQuoted,quotesToTrace,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
 import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
 import {nameKeys,type Who} from '../task-reminder-text.js';
@@ -20,6 +20,9 @@ const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='obj
 const telegramMessage=(payload:unknown)=>{const found=record(payload);return record(found?.message??found?.edited_message??found?.channel_post??found?.edited_channel_post);};
 /** Whether a message answers another, as the archive's reply relation is made from it: in this chat, or in another. */
 const replies=(message:Record<string,any>|null|undefined)=>!!record(message?.reply_to_message)||!!record(message?.external_reply);
+/** Whether a message answers anything at all: as replies() tells it, or as a Telegram Desktop export records its reply
+ *  (reply_to_message_id), which the archive's reply relation is made from too. */
+const answers=(message:Record<string,any>|null|undefined)=>replies(message)||(message?.reply_to_message_id!==undefined&&message?.reply_to_message_id!==null);
 
 /** The channels a turn that writes notes runs on; the scheduler's and background jobs' are jobs. */
 export const turnChannels=['telegram','browser','scheduler','background'] as const;
@@ -178,10 +181,13 @@ export class NoteSourceRepository {
    * message. `held`: the places (heldKey) of what it holds that is Nocheh's own words (nochehHeld: a message it embeds,
    * or the quote inside one). A quote inside a message it embeds, whose reply Telegram leaves out (quotesToTrace), is
    * traced as the pinned message's is, through that message's own archived event (embeddedTo): it is `held` when a
-   * revision of that message answers Nocheh's words, and `untraced` when the archive does not hold that message or holds
-   * a revision of it that answers nothing; both are cut for everyone, since a quote only repeats part of a message that
-   * is learned from its own event. Only a message that carries any of these is in the result. Another bot's message, and
-   * one sent through an inline bot, is someone else's: it carries none of these, and is learned labelled as someone else's.
+   * revision of that message answers Nocheh's words, and `untraced` when the archive does not hold that message, holds
+   * a revision of it that answers nothing, or holds none that shows its reply as Telegram sent it (replies): a Telegram
+   * Desktop export's revision shows it only as reply_to_message_id, which can't tell Nocheh's card from a learned reply,
+   * so it traces nothing alone but answers as a live revision beside it does. Both are cut for everyone, since a quote
+   * only repeats part of a message that is learned from its own event. Only a message that carries any of these is in
+   * the result. Another bot's message, and one sent through an inline bot, is someone else's: it carries none of these,
+   * and is learned labelled as someone else's.
    */
   async carried(ids:readonly string[]):Promise<Map<string,Carried>> {
     const wanted=[...new Set(ids.filter(fullId))],found=new Map<string,Carried>();
@@ -199,7 +205,10 @@ export class NoteSourceRepository {
       for(const item of quotesToTrace(message)) {
         const place=heldKey(item.path),targets=embedded.get(id)?.get(place)??[];
         if(targets.some(nocheh))held.push(place);
-        else if(!targets.length||targets.some(target=>!replies(shownMessages.get(target)?.message)))untraced.push(place);
+        else {
+          const revisions=targets.map(target=>shownMessages.get(target)?.message);
+          if(!revisions.some(replies)||!revisions.every(answers))untraced.push(place);
+        }
       }
       if(pinned||quote||pinnedQuote||held.length||untraced.length)found.set(id,{pinned,quote,pinned_quote:pinnedQuote,held,untraced});
     }
@@ -245,16 +254,17 @@ export class NoteSourceRepository {
     return this.shownTo(ids,(id,object,payload)=>{const target=pinnedSource(object,payload);return target?[[id,target]]:[];});
   }
   /**
-   * Every archived message each quote inside a message these events embed is from (quotesToTrace), by event id and the
-   * quote's place (heldKey): the same chat's message the embedded one is, found as a pin's is (embeddedSource), then each
-   * revision observed of it. A quote whose message names another chat or none, or one the archive does not hold, is left
-   * out. The owner's notes review reads it too, to judge such a quote.
+   * Every archived message each quote inside a message these events embed is from (quotesToTrace, or with `every` each
+   * one heldBy lists, those whose embedded message keeps its reply too), by event id and the quote's place (heldKey): the
+   * same chat's message the embedded one is, found as a pin's is (embeddedSource), then each revision observed of it. A
+   * quote whose message names another chat or none, or one the archive does not hold, is left out. The owner's notes
+   * review reads every one, to judge each quote by the message it answers (quotedSender), in this chat or in another.
    */
-  async embeddedTo(ids:readonly string[]):Promise<Map<string,Map<string,string[]>>> {
+  async embeddedTo(ids:readonly string[],every=false):Promise<Map<string,Map<string,string[]>>> {
     const found=new Map<string,Map<string,string[]>>();
     const shown=await this.shownTo(ids,(id,object,payload)=>{
-      const message=telegramMessage(payload);
-      return quotesToTrace(message).flatMap(item=>{const target=embeddedSource(object,message,item.value);return target?[[JSON.stringify([id,heldKey(item.path)]),target]]:[];});
+      const message=telegramMessage(payload),quotes=!every?quotesToTrace(message):message?heldBy(message).filter(item=>item.kind==='quote'):[];
+      return quotes.flatMap(item=>{const target=embeddedSource(object,message,item.value);return target?[[JSON.stringify([id,heldKey(item.path)]),target]]:[];});
     });
     for(const [key,targets] of shown) {
       const [id,place]=JSON.parse(key) as [string,string];
