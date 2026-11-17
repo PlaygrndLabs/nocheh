@@ -215,6 +215,55 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(bad=bad),self.assertRaisesRegex(ValueError,'invalid_refusal'):await gateway.send_refusal(bad)
             self.assertEqual(len(sent),5)
 
+    async def test_only_a_fixed_reply_that_may_have_gone_out_uses_up_the_day(self):
+        try:
+            from telegram.error import TimedOut
+            from telegram.ext import ExtBot
+            from telegram.request import BaseRequest
+        except ImportError:
+            self.skipTest('needs the Telegram library')
+        from services.durable import canonical
+        from .capture import Capture, instrument_request
+
+        class Telegram(BaseRequest):
+            """Telegram at the HTTP boundary: each sendMessage takes the next queued answer."""
+            def __init__(self):self.calls,self.answers=[],[]
+            @property
+            def read_timeout(self):return 1
+            async def initialize(self):pass
+            async def shutdown(self):pass
+            async def do_request(self,url,method,request_data=None,**kwargs):
+                name,data=url.rsplit('/',1)[-1],request_data.parameters if request_data else {}
+                if name=='getMe':return 200,canonical({'ok':True,'result':{'id':123456,'is_bot':True,'first_name':'Nocheh','username':'nocheh_fixture_bot'}})
+                self.calls.append((data['chat_id'],data.get('message_thread_id'),(data.get('reply_parameters') or {}).get('message_id')))
+                answer=self.answers.pop(0) if self.answers else 'sent'
+                if isinstance(answer,Exception):raise answer
+                if answer!='sent':return 400,canonical({'ok':False,'error_code':400,'description':answer})
+                return 200,canonical({'ok':True,'result':{'message_id':40+len(self.calls),'date':1700000000,
+                                                          'chat':{'id':int(data['chat_id']),'type':'supergroup'},'text':data['text']}})
+
+        with tempfile.TemporaryDirectory() as folder:
+            root,wire=Path(folder),Telegram()
+            gateway=TelegramService(Policy.of(True,'123',['-20'],topics=[('-20/topic/17','-20','17')]),'123456:synthetic',root/'spool',root/'state')
+            # The bot journals every send, as the running service's does.
+            capture=Capture(root/'capture','123456')
+            gateway.bot=ExtBot('123456:synthetic',request=instrument_request(wire,capture),get_updates_request=Telegram())
+            gateway.status,gateway.action_lock='connected',asyncio.Lock()
+            await gateway.bot.initialize()
+            ask={'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','topic':'17','once':'not_allowed','reply':'Sorry, only members.'}
+            # Telegram refuses the reply in a closed topic: nothing reached the person, so their next message gets it.
+            wire.answers.append('Bad Request: TOPIC_CLOSED')
+            self.assertEqual(await gateway.send_refusal(ask),{'state':'suppressed','error_code':'telegram_rejected'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'message_id':'6','topic':''}),{'state':'done'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'1'*64,'message_id':'7'}),{'state':'done'})
+            self.assertEqual(wire.calls,[(-20,17,5),(-20,None,6)],'one reply went out that day, after the one Telegram refused')
+            # A send whose answer never came may have reached them: it counts, and nothing more goes that day.
+            wire.answers.append(TimedOut())
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'2'*64,'user_id':'7','message_id':'8'}),{'state':'ambiguous'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'3'*64,'user_id':'7','message_id':'9'}),{'state':'ambiguous'})
+            self.assertEqual(wire.calls[2:],[(-20,17,8)])
+            await capture.sends.settle()
+
     async def test_anyone_but_the_owner_writing_privately_gets_the_private_reply_once_a_day(self):
         with tempfile.TemporaryDirectory() as folder:
             sent=[];gateway=self.gateway(Path(folder),sent)
