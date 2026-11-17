@@ -1,31 +1,38 @@
 import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
-import {groupAccess,type GroupAccess} from '../assistant-policy.js';
 import {validatePolicy} from '../security/contract.js';
 import {validateSpace} from '../spaces.js';
 import {chatApps,chatDirectory,chatIdStates,chatKinds,chatStates,isChatId,type ChatApp,type ChatDirectory,type ChatIdRow,type ChatRow} from '../chats.js';
-import {isTelegramAccount,isTelegramChat} from '../chats-telegram.js';
+import {isTelegramAccount} from '../chats-telegram.js';
+import {DAILY_MESSAGES_DEFAULT,DAILY_MESSAGES_MAX,DAILY_MESSAGES_MIN,memberStates,memberTaskModes,type MemberState,type MemberTasks} from '../member-wire.js';
 import type {StorePools} from './connections.js';
 import {ChatSeeder} from './chat-seed.js';
-import {bumpChatRevision,ensureConnection} from './chats.js';
+import {bumpChatRevision,ensureAccount,ensureConnection} from './chats.js';
+import {bumpMemberRevision} from './member-schema.js';
 import {ArchiveRepository} from './archive.js';
 import {GuardRepository} from './guards.js';
 import {SourceAccessRepository} from './access.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 
-/** A snapshot's runtime document. One taken before step 2b-2 also lists group_ids, which is checked by shape and ignored:
- * chats.state says which groups are served (ADR-0253). */
-type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids?:string[];group_access?:Record<string,GroupAccess>};
+/** A snapshot's runtime document: whether Nocheh is on and the owner's account. Which groups are served is chats.state
+ * (ADR-0253), and who may use Nocheh in a group is members (step 3), so neither is in it. */
+type AssistantPolicy={enabled:boolean;owner_id:string|null};
 /** A chats row in a reset snapshot (ADR-0252): a name only when the owner gave it. */
 type SnapshotChat={id:string;app:ChatApp;kind:ChatRow['kind'];parent_id:string|null;topic_key:string|null;app_type:string|null;
   title:string|null;title_source:'owner'|null;is_forum:boolean;state:ChatRow['state']};
 type SnapshotChatId={app:ChatApp;external_id:string;chat_id:string;state:ChatIdRow['state'];reason:'migrated'|'id_changed'|null};
+/** A member as a snapshot carries it: its permissions; its group switches and accounts are rows of their own. */
+type SnapshotMember={id:string;state:MemberState;group_talk:boolean;group_jobs:boolean;group_post_other:boolean;group_tools:boolean;tasks:MemberTasks};
+/** An account linked to a member, by its app id, so the restore makes the same account (ensureAccount) and links it. */
+type SnapshotMemberAccount={member_id:string;app:ChatApp;external_id:string};
+type SnapshotMemberChat={member_id:string;chat_id:string;enabled:boolean};
 /**
- * Version 2 (ADR-0252) carries the chats and their app ids, so every value names the same chat after the reset; a
- * version 1 snapshot, taken before step 2b, names chats by their old values and still restores (the stores' seeder
- * gives them rows when the app starts).
+ * Version 3 (step 3) carries the chats and their app ids (ADR-0252), so every value names the same chat after the reset,
+ * and the members: their permissions, the accounts linked to them, their group switches and the daily message cap. It
+ * is the only version: a snapshot taken by an older version (v1, v2), or a runtime document that still lists groups or
+ * who may talk in them, is refused (development mode).
  */
-type SetupSnapshot={format:'nocheh-reset-configuration-v1'|'nocheh-reset-configuration-v2';layout:'original-only-v1';configuration:{
+type SetupSnapshot={format:'nocheh-reset-configuration-v3';layout:'original-only-v1';configuration:{
   security_policy:{document:unknown}[];installation_generation:{generation:string}[];
   guard_mode:{mode:'on'|'off'}[];runtime_configuration:{name:'assistant';document:AssistantPolicy}[];
   projects:{id:string;name:string;description:string;state:'active'|'archived'}[];
@@ -34,9 +41,11 @@ type SetupSnapshot={format:'nocheh-reset-configuration-v1'|'nocheh-reset-configu
   memory_access_settings:{destination:string;suggestions:'related'|'off'|null;notify_owner:boolean|null;auto_followup:boolean|null;request_ttl_seconds:number|null;default_grant_mode:'one_time'|'persistent'|null}[];
   chat_tool_settings:{space_id:string;shell:boolean|null;browser:boolean|null;mcp:boolean|null}[];
   runtime_profiles:{id:string;name:string;owner_id:string}[];
-  chats?:SnapshotChat[];chat_ids?:SnapshotChatId[];
+  chats:SnapshotChat[];chat_ids:SnapshotChatId[];
+  members:SnapshotMember[];member_accounts:SnapshotMemberAccount[];member_chats:SnapshotMemberChat[];daily_messages:{daily_messages:number}[];
 }};
-const VERSION_1='nocheh-reset-configuration-v1',VERSION_2='nocheh-reset-configuration-v2';
+const VERSION_3='nocheh-reset-configuration-v3';
+const CHAT_TABLES=['chats','chat_ids'],MEMBER_TABLES=['members','member_accounts','member_chats','daily_messages'];
 const SETUP_TABLES=['security_policy','installation_generation','guard_mode','runtime_configuration',
   'projects','project_assignments','sharing_rules','memory_access_settings','chat_tool_settings','runtime_profiles'];
 type ProfileCommand={id:string;name:string;state:'active';expected_revision:0;operation_id:string};
@@ -55,24 +64,18 @@ const identifier=(value:unknown,pattern:RegExp)=>{const result=text(value,100);i
 const same=(left:unknown,right:unknown)=>canonical(left)===canonical(right);
 
 function policy(value:unknown):AssistantPolicy {
-  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('reset_setup_snapshot_invalid');
-  const row=value as Record<string,unknown>;
-  if(Object.keys(row).some(key=>!['enabled','owner_id','group_ids','group_access'].includes(key))||
-    !['enabled','owner_id'].every(key=>key in row))throw Error('reset_setup_snapshot_invalid');
-  // The policy holds Telegram's own ids: the owner's account and, in an older document, the groups' chat ids, which are negative.
-  if(typeof row.enabled!=='boolean'||row.owner_id!==null&&!isTelegramAccount(row.owner_id)||
-    row.group_ids!==undefined&&(!Array.isArray(row.group_ids)||row.group_ids.some(id=>!isTelegramChat(id)||isTelegramAccount(id)))||row.enabled&&!row.owner_id)
+  const row=exact(value,['enabled','owner_id']);
+  // The policy holds the owner's account: their Telegram user id.
+  if(typeof row.enabled!=='boolean'||row.owner_id!==null&&!isTelegramAccount(row.owner_id)||row.enabled&&!row.owner_id)
     throw Error('reset_setup_snapshot_invalid');
-  try {groupAccess(row.group_access??{},row.owner_id as string|null);}catch {throw Error('reset_setup_snapshot_invalid');}
   return row as unknown as AssistantPolicy;
 }
-/** A runtime document as this version admits it: an older document's group_ids is dropped (ADR-0253). */
-export const admittedDocument=(document:AssistantPolicy):AssistantPolicy=>{const {group_ids:_groups,...rest}=document;return rest;};
+/** A runtime document as this version admits it: exactly whether Nocheh is on and the owner's account. */
+export const admittedDocument=(document:AssistantPolicy):AssistantPolicy=>({enabled:document.enabled,owner_id:document.owner_id});
 
 const appId=/^[A-Za-z0-9._:-]{1,128}$/;
-/** The chats and app ids of a version 2 snapshot, checked row by row; a version 1 snapshot has none. */
+/** The chats and app ids of a snapshot, checked row by row. */
 function snapshotChats(snapshot:SetupSnapshot):{chats:SnapshotChat[];ids:SnapshotChatId[]} {
-  if(snapshot.format!==VERSION_2)return {chats:[],ids:[]};
   const c=snapshot.configuration as unknown as Record<string,unknown>,seen=new Set<string>(),keys=new Set<string>();
   for(const name of ['chats','chat_ids'])if(!Array.isArray(c[name])||(c[name] as unknown[]).length>10000)throw Error('reset_setup_snapshot_invalid');
   const chats=(c.chats as unknown[]).map(item=>{
@@ -94,15 +97,14 @@ function snapshotChats(snapshot:SetupSnapshot):{chats:SnapshotChat[];ids:Snapsho
   return {chats,ids};
 }
 /**
- * The chat directory a snapshot describes: its own chats rows, and for every value with none (all of a version 1
- * snapshot's), the row the stores' seeder would give it. Rows that break the schema's rules make the snapshot invalid.
+ * The chat directory a snapshot describes: its own chats rows, and for every value with none, the row the stores' seeder
+ * would give it. Rows that break the schema's rules make the snapshot invalid.
  */
 function snapshotDirectory(snapshot:SetupSnapshot):ChatDirectory {
   const {chats,ids}=snapshotChats(snapshot),c=snapshot.configuration,assistant=c.runtime_configuration[0]?.document;
   const known=new Set(ids.filter(row=>row.app==='telegram').map(row=>row.external_id)),named=new Set(chats.map(row=>row.id));
-  // An older document's groups get the row the seeder would give them, off like every group it seeds (ADR-0253).
   const seeder=new ChatSeeder(undefined as never,{owner_id:assistant?.owner_id??null});
-  for(const value of [assistant?.owner_id,...assistant?.group_ids??[],...c.project_assignments.map(row=>row.space_id),
+  for(const value of [assistant?.owner_id,...c.project_assignments.map(row=>row.space_id),
     ...c.sharing_rules.flatMap(row=>Array.isArray(row.sources)?[...row.sources,row.destination]:[row.destination]),
     ...c.memory_access_settings.map(row=>row.destination),...c.chat_tool_settings.map(row=>row.space_id)])seeder.value(value);
   const rows:ChatRow[]=chats.map(row=>({id:row.id,app:row.app,kind:row.kind,parent_id:row.parent_id,topic_key:row.topic_key,state:row.state,
@@ -118,7 +120,7 @@ function snapshotDirectory(snapshot:SetupSnapshot):ChatDirectory {
   const owner=assistant?.owner_id?byExternal.get(assistant.owner_id)??null:null;
   try{return chatDirectory({chats:rows,ids:appIds,owner_chat:owner});}catch{throw Error('reset_setup_snapshot_invalid');}
 }
-/** A store's chats as a version 2 snapshot reads them, in a fixed order. */
+/** A store's chats as a snapshot reads them, in a fixed order. */
 export async function chatRows(control:pg.Pool|pg.PoolClient):Promise<{chats:SnapshotChat[];chat_ids:SnapshotChatId[]}> {
   const chats=(await control.query(`SELECT c.id,n.app,c.kind,c.parent_id,c.topic_key,c.app_type,CASE WHEN c.title_source='owner' THEN c.title END AS title,
     CASE WHEN c.title_source='owner' THEN 'owner' END AS title_source,c.is_forum,c.state FROM chats c JOIN chat_connections n ON n.id=c.connection_id`)).rows;
@@ -140,11 +142,56 @@ export function restoredChats(value:{chats?:SnapshotChat[]|undefined;chat_ids?:S
   return {...sorted,chats:sorted.chats.map(row=>row.state==='pending'?{...row,state:'off' as const}:row)};
 }
 
+/**
+ * A store's members as a snapshot reads them, in a fixed order: the members, the accounts linked to them by app id,
+ * their group switches and the daily message cap.
+ */
+export async function memberRows(control:pg.Pool|pg.PoolClient) {
+  const members=(await control.query('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks FROM members')).rows as SnapshotMember[];
+  const accounts=(await control.query(`SELECT a.member_id,n.app,a.external_id FROM chat_accounts a JOIN chat_connections n ON n.id=a.connection_id
+    WHERE a.member_id IS NOT NULL`)).rows as SnapshotMemberAccount[];
+  const switches=(await control.query('SELECT member_id,chat_id,enabled FROM member_chats')).rows as SnapshotMemberChat[];
+  const daily=(await control.query('SELECT daily_messages FROM member_directory_state WHERE singleton')).rows as {daily_messages:number}[];
+  return sortedMembers({members,member_accounts:accounts,member_chats:switches,daily_messages:daily});
+}
+/** Members, their accounts and switches in one order, whatever order a snapshot or a database gave them in. */
+export function sortedMembers(value:Pick<SetupSnapshot['configuration'],'members'|'member_accounts'|'member_chats'|'daily_messages'>) {
+  return {members:[...value.members].sort((a,b)=>order(a.id,b.id)),
+    member_accounts:[...value.member_accounts].sort((a,b)=>order(a.app,b.app)||order(a.external_id,b.external_id)),
+    member_chats:[...value.member_chats].sort((a,b)=>order(a.member_id,b.member_id)||order(a.chat_id,b.chat_id)),
+    daily_messages:value.daily_messages.map(row=>({daily_messages:row.daily_messages}))};
+}
+/** The members of a snapshot, checked row by row against its own chats: each switch names a group. */
+function snapshotMembers(c:Record<string,unknown>,directory:ChatDirectory):void {
+  const ids=new Set<string>(),accounts=new Set<string>(),switches=new Set<string>();
+  for(const item of c.members as unknown[]) {
+    const row=exact(item,['id','state','group_talk','group_jobs','group_post_other','group_tools','tasks']),id=identifier(row.id,ID);
+    if(ids.has(id)||!(memberStates as readonly unknown[]).includes(row.state)||!(memberTaskModes as readonly unknown[]).includes(row.tasks)||
+      [row.group_talk,row.group_jobs,row.group_post_other,row.group_tools].some(value=>typeof value!=='boolean'))throw Error('reset_setup_snapshot_invalid');
+    ids.add(id);
+  }
+  for(const item of c.member_accounts as unknown[]) {
+    const row=exact(item,['member_id','app','external_id']),key=row.app+'\n'+row.external_id;
+    if(!ids.has(row.member_id as string)||row.app!=='telegram'||!isTelegramAccount(row.external_id)||accounts.has(key))throw Error('reset_setup_snapshot_invalid');
+    accounts.add(key);
+  }
+  for(const item of c.member_chats as unknown[]) {
+    const row=exact(item,['member_id','chat_id','enabled']),key=row.member_id+'\n'+row.chat_id;
+    if(!ids.has(row.member_id as string)||typeof row.chat_id!=='string'||directory.kind(row.chat_id)!=='group'||typeof row.enabled!=='boolean'||switches.has(key))
+      throw Error('reset_setup_snapshot_invalid');
+    switches.add(key);
+  }
+  const daily=c.daily_messages as unknown[];
+  if(daily.length!==1)throw Error('reset_setup_snapshot_invalid');
+  const cap=exact(daily[0],['daily_messages']).daily_messages;
+  if(typeof cap!=='number'||!Number.isSafeInteger(cap)||cap<DAILY_MESSAGES_MIN||cap>DAILY_MESSAGES_MAX)throw Error('reset_setup_snapshot_invalid');
+}
+
 /** Validate the content-free setup projection captured before erasure. */
 export function resetSetupSnapshot(input:unknown):SetupSnapshot {
   const snapshot=exact(input,['format','layout','configuration']);
-  if(snapshot.format!==VERSION_1&&snapshot.format!==VERSION_2||snapshot.layout!=='original-only-v1')throw Error('reset_setup_snapshot_invalid');
-  const c=exact(snapshot.configuration,[...SETUP_TABLES,...snapshot.format===VERSION_2?['chats','chat_ids']:[]]);
+  if(snapshot.format!==VERSION_3||snapshot.layout!=='original-only-v1')throw Error('reset_setup_snapshot_invalid');
+  const c=exact(snapshot.configuration,[...SETUP_TABLES,...CHAT_TABLES,...MEMBER_TABLES]);
   for(const value of Object.values(c))if(!Array.isArray(value)||value.length>10000)throw Error('reset_setup_snapshot_invalid');
   if((c.security_policy as unknown[]).length!==1||(c.installation_generation as unknown[]).length!==1||
     (c.guard_mode as unknown[]).length!==1||(c.runtime_configuration as unknown[]).length!==1)throw Error('reset_setup_snapshot_invalid');
@@ -155,6 +202,7 @@ export function resetSetupSnapshot(input:unknown):SetupSnapshot {
   const assistant=policy(runtime.document);const owner=assistant.owner_id;if(!owner)throw Error('reset_setup_owner_required');
   // What each value names comes from the snapshot's own chats, never from this process's directory or an id's shape.
   const directory=snapshotDirectory(snapshot as unknown as SetupSnapshot);
+  snapshotMembers(c,directory);
   const projects=new Set<string>();
   for(const item of c.projects as unknown[]) {const row=exact(item,['id','name','description','state']),id=identifier(row.id,ID);
     text(row.name,200);if(typeof row.description!=='string'||Buffer.byteLength(row.description)>4000||!['active','archived'].includes(String(row.state))||
@@ -258,6 +306,26 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
         [connections.get(row.app),row.external_id,row.chat_id,row.state,row.reason]);
       await bumpChatRevision(db);
     }
+    // The members, once their groups' chats are there: each account made as Nocheh first records it (ensureAccount) and
+    // linked to its member, the switches, the daily cap, and the carry's marker, so the lists from before step 3 are
+    // never carried over them (step 3).
+    const existingMembers=await memberRows(db),desiredMembers=sortedMembers(configuration);
+    const untouched=!existingMembers.members.length&&!existingMembers.member_accounts.length&&!existingMembers.member_chats.length&&
+      same(existingMembers.daily_messages,[{daily_messages:DAILY_MESSAGES_DEFAULT}]);
+    if(!same(existingMembers,desiredMembers)) {
+      if(!untouched)throw Error('reset_setup_target_changed');
+      for(const row of desiredMembers.members)await db.query(`INSERT INTO members(id,state,group_talk,group_jobs,group_post_other,group_tools,tasks)
+        VALUES($1,$2,$3,$4,$5,$6,$7)`,[row.id,row.state,row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.tasks]);
+      for(const row of desiredMembers.member_accounts) {
+        const account=await ensureAccount(db,await ensureConnection(db,row.app),{external:row.external_id},row.app);
+        await db.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1 AND member_id IS NULL',[account,row.member_id]);
+      }
+      for(const row of desiredMembers.member_chats)await db.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$2,$3)',
+        [row.member_id,row.chat_id,row.enabled]);
+      await db.query('UPDATE member_directory_state SET daily_messages=$1 WHERE singleton',[desiredMembers.daily_messages[0]!.daily_messages]);
+      await bumpMemberRevision(db);
+    }
+    await db.query('UPDATE member_directory_state SET carried_at=coalesce(carried_at,now()) WHERE singleton');
     // No preview or release of a rule is restored, so revision 1 is safe.
     for(const row of configuration.projects)await db.query('INSERT INTO projects(id,name,description,state,revision) VALUES($1,$2,$3,$4,1) ON CONFLICT DO NOTHING',
       [row.id,row.name,row.description,row.state]);
@@ -271,7 +339,7 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     for(const row of configuration.chat_tool_settings)await db.query('INSERT INTO chat_tool_settings(space_id,shell,browser,mcp,revision) VALUES($1,$2,$3,$4,1) ON CONFLICT DO NOTHING',
       [row.space_id,row.shell,row.browser,row.mcp]);
     const updated=await setupRows(db);for(const name of Object.keys(updated))if(!same(updated[name],(configuration as any)[name]))throw Error('reset_setup_target_changed');
-    if(!same(await chatRows(db),desiredChats))throw Error('reset_setup_target_changed');
+    if(!same(await chatRows(db),desiredChats)||!same(await memberRows(db),desiredMembers))throw Error('reset_setup_target_changed');
     await db.query('COMMIT');
   } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
   const archive=new ArchiveRepository(stores.archive),guards=new GuardRepository(stores,archive);
@@ -281,9 +349,10 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
   if(!same(restored.projects,configuration.projects)||!same(restored.project_assignments,configuration.project_assignments)||
     !same(restored.sharing_rules,configuration.sharing_rules)||!same(restored.memory_access_settings,configuration.memory_access_settings)||
     !same(restored.chat_tool_settings,configuration.chat_tool_settings)||!same(runtimeProfiles,configuration.runtime_profiles)||
-    !same(await chatRows(stores.control),restoredChats(configuration)))throw Error('reset_setup_verification_failed');
+    !same(await chatRows(stores.control),restoredChats(configuration))||!same(await memberRows(stores.control),sortedMembers(configuration)))
+    throw Error('reset_setup_verification_failed');
   const binding=await guards.state();if(binding.generation!==generation||binding.mode!==configuration.guard_mode[0]!.mode)throw Error('reset_setup_verification_failed');
   return {reset_id:resetId,generation,binding,configuration_records:Object.values(configuration).reduce((count,rows)=>count+rows.length,0),
     projects:configuration.projects.length,assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,memory_access_settings:configuration.memory_access_settings.length,
-    chats:configuration.chats?.length??0,profiles:admitted,source_content_copied:false,history_copied:false};
+    chats:configuration.chats.length,members:configuration.members.length,profiles:admitted,source_content_copied:false,history_copied:false};
 }

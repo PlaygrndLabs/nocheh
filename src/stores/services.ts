@@ -66,8 +66,10 @@ import {ChatSendRepository} from './chat-sends.js';
 import {PrivateAnswerRepository} from './private-answers.js';
 import {ChatRepository} from './chats.js';
 import {ChatAdds} from './chat-adds.js';
-import {accountIdFor} from '../chats.js';
-import {unwiredMembers,type MemberRepository} from './member-api.js';
+import {accountIdFor,chats as chatDirectory} from '../chats.js';
+import {freshMembers} from '../members.js';
+import type {MemberRepository} from './member-api.js';
+import {Members} from './members.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
@@ -125,15 +127,21 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
-  // Who wrote the message a group turn answers: the owner, or a person allowed there, by their Telegram name, with their
-  // account (a chat_accounts id; null for the owner, or when it cannot be told), which a reminder they set keeps (ADR-0255).
-  const sender=async(event:string):Promise<{actor:TaskActor;account:string|null}>=>{
+  // Who wrote the message a group turn answers: the owner, or a member, by their Telegram name, with their account (a
+  // chat_accounts id; null for the owner), which a reminder they set keeps (ADR-0255). A member is checked again here, at
+  // each task call, against the member directory as of now (step 3): one paused, removed or switched off in this group
+  // since the turn began gets 403 member_access_changed, so their turn in flight writes no task or reminder; a member
+  // whose tasks are read only gets a read-only turn, which lists and reads but adds, changes, comments on and sets
+  // reminders on nothing. Who sees which tasks is unchanged (ADR-0248).
+  const sender=async(event:string,chat:string):Promise<{actor:TaskActor;account:string|null;readOnly?:true}>=>{
     const row=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
     let from:any=null;try{const payload=JSON.parse(row.payload.toString());from=(payload.message??payload.edited_message)?.from;}catch{}
     if(from&&String(from.id)===options.policy().owner_id)return {actor:{kind:'owner'},account:null};
     const name=[from?.first_name,from?.last_name].filter(part=>typeof part==='string').join(' ').replace(/\s+/g,' ').trim().slice(0,100);
     let account:string|null=null;try{account=from?.id===undefined||from?.id===null?null:accountIdFor('telegram',String(from.id));}catch{}
-    return {actor:name?{kind:'member',name}:{kind:'member'},account};
+    const directory=await freshMembers();
+    if(!account||!directory.talks(account,chat,chatDirectory()))throw new HttpError(403,'member_access_changed');
+    return {actor:name?{kind:'member',name}:{kind:'member'},account,...(directory.tasks(account)==='read'?{readOnly:true as const}:{})};
   };
   // A group or topic reaches its own group's tasks, with its topics' when they share what they know, and the tasks set
   // on its project itself; a task added there belongs to that group or topic (ADR-0248).
@@ -148,11 +156,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     if(principal.answer!==undefined){
       const reads=principal.reads,project=reads?.project?(await stores.control.query('SELECT state FROM projects WHERE id=$1',[reads.project])).rows[0]:null;
       if(!reads?.project||project?.state!=='active')throw new HttpError(403,'task_project_required');
-      return {source,project:reads.project,group:null,reach:reads,readOnly:true,...await sender(source.reference.id)};
+      return {source,project:reads.project,group:null,reach:reads,...await sender(source.reference.id,principal.space!),readOnly:true};
     }
     const space=principal.space!,project=(await projects.effective(space)).project;
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
-    return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),...await sender(source.reference.id)};
+    return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),...await sender(source.reference.id,space)};
   },{call:options.runtime,owner:()=>ownerChat(options.policy()),policy:options.policy,record:send=>chatSends.recordLocal(send)},topicMemory);
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers,chatAdds),machines=new MachineRepository(access,jobs);
@@ -165,7 +173,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
   // The owner's Members routes (step 3, src/stores/member-api.ts).
-  const members:MemberRepository=unwiredMembers;
+  const members:MemberRepository=new Members(stores.control,options.policy);
   return {brain:options.brain,chats,chatAdds,members,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
