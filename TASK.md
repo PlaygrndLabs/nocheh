@@ -1145,7 +1145,8 @@ on a running installation left 46 of 909 Honcho message embeddings pending. Thei
 embedding had been shed or failed, and Honcho's vector reconciler, the only retry, names no
 workspace, so the Honcho boundary refused every call it made. The deriver now runs the
 reconciler's sync steps once per workspace with it bound, in parts within the gateway's
-per-request bounds (100 rows, 128 KiB of text); a call with none still fails closed
+per-request bounds (100 rows, 128 KiB of text, less room for preparation); a call with none
+still fails closed
 ([ADR-0259](docs/adr/0259-honcho-retries-each-workspace-bound.md),
 [check](services/honcho/test_boundary.py)). Checked against the pinned Honcho API and deriver
 with PostgreSQL and pgvector and the gateway's own request bounds: before, every pending row

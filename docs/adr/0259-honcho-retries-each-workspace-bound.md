@@ -42,9 +42,11 @@ so binding the workspace alone would still leave such a backlog pending.
   Honcho's own step with that workspace bound; the counts are added up. The deriver applies it at start
   (`services/honcho/run.py`). Honcho's code is unchanged.
 - Each workspace's rows go in parts that fit one request the gateway accepts
-  (`reconciler_parts`: at most 100 rows and 128 KiB of text, the bounds of
-  `meter.validate`). A message's rows stay together and in order; a message
-  larger than one request goes alone and the gateway decides.
+  (`reconciler_parts`: at most 100 rows, the bound of `meter.validate`, and
+  120 KiB of text, leaving 8 KiB of its 128 KiB for the archive's preparation,
+  which can mask a text a little longer before the gateway checks it again). A
+  message's rows stay together and in order; a message larger than one request
+  goes alone and the gateway decides.
 - A row with no workspace runs unbound and still fails closed.
 - Nothing else changes at the gateway: the request keeps the deriver's
   background priority, the archive still prepares and secret-checks every text,
@@ -66,8 +68,9 @@ so binding the workspace alone would still leave such a backlog pending.
 - A batch costs one embeddings request per workspace and part instead of one
   for the batch; an installation has one current workspace, and most parts hold
   the whole batch. Parts run one after another in the batch's transaction, so a
-  batch of many long messages takes longer; the deriver's claim heartbeat keeps
-  the work unit while it runs.
+  batch of many long messages takes longer, and during an archive outage each
+  part waits out its own retries; the deriver's claim heartbeat keeps the work
+  unit while it runs.
 - A refused part fails only its own rows.
 
 </consequences>

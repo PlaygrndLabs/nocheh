@@ -25,8 +25,10 @@ def bind_worker(manager,parse):
         finally: WORKSPACE.reset(token)
     manager.process_work_unit=run
 
-# The gateway's bounds on one embeddings request (meter.validate): inputs, and their UTF-8 bytes.
+# The gateway's bounds on one embeddings request (meter.validate): inputs, and their UTF-8 bytes. The gateway checks
+# again after the archive prepares the texts, which can mask a few characters longer, so a part leaves some room.
 EMBEDDING_INPUTS,EMBEDDING_BYTES=100,131072
+PART_BYTES=EMBEDDING_BYTES-8192
 
 def reconciler_parts(rows):
     # A message's rows stay together and in order; each part fits one embeddings request the gateway accepts.
@@ -36,7 +38,7 @@ def reconciler_parts(rows):
     part,count,size=[],0,0
     for group in messages.values():
         length=sum(len((getattr(row,'content',None) or '').encode()) for row in group)
-        if part and (count+len(group)>EMBEDDING_INPUTS or size+length>EMBEDDING_BYTES):
+        if part and (count+len(group)>EMBEDDING_INPUTS or size+length>PART_BYTES):
             yield part;part,count,size=[],0,0
         part+=group;count+=len(group);size+=length
     if part: yield part

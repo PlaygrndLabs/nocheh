@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from services.honcho.boundary import EMBEDDING_BYTES,EMBEDDING_INPUTS,WORKSPACE,WorkspaceMiddleware,bind_reconciler,bind_worker,install_transport,reconciler_parts
+from services.honcho.boundary import EMBEDDING_BYTES,EMBEDDING_INPUTS,PART_BYTES,WORKSPACE,WorkspaceMiddleware,bind_reconciler,bind_worker,install_transport,reconciler_parts
 
 class BoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_api_and_worker_bindings_are_scoped_and_always_reset(self):
@@ -101,7 +101,12 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([len(part) for part in parts],[2,2,2,100,50])
         self.assertEqual([row for part in parts for row in part],sorted(rows,key=lambda row:[r.message_id for r in rows].index(row.message_id)))
         payload=lambda part:{'model':'text-embedding-3-small','input':[row.content for row in part]}
-        for part in parts[:2]+parts[3:]: validate('/v1/embeddings',payload(part))
+        for part in parts[:2]+parts[3:]:
+            self.assertLessEqual(sum(len(row.content.encode()) for row in part),PART_BYTES)
+            validate('/v1/embeddings',payload(part))
+        # Several messages fill a part only up to the room left for preparation.
+        near=[chunk(f'n{i}',40000) for i in range(4)]
+        self.assertEqual([len(part) for part in reconciler_parts(near)],[3,1])
         # One message larger than a request goes alone; the gateway refuses it and only its rows fail.
         with self.assertRaisesRegex(Rejected,'embedding_bound_exceeded'): validate('/v1/embeddings',payload(parts[2]))
         # The bounds are the gateway's own.
