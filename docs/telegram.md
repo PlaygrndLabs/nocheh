@@ -278,7 +278,8 @@ follow-ups still ask. Changing `let ownerGroupTools=true` to `false` in
 `TELEGRAM_GROUP_ACCESS` is retired, and the `group-access` command is gone. At the
 first start of step 3, the people in the lists the last start admitted became
 members who talk in exactly the groups they could talk in before: a group they
-were granted in is on, every other group Nocheh has a record of is off. An old
+were granted in is on, and every other group Nocheh is in is off; a group Nocheh
+is added to again later is a new group, on by default. An old
 `TELEGRAM_GROUP_ACCESS` line in `.env` is hidden in Settings, never asks for
 Apply, and no service reads it ([deploy](deploy.md#upgrade-to-step-3)).
 

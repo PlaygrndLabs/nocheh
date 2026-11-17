@@ -108,8 +108,8 @@ guard epoch. After the chat seeder and the owner's chat, it carries the lists
 once: everyone in them becomes a member who talks in exactly the groups they could
 talk in before, on in each group they were granted in and off in every other group
 Nocheh is in, with every permission on. A group Nocheh left, was removed from or
-knows only from history gets no switch: added again later, it is a new group,
-on by default for members. The `member_carry` log line
+knows only from history gets no switched-off row: added again later, it is a new
+group, on by default for members. The `member_carry` log line
 counts the members, the groups and the rows written, and what was skipped:
 malformed entries, keys with no group record (`no_group`), the owner, proxy
 accounts, bots, ids that are no Telegram user id, people only ever denied, and a
