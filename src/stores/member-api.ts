@@ -35,15 +35,6 @@ export interface MemberRepository {
   settings(principal:Reader,request:MemberSettingsRequest):Promise<MemberSettingsResult>;
 }
 
-/** Until the repository is wired in: every route answers 501 not_implemented. */
-export const unwiredMembers:MemberRepository={
-  async list(){throw new HttpError(501,'not_implemented');},
-  async add(){throw new HttpError(501,'not_implemented');},
-  async change(){throw new HttpError(501,'not_implemented');},
-  async remove(){throw new HttpError(501,'not_implemented');},
-  async settings(){throw new HttpError(501,'not_implemented');},
-};
-
 const exact=(input:unknown,keys:readonly string[])=>{
   const body=object(input);if(Object.keys(body).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_member_field');return body;
 };

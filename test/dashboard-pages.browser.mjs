@@ -769,7 +769,7 @@ test('a reminder a person set says who and where, keeps its exact time and sette
   const person = task.reminders.find(item => item.set_by === 'person' && item.state === 'pending');
   assert.match(person.at, /:30\.000Z$/, 'set to the second');
   // The server renders who set it and where from the owner's reminder lines; the page has no words of its own for it.
-  assert.match(person.source, /^👤 Set by .*Sam Rivera.*, a person you allowed in group .*Aurora planning/);
+  assert.match(person.source, /^👤 Set by .*Sam Rivera.*, a member in group .*Aurora planning/);
   assert.equal(task.reminders.find(item => item.set_by === 'owner').source, null);
   const posts = [];
   page.on('request', request => {
@@ -783,7 +783,7 @@ test('a reminder a person set says who and where, keeps its exact time and sette
     .click();
   const dialog = page.getByRole('dialog');
   // The line shows under the reminder still to come and under the one Telegram refused, which reads Not sent.
-  const setBy = dialog.getByText(/Set by .*Sam Rivera.*a person you allowed in group .*Aurora planning/);
+  const setBy = dialog.getByText(/Set by .*Sam Rivera.*a member in group .*Aurora planning/);
   await setBy.first().waitFor();
   assert.equal(await setBy.count(), 2);
   await dialog.getByText(/^Not sent · /).waitFor();
@@ -1647,7 +1647,7 @@ test('a project shares nothing between its groups, and a group joins one only af
   await turnOn.getByRole('button', {name: 'Turn on'}).click();
   await placed.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
   assert.equal(await placed.getByRole('dialog', {name: 'Which project does this group join?'}).count(), 0);
-  // Turning it off asks first: Nocheh stays in the group, silent, and the people allowed there are kept.
+  // Turning it off asks first: Nocheh stays in the group, silent, and its members keep their switches.
   await placed.getByRole('switch', {name: 'Nocheh in this group', checked: true}).click();
   const turnOff = placed.getByRole('dialog', {name: 'Turn Nocheh off in “Weekend notes”?'});
   await turnOff.getByText('It stays in the group, silent. Its members keep their switches.').waitFor();

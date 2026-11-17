@@ -251,11 +251,11 @@ test('allowed members post freely in their own group; everything else waits for 
     // Nocheh decided the message addressed the bot, so the bot gets only what it sends.
     assert.deepEqual({...refusals.at(-1),event_id:undefined},{event_id:undefined,chat_id:group,message_id:refusals.at(-1)!.message_id,topic:'17',user_id:'8',
       once:'not_allowed',reply:'Sorry, in this group I only work with the owner and the owner\'s members.'});
-    await stores.control.query(`UPDATE owner_prompts SET texts='{"telegram.not_allowed":"Only allowed people, please."}'::jsonb WHERE singleton`);
+    await stores.control.query(`UPDATE owner_prompts SET texts='{"telegram.not_allowed":"Only members, please."}'::jsonb WHERE singleton`);
     const edited=await message('stranger-again',{text:'Nocheh?'},8,++updates);
     await s.preparation.run(edited.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     await s.telegram.run(edited.id,await epoch('telegram'));
-    assert.equal(refusals.at(-1)!.reply,'Only allowed people, please.','the owner\'s own wording is used');
+    assert.equal(refusals.at(-1)!.reply,'Only members, please.','the owner\'s own wording is used');
     const allowed=refusals.length,member=await message('member-chat',{text:'Hello all'},9,++updates);
     await s.preparation.run(member.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     await s.telegram.run(member.id,await epoch('telegram')).catch(()=>{});
@@ -473,7 +473,7 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     // A card too long with the owner's long person line names Bob alone; one too long even so waits in the Inbox.
     members({[GP1]:{granted:[BOB]}});
     await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',
-      [JSON.stringify({'telegram.approval_texts':'person_chat: private chat with {name}, a person you allowed in {group}'+', who may read this'.repeat(20)})]);
+      [JSON.stringify({'telegram.approval_texts':'person_chat: private chat with {name}, a member in {group}'+', who may read this'.repeat(20)})]);
     const long='x'.repeat(3500),compact=await send('compact',BOB_CHAT,long);
     assert.deepEqual([last('card').id,last('card').text],[compact.id,`📨 Send to private chat with ${bob}\n\n${long}`]);
     // A name that reads like another's keeps its short id there: the compact line drops only the groups.

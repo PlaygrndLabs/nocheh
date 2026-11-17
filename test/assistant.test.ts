@@ -296,7 +296,7 @@ test('real PostgreSQL: voice is archived untranscribed and never blocks dispatch
     await dispatchCommitted(pool,config,fixtureBrain(async()=>{throw Error('ambiguous delivery must not resend');}),undefined,{owner:'inngest',epoch:1});
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[second.id])).rows[0].state,'ambiguous');
     const ungranted=await ingest(pool,{...other,key:'telegram:fixture:update:ungranted',payload:update(-20,789)});
-    await dispatchCommitted(pool,config,fixtureBrain(async()=>{throw Error('ungranted participant must not reach Hermes');}),undefined,{owner:'inngest',epoch:1});
+    await dispatchCommitted(pool,config,fixtureBrain(async()=>{throw Error('a person who is no member must not reach Hermes');}),undefined,{owner:'inngest',epoch:1});
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[ungranted.id])).rows[0].state,'suppressed');
     const malformed=await ingest(pool,{...other,key:'telegram:fixture:update:3',payload:update(-30,456)});
     const later=await ingest(pool,{...other,key:'telegram:fixture:update:4'});

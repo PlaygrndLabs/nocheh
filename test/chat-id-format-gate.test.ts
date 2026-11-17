@@ -28,7 +28,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   // Part D: dashboard, docs and the full tester. Every site is gone: pages read the directory fields on /v1/conversations
   // (dashboard/lib/chats-model.ts), and the tester finds chats by their Telegram ids.
   // The Telegram adapter's legitimate reads of Telegram's own formats
-  ['dashboard/lib/chats-model.ts','adapter',1,'validUserId: a Telegram user id typed for group access'],
+  ['dashboard/lib/chats-model.ts','adapter',1,'validUserId: a Telegram user id typed to add a member by ID'],
   ['dashboard/lib/messages-format.ts','adapter',1,'a Desktop export matched to its group by the -100 id'],
   ['services/telegram/gateway.py','adapter',2,'raw Telegram chat, user and message ids at the front door'],
   ['services/telegram/server.py','adapter',1,'a refresh names a raw Telegram chat'],
@@ -40,7 +40,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['src/stores/chat-sends.ts','adapter',1,'a send record\'s chat is the app\'s own chat id'],
   ['src/stores/runtime-configuration.ts','adapter',1,'the policy document holds the raw Telegram owner id'],
   ['tools/cli/main.py','adapter',1,'configure-telegram owner id'],
-  ['tools/operations/archive/telegram_directory.py','adapter',2,'Telegram group and user ids typed by the owner'],
+  ['tools/operations/archive/telegram_directory.py','adapter',2,'Telegram group and user ids Telegram and the identities list give'],
   ['tools/operations/installation/configuration.py','adapter',1,'installer check of TELEGRAM_OWNER_ID'],
   ['tools/operations/installation/mini_app.py','adapter',1,'the bot id in the bot token'],
   ['services/hermes/preference_transfer.py','legacy',1,'a legacy-layout reset, or a preferences snapshot from before step 2b: its topic spaces read once'],

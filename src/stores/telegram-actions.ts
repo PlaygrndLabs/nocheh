@@ -125,7 +125,7 @@ export class TelegramActionRepository {
       const original=await this.access.archive.verify(source),intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
       if(original.origin!=='live'||intake?.transport==='import'||intake?.state==='pending')throw new HttpError(403,'external_effect_requires_live_turn');
       channel=original.channel;
-      // Only a person allowed to talk to Nocheh in a group may post there without the owner.
+      // Only the owner or a member who talks to Nocheh in a group may post there without the owner.
       if(channel==='telegram')requester=await this.requester(source.id,original.scope);
     }
     return this.propose(principal,turn,binding,source,input,channel,requester);
@@ -261,7 +261,7 @@ export class TelegramActionRepository {
       const effect=this.effect(row);let decision=await evaluate(db,effect);
       // The owner freedom setting lets the owner's own live private request
       // approve itself. Deny rules are evaluated first and still block it.
-      // A person allowed to talk to Nocheh in a group can have it post in that
+      // The owner or a member who talks to Nocheh in a group can have it post in that
       // same group: the group's memory is all such a turn can read, so the post
       // reveals nothing a reply there could not. A message built from one
       // group's memory for another group waits for the owner. Deny rules still

@@ -118,7 +118,7 @@ test('voice notes saved before a transcription key are transcribed once one is a
   } finally {await stores.archive.end();await stores.derived.end();await stores.control.end();await rm(root,{recursive:true,force:true});}
 });
 
-test('a live recording from someone not allowed is transcribed up to 15 minutes; the owner\'s, allowed people\'s, imported and restored ones in full',
+test('a live recording from someone not allowed is transcribed up to 15 minutes; the owner\'s, members\', imported and restored ones in full',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const admin=new pg.Pool(config);
@@ -178,7 +178,7 @@ test('a live recording from someone not allowed is transcribed up to 15 minutes;
     assert.deepEqual(anonymous.configuration,cut,'an anonymous admin, who may be the owner but cannot be told apart');
     const channel=await live({chat:group,from:{id:1000002,is_bot:true,first_name:'Channel'},sender_chat:{id:-1005,type:'channel',title:'Synthetic Channel'}});
     assert.deepEqual(channel.configuration,cut,'a post in a channel\'s name');
-    for(const [label,message,update] of [['the owner in the group',{chat:group,from:person(123)},'message'],['an allowed person',{chat:group,from:person(456)},'message'],
+    for(const [label,message,update] of [['the owner in the group',{chat:group,from:person(123)},'message'],['a member',{chat:group,from:person(456)},'message'],
       ['the owner\'s edited message',{chat:group,from:person(123),edit_date:2},'edited_message'],
       ['the owner in private',{chat:{id:123,type:'private'},from:person(123)},'message']] as const) {
       const found=await live(message,update);
@@ -214,7 +214,7 @@ test('a live recording from someone not allowed is transcribed up to 15 minutes;
     configured=true;
     await preparation.transcribeArchived(async()=>configured,500);
     assert.deepEqual(await configuration(waiting[0]!.artifact_ids[0]!,'voice'),cut,'someone not allowed');
-    assert.deepEqual(await configuration(waiting[1]!.artifact_ids[0]!,'voice'),{},'an allowed person');
+    assert.deepEqual(await configuration(waiting[1]!.artifact_ids[0]!,'voice'),{},'a member');
     asked.length=0;
     const job=digest('reprocess:voice:'+waiting[0]!.artifact_ids[0]!+':'+digest('runtime-voice:1'));
     assert.ok(await reprocessing.run(job,'fixture',async()=>[],authority));

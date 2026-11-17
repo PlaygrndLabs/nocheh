@@ -196,8 +196,8 @@ await tasks.create(taskOwner,{operation_id:'preview-5',title:'Pick the photos',p
 await tasks.create(taskOwner,{operation_id:'preview-6',title:'Check the booking page works',scope:studio,status:'waiting',blocked_by:[announcement.id]});
 await tasks.create(taskOwner,{operation_id:'preview-7',title:'Pay the rent',tags:['Money'],priority:2,repeat:{every:1,unit:'month'},due_on:new Date().toISOString().slice(0,10)});
 await tasks.comment(taskOwner,announcement.id,{operation_id:'preview-comment',text:'Devon sends the photos on Friday.'});
-// Reminders as the owner sees who set them (ADR-0255): nine of the owner's, one a person allowed in Aurora planning set
-// there, to the second, and one of theirs Telegram refused. No chat turn reaches the preview, so they are written here.
+// Reminders as the owner sees who set them (ADR-0255): nine of the owner's, one a member set in Aurora planning, to
+// the second, and one of theirs Telegram refused. No chat turn reaches the preview, so they are written here.
 const greenhouse=await tasks.create(taskOwner,{operation_id:'preview-8',title:'Water the greenhouse plants',tags:['Garden']});
 await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by)
   SELECT encode(sha256(convert_to('preview-reminder-'||n,'UTF8')),'hex'),$1,date_trunc('minute',now())+n*interval '1 day','pending','owner' FROM generate_series(3,11) n`,[greenhouse.id]);

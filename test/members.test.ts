@@ -4,7 +4,7 @@ import {canonical,digest} from '../src/archive.js';
 import {accountIdFor,installChatsForTest} from '../src/chats.js';
 import {freshMembers,installMembers,installMembersForTest,memberDirectory,memberIdFor,members,setMemberLoader,type MemberSnapshot} from '../src/members.js';
 import {groupToolsTextLabels,memberChangedReason,memberTextKeys} from '../src/member-wire.js';
-import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest,unwiredMembers} from '../src/stores/member-api.js';
+import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from '../src/stores/member-api.js';
 import {isProxyAccount} from '../src/chats-telegram-updates.js';
 import {BOB_ACCOUNT,BOB_CHAT,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_NG_ACCOUNT,MEMBER_NG_ID,NG1,NG1_TOPIC,NG2,
   NG_GROUP_IDS,OWNER_ACCOUNT,UNSERVED,fixtureDirectory,fixtureMemberDirectory,fixtureMembers} from './fixture-groups.js';
@@ -166,8 +166,6 @@ test('the Members routes check each body\'s shape before the repository sees it'
   assert.deepEqual(memberSettingsRequest({operation_id:'op-6',daily_messages:1}),{operation_id:'op-6',daily_messages:1});
   assert.deepEqual(memberSettingsRequest({operation_id:'op-7',daily_messages:10000}),{operation_id:'op-7',daily_messages:10000});
   for(const value of [0,10001,1.5,'200',null])assert.throws(()=>memberSettingsRequest({operation_id:'op',daily_messages:value}),{code:'invalid_daily_messages'},String(value));
-  // Until the repository is wired in, every route says so.
-  await assert.rejects(unwiredMembers.list({scope:null,admin:true}),{code:'not_implemented'});
 });
 
 test('the new editable text names, and the proxy accounts that are never a member',()=>{
