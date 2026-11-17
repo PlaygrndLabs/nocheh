@@ -94,6 +94,9 @@ def directory(state, archive=None, bot_api=_bot_api, served=None):
         groups[('chat', identifier)] = {'id': identifier, 'external': external or None, 'name': _clean(observed.get('name')) or None, 'users': users}
     token = values['TELEGRAM_BOT_TOKEN']
     selected = served.groups()
+    # A name is the person's, not the group's: one Telegram gave in any group serves every other group in this request,
+    # and someone Telegram refused (a 4xx, such as for a person who was never in that group) is not asked about again.
+    names, refused = {}, set()
     for served_group in selected[:20]:
         identifier = _id((served.address(served_group) or ('',))[0], GROUP)
         if not identifier:
@@ -110,18 +113,36 @@ def directory(state, archive=None, bot_api=_bot_api, served=None):
                 person = _person(member.get('user')) if isinstance(member, dict) else None
                 if person:
                     group['users'][person['id']] = person
+                    if person['name'] or person['username']:
+                        names.setdefault(person['id'], {'name': person['name'], 'username': person['username']})
             # Telegram is asked for the names of the owner and of the members storage lists for this group that no update
             # named yet, such as a member added by Telegram user ID who never wrote there (step 3). Only the name is used:
-            # whether they are in the group stays what storage knows.
+            # whether they are in the group stays what storage knows. Only the unnamed count toward the 40 asked.
             candidates = {values['TELEGRAM_OWNER_ID']} | {user_id for user_id, person in group['users'].items() if person.get('member')}
-            for user_id in sorted(value for value in candidates if isinstance(value, str))[:40]:
+            wanted = []
+            for user_id in sorted(value for value in candidates if isinstance(value, str) and USER.fullmatch(value)):
                 known = group['users'].get(user_id)
-                if not USER.fullmatch(user_id) or known and (known['name'] or known['username']):
+                if known and (known['name'] or known['username']):
                     continue
-                member = bot_api(token, 'getChatMember', chat_id=identifier, user_id=user_id)
+                if user_id in names:
+                    if known:
+                        group['users'][user_id] = {**known, **names[user_id]}
+                elif user_id not in refused:
+                    wanted.append(user_id)
+            for user_id in wanted[:40]:
+                try:
+                    member = bot_api(token, 'getChatMember', chat_id=identifier, user_id=user_id)
+                except HTTPError as error:
+                    error.close()
+                    if not 400 <= error.code < 500:
+                        raise
+                    # Telegram refused this one person; the others in the group are still asked.
+                    refused.add(user_id)
+                    continue
                 person = _person(member.get('user')) if isinstance(member, dict) else None
                 if person and person['id'] == user_id:
-                    group['users'][user_id] = {'id': user_id, **(known or {}), 'name': person['name'], 'username': person['username']}
+                    names[user_id] = {'name': person['name'], 'username': person['username']}
+                    group['users'][user_id] = {'id': user_id, **(group['users'].get(user_id) or {}), **names[user_id]}
         except Exception:
             # The archive and saved IDs remain useful during Bot API outages.
             continue
