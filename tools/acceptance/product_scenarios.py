@@ -945,6 +945,257 @@ class ProductScenarios(Scenarios):
                            "AND observed='nocheh_forwards_and_files' AND content LIKE '%"+mark+"%'")
         self.gate('recall_asks_the_participant_holding_the_file_text', held not in ('', '0'), conclusions=held)
 
+    # Where a hit came from (ADR-0259) ------------------------------------------------------------------------
+
+    # The fields every archive_search hit had before ADR-0259 for a reader in a turn; the source fields come beside them.
+    HIT_FIELDS = ('id', 'source', 'scope', 'kind', 'origin', 'occurred_at', 'chat_id', 'representation', 'text', 'truncated', 'content_types')
+    TAG_BYS = ('owner', 'person', 'forward', 'file', 'mixed', 'nocheh', 'shared', 'unknown')
+    UNAVAILABLE = {'error': 'archive_source_unavailable'}
+
+    @staticmethod
+    def hits_by_event(result):
+        """archive_search's hits by event id; a result that is no search answer has none."""
+        rows = result.get('sources') if isinstance(result, dict) else None
+        return {row['id']: row for row in rows if isinstance(row, dict) and isinstance(row.get('id'), str)} if isinstance(rows, list) else {}
+
+    @classmethod
+    def tagged(cls, item, zone, starts=None, by=None):
+        """A hit or opened message that names its source as Nocheh's code builds it (ADR-0259): a tag of at most 160
+        characters that starts as given and ends with a minute in the reader's time zone, a known `by` (the one given),
+        and `at`, an ISO time."""
+        tag = item.get('tag') if isinstance(item, dict) else None
+        return (isinstance(tag, str) and len(tag) <= 160 and (starts is None or tag.startswith(starts))
+                and re.search(r' · [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} '+re.escape(zone)+'$', tag) is not None
+                and item.get('by') in cls.TAG_BYS and (by is None or item.get('by') == by) and isinstance(item.get('at'), str) and bool(item['at']))
+
+    @classmethod
+    def kept_fields(cls, hit):
+        """Every field the hit had before ADR-0259 is still there."""
+        return isinstance(hit, dict) and all(field in hit for field in cls.HIT_FIELDS)
+
+    def tool_result(self, name):
+        """The newest result the scripted model got from a tool, as the tool gave it."""
+        final = [event for event in self.f.brain() if event.get('tool') == name and event['phase'] == 'final'][-1]
+        try:
+            return json.loads(final['result'])
+        except ValueError:
+            return {'raw': final['result'][:500]}
+
+    def recalled(self, chat, query, sender=OWNER, topic=None):
+        """memory_recall's answer to `sender` in `chat`, with no reply sent."""
+        self.silent_turn(self.f.message(chat, 'یادت هست؟ [[recall:'+query+']] [[after:silent]]', sender=sender, topic=topic), chat, topic)
+        return self.tool_result('mcp__nocheh__memory_recall')
+
+    @staticmethod
+    def session_hits(result, mark, place=None):
+        """The owner's recall hits from stored chat history (native_session) whose text holds the mark, in a chat whose
+        place names `place` when given."""
+        native = result.get('native') if isinstance(result, dict) else None
+        hits = native.get('hits') if isinstance(native, dict) else None
+        return [hit for hit in hits if isinstance(hit, dict) and hit.get('kind') == 'native_session' and mark in str(hit.get('text') or '')
+                and (place is None or place in str(hit.get('place') or ''))] if isinstance(hits, list) else []
+
+    def owner_zone(self, zone):
+        """Set the owner's Settings › Tasks time zone, and return the one it replaced."""
+        current = self.f.app('/v1/tasks/settings')
+        self.f.app('/v1/tasks/settings', {'time_zone': zone, 'revision': current['revision']})
+        return current.get('time_zone') or 'UTC'
+
+    def posted(self, chat, text, sender=OWNER, topic=None, **options):
+        """A message nobody addressed to Nocheh, archived without a reply; its event id."""
+        event_id, _ = self.turn(self.f.message(chat, text, sender=sender, mention=False, topic=topic, **options), chat, topic, expect_reply=False)
+        return event_id
+
+    def search_hits_name_their_source(self):
+        # Every archive_search hit names who wrote it, where and when, in a tag Nocheh's code builds from the archive, never
+        # the model, beside every field it had (ADR-0259). The owner reads times in the Settings › Tasks time zone, a group
+        # in UTC. In a group the owner's own message is named as Telegram shows the owner, with by=owner, and never "the
+        # owner"; a member who calls themselves "the owner" stays quoted with by=person, in the owner's chat too. GP2
+        # finds nothing of GP1's.
+        number = str(self.f.ids())
+        word, group_name = 'TAGWORD'+number, 'Synthetic Forum '+str(GROUP)
+        bob = {'from': {'id': MEMBER, 'is_bot': False, 'first_name': 'Bob', 'username': 'bob_synthetic'}}
+        named = {'from': {'id': GUEST, 'is_bot': False, 'first_name': 'the owner'}}
+        posted = {'bob': self.posted(GROUP, word+' Bob plans the trip', MEMBER, TEAM_TOPIC, extra=bob),
+                  'named': self.posted(GROUP, word+' I am the owner here', GUEST, TEAM_TOPIC, extra=named),
+                  'owner': self.posted(GROUP, word+' the owner writes in the group', OWNER, TEAM_TOPIC),
+                  'other': self.posted(OTHER_GROUP, word+' in the second group', MEMBER)}
+        search = lambda chat, topic=None: self.tool_call('mcp__nocheh__archive_search', {'query': word, 'limit': 10}, chat, topic)
+        before = self.owner_zone('Europe/Berlin')
+        try:
+            owner, group, other = search(OWNER), search(GROUP, TEAM_TOPIC), search(OTHER_GROUP)
+        finally:
+            self.owner_zone(before)
+        found = self.hits_by_event(owner)
+        self.current['observed'] = {'owner': {key: (found.get(event_id) or {}).get('tag') for key, event_id in posted.items()}}
+        self.gate('owner_hits_keep_every_field', all(self.kept_fields(found.get(event_id)) for event_id in posted.values()))
+        self.gate('owner_reads_bob_with_group_and_tasks_zone', self.tagged(found.get(posted['bob']), 'Europe/Berlin', '“Bob” (@bob_synthetic)', 'person')
+                  and group_name in found[posted['bob']]['tag'], hit=found.get(posted['bob']))
+        self.gate('member_named_the_owner_stays_quoted', self.tagged(found.get(posted['named']), 'Europe/Berlin', '“the owner”', 'person'),
+                  hit=found.get(posted['named']))
+        self.gate('owner_reads_own_words_as_the_owner', self.tagged(found.get(posted['owner']), 'Europe/Berlin', 'the owner ', 'owner'),
+                  hit=found.get(posted['owner']))
+        self.gate('owner_finds_the_second_group', self.tagged(found.get(posted['other']), 'Europe/Berlin', by='person'), hit=found.get(posted['other']))
+        found = self.hits_by_event(group)
+        self.current['observed']['group'] = {key: (found.get(event_id) or {}).get('tag') for key, event_id in posted.items()}
+        self.gate('group_hits_keep_every_field', all(self.kept_fields(found.get(posted[key])) for key in ('bob', 'named', 'owner')))
+        self.gate('group_reads_bob_in_utc', self.tagged(found.get(posted['bob']), 'UTC', '“Bob” (@bob_synthetic) · this chat · ', 'person'),
+                  hit=found.get(posted['bob']))
+        self.gate('group_reads_member_named_the_owner_quoted', self.tagged(found.get(posted['named']), 'UTC', '“the owner” · ', 'person'))
+        self.gate('group_reads_owner_by_telegram_name', self.tagged(found.get(posted['owner']), 'UTC', '“Synthetic '+str(OWNER)+'” · ', 'owner'),
+                  hit=found.get(posted['owner']))
+        self.gate('group_never_reads_the_tasks_zone_or_the_other_group', posted['other'] not in found and 'Europe/Berlin' not in json.dumps(group))
+        found = self.hits_by_event(other)
+        text = json.dumps(other, ensure_ascii=False)
+        self.gate('second_group_reads_only_its_own', self.tagged(found.get(posted['other']), 'UTC', '“Synthetic '+str(MEMBER)+'” · this chat · ', 'person')
+                  and not {posted['bob'], posted['named'], posted['owner']} & set(found), found=sorted(found))
+        self.gate('second_group_never_reads_the_first', group_name not in text and 'Europe/Berlin' not in text and 'the owner' not in text)
+
+    def group_tags_stay_in_the_group(self):
+        # A tag says only what its reader may know (ADR-0259): GP2 never reads GP1's name or the owner's private chat, and
+        # opening their messages answers unavailable, like a message that does not exist; a member reads a topic only by
+        # the name Telegram showed, never by one only the owner typed, while the owner reads that name.
+        number = str(self.f.ids())
+        word, secret, topic = 'STAYWORD'+number, 'OWNERTOPIC'+number, 44
+        self.f.app('/v1/telegram/topics', {'action': 'add', 'chat_id': str(GROUP), 'topic_id': topic, 'name': secret})
+        try:
+            named = self.posted(GROUP, word+' in the named topic', MEMBER, topic)
+            team = self.posted(GROUP, word+' in team plans', MEMBER, TEAM_TOPIC)
+            private, _ = self.turn(self.f.message(OWNER, word+' a private note'), OWNER)
+            other = self.posted(OTHER_GROUP, word+' in the second group', MEMBER)
+            search = lambda chat, topic=None: self.tool_call('mcp__nocheh__archive_search', {'query': word, 'limit': 10}, chat, topic)
+            read = lambda event_id, chat, topic=None: self.tool_call('mcp__nocheh__archive_read', {'id': 'nocheh:event:'+event_id}, chat, topic)
+            owner = self.hits_by_event(search(OWNER))
+            self.gate('owner_reads_the_name_the_owner_typed', secret in str((owner.get(named) or {}).get('tag')), hit=owner.get(named))
+            result = search(GROUP, TEAM_TOPIC)
+            found = self.hits_by_event(result)
+            self.gate('group_finds_the_sibling_topic', self.tagged(found.get(named), 'UTC', by='person'), hit=found.get(named))
+            opened = read(named, GROUP, TEAM_TOPIC)
+            self.gate('group_never_reads_the_owner_typed_topic_name', secret not in json.dumps([result, opened], ensure_ascii=False)
+                      and opened.get('source') == 'nocheh:event:'+named, tag=(found.get(named) or {}).get('tag'), topic=opened.get('topic'))
+            self.gate('group_never_finds_the_private_chat', private not in found)
+            result = search(OTHER_GROUP)
+            found, text = self.hits_by_event(result), json.dumps(result, ensure_ascii=False)
+            self.gate('second_group_finds_its_own', self.tagged(found.get(other), 'UTC', by='person'), found=sorted(found))
+            self.gate('second_group_tags_name_nothing_of_the_first', not {named, team, private} & set(found) and 'Synthetic Forum '+str(GROUP) not in text
+                      and secret not in text and 'private chat' not in text, tags=[hit.get('tag') for hit in found.values()])
+            opened = {name: read(event_id, OTHER_GROUP) for name, event_id in (('first_group', team), ('private_chat', private))}
+            self.gate('first_group_and_private_chat_unavailable', all(value == self.UNAVAILABLE for value in opened.values()), opened=opened)
+        finally:
+            self.f.app('/v1/telegram/topics', {'action': 'remove', 'chat_id': str(GROUP), 'topic_id': topic})
+
+    def reply_thread_opens(self):
+        # archive_read opens a message with its thread (ADR-0259): what it replies to and the message before that, and the
+        # replies to it, each with its own tag, and each only where its reader may read it. M ← R1 (Bob) ← R2 (the owner)
+        # in GP1, and a reply into GP1 from GP2: the owner reads all of it, GP1 never the reply from GP2, GP2 none of GP1.
+        number = str(self.f.ids())
+        updates = {'m': self.f.message(GROUP, 'THREADMARK'+number+' shall we meet on Friday', sender=GUEST, mention=False, topic=TEAM_TOPIC)}
+        updates['r1'] = self.f.message(GROUP, 'Friday works for me', sender=MEMBER, mention=False, topic=TEAM_TOPIC, reply_to=updates['m']['message'])
+        updates['r2'] = self.f.message(GROUP, 'Then Friday at ten', mention=False, topic=TEAM_TOPIC, reply_to=updates['r1']['message'])
+        source = updates['m']['message']
+        updates['outside'] = self.f.message(OTHER_GROUP, 'Can we join on Friday?', sender=MEMBER, mention=False, extra={'external_reply': {
+            'origin': {'type': 'user', 'sender_user': source['from'], 'date': source['date']}, 'chat': source['chat'], 'message_id': source['message_id']}})
+        ids = {}
+        for name, update in updates.items():
+            chat = update['message']['chat']['id']
+            ids[name], _ = self.turn(update, chat, update['message'].get('message_thread_id'), expect_reply=False)
+        read = lambda name, chat, topic=None, **options: self.tool_call('mcp__nocheh__archive_read', {'id': 'nocheh:event:'+ids[name], **options}, chat, topic)
+        sources = lambda items: [item.get('source') for item in items or [] if isinstance(item, dict)]
+        event = lambda name: 'nocheh:event:'+ids[name]
+        last = read('r2', OWNER, chain=2)
+        self.current['observed'] = {'owner_r2': {key: last.get(key) for key in ('tag', 'by', 'reply_to', 'chain')}}
+        self.gate('owner_reads_what_it_replies_to', (last.get('reply_to') or {}).get('source') == event('r1')
+                  and str(last['reply_to'].get('tag')).startswith('“Synthetic '+str(MEMBER)+'”') and last['reply_to'].get('by') == 'person'
+                  and last['reply_to'].get('text') == 'Friday works for me', reply_to=last.get('reply_to'))
+        self.gate('owner_reads_the_chain', sources(last.get('chain')) == [event('m')], chain=last.get('chain'))
+        self.gate('owner_reads_own_reply_as_the_owner', str(last.get('tag')).startswith('the owner') and last.get('by') == 'owner', tag=last.get('tag'))
+        opened = read('m', OWNER, replies=10)
+        self.gate('owner_reads_every_reply', set(sources((opened.get('replies') or {}).get('items'))) == {event('r1'), event('outside')}
+                  and (opened.get('replies') or {}).get('count') == 2, replies=opened.get('replies'))
+        opened = read('m', GROUP, TEAM_TOPIC, replies=10)
+        self.gate('group_reads_only_its_own_replies', sources((opened.get('replies') or {}).get('items')) == [event('r1')]
+                  and opened['replies'].get('count') == 1 and ids['outside'] not in json.dumps(opened), replies=opened.get('replies'))
+        middle = read('r1', GROUP, TEAM_TOPIC)
+        self.gate('group_reads_both_sides_of_a_reply', (middle.get('reply_to') or {}).get('source') == event('m')
+                  and sources((middle.get('replies') or {}).get('items')) == [event('r2')] and self.tagged(middle, 'UTC', by='person'),
+                  reply_to=middle.get('reply_to'), replies=middle.get('replies'))
+        self.gate('group_cannot_open_the_outside_reply', read('outside', GROUP, TEAM_TOPIC) == self.UNAVAILABLE)
+        self.gate('second_group_cannot_open_the_first', read('m', OTHER_GROUP) == self.UNAVAILABLE)
+        outside = read('outside', OTHER_GROUP, chain=5)
+        self.gate('second_group_reads_no_link_into_the_first', 'reply_to' not in outside and 'chain' not in outside and ids['m'] not in json.dumps(outside)
+                  and outside.get('source') == event('outside'), opened={key: outside.get(key) for key in ('tag', 'reply_to', 'chain', 'replies')})
+
+    def topic_sharing_group_keeps_evidence(self):
+        # When a group's topics share memory, recall in one topic keeps the evidence it learned in another (ADR-0259 V2:
+        # recall evidence used to be read for the asking topic alone, so every message learned in a sibling topic was
+        # dropped). LEARNMARK makes the fixture's learning keep the message as a conclusion about its writer
+        # (installation-provider.py PrivacyCanary), which Honcho's memory chat reads first for that writer's question.
+        number = str(self.f.ids())
+        mark = 'LEARNMARK'+number
+        self.topic_chat(GROUP, 11)
+        event_id = self.posted(GROUP, 'my boat leaves at nine '+mark, MEMBER, TEAM_TOPIC)
+        self.honcho_learned(mark)
+        result = self.recalled(GROUP, 'when does my boat leave '+number, sender=MEMBER, topic=11)
+        answers = [item for item in result.get('sources') or [] if isinstance(item, dict) and item.get('kind') == 'memory_inference']
+        evidence = [value for item in answers for value in item.get('evidence_sources') or []]
+        self.gate('recall_answers_in_the_sibling_topic', bool(answers), result=str(result)[:400])
+        self.gate('sibling_topic_evidence_kept', 'nocheh:event:'+event_id in evidence, evidence=evidence[:20],
+                  limitations=[item.get('limitations') for item in answers])
+
+    def retired_source_leaves_tags(self):
+        # Retire = forget at once (ADR-0259 step 1). Bob's message is a recent item of a group turn that searched for it
+        # and saved a note. Once it is retired: search no longer finds it, opening it answers unavailable, and the turn's
+        # stored history no longer holds it: its recent item is withheld, the turn's tool calls and results with it, and
+        # the note written in that turn is removed, while the message the turn answered keeps its own text.
+        number = str(self.f.ids())
+        mark, word, note, topic = 'RETIREMARK'+number, 'PINWORD'+number, 'RETIRENOTE'+number, 45
+        place = 'Synthetic Forum '+str(GROUP)
+        self.topic_chat(GROUP, topic)
+        bob = self.posted(GROUP, mark+' '+word+' my code is 4321', MEMBER, topic)
+        save = json.dumps({'target': 'memory', 'operations': [{'action': 'add', 'content': note+': Bob gave a code'}]})
+        self.silent_turn(self.f.message(GROUP, 'ابزار [[tool:mcp__nocheh__archive_search '+json.dumps({'query': word, 'limit': 10})
+                                        + ']] [[tool:memory '+save+']] [[after:silent]]', topic=topic), GROUP, topic)
+        found = self.hits_by_event(self.tool_result('mcp__nocheh__archive_search'))
+        self.gate('turn_read_and_tagged_it', mark in str((found.get(bob) or {}).get('text')) and self.tagged(found.get(bob), 'UTC', by='person'),
+                  hit=found.get(bob))
+        saved = self.tool_result('memory')
+        self.gate('turn_saved_a_note', saved.get('success') is True, result=str(saved)[:300])
+        self.gate('note_kept_before', bool(self.recalled_notes(json.dumps(self.recalled(OWNER, note)), note)))
+        self.gate('history_holds_it_before', bool(self.session_hits(self.recalled(OWNER, mark), mark, place)))
+        self.retire(bob)
+        self.gate('search_no_longer_finds_it', bob not in self.hits_by_event(self.tool_call('mcp__nocheh__archive_search', {'query': word}, OWNER)))
+        self.gate('opening_it_is_unavailable', self.tool_call('mcp__nocheh__archive_read', {'id': 'nocheh:event:'+bob}, OWNER) == self.UNAVAILABLE)
+        # Recall skips what the group's history would withhold even before its next turn; asked first, since that turn's
+        # own question names the mark.
+        self.gate('history_no_longer_holds_it', not self.session_hits(self.recalled(OWNER, mark), mark, place))
+        # The group's next turn brings its stored history and notes current before the model reads them.
+        _, text = self.turn(self.f.message(GROUP, 'چه گفتند؟ [[context:'+mark+']]', topic=topic), GROUP, topic)
+        self.gate('next_turn_no_longer_reads_it', text.endswith(' absent'), answer=text)
+        self.gate('note_removed', not self.recalled_notes(json.dumps(self.recalled(OWNER, note)), note))
+
+    def retire(self, event_id):
+        """The owner retires a message, as Messages › Hide does."""
+        current = self.f.app('/v1/sources/'+event_id+'/retirement')
+        result = self.f.app('/v1/sources/'+event_id+'/retirement', {'retired': True, 'expected_revision': current['revision'],
+                                                                     'operation_id': 'scenario-source-tags-'+event_id[:16]})
+        self.gate('retired', result.get('retired') is True, revision=result.get('revision'))
+        self.wait('retirement_visible', lambda: self.f.app('/v1/sources/'+event_id+'/retirement')['retired'] is True, 60)
+
+    def owner_recall_session_hits_have_text(self):
+        # Owner recall's hits from stored chat history carry their own text, a short snippet around the match, and when it
+        # was said, and never the text of the rows around them (ADR-0259 V1: they used to come back empty). The row
+        # before the hit is Nocheh's answer naming NEIGHBOURMARK.
+        number = str(self.f.ids())
+        mark, neighbour = 'SESSIONMARK'+number, 'NEIGHBOURMARK'+number
+        self.turn(self.f.message(OWNER, 'first [[turn:'+neighbour+']]'), OWNER)
+        self.turn(self.f.message(OWNER, mark+' the boat leaves at nine'), OWNER)
+        hits = self.session_hits(self.recalled(OWNER, mark), mark)
+        self.current['observed'] = {'hits': hits[:5]}
+        self.gate('session_hits_have_their_text', bool(hits))
+        self.gate('each_hit_says_when', all(isinstance(hit.get('at'), str) and hit['at'] for hit in hits))
+        self.gate('each_hit_is_a_short_snippet', all(len(hit['text']) <= 120 for hit in hits))
+        self.gate('no_neighbour_text', neighbour not in json.dumps(hits, ensure_ascii=False) and not any('context' in hit for hit in hits))
+
     def private_chat_stays_out_of_groups(self):
         # What the owner keeps on their private side never reaches what the model sees for a group, and no group reply
         # shows it. The owner puts private marks in their private chat: messages, a native note, a personal task, a
@@ -1765,9 +2016,9 @@ class ProductScenarios(Scenarios):
                 archive.writestr('ChatExport/voice_messages/audio_1.ogg', b'OggS\x00\x02synthetic voice note\n\xff'*4+marker.encode())
         return buffer.getvalue()
 
-    def tool_call(self, name, arguments, chat, topic=None):
-        """The scripted model calls one agent tool in `chat` and answers nothing, so no reply repeats the result."""
-        self.silent_turn(self.f.message(chat, 'ابزار [[tool:'+name+' '+json.dumps(arguments)+']] [[after:silent]]', topic=topic), chat, topic)
+    def tool_call(self, name, arguments, chat, topic=None, sender=OWNER):
+        """The scripted model calls one agent tool in `chat`, asked by `sender`, and answers nothing, so no reply repeats the result."""
+        self.silent_turn(self.f.message(chat, 'ابزار [[tool:'+name+' '+json.dumps(arguments)+']] [[after:silent]]', sender=sender, topic=topic), chat, topic)
         final = [event for event in self.f.brain() if event.get('tool') == name and event['phase'] == 'final'][-1]
         try:
             return json.loads(final['result'])
@@ -3350,6 +3601,9 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho',
                  'not_allowed_group_text_stays_out_of_owner_notes', 'display_name_cannot_borrow', 'forward_kept_apart_and_labelled', 'own_file_stays_recallable',
+                 # Source tags on search hits and opened messages (ADR-0259).
+                 'search_hits_name_their_source', 'group_tags_stay_in_the_group', 'reply_thread_opens', 'topic_sharing_group_keeps_evidence',
+                 'retired_source_leaves_tags', 'owner_recall_session_hits_have_text',
                  'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group',

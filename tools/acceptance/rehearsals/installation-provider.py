@@ -338,6 +338,9 @@ class PrivacyCanary:
     """
     PRIVATE = re.compile(r'PRIVATEMARK[0-9]+')
     PROBE = re.compile(r'PROBEMARK[0-9]+')
+    # A message a group scenario wants learned as a conclusion about its writer, with no private mark in a group's memory
+    # for the privacy probe to count (topic_sharing_group_keeps_evidence).
+    LEARNED = re.compile(r'(?:PRIVATEMARK|LEARNMARK)[0-9]+')
     # Honcho's deriver prompt (src/deriver/prompts.py) and its message wrapper.
     LEARN = 'extract **explicit atomic facts**'
     TARGET = re.compile(r'<message idx="([0-9]+)" peer="([^"]*)" target="true"[^>]*>(.*?)</message>', re.S)
@@ -373,11 +376,12 @@ class PrivacyCanary:
             self.counts['private_text_seen'] = (self.counts['private_text_seen'] + [seen])[-20:]
 
     def learned(self, text):
-        """Honcho's learning of messages with a private mark: one conclusion for each, which quotes its mark and cites it."""
+        """Honcho's learning of messages with a private mark or a learn mark: one conclusion for each, which quotes its mark
+        and cites it."""
         if self.LEARN not in text:
             return None
         explicit = [{'source_indices': [int(found[1])], 'content': found[2] + ' keeps a private Friday routine ' + mark[0]}
-                    for found in self.TARGET.finditer(text) for mark in [self.PRIVATE.search(found[3])] if mark]
+                    for found in self.TARGET.finditer(text) for mark in [self.LEARNED.search(found[3])] if mark]
         return json.dumps({'explicit': explicit}) if explicit else None
 
     def probe(self, body, texts):
