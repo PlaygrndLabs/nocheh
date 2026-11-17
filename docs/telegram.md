@@ -108,6 +108,18 @@ addresses Nocheh in a selected group without a grant, or anyone else who writes
 privately (at most once a UTC day), gets the owner's fixed reply without a model;
 messages from chats Nocheh does not serve are archived but never prepared. Bot
 senders, edits and historical replay do not trigger new replies.
+Every archive search hit and every message the assistant opens names who wrote
+it, where and when, in a tag Nocheh's code builds
+([ADR-0259](adr/0259-recalled-facts-and-search-hits-name-their-source.md)):
+`“Bob” (@bob) · this chat · 2026-11-03 14:12 UTC` in a group, and in the
+owner's own chats the owner's Settings › Tasks time zone and, for someone the
+owner renamed in People, `saved as “Brother”`. In a group the owner's own
+messages read by the owner's Telegram name, with `by=owner`; a member never
+reads another group, the owner's private chat, a People name, a topic name only
+the owner typed (it reads `› a topic`) or the owner's time zone. Opening a
+message also shows what it replies to, the message before that and the first
+replies to it, each only where the reader may read it; a message in a forum
+topic is no reply to the topic's opening.
 In a group, a message starts a turn only when it addresses Nocheh: a reply to
 one of its messages, its @username, or one of its names opening the message
 (**Names that call Nocheh**). Other messages reach the next reply as context;
@@ -129,7 +141,13 @@ accounts, not ordinary bot chats.
 In **Messages**, open the exact captured message and choose **Hide from
 assistant** to stop future agent use and learning. This works for text, voice,
 media, edits, and assistant replies; all observed edits of one Telegram message
-share the decision. **Undo hiding** restores future use. The original,
+share the decision. A hidden message also leaves the turns that quoted it: in a
+group turn that carried it among the recent messages (or as the message the turn
+replied to), its text becomes a notice naming its id, and that turn's searches
+and other tool results, and the notes written from them, are withheld and
+removed with it; the turn's own message and the answer already sent stay
+([ADR-0259](adr/0259-recalled-facts-and-search-hits-name-their-source.md)).
+**Undo hiding** restores future use. The original,
 attachments, transcripts, and owner action history remain inspectable. A reply
 already sent cannot be retracted, and an uncertain send remains uncertain until
 its delivery receipt is resolved. Hiding records an owner decision,

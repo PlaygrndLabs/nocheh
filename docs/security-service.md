@@ -179,6 +179,27 @@ The legacy memory mode (`NOCHEH_MEMORY_CONTEXT=legacy`) and the non-isolated
 runtime carry no labels, and a non-isolated run could reach the record file
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
+Search hits and opened messages carry a source tag, `{source, tag, by, at}`,
+built by storage code from the archive and the reader's own guarded copy, never
+by the model ([ADR-0259](adr/0259-recalled-facts-and-search-hits-name-their-source.md)).
+Every tag, related message and reply count first passes the reader's own read
+check (a batched `readable()` equal to `canRead`); a source the reader may not
+read reads only `source not available here`. Names are quoted and cleaned of
+brackets, quotes and control or format characters, so a name can't read like a
+frame line or claim the owner's words; trust keys on `by`, which keeps ADR-0257's
+fail-closed groups. All of a request's tags pass the guard in one `prepare`
+call; a tag that can't be built reads `source not available right now` and is
+counted as the `source_tags` memory problem. Hermes's retirement plan also reads
+the spans Nocheh's own frame quotes at the top of a stored turn (the recent group
+messages, the speaker line and a replied-to block), never past the turn's
+`[Archive source: …]` marker; frame words are taken out of members' text
+(`FRAME_WORDS`, now with the reply words too), so text inside a message can't
+open a span. A retired span becomes `[Quoted message withheld; it was retired:
+nocheh:event:<id>]` and withholds that turn's tool calls and results, and the
+notes written from them, like a retired turn message. Owner recall asks Hermes's
+search only for a hit's own snippet and time, never the neighbouring rows'
+`context`.
+
 
 For an existing installation, stop Hermes and its native writers before running
 `python3 -m tools.operations.security.security_profiles /absolute/path/to/hermes --hermes-stopped`.
