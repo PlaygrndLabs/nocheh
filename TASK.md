@@ -1140,6 +1140,23 @@ resume always opens a new workflow, and `memory pause`/`memory resume` take
 [check](test/store-native-review.test.ts), [Hermes](services/hermes/test_review_handoff.py)).
 Pending: resuming the reviews already closed this way on a running installation.
 
+Message search missing messages after a rebuild (2026-11-17): rebuilding long-term memory
+on a running installation left 46 of 909 Honcho message embeddings pending. Their first
+embedding had been shed or failed, and Honcho's vector reconciler, the only retry, names no
+workspace, so the Honcho boundary refused every call it made. The deriver now runs the
+reconciler's sync steps once per workspace with it bound, in parts within the gateway's
+per-request bounds (100 rows, 128 KiB of text, less room for preparation); a call with none
+still fails closed
+([ADR-0259](docs/adr/0259-honcho-retries-each-workspace-bound.md),
+[check](services/honcho/test_boundary.py)). Checked against the pinned Honcho API and deriver
+with PostgreSQL and pgvector and the gateway's own request bounds: before, every pending row
+stayed pending with `honcho_workspace_required`; binding alone left six long messages (157 KB)
+refused as one request; with parts, every row was embedded with its own workspace named, a
+refused workspace failed only its own rows, and rows reset from `failed` were embedded on the
+next run. Pending: on the running
+installation, set the rows that reached `failed` back to `pending` and confirm none stay
+pending.
+
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
 task table against a group chat): long tool results are read in parts
