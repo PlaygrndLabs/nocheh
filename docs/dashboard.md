@@ -498,16 +498,17 @@ carries it; never build one from a Telegram ID.
 ./bin/nocheh memory preview --space=TOPIC_ID --query Juniper
 ./bin/nocheh memory recall Juniper
 ./bin/nocheh memory reviews
-./bin/nocheh memory pause JOB_ID
-./bin/nocheh memory resume JOB_ID
+./bin/nocheh memory pause JOB_ID --revision REVISION
+./bin/nocheh memory resume JOB_ID --revision REVISION
 ./bin/nocheh memory review EVENT_ID --approve
 ./bin/nocheh import telegram /path/to/result.json --approve-memory-review
 ./bin/nocheh memory graph --scope '*' --output graph.json
 ```
 
-Use the revision returned by `memory policy`; stale edits are rejected. A minimal
-policy file is `{"mode":"approved"}`. Omitting a key restores inheritance; `{}`
-restores all inherited settings. The existing import command without the optional
+Use the revision returned by `memory policy`, or for a notes review the one
+`memory reviews` lists; stale edits are rejected. A minimal policy file is
+`{"mode":"approved"}`. Omitting a key restores inheritance; `{}` restores all
+inherited settings. The existing import command without the optional
 approval flag keeps imports searchable without scheduling a native review.
 
 ## Schedules

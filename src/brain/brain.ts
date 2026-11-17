@@ -77,7 +77,9 @@ export type Brain={
   readNotes?:Call;
   /** Search the brain's own notes and past sessions. The owner audience only. */
   recallNotes?:Call;
-  /** Learn the brain's own notes from a finished conversation, as one idempotent job; `observe_only` only reports it. */
+  /** Learn the brain's own notes from a finished conversation, as one idempotent job; `observe_only` only reports it.
+   * The brain records a start durably before the job runs, so an observed `not_found` means no run began that could
+   * have changed anything, and Nocheh may start the same job again (ADR-0258). */
   reviewNotes?:Call;
   /** Bring the brain's own scheduled tasks forward, so Nocheh runs those that are due. */
   advanceSchedules?:Call;

@@ -891,6 +891,17 @@ not affected
 [check](services/hermes/test_native_memory.py)). Pending: a review on full notes on a
 running installation that saves its note.
 
+Notes reviews stuck after a restart (2026-11-16): a full tester run left 26 Hermes
+native notes reviews closed as uncertain for good. Each had waited for a busy profile,
+its next start request failed while Hermes or the app restarted, and Hermes then
+reported it `not_found`, which the app counted as unconfirmed until the review closed.
+A review Hermes reports `not_found` now waits again as new work, up to its four
+attempts; Hermes launches a start only within 45 seconds of receiving it, the owner's
+resume always opens a new workflow, and `memory pause`/`memory resume` take
+`--revision` ([ADR-0258](docs/adr/0258-a-notes-review-whose-start-was-lost-waits-again.md),
+[check](test/store-native-review.test.ts), [Hermes](services/hermes/test_review_handoff.py)).
+Pending: resuming the reviews already closed this way on a running installation.
+
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion
 task table against a group chat): long tool results are read in parts
