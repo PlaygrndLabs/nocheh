@@ -62,7 +62,8 @@ that group's long-term memory and found by search and by recall from the owner's
 private chat, labelled with the group. It stays out of one place only: the
 owner's own notes (Memory › Assistant notes), together with the owner's reactions
 to it, and a reply to it or a pin of it is reviewed without it. A message left
-out stays out after a later grant; **Memory › Assistant notes** counts them.
+out stays out even if that person later becomes a member, or is switched on
+there; **Memory › Assistant notes** counts them.
 Posts in a chat's own name, anonymous admins and other bots count as not
 allowed. Nocheh's own messages never do once archived: a pin of one it learns
 is reviewed with it, and a pin of its card, notice or reminder without it,

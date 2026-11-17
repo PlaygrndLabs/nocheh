@@ -87,8 +87,10 @@ members live in the control store and are managed on the Members page.
   review admits the owner and the members who talk there, reactions included, and its people
   names read the member directory; refusals go out under the `refusal` send class
   ([policy](test/assistant.test.ts), [reviews](test/store-native-review.test.ts),
-  [labels](test/source-labels.test.ts), [bot](services/telegram/test_approval_cards.py)).
-  Checks after the merge (2026-11-17): the build; node unit tests (734: 483 pass, 247 skipped,
+  [labels](test/source-labels.test.ts), [bot](services/telegram/test_approval_cards.py)). The
+  docs say a message kept out of the owner's notes stays out after its sender becomes a member,
+  not after a grant ([docs](test/memory-source-docs.test.ts)).
+  Checks after the merge (2026-11-17): the build; node unit tests (735: 484 pass, 247 skipped,
   and only the 4 workflow tests that also fail on main fail); all 105 store test files (293 pass,
   0 fail); Python Telegram (152), Hermes (1012, 4 skipped, with the 2 environment errors that
   also occur on main) and the repository's Python tests (143, 2 skipped); the dashboard build,
