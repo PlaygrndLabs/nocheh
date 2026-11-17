@@ -18,7 +18,8 @@ import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
-import {chatDirectory,chatIdFor,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
+import {chatDirectory,chatIdFor,chatShortId,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
+import type {ChatState} from '../src/chat-wire.js';
 import {labeledPlaceholders,promptProblem,promptSchema,reminderTexts} from '../src/prompts.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
@@ -26,24 +27,34 @@ if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_
 /*
  * The chat directory the preview serves (ADR-0252). Chats Nocheh knew before step 2b keep their stored value as their
  * id ('42', '-10042', '-10042/topic/7'); a group first seen later has a digest id ('Night sky club', with a topic), and a
- * group Telegram upgraded after that keeps its id under a new Telegram id ('Garden swap'). As the 2b-1 bridge serves
- * them, a group is on when any of its Telegram ids is in TELEGRAM_GROUP_IDS; the owner's chat always is.
+ * group Telegram upgraded after that keeps its id under a new Telegram id ('Garden swap'). Nocheh is on where a chat's
+ * state says (ADR-0253): the owner's chat, Aurora planning and Garden swap start on, the other groups off, and three
+ * more show where Nocheh stands after someone else added it ('Book swap', leaving), someone added it without showing
+ * who ('Choir practice', left) or someone removed it ('Hiking crew'). The group switch (POST /chats/state) changes a
+ * state here, in memory.
  */
 const NEW_GROUP_TG='-10088',NEW_GROUP=chatIdFor('telegram',NEW_GROUP_TG),NEW_TOPIC=chatIdFor('telegram',NEW_GROUP_TG,'3');
 const UPGRADED_OLD_TG='-4005',UPGRADED_TG='-10099',UPGRADED=chatIdFor('telegram',UPGRADED_OLD_TG);
-const previewChats:{id:string;kind:'private'|'group';title:string|null;ids:string[];old?:string[];is_forum?:boolean;topics?:[string,string][]}[]=[
- {id:'42',kind:'private',title:'Owner',ids:['42']},
+const LEAVING_GROUP=chatIdFor('telegram','-10091'),LEFT_GROUP=chatIdFor('telegram','-10092'),REMOVED_GROUP=chatIdFor('telegram','-10093');
+const REMOVED_TOPIC=chatIdFor('telegram','-10093','5');
+const previewChats:{id:string;kind:'private'|'group';title:string|null;ids:string[];old?:string[];is_forum?:boolean;topics?:[string,string][];state?:ChatState}[]=[
+ {id:'42',kind:'private',title:'Owner',ids:['42'],state:'active'},
  {id:'73',kind:'private',title:'Mira Chen',ids:['73']},
- {id:'-10042',kind:'group',title:'Aurora planning',ids:['-10042'],is_forum:true,topics:[['-10042/topic/7','7']]},
+ {id:'-10042',kind:'group',title:'Aurora planning',ids:['-10042'],is_forum:true,topics:[['-10042/topic/7','7']],state:'active'},
  {id:'-10073',kind:'group',title:'Weekend notes',ids:['-10073']},
  {id:'-10077',kind:'group',title:null,ids:['-10077']},
  {id:NEW_GROUP,kind:'group',title:'Night sky club',ids:[NEW_GROUP_TG],is_forum:true,topics:[[NEW_TOPIC,'3']]},
- {id:UPGRADED,kind:'group',title:'Garden swap',ids:[UPGRADED_TG],old:[UPGRADED_OLD_TG]},
+ {id:UPGRADED,kind:'group',title:'Garden swap',ids:[UPGRADED_TG],old:[UPGRADED_OLD_TG],state:'active'},
+ {id:LEAVING_GROUP,kind:'group',title:'Book swap',ids:['-10091'],state:'pending'},
+ {id:LEFT_GROUP,kind:'group',title:'Choir practice',ids:['-10092'],state:'left'},
+ {id:REMOVED_GROUP,kind:'group',title:'Hiking crew',ids:['-10093'],is_forum:true,topics:[[REMOVED_TOPIC,'5']],state:'removed'},
 ];
-function previewDirectory(served:readonly string[]) {
+/** Each chat's state, which the group switch changes; a chat with none listed starts off. */
+const chatStates=new Map<string,ChatState>(previewChats.map(chat=>[chat.id,chat.state??'off']));
+function previewDirectory() {
   const chats:ChatRow[]=[],ids:ChatIdRow[]=[];
   for(const chat of previewChats) {
-    const state=chat.id==='42'||chat.kind==='group'&&[...chat.ids,...chat.old??[]].some(id=>served.includes(id))?'active' as const:'off' as const;
+    const state=chatStates.get(chat.id)!;
     chats.push({id:chat.id,app:'telegram',kind:chat.kind,parent_id:null,topic_key:null,state,title:chat.title,is_forum:chat.is_forum===true});
     for(const [id,key] of chat.topics??[])chats.push({id,app:'telegram',kind:'topic',parent_id:chat.id,topic_key:key,state});
     ids.push(...chat.ids.map(external=>({app:'telegram' as const,external_id:external,chat_id:chat.id,state:'current' as const})),
@@ -51,8 +62,8 @@ function previewDirectory(served:readonly string[]) {
   }
   return chatDirectory({chats,ids,owner_chat:'42'});
 }
-// The process's directory, for the real repositories the preview runs; served as the saved setting says.
-installChats(previewDirectory(['-10042']));
+// The process's directory, for the real repositories the preview runs.
+installChats(previewDirectory());
 const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLock(join(tmpdir(),'nocheh-preview-'+randomUUID(),'lock.json')),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
 await initialize(pool);
 await ownerLock.create('preview-password');
@@ -139,7 +150,7 @@ function modelRoutes() {
 }
 /** The `fresh` scenario: a new installation with a saved bot token and nothing else yet. */
 const freshInstall:Record<string,{value?:string|null;configured?:boolean}>={TELEGRAM_OWNER_ID:{value:''},TELEGRAM_BOT_TOKEN:{configured:true},OPENAI_API_KEY:{configured:false}};
-const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_IDS',value:'-10042',editable:true},{key:'TELEGRAM_GROUP_ACCESS',value:'{}',editable:true},{key:'TELEGRAM_GROUP_REPLIES',value:'addressed',editable:true},{key:'TELEGRAM_BOT_NAMES',value:'Nocheh,نوچه',editable:true},{key:'TELEGRAM_TOPIC_MEMORY',value:'group',editable:true},{key:'TELEGRAM_TYPING',value:'true',editable:true},{key:'TELEGRAM_REACTIONS',value:'true',editable:true},{key:'TELEGRAM_PROBLEM_NOTICES',value:'true',editable:true},{key:'NOCHEH_DASHBOARD_URL',value:'',editable:true},{key:'NOCHEH_MODEL',value:'claude-sonnet-5-5',editable:true},{key:'NOCHEH_EMBEDDING_MODEL',value:'text-embedding-3-small',editable:true},{key:'NOCHEH_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_MODEL',value:'',editable:true},{key:'NOCHEH_MEMORY_PROVIDER',value:'',editable:true},{key:'NOCHEH_MEMORY_MODEL',value:'',editable:true},{key:'NOCHEH_GUARD_PROVIDER',value:'',editable:true},{key:'NOCHEH_GUARD_MODEL',value:'',editable:true},{key:'NOCHEH_EMBEDDING_PROVIDER',value:'openai',editable:true},{key:'NOCHEH_PROVIDERS',value:'[]',editable:true},{key:'NOCHEH_PROVIDER_KEYS',value:null,secret:true,configured:false,editable:true},{key:'OPENAI_API_KEY',value:null,secret:true,configured:true,editable:true},{key:'ANTHROPIC_API_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'NOCHEH_PARALLEL_RUNS',value:'4',editable:true},{key:'NOCHEH_PARALLEL_REPLIES',value:'3',editable:true},{key:'NOCHEH_PARALLEL_GUARD_CHECKS',value:'3',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE',value:'off',editable:true},{key:'NOCHEH_OFFSITE_PROVIDER',value:'cloudflare',editable:true},{key:'NOCHEH_OFFSITE_ENDPOINT',value:'',editable:true},{key:'NOCHEH_OFFSITE_BUCKET',value:'',editable:true},{key:'NOCHEH_OFFSITE_REGION',value:'auto',editable:true},{key:'NOCHEH_OFFSITE_ACCESS_KEY_ID',value:'',editable:true},{key:'NOCHEH_OFFSITE_SECRET_ACCESS_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE_PASSPHRASE',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE_KEEP',value:'14',editable:true}];
+const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_ACCESS',value:'{}',editable:true},{key:'TELEGRAM_GROUP_REPLIES',value:'addressed',editable:true},{key:'TELEGRAM_BOT_NAMES',value:'Nocheh,نوچه',editable:true},{key:'TELEGRAM_TOPIC_MEMORY',value:'group',editable:true},{key:'TELEGRAM_TYPING',value:'true',editable:true},{key:'TELEGRAM_REACTIONS',value:'true',editable:true},{key:'TELEGRAM_PROBLEM_NOTICES',value:'true',editable:true},{key:'NOCHEH_DASHBOARD_URL',value:'',editable:true},{key:'NOCHEH_MODEL',value:'claude-sonnet-5-5',editable:true},{key:'NOCHEH_EMBEDDING_MODEL',value:'text-embedding-3-small',editable:true},{key:'NOCHEH_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_MODEL',value:'',editable:true},{key:'NOCHEH_MEMORY_PROVIDER',value:'',editable:true},{key:'NOCHEH_MEMORY_MODEL',value:'',editable:true},{key:'NOCHEH_GUARD_PROVIDER',value:'',editable:true},{key:'NOCHEH_GUARD_MODEL',value:'',editable:true},{key:'NOCHEH_EMBEDDING_PROVIDER',value:'openai',editable:true},{key:'NOCHEH_PROVIDERS',value:'[]',editable:true},{key:'NOCHEH_PROVIDER_KEYS',value:null,secret:true,configured:false,editable:true},{key:'OPENAI_API_KEY',value:null,secret:true,configured:true,editable:true},{key:'ANTHROPIC_API_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'NOCHEH_PARALLEL_RUNS',value:'4',editable:true},{key:'NOCHEH_PARALLEL_REPLIES',value:'3',editable:true},{key:'NOCHEH_PARALLEL_GUARD_CHECKS',value:'3',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE',value:'off',editable:true},{key:'NOCHEH_OFFSITE_PROVIDER',value:'cloudflare',editable:true},{key:'NOCHEH_OFFSITE_ENDPOINT',value:'',editable:true},{key:'NOCHEH_OFFSITE_BUCKET',value:'',editable:true},{key:'NOCHEH_OFFSITE_REGION',value:'auto',editable:true},{key:'NOCHEH_OFFSITE_ACCESS_KEY_ID',value:'',editable:true},{key:'NOCHEH_OFFSITE_SECRET_ACCESS_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE_PASSPHRASE',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE_KEEP',value:'14',editable:true}];
 // `no-owner` is an installation with its bot token and owner ID still to add.
 const settingValue=(mode:string,f:{key:string;value?:string|null})=>settingsChanges[f.key]??(mode==='fresh'?freshInstall[f.key]?.value:mode==='no-owner'&&f.key==='TELEGRAM_OWNER_ID'?'':undefined)??f.value;
 // What GET /settings answers; connecting off-site storage answers it too.
@@ -210,11 +221,36 @@ const conversations:any[]=[
  {space_id:NEW_GROUP,name:'Night sky club',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
  {space_id:NEW_TOPIC,name:'Meteor watch',kind:'topic',parent_space:NEW_GROUP,parent_name:'Night sky club',observed_at:new Date().toISOString(),configured:false,closed:false},
  {space_id:UPGRADED,name:'Garden swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
+ // Someone else added Nocheh to the first, and someone who didn't show who they were to the second (ADR-0253): it is
+ // leaving the first and has left the second.
+ {space_id:LEAVING_GROUP,name:'Book swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false,
+  added_by:'other',added_at:new Date(Date.now()-20000).toISOString()},
+ {space_id:LEFT_GROUP,name:'Choir practice',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-864e5).toISOString(),configured:false,
+  added_by:'anonymous',added_at:new Date(Date.now()-864e5).toISOString()},
+ // Someone removed Nocheh from this one, and Telegram said so; the owner's refresh since found the bot not in it. Its
+ // topic follows it.
+ {space_id:REMOVED_GROUP,name:'Hiking crew',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-3*864e5).toISOString(),configured:true,
+  added_by:'owner',added_at:new Date(Date.now()-30*864e5).toISOString(),removed_event:true,
+  telegram:{state:'not_member',migrate_to_chat_id:null,observed_at:new Date(Date.now()-2*864e5).toISOString()}},
+ {space_id:REMOVED_TOPIC,name:'Trail maps',kind:'topic',parent_space:REMOVED_GROUP,parent_name:'Hiking crew',observed_at:new Date(Date.now()-4*864e5).toISOString(),configured:false,closed:false},
 ];
-/** The directory as the saved Telegram setting serves it, installed for the repositories the preview runs. */
-const directoryNow=()=>installChats(previewDirectory(servedGroups()));
-/** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252). */
-const conversationItem=(row:any)=>({...row,...conversationFields(directoryNow(),row.space_id)});
+/** The `many-chats` scenario: 120 more groups Nocheh is on in, listed only. Their ids sort before every digest id, so
+ * 'Garden swap' falls past the first 100 chats and past the first 100 groups Nocheh is on in. In `many-chats-moved` one
+ * more, 'Club 000', sorts first, so 'Club 099' moves off the first page of those groups, and no page after the first can
+ * be read. */
+const club=(i:number)=>{const n=String(i).padStart(3,'0'),id='-2000000000'+n;
+ return {space_id:id,name:'Club '+n,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true,topic_key:null,
+  app_ids:[{app:'telegram',external:id,state:'current'}],is_forum:false,state:'active',owner:false,short_id:chatShortId(id),added_by:'owner',added_at:null,removed_event:false};};
+const manyChats=Array.from({length:120},(_,i)=>club(i+1));
+/** When Refresh group names last asked about each group, by chat id. */
+const refreshedAt=new Map<string,number>();
+/** The groups a scenario lists beyond the preview's own chats. */
+const moreChats=(mode:string)=>mode==='many-chats'?manyChats:mode==='many-chats-moved'?[club(0),...manyChats]:[];
+/** The directory as the chats' states serve it, installed for the repositories the preview runs. */
+const directoryNow=()=>installChats(previewDirectory());
+/** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252), and who
+ * added Nocheh from the chat's own record (ADR-0253). */
+const conversationItem=(row:any)=>({added_by:null,added_at:null,removed_event:false,...row,...conversationFields(directoryNow(),row.space_id)});
 permissions.push({id:'6'.repeat(64),kind:'shell',scope:conversation,arguments:{command:'printf synthetic-group'},remaining:2,expires_at:new Date(Date.now()+3600000).toISOString()});
 const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true},
  source_spaces:['-10077'],audience:{space:conversation,group:conversation},post_default:false};
@@ -237,8 +273,6 @@ const privateAnswers:any[]=[
 const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assigned',revision:1},
  // Saved before private chats were refused: it puts the owner's chat in no project, and the owner can clear it.
  {space_id:'42',project_id:projectId,mode:'assigned',revision:1}];
-/** The groups Nocheh serves, as the saved Telegram setting lists them. */
-const servedGroups=()=>String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean);
 /** A project's served groups, as the server lists them on /projects (ADR-0247). */
 const projectGroups=(id:string)=>{const directory=directoryNow();
  return assignments.filter(a=>a.mode==='assigned'&&a.project_id===id&&directory.kind(a.space_id)==='group'&&directory.served(a.space_id)).map(a=>a.space_id).sort();};
@@ -588,9 +622,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/telegram/identities')return json(res,200,{groups:[
     {id:'-10042',external:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira'},{id:'91',name:'Nia',username:null}]},
     {id:'-10073',external:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null}]},
-    // A group Telegram upgraded, by its Nocheh id as storage names it, with its Telegram id now: the earlier one the
-    // settings list finds this same group (ADR-0252). Sam wrote there and left; Lee's only record is that he left, so the
-    // People list leaves him out.
+    // A group Telegram upgraded, by its Nocheh id as storage names it, with its Telegram id now; people saved under its
+    // earlier one stay there (ADR-0252). Sam wrote there and left; Lee's only record is that he left, so the People list
+    // leaves him out.
     {id:UPGRADED,external:UPGRADED_TG,name:'Garden swap',users:[{id:'61',name:'Rosa',username:null,state:'in',seen:true},{id:'62',name:'Lee',username:null,state:'left',seen:false},
       {id:'63',name:'Sam',username:null,state:'left',seen:true}]},
   ],truncated:false});
@@ -650,8 +684,14 @@ const server=createServer((req,res)=>{void(async()=>{
     confirm_required:!fromGroup,readers:fromGroup?{space:conversation,group:conversation}:null});}
   if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
   if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant,...factGrants].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
-  // A search matches a chat's name, its group's name and its Telegram ids, as the server's does.
-  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),items=conversations.map(conversationItem).filter(row=>!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)));return json(res,200,{items,total:items.length,next_cursor:null,state:'current',observed_at:new Date().toISOString()});}
+  // A search matches a chat's name, its group's name and its Telegram ids, as the server's does; a search and the kind
+  // and state filters apply before the list, sorted by id, is paged, as the store pages it.
+  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'',after=url.searchParams.get('after')??'',limit=Math.min(100,Number(url.searchParams.get('limit')||50));
+   if(mode==='many-chats-moved'&&after)throw new HttpError(503,'fixture_observation_unavailable');
+   const all=[...conversations.map(conversationItem),...moreChats(mode)].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)
+    .filter(row=>(!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)))&&(!kind||row.kind===kind)&&(!state||row.state===state));
+   const remaining=all.filter(row=>row.space_id>after),items=remaining.slice(0,limit);
+   return json(res,200,{items,total:all.length,next_cursor:remaining.length>limit?items.at(-1).space_id:null,state:'current',observed_at:new Date().toISOString()});}
   if(route==='/conversations/context'){const space=url.searchParams.get('space')??'',directory=directoryNow(),group=directory.parentOf(space)??space;
    return json(res,200,{conversation:conversations.find(row=>row.space_id===space)??{space_id:space,name:null,kind:'unknown'},observed_at:new Date().toISOString(),state:'current',
     addressing:{state:'current',enabled:false,owner_id:'42',group_enabled:directory.isGroup(group)&&directory.served(group),granted:[],denied:[]},
@@ -877,7 +917,32 @@ const server=createServer((req,res)=>{void(async()=>{
     if(!settingsChanges.TELEGRAM_BOT_TOKEN&&mode!=='fresh')throw new HttpError(400,'telegram_token_missing');
     if(saved('TELEGRAM_ENABLED')==='true')throw new HttpError(400,'telegram_running');
     return json(res,200,{bot:'@aurora_helper_bot',people:[{id:'42',name:'Owner',username:'@owner'}]});}
-  if(route==='/telegram/chats/refresh')return json(res,200,{chats:String(settingsChanges.TELEGRAM_GROUP_IDS??'-10042').split(',').filter(Boolean).map(chat_id=>({chat_id,state:'available',title:'Aurora planning',is_forum:false}))});
+  // Telegram is asked about the groups Nocheh is on in as the server asks: at most 50 a press, those never checked and
+  // then those checked longest ago first, ties by id; the answer counts the others not checked in the last hour.
+  if(route==='/telegram/chats/refresh'){const directory=directoryNow(),now=Date.now(),last=(id:string)=>refreshedAt.get(id)??0;
+   const served=[...previewChats.filter(chat=>chat.kind==='group'&&directory.served(chat.id)).map(chat=>({chat_id:chat.id,external:chat.ids[0],state:'available',title:chat.title,is_forum:chat.is_forum===true})),
+    ...moreChats(mode).map(chat=>({chat_id:chat.space_id,external:chat.space_id,state:'available',title:chat.name,is_forum:false}))];
+   const chats=served.sort((a,b)=>last(a.chat_id)-last(b.chat_id)||(a.chat_id<b.chat_id?-1:a.chat_id>b.chat_id?1:0)).slice(0,50);
+   for(const chat of chats)refreshedAt.set(chat.chat_id,now);
+   return json(res,200,{chats,remaining:served.filter(chat=>last(chat.chat_id)<now-3600000).length});}
+  // The group switch (ADR-0253): on or off at once, with the project a group joins as it turns on: a new one named
+  // after it, one of the owner's, or none. Only a group Nocheh is in has one.
+  if(route==='/chats/state'){if(Object.keys(body).some(key=>!['chat_id','state','operation_id','project'].includes(key)))throw new HttpError(400,'unknown_chat_state_field');
+   const chat=String(body.chat_id),row=previewChats.find(item=>item.id===chat),project=body.project as {mode:string;project_id?:string}|undefined;
+   if(!['active','off'].includes(body.state)||project&&body.state!=='active')throw new HttpError(400,'invalid_chat_state');
+   if(!row)throw new HttpError(404,'chat_not_found');
+   if(row.kind!=='group')throw new HttpError(400,'chat_not_group');
+   if(['left','removed','archived'].includes(chatStates.get(chat)!))throw new HttpError(409,'chat_not_joined');
+   chatStates.set(chat,body.state);
+   const own=assignments.find(a=>a.space_id===chat);let projectId:string|null=own?.mode==='assigned'?own.project_id:null;
+   if(project){
+    if(project.mode==='new'){projectId=createHash('sha256').update('project:'+body.operation_id).digest('hex');
+     memoryProjects.unshift({id:projectId,name:row.title||'Group',description:'',state:'active',revision:1});}
+    else projectId=project.mode==='assigned'?project.project_id??null:null;
+    const next={space_id:chat,project_id:projectId,mode:project.mode==='none'?'none':'assigned',revision:(own?.revision??0)+1};
+    if(own)Object.assign(own,next);else assignments.push(next);
+   }
+   return json(res,200,{chat_id:chat,state:body.state,project_id:projectId});}
   // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0252).
   if(route==='/telegram/topics'){
    if(Object.keys(body).some(key=>!['action','link','chat_id','topic_id','name'].includes(key)))throw new HttpError(400,'unknown_topic_field');

@@ -14,7 +14,7 @@ export const promptKeys=['reply.common','reply.owner','reply.group','reply.priva
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
   'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','tasks.reminder_texts','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
-  'background.member_spend','background.member_paused','background.member_texts'] as const;
+  'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -289,6 +289,26 @@ export const backgroundMemberTexts=['member: • {name} in {group}: {spent}','mo
   'pause: ⏸ Pause member jobs','resume: ▶\ufe0f Resume member jobs',
   'paused: ⏸ Member jobs are paused until you resume them. Approved ones wait to start; running ones finish.',
   'resumed: ▶\ufe0f Member jobs resumed. Approved ones start shortly.','only_owner: Only the owner can do this.'].join('\n');
+/** The owner's lines when someone adds Nocheh to a group (ADR-0253), one "name: text" line each: the note when Nocheh
+ *  left a group a person the owner allowed somewhere (left_member) or an anonymous admin (left_anonymous) added it to, or
+ *  could not leave it (could_not_leave, with someone for a hidden adder), the line when Nocheh was removed from a group it
+ *  was on in, the card after the owner's own add with its buttons (move, no_project, turn_off), and the answers to a press,
+ *  which the card then shows under its text. {group}, {name} and {project} are filled in by code: names someone chose,
+ *  quoted, and a group with its short id, so a name cannot pass for the words around it. */
+export const chatAddTexts=['left_member: {name} added Nocheh to {group}. Only you can add Nocheh, so it left. To use it there, add it yourself.',
+  'left_anonymous: Someone added Nocheh to {group} without showing who, so it left. To use it there, turn off Remain anonymous and add Nocheh yourself.',
+  'could_not_leave: {name} added Nocheh to {group}, and it couldn\'t leave. It stays silent there.','someone: Someone',
+  'removed: Nocheh was removed from {group}.',
+  'card: Nocheh is on in {group}, in its new project {project}. You can move it to another project, take it out of projects, or turn Nocheh off there.',
+  'move: Move to {project}','no_project: No project','turn_off: Turn off','unnamed_project: a project',
+  'moved: {group} is now in {project}.','unassigned: {group} is in no project now.','turned_off: Nocheh is off in {group}. It stays in the group, silent.',
+  'changed: This card is out of date. Change it in the dashboard.','only_owner: Only the owner can do this.'].join('\n');
+export type ChatAddText='left_member'|'left_anonymous'|'could_not_leave'|'someone'|'removed'|'card'|'move'|'no_project'|'turn_off'|'unnamed_project'|
+  'moved'|'unassigned'|'turned_off'|'changed'|'only_owner';
+/** The chat add lines, with any line the owner removed or left empty taken from the default. */
+export function chatAddLines(text:string|undefined):Record<ChatAddText,string> {
+  return labeledLines(chatAddTexts,text) as Record<ChatAddText,string>;
+}
 /** The first line of a private answer, before the question (ADR-0249): {group} is the group or topic where it was asked,
  * {groups} every group the answer may read, the asking one included. Group and topic names lose their brackets and
  * control characters, so no one can write a line that looks like it. */
@@ -314,7 +334,8 @@ const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learni
   'telegram.private_answer':privateAnswerFrame,'telegram.private_answer_texts':privateAnswerTexts,'tasks.reminder':taskReminder,'tasks.reminder_texts':reminderTexts,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine,
-  'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts};
+  'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts,
+  'telegram.chat_adds':chatAddTexts};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

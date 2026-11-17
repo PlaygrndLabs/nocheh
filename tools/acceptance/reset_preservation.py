@@ -234,13 +234,25 @@ def _chats(configuration, owner, groups):
                        if row['kind'] == 'topic' and row['parent_id'] in served}}
 
 
+def _served(configuration):
+    """The groups Nocheh is on in (ADR-0253), by their current Telegram ids, from the configuration snapshot's chat
+    records. A snapshot without them (the legacy layout, or one taken before step 2b) names none, so its groups come
+    back off."""
+    rows, ids = configuration.get('chats'), configuration.get('chat_ids')
+    if rows is None or ids is None:
+        return []
+    active = {row['id'] for row in rows if row['kind'] == 'group' and row['state'] == 'active'}
+    return sorted({row['external_id'] for row in ids if row['app'] == 'telegram' and row['state'] == 'current' and row['chat_id'] in active})
+
+
 def _policy(values, snapshot):
     configuration.validate(values)
-    groups = sorted(set(value.strip() for value in values['TELEGRAM_GROUP_IDS'].split(',') if value.strip()))
-    document = {'enabled': values['TELEGRAM_ENABLED'] == 'true',
-                'owner_id': values['TELEGRAM_OWNER_ID'] or None, 'group_ids': groups}
-    policy = SimpleNamespace(owner=document['owner_id'], groups=document['group_ids'],
-                             chats=_chats(snapshot['configuration'], document['owner_id'], document['group_ids']))
+    # Which groups Nocheh is on in is the chats' state, not the setup (ADR-0253); the stored setup is the rest.
+    document = {'enabled': values['TELEGRAM_ENABLED'] == 'true', 'owner_id': values['TELEGRAM_OWNER_ID'] or None,
+                'group_access': configuration.group_access(values)}
+    groups = _served(snapshot['configuration'])
+    policy = SimpleNamespace(owner=document['owner_id'], groups=groups,
+                             chats=_chats(snapshot['configuration'], document['owner_id'], groups))
     if not policy.owner:
         raise ValueError('reset_owner_configuration_missing')
     if snapshot['layout'] == 'original-only-v1':

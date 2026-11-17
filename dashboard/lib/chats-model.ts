@@ -32,6 +32,12 @@ export type Chat = {
   /** A person's public Telegram username, without its @, when the server gives one; checked there by the one username
    * rule (src/chats-telegram.ts). */
   username?: string | null;
+  /** Who last added Nocheh to the chat (ADR-0253): you, someone else, someone anonymous, someone Telegram didn't name, or
+   * nobody on record (a chat from before step 2b, or one Nocheh only saw). */
+  added_by?: 'owner' | 'other' | 'anonymous' | 'unknown' | 'seeded' | null;
+  added_at?: string | null;
+  /** Whether Telegram told Nocheh that someone removed it from the chat. */
+  removed_event?: boolean;
 };
 export type Directory = {items: Chat[]; next_cursor: string | null; total?: number};
 /** A person Nocheh saw in a group: whether they are in it now, and whether the group's own messages show them (they wrote
@@ -43,8 +49,7 @@ export type Person = {
   state?: 'in' | 'left';
   seen?: boolean;
 };
-/** A group people were seen in: its Nocheh chat id, or the Telegram id TELEGRAM_GROUP_IDS gives for a group only that
- * list names, and its current Telegram id. */
+/** A group people were seen in: its Nocheh chat id and its current Telegram id. */
 export type IdentityGroup = {id: string; external?: string | null; name?: string | null; users?: Person[]};
 export type AccessRule = {granted: string[]; denied: string[]};
 export type AccessMap = Record<string, AccessRule>;
@@ -143,57 +148,65 @@ export function kindLabel(chat: Chat): string {
         : 'Chat';
 }
 
-export const parseGroupIds = (text: string): string[] =>
-  text
-    .split(',')
-    .map(id => id.trim())
-    .filter(Boolean);
-
-/** The saved text when the set of groups is unchanged, so a no-op edit is no change. */
-export function serializeGroupIds(ids: string[], savedText: string): string {
-  const unique = [...new Set(ids)];
-  const saved = parseGroupIds(savedText);
-  if (unique.length === saved.length && unique.every(id => saved.includes(id))) return savedText;
-  return unique.join(',');
+/** Whether Nocheh answers in a chat now: its state, which a topic takes from its group, is active (ADR-0253). */
+export const isOn = (chat: Chat | null | undefined): boolean => chat?.state === 'active';
+/** Where Nocheh stands in a group, in a word or two, as the chat list and the group's page show it (ADR-0253). */
+export const chatStateLabels: Record<ChatState, string> = {
+  active: 'On',
+  off: 'Off',
+  pending: 'Leaving',
+  left: 'Left',
+  removed: 'Removed',
+  could_not_leave: 'Couldn’t leave',
+  archived: 'Imported history',
+};
+/**
+ * Only the owner adds Nocheh to a group (ADR-0253), so only a group Nocheh is in has a switch: one that is on, off, or
+ * that someone else added and Nocheh couldn't leave. One it left, was removed from or knows only from imported history
+ * has none: the owner adds Nocheh there in Telegram.
+ */
+export const switchable = (chat: Chat | null | undefined): boolean =>
+  chat?.kind === 'group' && (chat.state === 'active' || chat.state === 'off' || chat.state === 'could_not_leave');
+/**
+ * What a group's state means, for its page. A group the seeder made (from before step 2b, or from imported history)
+ * has no add or removal on record, so its text claims neither. Telegram hides who added Nocheh when an admin adds it
+ * with Remain anonymous on, which may be the owner, so that add never says someone else.
+ */
+export function chatStateText(chat: Chat): string {
+  const hidden = chat.added_by === 'anonymous';
+  switch (chat.state) {
+    case 'active':
+      return 'You can always talk to it here.';
+    case 'pending':
+      return hidden
+        ? 'Someone added Nocheh here without showing who, so it is leaving.'
+        : 'Someone else added Nocheh here, so it is leaving.';
+    case 'left':
+      return hidden
+        ? 'Nocheh left because someone added it without showing who. To use it here, turn off Remain anonymous and add Nocheh yourself.'
+        : chat.added_by === 'other'
+          ? 'Nocheh left because someone else added it. Add Nocheh yourself to use it here.'
+          : 'Nocheh isn’t in this group any more.';
+    case 'removed':
+      return chat.removed_event ? 'Nocheh was removed from this group.' : 'Nocheh isn’t in this group any more.';
+    case 'could_not_leave':
+      return hidden
+        ? 'Someone added Nocheh here without showing who, and it couldn’t leave. It stays silent.'
+        : 'Someone else added Nocheh here and it couldn’t leave. It stays silent.';
+    case 'archived':
+      return 'From your imported history. Nocheh isn’t in this group.';
+    default:
+      return 'Nocheh doesn’t answer here.';
+  }
 }
-
 /**
- * Until chats.state is the only source (step 2b-2), TELEGRAM_GROUP_IDS still decides which groups Nocheh serves, by
- * their Telegram ids (ADR-0252). A group is listed when any of its Telegram ids is, an old one included.
+ * The TELEGRAM_GROUP_ACCESS key a group's people are kept under: whichever of its Telegram ids already holds people,
+ * in the draft and then in the saved settings, so a group Telegram upgraded keeps them under its earlier id; else its
+ * current id. Null for a chat with no Telegram id.
  */
-export const groupListed = (ids: string[], chat: Chat | null | undefined): boolean =>
-  appIds(chat).some(id => ids.includes(id));
-/**
- * Lists a group by one of its Telegram ids, or drops every Telegram id it has had. A group already listed stays as it
- * is. Otherwise it is listed by the id the saved list had, so turning it off and back on is no change, else by its
- * current one.
- */
-export function withGroupListed(ids: string[], chat: Chat, on: boolean, saved: string[] = []): string[] {
+export function accessKey(access: AccessMap, chat: Chat | null | undefined, saved: AccessMap = {}): string | null {
   const own = appIds(chat);
-  if (!on) return ids.filter(id => !own.includes(id));
-  if (own.some(id => ids.includes(id))) return ids;
-  const pick = own.find(id => saved.includes(id)) ?? currentAppId(chat);
-  return pick ? [...ids, pick] : ids;
-}
-/**
- * The TELEGRAM_GROUP_ACCESS key a group's people are kept under. Every key must be listed in TELEGRAM_GROUP_IDS, or the
- * settings are refused, and an upgraded group may still be listed by its old id only. So: whichever of its Telegram ids
- * already has people in `access`, else one `listed` (the group ids being saved) has, the one with `saved` people
- * first, else its current one. Null for a chat with no Telegram id.
- */
-export function accessKey(
-  access: AccessMap,
-  chat: Chat | null | undefined,
-  listed: string[] = [],
-  saved: AccessMap = {},
-): string | null {
-  const own = appIds(chat);
-  return (
-    own.find(id => access[id]) ??
-    own.find(id => saved[id] && listed.includes(id)) ??
-    own.find(id => listed.includes(id)) ??
-    currentAppId(chat)
-  );
+  return own.find(id => access[id]) ?? own.find(id => saved[id]) ?? currentAppId(chat);
 }
 
 export function parseAccess(text: string): AccessMap {
@@ -265,12 +278,7 @@ export type ChatTree = {
  * Private chats (yours first), then groups (Nocheh-on first) with their topics under them. Groups people were seen
  * in appear even before the directory lists them.
  */
-export function chatTree(
-  items: Chat[],
-  extraGroups: {id: string; name?: string | null}[],
-  on: (chat: Chat) => boolean,
-  query: string,
-): ChatTree {
+export function chatTree(items: Chat[], extraGroups: {id: string; name?: string | null}[], query: string): ChatTree {
   const all = [...items];
   for (const group of extraGroups)
     if (!all.some(item => item.space_id === group.id || appIds(item).includes(group.id)))
@@ -293,7 +301,9 @@ export function chatTree(
       return {group, topics: matches(group) ? topics : topics.filter(matches)};
     })
     .filter(entry => matches(entry.group) || entry.topics.length)
-    .sort((a, b) => Number(on(b.group)) - Number(on(a.group)) || chatName(a.group).localeCompare(chatName(b.group)));
+    .sort(
+      (a, b) => Number(isOn(b.group)) - Number(isOn(a.group)) || chatName(a.group).localeCompare(chatName(b.group)),
+    );
   return {privates, groups};
 }
 
@@ -359,6 +369,8 @@ export function chatError(error: unknown): string {
   if (code === 'project_topic_follows_group')
     return 'A topic always follows its group’s project. Change the group’s project instead.';
   if (code === 'telegram_refresh_unavailable') return 'Telegram couldn’t be reached. Try again shortly.';
+  if (code === 'chat_not_joined') return 'Nocheh isn’t in this group any more. Add it in Telegram first.';
+  if (code === 'chat_not_group') return 'Only a group has a switch.';
   if (code === 'topic_name_required') return 'Give the topic a name.';
   if (/topic/.test(code) && /invalid/.test(code))
     return 'That doesn’t look like a topic link or number from this group. In Telegram, open the topic and use Copy link.';

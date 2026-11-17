@@ -5,7 +5,7 @@ import re
 import time
 from tools.operations.archive.archive import API, canonical, digest
 from tools.operations.installation.configuration import load
-from tools.operations.archive.import_job import run
+from tools.operations.archive.import_job import check_mapping, run
 
 
 def tool_tick(state,body):
@@ -37,7 +37,5 @@ def import_batch(state, body):
         preview=metadata['preview'];mapping=metadata['mapping'];approved=metadata.get('review_approved') is True
         fingerprint=digest(canonical({'sha256':preview['sha256'],'mapping':mapping,'review_approved':approved,'total':preview['messages']}))
         if fingerprint!=body['configuration_hash']:raise ValueError('import_configuration_changed')
-        policy=load(state)
-        allowed=set(filter(None,[policy['TELEGRAM_OWNER_ID'],*policy['TELEGRAM_GROUP_IDS'].split(',')]))
-        if not isinstance(mapping,dict) or any(not isinstance(k,str) or v not in allowed for k,v in mapping.items()):raise ValueError('scope_mapping_denied')
+        check_mapping(mapping,load(state)['TELEGRAM_OWNER_ID'],API())
         return run(directory,mapping,body['completed'],API(job,lease),limit=50,duplicates=body['duplicates'],learning_after=body['learning_after'])

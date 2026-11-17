@@ -5,9 +5,9 @@
  * lookup that fails is asked again a little later: until one answers, the chat is not settled, which is not the same
  * as unknown.
  */
-import {useEffect, useRef, useSyncExternalStore} from 'react';
+import {useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {apiGet} from './api';
-import {useResource} from './resource';
+import {useResource, type Snapshot} from './resource';
 import {appIds, groupOf, parentOf, type Chat, type Directory} from './chats-model';
 
 const lookups = new Map<string, Chat | null>();
@@ -106,4 +106,82 @@ export function useChatDirectory(interval = 30000) {
     /** A topic's chat. */
     parentOf: (space: string | null | undefined) => parentOf(find(space)),
   };
+}
+
+/** The groups Nocheh is on in (ADR-0253): the server filters before paging, so its pages hold only them. */
+const servedPath = '/conversations?kind=group&state=active&limit=100';
+/** Pages read after the first: enough for any owner's groups, and never an endless loop. */
+const servedPages = 20;
+
+/** Reads up to `pages` pages of a /conversations list after `cursor`; complete when its last page said so. */
+export async function readPages(
+  get: (path: string) => Promise<Directory | null>,
+  path: string,
+  cursor: string,
+  pages: number,
+): Promise<{items: Chat[]; complete: boolean}> {
+  const items: Chat[] = [];
+  let after: string | null = cursor;
+  for (let page = 0; after && page < pages; page++) {
+    const next: Directory | null = await get(path + '&after=' + encodeURIComponent(after));
+    items.push(...(next?.items ?? []));
+    after = next?.next_cursor ?? null;
+  }
+  return {items, complete: !after};
+}
+
+/** The pages read after the first page's cursor: a read that failed holds none and says why. */
+export type ServedRest = {cursor: string; items: Chat[]; complete: boolean; error: string};
+
+/**
+ * The served list now: the first page, then the pages read after its cursor. Pages read after another cursor are never
+ * used, since a group that moved between the two would be in neither. `complete` says every served group is in
+ * `items`; `loading` that the list is still being read, so an incomplete list is not yet a problem. A read that failed
+ * keeps the pages read before, so nothing flickers away, but the list is not complete: a group turned on or off since
+ * may be missing or still listed.
+ */
+export function servedList(first: Snapshot<Directory>, rest: ServedRest | null) {
+  if (!first.data) return {items: [] as Chat[], complete: false, loading: !first.error, error: first.error};
+  const page = first.data.items ?? [],
+    cursor = first.data.next_cursor ?? null;
+  if (!cursor) return {items: page, complete: !first.error, loading: false, error: first.error};
+  const after = rest?.cursor === cursor ? rest : null;
+  const seen = new Set(page.map(chat => chat.space_id));
+  return {
+    items: after ? [...page, ...after.items.filter(chat => !seen.has(chat.space_id))] : page,
+    complete: !first.error && !!after?.complete && !after.error,
+    loading: !after,
+    error: first.error || (after?.error ?? ''),
+  };
+}
+
+/**
+ * Every group Nocheh is on in, whatever page of the whole directory each falls on: the groups the import page offers
+ * and the name refresh asks Telegram about. The first page is a shared resource; the pages after it, rare, are read
+ * again each time it is.
+ */
+export function useServedGroups(interval = 60000) {
+  const first = useResource<Directory>(servedPath, interval);
+  const cursor = first.data?.next_cursor ?? null;
+  const [rest, setRest] = useState<ServedRest | null>(null);
+  useEffect(() => {
+    if (!cursor) return;
+    let live = true;
+    readPages(path => apiGet<Directory>(path), servedPath, cursor, servedPages).then(
+      read => live && setRest({cursor, ...read, error: ''}),
+      (error: unknown) => {
+        if (!live) return;
+        const why = error instanceof Error ? error.message : 'Request unavailable';
+        // A failed read again after the same cursor keeps what was read before, which may be out of date, so the list
+        // says it is not complete; after a new cursor it has nothing.
+        setRest(current =>
+          current?.cursor === cursor ? {...current, error: why} : {cursor, items: [], complete: false, error: why},
+        );
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [cursor, first.receivedAt]);
+  return servedList(first, rest);
 }

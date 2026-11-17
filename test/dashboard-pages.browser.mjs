@@ -1572,7 +1572,18 @@ test('a project shares nothing between its groups, and a group joins one only af
   const asked = following.getByRole('status').filter({hasText: 'Which project does this group join?'});
   await asked.getByRole('button', {name: 'None'}).click();
   await following.getByRole('status').filter({hasText: 'Joins no project.'}).waitFor();
-  // Turning Nocheh on there asks first too, and saves over that row.
+  assert.deepEqual(sent(followingPosted), [{space_id: '-10042', mode: 'none', project_id: null, expected_revision: 3}]);
+  // Turning Nocheh on there asks first too, and sends the answer with the switch, in one request (ADR-0253).
+  const switched = [];
+  await following.route(/\/api\/nocheh\/chats\/state$/, route => {
+    const body = route.request().postDataJSON();
+    switched.push(body);
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({chat_id: body.chat_id, state: body.state, project_id: null}),
+    });
+  });
   await following.goto(origin + '/#chats?chat=-10073');
   const followingSwitch = following.getByRole('switch', {name: 'Nocheh in this group'});
   await followingSwitch.click();
@@ -1580,11 +1591,11 @@ test('a project shares nothing between its groups, and a group joins one only af
   await followingJoin.locator('#join-project').selectOption({label: 'None'});
   await followingJoin.getByRole('button', {name: 'Turn on'}).click();
   await following.getByRole('status').filter({hasText: 'Weekend notes joins no project.'}).waitFor();
-  assert.equal(await followingSwitch.isChecked(), true);
-  assert.deepEqual(sent(followingPosted), [
-    {space_id: '-10042', mode: 'none', project_id: null, expected_revision: 3},
-    {space_id: '-10073', mode: 'none', project_id: null, expected_revision: 3},
-  ]);
+  assert.deepEqual(
+    switched.map(({chat_id, state, project}) => ({chat_id, state, project})),
+    [{chat_id: '-10073', state: 'active', project: {mode: 'none'}}],
+  );
+  assert.equal(followingPosted.length, 1, 'no separate assignment is saved');
   await following.close();
 
   // A group already in a project names that project's other groups and its task list before Nocheh turns on there,
@@ -1604,6 +1615,11 @@ test('a project shares nothing between its groups, and a group joins one only af
       }),
     }),
   );
+  const placedSent = [];
+  placed.on('request', request => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/nocheh/chats/state'))
+      placedSent.push(request.postDataJSON());
+  });
   await placed.goto(origin + '/#chats?chat=-10073');
   const placedSwitch = placed.getByRole('switch', {name: 'Nocheh in this group'});
   await placedSwitch.click();
@@ -1618,21 +1634,51 @@ test('a project shares nothing between its groups, and a group joins one only af
   await turnOn.getByRole('button', {name: 'Cancel'}).click();
   await turnOn.waitFor({state: 'detached'});
   assert.equal(await placedSwitch.isChecked(), false, 'Cancel leaves it off');
+  assert.equal(placedSent.length, 0, 'nothing is sent before the confirm');
   await placedSwitch.click();
   await turnOn.getByRole('button', {name: 'Turn on'}).click();
   await placed.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
   assert.equal(await placed.getByRole('dialog', {name: 'Which project does this group join?'}).count(), 0);
+  // Turning it off asks first: Nocheh stays in the group, silent, and the people allowed there are kept.
+  await placed.getByRole('switch', {name: 'Nocheh in this group', checked: true}).click();
+  const turnOff = placed.getByRole('dialog', {name: 'Turn Nocheh off in “Weekend notes”?'});
+  await turnOff.getByText('It stays in the group, silent. People you allowed are kept.').waitFor();
+  await turnOff.getByRole('button', {name: 'Turn off'}).click();
+  await placed.getByRole('switch', {name: 'Nocheh in this group', checked: false}).waitFor();
+  // A group already in a project keeps it: the switch sends no project.
+  assert.deepEqual(
+    placedSent.map(({chat_id, state, project}) => ({chat_id, state, project})),
+    [
+      {chat_id: '-10073', state: 'active', project: undefined},
+      {chat_id: '-10073', state: 'off', project: undefined},
+    ],
+  );
   await placed.close();
 
-  // Turning Nocheh on in a group asks which project it joins first; Cancel leaves it off.
+  // Turning Nocheh on in a group asks which project it joins first; Cancel leaves it off. A new project named after the
+  // group is offered beside the owner's own.
   const {page: off, problems: offProblems} = await open('chats?chat=-10073');
+  const offSent = [];
+  await off.route(/\/api\/nocheh\/chats\/state$/, route => {
+    const body = route.request().postDataJSON();
+    offSent.push(body);
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({chat_id: body.chat_id, state: body.state, project_id: body.project.project_id}),
+    });
+  });
   const on = off.getByRole('switch', {name: 'Nocheh in this group'});
   await on.click();
   const join = off.getByRole('dialog', {name: 'Which project does this group join?'});
   await join.getByRole('button', {name: 'Cancel'}).click();
   await join.waitFor({state: 'detached'});
   assert.equal(await on.isChecked(), false, 'nothing turns on without an answer');
+  assert.equal(offSent.length, 0);
   await on.click();
+  const options = await join.locator('#join-project option').allTextContents();
+  assert.deepEqual(options.slice(0, 3), ['Choose a project…', 'New project “Weekend notes”', 'None']);
+  assert.ok(options.includes('Aurora field guide') && !options.includes('Old apartment move'), options.join(', '));
   await join.locator('#join-project').selectOption({label: 'Aurora field guide'});
   await join.getByText('Already in Aurora field guide: Aurora planning.').waitFor();
   await join
@@ -1640,10 +1686,12 @@ test('a project shares nothing between its groups, and a group joins one only af
     .waitFor();
   await join.getByRole('button', {name: 'Turn on'}).click();
   await off.getByRole('status').filter({hasText: 'Weekend notes joins Aurora field guide.'}).waitFor();
-  assert.equal(await on.isChecked(), true);
-  const bar = off.getByRole('region', {name: 'Save changes'});
-  await bar.getByRole('button', {name: 'Discard'}).click();
-  await bar.getByText('No unsaved changes').waitFor();
+  assert.deepEqual(
+    offSent.map(({chat_id, state, project}) => ({chat_id, state, project})),
+    [{chat_id: '-10073', state: 'active', project: {mode: 'assigned', project_id: 'ab'.repeat(32)}}],
+  );
+  // The switch is no setting: nothing waits to be saved.
+  await off.getByRole('region', {name: 'Save changes'}).getByText('No unsaved changes').waitFor();
   await off.close();
 
   // A suggested move names the groups already in the project before the owner decides.
@@ -1800,22 +1848,41 @@ test('a group first seen after the new ids and a group Telegram upgraded open li
   assert.equal(new URL(page.url()).hash, '#chats?chat=-10042%2Ftopic%2F7');
   for (const text of [await list.innerText(), await page.locator('main').innerText()])
     assert.ok(!/[0-9a-f]{64}/.test(text), 'no Nocheh id is shown');
-  // Turning Nocheh on in the new group lists it by its current Telegram ID, until step 2b-2 reads chats instead.
-  await list.getByRole('link', {name: 'Night sky club'}).click();
-  await page.getByRole('switch', {name: 'Nocheh in this group'}).click();
+  // Turning Nocheh on in the new group, which is off, asks which project it joins and turns it on at once, by its own
+  // id: no setting is saved (ADR-0253). Turning it off asks first, then is off at once too.
+  const switched = [],
+    settings = [];
+  page.on('request', request => {
+    if (request.method() !== 'POST') return;
+    if (request.url().endsWith('/api/nocheh/chats/state')) switched.push(request.postDataJSON());
+    if (/\/api\/nocheh\/settings(?:\/apply)?$/.test(request.url())) settings.push(request.url());
+  });
+  const row = list.getByRole('link', {name: 'Night sky club'});
+  await row.getByText('Off', {exact: true}).waitFor();
+  await row.click();
+  await page.getByText('Nocheh doesn’t answer here.').waitFor();
+  await page.getByRole('switch', {name: 'Nocheh in this group', checked: false}).click();
   const join = page.getByRole('dialog', {name: 'Which project does this group join?'});
   await join.locator('#join-project').selectOption({label: 'None'});
   await join.getByRole('button', {name: 'Turn on'}).click();
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
-  const saved = [];
-  await page.route(/\/api\/nocheh\/settings$/, route => {
-    if (route.request().method() !== 'POST') return route.fallback();
-    saved.push(route.request().postDataJSON().changes);
-    return route.fulfill({status: 200, contentType: 'application/json', body: '{"ok":true}'});
-  });
-  await page.getByRole('region', {name: 'Save changes'}).getByRole('button', {name: 'Save'}).click();
-  await page.waitForResponse(response => response.url().endsWith('/api/nocheh/settings'));
-  assert.equal(saved[0]?.TELEGRAM_GROUP_IDS, '-10042,-10088');
+  await row.getByText('On', {exact: true}).waitFor();
+  await page.getByRole('region', {name: 'Save changes'}).getByText('No unsaved changes').waitFor();
+  await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).click();
+  const off = page.getByRole('dialog', {name: 'Turn Nocheh off in “Night sky club”?'});
+  await off.getByText('It stays in the group, silent. People you allowed are kept.').waitFor();
+  await off.getByRole('button', {name: 'Turn off'}).click();
+  await page.getByRole('switch', {name: 'Nocheh in this group', checked: false}).waitFor();
+  await row.getByText('Off', {exact: true}).waitFor();
+  assert.deepEqual(
+    switched.map(({chat_id, state, project}) => ({chat_id, state, project})),
+    [
+      {chat_id: NEW_GROUP, state: 'active', project: {mode: 'none'}},
+      {chat_id: NEW_GROUP, state: 'off', project: undefined},
+    ],
+  );
+  assert.ok(switched.every(body => typeof body.operation_id === 'string' && body.operation_id.length > 0));
+  assert.deepEqual(settings, [], 'the switch saves no setting');
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -1849,9 +1916,7 @@ test('a group and a person show the short ID a send card adds after their name, 
   await page.close();
 });
 
-test('a group Telegram upgraded stays on by its earlier ID, and an older topic is added by its number or link', async () => {
-  // The saved list still names the upgraded group by its earlier Telegram ID, and the new group by its own.
-  const listed = '-10042,-10088,-4005';
+test('a group Telegram upgraded keeps its people under its earlier ID, and an older topic is added by its number or link', async () => {
   let savedAccess = '{}';
   const page = await browser.newPage({viewport: {width: 1440, height: 900}});
   const problems = [];
@@ -1860,16 +1925,23 @@ test('a group Telegram upgraded stays on by its earlier ID, and an older topic i
     if (route.request().method() !== 'GET') return route.fallback();
     const response = await route.fetch(),
       view = await response.json();
-    for (const field of view.fields) {
-      if (field.key === 'TELEGRAM_GROUP_IDS') field.value = listed;
-      if (field.key === 'TELEGRAM_GROUP_ACCESS') field.value = savedAccess;
-    }
+    for (const field of view.fields) if (field.key === 'TELEGRAM_GROUP_ACCESS') field.value = savedAccess;
     return route.fulfill({response, json: view});
   });
-  const topics = [];
+  // The new group is on here, so its Topics card shows.
+  await page.route(/\/api\/nocheh\/conversations\?/, async route => {
+    const response = await route.fetch(),
+      view = await response.json();
+    for (const item of view.items ?? []) if ([NEW_GROUP, NEW_TOPIC].includes(item.space_id)) item.state = 'active';
+    return route.fulfill({response, json: view});
+  });
+  const topics = [],
+    switched = [];
   page.on('request', request => {
     if (request.method() === 'POST' && request.url().endsWith('/api/nocheh/telegram/topics'))
       topics.push(request.postDataJSON());
+    if (request.method() === 'POST' && request.url().endsWith('/api/nocheh/chats/state'))
+      switched.push(request.postDataJSON());
   });
   await page.goto(origin + '/#chats?chat=' + encodeURIComponent(UPGRADED));
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
@@ -1878,7 +1950,7 @@ test('a group Telegram upgraded stays on by its earlier ID, and an older topic i
   for (const name of ['Rosa', 'Sam'])
     await page.getByRole('radiogroup', {name: `Can ${name} talk to Nocheh`}).waitFor();
   assert.equal(await page.getByRole('radiogroup', {name: 'Can Lee talk to Nocheh'}).count(), 0);
-  // Someone allowed there is kept under the Telegram ID the list has, as the settings require (ADR-0252).
+  // Someone allowed in a group with nobody saved yet is kept under its current Telegram ID.
   const saved = [];
   await page.route(/\/api\/nocheh\/settings$/, route => {
     if (route.request().method() !== 'POST') return route.fallback();
@@ -1897,35 +1969,39 @@ test('a group Telegram upgraded stays on by its earlier ID, and an older topic i
     await page.getByRole('region', {name: 'Save changes'}).getByRole('button', {name: 'Save'}).click();
     await response;
     const changes = saved.at(-1) ?? {};
-    const ids = String(changes.TELEGRAM_GROUP_IDS ?? listed).split(',');
-    const access = JSON.parse(changes.TELEGRAM_GROUP_ACCESS ?? '{}');
-    assert.ok(
-      Object.keys(access).every(key => ids.includes(key)),
-      'every access key is a listed group id: ' + JSON.stringify(changes),
-    );
-    return access;
+    assert.equal(changes.TELEGRAM_GROUP_IDS, undefined, 'no group list is saved');
+    return JSON.parse(changes.TELEGRAM_GROUP_ACCESS ?? '{}');
   };
   await allow('555');
-  assert.deepEqual(await save(), {'-4005': {granted: ['555'], denied: []}});
-  // With people saved under the earlier ID, turning the group off and on again in one draft is no change, and
-  // someone allowed next joins them there.
+  assert.deepEqual(await save(), {'-10099': {granted: ['555'], denied: []}});
+  // People saved under its earlier Telegram ID stay there, and someone allowed next joins them.
   savedAccess = JSON.stringify({'-4005': {granted: ['555'], denied: []}});
   await page.reload();
-  await page.getByRole('radiogroup', {name: 'Can Unknown person talk to Nocheh'}).waitFor();
+  const kept = page
+    .getByRole('radiogroup', {name: 'Can Unknown person talk to Nocheh'})
+    .getByRole('radio', {name: 'Allowed', checked: true});
+  await kept.waitFor();
+  // Turning the group off and on again changes no setting, so the people allowed there are kept.
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).click();
   await page
-    .getByRole('dialog', {name: 'Turn Nocheh off in this group?'})
+    .getByRole('dialog', {name: 'Turn Nocheh off in “Garden swap”?'})
     .getByRole('button', {name: 'Turn off'})
     .click();
+  await page.getByText('Turn Nocheh on in this group to choose who may talk to it.').waitFor();
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: false}).click();
   const join = page.getByRole('dialog', {name: 'Which project does this group join?'});
   await join.locator('#join-project').selectOption({label: 'None'});
   await join.getByRole('button', {name: 'Turn on'}).click();
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
-  await page
-    .getByRole('radiogroup', {name: 'Can Unknown person talk to Nocheh'})
-    .getByRole('radio', {name: 'Allowed', checked: true})
-    .waitFor();
+  await kept.waitFor();
+  assert.deepEqual(
+    switched.map(({chat_id, state}) => [chat_id, state]),
+    [
+      [UPGRADED, 'off'],
+      [UPGRADED, 'active'],
+    ],
+  );
+  assert.equal(saved.length, 1, 'the switch saves no setting');
   await allow('556');
   assert.deepEqual(await save(), {'-4005': {granted: ['555', '556'], denied: []}});
   await page.goto(origin + '/#chats?chat=' + encodeURIComponent(NEW_GROUP));
@@ -1958,13 +2034,6 @@ test('a group people were seen in, past the first page of chats, is listed once 
   const page = await browser.newPage({viewport: {width: 1440, height: 900}});
   const problems = [];
   page.on('pageerror', error => problems.push('page error: ' + error.message));
-  await page.route(/\/api\/nocheh\/settings$/, async route => {
-    if (route.request().method() !== 'GET') return route.fallback();
-    const response = await route.fetch(),
-      view = await response.json();
-    for (const field of view.fields) if (field.key === 'TELEGRAM_GROUP_IDS') field.value = '-10042,-4005';
-    return route.fulfill({response, json: view});
-  });
   await page.route(/\/api\/nocheh\/conversations\?limit=100$/, async route => {
     const response = await route.fetch(),
       first = await response.json();
@@ -1986,6 +2055,138 @@ test('a group people were seen in, past the first page of chats, is listed once 
   assert.equal(await page.getByText('Nocheh doesn’t know this chat.', {exact: false}).count(), 0);
   assert.deepEqual(problems, []);
   await page.close();
+});
+
+test('each group says where Nocheh stands, and only a group Nocheh is in has a switch', async () => {
+  const {page, problems} = await open('chats');
+  const list = page.getByRole('navigation', {name: 'Chats'});
+  // The list names each group's state from the chat directory (ADR-0253); On is marked.
+  for (const [name, state] of [
+    ['Aurora planning', 'On'],
+    ['Weekend notes', 'Off'],
+    ['Book swap', 'Leaving'],
+    ['Choir practice', 'Left'],
+    ['Hiking crew', 'Removed'],
+  ])
+    await list.getByRole('link', {name}).getByText(state, {exact: true}).waitFor();
+  // A group someone else added is being left, one added without showing who was left, and one Nocheh was removed
+  // from says so: none has a switch, or people to choose.
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Nocheh here', exact: true})});
+  for (const [name, state, text] of [
+    ['Book swap', 'Leaving', 'Someone else added Nocheh here, so it is leaving.'],
+    [
+      'Choir practice',
+      'Left',
+      'Nocheh left because someone added it without showing who. To use it here, turn off Remain anonymous and add Nocheh yourself.',
+    ],
+    ['Hiking crew', 'Removed', 'Nocheh was removed from this group.'],
+  ]) {
+    await list.getByRole('link', {name}).click();
+    await page.getByRole('heading', {name, level: 2}).waitFor();
+    await card.getByText(text).waitFor();
+    await card.getByText(state, {exact: true}).waitFor();
+    assert.equal(await page.getByRole('switch', {name: 'Nocheh in this group'}).count(), 0, name);
+    assert.equal(await page.getByRole('heading', {name: 'Who can talk to Nocheh'}).count(), 0, name);
+  }
+  // A topic follows its group: one in a group Nocheh was removed from says so, in the group's own words, and has no
+  // reply mode or Telegram notice, as its group's page has none.
+  assert.equal(await card.getByText(/Add the bot in Telegram first/).count(), 0, 'Hiking crew');
+  await list.getByRole('link', {name: 'Trail maps'}).click();
+  await page.getByRole('heading', {name: 'Trail maps', level: 2}).waitFor();
+  await card.getByText('Nocheh was removed from this group.').waitFor();
+  assert.match(await card.innerText(), /Follows its group, Hiking crew: Removed\./);
+  for (const wrong of [/where Nocheh is/, /Add the bot in Telegram first/, /Answers only when called/])
+    assert.equal(await card.getByText(wrong).count(), 0, String(wrong));
+  // A group Nocheh is in but off has its switch.
+  await list.getByRole('link', {name: 'Weekend notes'}).click();
+  await card.getByText('Nocheh doesn’t answer here.').waitFor();
+  await page.getByRole('switch', {name: 'Nocheh in this group', checked: false}).waitFor();
+  // Imported history can be shared with a group Nocheh is on in, and only with one.
+  await page.goto(origin + '/#messages?view=import&job=11111111-1111-4111-8111-111111111111');
+  await page.locator('#map-chat-1 option', {hasText: 'Share with Garden swap'}).waitFor({state: 'attached'});
+  const targets = await page.locator('#map-chat-1 option').allTextContents();
+  assert.ok(
+    targets.includes('Share with Aurora planning') && targets.includes('Share with Garden swap'),
+    targets.join(),
+  );
+  assert.ok(!targets.some(target => /Weekend notes|Book swap|Choir practice/.test(target)), targets.join());
+  // Settings lists no groups: each one is turned on or off in Chats.
+  await page.goto(origin + '/#settings?view=telegram');
+  await page.getByText('Add Nocheh to a group yourself in Telegram', {exact: false}).waitFor();
+  assert.equal(await page.getByText('Groups Nocheh is on in').count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('every group Nocheh is on in can be shared with and refreshed, past the first 100 chats', async () => {
+  // 120 more groups Nocheh is on in: Garden swap falls past the first 100 chats, and past the first 100 such groups.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats');
+  try {
+    const {page, problems} = await open('messages?view=import&job=11111111-1111-4111-8111-111111111111');
+    await page.locator('#map-chat-1 option', {hasText: 'Share with Garden swap'}).waitFor({state: 'attached'});
+    const targets = (await page.locator('#map-chat-1 option').allTextContents()).filter(text =>
+      text.startsWith('Share with '),
+    );
+    assert.equal(targets.length, 122, 'Aurora planning, 120 clubs and Garden swap');
+    assert.ok(['Aurora planning', 'Club 001', 'Club 120'].every(name => targets.includes('Share with ' + name)));
+    // The chat list loads its first 100 chats; a search that finds no group Nocheh is on in still lets Telegram be
+    // asked about all of them.
+    await page.goto(origin + '/#chats');
+    await page.getByText('Showing the first 100 chats', {exact: false}).waitFor();
+    await page.getByLabel('Find a chat').fill('Choir');
+    await page.getByRole('navigation', {name: 'Chats'}).getByRole('link', {name: 'Choir practice'}).waitFor();
+    assert.equal(await page.getByRole('button', {name: /Refresh group names/}).isEnabled(), true);
+    // Telegram is asked about 50 of the 122 a press. The owner is told how many are left to check, fewer each press,
+    // and nothing more once every group was checked in the last hour; a press never promises to check them all.
+    for (const toast of [
+      'Checked 50 groups with Telegram. 72 more haven’t been checked in the last hour. Press again to check more.',
+      'Checked 50 groups with Telegram. 22 more haven’t been checked in the last hour. Press again to check more.',
+      'Checked 50 groups with Telegram.',
+    ]) {
+      await page.getByRole('button', {name: /Refresh group names/}).click();
+      await page
+        .getByRole('status')
+        .filter({hasText: new RegExp('^' + toast.replaceAll('.', '\\.') + '$')})
+        .waitFor();
+    }
+    assert.deepEqual(problems, []);
+    await page.close();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+});
+
+test('a group that moves to a page not read yet is never dropped quietly, and sharing it still asks first', async () => {
+  writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats');
+  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  try {
+    const problems = [];
+    page.on('pageerror', error => problems.push('page error: ' + error.message));
+    // The served list is read again each minute: the test moves the page's clock on instead of waiting.
+    await page.clock.install();
+    await page.goto(origin + '/#messages?view=import&job=11111111-1111-4111-8111-111111111111');
+    const map = page.locator('#map-chat-1');
+    await map.locator('option', {hasText: 'Share with Club 099'}).waitFor({state: 'attached'});
+    await map.selectOption({label: 'Share with Club 099'});
+    // Club 000 is turned on and sorts first, so Club 099 leaves the first page; the pages after it can't be read.
+    writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats-moved');
+    await page.clock.fastForward(61000);
+    await page.getByText('Some groups may be missing').waitFor();
+    await map.locator('option', {hasText: 'Share with Club 000'}).waitFor({state: 'attached'});
+    assert.equal(await map.locator('option', {hasText: 'Share with Club 099'}).count(), 0);
+    assert.equal(await map.locator('option', {hasText: 'Share with Garden swap'}).count(), 0);
+    assert.equal(await map.inputValue(), '-2000000000099');
+    // The mapping still goes to a group, so starting asks first. Cancelling starts nothing.
+    await page.getByRole('button', {name: 'Start import'}).click();
+    const dialog = page.getByRole('dialog', {name: 'Share imported history with a group?'});
+    await dialog.getByRole('button', {name: 'Cancel'}).click();
+    await dialog.waitFor({state: 'detached'});
+    await page.getByRole('button', {name: 'Start import'}).waitFor();
+    assert.deepEqual(problems, []);
+  } finally {
+    await page.close();
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
 });
 
 test('a sharing rule finds messages from its groups by their chat, a new-id group and an upgraded one included', async () => {

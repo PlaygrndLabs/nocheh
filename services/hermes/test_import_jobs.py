@@ -137,3 +137,27 @@ class ImportJobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root,_=self.prepare(folder)
             with mock.patch.object(import_job,'MAX_EXPORT',10),self.assertRaisesRegex(ValueError,'export_json_exceeds_128_mib'):inspect(root)
+
+    def test_an_export_joins_only_the_owners_chat_or_a_group_nocheh_serves_now(self):
+        # Groups are served once the owner adds Nocheh there (ADR-0253): the app's served list names them, by every
+        # Telegram ID they have had, and it is read only when a mapping names a group.
+        served = {'epoch': 3, 'owner_chat': '42', 'owner_account': {'app': 'telegram', 'external': '42'}, 'chats': [
+            {'id': '42', 'app': 'telegram', 'kind': 'private', 'parent_id': None, 'topic_key': None, 'state': 'active',
+             'app_ids': [{'external': '42', 'state': 'current'}]},
+            {'id': 'a' * 64, 'app': 'telegram', 'kind': 'group', 'parent_id': None, 'topic_key': None, 'state': 'active',
+             'app_ids': [{'external': '-1002000000001', 'state': 'current'}, {'external': '-4000000000001', 'state': 'old'}]},
+            {'id': 'b' * 64, 'app': 'telegram', 'kind': 'group', 'parent_id': None, 'topic_key': None, 'state': 'off',
+             'app_ids': [{'external': '-1003000000001', 'state': 'current'}]}]}
+        reads = []
+
+        class App:
+            def call(self, path, body=None):
+                reads.append(path); return served
+        import_job.check_mapping({'desktop': '42'}, '42', App())
+        self.assertEqual(reads, [], 'the owner\'s own chat needs no list')
+        import_job.check_mapping({'one': '-4000000000001', 'two': '-1002000000001', 'desktop': '42'}, '42', App())
+        self.assertEqual(reads, ['/internal/chats'])
+        for mapping, owner in (({'one': '-1003000000001'}, '42'), ({'one': '-1009000000001'}, '42'), ({'one': '42'}, ''),
+                               ({'one': ''}, ''), ({'one': -1002000000001}, '42'), ([], '42')):
+            with self.subTest(mapping=mapping, owner=owner), self.assertRaisesRegex(ValueError, '^scope_mapping_denied$'):
+                import_job.check_mapping(mapping, owner, App())

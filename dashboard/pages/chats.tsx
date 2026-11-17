@@ -60,7 +60,7 @@ function ChatsView({telegram}: {telegram: ReturnType<typeof useTelegram>}) {
   return (
     <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
       <div className={cn('lg:sticky lg:top-6', selected && 'hidden lg:block')}>
-        <ChatList selected={selected} telegram={telegram} />
+        <ChatList selected={selected} />
       </div>
       <div className={cn('min-w-0', !selected && 'hidden lg:block')}>
         {selected ? (

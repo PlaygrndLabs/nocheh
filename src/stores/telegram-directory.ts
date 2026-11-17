@@ -5,7 +5,7 @@ import {admin,type Reader} from '../access.js';
 type Person={id:string;name:string|null;username:string|null;state:'in'|'left';seen:boolean};
 /** A group: its Nocheh chat id, its current Telegram id, every Telegram id it has had (current first, then older ones,
  *  such as its id before Telegram upgraded it), its name, and the people Nocheh saw in it. A group is always named by its
- *  Nocheh id: the Telegram ids are only for matching TELEGRAM_GROUP_IDS and asking Telegram. */
+ *  Nocheh id: the Telegram ids are only for matching TELEGRAM_GROUP_ACCESS and asking Telegram. */
 type Group={id:string;external:string|null;telegram_ids:string[];name:string|null;users:Person[]};
 type Db=Pick<pg.Pool,'query'>;
 const GROUPS=100,PEOPLE=5000,AUTHORS=5000,ARRIVALS=1000;

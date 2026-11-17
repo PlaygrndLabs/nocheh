@@ -180,11 +180,44 @@ test('send records drain once from the spool, list newest first with chat names,
       record({at:ago(90),state:'failed',status:400,error_code:'message_not_found',reference:'telegram:4242:update:50',message_id:null}),
       record({at:ago(60),reference:'telegram:4242:update:50',message_id:'25'}),
     ];
-    for(const value of retries)await write(value);
-    assert.deepEqual(await sends.drain(root),{recorded:retries.length,rejected:0});
+    // Each try of a leave has its own id after the add's: a later try that left, or that found Nocheh gone already,
+    // recovers the one whose answer never came. Found gone is harmless; a refusal stays a problem, and recovers nothing.
+    const leave=(event:string,at:number,fields:Partial<ChatSend>)=>record({at:ago(at),kind:'leave',method:'leaveChat',chat:'-1009876',message_id:null,
+      reference:'leave:'+event.repeat(64)+':'+randomUUID().replace(/-/g,''),...fields});
+    const leaves=[
+      leave('a',5,{state:'uncertain',status:0,error_code:'timed_out'}),leave('a',4.5,{state:'failed',status:403,error_code:'already_left'}),
+      leave('b',4.8,{state:'uncertain',status:502,error_code:'server_error'}),leave('b',4.3,{status:200}),
+      leave('c',4.7,{state:'uncertain',status:0,error_code:'timed_out'}),leave('c',4.2,{state:'failed',status:400,error_code:'no_permission'}),
+      leave('d',4.1,{state:'failed',status:400,error_code:'already_left'}),
+    ];
+    for(const value of [...retries,...leaves])await write(value);
+    assert.deepEqual(await sends.drain(root),{recorded:retries.length+leaves.length,rejected:0});
     const recovering=await sends.summary(new Date(now));
-    assert.deepEqual([recovering.failed,recovering.uncertain,recovering.problems,recovering.problem_kinds],[4,1,2,{reply:2}]);
-    assert.deepEqual(recovering.latest_problems.map(row=>row.error_code),['chat_not_found','message_not_found']);
+    assert.deepEqual([recovering.failed,recovering.uncertain,recovering.problems,recovering.problem_kinds],[7,4,4,{leave:2,reply:2}]);
+    assert.deepEqual(recovering.latest_problems.map(row=>[row.kind,row.error_code]),[['leave','no_permission'],['leave','timed_out'],
+      ['reply','chat_not_found'],['reply','message_not_found']]);
+    assert.equal(recovering.latest_problems[1]!.reference,leaves[4]!.reference,'a refusal recovers nothing');
+    const leaving=(await sends.list(owner,{kind:'leave'})).records.filter(row=>row.state!=='sent');
+    assert.deepEqual(leaving.map(row=>[row.reference!.slice(6,7),row.error_code,row.problem,row.recovered]),[['d','already_left',false,false],
+      ['c','no_permission',true,false],['a','already_left',false,false],['c','timed_out',true,false],['b','server_error',false,true],['a','timed_out',false,true]]);
+    // A try whose answer was lost is recovered too once the stage settled that add's leave as left, however long after:
+    // Nocheh's own update said it left, so no later try went. So is a refusal at a basic group's old id, such as Telegram
+    // saying the group was upgraded, once the leave at the new id settled as left. One the stage found Nocheh could not
+    // leave stays a problem.
+    const settled=[leave('e',40,{state:'failed',status:400,error_code:'rejected',chat:'-7654321'}),
+      leave('e',30,{state:'uncertain',status:0,error_code:'timed_out'}),leave('f',3.9,{state:'uncertain',status:0,error_code:'timed_out'})];
+    for(const [event,outcome] of [['e','left'],['f','could_not_leave']] as const)await stores.control.query(`INSERT INTO chat_state_events(event_id,chat_id,external_id,kind,action,state,outcome)
+      VALUES($1,$2,$3,'added','leave','done',$4)`,[event.repeat(64),ids.get(group),group,outcome]);
+    for(const value of settled)await write(value);
+    assert.deepEqual(await sends.drain(root),{recorded:3,rejected:0});
+    const leftAlready=await sends.summary(new Date(now));
+    assert.deepEqual([leftAlready.uncertain,leftAlready.problems,leftAlready.problem_kinds],[6,5,{leave:3,reply:2}]);
+    assert.equal(leftAlready.latest_problems[0]!.reference,settled[2]!.reference,'only the leave that could not go counts');
+    assert.deepEqual((await sends.list(owner,{kind:'leave'})).records.filter(row=>'ef'.includes(row.reference!.slice(6,7)))
+      .map(row=>[row.reference!.slice(6,7),row.chat,row.error_code,row.problem,row.recovered]),[['f','-1009876','timed_out',true,false],
+      ['e','-1009876','timed_out',false,true],['e','-7654321','rejected',false,true]]);
+    await stores.control.query('DELETE FROM chat_state_events WHERE event_id=ANY($1::text[])',[['e'.repeat(64),'f'.repeat(64)]]);
+    await stores.control.query("DELETE FROM chat_sends WHERE kind='leave'");
     const listed=(await sends.list(owner)).records.filter(row=>row.state!=='sent');
     assert.deepEqual(listed.map(row=>[row.error_code,row.problem,row.recovered]),[['chat_not_found',true,false],['timed_out',false,true],
       ['rate_limited',false,true],['formatting_rejected',false,true],['message_not_found',true,false]]);

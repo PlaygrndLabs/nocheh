@@ -390,14 +390,16 @@ export class TelegramDispatchRepository {
     }
     return parts;
   }
-  /** Someone not allowed to use Nocheh in an allowed group gets the owner's fixed
+  /** Someone not allowed to use Nocheh in an active group gets the owner's fixed
    * reply, without a model, when they address it; anyone but the owner who writes
    * privately gets the owner's private fixed reply, at most once a day. Anyone
-   * else stays quiet. */
+   * else stays quiet, also in a group that is off or that Nocheh is leaving: the chat
+   * directory says which groups are active (ADR-0253). */
   private async refuse(id:string,key:string,chat:string,payload:any) {
     const policy=this.access.policy(),message=payload?.message,sender=message?.from,personal=message?.chat?.type==='private';
     if(!policy.enabled||!message||!sender?.id||sender.is_bot===true||String(sender.id)===policy.owner_id)return;
-    if(personal?String(sender.id)!==chat:!['group','supergroup'].includes(message.chat?.type)||!policy.group_ids.includes(chat))return;
+    const directory=chats(),group=personal?null:directory.resolve('telegram',chat);
+    if(personal?String(sender.id)!==chat:!['group','supergroup'].includes(message.chat?.type)||directory.kind(group)!=='group'||!directory.served(group))return;
     const texts=await ownerPrompts(this.control),common={event_id:id,chat_id:chat,message_id:String(message.message_id),user_id:String(sender.id)};
     if(personal) {
       try{await this.call('telegram.refusal',{...common,private:true,reply:texts['telegram.not_allowed_private']??notAllowedPrivateReply},15000);}

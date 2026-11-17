@@ -260,7 +260,7 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
 });
 
 // Members' job spend on chats first seen after step 2b (ADR-0252): the owner's private chat has a digest id apart from
-// the owner's account, and the member asks in NG2, a group Telegram upgraded that TELEGRAM_GROUP_IDS names by its old id.
+// the owner's account, and the member asks in NG2, a group Telegram upgraded, whose access list names it by its old id.
 test('a member spend notice names a digest group by its chat, goes to the owner\'s private chat where it is in Telegram, and only the owner\'s press there resumes',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};

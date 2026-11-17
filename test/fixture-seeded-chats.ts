@@ -12,8 +12,8 @@ const seededDirectories=new WeakSet<ChatDirectory>();
 /**
  * Tests only: a chat directory as Part A's seeder leaves it for values stored before step 2b. Every old-shaped value
  * the directory is asked about becomes its chat the first time it is seen (a topic adds its parent), as the seeder
- * seeds every stored value and the intake every chat and topic it sees. Served as the policy serves now: its groups
- * (TELEGRAM_GROUP_IDS, the 2b-1 bridge) and its owner's private chat. Anything else (digests, 'owner', 'system')
+ * seeds every stored value and the intake every chat and topic it sees. On as the policy says now: its groups (the
+ * derived group_ids: the groups that are on, ADR-0253) and its owner's private chat. Anything else (digests, 'owner', 'system')
  * stays unknown and fails closed. A test that needs the strict fixture families installs fixtureDirectory or
  * groupsPolicy instead; a test of an unknown old-shaped id installs a directory that does not hold it.
  */

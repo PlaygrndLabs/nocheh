@@ -18,8 +18,8 @@ import {assertChatDirectory,bumpChatRevision,ensureConnection,reloadChats} from 
  *
  * Nothing imported can act on its own: sharing rules arrive switched off, tool
  * switches arrive off or inherited, and reminders whose time has passed or
- * whose sending was interrupted arrive skipped, and chats arrive off, served only as this installation's own settings
- * say. The freedom level, Telegram policy, grants, approvals and job history stay out, as they do for derivatives.
+ * whose sending was interrupted arrive skipped, and chats arrive off until the owner turns them on here.
+ * The freedom level, Telegram policy, grants, approvals and job history stay out, as they do for derivatives.
  * A reminder keeps who set it and where, and a task who last wrote it where, by account (ADR-0255); the names people
  * wrote for themselves stay out, and so do people's merged reminders, which are a send log.
  *
@@ -124,8 +124,8 @@ export class OwnerPortabilityRepository {
   async restore(principal:Reader,inputs:unknown[]) {
     admin(principal);if(!Array.isArray(inputs)||!inputs.length||inputs.length>100)throw new HttpError(400,'portable_batch_limit');
     const parsed=inputs.map(parse);let added=0,unchanged=0,kept=0,chatsAdded=false;
-    // Every chat an older record names gets its row first, off until this installation serves it.
-    const seeder=new ChatSeeder(this.stores,{owner_id:null,group_ids:[]}),names=new Map<string,{title:string;source:'owner'}>();
+    // Every chat an older record names gets its row first, off until the owner turns it on here (ADR-0253).
+    const seeder=new ChatSeeder(this.stores,{owner_id:null}),names=new Map<string,{title:string;source:'owner'}>();
     for(const {record} of parsed) {
       for(const value of chatValuesOf(record.table,record.row))seeder.value(value);
       if(record.table==='telegram_topic_registrations')try {
@@ -202,9 +202,10 @@ export class OwnerPortabilityRepository {
   /** Imported rows never act by themselves. */
   private safe(table:string,row:Record<string,unknown>):Record<string,unknown> {
     if(table==='sharing_rules')return {...row,enabled:false};
-    // A chat arrives off and names no person or add of this installation's; the app's start serves it as its settings say.
-    // Only a name the owner gave travels: a name Telegram showed was written by the chat's people, maybe strangers.
-    if(table==='chats')return {...row,state:'off',account_id:null,added_by_account_id:null,
+    // A chat arrives off and names no person, add or update order of this installation's: an import never turns a chat on
+    // or counts as an add, and only the owner turns it on here (ADR-0253). Only a name the owner gave travels: a name
+    // Telegram showed was written by the chat's people, maybe strangers.
+    if(table==='chats')return {...row,state:'off',account_id:null,added_by_account_id:null,add_event:null,state_seq:null,state_bot:null,state_at:null,
       ...(row.title_source==='owner'?{}:{title:null,title_source:null})};
     // A tool switch arrives off or inherited, never on: an import never turns a tool on that this installation turned off.
     // Only a real false stays off; anything else, such as "t" or 1 that the database would read as on, arrives inherited.

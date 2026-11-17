@@ -22,9 +22,10 @@ import urllib.parse
 import zipfile
 from datetime import datetime, timedelta, timezone
 
-from tools.acceptance import canaries
+from tools.acceptance import canaries, telegram_mock
 from tools.acceptance.github_mock import key_line
-from tools.acceptance.telegram_rehearsal import wait_telegram_connected
+from tools.acceptance.telegram_mock import ANONYMOUS_ADMIN
+from tools.acceptance.telegram_rehearsal import add_card, group_chat, person, sent_buttons, wait_telegram_connected
 from tools.acceptance.telegram_scenarios import (GROUP, NEW_GROUP, NEW_TOPIC, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP, UNSELECTED_GROUP,
                                                 REFRESHED_GROUP, REFRESHED_SUPERGROUP, UPGRADED_GROUP, UPGRADED_SUPERGROUP, Failed, Scenarios,
                                                 isolated_turns, synthetic_pdf)
@@ -37,11 +38,18 @@ NOT_ALLOWED = 'Sorry, I only work with people the owner has allowed in this grou
 TEAM_TOPIC, TEAM_NAME = 31, 'Team plans'
 # Someone who found the bot and started it from their own account.
 STRANGER, STRANGER_NAME = 880, 'STRANGERNAME61'
+# Someone the owner never allowed anywhere, who adds Nocheh to a group of theirs (ADR-0253).
+ADDER = 881
 PRIVATE_NOT_ALLOWED = 'Sorry, this is a private assistant. It only works for its owner.'
 # The made-up machine of the machine job scenarios: an SSH server on the fixture's default network, the network
 # nocheh-machines uses (deploy/acceptance/vm-fixture.Dockerfile). The tester's own image, built like its browser's.
 VM_SERVICE, VM_NAME, VM_LOGIN, VM_HOME = 'vm-fixture', 'build-vm', 'nocheh', '/home/nocheh'
 VM_IMAGE = 'nocheh-tester-vm:local'
+
+
+def shown(text):
+    """A message's text as a person sees it: without the invisible direction isolates around names."""
+    return re.sub('[\u2066-\u2069]', '', text or '')
 
 
 class ProductScenarios(Scenarios):
@@ -64,16 +72,19 @@ class ProductScenarios(Scenarios):
                     and item['message']['message_id'] == row['message']['message_id'])
 
     def press(self, row, choice, presser=OWNER):
-        """A tap on Approve, Reject, Allow here, Always allow, a job's Stop, Answer privately, or Pause or Resume member jobs
-        on a notice, delivered like Telegram's callback_query."""
-        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns', 'here': 'nc', 'always': 'nw', 'private': 'np', 'pause': 'njp', 'resume': 'nju'}[choice]
+        """A tap on Approve, Reject, Allow here, Always allow, a job's Stop, Answer privately, Pause or Resume member jobs on
+        a notice, or No project or Turn off on the card after an add, delivered like Telegram's callback_query."""
+        prefix = {'approve': 'na', 'reject': 'nd', 'stop': 'ns', 'here': 'nc', 'always': 'nw', 'private': 'np', 'pause': 'njp', 'resume': 'nju',
+                  'no_project': 'ngx', 'turn_off': 'ngo'}[choice]
         data = next(button['callback_data'] for button in self.buttons(row) if button['callback_data'].startswith(prefix))
-        number = self.f.ids()
-        query = {'id': 'cb'+str(number), 'from': {'id': presser, 'is_bot': False, 'first_name': 'Synthetic '+str(presser)},
-                 'chat_instance': 'instance-'+str(row['message']['chat']['id']), 'data': data, 'message': row['message']}
-        self.f.inject({'update_id': number, 'callback_query': query})
+        return self.tap(row, data, presser)
+
+    def tap(self, row, data, presser=OWNER):
+        """A tap on the button of a sent message that carries `data`; returns the answer to it."""
+        update = telegram_mock.press(self.f.ids(), row['message'], data, person(presser))
+        self.f.inject(update)
         return self.wait('press_answered', lambda: next((answer for answer in self.f.telegram().get('answers', [])
-                                                          if answer['callback_query_id'] == query['id']), None), 120)
+                                                          if answer['callback_query_id'] == update['callback_query']['id']), None), 120)
 
     def silent_turn(self, update, chat, topic=None):
         """A turn whose answer is a card or a direct post: the model returns [NO_REPLY]."""
@@ -103,39 +114,70 @@ class ProductScenarios(Scenarios):
         wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
         return names
 
-    def serve_groups(self, *groups):
-        """Turn Nocheh on in groups with the step 2b-1 switch: their Telegram ids join TELEGRAM_GROUP_IDS and the services
-        that read it restart. The app then serves every chat any of whose Telegram ids is listed (ADR-0252)."""
-        names = []
-        for name, service in self.f.manifest['services'].items():
-            environment = service.get('environment') or {}
-            if isinstance(environment, dict) and 'TELEGRAM_GROUP_IDS' in environment:
-                listed = [value for value in str(environment['TELEGRAM_GROUP_IDS']).split(',') if value]
-                environment['TELEGRAM_GROUP_IDS'] = ','.join(listed+[str(group) for group in groups if str(group) not in listed])
-                names.append(name)
-        self.gate('group_switch_found', bool(names), services=names)
-        path = self.f.directory/'compose.json'
-        path.write_text(json.dumps(self.f.manifest))
-        path.chmod(0o600)
-        self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *names)
-        wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
-        return names
+    def listed(self, app_id):
+        """The owner's chat list item of a Telegram chat, or {} while the list does not show it yet."""
+        chat = self.f.chat(app_id)
+        return next((item for item in self.f.conversations() if item['space_id'] == chat), {})
+
+    def state_of(self, app_id):
+        """Nocheh's state in a Telegram chat as the owner's chat list shows it: active (On), off, pending (Leaving), left,
+        removed, could_not_leave or archived (ADR-0253); None while it is not listed."""
+        return self.listed(app_id).get('state')
 
     def served(self, app_id):
         """Whether the owner's chat list shows Nocheh on in a Telegram chat."""
-        return self.f.chat_item(app_id).get('state') == 'active'
+        return self.state_of(app_id) == 'active'
+
+    def status_change(self, group, by, old='left', new='member'):
+        """Telegram's report that `by`, a person's Telegram id or ANONYMOUS_ADMIN, changed Nocheh's own status in a group
+        (my_chat_member); an add is left to member. Returns the update and its archived event."""
+        update = telegram_mock.bot_status(self.f.ids(), group, by if isinstance(by, dict) else person(by), old, new)
+        self.f.inject(update)
+        return update, self.captured(update)
+
+    def owner_adds(self, *groups, answer='no_project'):
+        """The owner adds Nocheh to groups, Telegram ids or chats as Telegram shows them (ADR-0253). Each is on at once, and
+        about 30 seconds later a card reaches the owner: the group is in a new project of its own, which `answer` changes
+        (None leaves the card unanswered). A group already on is left as it is, and one with a project answer from before
+        gets no card. Returns each added group's card, or None for one that got none."""
+        added, cards = {}, {}
+        for value in groups:
+            group = value if isinstance(value, dict) else group_chat(value)
+            try:
+                space = self.f.chat(group['id'], seconds=0)
+            except Failed:
+                space = None
+            if space and self.served(group['id']):
+                continue
+            answered = bool(space) and self.f.app('/v1/projects/effective?space='+urllib.parse.quote(space, safe=''))['own_assignment'] is not None
+            before = len(self.f.sent())
+            added[group['id']] = (before, self.status_change(group, OWNER)[1], answered)
+        for chat, (before, event_id, answered) in added.items():
+            self.wait('on_at_once', lambda chat=chat: self.served(chat), 60)
+            cards[chat] = None if answered else self.wait('add_card_arrives', lambda before=before, event_id=event_id: add_card(self.new(before), event_id), 180)
+            if cards[chat] and answer:
+                self.answer_card(cards[chat], answer)
+        return cards
+
+    def answer_card(self, card, answer, presser=OWNER):
+        """Press a button on the card after an add: no_project, turn_off, or the name of a project to move the group to.
+        Returns the answer to the press and the card as it reads afterwards: its text, the outcome, no buttons."""
+        prefix = {'no_project': 'ngx', 'turn_off': 'ngo'}.get(answer)
+        data = next(button['callback_data'] for button in sent_buttons(card)
+                    if (button['callback_data'].startswith(prefix) if prefix else button['text'] == 'Move to '+answer))
+        reply = self.tap(card, data, presser)
+        edited = self.wait('card_shows_outcome', lambda: (lambda row: row if row.get('edits') and not self.buttons(row) else None)(self.card_message(card)), 120)
+        return reply, edited
 
     def new_group_chat(self):
-        """NG1's Nocheh id, with Nocheh on there. new_id_group_works_end_to_end turns it on; a run of a later scenario on
-        its own does the same here first."""
+        """NG1's Nocheh id, with Nocheh on there. new_id_group_works_end_to_end has the owner add Nocheh there; a run of a
+        later scenario on its own does the same here first."""
         try:
             chat = self.f.chat(NEW_GROUP, seconds=0)
         except Failed:
             self.turn(self.f.message(NEW_GROUP, 'Hello before Nocheh is on here'), NEW_GROUP, expect_reply=False)
             chat = self.f.chat(NEW_GROUP)
-        if not self.served(NEW_GROUP):
-            self.current.setdefault('recreated', []).extend(self.serve_groups(NEW_GROUP))
-            self.wait('new_group_served', lambda: self.served(NEW_GROUP), 180)
+        self.owner_adds(NEW_GROUP)
         return chat
 
     def topic_created(self, chat, topic, name):
@@ -332,13 +374,13 @@ class ProductScenarios(Scenarios):
         self.refused_send(STRANGER, self.stranger(text='سلام'), 'SENDSTRANGER')
 
     def send_to_unselected_group_refused(self):
-        # A group the owner never selected has a chat row once someone writes there, but Nocheh does not serve it.
+        # A group the owner never added Nocheh to has a chat row once someone writes there, but Nocheh is off in it.
         outside = self.f.message(UNSELECTED_GROUP, 'سلام', sender=STRANGER, extra={'chat': {'id': UNSELECTED_GROUP, 'type': 'supergroup', 'title': 'STRANGERGROUP61'}})
         self.refused_send(UNSELECTED_GROUP, outside, 'SENDUNSELECTED')
 
     def send_to_allowed_person_private(self):
         # MEMBER is allowed in GROUP and OTHER_GROUP, so their private chat is served, but only through the owner's card. The
-        # card says it is a person's private chat and which selected group the owner allowed them in, quoting only names.
+        # card says it is a person's private chat and which group of the owner's they are allowed in, quoting only names.
         hello = self.f.message(MEMBER, 'سلام', sender=MEMBER)
         self.f.inject(hello)
         self.finished(self.captured(hello))
@@ -959,10 +1001,11 @@ class ProductScenarios(Scenarios):
                     raise Failed('cleanup_failed')
 
     def new_id_group_works_end_to_end(self):
-        # NG1 is a group Nocheh first sees after step 2b: its Nocheh id is a digest, never its Telegram id (ADR-0252). It
-        # stays off until the owner lists it in TELEGRAM_GROUP_IDS, the step 2b-1 switch; then a reply, a topic's recall of
-        # the group, a task on its project's board and a topic of its own work as in any group. Answer privately with NG1
-        # is project_groups_stay_apart, where NG1 is in P1.
+        # NG1 is a group Nocheh first sees after step 2b: its Nocheh id is a digest, never its Telegram id (ADR-0252). Seen
+        # with no add, it is Off; then the owner adds Nocheh there, which turns it on at once under the same id, and the one
+        # card that follows is answered No project (ADR-0253). Then a reply, a topic's recall of the group, a task on its
+        # project's board and a topic of its own work as in any group. Answer privately with NG1 is
+        # project_groups_stay_apart, where NG1 is in P1.
         number = str(self.f.ids())
         mark, word = 'NEWGROUPMARK'+number, 'NEWGROUPWORD'+number
         project = assignment = failed = None
@@ -974,9 +1017,9 @@ class ProductScenarios(Scenarios):
             self.gate('new_group_listed_with_its_telegram_id', item.get('kind') == 'group' and item.get('state') == 'off' and
                       [label.get('external') for label in item.get('app_ids') or []] == [str(NEW_GROUP)],
                       item={key: item.get(key) for key in ('kind', 'state', 'app_ids')})
-            self.current['recreated'] = self.serve_groups(NEW_GROUP)
-            self.wait('new_group_served', lambda: self.served(NEW_GROUP), 180)
-            self.gate('same_id_after_the_switch', self.f.chat(NEW_GROUP) == chat)
+            cards = self.owner_adds(NEW_GROUP)
+            self.gate('one_card_about_the_add', cards.get(NEW_GROUP) is not None)
+            self.gate('same_id_after_the_add', self.f.chat(NEW_GROUP) == chat)
             self.turn(self.f.message(NEW_GROUP, 'The meteor shower plan '+word+' '+mark), NEW_GROUP)
             # A topic of NG1 gets its own digest id, and reads what was said in its group.
             self.topic_created(NEW_GROUP, NEW_TOPIC, 'Sky watch')
@@ -1018,9 +1061,12 @@ class ProductScenarios(Scenarios):
     def supergroup_upgrade_keeps_history(self):
         # Telegram upgrades a basic group to a supergroup: the supergroup has a new Telegram id, and Telegram says so in
         # both chats (migrate_to_chat_id, migrate_from_chat_id). Nocheh keeps one chat (ADR-0252): the new id joins the old
-        # one, so the group keeps its id, its project, its task and its switch, which still lists the old id only, and a
-        # search in the supergroup finds what was said before the upgrade. An upgrade the owner's refresh finds instead
-        # (Telegram answers with migrate_to_chat_id) moves a group onto its new id the same way, at once.
+        # one, so the group keeps its id, its project, its task and its On, and a search in the supergroup finds what was
+        # said before the upgrade. Telegram also reports Nocheh joining the supergroup, from whoever upgraded it, and here
+        # that report comes first: the new id then looks like a group someone else added Nocheh to, but it joins the
+        # owner's group before Nocheh would leave it, so Nocheh never leaves and the owner hears nothing (ADR-0253). An
+        # upgrade the owner's refresh finds instead (Telegram answers with migrate_to_chat_id) moves a group onto its new id
+        # the same way, at once.
         number = str(self.f.ids())
         mark, word = 'BEFOREUPGRADE'+number, 'UPGRADEWORD'+number
         basic = {'id': UPGRADED_GROUP, 'type': 'group', 'title': 'Synthetic Garden'}
@@ -1032,9 +1078,9 @@ class ProductScenarios(Scenarios):
             self.turn(self.f.message(UPGRADED_GROUP, 'Hello before Nocheh is on here', extra={'chat': basic}), UPGRADED_GROUP, expect_reply=False)
             self.turn(self.f.message(REFRESHED_GROUP, 'Hello before Nocheh is on here', extra={'chat': orchard}), REFRESHED_GROUP, expect_reply=False)
             chat, refreshed = self.f.chat(UPGRADED_GROUP), self.f.chat(REFRESHED_GROUP)
-            # One restart turns both on: a refresh asks Telegram only about the groups Nocheh serves.
-            self.current['recreated'] = self.serve_groups(UPGRADED_GROUP, REFRESHED_GROUP)
-            self.wait('basic_group_served', lambda: self.served(UPGRADED_GROUP) and self.served(REFRESHED_GROUP), 180)
+            # The owner adds Nocheh to both: a refresh asks Telegram only about the groups Nocheh serves.
+            self.owner_adds(basic, orchard)
+            self.wait('basic_group_served', lambda: self.served(UPGRADED_GROUP) and self.served(REFRESHED_GROUP), 60)
             self.turn(self.f.message(UPGRADED_GROUP, 'Seeds for the swap '+word+' '+mark, extra={'chat': basic}), UPGRADED_GROUP)
             project = self.f.app('/v1/projects', {'name': 'Garden P3', 'description': '', 'state': 'active', 'expected_revision': 0,
                                                   'operation_id': 'scenario-upgrade-project-'+number})
@@ -1045,15 +1091,17 @@ class ProductScenarios(Scenarios):
             self.memory_settled()
             added = self.task_tool({'action': 'add', 'title': 'Sort the seed packets '+mark}, chat=UPGRADED_GROUP)
             self.gate('task_before_upgrade', bool(added.get('task', added).get('id')), result=str(added)[:300])
-            # Telegram's two service messages, as it sends them when a group is upgraded.
-            moved, arrived = self.f.ids(), self.f.ids()
-            updates = [{'update_id': moved, 'message': {'message_id': moved, 'date': int(time.time()), 'chat': basic, 'from': sender,
+            # Telegram's report of Nocheh joining the supergroup, from the member who upgraded it, then its two service
+            # messages, as it sends them when a group is upgraded.
+            before = len(self.f.sent())
+            joined_supergroup, moved, arrived = self.f.ids(), self.f.ids(), self.f.ids()
+            updates = [telegram_mock.bot_status(joined_supergroup, supergroup, person(MEMBER)),
+                       {'update_id': moved, 'message': {'message_id': moved, 'date': int(time.time()), 'chat': basic, 'from': sender,
                                                         'migrate_to_chat_id': UPGRADED_SUPERGROUP}},
                        {'update_id': arrived, 'message': {'message_id': 1, 'date': int(time.time()), 'chat': supergroup, 'from': sender,
                                                           'migrate_from_chat_id': UPGRADED_GROUP}}]
             self.f.inject(*updates)
-            for update in updates:
-                self.captured(update)
+            join_event = [self.captured(update) for update in updates][0]
             def joined():
                 try:
                     return self.f.chat(UPGRADED_SUPERGROUP, seconds=0) == chat
@@ -1064,7 +1112,13 @@ class ProductScenarios(Scenarios):
             labels = [(label.get('external'), label.get('state')) for label in item.get('app_ids') or []]
             self.gate('one_chat_with_both_telegram_ids', (str(UPGRADED_SUPERGROUP), 'current') in labels and (str(UPGRADED_GROUP), 'old') in labels,
                       labels=labels)
-            self.gate('still_on_by_its_old_id', item.get('state') == 'active', state=item.get('state'))
+            self.gate('still_on', item.get('state') == 'active', state=item.get('state'))
+            # Nocheh never leaves the owner's upgraded group, and the owner hears nothing about it.
+            record = self.settled(join_event)
+            self.gate('join_report_superseded', record['outcome'] == 'superseded' and record['notice'] in ('none', None), record=record)
+            self.gate('never_left', not self.leave_calls(UPGRADED_GROUP) and not self.leave_calls(UPGRADED_SUPERGROUP))
+            self.gate('nothing_to_the_owner', not self.owner_lines(before, supergroup))
+            self.gate('still_on_after_the_join_report', self.served(UPGRADED_SUPERGROUP))
             effective = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(chat, safe=''))
             self.gate('keeps_its_project', (effective.get('project') or {}).get('id') == project['id'], project=effective.get('project'))
             # The supergroup is answered, finds what was said before the upgrade and still has its task.
@@ -1093,7 +1147,7 @@ class ProductScenarios(Scenarios):
             self.gate('refresh_keeps_one_chat_with_both_telegram_ids', item.get('space_id') == refreshed
                       and (str(REFRESHED_SUPERGROUP), 'current') in labels and (str(REFRESHED_GROUP), 'old') in labels,
                       space=item.get('space_id') == refreshed, labels=labels)
-            # Still on by its old id, and the owner's list shows Telegram's last answer, under the new id: nothing to fix.
+            # Still on, and the owner's list shows Telegram's last answer, under the new id: nothing to fix.
             self.gate('refreshed_group_still_on', item.get('state') == 'active', state=item.get('state'))
             self.gate('directory_shows_the_refresh', (item.get('telegram') or {}).get('state') == 'available', telegram=item.get('telegram'))
         except Exception as error:
@@ -1109,6 +1163,226 @@ class ProductScenarios(Scenarios):
                     self.current['cleanup_problems'] = [type(error).__name__+':'+str(error)[:200]]
                     if failed is None:
                         raise Failed('cleanup_failed')
+
+    # Only the owner adds Nocheh to a group (ADR-0253) ------------------------------------------------------------
+
+    def fresh_group(self):
+        """A group no earlier run of the tester used, so the daily cap on notes about one group never meets a kept
+        fixture's earlier run. Its Telegram id is a supergroup's, new on every run; it reads like the other groups."""
+        chat = -(10**12+self.f.ids() % 10**9)
+        return chat, group_chat(chat)
+
+    def notes_room(self, chat):
+        """Earlier leave notes about other groups drop out of the last 24 hours, so a kept fixture's earlier runs never fill
+        the daily cap on all notes. Notes about this group (`chat`, its Telegram id) stay, so the cap on notes about one
+        group still holds."""
+        self.f.query('nocheh_control', "UPDATE chat_state_events SET updated_at=updated_at-interval '25 hours' WHERE notice='sent' "
+                     "AND action='leave' AND updated_at>now()-interval '24 hours' AND chat_id NOT IN "
+                     "(SELECT chat_id FROM chat_ids WHERE external_id='"+str(int(chat))+"')")
+
+    def add_record(self, event_id):
+        """The content-free record an add or a removal leaves (chat_state_events): roles and outcomes, never a name."""
+        raw = self.f.query('nocheh_control', "SELECT row_to_json(e) FROM (SELECT kind,role,member,action,state,outcome,notice,"
+                           "project_id,attempts FROM chat_state_events WHERE event_id='"+event_id+"') e")
+        return json.loads(raw) if raw else None
+
+    def settled(self, event_id, seconds=240):
+        """Wait until Nocheh has done what an add or a removal asks, about 30 seconds after it; returns its record."""
+        return self.wait('add_settled', lambda: (lambda row: row if row and row['state'] != 'waiting' else None)(self.add_record(event_id)), seconds)
+
+    def owner_lines(self, before, group):
+        """What reached the owner's private chat since `before` about a group: a card or a note names it by its title."""
+        return [row for row in self.new(before) if row['message']['chat']['id'] == OWNER and group['title'] in (row['message'].get('text') or '')]
+
+    def members_allowed(self):
+        """MEMBER is allowed in GROUP and OTHER_GROUP (group_members); a run of a later scenario on its own sets that first."""
+        access = next((service['environment']['TELEGRAM_GROUP_ACCESS'] for service in self.f.manifest['services'].values()
+                       if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment']), None)
+        if access is None or json.loads(access) != ACCESS:
+            self.current.setdefault('recreated', []).extend(self.apply_access(ACCESS))
+
+    def project(self, project_id):
+        """A project as the owner's project list shows it, archived ones included."""
+        after = ''
+        while True:
+            page = self.f.app('/v1/projects'+('?after='+after if after else ''))
+            found = next((row for row in page['projects'] if row['id'] == project_id), None)
+            if found or not page.get('next'):
+                return found or {}
+            after = page['next']
+
+    def add_that_leaves(self, by, member, note, outcome='left', group=None, held='none'):
+        """Someone other than the owner adds Nocheh to a fresh group (`by`: a person's Telegram id, or ANONYMOUS_ADMIN). It
+        is Leaving at once and silent there; about 30 seconds later it leaves with one leaveChat (outcome 'left'), or, when
+        Telegram refuses, stays in the group silent ('could_not_leave'). Then the owner gets one line without buttons holding
+        every piece of `note`, or, when `note` is None, nothing at all, and the record's notice is `held` (none, or capped
+        when a cap held a line back). Returns the group's Telegram id, the group and the add's record."""
+        chat, group = (group['id'], group) if group else self.fresh_group()
+        if note:
+            self.notes_room(chat)
+        role = 'anonymous' if by == ANONYMOUS_ADMIN else 'other'
+        before, leaves = len(self.f.sent()), len(self.leave_calls(chat))
+        _, event_id = self.status_change(group, by)
+        # Leaving shows at once, well before the leave about 30 seconds later.
+        item = self.wait('leaving_at_once', lambda: (lambda item: item if item.get('state') == 'pending' else None)(self.listed(chat)), 15)
+        self.gate('added_by_someone_else', item.get('added_by') == role, added_by=item.get('added_by'))
+        # While it is leaving Nocheh says nothing there: no reply, and no refusal even to someone allowed in another group.
+        self.turn(self.f.message(chat, 'Are you here?', sender=MEMBER), chat, expect_reply=False)
+        record = self.settled(event_id)
+        self.gate('add_recorded_without_content', {key: record[key] for key in ('kind', 'role', 'member', 'action', 'outcome')}
+                  == {'kind': 'added', 'role': role, 'member': member, 'action': 'leave', 'outcome': outcome}, record=record)
+        self.wait('listed_'+outcome, lambda: self.state_of(chat) == outcome, 60)
+        if note:
+            lines = self.wait('one_line_to_the_owner', lambda: self.owner_lines(before, group) if (self.add_record(event_id) or {}).get('notice') == 'sent' else None, 120)
+        time.sleep(5)
+        lines, record = self.owner_lines(before, group), self.add_record(event_id)
+        text = lines[0]['message'].get('text') or '' if lines else ''
+        if note:
+            self.gate('told_once_in_one_line', len(lines) == 1 and all(piece in text for piece in note) and not sent_buttons(lines[0]),
+                      count=len(lines), text=text[:300])
+        else:
+            self.gate('owner_told_nothing', not lines and record['notice'] == held, count=len(lines), notice=record['notice'])
+        calls = self.leave_calls(chat)[leaves:]
+        self.gate('one_leave' if outcome == 'left' else 'one_refused_leave', len(calls) == 1, leaves=len(calls))
+        self.gate('nothing_said_in_the_group', not [row for row in self.new(before) if row['message']['chat']['id'] == chat])
+        # A message there later gets nothing either.
+        self.turn(self.f.message(chat, 'Hello again?', sender=MEMBER), chat, expect_reply=False)
+        self.current['observed'] = {'leaves': len(calls), 'owner_lines': len(lines), 'record': record}
+        return chat, group, record
+
+    def member_add_leaves_and_tells_owner(self):
+        # MEMBER, allowed in GROUP and OTHER_GROUP, adds Nocheh to a group of theirs. Only the owner adds Nocheh, so it says
+        # nothing there and leaves about 30 seconds later, with exactly one leaveChat. The owner gets one line naming who
+        # added it and where; the record of the add holds no name and no text.
+        self.members_allowed()
+        self.add_that_leaves(MEMBER, True, ('Synthetic '+str(MEMBER), 'added Nocheh to', 'Only you can add Nocheh'))
+
+    def stranger_add_leaves_without_a_note(self):
+        # Someone the owner never allowed anywhere adds Nocheh to a group of theirs. Nocheh leaves the same way, and the
+        # owner hears nothing: a stranger gets only the content-free record, so they cannot write to the owner this way.
+        self.add_that_leaves(ADDER, False, None)
+
+    def anonymous_add_leaves_and_tells_owner(self):
+        # An admin with Remain anonymous on adds Nocheh: Telegram shows only its stand-in, GroupAnonymousBot. Nobody can
+        # tell who it was, so Nocheh leaves, and the owner gets one line saying how to add Nocheh there themselves.
+        self.add_that_leaves(ANONYMOUS_ADMIN, False, ('without showing who', 'Remain anonymous'))
+
+    def member_re_add_leaves_again_with_no_second_note(self):
+        # MEMBER adds Nocheh to a group, which it leaves with one line to the owner; MEMBER adds it again the same day.
+        # Nocheh leaves again, but the owner hears about one group at most once a day, so there is no second line.
+        self.members_allowed()
+        chat, group, _ = self.add_that_leaves(MEMBER, True, ('Synthetic '+str(MEMBER), 'Only you can add Nocheh'))
+        first = self.current['observed']
+        # No line about the group this time; the record says the cap held it back.
+        self.add_that_leaves(MEMBER, True, None, group=group, held='capped')
+        self.current['observed'] = {'first': first, 'again': self.current['observed']}
+        self.gate('two_leaves_in_all', len(self.leave_calls(chat)) == 2, leaves=len(self.leave_calls(chat)))
+
+    def member_add_that_cannot_leave_stays_silent(self):
+        # Telegram refuses Nocheh's leave (a fault on the fake's next leaveChat): Nocheh stays in the group, silent, shown as
+        # Couldn't leave on the owner's chat list, where they can still turn it on or off. The owner gets one line.
+        self.members_allowed()
+        self.f.control({'faults': [{'method': 'leaveChat', 'code': 400, 'description': 'Bad Request: synthetic refusal to leave'}]})
+        self.add_that_leaves(MEMBER, True, ('Synthetic '+str(MEMBER), "couldn't leave"), outcome='could_not_leave')
+        self.gate('refusal_used', not self.f.telegram()['faults'])
+
+    def removed_from_active_group_tells_owner_once(self):
+        # Someone removes Nocheh from a group it is on in (Telegram: member to kicked). It is Removed at once and never
+        # calls leaveChat, as there is nothing to leave; the owner gets one line saying so, and the list shows the removal.
+        chat, group = self.fresh_group()
+        self.owner_adds(group)
+        before = len(self.f.sent())
+        _, event_id = self.status_change(group, MEMBER, 'member', 'kicked')
+        self.wait('listed_removed', lambda: self.state_of(chat) == 'removed', 60)
+        record = self.settled(event_id)
+        self.gate('removal_recorded', {key: record[key] for key in ('kind', 'action', 'outcome')} == {'kind': 'removed', 'action': 'tell', 'outcome': 'told'},
+                  record=record)
+        self.wait('one_line_to_the_owner', lambda: self.owner_lines(before, group), 120)
+        time.sleep(5)
+        lines = self.owner_lines(before, group)
+        self.gate('told_once_in_one_line', len(lines) == 1 and 'was removed from' in (lines[0]['message'].get('text') or '') and not sent_buttons(lines[0]),
+                  count=len(lines), text=(lines[0]['message'].get('text') or '')[:300])
+        item = self.f.chat_item(chat)
+        self.gate('listed_with_its_removal', item.get('removed_event') is True, item={key: item.get(key) for key in ('state', 'added_by', 'removed_event')})
+        self.gate('never_left', not self.leave_calls(chat))
+        self.turn(self.f.message(chat, 'Hello?', sender=MEMBER), chat, expect_reply=False)
+
+    def owner_adds_nocheh_on_at_once(self):
+        # Only the owner adds Nocheh. Their add turns it on at once, with no question first, and the group gets its answer
+        # right away. About 30 seconds later one card reaches the owner: the group is in a new project named after it, with
+        # a Move to button for other active projects, then No project and Turn off. Three groups the owner adds get one
+        # answer each. Move puts the group in that project and No project in none, and both archive the project the add made,
+        # which no chat is in any more; Turn off keeps Nocheh in the group, silent. Each press is answered with one line,
+        # which the card then shows under its text instead of buttons. Nocheh never leaves, and nothing else reaches the
+        # owner about these groups.
+        number = str(self.f.ids())
+        target = self.f.app('/v1/projects', {'name': 'Card target P4 '+number, 'description': '', 'state': 'active', 'expected_revision': 0,
+                                             'operation_id': 'scenario-card-target-'+number})
+        groups = {answer: self.fresh_group() for answer in (target['name'], 'no_project', 'turn_off')}
+        before = len(self.f.sent())
+        adds = {answer: self.status_change(group, OWNER)[1] for answer, (_, group) in groups.items()}
+        for chat, _ in groups.values():
+            self.wait('on_at_once', lambda chat=chat: self.served(chat), 60)
+            item = self.f.chat_item(chat)
+            self.gate('added_by_the_owner', item.get('added_by') == 'owner', added_by=item.get('added_by'))
+        # Nothing waits for the owner's answer: the group answers before the card arrives.
+        chat, _ = groups[target['name']]
+        self.turn(self.f.message(chat, 'Are you on here?'), chat)
+        outcomes = {target['name']: 'is now in “'+target['name']+'”', 'no_project': 'is in no project now', 'turn_off': 'Nocheh is off in'}
+        for answer, (chat, group) in groups.items():
+            card = self.wait('card_arrives', lambda event_id=adds[answer]: add_card(self.new(before), event_id), 180)
+            text, buttons = card['message']['text'], sent_buttons(card)
+            rows = (json.loads(card['parameters']['reply_markup']) if isinstance(card['parameters']['reply_markup'], str)
+                    else card['parameters']['reply_markup'])['inline_keyboard']
+            space = self.f.chat(chat)
+            made = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(space, safe='')).get('project') or {}
+            self.gate('group_in_a_new_project_named_after_it', made.get('name') == group['title'] and made.get('id') != target['id'],
+                      project=made.get('name'))
+            self.gate('card_says_it_is_on_in_its_new_project', text.startswith('Nocheh is on in') and group['title'] in text and 'new project' in text,
+                      card=text[:300])
+            self.gate('card_buttons', [button['text'] for button in rows[-1]] == ['No project', 'Turn off'] and len(rows) <= 2
+                      and 'Move to '+target['name'] in [button['text'] for button in buttons] and len(buttons) <= 5
+                      and 'Move to '+group['title'] not in [button['text'] for button in buttons],
+                      rows=[[button['text'] for button in row] for row in rows])
+            reply, edited = self.answer_card(card, answer)
+            # Names arrive wrapped in direction isolates; the check reads the text as a person sees it.
+            self.gate('press_answered_with_its_outcome', outcomes[answer] in shown(reply.get('text')), answer=reply.get('text'))
+            self.gate('card_shows_the_outcome', edited['message']['text'].startswith(text) and outcomes[answer] in shown(edited['message']['text']),
+                      card=edited['message']['text'][-300:])
+            if answer == 'turn_off':
+                self.wait('turned_off', lambda chat=chat: self.state_of(chat) == 'off', 60)
+                continue
+            effective = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(space, safe=''))
+            self.gate('in_the_chosen_project', (effective.get('project') or {}).get('id') == (target['id'] if answer == target['name'] else None),
+                      project=(effective.get('project') or {}).get('name'))
+            self.gate('project_the_add_made_archived', self.project(made.get('id')).get('state') == 'archived',
+                      state=self.project(made.get('id')).get('state'))
+            self.gate('still_on', self.served(chat))
+        # Turned off, Nocheh stays in the group and stays silent there.
+        chat, _ = groups['turn_off']
+        self.turn(self.f.message(chat, 'Still on?'), chat, expect_reply=False)
+        for answer, (chat, group) in groups.items():
+            lines = self.owner_lines(before, group)
+            self.gate('one_card_and_nothing_else', len(lines) == 1, count=len(lines))
+            self.gate('never_left', not self.leave_calls(chat))
+
+    def off_group_turned_on_and_off_from_the_dashboard(self):
+        # A group Nocheh is in but was never added to while it watched is Off. The owner turns Nocheh on there from the
+        # dashboard (POST /v1/chats/state), in no project: it answers at once, with no card, no note and no leave. Turned off
+        # again, it stays in the group and is silent there.
+        chat, group = self.fresh_group()
+        self.turn(self.f.message(chat, 'Hello before Nocheh is on here', sender=MEMBER), chat, expect_reply=False)
+        space = self.f.chat(chat)
+        self.gate('seen_off', self.state_of(chat) == 'off', state=self.state_of(chat))
+        before, number = len(self.f.sent()), str(self.f.ids())
+        on = self.f.app('/v1/chats/state', {'chat_id': space, 'state': 'active', 'project': {'mode': 'none'}, 'operation_id': 'scenario-dashboard-on-'+number})
+        self.gate('turned_on', on == {'chat_id': space, 'state': 'active', 'project_id': None}, result=on)
+        self.gate('listed_on', self.served(chat))
+        self.turn(self.f.message(chat, 'Are you on now?'), chat)
+        off = self.f.app('/v1/chats/state', {'chat_id': space, 'state': 'off', 'operation_id': 'scenario-dashboard-off-'+number})
+        self.gate('turned_off', off.get('state') == 'off', result=off)
+        self.turn(self.f.message(chat, 'And now?'), chat, expect_reply=False)
+        self.gate('no_card_no_note_no_leave', not self.owner_lines(before, group) and not self.leave_calls(chat) and self.add_records(chat) == 0)
 
     def private_canaries_never_left_the_owner(self):
         # The last check of a run: no private mark planted by private_chat_stays_out_of_groups is in anything the fake
@@ -2777,6 +3051,10 @@ class ProductScenarios(Scenarios):
 
 PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'typing_shows_while_working',
                  'reactions_show_while_working', 'not_allowed_person_gets_fixed_reply',
+                 # Adds that leave tell the owner at most ten times a day, so they run before most cards.
+                 'member_add_leaves_and_tells_owner', 'stranger_add_leaves_without_a_note', 'anonymous_add_leaves_and_tells_owner',
+                 'member_re_add_leaves_again_with_no_second_note', 'member_add_that_cannot_leave_stays_silent',
+                 'removed_from_active_group_tells_owner_once', 'owner_adds_nocheh_on_at_once', 'off_group_turned_on_and_off_from_the_dashboard',
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'send_to_stranger_refused', 'send_to_unselected_group_refused', 'send_to_allowed_person_private',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'forwarded_messages_are_not_the_owners_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',

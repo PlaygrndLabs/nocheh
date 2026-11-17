@@ -27,8 +27,9 @@ test('Answer privately works the same when the owner’s private chat and the pr
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-private-button-chats-')),base=Date.now(),token=digest('private-button-chats:'+base);
   // GP4 as the seeder leaves a group stored before step 2b; every other chat here is recorded by capture.
-  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[GP4,NG1_TG,NG2_OLD_TG],group_access:{},topic_memory:'group'};
-  const seeded=fixtureChats(configured.group_ids);
+  // GP4 is on as the seeder left it; the owner adds Nocheh to NG1 and NG2 (ADR-0253).
+  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{},topic_memory:'group'};
+  const seeded=fixtureChats([GP4]);
   await seedChats(stores.control,{chats:seeded.chats.filter(row=>row.id===GP4),ids:seeded.ids.filter(row=>row.chat_id===GP4),owner_chat:null,accounts:[]});
   const policy=servedPolicy(()=>configured),ALICE=9,OWNER_CHAT=chatIdFor('telegram',OWNER);
   const started:any[]=[],replies:any[]=[],answers:any[]=[];let serial=base;
@@ -49,6 +50,12 @@ test('Answer privately works the same when the owner’s private chat and the pr
     const update=Number(payload.update_id);
     return {version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:telegram,source_id:String(update),revision:'1',
       occurred_at:null,text:String((payload.message as any)?.text??''),payload};
+  };
+  /** The owner adds Nocheh to a group: it is on at once (ADR-0253). */
+  const ownerAdds=async(telegram:string)=>{
+    const update=++serial,bot={id:123456,is_bot:true,first_name:'Nocheh'};
+    await services.capture.capture(envelope(telegram,{update_id:update,my_chat_member:{chat:chatOf(telegram),from:{id:Number(OWNER),is_bot:false,first_name:'Owner'},
+      date:1700000000+update-base,old_chat_member:{status:'left',user:bot},new_chat_member:{status:'member',user:bot}}}));
   };
   /** One live update in a Telegram chat, taken in, prepared and dispatched as the service does. */
   const say=async(telegram:string,text:string|null,from=Number(OWNER),extra:Record<string,unknown>={})=>{
@@ -77,6 +84,7 @@ test('Answer privately works the same when the owner’s private chat and the pr
     assert.equal(started.at(-1).chat,OWNER_CHAT);assert.equal(replyTo(hello).chat_id,OWNER,'sent to the owner in Telegram');
 
     // NG2 speaks as a basic group, then Telegram upgrades it; GP4 and NG1 speak too, so the answer can name them.
+    await ownerAdds(NG2_OLD_TG);await ownerAdds(NG1_TG);
     await say(NG2_OLD_TG,'NG2 kickoff notes',ALICE);
     await say(NG2_OLD_TG,null,ALICE,{migrate_to_chat_id:Number(NG2_TG)});
     await say(NG2_TG,null,ALICE,{migrate_from_chat_id:Number(NG2_OLD_TG)});

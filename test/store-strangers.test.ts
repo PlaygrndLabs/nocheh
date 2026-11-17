@@ -11,6 +11,8 @@ import {fixtureServices} from './fixture-brain.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {chatIdFor} from '../src/chats.js';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
+import {servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 
 test('someone Nocheh does not serve costs no download or model call, is never read back, and gets one private fixed reply',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -19,24 +21,33 @@ test('someone Nocheh does not serve costs no download or model call, is never re
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-strangers-')),key='strangers:'+Date.now(),group='-'+Date.now(),unselected=group+'9';
   const refusals:Record<string,any>[]=[];let detections=0,updates=0;
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{},topic_memory:'group' as const});
+  // Which groups are served is the chat records' (ADR-0253): the owner adds Nocheh to the selected one below, and the
+  // service serves as servedPolicy says.
+  const configured:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[],group_access:{},topic_memory:'group'},policy=servedPolicy(()=>configured);
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect'){detections++;return {literals:[]};}
       if(operation==='telegram.refusal'){refusals.push(input);return {state:'done'};}
       throw Error('unexpected runtime call '+operation);
     },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
-  const bot=String(Date.now()).slice(-9);
+  const bot='5'+String(Date.now()).slice(-8);
   const capture=async(chat:Record<string,unknown>,from:number,extra:Record<string,unknown>={})=>{
     const update=++updates,payload={update_id:update,message:{message_id:update,date:1700000000,chat,from:{id:from,first_name:'Someone'},text:'hello there',...extra}};
     const event:Envelope={version:1,key:`telegram:${bot}:update:${update}`,origin:'live',kind:'telegram_update',bot_id:bot,scope:String(chat.id),
       source_id:String(update),revision:'1',occurred_at:null,text:'hello there',payload};
     return (await s.capture.capture(event)).source.reference;
   };
+  const ownerAdds=async(chat:Record<string,unknown>)=>{
+    const update=++updates,nocheh={id:Number(bot),is_bot:true,first_name:'Nocheh'};
+    await s.capture.capture({version:1,key:`telegram:${bot}:update:${update}`,origin:'live',kind:'telegram_update',bot_id:bot,scope:String(chat.id),
+      source_id:String(update),revision:'1',occurred_at:null,text:null,payload:{update_id:update,my_chat_member:{chat,from:{id:123,first_name:'Owner'},
+        date:1700000000,old_chat_member:{status:'left',user:nocheh},new_chat_member:{status:'member',user:nocheh}}}});
+  };
   const epoch=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
   const operations=storageWorkflowOperations(s,async()=>{throw Error('unexpected download');});
   const dispatch=async(id:string)=>(await stores.control.query('SELECT state,error_code FROM dispatches WHERE event_id=$1',[id])).rows[0];
   const ownerTurn:Reader={admin:false,scope:null},dashboard:Reader={admin:true,scope:null};
+  await startChatDirectory(stores.control,()=>configured);
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
     // A stranger writes privately, with a file: nothing is downloaded and no model checks it.
@@ -68,6 +79,7 @@ test('someone Nocheh does not serve costs no download or model call, is never re
     assert.equal(await s.access.canRead(ownerTurn,own,binding),true);
     await operations.preparation!(own.id,await epoch('preparation'));
     assert.ok(detections>before,'the owner\'s message is checked');
+    await ownerAdds({id:Number(group),type:'supergroup',title:'Ours'});
     const member=await capture({id:Number(group),type:'supergroup',title:'Ours'},777);
     assert.notEqual((await operations.preparation!(member.id,await epoch('preparation'))).waiting_reason,'not_allowed');
     // Strangers name their own chats, so the owner's turns never see those chats listed; the dashboard does. Each is a

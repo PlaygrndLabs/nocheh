@@ -33,7 +33,7 @@ import {bootstrapStores} from './dist/src/stores/bootstrap.js';
 await bootstrapStores();
 const store=async name=>{const client=new pg.Client({host:'nocheh-db',user:'nocheh',database:'nocheh_'+name,password:process.env.PGPASSWORD});
  await client.connect();return client;};
-const marker=process.env.PRIVATE_MARKER,assistant={enabled:false,owner_id:'42',group_ids:['-10']};
+const marker=process.env.PRIVATE_MARKER,assistant={enabled:false,owner_id:'42',group_access:{}};
 const archive=await store('archive'),derived=await store('derived'),control=await store('control');
 await archive.query("INSERT INTO events(id,source_key,channel,bot_id,scope,source_id,revision,origin,kind,payload,payload_hash,original_text,search_text) VALUES($1,'fixture-source','telegram','fixture','42','1','1','live','telegram_update',$2,$3,$4,$5)",
  ['a'.repeat(64),Buffer.from('{}'),digest('{}'),Buffer.from(marker),marker]);
@@ -66,7 +66,7 @@ def main():
     (memory / 'honcho.env').write_text('SYNTHETIC_HONCHO_SETUP_RETAINED')
     values = dict(configuration.DEFAULTS)
     values.update(TELEGRAM_ENABLED='false', TELEGRAM_OWNER_ID='42',
-        TELEGRAM_GROUP_IDS='-10', NOCHEH_MODEL='fixture-model', POSTGRES_PASSWORD=POSTGRES_PASSWORD,
+        NOCHEH_MODEL='fixture-model', POSTGRES_PASSWORD=POSTGRES_PASSWORD,
         SERVICE_TOKEN='2' * 64, INNGEST_EVENT_KEY='3' * 64, INNGEST_SIGNING_KEY='4' * 64,
         INNGEST_POSTGRES_PASSWORD=INNGEST_PASSWORD,
         NOCHEH_ARCHIVE_PASSWORD=hashlib.sha256(b'archive-fixture').hexdigest(),

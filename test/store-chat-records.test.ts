@@ -8,7 +8,7 @@ import {ArchiveRepository} from '../src/stores/archive.js';
 import {CaptureCoordinator} from '../src/stores/capture.js';
 import {ChatDirectoryLoader,ChatRepository,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
-import {BOB_CHAT,GP1,GP1_TOPIC,GP2,GP_GROUP_IDS,NG1,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,OWNER,UNSERVED,seedChats} from './fixture-groups.js';
+import {OWNER} from './fixture-groups.js';
 import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -75,7 +75,7 @@ test('captured updates record chats, topics, private chats, people and membershi
       [id,'group',null,null,'Records group','supergroup','off',null],
       [topic,'topic',id,'5','Plans',null,'off',null],
       [bobChat,'private',null,null,'Bob','private','off',accountIdFor('telegram',bob)],
-    ].sort(),'chats first seen after step 2b have digest ids, served only as the 2b-1 bridge says');
+    ].sort(),'chats first seen after step 2b have digest ids; a group nobody added Nocheh to, and someone else\'s private chat, are off');
     assert.equal(saved.chats.find(row=>row.id===id)!.is_forum,true);
     assert.deepEqual(saved.ids.map(row=>[row.external_id,row.chat_id,row.state]).sort(),[[bob,bobChat,'current'],[group,id,'current']].sort());
     assert.deepEqual(saved.members.filter(row=>row.chat_id===id).map(row=>[row.account_id,row.state]).sort(),
@@ -109,13 +109,17 @@ test('captured updates record chats, topics, private chats, people and membershi
   }finally{await stores.close();}
 });
 
-test('a group Telegram upgrades keeps one chat with its old and current ids, served under either',fixture,async()=>{
+test('a group Telegram upgrades keeps one chat with its old and current ids, and stays on',fixture,async()=>{
   const stores=await open(),base=Date.now(),old='-4'+String(base).slice(-12),next='-100'+(base+5),update=(n:number)=>base*100+n;
-  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[old]},repository=new ChatRepository(stores,()=>policy);
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]},repository=new ChatRepository(stores,()=>policy);
   const coordinator=new CaptureCoordinator(new ArchiveRepository(stores.archive),stores.control,undefined,repository);
-  const capture=(n:number,scope:string,message:Record<string,unknown>)=>coordinator.capture({version:1,key:'upgrade:'+base+':'+n,origin:'live',kind:'telegram_update',
-    bot_id:'777',scope,source_id:String(n),revision:'1',occurred_at:null,text:null,payload:{update_id:update(n),message:{message_id:n,date:n,from:{id:7},...message}}} as Envelope);
+  const envelope=(n:number,scope:string,payload:Record<string,unknown>)=>coordinator.capture({version:1,key:'upgrade:'+base+':'+n,origin:'live',kind:'telegram_update',
+    bot_id:'777',scope,source_id:String(n),revision:'1',occurred_at:null,text:null,payload:{update_id:update(n),...payload}} as Envelope);
+  const capture=(n:number,scope:string,message:Record<string,unknown>)=>envelope(n,scope,{message:{message_id:n,date:n,from:{id:7},...message}});
   try {
+    // The owner adds Nocheh to the basic group: it is on (ADR-0253).
+    await envelope(0,old,{my_chat_member:{chat:{id:Number(old),type:'group',title:'Basic'},from:{id:Number(OWNER),first_name:'Owner'},date:0,
+      old_chat_member:{status:'left',user:{id:777,is_bot:true}},new_chat_member:{status:'member',user:{id:777,is_bot:true}}}});
     await capture(1,old,{chat:{id:Number(old),type:'group',title:'Basic'},text:'hi'});
     await capture(2,old,{chat:{id:Number(old),type:'group',title:'Basic'},migrate_to_chat_id:Number(next)});
     await capture(3,next,{chat:{id:Number(next),type:'supergroup',title:'Basic'},migrate_from_chat_id:Number(old)});
@@ -126,38 +130,11 @@ test('a group Telegram upgrades keeps one chat with its old and current ids, ser
     assert.equal((await stores.control.query('SELECT count(*) FROM chat_ids WHERE external_id=ANY($1::text[])',[[old,next]])).rows[0].count,'2','no second chat');
     assert.deepEqual(saved.chats.map(row=>[row.title,row.app_type,row.state]),[['Basic upgraded','supergroup','active']]);
     // The owner's people route names it once, by its Nocheh id, with both its Telegram ids, current first: the dashboard
-    // opens it by that id, and TELEGRAM_GROUP_IDS still naming it by the earlier one finds it (ADR-0252).
+    // opens it by that id, and an access list still naming it by the earlier one finds it (ADR-0252).
     const listed=(await telegramDirectory(stores.control,{admin:true,scope:null},stores.archive)).groups
       .filter(group=>group.id===id||[old,next].some(external=>group.telegram_ids.includes(external)));
     assert.deepEqual(listed.map(group=>[group.id,group.external,group.telegram_ids]),[[id,next,[next,old]]]);
-    // The bridge serves it while either id is in TELEGRAM_GROUP_IDS.
-    for(const [ids,state] of [[[next],'active'],[[old],'active'],[[],'off']] as const) {
-      await repository.serve({owner_id:OWNER,group_ids:[...ids]});
-      assert.equal((await stores.control.query('SELECT state FROM chats WHERE id=$1',[id])).rows[0].state,state);
-    }
   }finally{await stores.close();}
-});
-
-test('the 2b-1 bridge serves chats from TELEGRAM_GROUP_IDS and the owner id, in both chat id families',fixture,async()=>{
-  const stores=await open(),repository=new ChatRepository(stores,()=>({enabled:true,owner_id:OWNER,group_ids:[]}));
-  const states=async()=>Object.fromEntries((await stores.control.query('SELECT id,state FROM chats WHERE id=ANY($1::text[])',
-    [[OWNER,BOB_CHAT,GP1,GP2,UNSERVED,NG1,NG2,GP1_TOPIC,NG1_TOPIC]])).rows.map(row=>[row.id,row.state]));
-  try {
-    await seedChats(stores.control);
-    await repository.serve({owner_id:OWNER,group_ids:[GP1,NG2_OLD_TG]});
-    let found=await states();
-    assert.deepEqual([found[OWNER],found[BOB_CHAT],found[GP1],found[GP2],found[UNSERVED],found[NG1],found[NG2]],['active','off','active','off','off','off','active']);
-    // A group upgraded after step 2b is served under its new id too.
-    await repository.serve({owner_id:OWNER,group_ids:[NG2_TG]});
-    found=await states();assert.equal(found[NG2],'active');assert.equal(found[GP1],'off');
-    assert.equal(await repository.serve({owner_id:OWNER,group_ids:[NG2_TG]}),0,'nothing changes when the list is the same');
-    // A topic keeps its own row as it is: whether it is served follows its group.
-    assert.equal(found[GP1_TOPIC],(await stores.control.query('SELECT state FROM chats WHERE id=$1',[GP1_TOPIC])).rows[0].state);
-  }finally{
-    // Put the fixture back as other tests expect it.
-    await repository.serve({owner_id:OWNER,group_ids:[...GP_GROUP_IDS]}).catch(()=>0);
-    await stores.close();
-  }
 });
 
 test('the process directory reloads after a capture, a newer epoch and a miss, and an unknown id reads nothing',fixture,async()=>{

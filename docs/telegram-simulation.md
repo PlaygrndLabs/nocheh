@@ -224,22 +224,30 @@ live state, credentials or volumes and never stops the live stack.
 The fake Telegram plays every person. It stores inline keyboards, edits cards
 with `editMessageText`, and answers `answerCallbackQuery` only for button
 presses the tester injected, so approval cards are pressed like a phone would;
-it keeps the link an answer opens, as for **Answer privately**. The fixture
-serves three groups, so two can share a project while the third stays in none.
+it keeps the link an answer opens, as for **Answer privately**. Its `leaveChat`
+records the call and then reports the bot's own status change in a
+`my_chat_member` update, as Telegram does; a positive chat ID gets 400 and a chat
+the bot already left gets 403, which the bot counts as left and records as
+`already_left`. Updates the fake sends on its own get IDs that are
+not multiples of ten, which the tester's own IDs are. `getUpdates` delivers only
+the update kinds the bot asks for. When Telegram connects, the owner adds Nocheh
+to the fixture's three groups and answers each card **No project**
+([ADR-0253](adr/0253-only-the-owner-adds-nocheh.md)), so two can share a project
+while the third stays in none.
 Scenarios name a chat by its Nocheh id, which the tester finds by the chat's
 Telegram id in the owner's chat list (`Fixture.chat`), never by building one
 ([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)): the three groups keep their Telegram ids as
 ids, while a topic first seen during the run, and NG1 (`NEW_GROUP`), a group
-first seen after the install, have digest ids. NG1 is turned on with the
-step 2b-1 switch, `TELEGRAM_GROUP_IDS`, and then answers, reads its group from a
-topic and holds a task (`new_id_group_works_end_to_end`); it sits in P1 for the
+first seen after the install, have digest ids. The owner adds Nocheh to NG1
+(`owner_adds`), and it then answers, reads its group from a topic and holds a
+task (`new_id_group_works_end_to_end`); it sits in P1 for the
 privacy probes and for `project_groups_stay_apart`, where its own answer reads
 only NG1 and the private answer reads it too.
 `supergroup_upgrade_keeps_history` injects Telegram's `migrate_to_chat_id` and
 `migrate_from_chat_id` messages for a basic group: the supergroup stays the same
 chat, with both Telegram ids, its project, its task and its switch, and a search
-there finds what was said before the upgrade. A second basic group, turned on in
-the same restart and posted in by no other scenario, is found upgraded by the
+there finds what was said before the upgrade. A second basic group, which the
+owner adds at the same time and no other scenario posts in, is found upgraded by the
 owner's refresh instead (the fixture answers its old id with
 `migrate_to_chat_id`): the refresh moves it onto the new id at once, keeps the
 old one, asks again under the new id and sends nothing.
@@ -257,7 +265,17 @@ sits only under the owner's own answer, refuses a member's tap and answers the
 owner's `/start` from both groups but not the third (its probe mark rides an
 unaddressed message just before the question, so no search hit or private
 answer holds it), defaults (history kept forever, Notion off), and a Settings save whose
-apply a reload sees running and that ends with a result. Dashboard calls sign
+apply a reload sees running and that ends with a result. Who adds Nocheh: a
+member's, a stranger's and an anonymous admin's add each leave with one
+`leaveChat`, with one line to the owner only for the member and the anonymous
+admin; a member's second add the same day leaves with no second line; a leave
+Telegram refuses stays silent as Couldn’t leave; a removal from a group that is
+on tells the owner once; the owner's add is on at once, with one card whose
+buttons each work; and a group that is off is turned on and off through
+`/v1/chats/state`. Before an add that expects a line, the tester moves earlier
+sent leave notes about other groups out of the last 24 hours, so earlier runs on
+a kept fixture never fill the cap on all lines; the group's own notes stay, so
+its own cap still holds. Dashboard calls sign
 in through the preview relay like the browser
 ([client](../tools/acceptance/owner_dashboard.py)). The
 [page check](../tools/acceptance/dashboard_pages.mjs) runs in the

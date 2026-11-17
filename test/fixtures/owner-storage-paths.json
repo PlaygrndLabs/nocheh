@@ -25,6 +25,8 @@
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/audience", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/prompts", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/chat-sends", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/chats/state", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/chats/state/1", "owner_storage": false, "allowed_path": false},
  {"path": "/v1/telegram/chats/refresh", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/telegram/topics", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/conversations", "owner_storage": true, "allowed_path": true},

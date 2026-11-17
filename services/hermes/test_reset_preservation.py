@@ -30,7 +30,7 @@ class ResetPreservationTests(unittest.TestCase):
         (self.memory / 'honcho.env').write_text('PRIVATE HONCHO SETUP')
         values = dict(configuration.DEFAULTS)
         values.update(NOCHEH_STORAGE_LAYOUT='original-only-v1', TELEGRAM_ENABLED='false',
-                      TELEGRAM_OWNER_ID='42', TELEGRAM_GROUP_IDS='-10', NOCHEH_MODEL='fixture-model',
+                      TELEGRAM_OWNER_ID='42', NOCHEH_MODEL='fixture-model',
                       POSTGRES_PASSWORD='1' * 64, SERVICE_TOKEN='2' * 64,
                       INNGEST_EVENT_KEY='3' * 64, INNGEST_SIGNING_KEY='4' * 64,
                       INNGEST_POSTGRES_PASSWORD='5' * 64, NOCHEH_ARCHIVE_PASSWORD='6' * 64,
@@ -40,7 +40,7 @@ class ResetPreservationTests(unittest.TestCase):
         self.loaded = configuration.load(self.state); configuration.validate(self.loaded)
         blockers = []; paths = reset_inventory.files(self.state, self.memory, self.config, blockers)
         self.database = {name: [] for name in reset_preservation.reset_configuration.catalog('original-only-v1')}
-        policy = {'enabled': False, 'owner_id': '42', 'group_ids': ['-10']}
+        policy = {'enabled': False, 'owner_id': '42', 'group_access': {}}
         self.database.update(security_policy=[{'document': {'version': 1, 'rules': []}}],
                              installation_generation=[{'generation': '11111111-1111-4111-8111-111111111111'}],
                              guard_mode=[{'mode': 'on'}],
@@ -95,18 +95,24 @@ class ResetPreservationTests(unittest.TestCase):
         # ADR-0252: a configuration snapshot with chat records names each chat by its Nocheh id: the owner's chat, a group
         # Telegram upgraded (old id '-10', now '-1010'), a group first seen after step 2b, and their topics.
         new, topic, other = 'b' * 64, 'c' * 64, 'd' * 64
-        rows = [{'id': '42', 'app': 'telegram', 'kind': 'private', 'parent_id': None},
-                {'id': '-10', 'app': 'telegram', 'kind': 'group', 'parent_id': None},
-                {'id': new, 'app': 'telegram', 'kind': 'group', 'parent_id': None},
-                {'id': topic, 'app': 'telegram', 'kind': 'topic', 'parent_id': '-10'},
-                {'id': other, 'app': 'telegram', 'kind': 'topic', 'parent_id': '-99'},
-                {'id': '-99', 'app': 'telegram', 'kind': 'group', 'parent_id': None}]
+        # ADR-0253: the groups kept are the ones Nocheh is on in, by their current ids; one it is off in or left is not.
+        new, topic, other = 'b' * 64, 'c' * 64, 'd' * 64
+        rows = [{'id': '42', 'app': 'telegram', 'kind': 'private', 'parent_id': None, 'state': 'active'},
+                {'id': '-10', 'app': 'telegram', 'kind': 'group', 'parent_id': None, 'state': 'active'},
+                {'id': new, 'app': 'telegram', 'kind': 'group', 'parent_id': None, 'state': 'active'},
+                {'id': topic, 'app': 'telegram', 'kind': 'topic', 'parent_id': '-10', 'state': 'active'},
+                {'id': other, 'app': 'telegram', 'kind': 'topic', 'parent_id': '-99', 'state': 'off'},
+                {'id': '-99', 'app': 'telegram', 'kind': 'group', 'parent_id': None, 'state': 'off'},
+                {'id': '-98', 'app': 'telegram', 'kind': 'group', 'parent_id': None, 'state': 'left'}]
         ids = [{'app': 'telegram', 'external_id': external, 'chat_id': chat, 'state': state, 'reason': None}
                for external, chat, state in (('42', '42', 'current'), ('-10', '-10', 'old'), ('-1010', '-10', 'current'),
-                                             ('-30', new, 'current'), ('-99', '-99', 'current'))]
-        chats = reset_preservation._chats({'chats': rows, 'chat_ids': ids}, '42', ['-1010', '-30'])
+                                             ('-30', new, 'current'), ('-99', '-99', 'current'), ('-98', '-98', 'current'))]
+        served = reset_preservation._served({'chats': rows, 'chat_ids': ids})
+        self.assertEqual(served, ['-1010', '-30'])
+        chats = reset_preservation._chats({'chats': rows, 'chat_ids': ids}, '42', served)
         self.assertEqual(chats, {'owner': '42', 'groups': {'-10': ['-10', '-1010'], new: ['-30']}, 'topics': {topic: '-10'}})
-        self.assertIsNone(reset_preservation._chats({'projects': []}, '42', ['-10']), 'a snapshot from before step 2b')
+        self.assertEqual(reset_preservation._served({'projects': []}), [], 'a snapshot from before step 2b keeps no group on')
+        self.assertIsNone(reset_preservation._chats({'projects': []}, '42', []), 'a snapshot from before step 2b')
         with self.assertRaisesRegex(ValueError, 'scope_changed'):
             reset_preservation._chats({'chats': rows, 'chat_ids': ids}, '42', ['-1010', '42'])
 
@@ -120,8 +126,22 @@ class ResetPreservationTests(unittest.TestCase):
             self.assertEqual(len(journal.value['steps']), 3)
             self.assertFalse((journal.directory / 'preserved.json').exists())
 
+    def test_preferences_keep_the_groups_nocheh_is_on_in(self):
+        # Which groups Nocheh is on in is each chat's state in the snapshot, not the setup (ADR-0253).
+        row = lambda id, kind, state: {'id': id, 'app': 'telegram', 'kind': kind, 'parent_id': None, 'topic_key': None, 'app_type': None,
+                                       'title': None, 'title_source': None, 'is_forum': False, 'state': state}
+        self.database.update(chats=[row('-10', 'group', 'active'), row('-20', 'group', 'off'), row('-30', 'group', 'left'), row('42', 'private', 'active')],
+                             chat_ids=[{'app': 'telegram', 'external_id': id, 'chat_id': id, 'state': 'current', 'reason': None}
+                                       for id in ('-10', '-20', '-30', '42')])
+        self.recovery.query.return_value = json.dumps(self.database)
+        with reset_protocol.locked(self.state) as journal:
+            self.ready(journal); self.freeze(journal)
+            snapshot = json.loads((journal.directory / 'preferences.json').read_text())['snapshot']
+        self.assertEqual(snapshot['groups'], ['-10'])
+        self.assertEqual(snapshot['chats']['groups'], {'-10': ['-10']})
+
     def test_database_policy_mismatch_blocks_completion(self):
-        self.database['runtime_configuration'][0]['document']['group_ids'] = ['-99']
+        self.database['runtime_configuration'][0]['document']['group_access'] = {'-10': {'granted': ['77'], 'denied': []}}
         self.recovery.query.return_value = json.dumps(self.database)
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal)

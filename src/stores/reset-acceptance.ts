@@ -62,8 +62,11 @@ export async function verifyFreshAcceptance(stores:StorePools,value:unknown) {
   if(!same(installed,[{generation:input.generation}]))throw Error('reset_fresh_acceptance_generation_changed');
   const policy=(await stores.control.query(`SELECT v.document FROM runtime_configuration c
     JOIN runtime_configuration_versions v USING(name,revision) WHERE c.name='assistant'`)).rows[0]?.document;
-  if(!policy?.enabled||typeof policy.owner_id!=='string'||!Array.isArray(policy.group_ids))throw Error('reset_fresh_acceptance_configuration_changed');
-  const group=policy.group_ids.find((id:unknown)=>typeof id==='string'&&digest(id)===input.dedicated_group_sha256);
+  if(!policy?.enabled||typeof policy.owner_id!=='string')throw Error('reset_fresh_acceptance_configuration_changed');
+  // The dedicated group is one Nocheh serves now: an active group, by any Telegram id it has had (chats.state, ADR-0253).
+  const served=(await stores.control.query(`SELECT i.external_id FROM chats c JOIN chat_ids i ON i.chat_id=c.id
+    WHERE c.kind='group' AND c.state='active'`)).rows.map(row=>row.external_id as string);
+  const group=served.find(id=>digest(id)===input.dedicated_group_sha256);
   if(!group)throw Error('reset_fresh_acceptance_group_not_allowlisted');
   if(digest(policy.owner_id)===input.human_participant_sha256)throw Error('reset_fresh_acceptance_human_required');
 

@@ -18,7 +18,7 @@ import {startChatRecords} from './chat-seed.js';
 // Turns and service calls that run a built-in instruction text carry the owner's replacements. Telegram calls go to
 // Nocheh's own bot (ADR-0235), the other helper services to the Hermes service.
 const config=settings(),pools=runtimeStoreGroups(),adapter=combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token})),call=withPrompts(runtimeCall(adapter),pools.api.control);
-// Chats are served as the chat directory holds them (ADR-0252); in step 2b-1 the bridge sets that from the environment.
+// Chats are served as the chat directory holds them (ADR-0252): the owner adds Nocheh to a group or turns it on (ADR-0253).
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:servedPolicy(()=>config.assistant),runtime:call,brain:brainWithPrompts(brain(config),pools.api.control),memoryEngine:memoryEngine(config)};
 const services=storageServices(pools.api,options),workflowServices=storageServices(pools.workflow,options);

@@ -43,10 +43,10 @@ END$$;
 ALTER TABLE chat_sends ADD COLUMN IF NOT EXISTS chat_id text;
 `;
 
-export const sendKinds=['reply','approved_send','approval_card','card_update','button_answer','refusal','notice','notice_update','reaction','setup','other'] as const;
+export const sendKinds=['reply','approved_send','approval_card','card_update','button_answer','refusal','notice','notice_update','leave','reaction','setup','other'] as const;
 export const sendStates=['sent','failed','uncertain','not_sent'] as const;
-/** Expected no-ops, and a chat's own choice not to take reactions: listed, never counted as problems. */
-export const harmlessSendCodes=['message_not_modified','button_answer_expired','reaction_not_allowed'] as const;
+/** Expected no-ops, a chat's own choice not to take reactions, and a leave that found Nocheh gone: listed, never counted as problems. */
+export const harmlessSendCodes=['message_not_modified','button_answer_expired','reaction_not_allowed','already_left'] as const;
 /**
  * One send record. Version 2 (ADR-0252) names the app's chat, its thread (a Telegram topic, a Slack thread) and the
  * message as the app writes them, as text; version 1, which older front doors wrote, named the topic and message as
@@ -65,11 +65,17 @@ const required=['version','key','channel','at','kind','method','state','status']
 const nullable={1:['account','chat','topic','message_id','detail','error_code','reference','ms'],2:['account','chat','thread','message_id','detail','error_code','reference','ms']} as const;
 /** Within this time a retry of the same send that went through recovers the attempt before it. */
 const RETRY_MINUTES=15;
-/** An attempt a later one of the same send delivered: a plain-text resend, a short rate-limit wait, a fresh retry. */
-const recovered=(s:string)=>`(${s}.state IN ('failed','uncertain') AND ${s}.reference IS NOT NULL AND EXISTS (SELECT 1 FROM chat_sends r
-  WHERE r.state='sent' AND r.at>=${s}.at AND r.at<${s}.at+interval '${RETRY_MINUTES} minutes' AND r.id<>${s}.id AND r.channel=${s}.channel
-  AND r.chat IS NOT DISTINCT FROM ${s}.chat AND r.method=${s}.method
-  AND regexp_replace(r.reference,':retry:[0-9]+$','')=regexp_replace(${s}.reference,':retry:[0-9]+$','')))`;
+/** The send a reference names: a retry's ':retry:N', and a leave try's own id ('leave:<event>:<try>'), are left out. */
+const sameSend=(reference:string)=>`regexp_replace(regexp_replace(${reference},':retry:[0-9]+$',''),'^(leave:[a-f0-9]{64}):[a-f0-9]{32}$','\\1')`;
+/** An attempt a later one of the same send delivered: a plain-text resend, a short rate-limit wait, a fresh retry, or a
+ *  leave tried again that went or found Nocheh gone. A leave try is also recovered once the stage settled that add's
+ *  leave as left, at any time: Nocheh's own update often says it left before the try's answer would have, so no later
+ *  try goes. A leave that could not go, was superseded or is still waiting recovers nothing. */
+const recovered=(s:string)=>`(${s}.state IN ('failed','uncertain') AND ${s}.reference IS NOT NULL AND (EXISTS (SELECT 1 FROM chat_sends r
+  WHERE (r.state='sent' OR r.error_code='already_left') AND r.at>=${s}.at AND r.at<${s}.at+interval '${RETRY_MINUTES} minutes' AND r.id<>${s}.id
+  AND r.channel=${s}.channel AND r.chat IS NOT DISTINCT FROM ${s}.chat AND r.method=${s}.method AND ${sameSend('r.reference')}=${sameSend(`${s}.reference`)})
+  OR ${s}.kind='leave' AND EXISTS (SELECT 1 FROM chat_state_events e WHERE e.event_id=substring(${s}.reference from '^leave:([a-f0-9]{64}):[a-f0-9]{32}$')
+  AND e.action='leave' AND e.outcome='left')))`;
 const problem=(s:string)=>`(${s}.state IN ('failed','uncertain') AND coalesce(${s}.error_code,'') NOT IN (${harmlessSendCodes.map(code=>`'${code}'`).join(',')})
   AND NOT ${recovered(s)})`;
 const text=(value:unknown,pattern:RegExp)=>typeof value==='string'&&pattern.test(value);
