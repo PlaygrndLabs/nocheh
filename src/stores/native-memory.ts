@@ -1065,7 +1065,7 @@ export class NativeMemoryRepository {
    * agent check a claim against the original; a fact without citations brings its whole learning batch and
    * says so in the limitations. A fact that was read is not proof the answer relied on it. The messages are those this
    * reader may read: within the sessions its recall asked (its group's, when the group's topics share memory), never a
-   * retired write, and for a group or topic only each message it can read. */
+   * retired write; for a turn, only each message this reader can read (a group's own, and for the owner none retired). */
   private async evidence(workspace:string,audience:string,responses:{evidence:string[]}[],binding:GuardBinding,principal:Reader,group:readonly string[]|null):
     Promise<{references:SourceReference[];limitations:string[]}> {
     if(!this.engine.trace)return {references:[],limitations:['evidence_unsupported']};
@@ -1074,8 +1074,10 @@ export class NativeMemoryRepository {
     const limitations=ids.length>32?['evidence_conclusion_limit']:[];
     try {
       // Learned evidence is read as it was when it was learned: a later reaction change does not take it back.
+      // One batched check (readable, which is canRead) for every message: a group's own, and for the owner's turns none
+      // retired. The owner's dashboard reads every one.
       const read=await this.provenance.read(workspace,audience,ids.slice(0,32),binding,{group,
-        ...audience==='owner'?{}:{canRead:(reference:SourceReference)=>this.contexts.access.canRead(principal,reference,binding,{historical:true})}});
+        ...principal.admin?{}:{readable:(references:SourceReference[])=>this.contexts.access.readable(principal,references,binding,{historical:true})}});
       return {references:read.evidence,limitations:['evidence_lists_conclusions_read_not_relied_on',...read.limitations,...limitations]};
     } catch {return {references:[],limitations:['evidence_unavailable',...limitations]};}
   }

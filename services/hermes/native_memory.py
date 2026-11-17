@@ -89,12 +89,18 @@ def recall(root, body, retirements=None):
     after = body.get('after_profile', '')
     profiles = [p for p in profiles if p.name > after]
     hits = []
-    from .retired_history import IDENTIFIER, NOTE_DELIMITER, service_lookup, withheld_ids
+    from .retired_history import IDENTIFIER, NOTE_DELIMITER, pending, service_lookup, withheld_note
+    from .isolated_profile import database_path
     from . import note_sources
     lookup = retirements or service_lookup
     for profile in profiles[:100]:
         where = place(profile, metadata(profile))
         records = None
+        database = database_path(profile)
+        if database.is_symlink(): raise ValueError('session_path_denied')
+        # Read-only: a profile whose turns have not run since a retirement skips the rows its next turn will withhold,
+        # and the notes those withheld turns wrote, which that turn removes (retired_history.pending).
+        withheld, written, spans = pending(database, lookup) if database.is_file() else (set(), set(), set())
         for target, name in note_sources.TARGETS:
             file = profile / 'memories' / name
             if file.is_symlink() or not file.resolve().is_relative_to(profile.resolve()):
@@ -112,17 +118,11 @@ def recall(root, body, retirements=None):
                     value = lookup(cited[start:start+200]);hidden |= set(value['retired']) | set(value['answered'])
                 if lines and records is None: records = note_sources.load(profile)
                 for line, entry in lines:
-                    if set(IDENTIFIER.findall(line)) & hidden: continue
+                    if set(IDENTIFIER.findall(line)) & hidden or withheld_note(entry, written, spans): continue
                     hits.append({'profile': profile.name, **where, 'kind': 'native_note', 'file': name,
                                  'text': line[:8000], 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', line),
                                  'note': note_sources.note(records, target, entry)})
-        from .isolated_profile import database_path
-        database = database_path(profile)
-        if database.is_symlink(): raise ValueError('session_path_denied')
         if database.is_file():
-            # Read-only: a profile whose turns have not run since a retirement
-            # skips the rows its next turn will withhold.
-            withheld = withheld_ids(database, lookup)
             db = SessionDB(database, read_only=True)
             try:
                 # Hermes returns no row's content, only a snippet of the hit's own row; its `context` would add the

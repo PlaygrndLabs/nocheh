@@ -169,17 +169,23 @@ test('recall evidence reads the receipts its recall asked: a sibling topic\'s on
         digest(key+':prepared:'+name),digest('fixture'),remote(name),audienceOf[name],name==='retired'?new Date():null]);
     }
     await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true');
-    const checked:string[]=[],canRead=async(reference:any)=>{checked.push(reference.id);return reference.id!==sources.unreadable.id;};
-    const shared=await provenance.read(workspace,topic,[conclusion],binding,{group:[group,topic,sibling],canRead});
+    const batches:string[][]=[],readable=async(references:any[])=>{batches.push(references.map(reference=>reference.id));
+      return new Map(references.map(reference=>[reference.id,reference.id!==sources.unreadable.id]));};
+    const shared=await provenance.read(workspace,topic,[conclusion],binding,{group:[group,topic,sibling],readable});
     assert.deepEqual(shared.evidence,[sources.own,sources.sibling],'topics that share memory keep the sibling topic\'s evidence the recall read');
     assert.ok(shared.limitations.includes('ingestion_reference_unavailable'),'a retired write is not evidence');
     assert.ok(shared.limitations.includes('source_reference_unreadable'),'a message the group cannot read is left out, and says so');
-    assert.deepEqual(checked.sort(),[sources.own.id,sources.sibling.id,sources.unreadable.id].sort(),'every reference is checked for the reader');
-    const separate=await provenance.read(workspace,topic,[conclusion],binding,{group:null,canRead});
+    assert.deepEqual(batches.map(batch=>[...batch].sort()),[[sources.own.id,sources.sibling.id,sources.unreadable.id].sort()],
+      'every reference is checked for the reader, all in one batch (readable), never one read per message');
+    const separate=await provenance.read(workspace,topic,[conclusion],binding,{group:null,readable});
     assert.deepEqual(separate.evidence,[sources.own],'a topic with its own memory reads only its own receipts');
     const owner=await provenance.read(workspace,'owner',[conclusion],binding);
     assert.deepEqual(owner.evidence,[sources.own,sources.sibling,sources.unreadable],'the owner reads every audience\'s evidence, but never a retired write');
     assert.ok(owner.limitations.includes('ingestion_reference_unavailable'));
+    // The owner's own turn checks too: a message retired since it was learned is no evidence any more.
+    const turn=await provenance.read(workspace,'owner',[conclusion],binding,{readable:async references=>new Map(references.map(reference=>[reference.id,reference.id!==sources.own.id]))});
+    assert.deepEqual(turn.evidence,[sources.sibling,sources.unreadable],'the owner\'s turn keeps only messages its check lets it read');
+    assert.ok(turn.limitations.includes('source_reference_unreadable'));
   } finally {
     await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false');
     await stores.control.query('DELETE FROM memory_ingestion_receipts WHERE generation=$1',[workspace]);

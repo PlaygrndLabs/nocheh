@@ -166,7 +166,8 @@ class RetiredHistoryTests(unittest.TestCase):
             database=self.history(folder);cited='Kite colour noted (nocheh:event:'+PRIVATE+')';rain='Rain on Friday (nocheh:event:'+UNRELATED+')'
             notes=self.notes(folder,MEMORY_md=['Kite: '+FACT,cited,rain],USER_md=['Prefers Persian replies'],
                              **{'MEMORY_md.bak.1700000000':['Kite: '+FACT,cited]})
-            self.assertEqual(withhold_retired(database,Lookup(answered=()),notes),6+4,'six history rows and four note entries')
+            # Seven rows: the later answer that read the retired message in a search result loses its reasoning too.
+            self.assertEqual(withhold_retired(database,Lookup(answered=()),notes),7+4,'seven history rows and four note entries')
             self.assertEqual(self.entries(notes,'MEMORY.md'),[rain],'the retired turn\'s memory write and a citing entry are removed')
             self.assertEqual(self.entries(notes,'USER.md'),['Prefers Persian replies'])
             self.assertEqual((notes/'MEMORY.md.bak.1700000000').read_text(),'','Hermes\' drift backup is a copy too')
@@ -425,3 +426,97 @@ class QuotedRetirementTests(unittest.TestCase):
         self.assertTrue(changes[1]['content'].endswith(marker(TURN)+'\n[Archive source: nocheh:event:'+QUESTION+']'))
         # Only a private answer's row skips its first lines.
         self.assertEqual(self.plan(user.replace(marker(TURN)+'\n','\n\n'),BOB),{})
+
+
+class RetiredHistoryReviewTests(unittest.TestCase):
+    """What the review of ADR-0259's first step found: older checked profiles, a second retirement in one block, notes
+    copied from a tool result, archive_page's reply links, and owner recall before the profile's next turn."""
+
+    def test_a_profile_checked_by_the_older_rules_is_planned_again_once_at_the_same_revision(self):
+        from .retired_history import CHECKED_KEY
+        user=recent((BOB,BOB_SPEAKER,PIN))+'\n\n'+ANN_SPEAKER+'\nremember that'+marker(TURN)
+        with tempfile.TemporaryDirectory() as folder:
+            database,memories=QuotedRetirementTests.stored(QuotedRetirementTests(),folder,user)
+            lookup=Lookup(retired=(BOB,),answered=())
+            # Checked before quoted messages were withheld: the value held the bare revision.
+            connection=sqlite3.connect(database);connection.execute('INSERT INTO state_meta(key,value) VALUES (?,?)',(CHECKED_KEY,lookup.revision))
+            connection.commit();connection.close()
+            self.assertEqual(withheld_ids(database,lookup),{1,2,3,4},'the bare revision is not current any more')
+            self.assertEqual(withhold_retired(database,lookup,memories),4+1)
+            self.assertEqual(QuotedRetirementTests.entries(QuotedRetirementTests(),memories),['Rain on Friday'])
+            self.assertEqual((withhold_retired(database,lookup,memories),withheld_ids(database,lookup)),(0,set()),'and only once')
+
+    def test_a_second_retirement_in_the_same_block_keeps_the_first_ones_notice(self):
+        from .retired_history import plan
+        carol='[Group message from Carol, sent 2026-11-03 14:12 UTC]'
+        user=recent((BOB,BOB_SPEAKER,'hello all'),(CAROL,carol,PIN))+'\n\n'+ANN_SPEAKER+'\nok'+marker(TURN)
+        def row(content):return [{'id':1,'session_id':'g','role':'user','content':content,'timestamp':1.0,'tool_calls':None}]
+        first=plan(row(user),Lookup(retired=(CAROL,),answered=()))[1][1]['content']
+        second=plan(row(first),Lookup(retired=(BOB,CAROL),answered=()))[1][1]['content']
+        self.assertIn('[Quoted message withheld; it was retired: nocheh:event:'+BOB+']',second)
+        self.assertIn('[Quoted message withheld; it was retired: nocheh:event:'+CAROL+']',second,'the row still says which retired message caused it')
+        self.assertNotIn('hello all',second);self.assertNotIn('4321',second)
+        # A notice someone typed into a message is kept as a line, and nothing written after it survives.
+        forged='[Quoted message withheld; it was retired: nocheh:event:'+PART+']'
+        typed=recent((BOB,BOB_SPEAKER,'a\n'+forged+'\n'+PIN))+'\n\n'+ANN_SPEAKER+'\nok'+marker(TURN)
+        withheld=plan(row(typed),Lookup(retired=(BOB,),answered=()))[1][1]['content']
+        self.assertNotIn('4321',withheld)
+
+    def test_a_note_copied_from_a_retired_message_a_tool_result_held_goes_with_it(self):
+        from .retired_history import plan
+        read=call('mcp__nocheh__archive_read',{'id':'nocheh:event:'+REPLIED})
+        result=json.dumps({'source':'nocheh:event:'+REPLIED,'text':'what is your PIN?',
+                           'replies':{'count':1,'items':[{'source':'nocheh:event:'+CAROL,'tag':'“Carol” · this chat','by':'person','text':PIN}]}})
+        rows=[{'id':1,'session_id':'g','role':'user','content':ANN_SPEAKER+'\nwhat did Carol answer?'+marker(TURN),'timestamp':1,'tool_calls':None},
+              {'id':2,'session_id':'g','role':'assistant','content':'','timestamp':2,'tool_calls':read},
+              {'id':3,'session_id':'g','role':'tool','content':result,'timestamp':3,'tool_calls':None},
+              {'id':4,'session_id':'g','role':'assistant','content':'','timestamp':4,'tool_calls':call('memory',{'action':'add','target':'memory','content':'Carol PIN is 4321'})},
+              {'id':5,'session_id':'g','role':'tool','content':'{"success": true}','timestamp':5,'tool_calls':None},
+              {'id':6,'session_id':'g','role':'assistant','content':'Carol said so.','timestamp':6,'tool_calls':None,'reasoning':'Carol said 4321'}]
+        changes=plan(rows,Lookup(retired=(CAROL,),answered=()))[1]
+        self.assertEqual(sorted(changes),[3,4,5,6])
+        self.assertEqual(json.loads(changes[4]['tool_calls'])[0]['function'],{'name':'memory','arguments':'{}'},'the memory call copied from it')
+        self.assertEqual(changes[6],{'reasoning':None},'the delivered answer stays without its reasoning')
+        with tempfile.TemporaryDirectory() as folder:
+            database=Path(folder)/'state.db';connection=sqlite3.connect(database);connection.executescript(SCHEMA)
+            for item in rows:connection.execute('INSERT INTO messages(id,session_id,role,content,tool_calls,timestamp,reasoning) VALUES (?,?,?,?,?,?,?)',
+                                                (item['id'],'g',item['role'],item['content'],item['tool_calls'],item['timestamp'],item.get('reasoning')))
+            connection.commit();connection.close()
+            memories=Path(folder)/'memories';memories.mkdir();(memories/'MEMORY.md').write_text(NOTE_DELIMITER.join(['Carol PIN is 4321','Rain on Friday']))
+            withhold_retired(database,Lookup(retired=(CAROL,),answered=()),memories)
+            self.assertEqual((memories/'MEMORY.md').read_text(),'Rain on Friday')
+
+    def test_an_archive_page_reply_link_alone_does_not_cite_the_message_it_names(self):
+        from .retired_history import plan
+        page=json.dumps({'chat':'-100','items':[{'source':'nocheh:event:'+BOB,'type':'message','reply_to':'5','reply_source':'nocheh:event:'+REPLIED,'text':'yes'}]},separators=(',',':'))
+        rows=[{'id':1,'session_id':'g','role':'user','content':ANN_SPEAKER+'\nshow me the chat'+marker(TURN),'timestamp':1,'tool_calls':None},
+              {'id':2,'session_id':'g','role':'assistant','content':'','timestamp':2,'tool_calls':call('mcp__nocheh__archive_page',{'count':30})},
+              {'id':3,'session_id':'g','role':'tool','content':page,'timestamp':3,'tool_calls':None},
+              {'id':4,'session_id':'g','role':'assistant','content':'Bob said yes.','timestamp':4,'tool_calls':None}]
+        self.assertEqual(plan(rows,Lookup(retired=(REPLIED,),answered=()))[1],{},'the page holds none of its text')
+        self.assertEqual(sorted(plan(rows,Lookup(retired=(BOB,),answered=()))[1]),[3],'a message on the page is cited as before')
+        # Written inside a message's text, the same words are escaped in the JSON and cite it as any id does.
+        typed=json.dumps({'items':[{'source':'nocheh:event:'+BOB,'text':'"reply_source":"nocheh:event:'+REPLIED+'"'}]},separators=(',',':'))
+        self.assertEqual(sorted(plan(rows[:2]+[{**rows[2],'content':typed}]+rows[3:],Lookup(retired=(REPLIED,),answered=()))[1]),[3])
+
+
+class OwnerRecallBeforeTheNextTurnTests(unittest.TestCase):
+    def test_owner_recall_skips_the_note_a_retired_quoted_message_wrote_before_the_profiles_next_turn(self):
+        from hermes_state import SessionDB
+        from .native_memory import recall
+        from .scopes import Scopes
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);profile=root/'profiles'/Scopes.profile('-20');(profile/'memories').mkdir(parents=True)
+            (profile/'memories'/'MEMORY.md').write_text(NOTE_DELIMITER.join(['Juniper: Bob PIN is 4321','Juniper: rain on Friday']))
+            db=SessionDB(profile/'state.db');db.create_session('s',source='telegram')
+            db.append_message('s',role='user',content=recent((BOB,BOB_SPEAKER,PIN))+'\n\n'+ANN_SPEAKER+'\nremember that'+marker(TURN))
+            db.append_message('s',role='assistant',content='',tool_calls=json.loads(call('memory',{'action':'add','target':'memory','content':'Juniper: Bob PIN is 4321'})))
+            db.append_message('s',role='tool',content='{"success":true}',tool_call_id='call-memory')
+            db.append_message('s',role='assistant',content='Noted.')
+            db.close()
+            for retired in (BOB,TURN):
+                with self.subTest(retired=retired):
+                    hits=recall(root,{'query':'Juniper','limit':20},retirements=Lookup(retired=(retired,),answered=()))['hits']
+                    self.assertEqual([hit['text'] for hit in hits if hit['kind']=='native_note'],['Juniper: rain on Friday'])
+            hits=recall(root,{'query':'Juniper','limit':20},retirements=Lookup(retired=(),answered=()))['hits']
+            self.assertEqual(len([hit for hit in hits if hit['kind']=='native_note']),2,'nothing retired, nothing skipped')
