@@ -58,6 +58,11 @@ test('fact grants authorize exact destinations while relationships only create r
     // A grant names only that the owner shared it, and the day of the grant in UTC, never its sources (ADR-0259).
     const granted=(await stores.control.query('SELECT created_at FROM memory_fact_grants WHERE id=$1',[grant.id])).rows[0].created_at as Date;
     assert.deepEqual([context.sources[0]!.tag,context.sources[0]!.by],['shared by the owner on '+granted.toISOString().slice(0,10),'shared']);
+    // archive_read opens the same grant by its id through the same checks: in the group it went to, never in another,
+    // never for a private answer (ADR-0259).
+    assert.deepEqual(await services.memoryAccess.open(actor,grant.id),context.sources[0]);
+    await assert.rejects(services.memoryAccess.open({...actor,scope:otherGroup,space:otherGroup},grant.id),{code:'grant_not_found'});
+    await assert.rejects(services.memoryAccess.open({...actor,answer:digest(key+':answer')},grant.id),{code:'space_context_required'});
     assert.equal((await services.memoryAccess.context(await principal(groupSource,group+'/topic/7'),'checkpoint complete')).sources[0]?.text,'The checkpoint is complete.',
       'every topic of a group shares its grants by default');
     policy.topic_memory='topic';
@@ -72,6 +77,7 @@ test('fact grants authorize exact destinations while relationships only create r
     actor=await principal(groupSource);
     assert.equal((await services.memoryAccess.context(actor,'Apollo budget review done')).sources.length,0,'never served without the confirm');
     const paused=await find('grants',olderGrants[0]!.id);assert.deepEqual([paused.state,paused.suspended_reason],['suspended','private_evidence_unconfirmed']);
+    await assert.rejects(services.memoryAccess.open(actor,olderGrants[0]!.id),{code:'grant_not_found'},'a paused grant does not open');
     const listed=(await services.memoryAccess.grants(owner,'',otherGroup)).grants.find(item=>item.id===olderGrants[1]!.id);
     assert.deepEqual([listed?.state,listed?.suspended_reason],['suspended','private_evidence_unconfirmed'],'the list shows it paused before any turn there');
     assert.equal((await services.memoryAccess.context(actor,'checkpoint complete')).sources.length,1,'a share the owner confirmed keeps working');

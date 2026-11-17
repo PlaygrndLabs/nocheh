@@ -105,7 +105,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
   // Who · where · when for a search hit or an opened original, built by code and secret-checked together (ADR-0259).
   const tags=new SourceTagRepository(stores,access,noteSources,(principal,value,check)=>prepared.prepare(principal,value,check),detect,options.policy);
-  const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value),tags);
+  const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value),tags,learned);
   const turns=new RuntimeTurnRepository(access,prepared);
   // Nocheh's chat records (ADR-0252): what each captured Telegram original says of its chat, its topic and its people.
   const chats=new ChatRepository(stores,options.policy);

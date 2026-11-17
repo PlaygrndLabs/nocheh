@@ -4,7 +4,7 @@ import {chatDirectory} from '../src/chats.js';
 import {desktopLocalTime,telegramSenderName,telegramTopicOpening} from '../src/chats-telegram.js';
 import {forwardFacts,frameName} from '../src/forwarded.js';
 import {bucketOf,eventClass,eventClasses,sourceFacts,type EventClass,type SourceFacts} from '../src/source-facts.js';
-import {TAG_LIMIT,shownFileName,sharedTag,sourceMoment,sourceTag,tagName,unavailableTag,type TagReader,type TagSource} from '../src/source-tags.js';
+import {TAG_LIMIT,shownFileName,sharedTag,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type TagReader,type TagSource} from '../src/source-tags.js';
 import {automaticPersonId,ownerChosenName} from '../src/stores/entities.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,GP2,OWNER,fixtureChats} from './fixture-groups.js';
 
@@ -209,4 +209,14 @@ test('shared facts name only the day the owner shared them, and an unreadable so
   assert.deepEqual(sharedTag('2 Nov'),{tag:'shared by the owner on a time not recorded',by:'shared'});
   assert.deepEqual(unavailableTag('here'),{tag:'source not available here',by:'unknown'});
   assert.deepEqual(unavailableTag('now'),{tag:'source not available right now',by:'unknown'});
+});
+
+test('an opened original names a forward\'s origin and its topic beside its tag; members read only Telegram\'s names (ADR-0259)',()=>{
+  const forward=source(40,message(sam,{forward_origin:{type:'channel',chat:{id:-1009876543210,title:'City News',type:'channel'},message_id:9,date:1}}),{chat:GP1_TOPIC});
+  assert.deepEqual(sourceDetails(forward,owner,names,directory),{forward:'forwarded from a channel shown as “City News”',topic:'group “GP1” › topic “Trips”'});
+  // The topic is named even in that topic, where the tag says "this chat"; a member reads a topic only the owner named as "a topic".
+  assert.deepEqual(sourceDetails(forward,{...member,chat:GP1_TOPIC},new Map([[GP1,'GP1']]),directory),{forward:'forwarded from a channel shown as “City News”',topic:'group “GP1” › a topic'});
+  // A message in no topic, or the sender's own typing, names nothing more.
+  assert.deepEqual(sourceDetails(source(41,message(bob)),member,names,directory),{});
+  assert.deepEqual(sourceDetails(source(42,message(bob),{chat:BOB_CHAT}),member,names,directory),{},'no private chat is a topic');
 });

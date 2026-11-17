@@ -114,6 +114,24 @@ export class RelationshipRepository {
     }
     return found;
   }
+  /**
+   * The messages that reply to an object (ADR-0259), by the archive's reply relation (source_relations, its target
+   * index): each replying message once, with every copy of it the audience admits (permits), oldest first, its first
+   * copy deciding the order. At most `limit` copies are read; `more` says there were others. canRead is the caller's.
+   */
+  async replies(objectId:string,audience:RelationshipAudience,limit=100):Promise<{replies:{object:string;references:SourceReference[]}[];more:boolean}> {
+    if(!Number.isInteger(limit)||limit<1||limit>200)throw new HttpError(400,'invalid_relationship_page');
+    const rows=(await this.pool.query(`SELECT e.id,e.revision,e.payload_hash,v.object_id FROM source_relations r JOIN events e ON e.id=r.event_id
+      JOIN source_observations o ON o.event_id=e.id JOIN source_revisions v ON v.id=o.revision_id
+      WHERE r.target_id=$1 AND r.kind='reply_to' ORDER BY e.received_at,e.id LIMIT $2`,[objectId,limit+1])).rows;
+    const chats=await this.describeMany(rows.slice(0,limit).map(row=>row.id)),replies=new Map<string,SourceReference[]>();
+    for(const row of rows.slice(0,limit)) {
+      if(row.object_id===objectId||!permits(audience,chats.get(row.id)?.chat??null))continue;
+      const list=replies.get(row.object_id)??[];list.push({store:'archive',kind:'event',id:row.id,revision:row.revision,input_hash:row.payload_hash});replies.set(row.object_id,list);
+    }
+    return {replies:[...replies].map(([object,references])=>({object,references})),more:rows.length>limit};
+  }
+
   /** This scope filter is also intersected with the control repository's consent/access policy by callers. */
   async context(reference:SourceReference,audience:RelationshipAudience,limit=100):Promise<{
     source:SourceReference|null;targets:{kind:string;identity:SourceIdentity;references:SourceReference[];unresolved:boolean;next:string|null}[];

@@ -6,7 +6,7 @@ import {telegramSenderName} from '../chats-telegram.js';
 import {forwardFacts} from '../forwarded.js';
 import {HttpError} from '../http.js';
 import {sourceChat} from '../spaces.js';
-import {shownFileName,sourceMoment,sourceTag,unavailableTag,type Tag,type TagReader,type TagSource} from '../source-tags.js';
+import {shownFileName,sourceDetails,sourceMoment,sourceTag,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
 import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
 import {ownerPeopleNames} from './entities.js';
@@ -19,7 +19,7 @@ type Pools={archive:Pick<pg.Pool,'query'>;derived:Pick<pg.Pool,'query'>;control:
 /** How tags are asked for: a minute or a day; `historical` for evidence already learned, whose reaction may have changed
  *  since (canRead's own option); and `shown`, each source's payload as the caller already read it for this reader (the
  *  guarded copy's payload when the secret check is on), so nothing is read twice. */
-export interface TagOptions {precision?:'minute'|'day';historical?:boolean;shown?:ReadonlyMap<string,unknown>}
+export interface TagOptions {precision?:'minute'|'day';historical?:boolean;shown?:ReadonlyMap<string,unknown>;details?:boolean}
 /** The one call that runs every request's tag texts through the secret check (PreparedContextRepository.prepare). */
 type Prepare=(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>)=>Promise<unknown>;
 /** A guard binding that moved on is the caller's to retry, never a tag that failed. */
@@ -47,8 +47,8 @@ export class SourceTagRepository {
   constructor(readonly stores:Pools,readonly access:SourceAccessRepository,readonly notes:NoteSourceRepository,
     readonly prepare:Prepare|null,readonly detect:(text:string,background?:boolean)=>Promise<unknown>,readonly policy:()=>AssistantPolicy){}
 
-  async tags(principal:Reader,binding:GuardBinding,references:readonly SourceReference[],options:TagOptions={}):Promise<Map<string,Tag|null>> {
-    const result=new Map<string,Tag|null>(),ids=[...new Set(references.map(reference=>reference.id))];
+  async tags(principal:Reader,binding:GuardBinding,references:readonly SourceReference[],options:TagOptions={}):Promise<Map<string,(Tag&TagDetails)|null>> {
+    const result=new Map<string,(Tag&TagDetails)|null>(),ids=[...new Set(references.map(reference=>reference.id))];
     if(!ids.length)return result;
     let readable:Map<string,boolean>|null=null;
     try {
@@ -57,10 +57,15 @@ export class SourceTagRepository {
       for(const id of ids)if(!open.includes(id))result.set(id,null);
       if(open.length) {
         const built=await this.build(principal,binding,open,options);
-        // One secret check for every tag of the request; a tag repeated in this epoch costs nothing.
-        const texts=!principal.admin&&this.prepare?await this.prepare(principal,built.map(tag=>tag.tag),this.detect) as unknown[]:built.map(tag=>tag.tag);
-        if(!Array.isArray(texts)||texts.length!==built.length||texts.some(text=>typeof text!=='string'))throw new HttpError(500,'source_tags_unprepared');
-        built.forEach((tag,index)=>result.set(open[index]!,{...tag,tag:texts[index] as string}));
+        // One secret check for every tag of the request, and the forward and topic words an opened original names beside
+        // it; a text repeated in this epoch costs nothing.
+        const width=options.details?3:1,parts=built.flatMap(tag=>options.details?[tag.tag,tag.forward??'',tag.topic??'']:[tag.tag]);
+        const texts=!principal.admin&&this.prepare?await this.prepare(principal,parts,this.detect) as unknown[]:parts;
+        if(!Array.isArray(texts)||texts.length!==parts.length||texts.some(text=>typeof text!=='string'))throw new HttpError(500,'source_tags_unprepared');
+        built.forEach((tag,index)=>{
+          const at=index*width,{forward,topic,...plain}=tag;
+          result.set(open[index]!,{...plain,tag:texts[at] as string,...(forward?{forward:texts[at+1] as string}:{}),...(topic?{topic:texts[at+2] as string}:{})});
+        });
       }
       await countMemoryStep(this.stores.control,'source_tags',true);
       return result;
@@ -73,7 +78,7 @@ export class SourceTagRepository {
     }
   }
 
-  private async build(principal:Reader,binding:GuardBinding,ids:string[],options:TagOptions):Promise<Tag[]> {
+  private async build(principal:Reader,binding:GuardBinding,ids:string[],options:TagOptions):Promise<(Tag&TagDetails)[]> {
     const owner=ownerReader(principal),policy=this.policy(),directory=chats();
     const rows=new Map((await this.stores.archive.query('SELECT id,kind,channel,scope,occurred_at,received_at,payload FROM events WHERE id=ANY($1::text[])',[ids])).rows
       .map(row=>[row.id as string,row]));
@@ -104,6 +109,6 @@ export class SourceTagRepository {
     // Chat and topic names once; anyone but the owner reads only the names Telegram showed.
     const names=await recallNames(this.stores,[...new Set(sources.map(source=>source.chat).filter((chat):chat is string=>chat!==null))],{shownOnly:!owner});
     const reader:TagReader={owner,chat:owner?principal.space??ownerChat(policy):principal.space??principal.scope,zone,precision:options.precision??'minute'};
-    return sources.map(source=>sourceTag(source,reader,names,directory));
+    return sources.map(source=>({...sourceTag(source,reader,names,directory),...(options.details?sourceDetails(source,reader,names,directory):{})}));
   }
 }

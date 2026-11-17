@@ -24,10 +24,13 @@ import {archiveScopes,parentSpace,readSetGroups,sourceChat} from '../spaces.js';
 import {chats} from '../chats.js';
 import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
-import {unavailableTag,type Tag} from '../source-tags.js';
-import type {SourceTagRepository,TagOptions} from './source-tags.js';
-import {bucketOf} from '../source-facts.js';
+import {unavailableTag,zonedDay,type Tag,type TagDetails} from '../source-tags.js';
+import {ownerReader,type SourceTagRepository,type TagOptions} from './source-tags.js';
+import {bucketOf,sourceFacts} from '../source-facts.js';
 import {telegramTopicOpening} from '../chats-telegram.js';
+import {repliesElsewhere} from '../observed-source.js';
+import type {LearnedMemoryRepository} from './learned.js';
+import {ownerTimeZone} from './task-settings.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
 // One chat's records in time order, under every id the chat has had ($1, archiveScopes: ADR-0252). Telegram gives a
@@ -45,6 +48,12 @@ export function scopedObservation(value:unknown):any {
   }
   return result;
 }
+/** How much of a related message archive_read shows: what it answers or replies to, and each further one (ADR-0259). */
+const ANSWER_TEXT=500,THREAD_TEXT=300;
+/** How many sources an opened learned entry names (ADR-0259). */
+const LEARNED_EVIDENCE=5;
+/** At most `size` characters of a text, never half of one that takes two. */
+const clip=(text:string,size:number)=>{const chars=Array.from(text);return chars.length>size?{text:chars.slice(0,size).join(''),truncated:true as const}:{text};};
 /** The message a payload carries, live or exported. */
 const carriedMessage=(payload:unknown)=>{const body=payload&&typeof payload==='object'?payload as Record<string,any>:{};
   return body.message??body.edited_message??body.channel_post??body.edited_channel_post;};
@@ -53,7 +62,8 @@ export class SourceRepository {
   readonly audience:AudienceRepository;
   /** `tags` names each hit's and each opened original's source (ADR-0259); without it, results keep today's shapes. */
   constructor(readonly access:SourceAccessRepository,readonly attachments:AttachmentRepository,readonly selections:SelectionRepository,
-    readonly allowPrepared:(principal:Reader,value:unknown)=>Promise<void>=async()=>{},readonly tags:SourceTagRepository|null=null) {
+    readonly allowPrepared:(principal:Reader,value:unknown)=>Promise<void>=async()=>{},readonly tags:SourceTagRepository|null=null,
+    readonly learned:LearnedMemoryRepository|null=null) {
     this.audience=new AudienceRepository(access.guards);
   }
   private get stores(){return this.access.stores;}
@@ -199,6 +209,117 @@ export class SourceRepository {
       guarded_revision:guardedRevision,event,artifacts,derived,relationships,current_reactions,derivative_versions:'/v1/sources/'+id+'/derivatives',
       ...(principal.admin?{reply_messages:replies.get(id)??[],...ownerState}:{})};
     await this.allowPrepared(principal,result);return result;
+  }
+
+  /**
+   * archive_read's open (ADR-0259): read() and, for anyone but the owner's dashboard, what names the message and its
+   * thread, each part only within what the reader may read. `tag`, `by` and `at` name its source; `chat_id` and `at`
+   * open the conversation around it (archive_page); `forward` names where a forward came from and `topic` the topic it
+   * is in. `answers` is the message a reply of Nocheh's answers (its own canRead). `reply_to` is the message it replies
+   * to, and `chain` the messages before that, `chain` of them, each through the archive's reply relation within the
+   * reader's conversations (relationAudience), then canRead. A forum topic's opening is no reply: a message replying to
+   * it has no reply_to, and the opening's own `replies` are the whole topic, which archive_page reads. An old Telegram
+   * Desktop export whose message replies into another chat keeps no reply link (reply_link_withheld), since its id
+   * names that chat's message. `replies` counts the readable messages that reply to it and shows the first `replies`.
+   * Texts are the reader's own copies, cut short; the result stays within ARCHIVE_READ_LIMIT characters.
+   */
+  async opened(principal:Reader,id:string,options:{replies:number;chain:number}){return afterEpoch(jobRun(principal),()=>this.openedOnce(principal,id,options));}
+  private async openedOnce(principal:Reader,id:string,options:{replies:number;chain:number}) {
+    const found=await this.readOnce(principal,id);
+    if(principal.admin||!principal.turnEvent||!this.tags)return found;
+    const binding=await this.audience.assert(principal),thread=await this.thread(principal,binding,found.reference,found.event.payload,options);
+    for(const linked of thread.linked)await this.permitted(principal,linked,binding);
+    await this.audience.assert(principal);
+    const result={...found,...thread.fields};
+    await this.allowPrepared(principal,result);return result;
+  }
+  /** Kind, channel, scope and payload of each of these events, as the archive holds them. */
+  private async originals(ids:readonly string[]):Promise<Map<string,{kind:string;channel:string;scope:string;payload:any}>> {
+    const wanted=[...new Set(ids)];if(!wanted.length)return new Map();
+    const rows=(await this.stores.archive.query('SELECT id,kind,channel,scope,payload FROM events WHERE id=ANY($1::text[])',[wanted])).rows;
+    return new Map(rows.map(row=>{let payload:any=null;try{payload=JSON.parse(row.payload.toString());}catch{}return [row.id as string,{kind:row.kind,channel:row.channel,scope:row.scope,payload}];}));
+  }
+  /** Whether an event is an old Telegram Desktop export of a reply into another chat (repliesElsewhere). */
+  private static elsewhere(row:{kind:string;payload:any}|undefined):boolean {return !!row&&row.kind.startsWith('telegram_desktop_')&&repliesElsewhere(carriedMessage(row.payload));}
+  /** The text of an event as this reader's own copy holds it (the guarded copy when the secret check is on), with its
+   *  payload; null while that copy is being checked. */
+  private async shownCopy(id:string,binding:GuardBinding):Promise<{text:string;payload:unknown}|null> {
+    if(binding.mode==='on') {
+      const guarded=await this.access.guards.read('events:'+id,binding).catch(error=>{if(pending(error))return null;throw error;});
+      if(!guarded)return null;
+      const value=scopedObservation(guarded.value);return {text:String(value.text??''),payload:value.payload??null};
+    }
+    const row=(await this.stores.archive.query('SELECT original_text,payload FROM events WHERE id=$1',[id])).rows[0];
+    return {text:row?.original_text?.toString()??'',payload:row?JSON.parse(row.payload.toString()):null};
+  }
+  private async thread(principal:Reader,binding:GuardBinding,reference:SourceReference,payload:unknown,options:{replies:number;chain:number}) {
+    const audience=this.relationAudience(principal),self=(await this.originals([reference.id])).get(reference.id)!;
+    const readable=async(references:readonly SourceReference[])=>references.length?await this.access.readable(principal,references,binding):new Map<string,boolean>();
+    // What it replies to, then what that replies to: the first readable copy of each, never a topic's opening.
+    const hops:SourceReference[]=[];let current=reference.id,withheld=SourceRepository.elsewhere(self);
+    for(let step=0;step<=options.chain&&!withheld;step++) {
+      const targets=(await this.access.relationships.replyTargets([current],audience)).get(current)??[];
+      if(!targets.length||(await this.topicOpenings(targets.map(target=>target.id))).size)break;
+      const open=await readable(targets),target=targets.find(item=>open.get(item.id)===true);
+      if(!target||target.id===reference.id||hops.some(hop=>hop.id===target.id))break;
+      hops.push(target);current=target.id;withheld=SourceRepository.elsewhere((await this.originals([target.id])).get(target.id));
+    }
+    // The message a reply of Nocheh's answers, from the reply's own record, through its own access check.
+    const answersId=sourceFacts({channel:self.channel,kind:self.kind,payload:self.payload},this.access.policy().owner_id).answers;
+    const answered=answersId?await this.access.archive.captured(answersId).then(found=>found.reference).catch(()=>null):null;
+    const answers=answered&&(await readable([answered])).get(answered.id)===true?answered:null;
+    // The messages that reply to it: each once, by its first readable copy; never an export's reply into another chat.
+    const opening=telegramTopicOpening(carriedMessage(self.payload));
+    let replying:SourceReference[]=[],complete=true;
+    if(!opening) {
+      const object=(await this.access.relationships.describeMany([reference.id])).get(reference.id)?.object_id;
+      const found=object?await this.access.relationships.replies(object,audience,100):{replies:[],more:false};
+      const candidates=found.replies.flatMap(reply=>reply.references),open=await readable(candidates),rows=await this.originals(candidates.map(item=>item.id));
+      replying=found.replies.map(reply=>reply.references.find(item=>open.get(item.id)===true&&!SourceRepository.elsewhere(rows.get(item.id))))
+        .filter((item):item is SourceReference=>!!item&&item.id!==reference.id);
+      complete=!found.more;
+    }
+    const shownItems=[...hops,...(answers?[answers]:[]),...replying.slice(0,options.replies)];
+    const copies=new Map<string,{text:string;payload:unknown}|null>();
+    for(const item of shownItems)if(!copies.has(item.id))copies.set(item.id,await this.shownCopy(item.id,binding));
+    const shown=new Map<string,unknown>([[reference.id,binding.mode==='on'?payload:undefined],...[...copies].map(([id,copy])=>[id,copy?.payload] as [string,unknown])]);
+    for(const [key,value] of [...shown])if(value===undefined)shown.delete(key);
+    const tags=await this.tags!.tags(principal,binding,[reference,...shownItems],{shown,details:true});
+    const named=(item:SourceReference,size:number)=>{
+      const tag=tags.get(item.id),copy=copies.get(item.id),fallback=unavailableTag('here');
+      return {source:'nocheh:event:'+item.id,tag:tag?.tag??fallback.tag,by:tag?.by??fallback.by,
+        ...(copy?clip(copy.text,size):{checking:true})};
+    };
+    const own=tags.get(reference.id) as (Tag&TagDetails)|null|undefined,ownTag=own??{...unavailableTag('here'),at:null};
+    const captured=await this.access.archive.captured(reference.id);
+    const fields:Record<string,unknown>={tag:ownTag.tag,by:ownTag.by,at:ownTag.at,chat_id:sourceChat(captured),
+      ...(own?.forward?{forward:own.forward}:{}),...(own?.topic?{topic:own.topic}:{}),
+      ...(answers?{answers:named(answers,ANSWER_TEXT)}:{}),
+      ...(hops[0]?{reply_to:named(hops[0],ANSWER_TEXT)}:{}),...(hops.length>1?{chain:hops.slice(1).map(item=>named(item,THREAD_TEXT))}:{}),
+      ...(SourceRepository.elsewhere(self)?{reply_link_withheld:'other_chat'}:{}),
+      replies:opening?{count:0,items:[],topic:true}:{count:replying.length,items:replying.slice(0,options.replies).map(item=>named(item,THREAD_TEXT)),...(complete?{}:{complete:false})}};
+    return {fields,linked:shownItems.map(item=>item.id)};
+  }
+  /**
+   * What the model learned and the owner corrected, opened by its id and revision (archive_read nocheh:learned): only the
+   * active revision, read as memory_recall reads it (LearnedMemoryRepository.read: its scope, its evidence through
+   * canRead, its guarded copy). It names who wrote it, the day of that revision in the reader's zone, and up to
+   * LEARNED_EVIDENCE of its sources, tagged.
+   */
+  async learnedEntry(principal:Reader,id:string,revision:number){return afterEpoch(jobRun(principal),()=>this.learnedOnce(principal,id,revision));}
+  private async learnedOnce(principal:Reader,id:string,revision:number) {
+    if(principal.admin||!principal.turnEvent||!this.learned||!this.tags)throw new HttpError(403,'scoped_turn_required');
+    const binding=await this.audience.assert(principal);
+    const version=await this.learned.read(principal,id,binding,async reference=>this.access.canRead(principal,reference,binding),this.access.recall(principal));
+    if(version.revision!==revision)throw new HttpError(404,'learned_memory_not_found');
+    const created=(await this.stores.derived.query('SELECT created_at FROM learned_versions WHERE entry_id=$1 AND revision=$2',[id,revision])).rows[0]?.created_at as Date|undefined;
+    const zone=ownerReader(principal)?await ownerTimeZone(this.stores.control):'UTC';
+    const evidence=(version.evidence??[]).slice(0,LEARNED_EVIDENCE),tags=await this.tags.tags(principal,binding,evidence);
+    const result={source:`nocheh:learned:${id}:${revision}`,kind:version.kind,subject:version.subject,text:version.text,author:version.author,
+      day:created?zonedDay(created.getTime(),zone):null,
+      evidence:evidence.map(item=>{const tag=tags.get(item.id)??{...unavailableTag('here')};return {source:'nocheh:event:'+item.id,tag:tag.tag,by:tag.by};}),
+      ...((version.evidence?.length??0)>LEARNED_EVIDENCE?{more:version.evidence.length-LEARNED_EVIDENCE}:{})};
+    await this.audience.assert(principal);await this.allowPrepared(principal,result);return result;
   }
 
   /** Archive search deliberately excludes transcripts, contexts and learned results. */

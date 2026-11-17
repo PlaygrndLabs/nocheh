@@ -343,6 +343,20 @@ export class MemoryAccessRepository {
   private granted(row:{id:string;created_at:Date},text:string) {
     return {id:row.id,source:'nocheh:grant:'+row.id,kind:'owner_approved' as const,text,limitations:[] as string[],...shareTag(row.created_at)};
   }
+  /** One grant into the reader's conversation, opened by its id (archive_read): only an active persistent grant the
+   *  reader's conversation recalls, through the same checks as context() (validateGrant). */
+  async open(principal:Reader,id:string) {
+    if(principal.admin||principal.scope===null||!principal.space||principal.answer!==undefined)throw new HttpError(403,'space_context_required');
+    if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(404,'grant_not_found');
+    await this.reconcile();
+    const home=this.access.recall(principal)!,binding=await this.prepared.audience.assert(principal);
+    const row=(await this.stores.control.query(`SELECT * FROM memory_fact_grants WHERE id=$1 AND ${recallCondition('destination','$2','$3')} AND mode='persistent'
+      AND state='active' AND (expires_at IS NULL OR expires_at>now())`,[id,home.space,groupWithTopics(home.group)])).rows[0];
+    const text=row?await this.validateGrant(row,binding):null;
+    if(!text)throw new HttpError(404,'grant_not_found');
+    const result=this.granted(row,text);
+    await this.prepared.allow(principal,result);await this.prepared.audience.assert(principal);return result;
+  }
   async context(principal:Reader,query:string) {
     if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');string(query,2000);await this.reconcile();
     // Persistent grants to any conversation the principal recalls apply, so a group's topics share them. An answer reader

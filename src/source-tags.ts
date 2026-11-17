@@ -22,6 +22,9 @@ export const tagBys:readonly TagBy[]=['owner','person','forward','file','mixed',
 /** One source as a tool result names it, beside the fields it had before. `at` is the moment archive_page orders the
  *  message by, as an ISO time in UTC, so `archive_page {chat, from:at}` opens the conversation around it. */
 export interface Tag {source:string;tag:string;by:TagBy;at:string|null}
+/** What an opened original names beside its tag (archive_read, ADR-0259): a forward's origin in words, and the topic the
+ *  message is in, as its place words. */
+export interface TagDetails {forward?:string;topic?:string}
 /** The longest tag, and the longest name in it. */
 export const TAG_LIMIT=160,TAG_NAME_LIMIT=40;
 const words=modelSourceWords.tags;
@@ -71,6 +74,10 @@ function zoned(instant:number,zone:string):{day:string;time:string;zone:string} 
     return {day:`${String(parts.year).padStart(4,'0')}-${parts.month}-${parts.day}`,time:`${parts.hour}:${parts.minute}`,zone};
   } catch {return zone==='UTC'?{day:new Date(instant).toISOString().slice(0,10),time:new Date(instant).toISOString().slice(11,16),zone}:zoned(instant,'UTC');}
 }
+
+/** The day of an instant in a reader's zone (an IANA zone; one this server's clock does not know reads UTC), as
+ *  YYYY-MM-DD: the owner's Tasks zone for the owner, UTC for anyone else. */
+export const zonedDay=(instant:number,zone:string):string=>zoned(instant,zone).day;
 
 /** The file name a message shows, read from the reader's own copy: a Bot API document's or audio file's, or the one a
  *  Telegram Desktop export wrote. */
@@ -183,6 +190,19 @@ export function sourceTag(source:TagSource,reader:TagReader,names:ReadonlyMap<st
     if(length(tag)<=TAG_LIMIT)return result(tag);
   }
   return result(shorten(tag,TAG_LIMIT));
+}
+
+/**
+ * A forward's origin and a message's topic in words, for an opened original (archive_read): the forward words its tag
+ * carries, and the place words of the topic its chat is (a group's topic, by the name Telegram showed for anyone but the
+ * owner). Nothing for a message that is no forward and in no topic, and no topic of the owner's own for anyone else.
+ */
+export function sourceDetails(source:TagSource,reader:TagReader,names:ReadonlyMap<string,string>,directory:ChatDirectory=chats()):TagDetails {
+  const details:TagDetails={};
+  if(source.class.startsWith('forward_'))details.forward=what(source,TAG_NAME_LIMIT)!;
+  const topic=source.chat!==null&&directory.parentOf(source.chat)!==null&&(reader.owner||directory.groupOf(source.chat)!==null);
+  if(topic)details.topic=modelPlace({chat:source.chat,web:false},names,TAG_NAME_LIMIT,directory);
+  return details;
 }
 
 /** What the owner shared or granted, named only by the day the owner did it, never by the original's sender, chat or day

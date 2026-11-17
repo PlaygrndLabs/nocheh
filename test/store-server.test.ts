@@ -165,6 +165,10 @@ test('separated application captures through control outages, exposes owner repo
     assert.deepEqual(ownerRead.sender,{name:null,username:null,id:'123'});assert.equal(ownerRead.agent_copy.state,'ready');
     const scopedRead=await request('/v1/events/'+digest(key),undefined,200,credential);
     for(const field of ['sender','agent_copy','assistant_state','reply_messages'])assert.ok(!(field in scopedRead),field);
+    // archive_read asks for the thread around a message (ADR-0259); the same read without it stays today's.
+    const opened=await request('/v1/events/'+digest(key)+'?replies=3&chain=1',undefined,200,credential);
+    assert.deepEqual([typeof opened.tag,opened.by,opened.replies],['string','file',{count:0,items:[]}],'its text was read from a file above');assert.ok(!('tag' in scopedRead));
+    for(const asked of ['replies=11','chain=6','replies=-1','chain=x'])await request('/v1/events/'+digest(key)+'?'+asked,undefined,400,credential);
     const listed=(await request('/v1/data?scope=123')).records.find((row:any)=>row.id===digest(key));
     assert.deepEqual(listed.sender,ownerRead.sender);assert.deepEqual(listed.agent_copy,ownerRead.agent_copy);
     await request('/v1/runtime/profiles',undefined,403,credential);

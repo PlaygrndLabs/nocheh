@@ -156,24 +156,59 @@ async function backgroundJob(args:Value,context:ToolContext) {
   }
 }
 
+/** The longest archive_read result: what an original adds about its thread is left out, last first, to stay within it,
+ *  and what it showed before is never cut further (ADR-0259). */
+export const ARCHIVE_READ_LIMIT=16000;
+/** One related message as archive_read shows it: its id, tag, by and the reader's own copy of its text, cut short. */
+function related(value:unknown,limit:number) {
+  const item=record(value),source=String(item.source??'');
+  if(!/^nocheh:event:[a-f0-9]{64}$/.test(source))throw new Error('invalid_related');
+  const body=typeof item.text==='string'?item.text:null;
+  return {source,tag:String(item.tag??''),by:String(item.by??'unknown'),
+    ...(body===null?{checking:true}:{text:cut(body,0,limit),...(size(body)>limit||item.truncated===true?{truncated:true}:{})})};
+}
 async function archiveRead(args:Value,context:ToolContext) {
   try {
     const id=own(args,'id')?args.id:'';
     if(typeof id!=='string')throw new Error('invalid_source');
     const shared=id.match(/^nocheh:(shared|filtered):([a-f0-9]{64})$/);
     if(shared)return text(await request(context,'/v1/memory/'+shared[1]+'/'+shared[2]));
+    // A grant and an owner-corrected entry open through their own checks; neither is open to a private answer (ADR-0259).
+    const grant=id.match(/^nocheh:grant:([a-f0-9]{64})$/);
+    if(grant)return text(await request(context,'/v1/memory/grants/'+grant[1]));
+    const learned=id.match(/^nocheh:learned:([a-f0-9]{64}):([1-9][0-9]{0,8})$/);
+    if(learned){const entry=record(await request(context,'/v1/memory/learned/'+learned[1]+'/'+learned[2])),body=String(entry.text??'');
+      return text({...entry,text:cut(body,0,12000),...(size(body)>12000?{truncated:true}:{})});}
     const source=id.startsWith('nocheh:event:')?id.slice('nocheh:event:'.length):id;
     if(!hex.test(source))throw new Error('invalid_source');
-    const found=record(await request(context,'/v1/events/'+source)),event=record(found.event),body=String(event.text||'');
+    const replies=clamp(integer(args.replies,3),0,10),chain=clamp(integer(args.chain,1),0,5);
+    const found=record(await request(context,'/v1/events/'+source+query({replies:String(replies),chain:String(chain)}))),event=record(found.event),body=String(event.text||'');
     // Full raw payloads stay in the authenticated archive and export. Model context is bounded and labels generated content apart.
-    return text({source:found.source,scope:event.scope,origin:event.origin,kind:event.kind,text:cut(body,0,12000),truncated:size(body)>12000,
+    const result:Value={source:found.source,scope:event.scope,origin:event.origin,kind:event.kind,text:cut(body,0,12000),truncated:size(body)>12000,
       reaction_observation:reactionObservation(event.payload),
       current_reactions:own(found,'current_reactions')?found.current_reactions:{sources:[],complete:false},
       artifacts:list(found.artifacts).slice(0,50).map(value=>{const item=record(value);return {id:item.id,kind:item.kind,state:item.state};}),
       derived:list(found.derived).slice(0,5).map(value=>{const item=record(value);
         if(typeof item.content_base64!=='string')throw new Error('invalid_derived');
         return {id:item.id,kind:item.kind,text:cut(Buffer.from(item.content_base64,'base64').toString('utf8'),0,2000),
-          provenance:cut(typeof item.provenance==='string'?item.provenance:String(text(item.provenance)),0,1000)};})});
+          provenance:cut(typeof item.provenance==='string'?item.provenance:String(text(item.provenance)),0,1000)};})};
+    // Who · where · when, and the thread around it (ADR-0259), as storage names them for this reader.
+    if(typeof found.tag!=='string')return text(result);
+    for(const key of ['tag','by','at','chat_id','forward','topic','reply_link_withheld'])if(own(found,key)&&found[key]!==undefined)result[key]=found[key];
+    if(own(found,'answers'))result.answers=related(found.answers,500);
+    if(own(found,'reply_to'))result.reply_to=related(found.reply_to,500);
+    if(own(found,'chain'))result.chain=list(found.chain).slice(0,chain).map(value=>related(value,300));
+    const thread=record(found.replies??{count:0,items:[]}),count=Number(thread.count);
+    result.replies={count:Number.isSafeInteger(count)&&count>=0?count:0,items:list(thread.items).slice(0,replies).map(value=>related(value,300)),
+      ...(thread.topic===true?{topic:true}:{}),...(thread.complete===false?{complete:false}:{})};
+    // Within the limit: further replies first, then the earliest of the chain, then the rest of the thread.
+    const shown=result.replies as {items:unknown[]};let left=false;
+    const over=()=>size(text(result))>ARCHIVE_READ_LIMIT;
+    while(over()&&shown.items.length){shown.items.pop();left=true;}
+    while(over()&&Array.isArray(result.chain)&&result.chain.length){result.chain.pop();if(!result.chain.length)delete result.chain;left=true;}
+    for(const key of ['answers','reply_to'])if(over()&&own(result,key)){delete result[key];left=true;}
+    if(left)result.thread_cut=true;
+    return text(result);
   }catch{return text({error:'archive_source_unavailable'});}
 }
 
@@ -413,8 +448,12 @@ const TAGS=' Each hit has tag (who · where · when), by (whose words: owner, pe
 export const mcpTools:readonly McpTool[]=[
   {name:'archive_search',description:'Find permitted archive evidence in your authorized scope. For reaction questions without a known note ID, use mode=current_reactions with no query. Results include the guarded reaction observation and bounded target text; read source references for further detail. An individual empty new_reaction list records that actor removing their reaction; it does not prove task completion or that nobody else reacted. This captured evidence is incomplete; empty search results do not prove no reactions. For mode=text (default), query is required and every query word must match; try one or two distinctive words when a longer search misses. Cite returned source references.'+TAGS,
     inputSchema:shape({mode:{type:'string',enum:['text','current_reactions']},query:{type:'string',description:'Required for text mode; omitted for current_reactions.'},limit:{type:'integer',minimum:1,maximum:10}}),run:search},
-  {name:'archive_read',description:'Read an archived source, its observed reaction data, and links to captured current reactions. Follow reaction links to inspect changes or removals; a reaction is not proof of task completion. Originals and generated artifacts have distinct provenance.',
-    inputSchema:shape({id:{type:'string'}},['id']),run:archiveRead},
+  {name:'archive_read',description:'Read an archived source, its observed reaction data, and links to captured current reactions. Follow reaction links to inspect changes or removals; a reaction is not proof of task completion. Originals and generated artifacts have distinct provenance. '+
+    'A message also has tag, by and at, chat_id (open the conversation around it with mcp__nocheh__archive_page chat and from=at), forward (where a forward came from) and topic; '+
+    'answers (the message Nocheh\'s reply answers), reply_to (the message it replies to) and chain (the messages before that, chain of them, default 1, at most 5); '+
+    'and replies (count, and the first replies of them, default 3, at most 10). A message in a forum topic is no reply to the topic\'s opening. '+
+    'It also opens nocheh:shared, nocheh:filtered and nocheh:grant ids (what the owner shared) and nocheh:learned ids (an entry and its sources).',
+    inputSchema:shape({id:{type:'string'},replies:{type:'integer',minimum:0,maximum:10},chain:{type:'integer',minimum:0,maximum:5}},['id']),run:archiveRead},
   {name:'archive_page',description:'Read a conversation in time order, oldest first, one page at a time: messages, edits, reactions, replies and the text of their files and voice notes. '+
     'Use it to go through a period (from and to as YYYY-MM-DD) or a whole chat; pass next as after for the following page until complete is true. '+
     'position says how many of the chat\'s records are read through. Only the owner may name another chat, by an ID from mcp__nocheh__owner_read. '+
