@@ -679,6 +679,12 @@ a recalled note names its source beside its chat).
     design. A planted file can still shape a conclusion about the owner, and the
     owner block's header says so.
   - A Nocheh group reply that restates a member is learned as Nocheh's.
+  - Nocheh's reply to the owner's follow-up about a forward (one that answers
+    the follow-up, not the forward) stays in the owner's conversation session
+    as Nocheh's words. A real deriver reads it as context for the owner's next
+    messages, and a real conversation summary, returned inside the owner block,
+    can restate the forwarded words there. The tester's fake deriver and fixed
+    summary can't show this.
   - Copies sent with the sender hidden, pasted text, and hidden-user forwards of
     the owner's own messages can't be told apart (ADR-0250).
   - Search hits carry no source.
