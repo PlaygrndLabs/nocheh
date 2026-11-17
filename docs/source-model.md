@@ -85,8 +85,10 @@ Telegram audience. A Desktop export records a reply to another chat as that
 chat's message id beside `reply_to_peer_id`, so the Desktop adapter (version 4)
 makes no reply relation for it: this chat's message with that id is another
 message. Projections are made once, at capture, so an export archived earlier
-keeps the relation it was given until a reimport rebuilds it; the owner's notes
-review never judges a quote by it. Browser and scheduler sources also receive
+keeps the relation it was given; importing the same export again keeps it too
+(the archive keeps a source it already holds), and only a portable restore into
+an empty archive rebuilds it. The owner's notes review never judges a quote by
+it. Browser and scheduler sources also receive
 typed identities. Unrecognized legacy event kinds use conservative event-level
 identities.
 

@@ -734,8 +734,10 @@ a recalled note names its source beside its chat).
     review never judges a quote by it, but group memory, turn context, recall
     and the evidence graph still show that message as the one it answers, and
     when that message is Nocheh's, a quote inside a pin or an embedded copy of
-    the export's message is cut as Nocheh's words (failing closed). A reimport
-    rebuilds the projection without it.
+    the export's message is cut as Nocheh's words (failing closed). Importing
+    the same export again changes nothing, since the archive keeps a source it
+    already holds; a portable restore into an empty archive rebuilds the
+    projection without it.
   - A poll option Telegram shows with no adder is read as the poll's own, its
     sender's, since Telegram names who added every option added after the poll
     was sent; Nocheh can't tell otherwise.
