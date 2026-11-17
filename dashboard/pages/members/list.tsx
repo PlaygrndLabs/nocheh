@@ -1,14 +1,19 @@
 /** The list of members, and the daily message cap every member shares. */
 import {useState} from 'react';
 import {Contact} from 'lucide-react';
-import {DAILY_MESSAGES_MAX, DAILY_MESSAGES_MIN, type MemberList as Members} from '../../../src/member-wire';
+import {
+  DAILY_MESSAGES_MAX,
+  DAILY_MESSAGES_MIN,
+  type MemberList as Members,
+  type MemberSettingsResult,
+} from '../../../src/member-wire';
 import type {Person} from '../../lib/chats-model';
 import {setParams} from '../../lib/routes';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, CardBody, CardHeader, Empty, Field, Input, LoadingRows} from '../../ui/core';
 import {ActionError, useAction} from '../chats/shared';
 import {memberHref} from './hooks';
-import {byName, groupSummary, memberError, personMeta, personName} from './model';
+import {byName, groupSummary, memberError, personMeta, personName, type MemberAnswer} from './model';
 
 export function MemberList({
   list,
@@ -94,8 +99,11 @@ export function MemberList({
   );
 }
 
-/** The daily message cap: how many times each member may talk to Nocheh in a UTC day, across all their groups. */
-export function DailyMessages({value}: {value: number}) {
+/**
+ * The daily message cap: how many times each member may talk to Nocheh in a UTC day, across all their groups. Unlike the
+ * switches it is typed, so it has its own Save; the answer shows at once.
+ */
+export function DailyMessages({value, onSaved}: {value: number; onSaved: (answer: MemberAnswer) => void}) {
   const [draft, setDraft] = useState<string | null>(null);
   const action = useAction(memberError);
   const text = draft ?? String(value);
@@ -103,13 +111,16 @@ export function DailyMessages({value}: {value: number}) {
   const valid = Number.isSafeInteger(number) && number >= DAILY_MESSAGES_MIN && number <= DAILY_MESSAGES_MAX;
   const save = async () => {
     if (!valid || number === value) return;
-    const saved = await action.run(
+    const saved = await action.run<MemberSettingsResult>(
       'daily',
       '/members/settings',
       {daily_messages: number},
       {success: `Each member can talk to Nocheh ${number.toLocaleString()} times a day.`},
     );
-    if (saved) setDraft(null);
+    if (saved) {
+      onSaved(saved);
+      setDraft(null);
+    }
   };
   return (
     <Card>
@@ -125,7 +136,7 @@ export function DailyMessages({value}: {value: number}) {
             void save();
           }}
         >
-          <Field label="Messages each member may send a day" htmlFor="daily-messages" className="min-w-0 flex-1">
+          <Field label="Times each member may ask Nocheh a day" htmlFor="daily-messages" className="min-w-0 flex-1">
             <Input
               id="daily-messages"
               type="number"

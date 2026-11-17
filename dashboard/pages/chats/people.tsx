@@ -1,7 +1,7 @@
 /**
- * "Members here" in one group: you always, then each member Telegram or a switch puts in this group, read-only. Every
- * switch lives on the Members page, so each name links there; someone seen here who isn't a member has "Make member",
- * which opens the add flow with them (step 3).
+ * "Members here" in one group: you always, then each member Telegram shows in this group, or whose switch here is on
+ * while Telegram never said they left, read-only. Every switch lives on the Members page, so each name links there;
+ * someone seen here who isn't a member has "Make member", which opens the add flow with them (step 3).
  */
 import {UserPlus} from 'lucide-react';
 import {refreshResources} from '../../lib/resource';

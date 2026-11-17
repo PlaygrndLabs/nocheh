@@ -240,11 +240,15 @@ export function TelegramSettings() {
           description={
             <>
               Add Nocheh to a group yourself in Telegram, and it is on there at once. If someone else adds it, it
-              leaves. Turn it on or off in a group, and choose who may talk to it there, in{' '}
+              leaves. Turn it on or off in a group in{' '}
               <a className="font-medium text-accent-text hover:underline" href={href('chats')}>
                 Chats
               </a>
-              .
+              , and choose who may talk to it there on the{' '}
+              <a className="font-medium text-accent-text hover:underline" href={href('members')}>
+                Members
+              </a>{' '}
+              page.
             </>
           }
           className="pb-3"

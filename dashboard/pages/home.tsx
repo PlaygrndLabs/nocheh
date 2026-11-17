@@ -241,7 +241,7 @@ export default function Home() {
         <CardHeader title="Where things are" description="Everything Nocheh keeps belongs to you." />
         <div className="grid gap-px overflow-hidden rounded-b-xl bg-line sm:grid-cols-3">
           {[
-            {title: 'Chats', text: 'Turn Nocheh on in a group and choose who can talk to it.', link: href('chats')},
+            {title: 'Chats', text: 'Turn Nocheh on in a group and see who are members there.', link: href('chats')},
             {title: 'Messages', text: 'Search every message, and import old Telegram history.', link: href('messages')},
             {title: 'Memory', text: 'See and correct what Nocheh has learned.', link: href('memory')},
           ].map(card => (

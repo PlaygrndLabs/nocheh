@@ -12,7 +12,7 @@ import {Button, Field, Input, Notice, Segmented, Select} from '../../ui/core';
 import {Dialog} from '../../ui/overlay';
 import {ActionError, useAction, useTelegram} from '../chats/shared';
 import {memberHref} from './hooks';
-import {addGroups, byName, memberError, personMeta, personName} from './model';
+import {addGroups, byName, memberError, personMeta, personName, type MemberAnswer} from './model';
 
 type Mode = 'seen' | 'id';
 
@@ -21,12 +21,15 @@ export function AddMember({
   known,
   person,
   onClose,
+  onSaved,
 }: {
   list: MemberList;
   known: ReadonlyMap<string, Person>;
   /** The person "Make member" chose, by account; null to choose here. */
   person: string | null;
   onClose: () => void;
+  /** Shows the new member at once, before the list reloads with them. */
+  onSaved: (answer: MemberAnswer) => void;
 }) {
   const telegram = useTelegram();
   const action = useAction(memberError);
@@ -76,7 +79,9 @@ export function AddMember({
       label = personName({name: null, username: null, telegram_id: id}, known);
     }
     const result = await action.run<MemberResult>('add', '/members', body, {success: `${label} is a member now.`});
-    if (result?.member) setParams({add: null, member: result.member.id});
+    if (!result?.member) return;
+    onSaved(result);
+    setParams({add: null, member: result.member.id});
   };
 
   return (
