@@ -412,9 +412,22 @@ becomes your private memory"). One pull request of several commits
   unit tests (the same 4 fail); the dashboard tests and format check; the reviews store file and
   those that read the same paths (long-term memory, note sources, learning, entity
   suggestions); the sweep's probes; each new check also run without its fix and failing.
-  Pending: the whole store suite after those fixes; the
-  cloud tester's new and affected scenarios, with the changed `own_file_stays_recallable`
-  checks and review waits; the private names scan; a live look at a
+  The ninth to eleventh reviews' fixes (a quote inside a message another embeds judged, and cut
+  as `quote_not_traced` when nothing traces it; the owner's own deleted poll option in the
+  private chat the owner's own; a pin of the owner's message holding others' words worded as
+  such; a quote traced through every revision; a Desktop export's reply to another chat never
+  linked to this chat's message with the same number) were each checked the same way, with a
+  field-by-field sweep of every Telegram message field finding nothing labelled as the owner's
+  that the owner did not type. Final checks on the last code: the build; the unit tests (the
+  same 4 fail); the dashboard tests and format check; the whole store suite (the 4 files that
+  fail on main fail, every other file passes); the Hermes (its two environment-only errors),
+  Telegram and tester Python tests; the cloud tester's memory scenarios (group members, people
+  not allowed, display names, forwards, files, forwarded commands, tasks and reminders, the
+  owner's review, background jobs, native notes, the fixed reply, private chat out of groups,
+  import with learning, the search model change, the private marks sweep, nothing left running
+  and every dashboard page), all passing; the forward and file scenarios now ask which block
+  holds a forward by the mark's number, since the owner's own question carrying the mark was
+  learned as the owner's in a race. Pending: the private names scan at push; a live look at a
   labelled note, a forward and a skipped card on the owner's install after merge. Open owner
   question: whether the message of someone not allowed that the owner replies or reacts to
   should come along as labelled context for the note (built without it, as the rule says, until
