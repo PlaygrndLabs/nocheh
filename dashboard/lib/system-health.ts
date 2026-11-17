@@ -275,7 +275,7 @@ export function issues(m: any): Issue[] {
   }
   // Steps that failed today telling where notes came from, counted per attempt, not per note, and turns that read only
   // part of long-term memory (ADR-0257): Hermes's, then the stores' own lines for labelling notes, recall's ask of the
-  // owner's forwards and files, and the source tags of search hits and opened originals (ADR-0259), each apart so one
+  // owner's forwards and files, and the source tags of search hits and opened originals (ADR-0261), each apart so one
   // side working never hides the other's failure.
   const notes: any[] = Array.isArray(m.note_problems) ? m.note_problems : [];
   const times = (count: number) => `${count} ${count === 1 ? 'time' : 'times'} today`;
