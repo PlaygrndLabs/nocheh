@@ -192,8 +192,11 @@ groups. Here each effect checks the member again just before it happens:
   switched off there, gets `telegram.not_allowed` when they address Nocheh, at
   most once a UTC day per person and group. The bot keys the reply
   `refusal-<kind>-<chat>-<user>-<day>`, where the kind is `not_allowed` or
-  `daily_limit`. The private reply is unchanged. A post in a chat's own name or
-  from a proxy account gets nothing.
+  `daily_limit`. Only a reply that may have reached Telegram uses up the day's:
+  one Telegram refused, such as in a closed topic, or that never left keeps it
+  for that person's next message. The private reply works the same way and is
+  otherwise unchanged. A post in a chat's own name or from a proxy account gets
+  nothing.
 - **Voice notes.** `allowedSender` asks `talks`, so someone who is not the owner
   or a member who talks there has a live recording cut to 15 minutes (ADR-0251).
 - **Tasks.** A non-owner sender must still pass `talks` in the group at each task
