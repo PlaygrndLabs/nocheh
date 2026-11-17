@@ -13,7 +13,7 @@ review of the design tightened it: "you" only for a review of nothing but the
 owner's own messages that cites them, a note's earlier sources carried through
 the operations that replace it, and a reported claim never made direct.
 Reviews of the build closed gaps in pins and quotes (of Nocheh's own messages
-too), messages a message embeds, checklists, rules, recall, what a turn read,
+too), messages a message embeds, checklists, polls, rules, recall, what a turn read,
 failure counting and the full tester's checks; this record describes the result. Four
 questions went to the owner; this builds the recommended answer to each, except
 that a reply's or a reaction's target from someone not allowed is left out of
@@ -133,20 +133,35 @@ a recalled note names its source beside its chat).
   and a card the owner replies to stays whole as related context of the reply
   in the notes review and interpretations (ADR-0256): only Honcho never writes
   it. A reply that quotes nothing carries none of its target's words into what
-  is learned, and no message carries another it embeds: what is learned takes
-  out of each message every message nested in it, at any depth and whatever
-  field holds it, except the one a pin carries, which loses its own nested
-  messages the same way (`cutEmbeddedMessages`). Code tells such a message by
-  its shape alone, an object with a `message_id` and a `chat` and no `type`
-  (every forward origin has one), never by a field's name or an id, so a field
-  Telegram adds later fails closed: the checklist a service message reports on
+  is learned, and neither does a reply inside any message a message carries.
+- A message a message embeds is kept and labelled, not cut (the owner prefers a
+  guard to a removal): the checklist a service message reports on
   (`checklist_tasks_done`, `checklist_tasks_added`), a giveaway's message
-  (`giveaway_completed`) and a suggested post's (`suggested_post_approved` and
-  the rest) are all cut. Such a message is someone else's, or the sender's own
-  earlier one, and is learned from its own event when Nocheh got it, as a
-  reply's target is; the sender's own data beside it stays (the tasks they
-  added, the ids of tasks marked done). Interpretations, Honcho and the notes
-  review read nothing else of it.
+  (`giveaway_completed`), a suggested post's (`suggested_post_approved` and the
+  rest) and the poll an option was added to or deleted from
+  (`poll_option_added`, `poll_option_deleted`). Code finds such a message by its
+  shape alone, an object with a `message_id` and a `chat` and no `type` (every
+  forward origin has one), at any depth and whatever field holds it, never by a
+  field's name or an id, so one in a field Telegram adds later is found too
+  (`embeddedMessages`). One that is not its sender's own typed message makes
+  the message holding it someone else's words (section 2), whoever sent it.
+  Only Nocheh's own words in it are cut, from everything learned, as from a pin:
+  a message of Nocheh's own account, told by equality with `events.bot_id`, and
+  a quote of one (`nochehHeld`). Interpretations and Honcho read the rest,
+  labelled. The owner's notes review judges each one by its author as it judges
+  a message in that chat (`notesSender`), and a post in a chat's name is never
+  allowed: one from someone not allowed there is cut out of the message holding
+  it, the rest of that message stays, and the message counts once as
+  `sender_not_allowed`. A message Telegram no longer shows (date 0) carries
+  nothing and stays. A poll option someone added is judged the same way, by
+  `added_by_user`; one added in a chat's name (`added_by_chat`) is never
+  allowed, and the text of an option deleted from a poll, which names no one,
+  is always cut there. The review's store (`heldSenders`) returns the places it
+  lets in, and the learning context cuts every other place it finds
+  (`heldBy`, `cutHeld`), so a place the two read differently fails closed. A
+  quote is judged by what the message it is from holds too, as the reply shows
+  it now and as the archive holds it: a poll gets options added later without
+  an edit of its message.
 - Memory › Assistant notes says how many messages were kept out this generation
   (`kept_out` on the reviews list). Long-term memory and learning still take
   such a message, so in System › Background work its Memory notes step shows as
@@ -166,8 +181,9 @@ a recalled note names its source beside its chat).
   never the owner. `ownerTyped` holds only for the owner's own message, edit,
   reaction or web-chat message with no forward of someone else, no inline bot,
   no post in a chat's name, no quote of someone else, no pin of someone else's
-  message, no checklist that may hold someone else's tasks and no file or audio
-  text. A pin has no words of its own and carries
+  message, no words in it that may be someone else's (a checklist, a poll or a
+  message it embeds, below) and no file or audio text. A pin has no words of
+  its own and carries
   those of the message it pinned: a pinned forward is a forward, someone else's
   message is `pinned`, and only the sender's own message stays theirs. A quote
   is the sender's own only when the message it answers is theirs and is not a
@@ -185,11 +201,25 @@ a recalled note names its source beside its chat).
   `others_can_add_tasks` says only what others may do now, since its sender can
   turn it off once others have added tasks. So a checklist others can add tasks
   to, and any checklist shown again (an edit of it, the message a pin carries,
-  the message a quote is from), is read as one with someone else's words in
-  it, whoever sent it (`sharedChecklist`): `pinned`, or `quote` for a quote of
-  one, both in the person group, the classes a pin or quote of someone else's
-  message already has. Only a new checklist that only its sender can add to
-  stays the sender's own. Its text is still learned.
+  the message a quote is from, and the sender's forward of their own), is read
+  as one with someone else's words in it, whoever sent it (`sharedChecklist`):
+  `pinned`, or `quote` for a quote of one, both in the person group, the
+  classes a pin or quote of someone else's message already has. Only a new
+  checklist that only its sender can add to stays the sender's own, and in the
+  owner's private chat with Nocheh, where no one else can add tasks
+  (`ownerChat`, told by equality), the owner's checklist that is not a forward
+  stays the owner's own, new, edited, pinned or quoted; in a group it fails
+  closed. A poll is read the same way when an option in it was added by
+  someone else, in a chat's name (`added_by_chat`) or by another account
+  (`added_by_user`, told by equality) (`pollByOthers`), and so is the service
+  message for an option deleted from a poll (`poll_option_deleted`), whose
+  adder Telegram does not name, and a message that embeds one that is not its
+  sender's own typed message (`othersIn`, read for the embedded message as for
+  the one a pin carries). The `held` fact marks a message that itself holds
+  such words, as against a pin of them, so its labels claim no pin. A Telegram
+  Desktop export names no one per task or option, so its checklist
+  (`todo_list`) or poll is read the same way, whoever the archive proved sent
+  it. The text of all of these is still learned.
 - `eventClass` gives one fixed token per message, such as `owner_message`,
   `person_message`, `forward_hidden_by_owner`, `file_by_person`, `pinned`,
   `nocheh_job_report`, `nocheh_about_forward` or `unknown`, in five groups:
@@ -337,10 +367,13 @@ a recalled note names its source beside its chat).
   archived yet, or a forward of one) leaves the same pointer, and a quote of one
   is left out as a quote of Nocheh's is. Another bot's message is someone
   else's: the owner's pin of it is kept as a forward is, a member's stays on the
-  member, and a quote of it goes as anyone else's quote. The owner's checklist
-  that may hold someone else's tasks (see section 2) is kept as the owner's pin
-  of someone else's message is, with the same pointer. Nocheh's reply about a
-  forward goes to the forwards session.
+  member, and a quote of it goes as anyone else's quote. The owner's message
+  that holds words that may be someone else's (section 2: a shared checklist, a
+  poll someone else added options to, a message embedding someone else's) is
+  kept as the owner's pin of someone else's message is, with its own fixed
+  pointer and `source` (`held`), which claim no pin; a member's stays on the
+  member with that `source`. Nocheh's reply about a forward goes to the
+  forwards session.
 - In a group, a member's message, forward or pin stays on the member's peer,
   except a pin of Nocheh's own message, which leaves only the pointer. The
   owner's forward, file text,
@@ -480,19 +513,30 @@ a recalled note names its source beside its chat).
     or a venue it answers) is no longer learned with the pin; the pin's message
     is learned without it, as every message is learned without the message it
     answers.
-  - A service message no longer carries the message it reports on into what is
-    learned: the tasks the owner added and the ids of tasks the owner marked done
-    stay, and the checklist they belong to, a giveaway's message or a suggested
-    post is learned from its own message when Nocheh got it, labelled as its
-    sender's. A note from "tasks 1 and 2 done" sees the ids, not those tasks'
-    text, unless that checklist is in the same review.
-  - The owner's checklist others can add tasks to, and every edit, pin or quote
-    of the owner's own checklist, is no longer the owner's own typing: Telegram
-    names no one per task and the owner can stop sharing a checklist after others
-    added tasks. It is labelled as a pin or quote of someone else's message (on
-    the Notes page "a message by someone else that you pinned"), kept with the
-    owner's forwards and files in long-term memory, and its text is still
-    learned. A new checklist only the owner can add to stays the owner's own.
+  - A service message that carries someone else's message (the checklist a
+    "tasks done" or "tasks added" message reports on, a giveaway's or a
+    suggested post's message, the poll an option was added to) is no longer the
+    owner's own typing when the owner sent it: it is labelled as a message
+    holding someone else's words, on the Notes page "a message you sent ...
+    holding someone else's words, such as a shared checklist or poll", kept
+    with the owner's forwards and files in long-term memory, and all its text is
+    still learned. In the owner's notes review the carried message, or a poll
+    option, from someone not allowed there is cut out of it, and so is the text
+    of an option deleted from a poll, the message counted as kept out;
+    interpretations and long-term memory keep them.
+  - The owner's checklist others can add tasks to, every edit, pin or quote of
+    the owner's own checklist, and the owner's forward of it, are no longer the
+    owner's own typing in a group: Telegram names no one per task and the owner
+    can stop sharing a checklist after others added tasks. So is the owner's
+    poll that someone else added an option to. They are labelled as a message
+    holding someone else's words, or a pin or quote of someone else's message,
+    kept with the owner's forwards and files in long-term memory, and their
+    text is still learned. A new checklist only the owner can add to, and in the
+    owner's private chat with Nocheh any of the owner's checklists that is not
+    a forward, stay the owner's own.
+  - A Telegram Desktop export's checklist or poll is never the owner's own
+    typing, since the export names no one per task or option; it is labelled as
+    a message holding someone else's words and still learned.
   - Allowing someone later does not add their old messages to the notes.
   - Others' forwards, and others' messages the owner pins, leave the private
     chat's long-term memory session. A follow-up like "book the 7am one" is
@@ -596,9 +640,14 @@ a recalled note names its source beside its chat).
     else's, never the owner's words, but its text is kept, card or not.
   - A checklist others can add tasks to names no one per task, so a task that
     someone not allowed there added reaches the owner's notes review when the
-    checklist is shown again (an edit, a pin or a quote of it), labelled as
-    someone else's message, never the owner's; their own service message saying
-    they added it (`checklist_tasks_added`) is kept out as theirs.
+    checklist is shown again (an edit, a pin or a quote of it, or a service
+    message carrying it that someone allowed sent), labelled as someone else's
+    words, never the owner's; their own service message saying they added it
+    (`checklist_tasks_added`) is kept out as theirs. A message Telegram no
+    longer shows inside another (date 0) carries nothing to judge and stays.
+  - A poll option Telegram shows with no adder is read as the poll's own, its
+    sender's, since Telegram names who added every option added after the poll
+    was sent; Nocheh can't tell otherwise.
   - A quote of Nocheh's message is cut whole, so the notes review and
     interpretations no longer see which part of it was quoted.
   - Hermes's own `notes` line adds up its own steps, so a lookup that works can

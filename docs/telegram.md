@@ -245,15 +245,23 @@ Nocheh holds that message and its sender is allowed there. A quote inside a
 pinned message is judged the same way, by the message it quotes as Nocheh holds
 the pinned message; Telegram sends a pinned message without its reply, so the
 quote inside one Nocheh never got is cut. A pinned message's own reply, such as
-a poll it answers in another chat, is never learned with the pin, and neither is
-any other message one carries: the checklist that a "tasks done" or "tasks
-added" service message reports on, a giveaway's or a suggested post's message,
-or one in a field Telegram adds later. Nocheh tells such a message by its shape,
-never by a field's name, and learns it from its own message when it got that.
-Telegram names no one per checklist task, and the owner can stop sharing a
-checklist after others added tasks, so a checklist others can add tasks to, and
-any checklist edited, pinned or quoted, is labelled as a pin or quote of
-someone else's message, never as the owner's own words; it is still learned
+a poll it answers in another chat, is never learned with the pin. Any other
+message one carries (the checklist that a "tasks done" or "tasks added" service
+message reports on, a giveaway's or a suggested post's message, the poll an
+option was added to, or one in a field Telegram adds later) is kept and
+labelled: Nocheh tells such a message by its shape, never by a field's name,
+cuts only its own words from it, and in the owner's notes review cuts one from
+someone not allowed there, counted as kept out. A poll option someone added is
+judged by who added it there the same way, one added in a chat's name never
+let in, and a deleted option's text is cut there; interpretations and
+long-term memory keep them, labelled. Telegram names no one per checklist task,
+and the owner can stop sharing a checklist after others added tasks, so a
+checklist others can add tasks to, and any checklist edited, pinned, quoted or
+forwarded, is labelled as someone else's words, never as the owner's own; in
+the owner's private chat with Nocheh no one else can add tasks, so the owner's
+own checklist there stays the owner's. A poll someone else added an option to,
+a deleted option and a message carrying someone else's are labelled the same
+way. All of it is still learned
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app

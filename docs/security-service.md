@@ -127,15 +127,22 @@ forward quotes whoever wrote it, so it is never `owner`, and neither is a quote
 of a message in another chat or topic, which Telegram does not show as a forward
 or as sent through an inline bot; a Telegram Desktop export's message with any
 of its forward fields is a forward. A checklist others can add tasks to, and
-any checklist edited, pinned or quoted, is never `owner` either: Telegram names
-no one per task, and the owner can stop sharing one after others added tasks.
-A pinned message's own reply is never learned with the pin, and no message is
-learned with another it embeds, which code tells by its shape alone (a
-`message_id` and a `chat`), never a field's name, so a field Telegram adds later
-fails closed: the checklist a service message reports on, or a giveaway's or a
-suggested post's message, is learned only from its own message. In the owner's
-notes review a quote inside a pinned message is judged by who wrote the message
-it quotes, and cut when that can't be traced. The evidence
+any checklist edited, pinned, quoted or forwarded, is never `owner` either:
+Telegram names no one per task, and the owner can stop sharing one after others
+added tasks; only the owner's own in the owner's private chat with Nocheh, where
+no one else can add tasks, stays `owner`. Nor is a poll someone else added an
+option to, a deleted option, a Telegram Desktop export's checklist or poll, or a
+message that embeds one its sender did not type. A pinned message's own reply
+is never learned with the pin. A message another embeds, which code finds by
+its shape alone (a `message_id` and a `chat`), never a field's name, so one in a
+field Telegram adds later is found too (the checklist a service message reports
+on, a giveaway's or a suggested post's message, the poll an option was added
+to), is kept and labelled: only Nocheh's own words in it are cut, and the
+owner's notes review cuts one from someone not allowed there, a poll option
+such a person added or one added in a chat's name, and a deleted option's text,
+counting the message as kept out. In the owner's notes review a quote inside a
+pinned message is judged by who wrote the message it quotes, and cut when that
+can't be traced. The evidence
 instruction says a `nocheh` note is not the owner's own words either. What a
 turn read comes from its own session:
 a search by meaning counts as reading other chats, an earlier tool result or

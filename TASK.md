@@ -257,10 +257,13 @@ becomes your private memory"). One pull request of several commits
   turn's note never. A quote of a message in another chat or topic is never the sender's own
   (in a forum topic Telegram also points the reply at the topic's first message), and a
   Telegram Desktop export's message is a forward when it carries any of its forward fields. A
-  checklist others can add tasks to, and any checklist edited, pinned or quoted, is never the
-  sender's own typing: Telegram names no one per task, and the owner can stop sharing one after
-  others added tasks; it is labelled as a pin or quote of someone else's message and still
-  learned. A
+  checklist others can add tasks to, and any checklist edited, pinned, quoted or forwarded, is
+  never the sender's own typing: Telegram names no one per task, and the owner can stop sharing
+  one after others added tasks; only in the owner's private chat with Nocheh, where no one else
+  can add tasks, does the owner's own stay the owner's. A poll someone else added an option to, a
+  deleted option, a message embedding someone else's and a Desktop export's checklist or poll
+  are read the same way. Each is labelled as a pin or quote of someone else's message, or as a
+  message holding someone else's words (no pin claimed), and still learned. A
   rule is judged by the messages code recorded it was learned from, never by what the model
   cited, and rules resting on others' words label the note as theirs; only a review
   holding someone else's words reads them, as a review of Nocheh's own learned messages, alone or
@@ -308,10 +311,12 @@ becomes your private memory"). One pull request of several commits
   can stay direct; a claim citing the pin or quote never is. A pin of only a card, or of only
   Nocheh's message not archived yet, asks no interpretation or notes review either. A pinned
   message's own reply (a poll or a contact it answers in another chat) is never learned with
-  the pin, and no message carries another it embeds, told by shape alone so a field Telegram
-  adds later fails closed: the checklist a service message reports on, a giveaway's or a
-  suggested post's message is learned only from its own message, and the tasks the owner added
-  or marked done stay the owner's. Owner
+  the pin. A message another embeds (the checklist a service message reports on, a giveaway's or
+  a suggested post's message, the poll an option was added to), found by shape alone so a field
+  Telegram adds later is found too, is kept and labelled, not cut: only Nocheh's own words in it
+  are cut, and in the owner's notes review one from someone not allowed there, a poll option
+  such a person added and a deleted option's text are cut out by place and counted, while
+  interpretations and long-term memory keep them. Owner
   turns read the forwards block apart from the owner's, and
   recall asks it; when that ask fails, recall keeps the other answers and says so, and
   answers stay whole under their headers within 20,000 characters. A claim resting on a
@@ -380,7 +385,15 @@ becomes your private memory"). One pull request of several commits
   a quote inside a pinned message judged in the owner's notes review): the build; the unit tests
   (the same 4 fail); the dashboard tests and format check; the reviews store file and those that
   read the same paths (long-term memory, note sources, learning, entity suggestions); the
-  sweep's four probes; each new check also run without its fix and failing. Pending: the whole store suite after those fixes; the
+  sweep's four probes; each new check also run without its fix and failing. After the eighth
+  review's fixes (a message another embeds kept and labelled instead of cut, judged by its author
+  in the owner's notes review; a poll others added options to, or an option deleted, never the
+  owner's; the owner's forward of a checklist shown again; a Desktop export's checklist or poll
+  never the owner's; the owner's checklist in the private chat the owner's own): the build; the
+  unit tests (the same 4 fail); the dashboard tests and format check; the reviews store file and
+  those that read the same paths (long-term memory, note sources, learning, entity
+  suggestions); the sweep's probes; each new check also run without its fix and failing.
+  Pending: the whole store suite after those fixes; the
   cloud tester's new and affected scenarios, with the changed `own_file_stays_recallable`
   checks and review waits; the private names scan; a live look at a
   labelled note, a forward and a skipped card on the owner's install after merge. Open owner
@@ -397,7 +410,9 @@ becomes your private memory"). One pull request of several commits
   learned as someone else's; a forward of Nocheh's message sent on its own is learned as a
   forward from a person shown as Nocheh, someone else's, card or not; a task someone not allowed
   there added to a shared checklist reaches the owner's notes review when the checklist is shown
-  again, labelled as someone else's message, since Telegram names no one per task; a rule
+  again or carried by a service message someone allowed sent, labelled as someone else's words,
+  since Telegram names no one per task; a poll option Telegram shows with no adder is read as the
+  poll's own; a rule
   learned automatically from the owner's
   messages can restate others' words, and a review of the owner's and Nocheh's own messages
   reads it as Nocheh's; a quote of Nocheh's message is cut whole, so the notes review and

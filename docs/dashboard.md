@@ -199,8 +199,11 @@ a forward, a file, a mix, or a note written after the turn read something
 outside. Only a review that held other people's messages reads rules learned
 from others' words, and one learned from a forward or a file can make its note a
 mix; a review of only your own and Nocheh's messages leaves such rules out. A
-pin counts as the words of the message it pinned, and your quote or pin of a
-message Nocheh learned as its own counts as Nocheh's (blue). Nocheh's code builds
+pin counts as the words of the message it pinned, and a message you sent that
+holds someone else's words, such as a shared checklist, a poll someone else
+added an option to or a service message carrying another's message, reads "a
+message you sent ... holding someone else's words" (amber). Your quote or pin of
+a message Nocheh learned as its own counts as Nocheh's (blue). Nocheh's code builds
 the label from its own record of who wrote the note, never from the note's
 text, and a note written during a turn is never labelled as yours. Notes
 written before labels existed say "Source not recorded"; a label that could not
@@ -507,7 +510,8 @@ notes step shows as Done, with the reason under it and under **Note** in its
 details: "From someone not allowed there: kept out of your notes, still in group
 memory", or "A reaction to someone not allowed there: kept out of your notes,
 still in group memory". A pin of such a message is reviewed without the message
-it pinned. A pin of Nocheh's own message is never counted as kept out: a pin of
+it pinned, and a message carrying one of theirs (the checklist a "tasks done"
+message reports on, or a poll option they added) is reviewed without it. A pin of Nocheh's own message is never counted as kept out: a pin of
 a message it learns is reviewed with it, and a pin of its card, notice or
 reminder without it. Nocheh's own cards, notices and reminders are not learned anywhere, so their
 step shows as skipped ("Nocheh's own card, notice or reminder: kept, not
