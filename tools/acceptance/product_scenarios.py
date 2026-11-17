@@ -10,6 +10,7 @@ The scripted model acts only on explicit directives, so these scenarios test
 Nocheh's plumbing, rules and effects, never model judgement.
 """
 import base64
+import contextlib
 import http.client
 import io
 import json
@@ -25,16 +26,21 @@ from datetime import datetime, timedelta, timezone
 from tools.acceptance import canaries, telegram_mock
 from tools.acceptance.github_mock import key_line
 from tools.acceptance.telegram_mock import ANONYMOUS_ADMIN
-from tools.acceptance.telegram_rehearsal import add_card, group_chat, person, sent_buttons, wait_telegram_connected
-from tools.acceptance.telegram_scenarios import (GROUP, NEW_GROUP, NEW_TOPIC, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP, UNSELECTED_GROUP,
-                                                REFRESHED_GROUP, REFRESHED_SUPERGROUP, UPGRADED_GROUP, UPGRADED_SUPERGROUP, Failed, Scenarios,
-                                                isolated_turns, synthetic_pdf)
+from tools.acceptance.telegram_rehearsal import add_card, group_chat, person, sent_buttons
+from tools.acceptance.telegram_scenarios import (GROUP, MENTION, NEW_GROUP, NEW_TOPIC, NOT_ALLOWED, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP,
+                                                UNSELECTED_GROUP, REFRESHED_GROUP, REFRESHED_SUPERGROUP, UPGRADED_GROUP, UPGRADED_SUPERGROUP, Failed,
+                                                Scenarios, isolated_turns, synthetic_pdf)
 from tools.paths import ROOT
 
-# 778 is allowed in both groups, 779 only in GROUP; PARTICIPANT (777) in none.
+# The owner's members, added on the Members page by their Telegram user IDs (group_members): MEMBER (778) with GROUP and
+# OTHER_GROUP ticked, GUEST (779) with only GROUP; every other group Nocheh is in is unticked for them. PARTICIPANT (777)
+# is no member.
 MEMBER, GUEST = 778, 779
-ACCESS = {str(GROUP): {'granted': [str(MEMBER), str(GUEST)], 'denied': []}, str(OTHER_GROUP): {'granted': [str(MEMBER)], 'denied': []}}
-NOT_ALLOWED = 'Sorry, I only work with people the owner has allowed in this group.'
+MEMBERS = {MEMBER: (GROUP, OTHER_GROUP), GUEST: (GROUP,)}
+# The fixed, editable reply to a member over the daily message cap, at most once a UTC day per group (src/prompts.ts).
+DAILY_LIMIT = 'Sorry, you have reached today\'s limit of messages to me. You can ask again tomorrow.'
+# Topics the member scenarios talk in, apart from the ones other scenarios count replies in.
+SWITCH_TOPIC, PAUSE_TOPIC, WEB_TOPIC, CAP_TOPIC, NAME_TOPIC, ADD_TOPIC, POST_TOPIC, LEFT_TOPIC, TASK_TOPIC = 41, 42, 43, 44, 45, 46, 47, 48, 49
 TEAM_TOPIC, TEAM_NAME = 31, 'Team plans'
 # Someone who found the bot and started it from their own account.
 STRANGER, STRANGER_NAME = 880, 'STRANGERNAME61'
@@ -98,21 +104,6 @@ class ProductScenarios(Scenarios):
 
     def proposals(self):
         return self.f.app('/v1/tools/actions')['telegram']
-
-    def apply_access(self, access):
-        """Change who is allowed in which group and restart the services that read it, the Telegram service among them."""
-        names = []
-        for name, service in self.f.manifest['services'].items():
-            environment = service.get('environment') or {}
-            if isinstance(environment, dict) and 'TELEGRAM_GROUP_ACCESS' in environment:
-                environment['TELEGRAM_GROUP_ACCESS'] = json.dumps(access)
-                names.append(name)
-        path = self.f.directory/'compose.json'
-        path.write_text(json.dumps(self.f.manifest))
-        path.chmod(0o600)
-        self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *names)
-        wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
-        return names
 
     def listed(self, app_id):
         """The owner's chat list item of a Telegram chat, or {} while the list does not show it yet."""
@@ -193,10 +184,17 @@ class ProductScenarios(Scenarios):
     # Setup ----------------------------------------------------------------------
 
     def group_members(self):
-        # Allowed members for the group scenarios; later scenarios assume them.
-        self.current['recreated'] = self.apply_access(ACCESS)
+        # The owner's members for the group scenarios, added on the Members page through the dashboard; later scenarios
+        # assume them. MEMBER talks at once, with no restart. Telegram shows each member in their groups, which what is
+        # decided without a message from a group needs (a post into it from another group, a job, a private chat).
+        starts = self.service_starts()
+        members = self.set_members(MEMBERS)
+        self.gate('members_listed', all(item['state'] == 'active' for item in members.values()), members=list(members.values()))
         self.topic_created(GROUP, TEAM_TOPIC, TEAM_NAME)
-        self.turn(self.f.message(GROUP, 'سلام از طرف عضو مجاز', sender=MEMBER, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+        self.turn(self.f.message(GROUP, 'سلام از طرف عضو', sender=MEMBER, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+        self.nothing_restarted(starts)
+        for who, groups in MEMBERS.items():
+            self.seen_in(who, groups)
 
     # Addressing -------------------------------------------------------------------
 
@@ -264,10 +262,12 @@ class ProductScenarios(Scenarios):
         self.gate('no_reaction_when_not_addressed', not calls(started, GROUP, 'setMessageReaction', update['message']['message_id']))
 
     def not_allowed_person_gets_fixed_reply(self):
-        # Someone not allowed who addresses Nocheh gets the owner's fixed text once; no model runs.
+        # Someone who is no member and addresses Nocheh gets the owner's fixed text once; no model runs. A person new to the
+        # fixture, since everyone gets the text at most once a UTC day per group.
+        stranger = self.fresh_person()
         brain = len(self.f.brain())
         before = len(self.f.sent())
-        update = self.f.message(GROUP, 'سلام، کمکم می‌کنی؟', sender=PARTICIPANT, topic=TEAM_TOPIC)
+        update = self.f.message(GROUP, 'سلام، کمکم می‌کنی؟', sender=stranger, topic=TEAM_TOPIC)
         self.f.inject(update)
         self.finished(self.captured(update))
         reply = self.wait('fixed_reply_sent', lambda: [row for row in self.new(before) if row['message']['chat']['id'] == GROUP], 120)
@@ -280,7 +280,7 @@ class ProductScenarios(Scenarios):
                   and reply[0]['message'].get('message_thread_id') == TEAM_TOPIC, target=target)
         self.gate('no_model_turn', len(self.f.brain()) == brain)
         # Without addressing Nocheh they get nothing at all.
-        self.turn(self.f.message(GROUP, 'کسی هست؟', sender=PARTICIPANT, mention=False, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC, expect_reply=False)
+        self.turn(self.f.message(GROUP, 'کسی هست؟', sender=stranger, mention=False, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC, expect_reply=False)
 
     # Strangers ------------------------------------------------------------------------
 
@@ -379,8 +379,9 @@ class ProductScenarios(Scenarios):
         self.refused_send(UNSELECTED_GROUP, outside, 'SENDUNSELECTED')
 
     def send_to_allowed_person_private(self):
-        # MEMBER is allowed in GROUP and OTHER_GROUP, so their private chat is served, but only through the owner's card. The
-        # card says it is a person's private chat and which group of the owner's they are allowed in, quoting only names.
+        # MEMBER is a member in GROUP and OTHER_GROUP, so their private chat is served, but only through the owner's card. The
+        # card says it is a member's private chat and which of the owner's groups they are a member in, quoting only names.
+        self.members_allowed()
         hello = self.f.message(MEMBER, 'سلام', sender=MEMBER)
         self.f.inject(hello)
         self.finished(self.captured(hello))
@@ -391,7 +392,7 @@ class ProductScenarios(Scenarios):
         card = self.wait('card_posted', lambda: self.cards(before, OWNER), 120)[0]
         text = card['message']['text']
         self.gate('card_names_a_private_chat', text.startswith('📨 Send to private chat with '), card=text[:300])
-        self.gate('card_names_the_groups_they_are_allowed_in', '(a person you allowed in group ' in text and ' and 1 more)' in text, card=text[:300])
+        self.gate('card_names_the_groups_they_are_a_member_in', '(a member in group ' in text and ' and 1 more)' in text, card=text[:300])
         self.gate('card_shows_exact_message', wording in text, card=text[-300:])
         self.gate('only_the_owner_gets_a_card', [row['message']['chat']['id'] for row in self.cards(before)] == [OWNER])
         sent = lambda: [row for row in self.new(before) if row['message']['chat']['id'] == MEMBER and row['message'].get('text') == wording]
@@ -535,7 +536,9 @@ class ProductScenarios(Scenarios):
             self.gate('no_card_anywhere', not self.cards(before), sender=sender)
 
     def member_cross_group_card_in_origin(self):
-        # A member allowed in both groups reviews their own message to the other group, in the group they asked in.
+        # A member in both groups, whom Telegram has shown in the other group, reviews their own message to it, in the group
+        # they asked in.
+        self.members_allowed()
         wording = 'سلام گروه دوم MEMBERX1'
         request = self.f.message(GROUP, 'به گروه دیگر بفرست [[action:'+self.f.chat(OTHER_GROUP)+'|'+wording+']] [[after:silent]]', sender=MEMBER, topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
@@ -554,7 +557,8 @@ class ProductScenarios(Scenarios):
         self.gate('sent_once', len(sent) == 1)
 
     def owner_reviews_when_member_not_allowed_there(self):
-        # 779 is not allowed in OTHER_GROUP: the owner reviews it privately; the group never sees the draft.
+        # GUEST (779) is switched off in OTHER_GROUP: the owner reviews it privately; the group never sees the draft.
+        self.members_allowed()
         wording = 'پیام مهمان GUESTX1'
         request = self.f.message(GROUP, 'بفرست [[action:'+self.f.chat(OTHER_GROUP)+'|'+wording+']] [[after:silent]]', sender=GUEST, topic=TEAM_TOPIC)
         _, before = self.silent_turn(request, GROUP, TEAM_TOPIC)
@@ -1195,11 +1199,11 @@ class ProductScenarios(Scenarios):
         return [row for row in self.new(before) if row['message']['chat']['id'] == OWNER and group['title'] in (row['message'].get('text') or '')]
 
     def members_allowed(self):
-        """MEMBER is allowed in GROUP and OTHER_GROUP (group_members); a run of a later scenario on its own sets that first."""
-        access = next((service['environment']['TELEGRAM_GROUP_ACCESS'] for service in self.f.manifest['services'].values()
-                       if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment']), None)
-        if access is None or json.loads(access) != ACCESS:
-            self.current.setdefault('recreated', []).extend(self.apply_access(ACCESS))
+        """The members of group_members, as group_members leaves them: a run of a later scenario on its own sets them first,
+        through the Members routes with no restart, and a scenario that changed one has it back."""
+        self.set_members(MEMBERS)
+        for who, groups in MEMBERS.items():
+            self.seen_in(who, groups)
 
     def project(self, project_id):
         """A project as the owner's project list shows it, archived ones included."""
@@ -1692,86 +1696,96 @@ class ProductScenarios(Scenarios):
         return self.f.query('nocheh_control', "SELECT coalesce(string_agg(set_by||':'||state,',' ORDER BY set_by,state),'') FROM owner_task_reminders "
                             "WHERE task_id IN ("+(listed or "''")+")")
 
+    @contextlib.contextmanager
+    def group_in_project(self, name):
+        """GROUP in a new project of its own for one scenario, as the owner sets it on the dashboard; yields the project. GROUP
+        leaves it again after, as later scenarios expect; a failure to do that fails a scenario that passed."""
+        number = str(self.f.ids())
+        group = self.f.chat(GROUP)
+        project = self.f.app('/v1/projects', {'name': name, 'description': '', 'state': 'active', 'expected_revision': 0,
+                                              'operation_id': 'scenario-project-'+number})
+        own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(group, safe=''))['own_assignment']
+        assignment = self.f.app('/v1/projects/assignments', {'space_id': group, 'project_id': project['id'], 'mode': 'assigned',
+                                                             'expected_revision': own['revision'] if own else 0,
+                                                             'operation_id': 'scenario-project-assign-'+number})
+        self.memory_settled()
+        failed = False
+        try:
+            yield project
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            try:
+                self.f.app('/v1/projects/assignments', {'space_id': group, 'mode': 'none', 'expected_revision': assignment['revision'],
+                                                        'operation_id': 'scenario-project-unassign-'+number})
+                self.memory_settled()
+            except Exception as error:
+                self.current.setdefault('cleanup_problems', []).append(type(error).__name__+':'+str(error)[:200])
+                if not failed:
+                    raise Failed('cleanup_failed')
+
     def member_reminder_says_who_set_it(self):
         # Reminders say who set them (ADR-0255). GROUP joins a project for this scenario. The owner's reminder A on a
         # project task, set on the dashboard, stays when MEMBER's list in TEAM_TOPIC leaves it out, and arrives at its time
         # as before, with no line above it. MEMBER's reminder on that task and GUEST's on a task of their own, due in the
-        # same minute, reach the owner's private chat naming each as a person the owner allowed and where they set it, at
+        # same minute, reach the owner's private chat naming each as a member and where they set it, at
         # most one message for the group every 10 minutes. The exact merge is the store test's; here every row must be
         # sent before the scenario ends.
         number = str(self.f.ids())
         mark_x, mark_y = 'WHOSETX'+number, 'WHOSETY'+number
-        group = self.f.chat(GROUP)
-        assignment, failed, tasks, rows = None, None, [], {}
-        try:
-            project = self.f.app('/v1/projects', {'name': 'Reminder setters '+number, 'description': '', 'state': 'active', 'expected_revision': 0,
-                                                  'operation_id': 'scenario-reminder-setters-'+number})
-            own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(group, safe=''))['own_assignment']
-            assignment = self.f.app('/v1/projects/assignments', {'space_id': group, 'project_id': project['id'], 'mode': 'assigned',
-                                                                 'expected_revision': own['revision'] if own else 0,
-                                                                 'operation_id': 'scenario-reminder-setters-assign-'+number})
-            self.memory_settled()
-            # People's two reminders share one minute, so they are due together; the owner's comes a minute later.
-            base = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-            people_at, owner_at = self.minute(base+timedelta(minutes=5)), self.minute(base+timedelta(minutes=6))
-            before = len(self.f.sent())
-            created = self.f.app('/v1/tasks', {'operation_id': 'scenario-reminder-setters-task-'+number, 'title': 'Pack the tent '+mark_x,
-                                               'scope': project['id'], 'reminders': [owner_at]})
-            task_x = created.get('task', created)['id']
-            tasks.append(task_x)
-            detail = self.f.app('/v1/tasks/'+task_x)
-            changed = self.task_tool({'action': 'update', 'id': task_x, 'expected_revision': detail.get('task', detail)['revision'], 'reminders': [people_at]},
-                                     chat=GROUP, topic=TEAM_TOPIC, sender=MEMBER)
-            self.gate('member_told_the_owners_reminder_stays', bool(changed.get('reminders_kept')), result=str(changed)[:400])
-            self.gate('owners_reminder_survives_the_member_edit', self.reminder_rows([task_x]) == 'owner:pending,person:pending',
-                      rows=self.reminder_rows([task_x]))
-            added = self.task_tool({'action': 'add', 'title': 'Bring the lamp '+mark_y, 'reminders': [people_at]}, chat=GROUP, sender=GUEST)
-            task_y = added.get('task', added).get('id')
-            self.gate('guest_task_added', bool(task_y), result=str(added)[:300])
-            tasks.append(task_y)
-            # The owner's view names who set each reminder, in the words Telegram will show.
-            detail = self.f.app('/v1/tasks/'+task_x)
-            reminders = detail.get('task', detail).get('reminders') or []
-            by_owner = [item for item in reminders if item.get('set_by') == 'owner']
-            by_person = [item for item in reminders if item.get('set_by') == 'person']
-            self.gate('owner_view_names_who_set_it', len(by_owner) == 1 and by_owner[0].get('source') is None and len(by_person) == 1
-                      and 'Set by' in (by_person[0].get('source') or '') and 'a person you allowed' in (by_person[0].get('source') or ''),
-                      reminders=reminders)
+        tasks, rows = [], {}
+        with self.group_in_project('Reminder setters '+number) as project:
+            try:
+                # People's two reminders share one minute, so they are due together; the owner's comes a minute later.
+                base = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+                people_at, owner_at = self.minute(base+timedelta(minutes=5)), self.minute(base+timedelta(minutes=6))
+                before = len(self.f.sent())
+                created = self.f.app('/v1/tasks', {'operation_id': 'scenario-reminder-setters-task-'+number, 'title': 'Pack the tent '+mark_x,
+                                                   'scope': project['id'], 'reminders': [owner_at]})
+                task_x = created.get('task', created)['id']
+                tasks.append(task_x)
+                detail = self.f.app('/v1/tasks/'+task_x)
+                changed = self.task_tool({'action': 'update', 'id': task_x, 'expected_revision': detail.get('task', detail)['revision'], 'reminders': [people_at]},
+                                         chat=GROUP, topic=TEAM_TOPIC, sender=MEMBER)
+                self.gate('member_told_the_owners_reminder_stays', bool(changed.get('reminders_kept')), result=str(changed)[:400])
+                self.gate('owners_reminder_survives_the_member_edit', self.reminder_rows([task_x]) == 'owner:pending,person:pending',
+                          rows=self.reminder_rows([task_x]))
+                added = self.task_tool({'action': 'add', 'title': 'Bring the lamp '+mark_y, 'reminders': [people_at]}, chat=GROUP, sender=GUEST)
+                task_y = added.get('task', added).get('id')
+                self.gate('guest_task_added', bool(task_y), result=str(added)[:300])
+                tasks.append(task_y)
+                # The owner's view names who set each reminder, in the words Telegram will show.
+                detail = self.f.app('/v1/tasks/'+task_x)
+                reminders = detail.get('task', detail).get('reminders') or []
+                by_owner = [item for item in reminders if item.get('set_by') == 'owner']
+                by_person = [item for item in reminders if item.get('set_by') == 'person']
+                self.gate('owner_view_names_who_set_it', len(by_owner) == 1 and by_owner[0].get('source') is None and len(by_person) == 1
+                          and 'Set by' in (by_person[0].get('source') or '') and ', a member' in (by_person[0].get('source') or ''),
+                          reminders=reminders)
 
-            def settled():
-                rows['now'] = self.reminder_rows(tasks)
-                return rows['now'] == 'owner:sent,person:sent,person:sent'
-            self.wait('every_reminder_sent', settled, 1500, 5)
-            time.sleep(3)
-            about = [row for row in self.replies(before, OWNER) if mark_x in (row['message'].get('text') or '') or mark_y in (row['message'].get('text') or '')]
-            mine = [row['message']['text'] for row in about if 'Set by' not in row['message']['text']]
-            theirs = sorted((row for row in about if 'Set by' in row['message']['text']), key=lambda row: row['message']['date'])
-            texts = [row['message']['text'] for row in theirs]
-            self.current['observed'] = {'people_messages': [text[:600] for text in texts]}
-            self.gate('owners_reminder_arrives_as_before', len(mine) == 1 and mine[0].startswith('⏰ Pack the tent '+mark_x)
-                      and not any(sign in mine[0] for sign in ('\U0001f464', '✏', '☑')), owner=mine)
-            self.gate('people_reminders_name_who_set_them', bool(texts) and all('a person you allowed' in text for text in texts)
-                      and sum(text.count('Set by') for text in texts) == 2, texts=[text[:300] for text in texts])
-            self.gate('each_people_reminder_once', sum(text.count(mark_x) for text in texts) == 1 and sum(text.count(mark_y) for text in texts) == 1)
-            self.gate('member_reminder_names_the_topic', any('›' in text for text in texts), texts=[text[:300] for text in texts])
-            dates = [row['message']['date'] for row in theirs]
-            self.gate('at_most_one_message_per_group_in_10_minutes', all(later-earlier >= 595 for earlier, later in zip(dates, dates[1:])), dates=dates)
-        except Exception as error:
-            failed = error
-            if rows:
-                self.current.setdefault('observed', {})['reminders'] = rows.get('now')
-            raise
-        finally:
-            # GROUP leaves the project again, as later scenarios expect.
-            if assignment:
-                try:
-                    self.f.app('/v1/projects/assignments', {'space_id': group, 'mode': 'none', 'expected_revision': assignment['revision'],
-                                                            'operation_id': 'scenario-reminder-setters-unassign-'+number})
-                    self.memory_settled()
-                except Exception as error:
-                    self.current['cleanup_problems'] = [type(error).__name__+':'+str(error)[:200]]
-                    if failed is None:
-                        raise Failed('cleanup_failed')
+                def settled():
+                    rows['now'] = self.reminder_rows(tasks)
+                    return rows['now'] == 'owner:sent,person:sent,person:sent'
+                self.wait('every_reminder_sent', settled, 1500, 5)
+                time.sleep(3)
+                about = [row for row in self.replies(before, OWNER) if mark_x in (row['message'].get('text') or '') or mark_y in (row['message'].get('text') or '')]
+                mine = [row['message']['text'] for row in about if 'Set by' not in row['message']['text']]
+                theirs = sorted((row for row in about if 'Set by' in row['message']['text']), key=lambda row: row['message']['date'])
+                texts = [row['message']['text'] for row in theirs]
+                self.current['observed'] = {'people_messages': [text[:600] for text in texts]}
+                self.gate('owners_reminder_arrives_as_before', len(mine) == 1 and mine[0].startswith('⏰ Pack the tent '+mark_x)
+                          and not any(sign in mine[0] for sign in ('\U0001f464', '✏', '☑')), owner=mine)
+                self.gate('people_reminders_name_who_set_them', bool(texts) and all(', a member' in text for text in texts)
+                          and sum(text.count('Set by') for text in texts) == 2, texts=[text[:300] for text in texts])
+                self.gate('each_people_reminder_once', sum(text.count(mark_x) for text in texts) == 1 and sum(text.count(mark_y) for text in texts) == 1)
+                self.gate('member_reminder_names_the_topic', any('›' in text for text in texts), texts=[text[:300] for text in texts])
+                dates = [row['message']['date'] for row in theirs]
+                self.gate('at_most_one_message_per_group_in_10_minutes', all(later-earlier >= 595 for earlier, later in zip(dates, dates[1:])), dates=dates)
+            except Exception:
+                if rows:
+                    self.current.setdefault('observed', {})['reminders'] = rows.get('now')
+                raise
 
     def reminder_with_split_emoji_arrives(self):
         # Notes are cut at 500 characters. A cut inside an emoji used to leave half a character, which Telegram refuses;
@@ -1984,12 +1998,9 @@ class ProductScenarios(Scenarios):
         # member still asks and approves in the group, no card goes to the owner, and the approved job waits; the owner's own
         # job does not. Only the owner's Resume in their private chat ends the pause, and the held job then starts. The marks
         # are set just above what members spent today, so each member job of $3.0001 crosses one.
-        access = next(json.loads(service['environment']['TELEGRAM_GROUP_ACCESS']) for service in self.f.manifest['services'].values()
-                      if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment'])
-        if access != ACCESS:
-            self.current['recreated'] = self.apply_access(ACCESS)
+        self.members_allowed()
         settings = self.f.app('/v1/background-jobs/settings')
-        keys = ('cost_limit_usd', 'minutes_limit', 'member_daily_jobs', 'member_notice_usd', 'member_pause_usd')
+        keys = ('cost_limit_usd', 'minutes_limit', 'member_notice_usd', 'member_pause_usd')
 
         def save(**changes):
             current = self.f.app('/v1/background-jobs/settings')
@@ -2000,7 +2011,7 @@ class ProductScenarios(Scenarios):
         try:
             self.gate('no_pause_to_start_with', self.f.app('/v1/background-jobs/member-pause', {'paused': False})['paused'] is None)
             notice = above(spent())
-            saved = save(cost_limit_usd=5, member_daily_jobs=100, member_notice_usd=notice, member_pause_usd=round(notice+50, 2))
+            saved = save(cost_limit_usd=5, member_notice_usd=notice, member_pause_usd=round(notice+50, 2))
             self.gate('marks_saved', [saved['member_notice_usd'], saved['member_pause_usd']] == [notice, round(notice+50, 2)], saved=saved)
             # The first job crosses the notice mark: one notice with Pause, naming the member and the group.
             _, _, before = self.member_job('Member spend JOB14 '+nonce, nonce+'A')
@@ -2735,7 +2746,7 @@ class ProductScenarios(Scenarios):
         def limit(minutes):
             current = self.f.app('/v1/background-jobs/settings')
             return self.f.app('/v1/background-jobs/settings', {'cost_limit_usd': current['cost_limit_usd'], 'minutes_limit': minutes,
-                                                               'member_daily_jobs': current['member_daily_jobs'], 'revision': current['revision']})
+                                                               'revision': current['revision']})
         self.gate('limit_set', limit(5)['minutes_limit'] == 5)
         try:
             nonce = str(self.f.ids())
@@ -2945,10 +2956,7 @@ class ProductScenarios(Scenarios):
         # program the job started and is logged, while the owner's own program of the same login keeps running.
         dashboard = self.dashboard()
         machine = self.ready_machine(dashboard)
-        access = next(json.loads(service['environment']['TELEGRAM_GROUP_ACCESS']) for service in self.f.manifest['services'].values()
-                      if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment'])
-        if access != ACCESS:
-            self.current['recreated'] = self.apply_access(ACCESS)
+        self.members_allowed()
         nonce = str(self.f.ids())
         asked = 'Member machine JOB12 '+nonce
         proposal = {'action': 'start', 'title': asked, 'instruction': 'Set up the project there.', 'machine': VM_NAME, 'steps': ['Set up the project']}
@@ -3042,6 +3050,320 @@ class ProductScenarios(Scenarios):
         _, _, restored, _, _ = save_and_apply(names)
         self.gate('names_put_back', restored['state'] == 'complete', state=restored['state'])
 
+    # Members ------------------------------------------------------------------------------------------
+
+    @staticmethod
+    def tool_result(text):
+        """A Nocheh tool's result as the scripted model saw it, read as JSON when it is."""
+        try:
+            value = json.loads(text)
+        except (TypeError, ValueError):
+            return {'raw': (text or '')[:500]}
+        return value if isinstance(value, dict) else {'value': value}
+
+    def tool_final(self, tool, mark):
+        """The result of the newest call of a Nocheh tool whose arguments name `mark`, as the scripted model saw it."""
+        found = [event for event in self.f.brain() if event.get('tool') == tool and event['phase'] == 'final' and mark in (event.get('argument') or '')]
+        return self.tool_result(found[-1]['result']) if found else {}
+
+    def approval_cards(self, before):
+        """Approval cards anyone was sent since `before`; a reply's Answer privately button does not make one."""
+        return [row for row in self.new(before) if self.is_card(row)]
+
+    def settled_dispatch(self, event_id, seconds=60):
+        """The event's dispatch once it is closed, or None when it has none by then."""
+        started = time.monotonic()
+        while time.monotonic()-started < seconds:
+            row = self.f.dispatch(event_id)
+            if row and row['state'] in ('done', 'failed', 'ambiguous', 'suppressed', 'cancelled'):
+                return row
+            time.sleep(2)
+        return self.f.dispatch(event_id)
+
+    def destinations(self, person, topic):
+        """The groups, by Nocheh chat id, a member may post to from GROUP, as the destinations tool tells their turn there."""
+        mark = 'DESTMARK'+str(self.f.ids())
+        self.turn(self.f.message(GROUP, 'کجا می‌توانم بفرستم؟ '+mark+' [[tool:mcp__nocheh__telegram_destinations {}]]', sender=person, topic=topic),
+                  GROUP, topic)
+        found = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__telegram_destinations' and event['phase'] == 'final']
+        result = self.tool_result(found[-1]['result']) if found else {}
+        if not isinstance(result.get('groups'), list):
+            raise Failed('destinations_unreadable:'+json.dumps(result)[:300])
+        return [row.get('destination') for row in result['groups']]
+
+    def owner_adds_member_on_the_dashboard(self):
+        # Someone new writes in GROUP and gets the fixed reply. The owner finds them on the Members page among the people
+        # Telegram showed in a group of theirs and makes them a member there: an add that also ticks a group Telegram never
+        # showed them in is refused, the one with GROUP is not, and they talk there at once, with no restart. Removed, they
+        # get nothing more that day, as the fixed reply comes once a UTC day per group.
+        newcomer = self.fresh_person()
+        group, other = self.f.chat(GROUP), self.f.chat(OTHER_GROUP)
+        self.not_allowed_reply(self.f.message(GROUP, 'سلام، می‌شود کمکم کنی؟', sender=newcomer, topic=ADD_TOPIC), ADD_TOPIC)
+        seen = next((row for row in self.members_api()['people'] if row.get('telegram_id') == str(newcomer)), None)
+        self.gate('listed_among_people_seen_in_the_group', seen is not None and group in [row['chat_id'] for row in seen['groups']]
+                  and other not in [row['chat_id'] for row in seen['groups']], person=seen)
+        starts = self.service_starts()
+        refused = self.members_api('', {'operation_id': self.operation_id('member-add'), 'account_id': seen['account_id'],
+                                        'groups': {group: True, other: True}}, allow_error=True)
+        self.gate('group_never_seen_in_refused', refused['status'] in (400, 409) and 'member_group_not_seen' in json.dumps(refused['body']),
+                  status=refused['status'], body=refused['body'])
+        self.gate('nobody_added_by_the_refusal', self.member_item(newcomer) is None)
+        item = self.members_api('', {'operation_id': self.operation_id('member-add'), 'account_id': seen['account_id'], 'groups': {group: True}})['member']
+        try:
+            self.gate('member_added', item['account_id'] == seen['account_id'] and item['state'] == 'active' and item['permissions']['talk'] is True
+                      and any(row['chat_id'] == group and row['on'] for row in item['groups']), member=item)
+            self.turn(self.f.message(GROUP, 'حالا جواب می‌دهی؟', sender=newcomer, topic=ADD_TOPIC), GROUP, ADD_TOPIC)
+            self.nothing_restarted(starts)
+        finally:
+            self.remove_member(item)
+        self.gate('not_listed_after_removal', self.member_item(newcomer) is None)
+        self.refused_quietly(self.f.message(GROUP, 'باز هم سلام', sender=newcomer, topic=ADD_TOPIC), GROUP, ADD_TOPIC)
+
+    def member_switched_off_in_a_group(self):
+        # GUEST is a member with OTHER_GROUP switched off for them. Addressing Nocheh there, they get the same fixed reply as
+        # a stranger, once a UTC day per group, and no model turn. The owner switches OTHER_GROUP on for them on the Members
+        # page and they talk there at once; it is switched off again after.
+        self.members_allowed()
+        self.not_allowed_reply(self.f.message(OTHER_GROUP, 'سلام، اینجا هم کمک می‌کنی؟', sender=GUEST, topic=SWITCH_TOPIC), SWITCH_TOPIC, chat=OTHER_GROUP)
+        self.refused_quietly(self.f.message(OTHER_GROUP, 'هنوز نه؟', sender=GUEST, topic=SWITCH_TOPIC), OTHER_GROUP, SWITCH_TOPIC)
+        try:
+            switched = self.change_member(self.member_item(GUEST), groups={OTHER_GROUP: True})
+            self.gate('switched_on', any(row['chat_id'] == self.f.chat(OTHER_GROUP) and row['on'] for row in switched['groups']), member=switched)
+            self.turn(self.f.message(OTHER_GROUP, 'حالا چطور؟', sender=GUEST, topic=SWITCH_TOPIC), OTHER_GROUP, SWITCH_TOPIC)
+        finally:
+            self.change_member(self.member_item(GUEST), groups={OTHER_GROUP: False})
+
+    def paused_member_is_stopped(self):
+        # The owner pauses a member who has work in flight, and nothing they asked for goes out after that. A member new to
+        # the fixture, in GROUP only: their running job ends without its report, their message to OTHER_GROUP, which the
+        # owner approves after the pause, is not sent and its card says why, and their slow reply is not delivered. Paused,
+        # they get the fixed reply like a stranger. They are removed at the end.
+        paused = self.fresh_person()
+        item = self.add_member(paused, (GROUP,))
+        nonce = str(self.f.ids())
+        try:
+            # Their first message shows them in GROUP, which their job's card and run need.
+            self.turn(self.f.message(GROUP, 'سلام', sender=paused, topic=PAUSE_TOPIC), GROUP, PAUSE_TOPIC)
+            title = 'Paused member JOB18 '+nonce
+            # Each scripted answer of the job waits 40 s, so it runs for minutes.
+            job = {'title': title, 'instruction': 'Search slowly, run '+nonce+' [[delay:40]] '+self.searches('PAUSEMARK'+nonce, 6), **self.EMPTY}
+            encoded = json.dumps({'action': 'start', **job}).replace(']]', '\\u005d\\u005d')
+            _, asked = self.silent_turn(self.f.message(GROUP, 'کار طولانی '+nonce+' [[tool:mcp__nocheh__background_job '+encoded+']] [[after:silent]]',
+                                                       sender=paused, topic=PAUSE_TOPIC), GROUP, PAUSE_TOPIC)
+            card = self.wait('job_card_posted', lambda: self.approval_cards(asked), 120)[0]
+            self.press(card, 'approve', presser=paused if card['message']['chat']['id'] == GROUP else OWNER)
+            self.wait('job_running', lambda: self.job_named(title)['state'] == 'running', 240)
+            # Their message to OTHER_GROUP, where Telegram never showed them: the owner reviews it.
+            wording = 'پیام عضو متوقف PAUSESEND'+nonce
+            _, before = self.silent_turn(self.f.message(GROUP, 'به گروه دیگر بفرست [[action:'+self.f.chat(OTHER_GROUP)+'|'+wording+']] [[after:silent]]',
+                                                        sender=paused, topic=PAUSE_TOPIC), GROUP, PAUSE_TOPIC)
+            send_card = self.wait('owner_reviews_their_send', lambda: self.owner_cards(before), 120)[0]
+            # A slow answer: the scripted model waits 45 s after it saw the turn.
+            mark = 'PAUSETURN'+nonce
+            slow = self.f.message(GROUP, 'یک سؤال کند [[turn:'+mark+']] [[delay:45]]', sender=paused, topic=PAUSE_TOPIC)
+            replies = len(self.f.sent())
+            self.f.inject(slow)
+            event_id = self.captured(slow)
+            self.wait('model_working_on_it', lambda: any(event.get('directive') == 'turn' and event.get('argument') == mark for event in self.f.brain()), 180)
+            item = self.change_member(self.member_item(paused), state='paused')
+            self.gate('paused', item['state'] == 'paused', member=item)
+            row = self.finished(event_id)
+            self.gate('slow_reply_not_delivered', row['state'] != 'done' and not [sent for sent in self.new(replies) if mark in (sent['message'].get('text') or '')],
+                      state=row['state'], error=row['error'])
+            found = self.job_ended(title, 600)
+            self.gate('running_job_ended_not_permitted', found['state'] == 'failed' and found.get('error_code') == 'job_not_permitted',
+                      state=found['state'], error=found.get('error_code'))
+            self.gate('no_job_report', not [sent for sent in self.new(asked) if sent['message']['chat']['id'] == GROUP
+                                            and 'mcp__nocheh__archive_search' in (sent['message'].get('text') or '')])
+            self.press(send_card, 'approve')
+            edited = self.wait('card_says_not_sent', lambda: (lambda shown: shown if 'can no longer do this there' in shown['message']['text']
+                                                              else None)(self.card_message(send_card)), 180)
+            time.sleep(3)
+            self.gate('nothing_reached_the_other_group', not [sent for sent in self.new(before) if sent['message']['chat']['id'] == OTHER_GROUP
+                                                               and wording in (sent['message'].get('text') or '')], card=edited['message']['text'][-300:])
+            self.not_allowed_reply(self.f.message(GROUP, 'هنوز هستی؟', sender=paused, topic=PAUSE_TOPIC), PAUSE_TOPIC)
+        finally:
+            self.remove_member(item)
+
+    def member_web_reads_without_a_card(self):
+        # A group's permission for web pages and outside tools: a member's web page read in a group runs with no card,
+        # recorded as allowed by that permission with the member who asked. The owner's own read in a group runs with no
+        # card too, the owner's choice. A command still waits for the owner's card. With the member's switch for web pages
+        # and outside tools off, their read is refused when asked: no card and nothing recorded.
+        self.members_allowed()
+        member = self.member_item(MEMBER)
+        nonce = str(self.f.ids())
+
+        def ask(sender, call, mark):
+            update = self.f.message(GROUP, 'لطفا '+mark+' [[tool:'+call+']] [[after:silent]]', sender=sender, topic=WEB_TOPIC)
+            event_id, before = self.silent_turn(update, GROUP, WEB_TOPIC)
+            time.sleep(3)
+            rows = json.loads(self.f.query('nocheh_control', "SELECT coalesce(json_agg(json_build_object('id',id,'authority',authority,'asker',asker_account,"
+                                           "'state',state)),'[]') FROM controlled_actions WHERE event_id='"+event_id+"'"))
+            return rows, before
+
+        def ended(rows):
+            """Wait, without a gate, for an operation that ran with no card to end, so its follow-up reply comes before the next."""
+            started = time.monotonic()
+            while rows and time.monotonic()-started < 180:
+                state = self.f.query('nocheh_control', "SELECT state FROM controlled_actions WHERE id='"+rows[0]['id']+"'")
+                if state in ('done', 'failed', 'ambiguous', 'rejected'):
+                    return
+                time.sleep(3)
+
+        for name, sender, asker in (('member', MEMBER, member['account_id']), ('owner', OWNER, None)):
+            mark = 'WEBMARK'+nonce+name
+            rows, before = ask(sender, 'mcp__nocheh__browser '+json.dumps({'url': 'https://pages.example.test/'+mark}), mark)
+            # Allowed, it runs at once: the tool waits briefly for the page, else its answer follows as a reply.
+            self.gate(name+'_read_runs_without_a_card', len(rows) == 1 and rows[0]['state'] != 'proposed' and not self.approval_cards(before),
+                      rows=rows, result=self.tool_final('mcp__nocheh__browser', mark))
+            self.gate(name+'_recorded_as_the_groups_permission', rows[0]['authority'] == 'group_tools' and rows[0]['asker'] == asker, rows=rows)
+            ended(rows)
+        mark = 'SHELLMARK'+nonce
+        rows, before = ask(MEMBER, 'mcp__nocheh__shell '+json.dumps({'command': 'printf '+mark}), mark)
+        card = self.wait('command_waits_for_the_owner', lambda: self.owner_cards(before), 120)[0]
+        self.gate('command_not_under_the_groups_permission', len(rows) == 1 and rows[0]['authority'] is None, rows=rows)
+        self.press(card, 'reject')
+        self.change_member(member, tools=False)
+        try:
+            mark = 'WEBOFF'+nonce
+            rows, before = ask(MEMBER, 'mcp__nocheh__browser '+json.dumps({'url': 'https://pages.example.test/'+mark}), mark)
+            result = self.tool_final('mcp__nocheh__browser', mark)
+            self.gate('read_refused_with_tools_off', result.get('error') == 'tool_not_permitted' and not rows and not self.approval_cards(before),
+                      result=result, rows=rows)
+        finally:
+            self.change_member(self.member_item(MEMBER), tools=True)
+
+    def read_only_member_cannot_add_a_task(self):
+        # A member whose tasks are read only lists the group's tasks but adds none; with write back they add one. GROUP is
+        # in a project for this scenario, as a group's tasks need one, and leaves it after.
+        self.members_allowed()
+        mark = 'READONLY'+str(self.f.ids())
+        with self.group_in_project('Read only '+mark):
+            self.change_member(self.member_item(GUEST), tasks='read')
+            try:
+                added = self.task_tool({'action': 'add', 'title': 'Not added '+mark}, chat=GROUP, topic=TASK_TOPIC, sender=GUEST)
+                self.gate('read_only_add_refused', added.get('error') == 'not_available_in_this_chat', result=str(added)[:300])
+                listed = self.task_tool({'action': 'list'}, chat=GROUP, topic=TASK_TOPIC, sender=GUEST)
+                self.gate('read_only_still_lists', 'error' not in listed and mark not in json.dumps(listed, ensure_ascii=False), result=str(listed)[:300])
+            finally:
+                self.change_member(self.member_item(GUEST), tasks='write')
+            added = self.task_tool({'action': 'add', 'title': 'Added '+mark}, chat=GROUP, topic=TASK_TOPIC, sender=GUEST)
+            self.gate('write_adds_again', bool(added.get('task', added).get('id')), result=str(added)[:300])
+
+    def member_posting_off_is_refused(self):
+        # With posting to their other groups off, a member's message to another group is refused when asked: no card and
+        # nothing sent. A message to the group they asked in still goes right away.
+        self.members_allowed()
+        nonce = str(self.f.ids())
+        away, here = 'به گروه دیگر نرود POSTOFF'+nonce, 'اینجا برود POSTHERE'+nonce
+        self.change_member(self.member_item(MEMBER), post=False)
+        try:
+            request = self.f.message(GROUP, 'بفرست [[action:'+self.f.chat(OTHER_GROUP)+'|'+away+']] [[after:silent]]', sender=MEMBER, topic=POST_TOPIC)
+            _, before = self.silent_turn(request, GROUP, POST_TOPIC)
+            result = self.tool_final('mcp__nocheh__action_request', 'POSTOFF'+nonce)
+            self.gate('refused_when_asked', result.get('error') == 'member_post_not_allowed', result=result)
+            time.sleep(3)
+            self.gate('no_card_and_nothing_sent', not self.approval_cards(before) and not [row for row in self.new(before) if away in (row['message'].get('text') or '')])
+            request = self.f.message(GROUP, 'اینجا بفرست [[action:current|'+here+']] [[after:silent]]', sender=MEMBER, topic=POST_TOPIC)
+            _, before = self.silent_turn(request, GROUP, POST_TOPIC)
+            self.wait('same_group_post_still_goes', lambda: [row for row in self.replies(before, GROUP, POST_TOPIC) if row['message']['text'] == here], 180)
+        finally:
+            self.change_member(self.member_item(MEMBER), post=True)
+
+    def member_who_left_a_group_is_not_reached_there(self):
+        # Telegram's service message that MEMBER left OTHER_GROUP: the Members list shows them out of it, and what is decided
+        # without a message from there no longer reaches it. Their destinations from GROUP leave it out and their message to
+        # it waits for the owner's card. Back in OTHER_GROUP, their message there is answered, as a live message proves
+        # they are in it, and it is one of their destinations again.
+        self.members_allowed()
+        other = self.f.chat(OTHER_GROUP)
+        self.gate('reaches_the_other_group_to_start_with', other in self.destinations(MEMBER, LEFT_TOPIC))
+        update = telegram_mock.left_member(self.f.ids(), group_chat(OTHER_GROUP), person(MEMBER))
+        self.f.inject(update)
+        self.captured(update)
+        self.wait('listed_as_left', lambda: self.member_presence(MEMBER, other) == 'left', 60)
+        self.gate('other_group_no_longer_a_destination', other not in self.destinations(MEMBER, LEFT_TOPIC))
+        wording = 'بعد از رفتن LEFTSEND'+str(self.f.ids())
+        _, before = self.silent_turn(self.f.message(GROUP, 'بفرست [[action:'+other+'|'+wording+']] [[after:silent]]', sender=MEMBER, topic=LEFT_TOPIC),
+                                     GROUP, LEFT_TOPIC)
+        card = self.wait('owner_reviews_it', lambda: self.owner_cards(before), 120)[0]
+        self.gate('no_card_in_the_group', not self.cards_since(before, GROUP))
+        self.press(card, 'reject')
+        self.turn(self.f.message(OTHER_GROUP, 'برگشتم', sender=MEMBER, topic=LEFT_TOPIC), OTHER_GROUP, LEFT_TOPIC)
+        self.wait('listed_as_in_again', lambda: self.member_presence(MEMBER, other) == 'in', 60)
+        self.gate('other_group_a_destination_again', other in self.destinations(MEMBER, LEFT_TOPIC))
+
+    def four_member_jobs_in_one_day(self):
+        # Members have no daily count of jobs: four small jobs MEMBER asks for in one day all start, each approved by MEMBER
+        # on its card in the group, and each ends done.
+        self.members_allowed()
+        nonce = str(self.f.ids())
+        for index in range(4):
+            title = 'Member day JOB19 '+nonce+'-'+str(index)
+            job = {'title': title, 'instruction': 'Report at once, run '+nonce+'-'+str(index), **self.EMPTY}
+            _, before = self.silent_turn(self.member_job_request('کار کوچک '+nonce, job), GROUP, TEAM_TOPIC)
+            card = self.wait('member_job_card_in_the_group', lambda: self.cards_since(before, GROUP), 120)[0]
+            self.gate('no_card_to_the_owner', not self.owner_cards(before), index=index)
+            self.press(card, 'approve', presser=MEMBER)
+            found = self.job_ended(title, 300)
+            self.gate('job_started_and_done', found['state'] == 'done' and len(self.job_runs(found['id'])) == 1, index=index,
+                      state=found['state'], error=found.get('error_code'))
+
+    def member_over_the_daily_cap(self):
+        # The daily message cap counts each member's addressed turns across groups in a UTC day. With the cap at 1 on the
+        # Members page, a new member's first message is answered; the second gets the owner's fixed limit text and no model
+        # turn; the third gets nothing, as that text comes once a UTC day per group. The owner is still answered. The cap is
+        # put back and the member removed.
+        capped = self.fresh_person()
+        # The cap to put back; a kept fixture whose earlier run stopped here gets the default back.
+        cap = self.members_api()['daily_messages']
+        cap = 200 if cap == 1 else cap
+        item = self.add_member(capped, (GROUP,))
+        try:
+            saved = self.members_api('/settings', {'operation_id': self.operation_id('member-settings'), 'daily_messages': 1})
+            self.gate('cap_saved', saved['daily_messages'] == 1, saved=saved)
+            self.turn(self.f.message(GROUP, 'سلام', sender=capped, topic=CAP_TOPIC), GROUP, CAP_TOPIC)
+            before, brain = len(self.f.sent()), len(self.f.brain())
+            mark = 'OVERCAP'+str(self.f.ids())
+            over = self.f.message(GROUP, 'یک سؤال دیگر [[turn:'+mark+']]', sender=capped, topic=CAP_TOPIC)
+            self.f.inject(over)
+            row = self.finished(self.captured(over))
+            self.gate('over_the_cap_no_model_turn', row['state'] in ('suppressed', 'cancelled') and row['error'] == 'member_daily_limit'
+                      and not [event for event in self.f.brain()[brain:] if event.get('argument') == mark], state=row['state'], error=row['error'])
+            time.sleep(3)
+            new = self.replies(before, GROUP, CAP_TOPIC)
+            target = json.loads(new[0]['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') if new else None
+            self.gate('one_limit_reply_to_the_message', len(new) == 1 and new[0]['message']['text'] == DAILY_LIMIT and target == over['message']['message_id'],
+                      count=len(new), text=new[0]['message']['text'][:200] if new else None)
+            self.turn(self.f.message(GROUP, 'سؤال سوم', sender=capped, topic=CAP_TOPIC), GROUP, CAP_TOPIC, expect_reply=False)
+            self.turn(self.f.message(GROUP, 'من هنوز جواب می‌گیرم؟', topic=CAP_TOPIC), GROUP, CAP_TOPIC)
+        finally:
+            self.members_api('/settings', {'operation_id': self.operation_id('member-settings'), 'daily_messages': cap})
+            self.remove_member(item)
+
+    def posts_in_a_chats_own_name_get_nothing(self):
+        # A message an anonymous admin posts in the group's own name, or a channel posts in its own, names no person, so it
+        # is nobody's: even when it addresses Nocheh it gets no model turn, no reply and no fixed reply. Telegram's
+        # stand-ins for them (GroupAnonymousBot, Channel_Bot) never show among the people the owner can make members.
+        channel = {'id': -10077, 'type': 'channel', 'title': 'Synthetic Channel 10077'}
+        entities = [{'type': 'mention', 'offset': 0, 'length': len(MENTION)}]
+        for name, sender in (('anonymous_admin', None), ('channel', channel)):
+            mark = 'NAMEPOST'+str(self.f.ids())
+            update = telegram_mock.in_chat_name(self.f.ids(), group_chat(GROUP), MENTION+' سلام [[turn:'+mark+']]', sender_chat=sender,
+                                                topic=NAME_TOPIC, entities=entities)
+            before, brain = len(self.f.sent()), len(self.f.brain())
+            self.f.inject(update)
+            row = self.settled_dispatch(self.captured(update))
+            time.sleep(5)
+            self.gate(name+'_gets_nothing', (row is None or row['state'] != 'done') and not self.replies(before, GROUP, NAME_TOPIC)
+                      and not [event for event in self.f.brain()[brain:] if event.get('argument') == mark],
+                      state=(row or {}).get('state'), error=(row or {}).get('error'))
+        people = self.members_api()['people']
+        self.gate('stand_ins_never_listed', not [row for row in people if row.get('telegram_id') in (str(telegram_mock.ANONYMOUS_ADMIN['id']),
+                                                                                                   str(telegram_mock.CHANNEL_BOT['id']))],
+                  people=[row.get('telegram_id') for row in people])
+
     # Owner dashboard session ------------------------------------------------------------------------
 
     def dashboard(self):
@@ -3050,7 +3372,8 @@ class ProductScenarios(Scenarios):
 
 
 PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_reach_next_reply', 'typing_shows_while_working',
-                 'reactions_show_while_working', 'not_allowed_person_gets_fixed_reply',
+                 'reactions_show_while_working', 'not_allowed_person_gets_fixed_reply', 'owner_adds_member_on_the_dashboard',
+                 'posts_in_a_chats_own_name_get_nothing', 'member_over_the_daily_cap',
                  # Adds that leave tell the owner at most ten times a day, so they run before most cards.
                  'member_add_leaves_and_tells_owner', 'stranger_add_leaves_without_a_note', 'anonymous_add_leaves_and_tells_owner',
                  'member_re_add_leaves_again_with_no_second_note', 'member_add_that_cannot_leave_stays_silent',
@@ -3058,13 +3381,16 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'send_to_stranger_refused', 'send_to_unselected_group_refused', 'send_to_allowed_person_private',
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'forwarded_messages_are_not_the_owners_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
-                 'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
+                 'owner_reviews_when_member_not_allowed_there', 'member_switched_off_in_a_group', 'member_posting_off_is_refused',
+                 'member_who_left_a_group_is_not_reached_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho', 'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',
-                 'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group',
+                 'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'read_only_member_cannot_add_a_task',
                  'member_reminder_says_who_set_it', 'reminder_with_split_emoji_arrives', 'chat_is_read_in_order',
-                 'background_job_runs_and_reports', 'background_job_cost_cap', 'background_job_member_spend', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
-                 'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'job_operation_runs_after_approval',
+                 'background_job_runs_and_reports', 'background_job_cost_cap', 'four_member_jobs_in_one_day', 'background_job_member_spend',
+                 'paused_member_is_stopped', 'background_job_uses_sealed_box', 'background_job_reads_a_repo_copy',
+                 'approval_waits_across_a_change_and_runs', 'group_operation_answers_in_topic', 'allowed_command_runs_without_a_card', 'member_web_reads_without_a_card',
+                 'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit', 'machine_job_runs_after_one_approval', 'machine_job_refused_for_members_and_stopped',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
