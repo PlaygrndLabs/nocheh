@@ -318,7 +318,11 @@ test('the owner\'s add gets its own project and a card, in one owner command; th
 
     const before=await h.epoch();
     await h.due();await h.adds.settle();
-    assert.equal(await h.epoch(),before+3,'one owner command for each card\'s project');
+    // Each card's own project is one owner command that moves no guard epoch (step 3), so a reply running in the group
+    // meanwhile still sends on its first try.
+    assert.equal(await h.epoch(),before,'a card\'s own project moves no guard epoch');
+    assert.deepEqual((await stores.control.query(`SELECT count(*)::int AS n,bool_or(holds_memory) AS memory FROM owner_commands WHERE id=ANY($1::text[])`,
+      [[freshAdd,legacyAdd,thirdAdd].map(event=>'chat-add-project:'+event)])).rows[0],{n:3,memory:false},'one owner command for each card\'s project');
     const auto=(event:string)=>digest('project:chat-add-project:'+event);
     for(const [chatId,event,value] of [[freshId,freshAdd,fresh],[legacy,legacyAdd,legacy],[thirdId,thirdAdd,third]] as const) {
       assert.deepEqual((await stores.control.query('SELECT name,state FROM projects WHERE id=$1',[auto(event)])).rows[0],{name:h.title(value),state:'active'});

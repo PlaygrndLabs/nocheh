@@ -200,7 +200,9 @@ export class ChatAdds {
         await writeProject(db,{id:project,name:cardName(now.title,200)??'Group',description:'',state:'active',expected_revision:0});
         await writeAssignment(db,{space_id:row.chat_id,project_id:project,mode:'assigned',expected_revision:0});
         return {outcome:'carded' as Outcome,project_id:project};
-      });
+      // A new project holding only this group changes no one's reach, so it moves no guard epoch: a reply already running
+      // in the group still sends on its first try (step 3). A Move to press keeps the epoch move.
+      },{epoch:false});
       if(made.outcome!=='carded'||!made.project_id){await this.finish(row,{outcome:made.outcome});return;}
       const offered=(await this.control.query(`SELECT id FROM projects WHERE state='active' AND id<>$1 ORDER BY updated_at DESC,id LIMIT ${OFFERED}`,[made.project_id])).rows.map(item=>item.id as string);
       await this.keep(row,{outcome:'carded',project_id:made.project_id,offered});
