@@ -17,7 +17,6 @@ const model = await import(
   'data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64')
 );
 const {
-  accessKey,
   appIdLabel,
   chatName,
   chatStateLabels,
@@ -225,19 +224,6 @@ test('a group’s text says why Nocheh left only when an add or a removal is on 
     'Someone else added Nocheh here and it couldn’t leave. It stays silent.',
   );
   assert.equal(group('archived'), 'From your imported history. Nocheh isn’t in this group.');
-});
-
-test('a group’s people stay under the Telegram ID that already holds them, else its current one', () => {
-  // People saved under a group's earlier Telegram ID stay there after Telegram upgraded it.
-  const saved = {'-4005': {granted: ['73'], denied: []}};
-  assert.equal(accessKey(saved, find(UPGRADED)), '-4005');
-  assert.equal(accessKey({}, find(UPGRADED), saved), '-4005', 'a draft that dropped them all keeps the saved key');
-  assert.equal(accessKey({'-10099': {granted: ['74'], denied: []}}, find(UPGRADED), saved), '-10099');
-  assert.equal(accessKey({}, find(UPGRADED)), '-10099', 'nobody yet: its current id');
-  assert.equal(accessKey({}, find(NEW)), '-10088');
-  assert.equal(accessKey({}, unknownChat(NEW)), null, 'no Telegram id, no key');
-  // Another group's people never decide this one's key.
-  assert.equal(accessKey({'-10042': {granted: ['73'], denied: []}}, find(UPGRADED)), '-10099');
 });
 
 test('a rule keeps the search hits of its sources’ groups, matched by the hit’s chat, never by its raw scope', () => {

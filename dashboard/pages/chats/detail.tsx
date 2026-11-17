@@ -1,4 +1,4 @@
-/** One chat: where Nocheh answers, who may talk, what it remembers and may do, the tools it may use, and, for a group or topic, its project. */
+/** One chat: where Nocheh answers, its members, what it remembers and may do, the tools it may use, and, for a group or topic, its project. */
 import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
@@ -18,7 +18,7 @@ import {Button, Card, CardBody, CardHeader, LoadError} from '../../ui/core';
 import {AllowedActions} from './actions';
 import {ShortId} from './chat-list';
 import {MemoryCard} from './memory';
-import {WhoCanTalk} from './people';
+import {MembersHere} from './people';
 import {NochehHere} from './presence';
 import {PrivateChatProject, ProjectCard} from './project';
 import {RoleAndSkills} from './role-skills';
@@ -131,8 +131,8 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         <LoadError what="this chat’s details" onRetry={() => void refreshResources()} />
       )}
       <NochehHere chat={chat} parent={parent} telegram={telegram} />
-      {/* A group Nocheh left or was removed from has nobody to choose: the owner adds Nocheh there first. */}
-      {switchable(chat) && <WhoCanTalk group={chat} telegram={telegram} />}
+      {/* Who may talk in a group Nocheh is in, read-only: each member's switches are on the Members page. */}
+      {switchable(chat) && <MembersHere group={chat} telegram={telegram} />}
       {(owner || on) && (
         <RoleAndSkills
           scope={space}

@@ -39,14 +39,14 @@ export const otherGroupsText = (project: string, groups: string[]) =>
  * group's memory a rule into one topic is used in the General chat and every other topic too.
  */
 export const ruleAudienceText = (group: string | null) =>
-  `Everyone allowed in ${group ?? 'the chat you share into'}, its topics included, will see what this rule lets in.`;
+  `You and every member in ${group ?? 'the chat you share into'}, its topics included, will see what this rule lets in.`;
 
 /**
- * Shown wherever a group joins a project: everyone allowed there sees and changes the tasks set on the whole project,
- * never another group's own tasks (ADR-0243, ADR-0248).
+ * Shown wherever a group joins a project: its members see the tasks set on the whole project, and change them where they
+ * may write tasks, never another group's own tasks (ADR-0243, ADR-0248).
  */
 export const projectTasksWarning = (chat: string, projects: string[]) =>
-  `Everyone allowed in ${chat} will see and change the tasks set on the whole of ` +
+  `Members in ${chat} will see and, where they may write tasks, change the tasks set on the whole of ` +
   (projects.length < 2 ? (projects[0] ?? '') : projects.slice(0, -1).join(', ') + ' and ' + projects.at(-1)) +
   ', never another group’s own tasks.';
 

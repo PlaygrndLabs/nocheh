@@ -6,15 +6,10 @@ import {href} from '../../lib/routes';
 import {useSettings} from '../../lib/settings';
 import {useChatDirectory} from '../../lib/chat-directory';
 import {
-  accessKey,
   appIds,
   chatError,
   chatName,
-  emptyRule,
-  parseAccess,
-  serializeAccess,
   unknownChat,
-  withPersonDecision,
   type Chat,
   type Directory,
   type IdentityGroup,
@@ -28,20 +23,13 @@ export const telegramSettingsHref = href('settings', {view: 'telegram'});
 export const memoryRequestsHref = href('inbox', {kind: 'memory_access'});
 
 /**
- * The Telegram settings that decide how Nocheh answers and who may talk to it in a group.
- * Changes are drafts in the shared settings store; the bottom save bar saves and applies them. Which groups Nocheh is
- * on in is no setting: it is each group's state, which its switch changes at once (ADR-0253). TELEGRAM_GROUP_ACCESS
- * keeps a group's people under one of its Telegram ids (ADR-0252); a chat is passed whole, never its id.
+ * The Telegram settings that decide how Nocheh answers in a group. Changes are drafts in the shared settings store; the
+ * bottom save bar saves and applies them. Which groups Nocheh is on in is no setting: it is each group's state, which its
+ * switch changes at once (ADR-0253). Who may talk there is no setting either: members are kept on the Members page, where
+ * every switch saves at once (step 3).
  */
 export function useTelegram() {
   const settings = useSettings();
-  const access = parseAccess(settings.value('TELEGRAM_GROUP_ACCESS'));
-  const savedAccess = parseAccess(settings.saved('TELEGRAM_GROUP_ACCESS'));
-  const writeAccess = (next: typeof access) => serializeAccess(next, settings.saved('TELEGRAM_GROUP_ACCESS'));
-  const ruleOf = (map: typeof access, chat: Chat | null | undefined) => {
-    const key = accessKey(map, chat);
-    return (key && map[key]) || emptyRule();
-  };
   return {
     loaded: !!settings.data,
     error: settings.error,
@@ -57,13 +45,6 @@ export function useTelegram() {
       .filter(Boolean),
     topicMemory: settings.value('TELEGRAM_TOPIC_MEMORY') || 'group',
     topicMemoryChanged: settings.changed('TELEGRAM_TOPIC_MEMORY'),
-    rule: (chat: Chat | null | undefined) => ruleOf(access, chat),
-    savedRule: (chat: Chat | null | undefined) => ruleOf(savedAccess, chat),
-    setPerson(chat: Chat, id: string, allow: boolean) {
-      const key = accessKey(access, chat, savedAccess);
-      if (!key) return;
-      settings.set('TELEGRAM_GROUP_ACCESS', writeAccess(withPersonDecision(access, savedAccess, key, id, allow)));
-    },
     setTopicMemory(value: 'group' | 'topic') {
       settings.set('TELEGRAM_TOPIC_MEMORY', value);
     },
@@ -110,8 +91,9 @@ export function useChatNames(): (space: string) => string {
 /**
  * Runs one owner action right away: busy state, plain error, toast, then fresh data.
  * Retrying the same failed request reuses its operation ID so it is never applied twice.
+ * `describe` puts a refusal in plain words; the Members page passes its own.
  */
-export function useAction() {
+export function useAction(describe: (error: unknown) => string = chatError) {
   const {toast} = useFeedback();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -134,7 +116,7 @@ export function useAction() {
       void refreshResources();
       return (result ?? ({} as T)) as T;
     } catch (failure) {
-      setError(chatError(failure));
+      setError(describe(failure));
       return null;
     } finally {
       setBusy(null);
