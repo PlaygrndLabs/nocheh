@@ -100,5 +100,5 @@ test('a recalled hit is named by its chat row, never by how its id looks: digest
   assert.deepEqual(topics,[[NG1_TOPIC],[NG1_TG],[NG1_TOPIC_KEY]],'a topic is read in its group\'s Telegram ids by its key');
   assert.equal(asked.length,3);
   asked.length=0;await recallNames(stores,[NG1],{shownOnly:true});
-  assert.deepEqual(asked[0]!.values,[[NG1],true],'anyone but the owner reads only the names Telegram showed (ADR-0259)');
+  assert.deepEqual(asked[0]!.values,[[NG1],true],'anyone but the owner reads only the names Telegram showed (ADR-0261)');
 });

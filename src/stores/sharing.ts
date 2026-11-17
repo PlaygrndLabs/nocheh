@@ -24,7 +24,7 @@ type Preview={id:string;request_hash:string;operation_reference:OperationReferen
 type Inputs={rule:SharingRule;binding:GuardBinding;sources:SourceReference[];dependencies:PreparedDependency[];
   candidates:{id:string;text:string}[];query:string;content:string|null};
 type Shared={id:string;source:string;kind:'owner_approved'|'privacy_filtered_inference';text:string;limitations:string[];tag:string;by:TagBy};
-/** What the owner shared names only the day it was shared (ADR-0259), never the original's sender, chat or day. Shares
+/** What the owner shared names only the day it was shared (ADR-0261), never the original's sender, chat or day. Shares
  *  are read in groups, topics and private answers, which read UTC, never the owner's zone. */
 export const shareTag=(created:Date)=>sharedTag(created.toISOString().slice(0,10));
 

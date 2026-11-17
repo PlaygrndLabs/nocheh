@@ -15,11 +15,11 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import type {PreparedDependency} from '../src/stores/learned.js';
 import {fixtureServices} from './fixture-brain.js';
 
-/** The fields archive_read adds (ADR-0259). */
+/** The fields archive_read adds (ADR-0261). */
 const added=['tag','by','at','chat_id','forward','topic','answers','reply_to','chain','replies','reply_link_withheld'];
 const short=(item:any)=>item&&{source:item.source,by:item.by,text:item.text};
 
-test('archive_read opens a message with its source and its thread, each part only within what the reader may read (ADR-0259)',
+test('archive_read opens a message with its source and its thread, each part only within what the reader may read (ADR-0261)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}

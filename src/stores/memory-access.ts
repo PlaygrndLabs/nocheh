@@ -339,7 +339,7 @@ export class MemoryAccessRepository {
   }
   private async suspend(id:string,reason:string){await this.stores.control.query("UPDATE memory_fact_grants SET state='suspended',suspended_reason=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='active'",[id,reason]);}
   private async suspendRequest(id:string,expected:number){await this.stores.control.query("UPDATE memory_access_requests SET state='suspended',revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$2 AND state='pending'",[id,expected]);}
-  /** A grant as a group reads it: its wording, named only as shared by the owner on the day of the grant (ADR-0259). */
+  /** A grant as a group reads it: its wording, named only as shared by the owner on the day of the grant (ADR-0261). */
   private granted(row:{id:string;created_at:Date},text:string) {
     return {id:row.id,source:'nocheh:grant:'+row.id,kind:'owner_approved' as const,text,limitations:[] as string[],...shareTag(row.created_at)};
   }

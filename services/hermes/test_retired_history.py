@@ -305,7 +305,7 @@ def replied(event,text=PIN):
 
 
 class QuotedRetirementTests(unittest.TestCase):
-    """A retired message that a turn's frame quotes is forgotten with what the turn did with it (ADR-0259)."""
+    """A retired message that a turn's frame quotes is forgotten with what the turn did with it (ADR-0261)."""
     def turn(self,user,note='Bob PIN is 4321'):
         return [{'id':1,'session_id':'g','role':'user','content':user,'timestamp':1.0,'tool_calls':None},
                 {'id':2,'session_id':'g','role':'assistant','content':'','timestamp':2.0,'tool_calls':call('memory',{'action':'add','target':'memory','content':note})},
@@ -429,7 +429,7 @@ class QuotedRetirementTests(unittest.TestCase):
 
 
 class RetiredHistoryReviewTests(unittest.TestCase):
-    """What the review of ADR-0259's first step found: older checked profiles, a second retirement in one block, notes
+    """What the review of ADR-0261's first step found: older checked profiles, a second retirement in one block, notes
     copied from a tool result, archive_page's reply links, and owner recall before the profile's next turn."""
 
     def test_a_profile_checked_by_the_older_rules_is_planned_again_once_at_the_same_revision(self):

@@ -157,7 +157,7 @@ async function backgroundJob(args:Value,context:ToolContext) {
 }
 
 /** The longest archive_read result: what an original adds about its thread is left out, last first, to stay within it,
- *  and what it showed before is never cut further (ADR-0259). */
+ *  and what it showed before is never cut further (ADR-0261). */
 export const ARCHIVE_READ_LIMIT=16000;
 /** One related message as archive_read shows it: its id, tag, by and the reader's own copy of its text, cut short. */
 function related(value:unknown,limit:number) {
@@ -173,7 +173,7 @@ async function archiveRead(args:Value,context:ToolContext) {
     if(typeof id!=='string')throw new Error('invalid_source');
     const shared=id.match(/^nocheh:(shared|filtered):([a-f0-9]{64})$/);
     if(shared)return text(await request(context,'/v1/memory/'+shared[1]+'/'+shared[2]));
-    // A grant and an owner-corrected entry open through their own checks; neither is open to a private answer (ADR-0259).
+    // A grant and an owner-corrected entry open through their own checks; neither is open to a private answer (ADR-0261).
     const grant=id.match(/^nocheh:grant:([a-f0-9]{64})$/);
     if(grant)return text(await request(context,'/v1/memory/grants/'+grant[1]));
     const learned=id.match(/^nocheh:learned:([a-f0-9]{64}):([1-9][0-9]{0,8})$/);
@@ -192,7 +192,7 @@ async function archiveRead(args:Value,context:ToolContext) {
         if(typeof item.content_base64!=='string')throw new Error('invalid_derived');
         return {id:item.id,kind:item.kind,text:cut(Buffer.from(item.content_base64,'base64').toString('utf8'),0,2000),
           provenance:cut(typeof item.provenance==='string'?item.provenance:String(text(item.provenance)),0,1000)};})};
-    // Who · where · when, and the thread around it (ADR-0259), as storage names them for this reader.
+    // Who · where · when, and the thread around it (ADR-0261), as storage names them for this reader.
     if(typeof found.tag!=='string')return text(result);
     for(const key of ['tag','by','at','chat_id','forward','topic','reply_link_withheld'])if(own(found,key)&&found[key]!==undefined)result[key]=found[key];
     if(own(found,'answers'))result.answers=related(found.answers,500);
@@ -439,7 +439,7 @@ function proposalSchema():Value {
 }
 
 const day={type:['string','null']},ids={type:'array',items:{type:'string'},maxItems:20};
-/** What a hit's source fields mean (ADR-0259): said once, in archive_search's description, with the usage sentence, and
+/** What a hit's source fields mean (ADR-0261): said once, in archive_search's description, with the usage sentence, and
  *  never inside a tool result, so stored history does not pile it up. */
 const TAGS=' Each hit has tag (who · where · when), by (whose words: owner, person, forward, file, mixed, nocheh, shared or unknown) and at '+
   '(when, as an ISO time). Times in tags are in the owner\'s Settings › Tasks time zone in the owner\'s own chats and in UTC elsewhere. '+sourceTagUsage;

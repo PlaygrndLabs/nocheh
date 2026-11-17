@@ -49,16 +49,16 @@ export function scopedObservation(value:unknown):any {
   }
   return result;
 }
-/** How much of a related message archive_read shows: what it answers or replies to, and each further one (ADR-0259). */
+/** How much of a related message archive_read shows: what it answers or replies to, and each further one (ADR-0261). */
 const ANSWER_TEXT=500,THREAD_TEXT=300;
-/** How many sources an opened learned entry names (ADR-0259). */
+/** How many sources an opened learned entry names (ADR-0261). */
 const LEARNED_EVIDENCE=5;
 /** At most `size` characters of a text, never half of one that takes two. */
 const clip=(text:string,size:number)=>{const chars=Array.from(text);return chars.length>size?{text:chars.slice(0,size).join(''),truncated:true as const}:{text};};
 type Tagged=Pick<Tag,'tag'|'by'|'at'>;
 export class SourceRepository {
   readonly audience:AudienceRepository;
-  /** `tags` names each hit's and each opened original's source (ADR-0259); without it, results keep today's shapes. */
+  /** `tags` names each hit's and each opened original's source (ADR-0261); without it, results keep today's shapes. */
   constructor(readonly access:SourceAccessRepository,readonly attachments:AttachmentRepository,readonly selections:SelectionRepository,
     readonly allowPrepared:(principal:Reader,value:unknown)=>Promise<void>=async()=>{},readonly tags:SourceTagRepository|null=null,
     readonly learned:LearnedMemoryRepository|null=null) {
@@ -66,7 +66,7 @@ export class SourceRepository {
   }
   private get stores(){return this.access.stores;}
   /**
-   * Who · where · when for what a reader is shown (ADR-0259), by id: one batched read and one secret check for the whole
+   * Who · where · when for what a reader is shown (ADR-0261), by id: one batched read and one secret check for the whole
    * request (SourceTagRepository). A source the reader cannot read reads "source not available here". Nothing for the
    * owner's dashboard (admin), whose shapes stay as they were, nor for a reader outside a turn, which has no turn to
    * secret-check new text for (PreparedContextRepository.prepare): it reads today's shapes too.
@@ -142,7 +142,7 @@ export class SourceRepository {
         reaction_observation:reactionObservation(reaction.event.payload),targets:previews});
       if(sources.length===count)break;
     }
-    // The reaction and each target it shows name their source (ADR-0259); the reaction's own fields are unchanged.
+    // The reaction and each target it shows name their source (ADR-0261); the reaction's own fields are unchanged.
     const tags=await this.tagsFor(principal,binding,references);
     const tagOf=(source:string)=>{const tag=tags.get(source.slice('nocheh:event:'.length));return tag?{tag:tag.tag,by:tag.by}:{};};
     for(const item of sources){Object.assign(item,tagOf(item.source));for(const target of item.targets)Object.assign(target,tagOf(target.source));}
@@ -210,7 +210,7 @@ export class SourceRepository {
   }
 
   /**
-   * archive_read's open (ADR-0259): read() and, for anyone but the owner's dashboard, what names the message and its
+   * archive_read's open (ADR-0261): read() and, for anyone but the owner's dashboard, what names the message and its
    * thread, each part only within what the reader may read. `tag`, `by` and `at` name its source; `chat_id` and `at`
    * open the conversation around it (archive_page); `forward` names where a forward came from and `topic` the topic it
    * is in. `answers` is the message a reply of Nocheh's answers (its own canRead). `reply_to` is the message it replies
@@ -366,7 +366,7 @@ export class SourceRepository {
       references.push(reference);if(binding?.mode==='on')shown.set(reference.id,(value as {payload?:unknown}).payload??null);
       if(hits.length===count)break;
     }
-    // Each hit names its source (ADR-0259), from the copy this reader was just shown; every field above stays.
+    // Each hit names its source (ADR-0261), from the copy this reader was just shown; every field above stays.
     const tags=await this.tagsFor(principal,binding,references,{shown});
     for(const hit of hits)Object.assign(hit,tags.get(hit.id)??{});
     if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}
@@ -380,7 +380,7 @@ export class SourceRepository {
     await this.allowPrepared(principal,hits);return hits;
   }
   /** Messages another index found, such as memory search by meaning, read back through the reader's own access. Those in
-   *  `tagged` name their source (ADR-0259); the rest keep today's fields alone. */
+   *  `tagged` name their source (ADR-0261); the rest keep today's fields alone. */
   async found(principal:Reader,ids:string[],count:number,tagged:ReadonlySet<string>=new Set()){return afterEpoch(jobRun(principal),()=>this.foundOnce(principal,ids,count,tagged));}
   private async foundOnce(principal:Reader,ids:string[],count:number,tagged:ReadonlySet<string>) {
     const binding=principal.admin?null:await this.audience.assert(principal);
@@ -504,7 +504,7 @@ export class SourceRepository {
     }
   }
   /**
-   * What a page adds for the agent (ADR-0259): `owner:true` on the owner's own typing (bucketOf, as a tag's by=owner), and
+   * What a page adds for the agent (ADR-0261): `owner:true` on the owner's own typing (bucketOf, as a tag's by=owner), and
    * `reply_source` on a reply whose message is not on this page: an id that archive_read opens, from the archive's reply
    * relation within what the reader may see (relationAudience, then canRead). A reply to a forum topic's opening is no
    * reply and gets none. Returns the ids it links, to check again with the page.

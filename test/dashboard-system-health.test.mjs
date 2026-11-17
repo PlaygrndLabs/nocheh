@@ -130,7 +130,7 @@ test('the stores\' label lookups and recall\'s ask of forwards and files are lin
   ]);
 });
 
-test('source tags that could not be built are a stores line of their own (ADR-0259)', () => {
+test('source tags that could not be built are a stores line of their own (ADR-0261)', () => {
   // Without its own row, a failed tag would read as a failed note label, which it is not.
   assert.deepEqual(
     issues({

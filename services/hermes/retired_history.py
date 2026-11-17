@@ -47,7 +47,7 @@ DERIVED=('api_content','reasoning','reasoning_content','reasoning_details','code
 # Kept in Hermes's own key/value table so it travels and commits with the rows it describes. The value is the retirement
 # revision a profile was brought current at, after the version of the rules that did it: a profile checked by older
 # rules is planned again once, at the same revision, so a change in what the rules withhold reaches what is already
-# stored (ADR-0259: quoted messages retired before that change).
+# stored (ADR-0261: quoted messages retired before that change).
 CHECKED_KEY='nocheh_retired_history_revision'
 PLAN_VERSION='quoted1'
 # A patched span shorter than this would mark unrelated note entries.
@@ -63,7 +63,7 @@ SPEAKER='[Group message from '
 ITEM=re.compile(r'\[Group message from .*\] \(source nocheh:event:([a-f0-9]{64})\)')
 # A quoted message withheld before, which a later withholding of the item around it keeps, so the row still names it.
 QUOTE_NOTICE=re.compile(r'\[Quoted message withheld; it was retired: nocheh:event:[a-f0-9]{64}\]')
-# A link archive_page adds to a reply whose message is not on the page (ADR-0259), as its JSON result writes it: the
+# A link archive_page adds to a reply whose message is not on the page (ADR-0261), as its JSON result writes it: the
 # id is no text the page holds, so it alone makes no tool result cite that message. Inside a message's text in that
 # JSON its quotes would be escaped, so no one can write it there.
 REPLY_SOURCE=re.compile(r'(?<=[{,])"reply_source":"nocheh:event:[a-f0-9]{64}"')

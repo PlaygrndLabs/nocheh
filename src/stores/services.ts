@@ -103,7 +103,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new MemoryProvenanceRepository(stores,archive,guards,options.memoryEngine);
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
-  // Who · where · when for a search hit or an opened original, built by code and secret-checked together (ADR-0259).
+  // Who · where · when for a search hit or an opened original, built by code and secret-checked together (ADR-0261).
   const tags=new SourceTagRepository(stores,access,noteSources,(principal,value,check)=>prepared.prepare(principal,value,check),detect,options.policy);
   const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value),tags,learned);
   const turns=new RuntimeTurnRepository(access,prepared);

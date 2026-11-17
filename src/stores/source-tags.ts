@@ -35,7 +35,7 @@ function shownForward(original:unknown,shown:unknown) {
 export const ownerReader=(principal:Reader)=>principal.admin||principal.scope===null&&principal.answer===undefined;
 
 /**
- * Source tags for the sources a reader asked about (ADR-0259), built by code in a few batched reads: who may read each
+ * Source tags for the sources a reader asked about (ADR-0261), built by code in a few batched reads: who may read each
  * (SourceAccessRepository.readable, which is canRead), what each message is (classesFor), its sender as the reader's own
  * copy shows them, its chat and its moment; the chat names once (Telegram's own names only, for anyone but the owner);
  * and, for the owner alone, the Tasks time zone and the People names the owner chose. Every tag of a request then goes

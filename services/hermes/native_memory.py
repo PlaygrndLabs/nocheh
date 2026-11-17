@@ -127,7 +127,7 @@ def recall(root, body, retirements=None):
             try:
                 # Hermes returns no row's content, only a snippet of the hit's own row; its `context` would add the
                 # rows before and after without their ids, so a neighbour the skip below misses could be read
-                # through it. It is never asked for (ADR-0259).
+                # through it. It is never asked for (ADR-0261).
                 for row in db.search_messages(query, limit=limit, fields=SESSION_FIELDS):
                     if row.get('id') in withheld: continue
                     # Who wrote the row: the person, Nocheh, or a tool, which storage puts in words.

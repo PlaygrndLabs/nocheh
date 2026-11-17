@@ -945,9 +945,9 @@ class ProductScenarios(Scenarios):
                            "AND observed='nocheh_forwards_and_files' AND content LIKE '%"+mark+"%'")
         self.gate('recall_asks_the_participant_holding_the_file_text', held not in ('', '0'), conclusions=held)
 
-    # Where a hit came from (ADR-0259) ------------------------------------------------------------------------
+    # Where a hit came from (ADR-0261) ------------------------------------------------------------------------
 
-    # The fields every archive_search hit had before ADR-0259 for a reader in a turn; the source fields come beside them.
+    # The fields every archive_search hit had before ADR-0261 for a reader in a turn; the source fields come beside them.
     HIT_FIELDS = ('id', 'source', 'scope', 'kind', 'origin', 'occurred_at', 'chat_id', 'representation', 'text', 'truncated', 'content_types')
     TAG_BYS = ('owner', 'person', 'forward', 'file', 'mixed', 'nocheh', 'shared', 'unknown')
     UNAVAILABLE = {'error': 'archive_source_unavailable'}
@@ -960,7 +960,7 @@ class ProductScenarios(Scenarios):
 
     @classmethod
     def tagged(cls, item, zone, starts=None, by=None):
-        """A hit or opened message that names its source as Nocheh's code builds it (ADR-0259): a tag of at most 160
+        """A hit or opened message that names its source as Nocheh's code builds it (ADR-0261): a tag of at most 160
         characters that starts as given and ends with a minute in the reader's time zone, a known `by` (the one given),
         and `at`, an ISO time."""
         tag = item.get('tag') if isinstance(item, dict) else None
@@ -970,7 +970,7 @@ class ProductScenarios(Scenarios):
 
     @classmethod
     def kept_fields(cls, hit):
-        """Every field the hit had before ADR-0259 is still there."""
+        """Every field the hit had before ADR-0261 is still there."""
         return isinstance(hit, dict) and all(field in hit for field in cls.HIT_FIELDS)
 
     def tool_result(self, name):
@@ -1008,7 +1008,7 @@ class ProductScenarios(Scenarios):
 
     def search_hits_name_their_source(self):
         # Every archive_search hit names who wrote it, where and when, in a tag Nocheh's code builds from the archive, never
-        # the model, beside every field it had (ADR-0259). The owner reads times in the Settings › Tasks time zone, a group
+        # the model, beside every field it had (ADR-0261). The owner reads times in the Settings › Tasks time zone, a group
         # in UTC. In a group the owner's own message is named as Telegram shows the owner, with by=owner, and never "the
         # owner"; a member who calls themselves "the owner" stays quoted with by=person, in the owner's chat too. GP2
         # finds nothing of GP1's.
@@ -1052,7 +1052,7 @@ class ProductScenarios(Scenarios):
         self.gate('second_group_never_reads_the_first', group_name not in text and 'Europe/Berlin' not in text and 'the owner' not in text)
 
     def group_tags_stay_in_the_group(self):
-        # A tag says only what its reader may know (ADR-0259): GP2 never reads GP1's name or the owner's private chat, and
+        # A tag says only what its reader may know (ADR-0261): GP2 never reads GP1's name or the owner's private chat, and
         # opening their messages answers unavailable, like a message that does not exist; a member reads a topic only by
         # the name Telegram showed, never by one only the owner typed, while the owner reads that name.
         number = str(self.f.ids())
@@ -1085,7 +1085,7 @@ class ProductScenarios(Scenarios):
             self.f.app('/v1/telegram/topics', {'action': 'remove', 'chat_id': str(GROUP), 'topic_id': topic})
 
     def reply_thread_opens(self):
-        # archive_read opens a message with its thread (ADR-0259): what it replies to and the message before that, and the
+        # archive_read opens a message with its thread (ADR-0261): what it replies to and the message before that, and the
         # replies to it, each with its own tag, and each only where its reader may read it. M ← R1 (Bob) ← R2 (the owner)
         # in GP1, and a reply into GP1 from GP2: the owner reads all of it, GP1 never the reply from GP2, GP2 none of GP1.
         number = str(self.f.ids())
@@ -1126,7 +1126,7 @@ class ProductScenarios(Scenarios):
                   and outside.get('source') == event('outside'), opened={key: outside.get(key) for key in ('tag', 'reply_to', 'chain', 'replies')})
 
     def topic_sharing_group_keeps_evidence(self):
-        # When a group's topics share memory, recall in one topic keeps the evidence it learned in another (ADR-0259 V2:
+        # When a group's topics share memory, recall in one topic keeps the evidence it learned in another (ADR-0261 V2:
         # recall evidence used to be read for the asking topic alone, so every message learned in a sibling topic was
         # dropped). LEARNMARK makes the fixture's learning keep the message as a conclusion about its writer
         # (installation-provider.py PrivacyCanary), which Honcho's memory chat reads first for that writer's question.
@@ -1143,7 +1143,7 @@ class ProductScenarios(Scenarios):
                   limitations=[item.get('limitations') for item in answers])
 
     def retired_source_leaves_tags(self):
-        # Retire = forget at once (ADR-0259 step 1). Bob's message is a recent item of a group turn that searched for it
+        # Retire = forget at once (ADR-0261 step 1). Bob's message is a recent item of a group turn that searched for it
         # and saved a note. Once it is retired: search no longer finds it, opening it answers unavailable, and the turn's
         # stored history no longer holds it: its recent item is withheld, the turn's tool calls and results with it, and
         # the note written in that turn is removed, while the message the turn answered keeps its own text.
@@ -1183,7 +1183,7 @@ class ProductScenarios(Scenarios):
 
     def owner_recall_session_hits_have_text(self):
         # Owner recall's hits from stored chat history carry their own text, a short snippet around the match, and when it
-        # was said, and never the text of the rows around them (ADR-0259 V1: they used to come back empty). The row
+        # was said, and never the text of the rows around them (ADR-0261 V1: they used to come back empty). The row
         # before the hit is Nocheh's answer naming NEIGHBOURMARK.
         number = str(self.f.ids())
         mark, neighbour = 'SESSIONMARK'+number, 'NEIGHBOURMARK'+number
@@ -3601,7 +3601,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_reviews_when_member_not_allowed_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho',
                  'not_allowed_group_text_stays_out_of_owner_notes', 'display_name_cannot_borrow', 'forward_kept_apart_and_labelled', 'own_file_stays_recallable',
-                 # Source tags on search hits and opened messages (ADR-0259).
+                 # Source tags on search hits and opened messages (ADR-0261).
                  'search_hits_name_their_source', 'group_tags_stay_in_the_group', 'reply_thread_opens', 'topic_sharing_group_keeps_evidence',
                  'retired_source_leaves_tags', 'owner_recall_session_hits_have_text',
                  'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',

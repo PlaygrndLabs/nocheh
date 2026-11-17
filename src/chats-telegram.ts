@@ -164,7 +164,7 @@ export const telegramMessage=(payload:unknown):Record<string,any>|null=>{
   const found=fields(payload);return fields(found?.message??found?.edited_message??found?.channel_post??found?.edited_channel_post);};
 const shownText=(value:unknown):string|null=>typeof value==='string'&&value.trim()?value:null;
 /**
- * Who sent a message, as Telegram showed them (ADR-0259): a Bot API sender's first and last name and public username,
+ * Who sent a message, as Telegram showed them (ADR-0261): a Bot API sender's first and last name and public username,
  * or the name a Telegram Desktop export wrote (`from`), which has no username. Read from those name fields alone,
  * never from an id, so no digits from an id field ever become a name; a post in a chat's name, a bot's own delivered
  * message and anything else name nobody. `payload` is the copy the reader reads (the guarded copy when the secret check
@@ -187,7 +187,7 @@ export function telegramSenderName(kind:string,payload:unknown):{name:string|nul
 /**
  * Whether a message is a forum topic's opening: the service message Telegram writes when a topic is created, which
  * every message in that topic replies to. Such a "reply" only says which topic a message is in, so it is never treated
- * as a reply (ADR-0259). Told by a field being present alone: Bot API's `forum_topic_created`, or a Telegram Desktop
+ * as a reply (ADR-0261). Told by a field being present alone: Bot API's `forum_topic_created`, or a Telegram Desktop
  * export's service message whose action is `topic_created`. No id is read or compared.
  */
 export function telegramTopicOpening(message:unknown):boolean {

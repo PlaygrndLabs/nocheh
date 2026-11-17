@@ -24,7 +24,7 @@ test('broker supports only explicit scoped routes and the configured reply provi
   assert.equal(scopedRoute('GET','/v1/search'),true);
   // The agent's reading tools reach storage, which checks who may read what.
   for(const route of ['/v1/archive/page','/v1/imports/pending'])assert.equal(scopedRoute('GET',route),true);
-  // archive_read opens a grant and an owner-corrected entry (ADR-0259); nothing else under them is relayed.
+  // archive_read opens a grant and an owner-corrected entry (ADR-0261); nothing else under them is relayed.
   const id='a'.repeat(64);
   for(const route of ['/v1/memory/grants/'+id,`/v1/memory/learned/${id}/3`])assert.equal(scopedRoute('GET',route),true,route);
   for(const route of ['/v1/memory/grants',`/v1/memory/learned/${id}`,`/v1/memory/learned/${id}/0`,'/v1/memory/grants/'+id+'/revoke'])assert.equal(scopedRoute('GET',route),false,route);

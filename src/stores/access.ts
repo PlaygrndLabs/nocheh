@@ -49,7 +49,7 @@ export class SourceAccessRepository {
     await this.guards.assertCurrent(binding);return allowed;
   }
   /**
-   * canRead for many sources at once (ADR-0259): true exactly where canRead returns true, and false where it returns
+   * canRead for many sources at once (ADR-0261): true exactly where canRead returns true, and false where it returns
    * false or refuses the reference (one the archive does not hold, or that names another revision). The same checks in
    * the same order, each batched, so a page of tags costs a few reads instead of about five per source. A guard binding
    * that is no longer current is refused, as canRead refuses it.

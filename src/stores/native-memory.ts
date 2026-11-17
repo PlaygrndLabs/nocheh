@@ -90,7 +90,7 @@ function fitted(text:string,size:number):string {
 const workspaceId=(protocol:string,generation:string,revision:number)=>digest(canonical(revision===1?[protocol,generation]:[protocol,generation,revision]));
 type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
 
-/** How many messages of each learned batch a memory search hit names by source (ADR-0259): the first 3 references of each
+/** How many messages of each learned batch a memory search hit names by source (ADR-0261): the first 3 references of each
  *  receipt; later ones keep today's fields alone. */
 export const SEARCH_TAGGED_PER_BATCH=3;
 /** The ids of a memory search to name by source: those among the first SEARCH_TAGGED_PER_BATCH of their batch. */
@@ -1157,7 +1157,7 @@ export class NativeMemoryRepository {
   /** Archived messages the engine finds by meaning among what was learned for this audience, best first.
    * Only their ids leave here: the reader gets the messages back through the archive's own access check. */
   /** Archived messages by meaning, in the engine's order. `from` says, for each id, the receipt it came from and its
-   *  position among that receipt's references, so the first few of each can be named (ADR-0259). */
+   *  position among that receipt's references, so the first few of each can be named (ADR-0261). */
   async search(principal:Reader,query:string,count:number):Promise<{ids:string[];learned:boolean;syncing?:boolean;from?:{receipt:string;position:number}[]}> {
     string(query,2000);if(!query.trim())throw new HttpError(400,'empty_query');
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);

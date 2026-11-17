@@ -110,7 +110,7 @@ messages from chats Nocheh does not serve are archived but never prepared. Bot
 senders, edits and historical replay do not trigger new replies.
 Every archive search hit and every message the assistant opens names who wrote
 it, where and when, in a tag Nocheh's code builds
-([ADR-0259](adr/0259-recalled-facts-and-search-hits-name-their-source.md)):
+([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)):
 `“Bob” (@bob) · this chat · 2026-11-03 14:12 UTC` in a group, and in the
 owner's own chats the owner's Settings › Tasks time zone and, for someone the
 owner renamed in People, `saved as “Brother”`. In a group the owner's own
@@ -146,7 +146,7 @@ group turn that carried it among the recent messages (or as the message the turn
 replied to), its text becomes a notice naming its id, and that turn's searches
 and other tool results, and the notes written from them, are withheld and
 removed with it; the turn's own message and the answer already sent stay
-([ADR-0259](adr/0259-recalled-facts-and-search-hits-name-their-source.md)).
+([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).
 **Undo hiding** restores future use. The original,
 attachments, transcripts, and owner action history remain inspectable. A reply
 already sent cannot be retracted, and an uncertain send remains uncertain until

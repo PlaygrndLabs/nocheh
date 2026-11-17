@@ -1,4 +1,4 @@
-"""The full tester's source tag scenarios (tools/acceptance/product_scenarios.py, ADR-0259) pass on a product that names
+"""The full tester's source tag scenarios (tools/acceptance/product_scenarios.py, ADR-0261) pass on a product that names
 each hit's source, opens a message with its thread and forgets a retired message at once, and fail on one that does
 what Nocheh did before step 1, or that lets a tag say more than its reader may know.
 
@@ -38,7 +38,7 @@ BRAIN = provider().ScriptedBrain
 class Installation(Fixture):
     """The fake Telegram, the archive and the brain's tools of a made-up installation, as the scenarios read them.
 
-    Faults: `untagged` (hits and opened messages as before ADR-0259), `owner_zone_everywhere`, `owner_word_in_groups`,
+    Faults: `untagged` (hits and opened messages as before ADR-0261), `owner_zone_everywhere`, `owner_word_in_groups`,
     `owner_topic_name_leaks`, `outside_reply_in_group`, `evidence_dropped` (sibling topic evidence lost, V2),
     `session_text_empty` (V1), `session_context` (neighbour rows in hits), `history_kept` (B6.1 not applied), `turn_kept`
     (recall skips the quoting rows but the next turn still reads them), `note_kept`."""

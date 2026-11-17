@@ -56,7 +56,7 @@ function exportedReactions(message:Record<string,any>,named:boolean) {
 
 /** One record in the compact form the agent pages through. Reply and topic ids are Telegram message ids; an exported
  *  reply into another chat has none, since its id names that chat's message (repliesElsewhere). A sender is named by
- *  the name or username Telegram showed, else as "a person", never by an id (ADR-0259). A Telegram Desktop export wrote
+ *  the name or username Telegram showed, else as "a person", never by an id (ADR-0261). A Telegram Desktop export wrote
  *  the names the exporting account saw, which for a saved contact is the name the owner gave them, so its sender and
  *  the people it lists on reactions are named only for the owner (`exportNames`); anyone else reads "a person".
  *  `whole`, for a sealed job box's copy, keeps every file and cuts texts only past one record's budget. */

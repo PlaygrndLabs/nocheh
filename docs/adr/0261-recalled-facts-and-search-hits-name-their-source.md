@@ -1,4 +1,4 @@
-# ADR-0259: Recalled facts and search hits name their source
+# ADR-0261: Recalled facts and search hits name their source
 
 <status>
 Step 1 accepted on 2026-11-17; steps 2 to 4 are planned. The owner asked for

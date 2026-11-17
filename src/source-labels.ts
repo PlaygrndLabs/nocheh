@@ -78,7 +78,7 @@ export const modelSourceWords={
     archive:'messages from other chats',web:'web pages',notion:'Notion',tools:'tool servers',commands:'command results',past:'past conversations',other:'other tools'},
   places:{owner:'the owner\'s private chat',web:'the owner\'s web chat',group:'group “{name}”',unnamed_group:'a group',topic:' › topic “{name}”',
     unnamed_topic:' › a topic',unknown:'a chat Nocheh can\'t name'},
-  /** A source tag's fixed words (ADR-0259, src/source-tags.ts): who · where · when, built by code, never by the model.
+  /** A source tag's fixed words (ADR-0261, src/source-tags.ts): who · where · when, built by code, never by the model.
    *  A name someone chose is always in the quotes code adds. */
   tags:{owner:'the owner',nocheh:'Nocheh',person:'a person',named:'“{name}”',username:' (@{username})',saved_as:', saved as “{name}”',
     anonymous:'an anonymous admin',bot:'a bot',bot_named:'the bot @{name}',

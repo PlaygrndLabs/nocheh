@@ -18,7 +18,7 @@ import {SourceTagRepository} from '../src/stores/source-tags.js';
 import {fixtureServices} from './fixture-brain.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
 
-test('source tags: readable() is canRead, members read only their groups in UTC by Telegram\'s names, the owner reads the Tasks zone and People names (ADR-0259)',
+test('source tags: readable() is canRead, members read only their groups in UTC by Telegram\'s names, the owner reads the Tasks zone and People names (ADR-0261)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}

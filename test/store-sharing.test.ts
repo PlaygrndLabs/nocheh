@@ -69,7 +69,7 @@ test('sharing publishes exact prepared text with private provenance, revocation 
     assert.deepEqual(await request('/v1/sharing/previews/'+preview.id+'/approve',approval),released);
     let actor=await principal(group,destination.id),shared=await services.shared.read(actor,released.id);
     assert.equal(shared.text,preview.text);assert.equal(shared.kind,'owner_approved');assert.ok(!JSON.stringify(shared).includes(original.id));
-    // A share names only that the owner shared it, and the day it was shared in UTC, never its sources (ADR-0259).
+    // A share names only that the owner shared it, and the day it was shared in UTC, never its sources (ADR-0261).
     const sharedOn=(await stores.control.query('SELECT created_at FROM sharing_releases WHERE id=$1',[released.id])).rows[0].created_at as Date;
     assert.deepEqual([shared.tag,shared.by],['shared by the owner on '+sharedOn.toISOString().slice(0,10),'shared']);
     await assert.rejects(services.sources.read(actor,original.id),{code:'source_not_found'});

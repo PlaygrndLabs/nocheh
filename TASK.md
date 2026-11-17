@@ -3,7 +3,7 @@
 <current>
 
 Memory step 1: search hits and opened messages name their source
-([ADR-0259](docs/adr/0259-recalled-facts-and-search-hits-name-their-source.md); owner,
+([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md); owner,
 2026-11-17: track the source of each fact, not only history without its thread and relations,
 before the MVP). Built on the three recommended answers, which the owner may still change: in a
 group the owner's words are named by the owner's Telegram name with `by=owner`; the owner's own
@@ -591,7 +591,7 @@ becomes your private memory"). One pull request of several commits
   labelled note, a forward and a skipped card on the owner's install after merge. Open owner
   question: whether the message of someone not allowed that the owner replies or reacts to
   should come along as labelled context for the note (built without it, as the rule says, until
-  the owner answers). Left for later: labels on search hits (done by ADR-0259 step 1); a dashboard page for one message's
+  the owner answers). Left for later: labels on search hits (done by ADR-0261 step 1); a dashboard page for one message's
   learning setting; web-chat replies carry no class; no test covers Hermes counting a missing
   forwards block; a rule's recorded inputs are not checked against who is allowed there, only
   the messages it cites; an earlier read a turn restates in its own words is not counted;
@@ -1175,6 +1175,23 @@ resume always opens a new workflow, and `memory pause`/`memory resume` take
 `--revision` ([ADR-0258](docs/adr/0258-a-notes-review-whose-start-was-lost-waits-again.md),
 [check](test/store-native-review.test.ts), [Hermes](services/hermes/test_review_handoff.py)).
 The owner chose to leave the four parts already closed this way unreviewed, so nothing is
+pending.
+
+Message search missing messages after a rebuild (2026-11-17): rebuilding long-term memory
+on a running installation left 46 of 909 Honcho message embeddings pending. Their first
+embedding had been shed or failed, and Honcho's vector reconciler, the only retry, names no
+workspace, so the Honcho boundary refused every call it made. The deriver now runs the
+reconciler's sync steps once per workspace with it bound, in parts within the gateway's
+per-request bounds (100 rows, 128 KiB of text, less room for preparation); a call with none
+still fails closed
+([ADR-0261](docs/adr/0261-honcho-retries-each-workspace-bound.md),
+[check](services/honcho/test_boundary.py)). Checked against the pinned Honcho API and deriver
+with PostgreSQL and pgvector and the gateway's own request bounds: before, every pending row
+stayed pending with `honcho_workspace_required`; binding alone left six long messages (157 KB)
+refused as one request; with parts, every row was embedded with its own workspace named, a
+refused workspace failed only its own rows, and rows reset from `failed` were embedded on the
+next run. Pending: on the running
+installation, set the rows that reached `failed` back to `pending` and confirm none stay
 pending.
 
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to

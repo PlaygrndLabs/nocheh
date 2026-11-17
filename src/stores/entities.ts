@@ -43,7 +43,7 @@ export interface EntityClaimInput {
 export const automaticPersonId=(objectId:string)=>digest(canonical([protocol,'person',objectId]));
 const automaticName=(identity:{platform:string;kind:string;external_id:string})=>`${identity.platform} ${identity.kind} ${identity.external_id}`;
 /**
- * The name the owner chose for the person who wrote a message (ADR-0259), or null when the owner chose none: an untouched
+ * The name the owner chose for the person who wrote a message (ADR-0261), or null when the owner chose none: an untouched
  * identity Nocheh made by itself (bound exactly to its own automatic entity, never renamed: the identity ensureIdentity
  * keeps following Telegram's names), or one still named by its automatic fallback, which can hold the account's id. Only
  * a rename, a merge or a confirmed suggestion makes a name the owner's. Told by equality with what ensureIdentity

@@ -42,7 +42,7 @@ export interface Carried {pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;
  * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes and naming
  * their chats (`notes`), for Hermes's lookups before a turn or review as for recall and the Notes page, recall's ask
  * of the owner's forwards and files (`memory_read`), and building the source tags of search hits and opened originals
- * (`source_tags`, ADR-0259). /v1/status shows today's, and the owner's notice and System › Health show each as a line of
+ * (`source_tags`, ADR-0261). /v1/status shows today's, and the owner's notice and System › Health show each as a line of
  * its own (`note_labels`, `forwards_read`, `source_tags`), apart from Hermes's lines. `done` counts the steps that worked
  * after the day's first failure of that kind.
  */
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS memory_problem_days (
  day date NOT NULL,kind text NOT NULL CHECK(kind IN ('notes','memory_read','source_tags')),done integer NOT NULL DEFAULT 0,failed integer NOT NULL DEFAULT 0,
  PRIMARY KEY(day,kind)
 );
--- Source tags are counted too (ADR-0259).
+-- Source tags are counted too (ADR-0261).
 ALTER TABLE memory_problem_days DROP CONSTRAINT IF EXISTS memory_problem_days_kind_check;
 ALTER TABLE memory_problem_days ADD CONSTRAINT memory_problem_days_kind_check CHECK(kind IN ('notes','memory_read','source_tags'));
 `;

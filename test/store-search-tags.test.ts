@@ -13,14 +13,14 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {SourceRepository} from '../src/stores/retrieval.js';
 import {fixtureServices} from './fixture-brain.js';
 
-/** A result without the fields ADR-0259 adds, to compare with what the same read gave before. */
+/** A result without the fields ADR-0261 adds, to compare with what the same read gave before. */
 const plain=(value:unknown):unknown=>{
   if(Array.isArray(value))return value.map(plain);
   if(!value||typeof value!=='object')return value;
   return Object.fromEntries(Object.entries(value).filter(([key])=>!['tag','by','at','owner','reply_source'].includes(key)).map(([key,item])=>[key,plain(item)]));
 };
 
-test('search hits, memory hits, reactions and page items name their source, and keep every field they had (ADR-0259)',
+test('search hits, memory hits, reactions and page items name their source, and keep every field they had (ADR-0261)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -60,7 +60,7 @@ test('search hits, memory hits, reactions and page items name their source, and 
     const binding=await s.guards.state();
     const reader=(scope:string|null,space:string,turnEvent:string):Reader=>({admin:false,scope,space,turnEvent,generation:binding.generation,guard_epoch:binding.epoch});
     const owner=reader(null,'123',ownerPrivate.id),general=reader(A,A,bobA.id),other=reader(B,B,bobB.id);
-    // The same reads without source tags: what each result held before ADR-0259.
+    // The same reads without source tags: what each result held before ADR-0261.
     const before=new SourceRepository(s.access,s.attachments,s.selections);
     const named=(hits:any[])=>Object.fromEntries(hits.map(hit=>[hit.source,`${hit.by}: ${hit.tag}`]));
 

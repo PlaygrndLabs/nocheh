@@ -181,7 +181,7 @@ runtime carry no labels, and a non-isolated run could reach the record file
 
 Search hits and opened messages carry a source tag, `{source, tag, by, at}`,
 built by storage code from the archive and the reader's own guarded copy, never
-by the model ([ADR-0259](adr/0259-recalled-facts-and-search-hits-name-their-source.md)).
+by the model ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).
 Every tag, related message and reply count first passes the reader's own read
 check (a batched `readable()` equal to `canRead`); a source the reader may not
 read reads only `source not available here`. Names are quoted and cleaned of

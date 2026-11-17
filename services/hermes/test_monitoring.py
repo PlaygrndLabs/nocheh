@@ -123,7 +123,7 @@ class MonitoringTests(unittest.TestCase):
                 'Long-term memory: recall couldn’t ask your forwards and files 1 time today; it answered from the rest of your memory.'])
 
     def test_source_tags_the_stores_could_not_build_are_a_notice_line_of_their_own(self):
-        """ADR-0259: a search hit or an opened original whose source tag could not be built read "source not available
+        """ADR-0261: a search hit or an opened original whose source tag could not be built read "source not available
         right now"; the stores count it as `source_tags`, a line apart from note labels."""
         from datetime import datetime, timezone
         from tools.operations.provider import problems

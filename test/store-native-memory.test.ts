@@ -306,7 +306,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}})});
   const group={admin:false,scope:'-100',space:'-100/topic/3',turnEvent:digest('turn')} as Reader;
-  // Each id says the batch it came from and its place there, so the first 3 of a batch are named by source (ADR-0259).
+  // Each id says the batch it came from and its place there, so the first 3 of a batch are named by source (ADR-0261).
   const batches=[{receipt:digest('receipt-a'),position:0},{receipt:digest('receipt-c'),position:1}];
   const searched=await memory.search(group,'who sends the invoice',4);
   assert.deepEqual(searched,{ids:[digest('first'),digest('second')],learned:true,from:batches});

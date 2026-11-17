@@ -427,7 +427,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
       const body=object(await readJson(req)),count=limit(body.limit,5,10);
       const found=await timed(s.stores.control,principal.turnEvent,'longterm_search','nocheh',()=>s.memory.search(principal,string(body.query??'',2000),count));
-      // The first 3 messages of each learned batch name their source (ADR-0259); the hits are today's, in today's order.
+      // The first 3 messages of each learned batch name their source (ADR-0261); the hits are today's, in today's order.
       return result({sources:await s.sources.found(principal,found.ids,count,searchTagged(found)),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
     }
     if(path==='/v1/memory/context'&&req.method==='GET') {
@@ -436,7 +436,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     const shared=path.match(/^\/v1\/memory\/(?:shared|filtered)\/([a-f0-9]{64})$/);
     if(shared&&req.method==='GET')return result(await s.shared.read(principal,shared[1]!),true);
-    // A grant and an owner-corrected entry opened by archive_read (ADR-0259); neither is a private answer's route.
+    // A grant and an owner-corrected entry opened by archive_read (ADR-0261); neither is a private answer's route.
     const grant=path.match(/^\/v1\/memory\/grants\/([a-f0-9]{64})$/);
     if(grant&&req.method==='GET')return result(await s.memoryAccess.open(principal,grant[1]!),true);
     const learnedEntry=path.match(/^\/v1\/memory\/learned\/([a-f0-9]{64})\/([1-9][0-9]{0,8})$/);
@@ -479,7 +479,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       if(path==='/v1/graph')return json(res,200,await s.sources.graph(principal,url.searchParams.get('scope')??'*',url.searchParams.get('after')??'',limit(url.searchParams.get('limit')),url.searchParams.get('focus')??''));
       const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
-      // archive_read asks for the thread around a message (ADR-0259); without it, the read is today's.
+      // archive_read asks for the thread around a message (ADR-0261); without it, the read is today's.
       if(event&&(url.searchParams.has('replies')||url.searchParams.has('chain'))) {
         const bounded=(name:string,fallback:number,most:number)=>{const value=url.searchParams.get(name);
           if(value===null)return fallback;if(!/^[0-9]{1,2}$/.test(value)||Number(value)>most)throw new HttpError(400,'invalid_thread_request');return Number(value);};

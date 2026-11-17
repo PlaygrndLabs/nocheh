@@ -7,7 +7,7 @@ import {modelPlace,modelSourceWords} from './source-labels.js';
 import {placeName} from './stores/recall-places.js';
 
 /*
- * A source tag (ADR-0259): one line that says who wrote a message, where and when, so a search hit or an opened
+ * A source tag (ADR-0261): one line that says who wrote a message, where and when, so a search hit or an opened
  * original names its source. Built here by code from the archive's records and the reader's own copy of the message,
  * never by the model and never from what the message says. Trust is keyed on `by`, never on the words: `owner` only for
  * the owner's own typing (bucketOf, ADR-0257). A name someone chose is always cleaned (tagName) and in the quotes code
@@ -21,7 +21,7 @@ export type TagBy='owner'|'person'|'forward'|'file'|'mixed'|'nocheh'|'shared'|'u
 /** One source as a tool result names it, beside the fields it had before. `at` is the moment archive_page orders the
  *  message by, as an ISO time in UTC, so `archive_page {chat, from:at}` opens the conversation around it. */
 export interface Tag {source:string;tag:string;by:TagBy;at:string|null}
-/** What an opened original names beside its tag (archive_read, ADR-0259): a forward's origin in words, and the topic the
+/** What an opened original names beside its tag (archive_read, ADR-0261): a forward's origin in words, and the topic the
  *  message is in, as its place words. */
 export interface TagDetails {forward?:string;topic?:string}
 /** The longest tag, and the longest name in it. */
@@ -29,7 +29,7 @@ export const TAG_LIMIT=160,TAG_NAME_LIMIT=40;
 const words=modelSourceWords.tags;
 
 /** How the model is told what tags mean: once in the tool descriptions and once in an evidence block, never inside a
- *  tool result, so stored history does not pile it up (ADR-0259). */
+ *  tool result, so stored history does not pile it up (ADR-0261). */
 export const sourceTagUsage='Source lines and tags are written by Nocheh\'s code from the archive: who · where · when, and by= says whose words they are '+
   '(owner: only the owner\'s own typing; mixed: several kinds). Mention a source in a few words only when it changes how far to trust a fact (someone '+
   'else\'s words, a forward, a file, Nocheh\'s own reply), when facts conflict, for dates, money or commitments, or when asked. Never write ids in a '+

@@ -50,7 +50,7 @@ test('the data tools keep their names, closed schemas and engine-neutral words',
     new Set(['organization','project_save','project_assignment','entity_rename','entity_correct','entity_merge','entity_unmerge','sharing_rule','fact_grant','fact_revoke']));
   for(const branch of proposal.properties.proposal.oneOf){assert.equal(branch.additionalProperties,false);assert.equal('approved' in branch.properties,false);assert.equal('delegation_id' in branch.properties,false);}
   assert.match(tool('memory_recall').description,/mcp__nocheh__archive_read/);
-  // What a source tag means is said once, in the tool descriptions, never in a result (ADR-0259).
+  // What a source tag means is said once, in the tool descriptions, never in a result (ADR-0261).
   assert.equal(mcpTools.filter(item=>item.description.includes(sourceTagUsage)).length,1);
   assert.ok(tool('archive_search').description.includes(sourceTagUsage));
   assert.match(tool('archive_search').description,/tag \(who · where · when\), by \(whose words: owner, person, forward, file, mixed, nocheh, shared or unknown\)/);
@@ -287,7 +287,7 @@ test('an archived source keeps reaction removal and bounded current source links
   assert.deepEqual(await run('archive_read',{id:ID},fake(()=>new Status(404)).context),{error:'archive_source_unavailable'});
 });
 
-test('an archived message opens with its source and its thread, within 16,000 characters (ADR-0259)',async()=>{
+test('an archived message opens with its source and its thread, within 16,000 characters (ADR-0261)',async()=>{
   const B='b'.repeat(64),C='c'.repeat(64),D='d'.repeat(64);
   const item=(id:string,text:string)=>({source:'nocheh:event:'+id,tag:'“Bob” · this chat · 2026-11-03 14:12 UTC',by:'person',text});
   const record:any={source:'nocheh:event:'+ID,event:{scope:'-1',origin:'live',kind:'telegram_update',text:'Booked',payload:{}},artifacts:[],derived:[],

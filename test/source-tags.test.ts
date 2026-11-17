@@ -231,7 +231,7 @@ test('shared facts name only the day the owner shared them, and an unreadable so
   assert.deepEqual(unavailableTag('now'),{tag:'source not available right now',by:'unknown'});
 });
 
-test('an opened original names a forward\'s origin and its topic beside its tag; members read only Telegram\'s names (ADR-0259)',()=>{
+test('an opened original names a forward\'s origin and its topic beside its tag; members read only Telegram\'s names (ADR-0261)',()=>{
   const forward=source(40,message(sam,{forward_origin:{type:'channel',chat:{id:-1009876543210,title:'City News',type:'channel'},message_id:9,date:1}}),{chat:GP1_TOPIC});
   assert.deepEqual(sourceDetails(forward,owner,names,directory),{forward:'forwarded from a channel shown as “City News”',topic:'group “GP1” › topic “Trips”'});
   // The topic is named even in that topic, where the tag says "this chat"; a member reads a topic only the owner named as "a topic".

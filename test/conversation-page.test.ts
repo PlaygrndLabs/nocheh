@@ -28,7 +28,7 @@ test('a page item names the sender, the replied message, the topic and the react
   assert.deepEqual(pageItem(exportedInput,true).reactions,exported.reactions,'a sealed box copy keeps the reactions an export carries');
   assert.deepEqual([exported.message_id,exported.reply_to,exported.topic,exported.from,exported.content],['13','12','7','Sam',['photo']]);
   assert.equal(exported.files![0]!.text.length,1000);assert.equal(exported.files![0]!.truncated,true);
-  // A sender Telegram showed no name for reads "a person", never an id (ADR-0259).
+  // A sender Telegram showed no name for reads "a person", never an id (ADR-0261).
   assert.equal(pageItem({id,kind:'telegram_update',at,text:'Hi',payload:{message:{message_id:16,chat,from:{id:5}}}}).from,'a person');
   assert.equal(pageItem({id,kind:'telegram_desktop_message',at,text:'Hi',payload:{message:{id:17,from:'',from_id:'user5'}}}).from,'a person');
   assert.equal(pageItem({id,kind:'telegram_update',at,text:'Hi',payload:{message:{message_id:18,chat,from:{id:5,username:'sam_lee'}}}}).from,'@sam_lee');

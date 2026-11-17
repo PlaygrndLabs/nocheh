@@ -50,7 +50,7 @@ export function recallPlace(where:RecallWhere,names:ReadonlyMap<string,string>):
  * creation, edit or reply to its first message among the group's recent messages, else from its topic row (the name the
  * owner gave it, or the one Telegram last showed).
  * A failed lookup leaves names out, so a hit is labelled by its kind and recall never fails over a name.
- * `shownOnly` keeps only names Telegram showed, for a group member's tags (ADR-0259): a chat row's name counts only when
+ * `shownOnly` keeps only names Telegram showed, for a group member's tags (ADR-0261): a chat row's name counts only when
  * Telegram showed it (observed or refreshed), so a topic only the owner named reads as a topic with no name.
  */
 export async function recallNames(stores:Pools,spaces:string[],options:{shownOnly?:boolean}={}):Promise<Map<string,string>> {

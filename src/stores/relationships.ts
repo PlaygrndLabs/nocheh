@@ -100,7 +100,7 @@ export class RelationshipRepository {
   }
 
   /**
-   * The messages each of these events replies to (ADR-0259): every archived copy of each reply target, oldest first, the
+   * The messages each of these events replies to (ADR-0261): every archived copy of each reply target, oldest first, the
    * way context() finds them, in one read. Only copies whose conversation the audience admits are kept (permits): a
    * target outside it, external to the reader, is left out as context() leaves it out. An access check (canRead) is the
    * caller's, as for context().
@@ -119,7 +119,7 @@ export class RelationshipRepository {
     return found;
   }
   /**
-   * The messages that reply to an object (ADR-0259), by the archive's reply relation (source_relations, its target
+   * The messages that reply to an object (ADR-0261), by the archive's reply relation (source_relations, its target
    * index): each replying message once, with every copy of it the audience admits (permits), oldest first, its first
    * copy deciding the order. Only copies in the audience's own groups are read (in SQL, so replies elsewhere never take
    * the place of those it may see); at most `limit` of them, and `more` says there were others there. canRead is the
