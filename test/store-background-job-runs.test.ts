@@ -184,6 +184,16 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
     assert.equal((await tick(reported)).state,'failed');
     assert.deepEqual([(await job(reported)).error_code,(await reports(reported)).length],['job_not_permitted',0]);
     granted=['9'];regrant();
+    // Nor the rest of one for a member removed while it is sent: a member change moves no epoch, so each part asks again.
+    const halfway=await approved('Halfway check'),parted=await claim(halfway);
+    await finish(parted,'done',{text:'Part one: made-up task 12 is open. '+'x'.repeat(7000)+'\n\nPart two: made-up task 14 is done. '+'y'.repeat(7000)});
+    assert.equal((await tick(halfway)).stage,'delivery');
+    const [opening]=await reports(halfway);assert.equal(opening?.destination,group);
+    await stores.control.query("UPDATE telegram_action_requests SET state='done' WHERE id=$1",[opening.id]);
+    granted=[];regrant();
+    assert.equal((await tick(halfway)).state,'failed');
+    assert.deepEqual([(await job(halfway)).error_code,(await reports(halfway)).length],['job_not_permitted',1],'the second part is not sent');
+    granted=['9'];regrant();
     assert.equal(Number((await stores.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count),0,'the slots are free');
 
     // After a change that is not quiet, a relaunch starts over with the first message and no to-do list; after quiet epochs

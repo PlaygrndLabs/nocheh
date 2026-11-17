@@ -6,6 +6,7 @@ import {isProxyAccount} from '../chats-telegram-updates.js';
 import {memberIdFor} from '../members.js';
 import {bumpMemberRevision} from './member-schema.js';
 import {chatOfApp,ensureAccount,ensureConnection} from './chats.js';
+import {joined} from './members.js';
 
 /*
  * The one-time carry of the lists in force before step 3 ("Who can talk to Nocheh" in each group) into members. It runs
@@ -16,10 +17,11 @@ import {chatOfApp,ensureAccount,ensureConnection} from './chats.js';
  * Each list is keyed by a group's Telegram id, current or old; the lists under every id of one group are joined, and a
  * person denied there under any of them is denied there. Each person granted somewhere becomes a member with every
  * permission on and tasks read and write (what they could do before), with their exact reach kept: a switched-on row
- * for each group they were granted in, and a switched-off row for every other group chat, so a group with no row (which
- * counts as on) never lets a carried person talk where they could not before. Talk works there because each message
- * proves its sender is in the group; a decision made without a message still needs Telegram's row (the directory's
- * reaches). The owner's own list is the authority here, so Telegram's rows are not asked.
+ * for each group they were granted in, and a switched-off row for every other group chat Nocheh is in (not left,
+ * removed or archived), so a group with no row (which counts as on) never lets a carried person talk where they could
+ * not before. A group Nocheh is added to again later counts as a new group, on by default. Talk works where they were
+ * granted because each message proves its sender is in the group; a decision made without a message still needs
+ * Telegram's row (the directory's reaches). The owner's own list is the authority here, so Telegram's rows are not asked.
  *
  * Parsing never throws on data: anything not shaped as {group id: {granted: [user ids], denied: [user ids]}} is skipped
  * and counted, as are keys naming no group Nocheh has a row for, the owner, Telegram's proxy accounts, accounts
@@ -60,7 +62,8 @@ export async function carryMembers(control:pg.Pool,policy:Pick<AssistantPolicy,'
       const groups=reach.get(user)??new Set<string>();groups.add(chat);reach.set(user,groups);
     }
     for(const user of people)if(!reach.has(user))skipped.denied_only!++;
-    const allGroups=(await db.query(`SELECT id FROM chats WHERE kind='group' ORDER BY id`)).rows.map(row=>row.id as string);
+    // The groups Nocheh is in now: a carried person is switched off in each they were not granted in.
+    const inGroups=(await db.query(`SELECT c.id FROM chats c WHERE ${joined('c')} ORDER BY c.id`)).rows.map(row=>row.id as string);
     let carried=0,rows=0;const kept=new Set<string>();
     for(const [user,groups] of [...reach].sort(([a],[b])=>a<b?-1:a>b?1:0)) {
       if(policy.owner_id&&user===policy.owner_id){skipped.owner!++;continue;}
@@ -72,7 +75,7 @@ export async function carryMembers(control:pg.Pool,policy:Pick<AssistantPolicy,'
       await db.query('INSERT INTO members(id) VALUES($1) ON CONFLICT DO NOTHING',[memberIdFor(account)]);
       await db.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1 AND member_id IS NULL',[account,memberIdFor(account)]);
       const member=(await db.query('SELECT member_id FROM chat_accounts WHERE id=$1',[account])).rows[0].member_id as string;
-      for(const group of allGroups)rows+=(await db.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
+      for(const group of new Set([...groups,...inGroups]))rows+=(await db.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
         [member,group,groups.has(group)])).rowCount??0;
       for(const group of groups)kept.add(group);
       carried++;

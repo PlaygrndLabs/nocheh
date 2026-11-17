@@ -36,7 +36,8 @@ test('owner Telegram directory gives recorded names, ids and membership, and who
   const result=await telegramDirectory(control,{admin:true,scope:null},archive);
   assert.equal(sql.length,3);assert.equal(read.length,2);
   assert.match(sql[1]!,/a\.kind='human'/,'bots, anonymous admins and chats posting as themselves are never people');
-  assert.match(sql[1]!,/FROM member_chats s JOIN chat_accounts a ON a\.member_id=s\.member_id/,'every member with a switch there is listed');
+  assert.match(sql[1]!,/FROM member_chats s JOIN chat_accounts a ON a\.member_id=s\.member_id/,'every member switched on there is listed');
+  assert.match(sql[1]!,/s\.enabled AND c\.kind='group' AND c\.state NOT IN \('left','removed','archived'\)/,'only a switch that is on, in a group Nocheh is in');
   assert.ok(sql.every(text=>!/events|payload|text/.test(text.replace(/chat_|::text/g,''))),'the chat records hold no message text');
   // Of a message, only which kind of update it is, and the people a join message names, are read.
   const parts=/convert_from\(e\.payload,'UTF8'\)::jsonb (?:\?\| ARRAY\['message','edited_message','channel_post','edited_channel_post'\]|#> '\{message,new_chat_members\}')/g;

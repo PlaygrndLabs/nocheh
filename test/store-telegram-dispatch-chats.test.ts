@@ -158,3 +158,63 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
     }
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
+
+// The owner's add card gives a new group its own new project about 30 s after the add, as one owner command that moves no
+// guard epoch (ADR-0259): it changes no one's reach. So a reply already running in that group when the project is made
+// goes out on its first try, with no guard_context_changed and no second turn.
+test('a reply running while the owner\'s add card gives the group its own project is sent on its first try',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-card-')),base=Date.now(),token=digest('dispatch-card:'+base);
+  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],topic_memory:'group'};
+  const policy=servedPolicy(()=>configured),GROUP='-1004000000301',group=chatIdFor('telegram',GROUP);
+  const started:any[]=[],replies:any[]=[];let serial=base,brain='running';
+  const runtime:FakeCall=async(operation,input)=>{
+    if(operation==='guard.detect')return {literals:[]};
+    // The card goes to the owner's private chat.
+    if(operation==='telegram.notice')return {state:'done'};
+    if(operation==='run.resume')return {state:brain};
+    assert.equal(operation,'run.start');started.push(input);return {state:brain,stage:'assistant'};
+  };
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,runtime,
+    memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),groupReplies:{mode:'addressed',names:['Nocheh']},
+    telegram:fixtureTelegram((operation,input)=>{if(operation==='telegram.reply'&&!input.cancel&&!input.observe_only)replies.push(input);})});
+  const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
+  const epoch=async()=>Number((await stores.control.query('SELECT epoch FROM guard_state WHERE singleton')).rows[0].epoch);
+  const chat={id:Number(GROUP),type:'supergroup',title:'Made-up bakery'};
+  const update=(scope:string,payload:Record<string,unknown>)=>{const n=++serial;return services.capture.capture({version:1,key:`telegram:123456:update:${n}`,
+    origin:'live',kind:'telegram_update',bot_id:'123456',scope,source_id:String(n),revision:'1',occurred_at:null,text:null,payload:{update_id:n,...payload}} as Envelope);};
+  await startChatDirectory(stores.control,()=>configured);
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    // The owner's private chat, so the card has somewhere to go, and the owner's add: the group is on at once, and its card
+    // waits 30 s.
+    await update(OWNER,{message:{message_id:1,date:1700000000,chat:{id:Number(OWNER),type:'private',first_name:'Owner'},from:{id:Number(OWNER),is_bot:false,first_name:'Owner'},text:'Hello'}});
+    const bot={id:123456,is_bot:true,first_name:'Nocheh'};
+    await update(GROUP,{my_chat_member:{chat,from:{id:Number(OWNER),is_bot:false,first_name:'Owner'},date:1700000001,
+      old_chat_member:{status:'left',user:bot},new_chat_member:{status:'member',user:bot}}});
+    assert.ok(chats().served(group));
+    // The owner asks Nocheh there; the brain is still working on it when the card's project is made.
+    const n=++serial,message={message_id:n,date:1700000002,chat,from:{id:Number(OWNER),is_bot:false,first_name:'Owner'},text:'Nocheh, what is on today?'};
+    const asked=(await services.capture.capture({version:1,key:`telegram:123456:update:${n}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:GROUP,
+      source_id:String(n),revision:'1',occurred_at:null,text:message.text,payload:{update_id:n,message}} as Envelope)).source.reference.id;
+    assert.equal((await services.preparation.run(asked,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'))).state,'completed');
+    await services.telegram.run(asked,await authority('telegram'));
+    assert.equal(started.filter(turn=>turn.event_id===asked).length,1,'the turn started');
+    assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[asked])).rows[0].state,'running');
+    const before=await epoch();
+    await stores.control.query(`UPDATE chat_state_events SET due_at=CASE WHEN chat_id=$1 THEN now() ELSE greatest(due_at,now()+interval '1 day') END WHERE state='waiting'`,[group]);
+    await services.chatAdds.settle();
+    assert.ok((await stores.control.query(`SELECT 1 FROM project_assignments WHERE space_id=$1 AND mode='assigned'`,[group])).rowCount,'the card made the group its own project');
+    assert.equal(await epoch(),before,'and moved no guard epoch');
+    // The brain finishes: the reply goes out from the first attempt, and no turn starts again.
+    brain='done';
+    await stores.control.query('UPDATE dispatches SET next_attempt=now() WHERE event_id=$1',[asked]);
+    await services.telegram.run(asked,await authority('telegram'));
+    assert.deepEqual((await stores.control.query('SELECT state,attempts,error_code FROM dispatches WHERE event_id=$1',[asked])).rows[0],{state:'done',attempts:1,error_code:null});
+    assert.deepEqual(replies.filter(reply=>reply.event_id===asked).map(reply=>[reply.id,reply.chat_id,reply.text]),[[digest(asked+':1'),GROUP,'Fixture reply']]);
+    assert.equal(started.filter(turn=>turn.event_id===asked).length,1,'one turn');
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});

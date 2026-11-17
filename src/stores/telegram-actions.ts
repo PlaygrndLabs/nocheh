@@ -178,13 +178,17 @@ export class TelegramActionRepository {
       (chat.id===from?members().talks(account,chat.id,directory):posts&&allowedIn(chat.id,user,'post',directory)))).map(chat=>chat.id);
   }
   /** Whether the member whose live turn asked for a send (asker_account) may still have it go out (step 3): they still
-   *  talk in the group they asked in and, for a post into another group, may still post from there. Read fresh, as the
-   *  last word before a send. A send the owner asked for, or that no member's turn asked for, has no asker. */
+   *  talk in the group they asked in and, for a post into another group, may still post from there and, when the card
+   *  was their own (card_space outside the owner's chat), still reach that group with that permission, as their card
+   *  needed. A post to another group the owner's card decides keeps the owner's word. Read fresh, as the last word
+   *  before a send. A send the owner asked for, or that no member's turn asked for, has no asker. */
   private async askerCurrent(row:any,directory:ChatDirectory):Promise<boolean> {
     if(!row.asker_account)return true;
     const current=await freshMembers();
-    return current.talks(row.asker_account,row.scope,directory)&&
-      (!otherGroup(row.scope,row.destination,directory)||current.may(row.asker_account,row.scope,'post',directory));
+    if(!current.talks(row.asker_account,row.scope,directory))return false;
+    if(!otherGroup(row.scope,row.destination,directory))return true;
+    const ownCard=!!row.card_space&&(directory.parentOf(row.card_space)??row.card_space)!==ownerChat(this.access.policy());
+    return current.may(row.asker_account,row.scope,'post',directory)&&(!ownCard||current.reaches(row.asker_account,row.destination,'post',directory));
   }
   /** Why a live group request needs no approval, or null: a post in the same
    * group, or the owner's own request for their private chat, which already

@@ -907,8 +907,10 @@ export class BackgroundJobRepository {
     // lists and moves the epoch, so the checks below would end the job without a word. A machine job's parts for the owner
     // and the group's line go on as before.
     if(!line&&targets[sent.length]!.to===row.space_id&&await unserved())return this.notServed(row);
-    // A member removed from the chat since the job ran gets nothing sent there.
-    if(!sent.length&&!this.permitted(row))return this.finish(row,'failed','job_not_permitted');
+    // A member paused, removed, switched off or gone from the chat since the job ran gets nothing more sent there: checked
+    // before every part, as a member change moves no epoch. The owner's own job, the only one with the group's line, is
+    // always permitted.
+    if(!line&&!this.permitted(row))return this.finish(row,'failed','job_not_permitted');
     const part=sent.length+1,binding=await this.guards.state(),run=line?null:await this.latest(row.id);
     // The last run wrote the report in its own epoch. Only quiet epochs, a reaction or an automatic learning revision, may
     // have passed since (ADR-0201); any other change may have withdrawn what it read.

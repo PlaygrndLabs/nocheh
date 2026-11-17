@@ -348,14 +348,20 @@ export class ChatRepository {
    * of their own, they stay two chats, as a group upgraded before step 2b does, except in a live capture Nocheh acts on
    * (`live`; never history, see startAdoption): there the new one's updates came just before its upgrade message, and it
    * folds into the old one if only its own add ever served it (fold); if it may not, the two stay apart, and the new one
-   * still takes the upgrade's echo (apart). `at` is when Nocheh took the upgrade message in.
+   * still takes the upgrade's echo (apart). Whenever they stay two chats there, members' switches are copied to the new
+   * id (step 3). `at` is when Nocheh took the upgrade message in.
    */
   async migrate(db:Db,connection:string,from:string,to:string,live=false,at:Date=new Date()):Promise<boolean> {
     if(!isTelegramChat(from)||!isTelegramChat(to)||from===to)return false;
     const old=await chatOfApp(db,connection,from),next=await chatOfApp(db,connection,to);
     if(old&&next) {
       if(!live||old.id===next.id||old.kind!=='group'||next.kind!=='group'||!old.current||!next.current)return false;
-      return await this.fold(db,connection,old.id,next.id)||await this.apart(db,old.id,next.id,at);
+      if(await this.fold(db,connection,old.id,next.id)||await this.apart(db,old.id,next.id,at))return true;
+      // Neither: both chats stay as they are (the new one has its own project and the old one is on, for one), and the
+      // members' switches are still copied to the new id, which serves the group now, so no one switched off there
+      // talks again (step 3). True when a switch was written, so the directories reload once the capture commits.
+      if(!await copySwitches(db,old.id,next.id))return false;
+      await bumpMemberRevision(db);return true;
     }
     if(old) {
       if(old.current)await db.query(`UPDATE chat_ids SET state='old',reason='migrated',changed_at=now() WHERE connection_id=$1 AND external_id=$2 AND state='current'`,[connection,from]);
@@ -647,10 +653,11 @@ async function membershipFrom(db:Db,chat:string,account:string,state:'in'|'left'
   await bumpMemberRevision(db);
   return true;
 }
-/** Copies members' switches for group `from` to group `to`; where `to` already has a switch, off wins. */
-async function copySwitches(db:Db,from:string,to:string):Promise<void> {
-  await db.query(`INSERT INTO member_chats(member_id,chat_id,enabled) SELECT member_id,$2,enabled FROM member_chats WHERE chat_id=$1
-    ON CONFLICT(member_id,chat_id) DO UPDATE SET enabled=false,updated_at=now() WHERE member_chats.enabled AND NOT excluded.enabled`,[from,to]);
+/** Copies members' switches for group `from` to group `to`; where `to` already has a switch, off wins. Returns how many
+ *  switches it wrote. */
+async function copySwitches(db:Db,from:string,to:string):Promise<number> {
+  return (await db.query(`INSERT INTO member_chats(member_id,chat_id,enabled) SELECT member_id,$2,enabled FROM member_chats WHERE chat_id=$1
+    ON CONFLICT(member_id,chat_id) DO UPDATE SET enabled=false,updated_at=now() WHERE member_chats.enabled AND NOT excluded.enabled`,[from,to])).rowCount??0;
 }
 
 /**

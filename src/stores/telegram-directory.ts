@@ -1,5 +1,6 @@
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
+import {joined} from './members.js';
 
 /** A person in a group: their Telegram user id, name and state there (null when Telegram never said), whether the
  *  group's own messages show them, and whether they are a member (step 3). */
@@ -23,9 +24,11 @@ const GROUPS=100,PEOPLE=5000,AUTHORS=5000,ARRIVALS=1000;
  * It is read from the archive's author relations and the ids in join messages, as before step 2b, when `archive` is
  * given; without it every person counts as seen.
  *
- * Each group also lists the member accounts that have a switch there (member_chats, on or off), with `member` true,
- * including members Nocheh never saw (one carried from the lists before step 3, or added by Telegram user ID): the
- * management side asks Telegram for their names (getChatMember), so the owner sees a name, not only an id.
+ * Each group Nocheh is in (not left, removed or archived) also lists the member accounts switched on there
+ * (member_chats), with `member` true, including members Nocheh never saw (one carried from the lists before step 3, or
+ * added by Telegram user ID): the management side asks Telegram for their names (getChatMember), so the owner sees a
+ * name, not only an id. A switch that is off, as the carry writes for every group a carried person had no grant in,
+ * neither lists a group nor a person there.
  */
 export async function telegramDirectory(control:Db,principal:Reader,archive:Db|null=null):Promise<{groups:Group[];truncated:boolean}> {
   admin(principal);
@@ -34,16 +37,17 @@ export async function telegramDirectory(control:Db,principal:Reader,archive:Db|n
     JOIN chat_connections n ON n.id=c.connection_id AND n.app='telegram'
     LEFT JOIN chat_ids i ON i.chat_id=c.id AND i.state='current' LEFT JOIN chat_details d ON d.chat_id=c.id
     WHERE c.kind='group' AND (d.seen_at IS NOT NULL OR EXISTS(SELECT 1 FROM chat_memberships m WHERE m.chat_id=c.id)
-      OR EXISTS(SELECT 1 FROM member_chats s WHERE s.chat_id=c.id))
+      OR ${joined('c')} AND EXISTS(SELECT 1 FROM member_chats s WHERE s.chat_id=c.id AND s.enabled))
     ORDER BY c.id LIMIT ${GROUPS+1}`)).rows;
   const groups:Group[]=groupRows.slice(0,GROUPS).map(row=>({id:row.id,external:row.external_id??null,telegram_ids:[],
     name:row.title??(row.username?'@'+row.username:null),users:[]}));
   if(!groups.length)return {groups,truncated:groupRows.length>GROUPS};
   const byGroup=new Map(groups.map(group=>[group.id,group]));
-  // Everyone Telegram has a row for, and every member account with a switch there, Telegram's row or not.
+  // Everyone Telegram has a row for, and every member account switched on there while Nocheh is in it, Telegram's row or not.
   const people=(await control.query(`SELECT p.chat_id,m.state,a.external_id,a.display_name,a.username,a.member_id IS NOT NULL AS member FROM
     (SELECT chat_id,account_id FROM chat_memberships WHERE chat_id=ANY($1::text[])
-      UNION SELECT s.chat_id,a.id FROM member_chats s JOIN chat_accounts a ON a.member_id=s.member_id WHERE s.chat_id=ANY($1::text[])) p
+      UNION SELECT s.chat_id,a.id FROM member_chats s JOIN chat_accounts a ON a.member_id=s.member_id JOIN chats c ON c.id=s.chat_id
+        WHERE s.chat_id=ANY($1::text[]) AND s.enabled AND ${joined('c')}) p
     JOIN chat_accounts a ON a.id=p.account_id LEFT JOIN chat_memberships m ON m.chat_id=p.chat_id AND m.account_id=p.account_id
     WHERE a.kind='human' ORDER BY p.chat_id,a.external_id LIMIT ${PEOPLE+1}`,[groups.map(group=>group.id)])).rows;
   const ids=(await control.query(`SELECT i.chat_id,i.external_id FROM chat_ids i JOIN chat_connections n ON n.id=i.connection_id AND n.app='telegram'

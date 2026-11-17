@@ -2,7 +2,7 @@ import {after,test} from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {digest} from '../src/archive.js';
-import {accountIdFor,connectionIdFor} from '../src/chats.js';
+import {accountIdFor,chatIdFor,connectionIdFor} from '../src/chats.js';
 import {memberIdFor} from '../src/members.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {carryMembers} from '../src/stores/member-carry.js';
@@ -16,6 +16,11 @@ import {BOB,GP1,GP2,GP3,GP4,GP_GROUP_IDS,NG1,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,
 const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000};
 const served=[...GP_GROUP_IDS,...NG_GROUP_IDS];
 const policy={owner_id:OWNER};
+/** Groups Nocheh is no longer in, by their Telegram ids: it left one, was removed from one, and knows one only from history. */
+const LEFT_TG='-1003000000101',REMOVED_TG='-1003000000102',ARCHIVED_TG='-1003000000103';
+const GONE=[[LEFT_TG,'left'],[REMOVED_TG,'removed'],[ARCHIVED_TG,'archived']] as const;
+const LEFT=chatIdFor('telegram',LEFT_TG),REMOVED=chatIdFor('telegram',REMOVED_TG),ARCHIVED=chatIdFor('telegram',ARCHIVED_TG);
+/** Every group chat Nocheh is in: an off group (UNSERVED) is one. */
 const ALL=[GP1,GP2,GP3,GP4,UNSERVED,NG1,NG2].sort();
 const none={malformed:0,no_group:0,owner:0,proxy:0,bot:0,invalid:0,denied_only:0,denied:0};
 let shared:Promise<pg.Pool>|null=null;
@@ -25,7 +30,10 @@ async function control():Promise<pg.Pool> {
     const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
     const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
     await initializeStoreDatabases(config,passwords);
-    const stores=connectStores(config,passwords);await seedChats(stores.control,fixtureChats(served));
+    const stores=connectStores(config,passwords),chats=fixtureChats(served),gone=GONE.map(([external,state])=>({external,state,id:chatIdFor('telegram',external)}));
+    await seedChats(stores.control,{...chats,
+      chats:[...chats.chats,...gone.map(({id,state})=>({id,app:'telegram' as const,kind:'group' as const,parent_id:null,topic_key:null,state,title:'Gone '+state,is_forum:false,account_id:null,app_type:'supergroup'}))],
+      ids:[...chats.ids,...gone.map(({id,external})=>({app:'telegram' as const,external_id:external,chat_id:id,state:'current' as const}))]});
     await stores.archive.end();await stores.derived.end();
     return stores.control;
   })();
@@ -41,23 +49,25 @@ async function carry(access?:unknown,document:Record<string,unknown>={enabled:tr
   try{return await carryMembers(db,policy);}
   finally{await db.query(`DELETE FROM runtime_configuration_versions WHERE name='assistant' AND revision=$1`,[revision]);}
 }
-/** A member's switches, by the Telegram user id it was carried for: [group, on] for every group chat. */
+/** A member's switches, by the Telegram user id it was carried for: [group, on] for every group chat they have one in. */
 async function switches(external:string) {
   return (await (await control()).query('SELECT chat_id,enabled FROM member_chats WHERE member_id=$1 ORDER BY chat_id',[memberIdFor(accountIdFor('telegram',external))]))
     .rows.map(row=>[row.chat_id,row.enabled]);
 }
-/** Every group chat, switched on only in `on`. */
-const only=(...on:string[])=>ALL.map(chat=>[chat,on.includes(chat)]);
+/** Every group chat Nocheh is in, and any other group in `on`, switched on only in `on`. */
+const only=(...on:string[])=>[...new Set([...ALL,...on])].sort().map(chat=>[chat,on.includes(chat)]);
 const carried=async()=>(await (await control()).query(`SELECT a.external_id FROM chat_accounts a JOIN members m ON m.id=a.member_id ORDER BY a.external_id`)).rows
   .map(row=>row.external_id);
 
 after(async()=>{if(shared)await (await shared).end();});
 
-test('an old-shaped group key and an upgraded group\'s old key both carry, with a switched-off row for every other group',fixture,async()=>{
+test('an old-shaped group key and an upgraded group\'s old key both carry, with a switched-off row for every other group Nocheh is in',fixture,async()=>{
   const result=await carry({[GP1]:{granted:['901'],denied:[]},[NG2_OLD_TG]:{granted:['902'],denied:[]}});
   assert.deepEqual(result,{carried:true,members:2,groups:2,skipped:none});
   assert.deepEqual(await carried(),['901','902']);
-  assert.deepEqual(await switches('901'),only(GP1),'a group with no row would count as on, so every other group gets a row switched off');
+  assert.deepEqual(await switches('901'),only(GP1),'a group with no row would count as on, so every other group Nocheh is in gets a row switched off');
+  assert.equal((await (await control()).query('SELECT count(*) FROM member_chats WHERE chat_id=ANY($1::text[])',[[LEFT,REMOVED,ARCHIVED]])).rows[0].count,'0',
+    'a group Nocheh left, was removed from or knows only from history gets none: added again, it is a new group, on by default');
   assert.deepEqual(await switches('902'),only(NG2));
   const db=await control(),member=(await db.query('SELECT * FROM members WHERE id=$1',[memberIdFor(accountIdFor('telegram','901'))])).rows[0];
   assert.deepEqual([member.state,member.group_talk,member.group_jobs,member.group_post_other,member.group_tools,member.tasks],['active',true,true,true,true,'write'],
@@ -89,10 +99,10 @@ test('a key naming no group Nocheh has a row for is skipped',fixture,async()=>{
   assert.deepEqual(await carried(),['904']);
 });
 
-test('a group that is off keeps its switched-on row',fixture,async()=>{
-  const result=await carry({[UNSERVED]:{granted:['901'],denied:[]}});
-  assert.equal(result.members,1);
-  assert.deepEqual(await switches('901'),only(UNSERVED),'so they talk there once the owner turns it on');
+test('a group that is off keeps its switched-on row, and so does a group Nocheh is no longer in',fixture,async()=>{
+  const result=await carry({[UNSERVED]:{granted:['901'],denied:[]},[LEFT_TG]:{granted:['901'],denied:[]}});
+  assert.deepEqual([result.members,result.groups],[1,2]);
+  assert.deepEqual(await switches('901'),only(UNSERVED,LEFT),'so they talk there once the owner turns it on');
 });
 
 test('a person Nocheh never saw gets an account, linked to their member',fixture,async()=>{
