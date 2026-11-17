@@ -87,6 +87,40 @@ Deploy 2b-1 from a revision with the record-once fix (#222). A 2b-1 build
 without it may leave updates it took in unrecorded, and when you deploy 2b-2
 again, Nocheh acts on their adds and removals: it may leave, tell or card them.
 
+### Upgrade to step 3
+
+Take a backup first ([ADR-0259](adr/0259-members-in-groups.md)). Step 3 moves who
+may talk in groups out of `.env` and into members kept in the control store.
+
+1. On 2b-2, apply any change to who can talk in groups that is still waiting for
+   Apply. The carry reads the lists the last start admitted, the newest runtime
+   configuration that holds them, never `.env`.
+2. Finish any data reset before you upgrade. Step 3 refuses a reset snapshot
+   written before it (`reset_setup_snapshot_invalid`), so a reset started under
+   2b-2 must be started again.
+3. Run every service from the same revision with `./bin/nocheh up` or `update`;
+   `deploy local` alone replaces only `nocheh-app`. Under step 3 only `nocheh-app`
+   decides who talks: `nocheh-telegram`, Hermes and the installer no longer read
+   the lists.
+
+The first start writes one new runtime configuration revision, which starts one
+guard epoch. After the chat seeder and the owner's chat, it carries the lists
+once: everyone in them becomes a member who talks in exactly the groups they could
+talk in before, on in each group they were granted in and off in every other group
+Nocheh has a record of, with every permission on. The `member_carry` log line
+counts the members, the groups and the rows written, and what was skipped:
+malformed entries, keys with no group record (`no_group`), the owner, proxy
+accounts, bots, ids that are no Telegram user id, people only ever denied, and a
+group a person is denied in. A list for a group Nocheh was never in is not
+carried. The carry runs once; a later start, or a reset that keeps your setup,
+never runs it again.
+
+The old `TELEGRAM_GROUP_ACCESS` line in `.env` is ignored: Settings hides it, it
+never asks for Apply, and no service reads it. You may delete it. The
+`group-access` command is gone; manage members on the **Members** page
+([telegram](telegram.md#members)). Making the bot an admin in your members' groups
+lets Nocheh see more joins and leaves; it is recommended, not required.
+
 See [service names, responsibilities, dashboards and workflow](services.md).
 Host services require Node 26.x; set `NOCHEH_NODE` when selecting a non-default executable.
 

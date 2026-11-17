@@ -2,6 +2,78 @@
 
 <current>
 
+Members step 3: members in groups
+([ADR-0259](docs/adr/0259-members-in-groups.md); owner, 2026-11-12, approving the Members
+design: members are allowed by default in the groups they are in, with a permission scope per
+member, no daily limit on small jobs and no approval for web pages and outside tools; the step 3
+thread, 2026-11-17: a group with no switch counts as on, no "Asked, not allowed" list, "Add by
+Telegram user ID" kept, and the owner's own web and tool requests in groups skip the card).
+One branch: a contract, five parts and their integration. `TELEGRAM_GROUP_ACCESS` is retired:
+members live in the control store and are managed on the Members page.
+- The member directory: `members`, `member_chats`, `member_directory_state` and `member_turns`,
+  and `chat_accounts.member_id`'s foreign key ([schema](test/store-member-schema.test.ts)).
+  `talks`, `may`, `reaches`, `tasks` and `accounts` answer every person check; a group with no
+  switch is on, and a decision made without a message from the group also needs Telegram's
+  newest 'in' row ([directory](test/members.test.ts)). It loads in one snapshot after every
+  commit that moves the member revision, and within the 2 s watch elsewhere; member commands
+  are owner commands with no guard epoch ([repository](test/store-members.test.ts)).
+- The gates: admission, the final reply check, the voice cut, the daily message cap
+  (`member_daily_limit`), jobs (`job_not_permitted`, a running job and its card's presser),
+  posts to other groups (`member_post_not_allowed`, the asker's own card only for a group they
+  reach, a send cancelled as `member_changed`), destinations, and web pages and outside tools
+  without a card (`group_tools`, `tool_not_permitted`, the claim's check again)
+  ([gates](test/store-member-gates.test.ts), [tools](test/store-controlled-actions.test.ts),
+  [runs](test/store-controlled-execution.test.ts), [jobs](test/store-background-jobs.test.ts)).
+  Task calls check the member again (`member_access_changed`), and read-only tasks give a
+  read-only turn ([tasks](test/store-member-tasks.test.ts)). The bot keeps no list: a paused or
+  switched-off member gets the stranger's fixed reply, once a UTC day per group, and a post in a
+  chat's own name gets nothing ([dispatch](test/store-telegram-dispatch.test.ts),
+  [bot](services/telegram/test_approval_cards.py)). The owner's own group
+  requests skip the tool card behind `let ownerGroupTools=true`.
+- The carry: at the first start, the lists the last start admitted become members with exactly
+  their reach, on rows for granted groups and off rows for every other group chat, once, with
+  skips counted in the `member_carry` log line ([carry](test/store-member-carry.test.ts)).
+  Reset snapshots are v3 only and carry the members
+  ([reset](test/store-reset-setup.test.ts), [acceptance](test/store-reset-acceptance.test.ts),
+  [Python](services/hermes/test_reset_configuration.py)). The runtime document is
+  `{enabled, owner_id}`, and an old `.env` line is hidden and never asks for Apply
+  ([configuration](test/store-runtime-configuration.test.ts),
+  [settings](services/hermes/test_settings.py)). The `group-access` command, the installer's
+  checks and Hermes's person checks are gone ([scopes](services/hermes/test_scopes.py),
+  [configuration](services/hermes/test_configuration.py)). The add card's own new project moves
+  no guard epoch ([adds](test/store-chat-adds.test.ts)).
+- The dashboard: Members after Chats, with permissions, groups, pause, remove, the daily cap and
+  both add flows, every control saving at once; Chats shows a read-only "Members here"; the
+  Save path for people, Settings' group access and System's daily member jobs are gone; three new
+  editable texts ([model](test/dashboard-members-model.test.mjs),
+  [routes](test/dashboard-routes.test.mjs), [identities](test/store-member-identities.test.ts),
+  [pages](test/dashboard-pages.browser.mjs)).
+- Full tester: members are set up through the owner's Members routes, with no restart; new
+  scenarios add a member on the dashboard, switch one off in a group, pause one, read a web page
+  without a card, keep tasks read only, turn posting off, follow a member who left, run four
+  member jobs in a day, reach the daily cap, and post in a chat's own name
+  ([scenarios](tools/acceptance/product_scenarios.py), [seeding](test/test_tester_members.py),
+  [fake](services/telegram/test_telegram_http_fixture.py)).
+
+  Checks on the integrated branch (2026-11-17): the build; node unit tests (671: 428 pass, 239
+  skipped, and only the 4 workflow tests that also fail on main fail); the chat id format gate;
+  all 104 store test files (282 pass, 0 fail); Python Telegram (147), Hermes (973, 4 skipped,
+  with the 2 environment errors that also occur on main) and the repository's Python tests (125,
+  2 skipped); the dashboard build, type and format checks and its tests (60 of 60); the browser
+  tests (59: 56 pass, and the 3 that also fail on main).
+  Pending:
+  - The whole full tester on images. It has not run on this step. Two not-allowed scenarios use
+    fixed people, so a second run on the same UTC day may not see the first reply.
+  - The add card's own project moving no epoch has no tester scenario; a store test covers it.
+  - The privacy scan before a push.
+  - Live acceptance on the owner's install after merge.
+  Owner steps: apply any waiting change to who can talk in groups on 2b-2, finish any data
+  reset, take a backup, and run every service from the same revision
+  ([deploy](docs/deploy.md#upgrade-to-step-3)). Then open **Members**: everyone you allowed is a
+  member in exactly the groups they could talk in. The old `.env` line is ignored. Making the
+  bot an admin in members' groups is recommended. Your own web and tool requests in groups no
+  longer show a card; ask if you want that back.
+
 Members step 2b-2: only the owner adds Nocheh to groups
 ([ADR-0253](docs/adr/0253-only-the-owner-adds-nocheh.md); owner, 2026-11-12, approving the
 Members design: only the owner adds Nocheh to a group, and anyone else's add leaves; 2026-11-14:

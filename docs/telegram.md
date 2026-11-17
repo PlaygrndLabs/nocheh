@@ -48,34 +48,13 @@ the command line ([ADR-0244](adr/0244-owner-defaults-posts-and-machine-reports-s
 ./bin/nocheh config apply
 ```
 
-`config set` refuses an ID that is allowed or denied as a person in a group, and
-`configure-telegram` checks the whole policy before it writes `.env`.
+`configure-telegram` checks the whole policy before it writes `.env`. You are never
+a member: the Members page refuses your own ID and warns if your account is ever
+linked to a member.
 
-Only the owner may address Nocheh in a selected group by default. The owner can
-manage individual participant IDs in **Chats**, by opening the group, then Save in
-the bar at the bottom of the screen. The people allowed in a group are kept while
-Nocheh is off there or has left, for when it is on there again. Selected group titles,
-visible administrators, and observed senders appear by name and numeric ID;
-each listed person has Denied or Allowed access. Denied is the default, whether
-there is no individual grant or an explicit saved denial. The Bot API does not
-list every group member,
-so add an ID manually when a person has not appeared in those sources.
-The same controls are available in the CLI:
-
-```sh
-./bin/nocheh group-access list
-./bin/nocheh group-access grant -1001234567890 987654321
-./bin/nocheh group-access deny -1001234567890 987654321
-./bin/nocheh group-access revoke -1001234567890 987654321
-```
-
-Use discovered numeric user IDs. A group ID is checked by its shape only, so a
-group that is off can have its people set before it is on. Each change applies to
-the running services;
-`--save-only` saves a batch for a later `./bin/nocheh config apply`.
-Grant permits a participant to start a reply or tool-using turn in that group.
-Deny overrides grant. Revoke removes either decision and returns that participant
-to the owner-only default. Only the owner can administer these decisions.
+Besides you, only your members may address Nocheh in a selected group. You add and
+manage them on the **Members** page ([members](#members)); no setting lists them,
+and there is no command for them.
 
 For proactive group conversation, disable the bot's group privacy mode in
 BotFather or give it the appropriate group administrator role. Telegram otherwise
@@ -91,9 +70,10 @@ group's topics share Honcho recall and archive search (**Topic memory** in
 Settings › Telegram can keep each topic separate). Memory
 access supports isolated, approved and filtered derived sharing under ADR-0030;
 the owner DM may search registered native memory and the archive, except chats Nocheh does not serve. Unselected
-chats and participants without a group grant cannot start a turn. Someone who
-addresses Nocheh in a selected group without a grant, or anyone else who writes
-privately (at most once a UTC day), gets the owner's fixed reply without a model;
+chats and people who may not talk to Nocheh in a group cannot start a turn. Someone
+who addresses Nocheh in a selected group and may not talk there gets the owner's
+fixed reply without a model, at most once a UTC day per group, and so does anyone
+else who writes privately, at most once a UTC day;
 messages from chats Nocheh does not serve are archived but never prepared. Bot
 senders, edits and historical replay do not trigger new replies.
 In a group, a message starts a turn only when it addresses Nocheh: a reply to
@@ -158,7 +138,8 @@ cause a leave, a line, a card or a change of state.
 
 - **Your add.** When you add Nocheh to a group from your own account, it is on
   there at once. About 30 s later your private chat gets one card. A group with
-  no project answer is then in a new project named after the group, and the
+  no project answer is then in a new project named after the group, made without
+  a new guard epoch, so a reply already running there is not held back, and the
   card's buttons move it to one of up to three other projects, the ones
   updated last (**Move to …**), take it out of projects (**No project**), or
   turn Nocheh off there (**Turn off**). Only your own press in your private chat acts; anyone
@@ -172,8 +153,8 @@ cause a leave, a line, a card or a change of state.
   with no group is archived.
 - **Anyone else's add.** A member, a stranger, another bot, an admin who
   remains anonymous or a channel: the group reads Leaving, Nocheh stays silent
-  there, and about 30 s later it leaves. When the adder is a person you allowed
-  in any group, you get one line naming them; when Telegram hid who added it,
+  there, and about 30 s later it leaves. When the adder is a member, you get one
+  line naming them; when Telegram hid who added it,
   you get one line that says to turn off Remain anonymous and add Nocheh
   yourself, and Chats says the same; a stranger's add sends nothing. Each add
   keeps a record with no names or message text. When Telegram refuses the
@@ -200,8 +181,8 @@ cause a leave, a line, a card or a change of state.
   add on record: Nocheh's own add there was not recorded yet. The new
   supergroup's own add can also arrive before the upgrade messages. It then
   folds into the old chat when only its own add served it and it has no
-  project yet, so the group keeps its state, project and people. Your add
-  folded in turns on only a group Nocheh was not in (Left, Removed or Imported
+  project yet, so the group keeps its state, project and members' switches.
+  Your add folded in turns on only a group Nocheh was not in (Left, Removed or Imported
   history) or had only just seen. Once the card made the new chat's project,
   the two stay apart, but the new one still takes the old one's Off, Couldn’t
   leave or Leaving, and who added Nocheh, when it is on only from your add
@@ -233,6 +214,73 @@ add and Telegram ID, so an upgraded group's new ID is asked on its own. Its
 `/health` shows what `getMe` says the bot may
 do: `can_join_groups`, `can_read_all_group_messages`, `supports_inline_queries`
 and `can_connect_to_business`.
+
+## Members
+
+Members are the people besides you who may talk to Nocheh in groups
+([ADR-0259](adr/0259-members-in-groups.md)). Members are allowed by default in
+the groups they are in: a group you never switched off for a member is on for
+them, a group they join later included. Manage them on the **Members** page
+([dashboard](dashboard.md)); every control saves at once, and a change applies at
+once, with no Apply, no restart and no new guard epoch.
+
+- **Talk to Nocheh in groups they joined**, on by default. Under it, each on by
+  default and each off while talk is off: **Small jobs (no daily limit)**, **Post
+  to their other groups** (they confirm each post with their own card) and **Web
+  pages and outside tools (no approval)**.
+- **Tasks**: **Read and write**, or **Read only**, where they list and read the
+  tasks their group reaches and change nothing.
+- **Groups**: each of their groups with its switch and what Telegram last said
+  about them there: Seen here, Left the group (Telegram says), or Nothing from
+  Telegram yet. **New here** marks a group Telegram has shown them in that has no
+  switch saved yet; it only informs.
+- **Pause this member** stops everything they can do, in every group. **Remove**,
+  which asks first, takes the member away; their tasks and reminders stay.
+- **Daily messages**: each member may start 200 turns a UTC day across all groups
+  by default, 1 to 10,000. A turn past it is not started and uses no model, and
+  the member gets **Reply to a member past the daily limit** from Settings ›
+  Assistant › Built-in instructions, at most once a UTC day per group. You are
+  never counted.
+
+**Add a member** picks someone Nocheh has seen in your groups, with the groups they
+were seen in ticked, or takes a Telegram user ID, with every group Nocheh is in shown
+and none ticked. A group you untick is saved off. A person you add by ID can talk
+from their first message; a group they were never seen in can be ticked only this
+way. A group's page in **Chats** shows **Members here**, read only, with **Make
+member** for people seen there who are not members.
+
+What a member asked for is checked against them again just before it happens:
+a reply before it is delivered, a message Nocheh sends, a web page read or outside
+tool, a job and a task change. A member paused mid-reply gets no reply, and a
+message they asked for is cancelled with the reason on its card. A post into
+another group and a running job need Telegram to have shown them in that group,
+and a send to their private chat needs it in one of their groups. A member's first
+message in a group is enough to talk there, and shows them in it; until then, a
+post into that group from another one goes to your card. The bot asks Telegram
+nothing at runtime about who is a member, and a bot that is not a group admin
+sees joins and leaves only from Telegram's service messages, so a member who left
+quietly keeps their place until Telegram says so.
+Making the bot an admin in your members' groups is recommended, not required.
+
+Someone who addresses Nocheh in a group and may not talk there, a stranger or a
+member who is paused, has talk switched off or is off in that group, gets
+**Reply to people who may not talk in a group** at most once a UTC day per group,
+with no model. A post in a chat's own name, such as an anonymous admin's, gets
+nothing.
+
+A member's web page read or outside tool in a live group turn runs without a
+card while their permission is on, and so does your own request in a group. Deny
+rules and the chat's tool switches come first, a command still waits for your
+card, and a member with the permission off is refused. Jobs, schedules and
+follow-ups still ask. Changing `let ownerGroupTools=true` to `false` in
+`src/stores/controlled-actions.ts` gives your own group requests their card again.
+
+`TELEGRAM_GROUP_ACCESS` is retired, and the `group-access` command is gone. At the
+first start of step 3, the people in the lists the last start admitted became
+members who talk in exactly the groups they could talk in before: a group they
+were granted in is on, every other group Nocheh has a record of is off. An old
+`TELEGRAM_GROUP_ACCESS` line in `.env` is hidden in Settings, never asks for
+Apply, and no service reads it ([deploy](deploy.md#upgrade-to-step-3)).
 
 ## Send records
 
@@ -334,22 +382,24 @@ In the owner's private DM:
 `/action` shows the destination and exact requested text. A live typed owner DM,
 the dashboard Inbox, `./bin/nocheh approvals`, or the owner's Approve press on
 the card Nocheh sends to the owner's private chat can approve. A group request for
-a post in that same group (that same topic when **Topic memory** keeps topics separate) needs none; a card for another group or topic goes to the person
-who asked when they are allowed in both. Other group messages, imported history
+a post in that same group (that same topic when **Topic memory** keeps topics separate) needs none; a card for another group or topic goes to the member
+who asked when they may post to their other groups, may talk in the other group
+and Telegram has shown them there, and otherwise to the owner. Other group messages, imported history
 and transcripts cannot approve or alter settings. Controlled shell, browser and public HTTPS MCP requests also use
 exact proposals and bounded revocable permissions; see ADR-0029. Uncertain
 delivery remains ambiguous; it is not automatically resent.
 
 Nocheh sends only to chats it serves: the owner's private chat and its topics,
-the selected groups and their topics, and the private chats of people the owner
-allowed in those groups. A send to a person's private chat always waits for the
-owner's card. Any other destination, a chat Nocheh has no record of included, is
+the selected groups and their topics, and the private chats of members who may
+talk in one of those groups and whom Telegram has shown there. A send to a
+member's private chat always waits for the owner's card. Any other destination, a chat Nocheh has no record of included, is
 refused alike with `destination_not_served`, and the assistant is told the owner
-can serve it on the Chats page. The app checks this when a send is proposed,
+can select the group on the Chats page or make the person a member on the
+Members page. The app checks this when a send is proposed,
 approved and started, and again whenever the bot asks before a message, so a
 chat the owner stops serving gets nothing more; its card then says "Approved,
 but not sent" and why. The card names the kind of chat in fixed words ("group",
-"topic", "private chat with … (a person you allowed in group …)") and quotes
+"topic", "private chat with … (a member in …)") and quotes
 only the name; a name that reads like another chat's gets its project or the
 short ID the Chats page shows after the name
 ([ADR-0254](adr/0254-sends-go-only-to-chats-nocheh-serves.md)).
@@ -357,7 +407,7 @@ short ID the Chats page shows after the name
 ## Task reminders
 
 A task reminder goes to the owner's private chat at its time. One set by a
-person the owner allowed, or by the owner in a group, starts with a line naming
+member, or by the owner in a group, starts with a line naming
 who set it and where ("👤 Set by … in …"), and a task someone last wrote or
 closed outside the owner's private chat and the dashboard says so too; a
 person's notes come marked line by line. People's reminders due together in one
