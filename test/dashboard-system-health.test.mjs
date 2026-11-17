@@ -130,6 +130,28 @@ test('the stores\' label lookups and recall\'s ask of forwards and files are lin
   ]);
 });
 
+test('source tags that could not be built are a stores line of their own (ADR-0259)', () => {
+  // Without its own row, a failed tag would read as a failed note label, which it is not.
+  assert.deepEqual(
+    issues({
+      note_problems: [
+        {day: '2026-11-14', kind: 'source_tags', failed: 3, ok: 1},
+        {day: '2026-11-14', kind: 'note_labels', failed: 1, ok: 0},
+      ],
+    }).map(row => [row.text, row.detail]),
+    [
+      [
+        'Labelling where facts and search results came from failed 3 times today',
+        'Those showed “source not available right now”. The messages and what was learned from them are kept.',
+      ],
+      [
+        'Looking up where notes came from failed 1 time today',
+        'Recall and the Notes page showed those notes as “source not available right now” or without their chat, and replies may have seen them without their chat. The notes and what was recorded about them are kept.',
+      ],
+    ],
+  );
+});
+
 test('a task that ended shows its recorded reason as a note, and only an open one is waiting for something', () => {
   // A memory step that completed without learning Nocheh's own card waits for nothing.
   assert.deepEqual(

@@ -79,6 +79,18 @@ export class SourceRetirementRepository {
     const objects=new Set(retired.map(row=>row.object_id));
     return new Set(identities.filter(row=>objects.has(row.object_id)).map(row=>row.event_id));
   }
+  /** isRetired() for many events in one pair of reads: those whose message is retired, or that react to a retired message. */
+  async retiredAmong(eventIds:readonly string[]):Promise<Set<string>> {
+    const wanted=[...new Set(eventIds)];
+    if(!wanted.length)return new Set();
+    const rows=(await this.archive.pool.query(`SELECT o.event_id,r.object_id FROM source_observations o
+      JOIN source_revisions r ON r.id=o.revision_id WHERE o.event_id=ANY($1::text[])
+      UNION SELECT event_id,target_id AS object_id FROM source_relations WHERE event_id=ANY($1::text[]) AND kind='reaction_to'`,[wanted])).rows;
+    if(!rows.length)return new Set();
+    const retired=new Set((await this.stores.control.query('SELECT object_id FROM source_retirements WHERE object_id=ANY($1::text[]) AND retired=true',
+      [[...new Set(rows.map(row=>row.object_id))]])).rows.map(row=>row.object_id as string));
+    return new Set(rows.filter(row=>retired.has(row.object_id)).map(row=>row.event_id as string));
+  }
   async isRetired(reference:SourceReference):Promise<boolean> {
     const rows=(await this.archive.pool.query(`SELECT r.object_id FROM source_observations o
       JOIN source_revisions r ON r.id=o.revision_id WHERE o.event_id=$1

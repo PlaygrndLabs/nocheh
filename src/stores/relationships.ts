@@ -50,17 +50,32 @@ export class RelationshipRepository {
    * that audience names (observedChat), null when it is unknown or no row names it. */
   async describe(reference:SourceReference):Promise<{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string;chat:string|null}> {
     await this.archive.verify(reference);
-    const row=(await this.pool.query(`SELECT ${observationColumns},r.object_id FROM source_observations o
+    const found=(await this.describeMany([reference.id])).get(reference.id);
+    if(!found)throw new HttpError(404,'source_projection_not_found');
+    return found;
+  }
+  /** describe() for many events in one read, for ids the caller has already verified; an event with no observation is
+   * left out. A reaction is described by the message it reacts to, as describe() does. */
+  async describeMany(ids:readonly string[]):Promise<Map<string,{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string;chat:string|null}>> {
+    const found=new Map<string,{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string;chat:string|null}>(),wanted=[...new Set(ids)];
+    if(!wanted.length)return found;
+    const rows=(await this.pool.query(`SELECT ${observationColumns},r.object_id,o.event_id FROM source_observations o
       JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
-      JOIN events e ON e.id=o.event_id WHERE o.event_id=$1`,[reference.id])).rows[0];
-    if(!row)throw new HttpError(404,'source_projection_not_found');
-    let audience=messageAudience(row);
-    if(['reaction_change','reaction_counts'].includes(row.operation)) {
-      const target=(await this.pool.query("SELECT target_id FROM source_relations WHERE event_id=$1 AND kind='reaction_to'",[reference.id])).rows[0];
-      const resolved=target?await this.targetAudience(target.target_id):null;
-      if(resolved&&resolved.chat_id===audience?.chat_id)audience=resolved;
+      JOIN events e ON e.id=o.event_id WHERE o.event_id=ANY($1::text[])`,[wanted])).rows;
+    const reactions=rows.filter(row=>['reaction_change','reaction_counts'].includes(row.operation)).map(row=>row.event_id);
+    const targets=new Map<string,string>();
+    if(reactions.length)for(const row of (await this.pool.query("SELECT DISTINCT ON (event_id) event_id,target_id FROM source_relations WHERE event_id=ANY($1::text[]) AND kind='reaction_to' ORDER BY event_id,target_id",
+      [reactions])).rows)targets.set(row.event_id,row.target_id);
+    for(const row of rows) {
+      let audience=messageAudience(row);
+      if(['reaction_change','reaction_counts'].includes(row.operation)) {
+        const target=targets.get(row.event_id),resolved=target?await this.targetAudience(target):null;
+        if(resolved&&resolved.chat_id===audience?.chat_id)audience=resolved;
+      }
+      found.set(row.event_id,{audience,reaction:row.metadata.reaction??null,object_id:row.object_id,
+        chat:audience&&audience.chat_id===row.scope?observedChat(row.channel,audience):null});
     }
-    return {audience,reaction:row.metadata.reaction??null,object_id:row.object_id,chat:audience&&audience.chat_id===row.scope?observedChat(row.channel,audience):null};
+    return found;
   }
 
   async observations(target:SourceIdentity,after='',limit=100):Promise<{references:SourceReference[];next:string|null}> {

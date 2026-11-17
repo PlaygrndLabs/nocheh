@@ -1,3 +1,4 @@
+import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
@@ -37,6 +38,60 @@ export interface EntityClaimInput {
  attribution:'direct'|'reported'|'inferred';speaker_entity_id?:string;uncertainty:'uncertain'|'supported'|'explicit';evidence:SourceReference[];
 }
 
+/** The person entity Nocheh makes by itself for a platform identity (a source object), and the name it gives one that
+ *  came with no name. Both are what ensureIdentity writes; nothing reads an id's shape from them. */
+export const automaticPersonId=(objectId:string)=>digest(canonical([protocol,'person',objectId]));
+const automaticName=(identity:{platform:string;kind:string;external_id:string})=>`${identity.platform} ${identity.kind} ${identity.external_id}`;
+/**
+ * The name the owner chose for the person who wrote a message (ADR-0259), or null when the owner chose none: an untouched
+ * identity Nocheh made by itself (bound exactly to its own automatic entity, never renamed: the identity ensureIdentity
+ * keeps following Telegram's names), or one still named by its automatic fallback, which can hold the account's id. Only
+ * a rename, a merge or a confirmed suggestion makes a name the owner's. Told by equality with what ensureIdentity
+ * writes; no id is parsed.
+ */
+export function ownerChosenName(entity:{id:string;name:string;revision:number},binding:{entity_id:string;state:string},
+  identity:{id:string;platform:string;kind:string;external_id:string}):string|null {
+  const automatic=automaticPersonId(identity.id);
+  if(binding.state==='exact'&&binding.entity_id===automatic&&entity.id===automatic&&Number(entity.revision)===1)return null;
+  const name=typeof entity.name==='string'?entity.name.trim():'';
+  return !name||name===automaticName(identity)?null:name;
+}
+/**
+ * The People name the owner chose for the sender of each of these events, by event id (ownerChosenName), for the owner's
+ * own tags only: who wrote it (its one authored_by identity), that identity's binding the owner confirmed or else its
+ * automatic one, and the active entity it names, following a merged entity to the one it was merged into. An event with
+ * no such name, or more than one author, is left out.
+ */
+export async function ownerPeopleNames(stores:{archive:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>},eventIds:readonly string[]):Promise<Map<string,string>> {
+  const found=new Map<string,string>(),wanted=[...new Set(eventIds)];
+  if(!wanted.length)return found;
+  const authors=(await stores.archive.query(`SELECT r.event_id,min(o.id) AS id,min(o.platform) AS platform,min(o.kind) AS kind,min(o.external_id) AS external_id
+    FROM source_relations r JOIN source_objects o ON o.id=r.target_id WHERE r.event_id=ANY($1::text[]) AND r.kind='authored_by'
+    GROUP BY r.event_id HAVING count(*)=1`,[wanted])).rows;
+  if(!authors.length)return found;
+  const bindings=(await stores.control.query(`SELECT DISTINCT ON (b.source_object_id) b.source_object_id,b.entity_id,b.state
+    FROM memory_entity_bindings b WHERE b.source_object_id=ANY($1::text[]) AND b.binding_kind='source_identity' AND b.state IN ('exact','confirmed')
+    ORDER BY b.source_object_id,b.state='confirmed' DESC,b.updated_at DESC,b.id`,[[...new Set(authors.map(row=>row.id as string))]])).rows;
+  const byObject=new Map(bindings.map(row=>[row.source_object_id as string,row]));
+  const entities=new Map<string,MemoryEntity>();
+  let ids=[...new Set(bindings.map(row=>row.entity_id as string))];
+  // A merged entity names the one it was merged into; a chain of merges is followed a few steps, never in a loop.
+  for(let step=0;step<5&&ids.length;step++) {
+    const rows=(await stores.control.query('SELECT id,kind,name,state,merged_into,revision FROM memory_entities WHERE id=ANY($1::text[])',[ids])).rows as MemoryEntity[];
+    for(const row of rows)entities.set(row.id,row);
+    ids=rows.filter(row=>row.state==='merged'&&row.merged_into&&!entities.has(row.merged_into)).map(row=>row.merged_into!);
+  }
+  const active=(id:string)=>{let entity=entities.get(id);for(let step=0;step<5&&entity?.state==='merged'&&entity.merged_into;step++)entity=entities.get(entity.merged_into);
+    return entity?.state==='active'&&entity.kind==='person'?entity:null;};
+  for(const author of authors) {
+    const binding=byObject.get(author.id),entity=binding?active(binding.entity_id):null;
+    if(!binding||!entity)continue;
+    // A merge moved the binding to another entity, so it is the owner's choice, as a rename is.
+    const name=ownerChosenName(entity,entity.id===binding.entity_id?binding:{...binding,state:'merged'},author);
+    if(name)found.set(author.event_id,name);
+  }
+  return found;
+}
 const entityId=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_entity_id');return id;};
 export function attributedSpeaker(attribution:'direct'|'reported'|'inferred',subject:string,supplied:string|undefined,trusted:string|undefined):string|undefined {
   // A direct claim about the actual source speaker can omit a redundant speaker ID.
@@ -141,9 +196,9 @@ export class EntityRepository {
     return found.length===1?this.ensureIdentity(found[0]):null;
   }
   private async ensureIdentity(identity:{id:string;platform:string;kind:string;external_id:string;payload:unknown}):Promise<MemoryEntity|null> {
-    const id=digest(canonical([protocol,'person',identity.id])),binding=digest(canonical([protocol,'source-binding',identity.id]));
+    const id=automaticPersonId(identity.id),binding=digest(canonical([protocol,'source-binding',identity.id]));
     const linked=(await this.stores.control.query('SELECT entity_id,state FROM memory_entity_bindings WHERE id=$1',[binding])).rows[0];
-    const known=participantName(identity.payload,''),name=known||`${identity.platform} ${identity.kind} ${identity.external_id}`;
+    const known=participantName(identity.payload,''),name=known||automaticName(identity);
     // Only an untouched exact platform identity follows platform display names, and only to a name
     // the update supplies. Owner renames and confirmed or moved bindings retain their chosen identity.
     if(!linked||linked.entity_id===id&&linked.state==='exact')await this.stores.control.query(`INSERT INTO memory_entities(id,kind,name,state)

@@ -94,9 +94,11 @@ test('a recalled hit is named by its chat row, never by how its id looks: digest
        {chat:NG2,scope:NG2_OLD_TG,payload:message(Number(NG2_OLD_TG),'NG2 latest'),received_at:newer,id:'b'}])};
   const found=await recallNames(stores,[NG1,NG1_TOPIC,NG2,NG1_TG,'-1009999999999',OWNER]);
   assert.deepEqual(Object.fromEntries(found),{[NG1]:'NG1 row',[NG1_TOPIC]:'Trips',[NG2]:'NG2 latest'});
-  assert.deepEqual(asked[0]!.values,[[NG1,NG2,NG1_TOPIC]],'chat rows are read by Nocheh ids only');
+  assert.deepEqual(asked[0]!.values,[[NG1,NG2,NG1_TOPIC],false],'chat rows are read by Nocheh ids only, every name the owner reads');
   const [groups,topics]=[asked[1]!.values,asked[2]!.values];
   assert.deepEqual(groups,[[NG1,NG2,NG2],[NG1_TG,...[NG2_TG,NG2_OLD_TG].sort()]],'the archive is read by every Telegram id each group has had');
   assert.deepEqual(topics,[[NG1_TOPIC],[NG1_TG],[NG1_TOPIC_KEY]],'a topic is read in its group\'s Telegram ids by its key');
   assert.equal(asked.length,3);
+  asked.length=0;await recallNames(stores,[NG1],{shownOnly:true});
+  assert.deepEqual(asked[0]!.values,[[NG1],true],'anyone but the owner reads only the names Telegram showed (ADR-0259)');
 });

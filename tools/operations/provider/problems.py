@@ -33,13 +33,14 @@ MAX_FOLLOWED = 50
 SOURCES = {'application': 'application', 'service': 'services', 'models': 'routes', 'work_unchecked': 'work', 'workers': 'work',
            'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram',
            'reader': 'readers', 'notes': 'notes', 'memory_read': 'notes', 'note_labels': 'store_notes', 'forwards_read': 'store_notes',
+           'source_tags': 'store_notes',
            'backup': 'backups', 'backup_unreadable': 'backups', 'backup_skipped': 'backups', 'offsite': 'backups', 'offsite_skipped': 'backups'}
 # A part's model calls, a reader's files, the steps that tell where notes came from and turns that read long-term
 # memory, counted per day with those that worked: they clear once one works after the last failure a check saw. Hermes's
-# steps (notes, memory_read) and the stores' (note_labels, forwards_read) are lines of their own, so a step that works on
-# one side never clears the other's.
-COUNTED_TODAY = ('model', 'reader', 'notes', 'memory_read', 'note_labels', 'forwards_read')
-NOTE_LINES = ('notes', 'memory_read', 'note_labels', 'forwards_read')
+# steps (notes, memory_read) and the stores' (note_labels, forwards_read, source_tags) are lines of their own, so a step
+# that works on one side never clears the other's.
+COUNTED_TODAY = ('model', 'reader', 'notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags')
+NOTE_LINES = ('notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags')
 # Sends of the notices themselves, left out of the 'sends' count so a notice that fails cannot feed itself.
 OWN_SENDS = ('notice', 'notice_update')
 # Background work families, as System › Work names them.
@@ -181,7 +182,8 @@ def problems(monitoring, usage_rows, today):
                 ok=row.get('ok') if type(row.get('ok')) is int else None)
     # Steps that failed to record or look up where notes came from, counted per attempt so a failure that comes back
     # grows the count, and turns that could not read long-term memory in full (ADR-0257; services/hermes/usage.py NOTE_KINDS),
-    # then the stores' own: labelling notes, and recall's ask of the owner's forwards and files (monitoring.STORE_NOTE_KINDS).
+    # then the stores' own: labelling notes, recall's ask of the owner's forwards and files, and source tags
+    # (monitoring.STORE_NOTE_KINDS).
     notes = monitoring.get('note_problems')
     for row in notes if isinstance(notes, list) else []:
         if row.get('day') == today and row.get('kind') in NOTE_LINES and type(row.get('failed')) is int:
@@ -296,6 +298,9 @@ def text(problem, new):
     if kind == 'forwards_read':
         return (f"Long-term memory: recall couldn’t ask your forwards and files {_plural(count, 'time', 'times')} today; "
                 'it answered from the rest of your memory.')
+    if kind == 'source_tags':
+        return (f"Memory labels: labelling where facts and search results came from failed {_plural(count, 'time', 'times')} "
+                'today; those showed “source not available right now”. The messages and what was learned from them are kept.')
     if kind == 'backup':
         reason = BACKUP_REASONS.get(problem.get('reason'), BACKUP_REASONS['backup_failed'])
         if count == 1:
