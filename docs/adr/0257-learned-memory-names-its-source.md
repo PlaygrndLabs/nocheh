@@ -13,8 +13,8 @@ review of the design tightened it: "you" only for a review of nothing but the
 owner's own messages that cites them, a note's earlier sources carried through
 the operations that replace it, and a reported claim never made direct.
 Reviews of the build closed gaps in pins and quotes (of Nocheh's own messages
-too), rules, recall, what a turn read, failure counting and the full tester's
-checks; this record describes the result. Four
+too), messages a message embeds, checklists, rules, recall, what a turn read,
+failure counting and the full tester's checks; this record describes the result. Four
 questions went to the owner; this builds the recommended answer to each, except
 that a reply's or a reaction's target from someone not allowed is left out of
 the review, as the owner's rule says, until the owner answers otherwise. It reads
@@ -84,8 +84,17 @@ a recalled note names its source beside its chat).
   wrote it. A quote refused this way is cut out of the message quoting it, which
   stays, and counted as `sender_not_allowed`. A pin is judged by the author of
   the message it pinned, in the same chat: one from someone not allowed is cut
-  out of the pin, which stays, and counted as `sender_not_allowed`. A pinned
-  message Telegram no longer shows carries no words and is let through. Nocheh's
+  out of the pin, which stays, and counted as `sender_not_allowed`. A quote
+  inside the pinned message is judged as any quote is, by the message it
+  repeats part of: the pinned message as the archive holds it, each revision,
+  is asked as a message quoting is (`admitPinnedQuote`), so the quote stays only
+  when the message it answers is archived and admitted or, never archived, its
+  author as that reply shows it is allowed there. Telegram sends a pinned
+  message without its reply, so the quote inside one the archive never got has
+  nothing to judge it by and is cut too. A quote refused this way is cut out of
+  the pinned message, which stays, and counted as `sender_not_allowed`, once per
+  message. A pinned message Telegram no longer shows carries no words and is let
+  through. Nocheh's
   own message, found in the archive as the same chat's message the pin names
   (the way a reply's target is found), is never someone not allowed: a learned
   one stays, and a card, notice or reminder is cut out without being counted,
@@ -124,7 +133,20 @@ a recalled note names its source beside its chat).
   and a card the owner replies to stays whole as related context of the reply
   in the notes review and interpretations (ADR-0256): only Honcho never writes
   it. A reply that quotes nothing carries none of its target's words into what
-  is learned.
+  is learned, and no message carries another it embeds: what is learned takes
+  out of each message every message nested in it, at any depth and whatever
+  field holds it, except the one a pin carries, which loses its own nested
+  messages the same way (`cutEmbeddedMessages`). Code tells such a message by
+  its shape alone, an object with a `message_id` and a `chat` and no `type`
+  (every forward origin has one), never by a field's name or an id, so a field
+  Telegram adds later fails closed: the checklist a service message reports on
+  (`checklist_tasks_done`, `checklist_tasks_added`), a giveaway's message
+  (`giveaway_completed`) and a suggested post's (`suggested_post_approved` and
+  the rest) are all cut. Such a message is someone else's, or the sender's own
+  earlier one, and is learned from its own event when Nocheh got it, as a
+  reply's target is; the sender's own data beside it stays (the tasks they
+  added, the ids of tasks marked done). Interpretations, Honcho and the notes
+  review read nothing else of it.
 - Memory › Assistant notes says how many messages were kept out this generation
   (`kept_out` on the reviews list). Long-term memory and learning still take
   such a message, so in System › Background work its Memory notes step shows as
@@ -144,7 +166,8 @@ a recalled note names its source beside its chat).
   never the owner. `ownerTyped` holds only for the owner's own message, edit,
   reaction or web-chat message with no forward of someone else, no inline bot,
   no post in a chat's name, no quote of someone else, no pin of someone else's
-  message and no file or audio text. A pin has no words of its own and carries
+  message, no checklist that may hold someone else's tasks and no file or audio
+  text. A pin has no words of its own and carries
   those of the message it pinned: a pinned forward is a forward, someone else's
   message is `pinned`, and only the sender's own message stays theirs. A quote
   is the sender's own only when the message it answers is theirs and is not a
@@ -158,7 +181,15 @@ a recalled note names its source beside its chat).
   which the quote is not from. A Telegram Desktop export's message is a forward
   when it carries any of the export's forward fields, whatever they hold:
   `forwarded_from` (a deleted account's is `null`), `forwarded_from_id` or
-  `saved_from`.
+  `saved_from`. A checklist names no one per task, and its
+  `others_can_add_tasks` says only what others may do now, since its sender can
+  turn it off once others have added tasks. So a checklist others can add tasks
+  to, and any checklist shown again (an edit of it, the message a pin carries,
+  the message a quote is from), is read as one with someone else's words in
+  it, whoever sent it (`sharedChecklist`): `pinned`, or `quote` for a quote of
+  one, both in the person group, the classes a pin or quote of someone else's
+  message already has. Only a new checklist that only its sender can add to
+  stays the sender's own. Its text is still learned.
 - `eventClass` gives one fixed token per message, such as `owner_message`,
   `person_message`, `forward_hidden_by_owner`, `file_by_person`, `pinned`,
   `nocheh_job_report`, `nocheh_about_forward` or `unknown`, in five groups:
@@ -306,7 +337,9 @@ a recalled note names its source beside its chat).
   archived yet, or a forward of one) leaves the same pointer, and a quote of one
   is left out as a quote of Nocheh's is. Another bot's message is someone
   else's: the owner's pin of it is kept as a forward is, a member's stays on the
-  member, and a quote of it goes as anyone else's quote. Nocheh's reply about a
+  member, and a quote of it goes as anyone else's quote. The owner's checklist
+  that may hold someone else's tasks (see section 2) is kept as the owner's pin
+  of someone else's message is, with the same pointer. Nocheh's reply about a
   forward goes to the forwards session.
 - In a group, a member's message, forward or pin stays on the member's peer,
   except a pin of Nocheh's own message, which leaves only the pointer. The
@@ -431,9 +464,12 @@ a recalled note names its source beside its chat).
   - In the owner's notes review, a quote of another bot's message, of a message
     the archive never got from someone not allowed there, or of a message in
     another chat or topic that the archive does not hold or whose sender is not
-    allowed there, is cut out of the message quoting it. The message stays, and
-    interpretations and long-term memory keep the quote, labelled as someone
-    else's.
+    allowed there, is cut out of the message quoting it. So is a quote inside a
+    pinned message, judged by the message it quotes as the archive holds the
+    pinned message; Telegram sends a pinned message without its reply, so the
+    quote inside one the archive never got can't be traced and is cut too. The
+    message stays, and interpretations and long-term memory keep the quote,
+    labelled as someone else's.
   - The owner's quote of their own message in another chat or topic, and a
     Telegram Desktop export's forward with no name for its sender (a deleted
     account's, or one marked only by `forwarded_from_id` or `saved_from`), are
@@ -444,6 +480,19 @@ a recalled note names its source beside its chat).
     or a venue it answers) is no longer learned with the pin; the pin's message
     is learned without it, as every message is learned without the message it
     answers.
+  - A service message no longer carries the message it reports on into what is
+    learned: the tasks the owner added and the ids of tasks the owner marked done
+    stay, and the checklist they belong to, a giveaway's message or a suggested
+    post is learned from its own message when Nocheh got it, labelled as its
+    sender's. A note from "tasks 1 and 2 done" sees the ids, not those tasks'
+    text, unless that checklist is in the same review.
+  - The owner's checklist others can add tasks to, and every edit, pin or quote
+    of the owner's own checklist, is no longer the owner's own typing: Telegram
+    names no one per task and the owner can stop sharing a checklist after others
+    added tasks. It is labelled as a pin or quote of someone else's message (on
+    the Notes page "a message by someone else that you pinned"), kept with the
+    owner's forwards and files in long-term memory, and its text is still
+    learned. A new checklist only the owner can add to stays the owner's own.
   - Allowing someone later does not add their old messages to the notes.
   - Others' forwards, and others' messages the owner pins, leave the private
     chat's long-term memory session. A follow-up like "book the 7am one" is
@@ -545,11 +594,11 @@ a recalled note names its source beside its chat).
   - A forward of Nocheh's message, sent on its own rather than pinned or
     quoted, is learned as a forward from a person shown as Nocheh: someone
     else's, never the owner's words, but its text is kept, card or not.
-  - A quote inside a pinned message is checked only for Nocheh's words: the
-    notes review does not ask who wrote the message it quotes, and one the
-    archive does not hold, of a message in the same chat, can't be traced at all
-    (Telegram's pinned message carries no reply), so it stays as a quote of
-    someone else's message.
+  - A checklist others can add tasks to names no one per task, so a task that
+    someone not allowed there added reaches the owner's notes review when the
+    checklist is shown again (an edit, a pin or a quote of it), labelled as
+    someone else's message, never the owner's; their own service message saying
+    they added it (`checklist_tasks_added`) is kept out as theirs.
   - A quote of Nocheh's message is cut whole, so the notes review and
     interpretations no longer see which part of it was quoted.
   - Hermes's own `notes` line adds up its own steps, so a lookup that works can

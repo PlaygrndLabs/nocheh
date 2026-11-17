@@ -241,9 +241,19 @@ the reply at the topic's first message, which the quote is not from. In the
 owner's notes review a quote is judged by who wrote the message it answers, as a
 pin is: another bot's message, which Telegram never sends to Nocheh, is cut out
 and counted, and a quote of a message in another chat or topic stays only when
-Nocheh holds that message and its sender is allowed there. A pinned message's
-own reply, such as a poll it answers in another chat, is never learned with the
-pin
+Nocheh holds that message and its sender is allowed there. A quote inside a
+pinned message is judged the same way, by the message it quotes as Nocheh holds
+the pinned message; Telegram sends a pinned message without its reply, so the
+quote inside one Nocheh never got is cut. A pinned message's own reply, such as
+a poll it answers in another chat, is never learned with the pin, and neither is
+any other message one carries: the checklist that a "tasks done" or "tasks
+added" service message reports on, a giveaway's or a suggested post's message,
+or one in a field Telegram adds later. Nocheh tells such a message by its shape,
+never by a field's name, and learns it from its own message when it got that.
+Telegram names no one per checklist task, and the owner can stop sharing a
+checklist after others added tasks, so a checklist others can add tasks to, and
+any checklist edited, pinned or quoted, is labelled as a pin or quote of
+someone else's message, never as the owner's own words; it is still learned
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app

@@ -239,7 +239,9 @@ becomes your private memory"). One pull request of several commits
   grant adds nothing back. A quote is judged by the message it answers even when the review
   holds nothing of it: another bot's message, or one Nocheh never got, by its author as the
   reply shows it, and one in another chat or topic stays only when the archive holds it and its
-  sender is allowed there. A pin of Nocheh's own message is never counted as kept out: one it
+  sender is allowed there; a quote inside a pinned message is judged the same way, and cut
+  when the archive never got the pinned message, which Telegram sends without its reply. A pin
+  of Nocheh's own message is never counted as kept out: one it
   learns stays in the pin, and a card, notice or reminder is taken out of it, so a pin of a card
   with nothing else to review is not reviewed at all. Memory › Assistant
   notes counts what was kept out, and System › Background work shows the message's Memory notes
@@ -255,6 +257,10 @@ becomes your private memory"). One pull request of several commits
   turn's note never. A quote of a message in another chat or topic is never the sender's own
   (in a forum topic Telegram also points the reply at the topic's first message), and a
   Telegram Desktop export's message is a forward when it carries any of its forward fields. A
+  checklist others can add tasks to, and any checklist edited, pinned or quoted, is never the
+  sender's own typing: Telegram names no one per task, and the owner can stop sharing one after
+  others added tasks; it is labelled as a pin or quote of someone else's message and still
+  learned. A
   rule is judged by the messages code recorded it was learned from, never by what the model
   cited, and rules resting on others' words label the note as theirs; only a review
   holding someone else's words reads them, as a review of Nocheh's own learned messages, alone or
@@ -302,7 +308,10 @@ becomes your private memory"). One pull request of several commits
   can stay direct; a claim citing the pin or quote never is. A pin of only a card, or of only
   Nocheh's message not archived yet, asks no interpretation or notes review either. A pinned
   message's own reply (a poll or a contact it answers in another chat) is never learned with
-  the pin. Owner
+  the pin, and no message carries another it embeds, told by shape alone so a field Telegram
+  adds later fails closed: the checklist a service message reports on, a giveaway's or a
+  suggested post's message is learned only from its own message, and the tasks the owner added
+  or marked done stay the owner's. Owner
   turns read the forwards block apart from the owner's, and
   recall asks it; when that ask fails, recall keeps the other answers and says so, and
   answers stay whole under their headers within 20,000 characters. A claim resting on a
@@ -366,7 +375,12 @@ becomes your private memory"). One pull request of several commits
   owner's notes review): the build; the unit tests (the same 4 fail); the dashboard tests and
   format check; the reviews store file and those that read the same paths (long-term memory,
   note sources, relationships, the rule catalog); the sweep's probes; each new check also run
-  without its fix and failing. Pending: the whole store suite after those fixes; the
+  without its fix and failing. After the seventh review's fixes (messages a message embeds left
+  out of what is learned, by shape; a checklist that may hold others' tasks never the owner's;
+  a quote inside a pinned message judged in the owner's notes review): the build; the unit tests
+  (the same 4 fail); the dashboard tests and format check; the reviews store file and those that
+  read the same paths (long-term memory, note sources, learning, entity suggestions); the
+  sweep's four probes; each new check also run without its fix and failing. Pending: the whole store suite after those fixes; the
   cloud tester's new and affected scenarios, with the changed `own_file_stays_recallable`
   checks and review waits; the private names scan; a live look at a
   labelled note, a forward and a skipped card on the owner's install after merge. Open owner
@@ -381,9 +395,10 @@ becomes your private memory"). One pull request of several commits
   as someone else's (it fails closed), and its words, Nocheh's own account's, are cut from
   everything learned, except where the stored bot is not an account (an import), where it is
   learned as someone else's; a forward of Nocheh's message sent on its own is learned as a
-  forward from a person shown as Nocheh, someone else's, card or not; a quote inside a pinned
-  message is checked only for Nocheh's words, and one the archive does not hold, of a message in
-  the same chat, stays as someone else's quote; a rule learned automatically from the owner's
+  forward from a person shown as Nocheh, someone else's, card or not; a task someone not allowed
+  there added to a shared checklist reaches the owner's notes review when the checklist is shown
+  again, labelled as someone else's message, since Telegram names no one per task; a rule
+  learned automatically from the owner's
   messages can restate others' words, and a review of the owner's and Nocheh's own messages
   reads it as Nocheh's; a quote of Nocheh's message is cut whole, so the notes review and
   interpretations no longer see which part was quoted; Hermes's own notes line adds up its own
