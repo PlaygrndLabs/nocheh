@@ -12,6 +12,7 @@ import {fixtureServices} from './fixture-brain.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import type {GuardBinding} from '../src/stores/guards.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('waiting approvals carry across reaction epochs and stop after any other epoch',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -43,6 +44,8 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
     const b=await host(id),claim=await x.claim(b) as any;assert.equal(claim.claimed,true);assert.deepEqual(await x.start(b),{started:true});
     await x.finish({id,actor:b.actor,state:'done',result:{stdout,exit_code:0}});return claim;
   };
+  // The person who asks in both groups is one of the owner's members there (step 3).
+  const people=grantMembers({[asking]:{granted:['7']},[other]:{granted:['7']}},{owner:'123'});
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
     const source=await capture(asking,'request',{update_id:1,message:message(asking,1,'Please run the made-up checks')});await s.guards.prepare(source,'fixture',s.detect);
@@ -132,7 +135,7 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
     await assert.rejects(a.decide(owner,{id:stopped.id,fingerprint:stopped.fingerprint,decision:'approve'}),{code:'guard_context_changed'});
     assert.equal((await a.inspect(reader(after),stopped.id)).arguments,undefined);
     assert.equal((await a.inspect(owner,stopped.id)).arguments.command,'printf stopped-card','the owner still reviews the exact operation');
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('automatic learning revisions are quiet; owner corrections are not; learning waits for a running action',
@@ -150,6 +153,8 @@ test('automatic learning revisions are quiet; owner corrections are not; learnin
     return {id,actor:'wf-'+row.id,workflow_id:row.id,workflow_token:lease.token};
   };
   const quiet=async(b:GuardBinding)=>(await stores.control.query('SELECT reason FROM guard_quiet_epochs WHERE generation=$1 AND epoch=$2',[b.generation,b.epoch])).rows;
+  // The person who asks in the group is one of the owner's members there (step 3).
+  const people=grantMembers({[asking]:{granted:['7']}},{owner:'123'});
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
     const payload={update_id:1,message:{message_id:1,date:1700000001,chat:{id:Number(asking),type:'supergroup',is_forum:false},from:{id:7},text:'A green mark means a made-up task is done'}};
@@ -200,5 +205,5 @@ test('automatic learning revisions are quiet; owner corrections are not; learnin
     // A first version of another entry advances no epoch, so the correction's epoch stays unrecorded.
     await (await learn('A red mark means blocked.',null,digest(key+':other-entry'))).activate();
     assert.equal((await s.guards.state()).epoch,after.epoch);assert.deepEqual(await quiet(after),[]);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

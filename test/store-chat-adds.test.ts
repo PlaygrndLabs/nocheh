@@ -13,6 +13,7 @@ import {ChatAdds,chatAddData} from '../src/stores/chat-adds.js';
 import {ChatRepository,servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {legacyChats,OWNER,seedChats} from './fixture-groups.js';
+import {seedMemberAccount} from './fixture-member-grants.js';
 
 /*
  * The stage after someone adds Nocheh to a group or removes it (ADR-0253): it leaves a group someone else added it to,
@@ -23,8 +24,6 @@ import {legacyChats,OWNER,seedChats} from './fixture-groups.js';
  */
 const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000};
 const BOT='777',ANONYMOUS=1087968824,MEMBER=7901,STRANGER=7902,ALICE=7903;
-/** A group key of TELEGRAM_GROUP_ACCESS where the owner allowed MEMBER. */
-const ACCESS='-1001234567890';
 const owner={admin:true,scope:null};
 async function open():Promise<StorePools> {
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
@@ -36,12 +35,14 @@ type Call={operation:string;input:any};
 
 /** One test's captures, its Telegram recorder and its stage. */
 async function harness(stores:StorePools,label:string) {
-  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{[ACCESS]:{granted:[String(MEMBER)],denied:[]}}};
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const base=Date.now(),repository=new ChatRepository(stores,()=>policy),archive=new ArchiveRepository(stores.archive);
   const coordinator=new CaptureCoordinator(archive,stores.control,undefined,repository);
   // The owner's private chat as the shared fixture has it: seeded with its old-shaped id, unless a capture made it first.
   if(!(await stores.control.query('SELECT 1 FROM chat_ids WHERE external_id=$1',[OWNER])).rowCount)await seedChats(stores.control,legacyChats([OWNER],{owner:OWNER}));
   await startChatDirectory(stores.control,()=>policy);
+  // MEMBER is one of the owner's members (step 3).
+  await seedMemberAccount(stores.control,String(MEMBER));
   // Notes sent before this test are out of its 24 hours, so the caps count this test's own, and rows another test left
   // waiting are not this test's to settle.
   await stores.control.query(`UPDATE chat_state_events SET updated_at=updated_at-interval '2 days' WHERE notice='sent'`);

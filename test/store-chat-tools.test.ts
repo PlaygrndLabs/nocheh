@@ -14,6 +14,7 @@ import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {chatDirectory,installChatsForTest} from '../src/chats.js';
 import {GP1,GP1_TOPIC,GP_GROUP_IDS,NG1,NG1_TOPIC,NG2,NG_GROUP_IDS,OWNER,fixtureChats,legacyDirectory} from './fixture-groups.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 /** Rows as the control table holds them, read the way the resolver reads them. */
 const table=(rows:{space_id:string;shell?:boolean|null;browser?:boolean|null;mcp?:boolean|null;revision?:number}[])=>({
@@ -75,6 +76,8 @@ test('the owner sets tool switches per chat and topic; Nocheh refuses and stops 
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-chat-tools-')),key='chat-tools:'+Date.now(),group='-10042',topic=group+'/topic/7';
   const owner:Reader={admin:true,scope:null};let detected=0;
   const restore=installChatsForTest(legacyDirectory([group,topic,group+'/topic/8','42/topic/5'],{owner:'42',served:[group]}));
+  // The person who asks in the group is one of the owner's members there (step 3).
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'42'});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'42',group_ids:[group]}),
     runtime:async operation=>{if(operation==='guard.detect'){detected++;return {literals:[]};}throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   const api=new OwnerStorageApi(s),a=s.controlledActions,x=s.controlledExecution;
@@ -174,5 +177,5 @@ test('the owner sets tool switches per chat and topic; Nocheh refuses and stops 
     const read=await a.propose(member,browser);await a.decide(owner,{id:read.id,fingerprint:read.fingerprint,decision:'approve'});
     const claimed=await x.claim(await host(read.id)) as any;
     assert.equal(claimed.claimed,true);assert.equal('preference' in claimed,false);
-  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

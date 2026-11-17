@@ -1,6 +1,5 @@
 import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
-import {groupAccess,type GroupAccess} from '../assistant-policy.js';
 import {validatePolicy} from '../security/contract.js';
 import {validateSpace} from '../spaces.js';
 import {chatApps,chatDirectory,chatIdStates,chatKinds,chatStates,isChatId,type ChatApp,type ChatDirectory,type ChatIdRow,type ChatRow} from '../chats.js';
@@ -15,7 +14,7 @@ import {RuntimeProfileRepository} from './runtime-profiles.js';
 
 /** A snapshot's runtime document. One taken before step 2b-2 also lists group_ids, which is checked by shape and ignored:
  * chats.state says which groups are served (ADR-0253). */
-type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids?:string[];group_access?:Record<string,GroupAccess>};
+type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids?:string[];group_access?:unknown};
 /** A chats row in a reset snapshot (ADR-0252): a name only when the owner gave it. */
 type SnapshotChat={id:string;app:ChatApp;kind:ChatRow['kind'];parent_id:string|null;topic_key:string|null;app_type:string|null;
   title:string|null;title_source:'owner'|null;is_forum:boolean;state:ChatRow['state']};
@@ -63,7 +62,6 @@ function policy(value:unknown):AssistantPolicy {
   if(typeof row.enabled!=='boolean'||row.owner_id!==null&&!isTelegramAccount(row.owner_id)||
     row.group_ids!==undefined&&(!Array.isArray(row.group_ids)||row.group_ids.some(id=>!isTelegramChat(id)||isTelegramAccount(id)))||row.enabled&&!row.owner_id)
     throw Error('reset_setup_snapshot_invalid');
-  try {groupAccess(row.group_access??{},row.owner_id as string|null);}catch {throw Error('reset_setup_snapshot_invalid');}
   return row as unknown as AssistantPolicy;
 }
 /** A runtime document as this version admits it: an older document's group_ids is dropped (ADR-0253). */

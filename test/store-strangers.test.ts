@@ -23,7 +23,7 @@ test('someone Nocheh does not serve costs no download or model call, is never re
   const refusals:Record<string,any>[]=[];let detections=0,updates=0;
   // Which groups are served is the chat records' (ADR-0253): the owner adds Nocheh to the selected one below, and the
   // service serves as servedPolicy says.
-  const configured:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[],group_access:{},topic_memory:'group'},policy=servedPolicy(()=>configured);
+  const configured:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[],topic_memory:'group'},policy=servedPolicy(()=>configured);
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect'){detections++;return {literals:[]};}

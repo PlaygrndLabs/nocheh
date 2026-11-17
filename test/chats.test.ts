@@ -183,7 +183,7 @@ test('the dashboard and the Python services get their chat fields from the direc
 test('the owner\'s private chat is separate from the owner\'s account',()=>{
   const saved={...process.env};
   try{
-    Object.assign(process.env,{TELEGRAM_ENABLED:'true',TELEGRAM_OWNER_ID:OWNER,TELEGRAM_GROUP_IDS:GP1,TELEGRAM_GROUP_ACCESS:'{}'});
+    Object.assign(process.env,{TELEGRAM_ENABLED:'true',TELEGRAM_OWNER_ID:OWNER,TELEGRAM_GROUP_IDS:GP1});
     const policy=assistantPolicy();
     assert.equal(policy.owner_chat,OWNER,'2b-1 seeds the owner chat under the id it always had');assert.equal(ownerChat(policy),OWNER);
     assert.deepEqual(policy.group_ids,[],'TELEGRAM_GROUP_IDS is not read: chats.state says which groups are on (ADR-0253)');

@@ -8,9 +8,11 @@ import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {digest,ingest,type Envelope} from '../src/archive.js';
 import {immutableFile} from '../src/storage.js';
-import {allowedSender,assistantPolicy,conversationScope,groupAccessFor,outsideChat,settleTelegramChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
+import {allowedSender,assistantPolicy,conversationScope,outsideChat,settleTelegramChat,telegramDeliveryAllowed,type AssistantPolicy} from '../src/assistant-policy.js';
 import {installChats,installChatsForTest,setChatLoader} from '../src/chats.js';
-import {BOB,BOB_CHAT,GP1,GP2,GP_GROUP_IDS,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,UNSERVED,fixtureDirectory,policyDirectory} from './fixture-groups.js';
+import {BOB,BOB_CHAT,GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ID,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,UNSERVED,fixtureDirectory,fixtureMemberDirectory,fixtureMembers,policyDirectory} from './fixture-groups.js';
+import {installMembersForTest,memberDirectory} from '../src/members.js';
+import {grantMembers} from './fixture-member-grants.js';
 import {prepareArchiveFiles} from '../src/preparation.js';
 import {dispatchCommitted,storedTranscripts} from '../src/assistant.js';
 import {fixtureBrain} from './fixture-brain.js';
@@ -30,32 +32,41 @@ test('only owner private messages receive owner scope; selected groups stay grou
   assert.throws(()=>conversationScope(policy,update(-20,123),'-30'),{code:'source_scope_mismatch'});
 });
 
-test('group participants need an explicit grant and a deny overrides it',()=>{
-  assert.equal(conversationScope(policy,update(-20,456),'-20'),null);
-  const granted={...policy,group_access:{'-20':{granted:['456'],denied:[]}}};
-  assert.equal(conversationScope(granted,update(-20,456),'-20')?.user_id,'456');
-  assert.equal(conversationScope(granted,update(-30,456),'-30'),null);
-  const denied={...policy,group_access:{'-20':{granted:['456'],denied:['456']}}};
-  assert.equal(conversationScope(denied,update(-20,456),'-20'),null);
-  assert.equal(conversationScope(denied,update(-20,123),'-20')?.owner,false);
+test('in a group the owner and the members who talk there are answered: a stranger, a group switched off for a member, a pause and talk off are not (step 3)',()=>{
+  assert.equal(conversationScope(policy,update(-20,456),'-20'),null,'a stranger');
+  // A member with no row for a group talks there: a group the owner never switched counts as on.
+  let restore=grantMembers({'-20':{granted:['456']}},{owner:'123'});
+  try {
+    assert.equal(conversationScope(policy,update(-20,456),'-20')?.user_id,'456');
+    assert.equal(conversationScope(policy,update(-30,456),'-30')?.user_id,'456','no row for that group: on');
+  }finally{restore();}
+  restore=grantMembers({'-20':{granted:['456']}},{owner:'123',groups:['-30']});
+  try {
+    assert.equal(conversationScope(policy,update(-30,456),'-30'),null,'the group switched off for them');
+    assert.equal(conversationScope(policy,update(-20,123),'-20')?.owner,false,'the owner first, never a member');
+  }finally{restore();}
+  for(const change of [{state:'paused' as const},{group_talk:false}]) {
+    const off=grantMembers({'-20':{granted:['456']}},{owner:'123',changes:{'456':change}});
+    try{assert.equal(conversationScope(policy,update(-20,456),'-20'),null,JSON.stringify(change));}finally{off();}
+  }
 });
 
 test('a chat is answered by its chat row: digest chats, upgraded groups and access under an old id (ADR-0252)',()=>{
   const restore=installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS]));
   try {
-    const served:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS],group_access:{}};
+    const served:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS]};
     // A group first seen after step 2b is answered under its Nocheh id, never its Telegram id.
     assert.deepEqual(conversationScope(served,update(Number(NG1_TG),123,'supergroup'),NG1_TG),{owner:false,chat_id:NG1,user_id:'123'});
     assert.deepEqual(conversationScope(served,update(Number(GP1),123,'supergroup'),GP1),{owner:false,chat_id:GP1,user_id:'123'});
     // An upgraded group is one chat under its current and its old Telegram id.
     for(const raw of [NG2_TG,NG2_OLD_TG])assert.equal(conversationScope(served,update(Number(raw),123,'supergroup'),raw)?.chat_id,NG2,raw);
-    // Access the owner gave under the group's old id still holds after the upgrade; a deny under either id wins.
-    const granted={...served,group_access:{[NG2_OLD_TG]:{granted:[BOB],denied:[]}}};
-    assert.deepEqual(groupAccessFor(granted,NG2),{granted:[BOB],denied:[]});
-    assert.equal(conversationScope(granted,update(Number(NG2_TG),Number(BOB),'supergroup'),NG2_TG)?.user_id,BOB);
-    assert.equal(conversationScope(granted,update(Number(NG1_TG),Number(BOB),'supergroup'),NG1_TG),null,'a grant is for its own group only');
-    const denied={...served,group_access:{[NG2_OLD_TG]:{granted:[BOB],denied:[]},[NG2_TG]:{granted:[],denied:[BOB]}}};
-    assert.equal(conversationScope(denied,update(Number(NG2_TG),Number(BOB),'supergroup'),NG2_TG),null);
+    // A member talks in the upgraded group under either Telegram id: their switch is the chat's, not an id's (step 3).
+    const people=installMembersForTest(fixtureMemberDirectory());
+    try {
+      for(const raw of [NG2_TG,NG2_OLD_TG])assert.equal(conversationScope(served,update(Number(raw),Number(MEMBER_NG),'supergroup'),raw)?.user_id,MEMBER_NG,raw);
+      assert.equal(conversationScope(served,update(Number(GP3),Number(MEMBER_GP),'supergroup'),GP3),null,'a group switched off for them');
+      assert.equal(conversationScope(served,update(Number(NG2_TG),Number(BOB),'supergroup'),NG2_TG),null,'a stranger');
+    }finally{people();}
     // A group with no row, or one the owner does not serve, is answered nowhere; neither is Bob's own private chat.
     assert.equal(conversationScope(served,update(-1009999999999,123,'supergroup'),'-1009999999999'),null);
     const unserved={...served,group_ids:[...GP_GROUP_IDS]};
@@ -97,20 +108,24 @@ test('a chat recorded a moment ago is looked up again before its message is judg
   }finally{setChatLoader(null);restore();}
 });
 
-test('an allowed sender is the owner or a granted, not denied person in that selected group, in new and edited messages alike',()=>{
-  const granted={...policy,group_access:{'-20':{granted:['456'],denied:[]}}};
+test('an allowed sender is the owner or a member who talks in that served group, in new and edited messages alike (step 3)',()=>{
   const edited=(chat:number,user:number)=>({update_id:2,edited_message:{...update(chat,user).message,edit_date:9}});
   assert.equal(allowedSender(policy,update(123,123,'private'),'123'),true,'the owner in their private chat');
   assert.equal(allowedSender(policy,update(-20,123),'-20'),true,'the owner in a group');
   assert.equal(allowedSender(policy,edited(-20,123),'-20'),true,'the owner\'s edit');
-  assert.equal(allowedSender(granted,update(-20,456),'-20'),true,'a granted person');
-  assert.equal(allowedSender(granted,edited(-20,456),'-20'),true,'a granted person\'s edit');
-  assert.equal(allowedSender(policy,update(-20,456),'-20'),false,'someone not granted');
-  assert.equal(allowedSender(granted,update(-30,456),'-30'),false,'granted in another group only');
-  assert.equal(allowedSender({...policy,group_access:{'-20':{granted:['456'],denied:['456']}}},update(-20,456),'-20'),false,'a deny wins');
+  assert.equal(allowedSender(policy,update(-20,456),'-20'),false,'not a member');
+  let people=grantMembers({'-20':{granted:['456']}},{owner:'123',groups:['-30']});
+  try {
+    assert.equal(allowedSender(policy,update(-20,456),'-20'),true,'a member');
+    assert.equal(allowedSender(policy,edited(-20,456),'-20'),true,'a member\'s edit');
+    assert.equal(allowedSender(policy,update(-30,456),'-30'),false,'switched off in that group');
+  }finally{people();}
+  people=grantMembers({'-20':{granted:['456']}},{owner:'123',changes:{'456':{state:'paused'}}});
+  try{assert.equal(allowedSender(policy,update(-20,456),'-20'),false,'a paused member');}finally{people();}
+  people=grantMembers({'-20':{granted:['456']}},{owner:'123'});
   // A group no longer served: the directory, which follows chats.state, no longer serves it (ADR-0252, ADR-0253).
-  const unselected={...granted,group_ids:['-30']},restore=installChatsForTest(policyDirectory(unselected,['-20','456','-99']));
-  try{assert.equal(allowedSender(unselected,update(-20,456),'-20'),false,'a group no longer selected');}finally{restore();}
+  const unselected={...policy,group_ids:['-30']},restore=installChatsForTest(policyDirectory(unselected,['-20','456','-99']));
+  try{assert.equal(allowedSender(unselected,update(-20,456),'-20'),false,'a group no longer selected');}finally{restore();people();}
   assert.equal(allowedSender(policy,update(123,456,'private'),'123'),false,'a stranger in private');
   // Telegram's stand-ins for an anonymous admin and for a channel posting in the group.
   const anonymous={update_id:3,message:{message_id:8,chat:{id:-20,type:'supergroup'},from:{id:1000001,is_bot:true},sender_chat:{id:-20,type:'supergroup'}}};
@@ -126,75 +141,75 @@ test('an allowed sender is the owner or a granted, not denied person in that sel
   assert.equal(allowedSender({...policy,enabled:false},update(-20,123),'-20'),true,'it does not depend on replies being on');
 });
 
-test('an allowed sender is judged in the chat the directory finds: digest groups, upgraded groups and access under an old id (ADR-0252)',()=>{
+test('an allowed sender is judged in the chat the directory finds: digest groups and an upgraded group under either id (ADR-0252, step 3)',()=>{
   installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS]));
+  const people=installMembersForTest(fixtureMemberDirectory());
   try {
-    const served:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS],
-      group_access:{[GP1]:{granted:[BOB],denied:[]},[NG1_TG]:{granted:[BOB],denied:[]},[NG2_OLD_TG]:{granted:[BOB],denied:[]}}};
+    const served:AssistantPolicy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS]};
     const voice=(chat:string,user:string,type='supergroup')=>({update_id:1,message:{message_id:7,chat:{id:Number(chat),type},from:{id:Number(user),is_bot:false},voice:{file_id:'v1',duration:1200}}});
-    // Bob is allowed in an old-shaped group, a digest group, and an upgraded group under its new and its old Telegram id.
-    for(const raw of [GP1,NG1_TG,NG2_TG,NG2_OLD_TG])assert.equal(allowedSender(served,voice(raw,BOB),raw),true,raw);
-    assert.equal(allowedSender(served,voice(GP2,BOB),GP2),false,'granted in other groups only');
-    // A deny under the upgraded group's new id wins over the grant under its old one, wherever the message comes from.
-    const denied={...served,group_access:{...served.group_access,[NG2_TG]:{granted:[],denied:[BOB]}}};
-    for(const raw of [NG2_TG,NG2_OLD_TG])assert.equal(allowedSender(denied,voice(raw,BOB),raw),false,raw);
+    // Members talk in old-shaped groups, a digest group, and an upgraded group under its new and its old Telegram id.
+    for(const raw of [GP1,GP2,GP4])assert.equal(allowedSender(served,voice(raw,MEMBER_GP),raw),true,raw);
+    for(const raw of [NG1_TG,NG2_TG,NG2_OLD_TG])assert.equal(allowedSender(served,voice(raw,MEMBER_NG),raw),true,raw);
+    assert.equal(allowedSender(served,voice(GP3,MEMBER_GP),GP3),false,'a group switched off for them');
+    assert.equal(allowedSender(served,voice(GP1,BOB),GP1),false,'a stranger');
+    // A switch off for the upgraded group holds under both of its Telegram ids: it is the chat's, not an id's.
+    const fixture=fixtureMembers(),off=installMembersForTest(memberDirectory({...fixture,chats:[...fixture.chats,{member_id:MEMBER_NG_ID,chat_id:NG2,enabled:false}]}));
+    try{for(const raw of [NG2_TG,NG2_OLD_TG])assert.equal(allowedSender(served,voice(raw,MEMBER_NG),raw),false,raw);}finally{off();}
+    // A paused member talks nowhere.
+    const paused=installMembersForTest(fixtureMemberDirectory({[MEMBER_GP_ID]:{state:'paused'}}));
+    try{assert.equal(allowedSender(served,voice(GP1,MEMBER_GP),GP1),false,'paused');}finally{paused();}
     // A group the directory does not serve, or has no row for, allows only the owner (fail closed).
-    const stray='-1009999999999',listed={...served,group_ids:[...served.group_ids,UNSERVED,stray],
-      group_access:{...served.group_access,[UNSERVED]:{granted:[BOB],denied:[]},[stray]:{granted:[BOB],denied:[]}}};
-    assert.equal(allowedSender(listed,voice(UNSERVED,BOB),UNSERVED),false,'a group the directory does not serve');
-    assert.equal(allowedSender(listed,voice(stray,BOB),stray),false,'a group with no row');
-    assert.equal(allowedSender(listed,voice(stray,OWNER),stray),true,'the owner, wherever they write');
-    assert.equal(allowedSender(served,voice(BOB,BOB,'private'),BOB),false,'a member in their own private chat');
+    const stray='-1009999999999';
+    assert.equal(allowedSender(served,voice(UNSERVED,MEMBER_GP),UNSERVED),false,'a group the directory does not serve');
+    assert.equal(allowedSender(served,voice(stray,MEMBER_GP),stray),false,'a group with no row');
+    assert.equal(allowedSender(served,voice(stray,OWNER),stray),true,'the owner, wherever they write');
+    assert.equal(allowedSender(served,voice(MEMBER_GP,MEMBER_GP,'private'),MEMBER_GP),false,'a member in their own private chat');
     // The directory, which follows chats.state, decides what is served: a digest group it no longer serves.
     installChatsForTest(fixtureDirectory([...GP_GROUP_IDS]));
-    assert.equal(allowedSender(served,voice(NG1_TG,BOB),NG1_TG),false,'a digest group no longer served');
-    assert.equal(allowedSender(served,voice(GP1,BOB),GP1),true);
+    assert.equal(allowedSender(served,voice(NG1_TG,MEMBER_NG),NG1_TG),false,'a digest group no longer served');
+    assert.equal(allowedSender(served,voice(GP1,MEMBER_GP),GP1),true);
     assert.equal(NG1.length,64);assert.equal(NG2.length,64);
-  }finally{installChatsForTest(policyDirectory(policy,['456','-99']));}
+  }finally{people();installChatsForTest(policyDirectory(policy,['456','-99']));}
 });
 
-test('the owner listed as a person allowed or denied in a group stops the services from starting',async()=>{
-  const folder=await mkdtemp(join(tmpdir(),'nocheh-policy-'));
-  try {
-    const file=join(folder,'policy.json');
-    for(const access of [{'-20':{granted:['123'],denied:[]}},{'-20':{granted:[],denied:['123']}}]) {
-      await writeFile(file,JSON.stringify({...policy,group_access:access}));
-      assert.throws(()=>assistantPolicy(file),/Invalid TELEGRAM_GROUP_ACCESS/,JSON.stringify(access));
-    }
-    await writeFile(file,JSON.stringify({...policy,group_access:{'-20':{granted:['456'],denied:[]}}}));
-    assert.deepEqual(assistantPolicy(file).group_access,{'-20':{granted:['456'],denied:[]}});
-  }finally{await rm(folder,{recursive:true,force:true});}
-});
-
-test('which groups are served is never configured: a group list is ignored and access keys are checked by shape only',async()=>{
+test('who may talk in groups is never configured: a policy file\'s or the environment\'s group access and group list are not read (step 3)',async()=>{
   const folder=await mkdtemp(join(tmpdir(),'nocheh-policy-')),saved={...process.env};
   try {
     // ADR-0253: the owner adds Nocheh to a group or turns it on in Chats; servedPolicy derives group_ids from chats.state.
+    // Step 3: the owner's members decide who talks; the policy holds no list of people, not even the owner listed in one.
     const file=join(folder,'policy.json');
-    await writeFile(file,JSON.stringify({...policy,group_access:{'-1001234567890':{granted:['456'],denied:[]}}}));
-    assert.deepEqual(assistantPolicy(file).group_ids,[],'a policy file\'s group_ids is ignored');
-    assert.deepEqual(assistantPolicy(file).group_access,{'-1001234567890':{granted:['456'],denied:[]}},'a key for a group in no list is kept');
-    for(const key of ['-0','20','-20x','group']) {
-      await writeFile(file,JSON.stringify({...policy,group_access:{[key]:{granted:['456'],denied:[]}}}));
-      assert.throws(()=>assistantPolicy(file),/Invalid TELEGRAM_GROUP_ACCESS/,key);
+    for(const access of [{'-20':{granted:['123'],denied:[]}},{'-1001234567890':{granted:['456'],denied:[]}},{'group':{granted:'x'}}]) {
+      await writeFile(file,JSON.stringify({...policy,group_access:access}));
+      const read=assistantPolicy(file);
+      assert.deepEqual(read.group_ids,[],'a policy file\'s group_ids is ignored');
+      assert.equal('group_access' in read,false,JSON.stringify(access));
     }
-    Object.assign(process.env,{TELEGRAM_ENABLED:'true',TELEGRAM_OWNER_ID:'123',TELEGRAM_GROUP_IDS:'-20,not a list',TELEGRAM_GROUP_ACCESS:'{"-30":{"granted":["456"],"denied":[]}}'});
-    assert.deepEqual([assistantPolicy().group_ids,Object.keys(assistantPolicy().group_access!)],[[],['-30']],'TELEGRAM_GROUP_IDS is not read');
+    Object.assign(process.env,{TELEGRAM_ENABLED:'true',TELEGRAM_OWNER_ID:'123',TELEGRAM_GROUP_IDS:'-20,not a list',TELEGRAM_GROUP_ACCESS:'not even JSON'});
+    assert.deepEqual(assistantPolicy(),{enabled:true,owner_id:'123',group_ids:[],topic_memory:'group',owner_chat:'123'},'neither TELEGRAM_GROUP_IDS nor TELEGRAM_GROUP_ACCESS is read');
   }finally{
     for(const key of Object.keys(process.env))if(!(key in saved))delete process.env[key];Object.assign(process.env,saved);
     await rm(folder,{recursive:true,force:true});
   }
 });
 
-test('final Telegram delivery checks the original sender after grant revocation',()=>{
+test('final Telegram delivery checks the original sender again: a member paused or switched off after the turn started is not answered (step 3)',()=>{
   const source={origin:'live',channel:'telegram',kind:'telegram_update',scope:'-20',payload:Buffer.from(JSON.stringify(update(-20,456)))};
-  const granted={...policy,group_access:{'-20':{granted:['456'],denied:[]}}};
-  assert.equal(telegramDeliveryAllowed(granted,{scope:'-20'},source),true);
-  assert.equal(telegramDeliveryAllowed(policy,{scope:'-20'},source),false);
-  assert.equal(telegramDeliveryAllowed(granted,{scope:null},source),false);
-  assert.equal(telegramDeliveryAllowed(granted,{scope:'-20'},{...source,origin:'import'}),false);
-  assert.equal(telegramDeliveryAllowed(granted,{scope:'-20'},null),false);
-  assert.equal(telegramDeliveryAllowed(granted,{scope:null},{...source,channel:'browser'}),true);
+  assert.equal(telegramDeliveryAllowed(policy,{scope:'-20'},source),false,'not a member');
+  let people=grantMembers({'-20':{granted:['456']}},{owner:'123'});
+  try {
+    assert.equal(telegramDeliveryAllowed(policy,{scope:'-20'},source),true);
+    assert.equal(telegramDeliveryAllowed(policy,{scope:null},source),false);
+    assert.equal(telegramDeliveryAllowed(policy,{scope:'-20'},{...source,origin:'import'}),false);
+    assert.equal(telegramDeliveryAllowed(policy,{scope:'-20'},null),false);
+    assert.equal(telegramDeliveryAllowed(policy,{scope:null},{...source,channel:'browser'}),true);
+  }finally{people();}
+  for(const change of [{changes:{'456':{state:'paused' as const}}},{changes:{'456':{group_talk:false}}},{groups:['-20'],grants:{}}]) {
+    people=grantMembers(change.grants??{'-20':{granted:['456']}},{owner:'123',...change});
+    try{assert.equal(telegramDeliveryAllowed(policy,{scope:'-20'},source),false,JSON.stringify(change));}finally{people();}
+  }
+  // The owner's own message in a group never depends on the member directory.
+  const own={...source,payload:Buffer.from(JSON.stringify(update(-20,123)))};
+  assert.equal(telegramDeliveryAllowed(policy,{scope:'-20'},own),true);
 });
 
 test('real PostgreSQL: action proposals require a bound turn; only a captured owner DM can approve exact immutable arguments',{skip:!process.env.PGHOST},async()=>{

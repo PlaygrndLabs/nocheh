@@ -1,6 +1,6 @@
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
-import {groupAccessOf,type AssistantPolicy} from '../assistant-policy.js';
+import type {AssistantPolicy} from '../assistant-policy.js';
 import {conversationFields,type ChatDirectory} from '../chats.js';
 import {telegramUsername} from '../chats-telegram.js';
 import {HttpError} from '../http.js';
@@ -55,6 +55,15 @@ export interface OwnerSupervisionDependencies {
  * group's), so a filtered list such as the served groups pages whole. */
 type PageInput={q?:string;after?:string;limit?:number;kind?:string;state?:string};
 type DecisionInput={kind?:string;after?:string;limit?:number};
+/** A stored document's older group_access, joined over the group's Telegram ids; group_access left the policy (step 3)
+ * and the members part shows the group's members here instead. */
+function storedGroupAccess(policy:unknown,externals:readonly string[]):{granted:string[];denied:string[]}|undefined {
+  const access=(policy as {group_access?:Record<string,{granted?:string[];denied?:string[]}>}|undefined)?.group_access;
+  const found=externals.map(id=>access?.[id]).filter((entry):entry is {granted?:string[];denied?:string[]}=>!!entry);
+  if(!found.length)return undefined;
+  const join=(values:string[])=>[...new Set(values)].sort();
+  return {granted:join(found.flatMap(entry=>entry.granted??[])),denied:join(found.flatMap(entry=>entry.denied??[]))};
+}
 const iso=(value:unknown):string|null=>value instanceof Date?value.toISOString():typeof value==='string'?value:null;
 const clean=(value:unknown):string|null=>typeof value==='string'?value.replace(/\s+/g,' ').trim().slice(0,200)||null:null;
 const identity=(id:string)=>{if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_decision_id');return id;};
@@ -284,7 +293,7 @@ export class OwnerSupervisionRepository {
     // The policy keys a group's access by its Telegram ids, joined over every id the group has had as the turn gate joins
     // them (groupAccessFor); the owner's private chat is the directory's, and so is whether the group is on (chats.state).
     const guard=memory.guard,policy=configuration?.policy,externals=chats.get(parent)?.app_ids.map(label=>label.external)??[parent];
-    const access=groupAccessOf(policy,externals),owner=space===chats.ownerChat();
+    const access=storedGroupAccess(policy,externals),owner=space===chats.ownerChat();
     // While a group's topics share memory, a turn there reads the rules into the group and every one of its topics too.
     const groupWide=(policy?.topic_memory??'group')==='group'&&chats.kind(parent)==='group';
     const sharingRules=rules.rows.filter(row=>row.destination===space||groupWide).map(row=>row.destination===space?row:{...row,through_group:true});

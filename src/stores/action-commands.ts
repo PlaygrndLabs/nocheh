@@ -55,7 +55,8 @@ const reasons:Record<string,ApprovalText>={notion_not_connected:'reason_sign_in'
   permission_no_longer_valid:'reason_changed',execution_lease_expired:'reason_changed',notion_owner_private_only:'reason_changed',notion_job_not_approved:'reason_changed',
   tool_sandbox_missing:'reason_sandbox',
   remote_unauthorized:'reason_refused',remote_response_rejected:'reason_refused',
-  destination_not_served:'reason_not_served',action_context_changed:'reason_changed',action_delivery_denied:'reason_changed'};
+  destination_not_served:'reason_not_served',action_context_changed:'reason_changed',action_delivery_denied:'reason_changed',
+  member_changed:'reason_member_changed'};
 /** A fixed code's reason in the owner's words; an unknown code shows no text of its own. */
 const why=(line:Record<ApprovalText,string>,code:string|null|undefined)=>line[code&&Object.hasOwn(reasons,code)?reasons[code]!:'reason_other'];
 /** An approval that fails because what the operation used changed since it was asked. */
@@ -78,7 +79,7 @@ type Seen={chat:string;message:string}|undefined;
 type ChatFacts={title:string|null;username:string|null;forum:boolean|null;message:string|null;external:string|null};
 /** A person as a send card names them (labelName), and their public username, for a link to them. */
 type Person={name:string|null;username:string|null};
-/** What one send card reads once (ADR-0254): every served group's facts, the served groups each allowed person is in,
+/** What one send card reads once (ADR-0254): every served group's facts, the served groups each member reaches (step 3),
  *  the people it may name, the name keys a name must not share, each with whose it is, each named served group's key,
  *  and, once a group needs them, the projects of the served groups. */
 type SendNames={allowed:ReadonlyMap<string,readonly string[]>;facts:Map<string,ChatFacts>;people:Map<string,Person>;keys:[string,string][];
@@ -220,10 +221,10 @@ export class ActionCommandRepository {
       return [id,{name:labelName(titles.get(id))??labelName(row?.display_name)??(username?labelName('@'+username):null),username}];
     }));
   }
-  /** What a send card reads once: the facts of every served group, the people allowed in them and `account` (the
-   *  person a send goes to), and the name keys of every served group, allowed person and the owner's chat. */
+  /** What a send card reads once: the facts of every served group, the members who reach them and `account` (the
+   *  person a send goes to), and the name keys of every served group, such member and the owner's chat. */
   private async sendNames(directory:ChatDirectory,account:string|null):Promise<SendNames> {
-    const allowed=allowedAccounts(this.access.policy(),directory),keys:[string,string][]=[],named=new Map<string,string>();
+    const allowed=allowedAccounts(directory),keys:[string,string][]=[],named=new Map<string,string>();
     const groups=directory.all().filter(chat=>chat.kind==='group'&&directory.served(chat.id)).map(chat=>chat.id);
     const facts=new Map(await Promise.all(groups.map(async group=>[group,await this.chat(group)] as const)));
     const people=await this.people([...new Set([...allowed.keys(),...account?[account]:[]])],directory);
@@ -240,11 +241,11 @@ export class ActionCommandRepository {
   }
   /**
    * A send's chat on its card (ADR-0254): the kind of chat in the owner's fixed words, and only a name someone chose, in
-   * the quotes and isolates code adds, linked to its chat or bold. A person's private chat says which served group the
-   * owner allowed them in. A name that reads like another served group's, an allowed person's or the owner's chat's gets
+   * the quotes and isolates code adds, linked to its chat or bold. A member's private chat says which served group they
+   * are a member in. A name that reads like another served group's, a member's or the owner's chat's gets
    * its chat's short id, the one the dashboard's chat list shows; a group on a card in the owner's private chat gets its
    * project instead, when that project tells it apart from every served group that reads alike. `compact` names a person
-   * without the groups they are allowed in, for a card that is too long otherwise; a name that reads like another's keeps
+   * without their groups, for a card that is too long otherwise; a name that reads like another's keeps
    * its short id even so. A group or topic Nocheh does not serve now says so after it.
    */
   private async sendPlace(space:string,line:Record<ApprovalText,string>,mark:Mark,at:{ownerCard:boolean;compact:boolean},
@@ -279,7 +280,7 @@ export class ActionCommandRepository {
       // The short id comes first, so a card too long for the groups still says which of two alike people it goes to.
       if(name!==null&&twin('person:'+account,name))label=short(label,chat);
       if(at.compact)return fillLine(line.person_chat_other,{name:label});
-      // A settle after the owner took their access away names no group.
+      // A settle after the owner paused or removed the member, or switched their groups off, names no group.
       const groups=account?known.allowed.get(account)??[]:[];
       if(!groups.length)return fillLine(line.person_chat_other,{name:label});
       const first=await group(groups[0]!,null);

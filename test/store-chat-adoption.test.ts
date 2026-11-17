@@ -13,6 +13,7 @@ import {bumpChatRevision,ChatRepository,servedPolicy,startChatDirectory} from '.
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {legacyChats,OWNER,seedChats} from './fixture-groups.js';
 import {seededDirectory} from './fixture-seeded-chats.js';
+import {seedMemberAccount} from './fixture-member-grants.js';
 
 /*
  * Only the owner adds Nocheh (ADR-0253): a my_chat_member update about Nocheh in a group decides chats.state as it is
@@ -88,9 +89,11 @@ const guard=async(stores:StorePools)=>{
 
 test('the owner adding Nocheh turns a group on with a card; anyone else\'s add makes it pending to leave, and no add moves the guard epoch',fixture,async()=>{
   const stores=await open(),MEMBER=7771,STRANGER=7772;
-  let policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{'-1001234567890':{granted:[String(MEMBER)],denied:[]}}};
+  let policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'adds');
   try {
+    // MEMBER is one of the owner's members (step 3).
+    await seedMemberAccount(stores.control,String(MEMBER));
     // A group stored before step 2b keeps its Telegram value as its id: the seeder left it off.
     const legacy=h.group(9);await seedChats(stores.control,legacyChats([legacy]));
     const before=await guard(stores);
@@ -270,10 +273,11 @@ async function begin(stores:StorePools,h:ReturnType<typeof harness>,stage:Awaite
 
 test('an upgrade folds the new supergroup\'s own add into the old group, whichever upgrade message comes first, and an echo never changes the old group',fixture,async()=>{
   const stores=await open(),ALICE=7801;
-  // Alice may use Nocheh in some group: a leave after her add tells the owner, so a false second add would show.
-  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{'-1001234567890':{granted:[String(ALICE)],denied:[]}}};
+  // Alice is one of the owner's members: a leave after her add tells the owner, so a false second add would show.
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'fold'),stage=await stageFor(stores,h.repository,()=>policy);
   try {
+    await seedMemberAccount(stores.control,String(ALICE));
     const cases=[[1,'old',ALICE,'seen'],[2,'new',ALICE,'on'],[3,'old',Number(OWNER),'off'],[4,'new',Number(OWNER),'off'],[5,'new',Number(OWNER),'on'],
       [6,'old',Number(OWNER),'pending'],[7,'new',ALICE,'could_not_leave'],[8,'old',Number(OWNER),'could_not_leave'],[9,'new',Number(OWNER),'removed'],
       [15,'old',Number(OWNER),'seen'],[16,'new',Number(OWNER),'seen'],[17,'old',Number(OWNER),'stale']] as const;

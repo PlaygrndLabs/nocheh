@@ -331,7 +331,7 @@ export class ChatRepository {
       updated_at=now() WHERE id=$1`,[chat,order.seq,order.bot,order.at,state]);
     if(kind==='added')await db.query(`UPDATE chats SET added_by_account_id=$2,added_by_role=$3,added_at=$4,add_event=$5 WHERE id=$1`,[chat,account,role,order.at,event]);
     if(kind) {
-      const member=role==='other'&&!!by&&Object.values(policy.group_access??{}).some(access=>access.granted.includes(by.external));
+      const member=role==='other'&&!!account&&!!(await db.query('SELECT 1 FROM chat_accounts WHERE id=$1 AND member_id IS NOT NULL',[account])).rowCount;
       // A leave or card waits 30 s, so an upgrade's two halves can fold into one chat first (migrate).
       await db.query(`INSERT INTO chat_state_events(event_id,chat_id,external_id,kind,role,account_id,member,action,state,due_at)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now()+CASE WHEN $8 IN ('card','leave') THEN interval '30 seconds' ELSE interval '0 seconds' END) ON CONFLICT DO NOTHING`,

@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {carriesForward} from '../src/stores/guards.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('a job report survives a reaction in another group, any other change after its run ends the job without a report, and Stop sends no further part',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -18,7 +19,9 @@ test('a job report survives a reaction in another group, any other change after 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-epochs-')),key='job-epochs:'+Date.now(),group='-100555',other='-100777';
   const cards:Record<string,any>[]=[];
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],topic_memory:'group' as const});
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123',groups:[other]});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -68,7 +71,7 @@ test('a job report survives a reaction in another group, any other change after 
   };
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
-    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:10,revision:(await s.jobs.settings()).revision});
+    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,revision:(await s.jobs.settings()).revision});
     const note=await message(other,'A made-up note in the other group');noted=sent;
     // A reaction while the job waits to start, and another after its run, before the report.
     const kept=await approved('Task check');
@@ -131,5 +134,5 @@ test('a job report survives a reaction in another group, any other change after 
     assert.equal((await tick(halted)).state,'cancelled');assert.equal((await job(halted)).state,'stopped');
     assert.equal((await reports(halted)).length,1);assert.equal(await requests(),count,'no further part is sent');
     assert.match(cards.filter(card=>card.kind==='settle').at(-1)!.text,/🚫 Stopped\./,'the card shows the job stopped');
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

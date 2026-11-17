@@ -27,7 +27,7 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-chats-')),base=Date.now(),token=digest('dispatch-chats:'+base);
   // The owner adds Nocheh to NG1 and to NG2 before its upgrade (ADR-0253); the service serves as servedPolicy says, from
   // chats.state alone.
-  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{},topic_memory:'group'};
+  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],topic_memory:'group'};
   const policy=servedPolicy(()=>configured),ALICE=9;
   const started:any[]=[],replies:any[]=[];let serial=base;
   const runtime:FakeCall=async(operation,input)=>{
