@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('a job on the owner\'s machine asked in a group reports to the owner\'s private chat; the group gets one line and never sees the machine, the plan or the to-do list',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:600000},async()=>{
@@ -18,7 +19,9 @@ test('a job on the owner\'s machine asked in a group reports to the owner\'s pri
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-machine-report-')),key='machine-report:'+Date.now();
   const project='-1001000000001',projectId=digest(key+':project'),owner:Reader={admin:true,scope:null},previous=process.env.NOCHEH_MACHINE_TOKEN;
   process.env.NOCHEH_MACHINE_TOKEN='synthetic-machine-token-'+'r'.repeat(24);
-  const policy={enabled:true,owner_id:'123',group_ids:[project],group_access:{[project]:{granted:['9'],denied:[]}},topic_memory:'group' as const};
+  const policy={enabled:true,owner_id:'123',group_ids:[project],topic_memory:'group' as const};
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[project]:{granted:['9']}},{owner:'123'});
   const approvals:any[]=[];
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async(operation,input)=>{
@@ -189,7 +192,7 @@ test('a job on the owner\'s machine asked in a group reports to the owner\'s pri
     const plain=await s.jobs.start(await said(project,123,'Count the open tasks'),{title:'Plain made-up count',instruction:'Count the made-up tasks.'});
     const counted=await run(plain);await finish(counted,'3 made-up tasks are open.');
     await tick(plain.id);assert.deepEqual((await reports(plain.id)).map(row=>row.destination),[project]);
-  }finally{
+  }finally{people();
     if(previous===undefined)delete process.env.NOCHEH_MACHINE_TOKEN;else process.env.NOCHEH_MACHINE_TOKEN=previous;
     await stores.close();await rm(root,{recursive:true,force:true});
   }

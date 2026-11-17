@@ -14,6 +14,7 @@ import {bumpChatRevision,ChatRepository,servedPolicy,startChatDirectory} from '.
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {legacyChats,OWNER,seedChats} from './fixture-groups.js';
 import {seededDirectory} from './fixture-seeded-chats.js';
+import {seedMemberAccount} from './fixture-member-grants.js';
 
 /*
  * Only the owner adds Nocheh (ADR-0253): a my_chat_member update about Nocheh in a group decides chats.state as it is
@@ -83,13 +84,7 @@ const row=async(stores:StorePools,id:string)=>(await stores.control.query(`SELEC
 const events=async(stores:StorePools,id:string)=>(await stores.control.query(`SELECT event_id,external_id,kind,role,account_id,member,action,state,
   due_at>created_at+interval '25 seconds' AS waits FROM chat_state_events WHERE chat_id=$1 ORDER BY created_at,event_id`,[id])).rows;
 /** Makes the person with Telegram user id `external` a member (step 3): their account, linked to a members row. */
-async function makeMember(stores:StorePools,external:number) {
-  const connection=connectionIdFor('telegram'),account=accountIdFor('telegram',String(external));
-  await stores.control.query(`INSERT INTO chat_connections(id,app,secret_ref) VALUES($1,'telegram','env:TELEGRAM_BOT_TOKEN') ON CONFLICT DO NOTHING`,[connection]);
-  await stores.control.query('INSERT INTO chat_accounts(id,connection_id,external_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[account,connection,String(external)]);
-  await stores.control.query('INSERT INTO members(id) VALUES($1) ON CONFLICT DO NOTHING',[memberIdFor(account)]);
-  await stores.control.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1',[account,memberIdFor(account)]);
-}
+const makeMember=(stores:StorePools,external:number)=>seedMemberAccount(stores.control,String(external));
 /** A member's switches for `chats`, as [chat, enabled], and the member revision. */
 const switches=async(stores:StorePools,member:string,chatIds:string[])=>(await stores.control.query(
   'SELECT chat_id,enabled FROM member_chats WHERE member_id=$1 AND chat_id=ANY($2::text[]) ORDER BY chat_id',[member,chatIds])).rows.map(item=>[item.chat_id,item.enabled]);

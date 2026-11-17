@@ -32,7 +32,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['dashboard/lib/messages-format.ts','adapter',1,'a Desktop export matched to its group by the -100 id'],
   ['services/telegram/gateway.py','adapter',2,'raw Telegram chat, user and message ids at the front door'],
   ['services/telegram/server.py','adapter',1,'a refresh names a raw Telegram chat'],
-  ['src/assistant-policy.ts','adapter',3,'TELEGRAM_OWNER_ID and TELEGRAM_GROUP_ACCESS keys and user ids'],
+  ['src/assistant-policy.ts','adapter',1,'TELEGRAM_OWNER_ID'],
   ['src/conversation-page.ts','adapter',1,'Telegram ids inside an original\'s payload'],
   ['src/mini-app.ts','adapter',2,'the Telegram user id checked against TELEGRAM_OWNER_ID'],
   ['src/observed-source.ts','adapter',3,'archive intake: Desktop export and live scopes are Telegram ids'],

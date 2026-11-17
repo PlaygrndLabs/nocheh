@@ -1,6 +1,6 @@
 import {blockingPublications} from './publications.js';
 import type pg from 'pg';
-import {groupAccess,type AssistantPolicy} from '../assistant-policy.js';
+import type {AssistantPolicy} from '../assistant-policy.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError} from '../http.js';
 import {requestWorkflow} from '../workflows/store.js';
@@ -16,14 +16,15 @@ CREATE TABLE IF NOT EXISTS runtime_configuration (
 );
 `;
 /**
- * The admitted setup a runtime may use, and its fingerprint. Which groups are served is chats.state, never part of it, so
- * turning a group on or off never moves the fingerprint or a guard epoch (ADR-0253); the first start after group_ids
- * left the document writes one new revision and one epoch.
+ * The admitted setup a runtime may use, and its fingerprint: whether Nocheh answers in Telegram and who the owner is.
+ * Which groups are served is chats.state (ADR-0253) and who else may talk there is the member directory (step 3), never
+ * part of it, so turning a group on or off and every member change never move the fingerprint or a guard epoch. The
+ * first start after group_access left the document writes one new revision and one epoch.
  */
-function policyDocument(policy:AssistantPolicy):Pick<AssistantPolicy,'enabled'|'owner_id'|'group_access'> {
+function policyDocument(policy:AssistantPolicy):Pick<AssistantPolicy,'enabled'|'owner_id'> {
   if(typeof policy.enabled!=='boolean'||policy.owner_id!==null&&(typeof policy.owner_id!=='string'||!/^[1-9]\d{0,18}$/.test(policy.owner_id))||
     policy.enabled&&!policy.owner_id)throw new HttpError(400,'invalid_assistant_policy');
-  return {enabled:policy.enabled,owner_id:policy.owner_id,group_access:groupAccess(policy.group_access??{},policy.owner_id)};
+  return {enabled:policy.enabled,owner_id:policy.owner_id};
 }
 
 /** Saved installation setup is admitted into control before a runtime can use it. */

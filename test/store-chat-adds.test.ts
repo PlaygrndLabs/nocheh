@@ -14,6 +14,7 @@ import {ChatAdds,chatAddData} from '../src/stores/chat-adds.js';
 import {ChatRepository,servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {legacyChats,OWNER,seedChats} from './fixture-groups.js';
+import {seedMemberAccount} from './fixture-member-grants.js';
 
 /*
  * The stage after someone adds Nocheh to a group or removes it (ADR-0253): it leaves a group someone else added it to,
@@ -46,6 +47,8 @@ async function harness(stores:StorePools,label:string) {
   await stores.control.query('INSERT INTO members(id) VALUES($1) ON CONFLICT DO NOTHING',[memberIdFor(memberAccount)]);
   await stores.control.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1',[memberAccount,memberIdFor(memberAccount)]);
   await startChatDirectory(stores.control,()=>policy);
+  // MEMBER is one of the owner's members (step 3).
+  await seedMemberAccount(stores.control,String(MEMBER));
   // Notes sent before this test are out of its 24 hours, so the caps count this test's own, and rows another test left
   // waiting are not this test's to settle.
   await stores.control.query(`UPDATE chat_state_events SET updated_at=updated_at-interval '2 days' WHERE notice='sent'`);

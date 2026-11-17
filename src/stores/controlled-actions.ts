@@ -19,8 +19,10 @@ import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
 import type {OperationReference} from './operations.js';
-import {closedAs,ownerResolutions} from './controlled-action-schema.js';
-import {ownerChat,ownerIds} from '../assistant-policy.js';
+import {closedAs,ownerResolutions,type ControlledAuthority} from './controlled-action-schema.js';
+import {messageSender,ownerChat,ownerIds} from '../assistant-policy.js';
+import {members} from '../members.js';
+import {groupToolsLines,ownerPrompts} from '../prompts.js';
 
 const protocol='controlled-action-v2';
 const identity=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_action_id');return id;};
@@ -43,6 +45,33 @@ const ruleUses=1000;
 export const covers=(grant:any,row:any)=>grant.grain==='chat'?row.job_id===null&&!!row.match_key&&grant.match_key===row.match_key&&grant.kind===row.kind&&
   grant.space_id===row.space_id&&grant.logical_profile===row.logical_profile&&grant.binding?.generation===row.binding?.generation:
   grant.fingerprint===row.fingerprint&&canonical(grant.binding)===canonical(row.binding)&&(grant.job_id===null||grant.job_id===row.job_id);
+
+/** Who asked in a live group turn (step 3): the owner, or a member's account (whether or not they may still talk there). */
+export type GroupAsker={owner:true;account:null}|{owner:false;account:string};
+/** Whether an operation is one a group's permission for web pages and outside tools covers: a web page read, or an
+ *  outside MCP tool that is not a connection the owner set up (Notion stays the owner's own). A command never is. */
+export const groupToolKind=(kind:unknown,args:object)=>(kind==='browser'||kind==='mcp')&&!('connection' in args);
+/**
+ * The one switch for the owner's own web page and outside tool requests in a group: on lets them run without a card, as a
+ * member's do under the group's tools permission (the owner's decision for step 3); off gives each its card again.
+ */
+let ownerGroupTools=true;
+/** Tests only: sets the switch above and returns the function that puts it back. */
+export function setOwnerGroupToolsForTest(on:boolean):()=>void {
+  const previous=ownerGroupTools;ownerGroupTools=on;return ()=>{ownerGroupTools=previous;};
+}
+/**
+ * Why a live group turn's web page read or outside tool call runs without a card, or null (step 3): the group's tools
+ * permission of the member who asked (members().may 'tools', checked again at the claim), or the owner's own request
+ * while ownerGroupTools allows it. Only a live request in a group: never a job's run, a scheduled task or a follow-up
+ * (the caller passes no asker for those), never a command or a Notion call. Deny rules and the owner's tool switches for
+ * the chat still come first: the switch is checked before, and the caller evaluates with this authority.
+ */
+export function groupToolsGrant(asker:GroupAsker|null,kind:unknown,args:object,space:string):ControlledAuthority|null {
+  if(!asker||!groupToolKind(kind,args))return null;
+  if(asker.owner)return ownerGroupTools?'group_tools':null;
+  return members().may(asker.account,space,'tools')?'group_tools':null;
+}
 
 /** Content and owner-edit history remain derived; authority and effects remain control. */
 export class ControlledActionRepository {
@@ -92,12 +121,21 @@ export class ControlledActionRepository {
     const binding={...current,generation:turn.generation??current.generation,epoch:turn.guard_epoch};
     const source=await this.prepared.root(principal,current);
     if('connection' in raw)await notionAuthority(this.control,principal,turn,raw,false);
-    let telegram=false;
+    let telegram=false,asker:GroupAsker|null=null;
     if(source.store==='archive') {
       const original=await this.access.archive.verify(source),intake=(await this.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
       if(original.origin!=='live'||intake?.transport==='import'||intake?.state==='pending')throw new HttpError(403,'external_effect_requires_live_turn');
       telegram=original.channel==='telegram';
+      // Who asked in a group's live turn (step 3); a job's run asks for no one.
+      if(telegram&&principal.scope!==null&&!turn.job) {
+        const event=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
+        asker=event?messageSender(this.access.policy(),JSON.parse(event.payload.toString()),original.scope):null;
+      }
     }
+    // A member whose web pages and outside tools are off is refused before anything is recorded or checked for secrets;
+    // a follow-up is no one's request and still waits for the owner's card.
+    if(asker&&!asker.owner&&groupToolKind(body.kind,raw)&&!members().may(asker.account,principal.space,'tools')&&!await followUpTurn(this.control,principal))
+      throw new HttpError(403,'tool_not_permitted');
     const id=digest(canonical([protocol,source,binding,body.kind,raw])),proposal=await this.derived.record({operation_id:'controlled-proposal:'+id,
       source,kind:'controlled_action_request',content:Buffer.from(canonical(raw)),producer:'nocheh',producer_version:protocol,configuration:{binding,kind:body.kind}});
     // The summary is checked beside the arguments, at the same time, so it adds no wait.
@@ -119,10 +157,11 @@ export class ControlledActionRepository {
       // asks for has no rule key, so no chat rule covers it and its card offers no rule (ADR-0212, ADR-0214).
       const followUp=source.store==='archive'&&await followUpTurn(db,principal);
       // A repeat of the same request keeps the summary it was first asked with, so its card never changes.
-      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT DO NOTHING`,
+      // A member's request keeps their account, so the claim checks them again before it runs (step 3).
+      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference,asker_account)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`,
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null,
-          turn.job||followUp?null:ruleKey(body.kind as string,args),summary]);
+          turn.job||followUp?null:ruleKey(body.kind as string,args),summary,asker&&!asker.owner?asker.account:null]);
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint)throw new HttpError(409,'action_proposal_changed');
       const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);
@@ -143,9 +182,19 @@ export class ControlledActionRepository {
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
       if(autonomy&&decision.outcome==='allow')
         await db.query("UPDATE controlled_actions SET state='approved',decision_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source]);
+      // A group's permission for web pages and outside tools lets a live group request run without a card (step 3); deny
+      // rules come first, and the row keeps why, which its claim evaluates with.
+      const tools=!autonomy&&live&&row.state==='proposed'&&decision.outcome==='ask'?groupToolsGrant(asker,row.kind,args,principal.space!):null;
+      if(tools)decision=await evaluate(db,this.effect(row),tools);
+      if(tools&&decision.outcome==='allow')
+        await db.query("UPDATE controlled_actions SET state='approved',authority=$3,decision_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source,tools]);
       await recordEffect(db,this.effect(row),'proposed',decision,source);
       await recordEffect(db,this.effect(row),decision.outcome==='deny'?'blocked':decision.outcome==='allow'?'allowed':'awaiting_approval',decision,source,grant?.id);
       await requestWorkflow(db,'tools',id);await db.query('COMMIT');
+      if(tools&&decision.outcome==='allow') {
+        const lines=groupToolsLines((await ownerPrompts(db))['telegram.group_tools_texts']);
+        return {id,state:'approved',fingerprint,allowed:true,message:telegram&&await followUpLeft(db,source.id)?lines.allowed_follow_up:lines.allowed};
+      }
       if(autonomy&&decision.outcome==='allow')return {id,state:'approved',fingerprint,allowed:true,message:autonomy===notion?'Allowed by the owner\'s Notion setting; it will run now.':
         // Only a Telegram chat gets the follow-up turn, at most three per asking message (ADR-0212); a browser turn reads the operation itself.
         telegram&&await followUpLeft(db,source.id)?'Approved by your own request under the owner freedom setting; it runs now. Its answer will follow here as a reply; do not wait for it, say only that it is running.':
@@ -279,7 +328,8 @@ export class ControlledActionRepository {
       if(minutes!==null&&(!minutes||!row.match_key||row.job_id))throw new HttpError(400,'rule_not_available');
       if(body.decision==='approve'){await this.fence(db,row.binding);await this.arguments(row);}
       const state=body.decision==='approve'?'approved':'rejected';
-      await db.query('UPDATE controlled_actions SET state=$2,permission_id=NULL,decision_reference=$3,revision=revision+1,updated_at=now() WHERE id=$1',[id,state,source??null]);
+      // The owner's own decision is why it runs from now on, not a group's tools permission it was approved under before.
+      await db.query('UPDATE controlled_actions SET state=$2,permission_id=NULL,authority=NULL,decision_reference=$3,revision=revision+1,updated_at=now() WHERE id=$1',[id,state,source??null]);
       await requestWorkflow(db,'tools',id);
       if(!minutes)return {id,state,revision:row.revision+1};
       const rule=digest(canonical(['rule',id,body.allow,body.operation_id??null]));

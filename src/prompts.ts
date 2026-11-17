@@ -3,6 +3,7 @@ import {admin,type Reader} from './access.js';
 import {HttpError,object} from './http.js';
 import type {RuntimeCall,RuntimeOperation} from './runtime.js';
 import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.js';
+import type {groupToolsTextLabels} from './member-wire.js';
 
 /**
  * Built-in instruction texts and the owner's replacements from Settings › Assistant.
@@ -14,7 +15,7 @@ export const promptKeys=['reply.common','reply.owner','reply.group','reply.priva
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
   'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','tasks.reminder_texts','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
-  'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds'] as const;
+  'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds','telegram.member_daily_limit','telegram.group_tools_texts'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -22,10 +23,23 @@ export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.i
   'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
   'background.job':['{instruction}'],'background.card':['{instruction}'],'background.machine':['{steps}']};
 
-/** Sent in a group, without a model, to someone who addressed Nocheh but is not allowed to use it there. */
-export const notAllowedReply='Sorry, I only work with people the owner has allowed in this group.';
+/** Sent in a group, without a model and at most once a UTC day per person and group, to someone who addressed Nocheh but
+ * may not use it there: a stranger, or a member who is paused or switched off there (step 3). */
+export const notAllowedReply='Sorry, in this group I only work with the owner and the owner\'s members.';
 /** Sent, without a model and at most once a day, to anyone but the owner who writes to Nocheh privately. */
 export const notAllowedPrivateReply='Sorry, this is a private assistant. It only works for its owner.';
+/** Sent in a group, without a model and at most once a UTC day per group, to a member who addressed Nocheh after using up
+ * the daily message cap the owner set on the Members page (step 3). */
+export const memberDailyLimitReply='Sorry, you have reached today\'s limit of messages to me. You can ask again tomorrow.';
+/** What the model is told when a group's permission for web pages and outside tools lets a tool call run without a card
+ * (step 3): with its answer to follow as a reply (allowed_follow_up), or without (allowed). One "name: text" line each. */
+export const groupToolsTexts=['allowed_follow_up: Allowed by this group\'s permission for web pages and outside tools; it runs now. Its answer will follow here as a reply; do not wait for it, say only that it is running.',
+  'allowed: Allowed by this group\'s permission for web pages and outside tools; it runs now.'].join('\n');
+export type GroupToolsText=typeof groupToolsTextLabels[number];
+/** The group tools lines, with any line the owner removed or left empty taken from the default. */
+export function groupToolsLines(text:string|undefined):Record<GroupToolsText,string> {
+  return labeledLines(groupToolsTexts,text) as Record<GroupToolsText,string>;
+}
 
 export const learningPrompt=(
   "Interpret permitted conversation evidence silently. "+
@@ -79,16 +93,17 @@ export const approvalTask='📋 {change}\n👥 Seen in {chats}\n🔒 {private}\n
 /** One "name: text" line for each button, outcome and notice on an approval card. */
 export const approvalTexts=[
   'approve: ✅ Approve','reject: ❌ Reject','allow_once: ✅ Allow once','allow_here: 🕒 Allow where asked, 12 hours','allow_always: 📌 Always allow this site where asked',
-  'allow_command: 📌 Always allow it where asked','rule_note: 👥 “Where asked” covers everyone you allowed in that chat or topic, not only the person who asked.',
+  'allow_command: 📌 Always allow it where asked','rule_note: 👥 “Where asked” covers you and every member who can talk in that chat or topic, not only the person who asked.',
   'stop: 🛑 Stop','stopping_job: 🛑 Stopping the job. Nothing more runs.','job_ended: This job has already ended.',
   'only_stop: Only the person who asked or the owner can stop this job.','private_chat: your private chat','unnamed_group: a Telegram group',
   'topic: › {topic}','unnamed_topic: a topic','general_topic: General',
-  'group_chat: group {name}','topic_name: topic {name}','person_chat: private chat with {name} (a person you allowed in {group})',
-  'person_chat_more: private chat with {name} (a person you allowed in {group} and {count} more)','person_chat_other: private chat with {name}',
+  'group_chat: group {name}','topic_name: topic {name}','person_chat: private chat with {name} (a member in {group})',
+  'person_chat_more: private chat with {name} (a member in {group} and {count} more)','person_chat_other: private chat with {name}',
   'unnamed_person: a person …{id}','unknown_chat: a chat Nocheh no longer knows','not_served: (not served now)',
   'name_project: {name} of project {project}','name_id: {name} (…{id})',
   'not_sent: 🚫 Approved, but not sent: {reason}','reason_not_served: Nocheh does not serve that chat now.',
   'reason_settings_changed: your settings changed while it ran. It runs again at its next time.',
+  'reason_member_changed: the member who asked can no longer do this there: they were paused or removed, or a switch for them was turned off.',
   'schedule_not_sent: ⚠\ufe0f A scheduled task in {chat} finished, but its result was not sent: {reason}',
   'schedule_not_run: ⚠\ufe0f A scheduled task in {chat} did not run: {reason} It runs again once you select that group on the dashboard Chats page.',
   'job_report_not_sent: ⚠\ufe0f The job {title} finished, but its report was not sent to {chat}: {reason}',
@@ -139,7 +154,7 @@ export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_alw
   'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_later'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed'|
   'task_move_group'|'task_move_group_family'|'task_move_project'|'task_move_project_family'|'task_group_only'|'task_group_later'|
   'group_chat'|'topic_name'|'person_chat'|'person_chat_more'|'person_chat_other'|'unnamed_person'|'unknown_chat'|'not_served'|'name_project'|'name_id'|
-  'not_sent'|'reason_not_served'|'reason_settings_changed'|'schedule_not_sent'|'schedule_not_run'|'job_report_not_sent';
+  'not_sent'|'reason_not_served'|'reason_settings_changed'|'reason_member_changed'|'schedule_not_sent'|'schedule_not_run'|'job_report_not_sent';
 /** The labeled lines, with any line the owner removed or left empty taken from the default, and so is a stored line
  * that lacks a value Nocheh fills in (labeledPlaceholders). */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
@@ -186,8 +201,8 @@ export const taskReminder='⏰ {title}\n📅 {due}\n📁 {list}\n\n{notes}';
  * backlog line of people's reminders merged into one message, the mark before each line of a person's notes, and the
  * notice when the owner's message in a group removed reminders set elsewhere. {place} uses the approval texts' chat
  * words, so there is one set of them. */
-export const reminderTexts=['you: you','person: {name}, a person you allowed','person_gone: {name}, a person you no longer allow',
-  'unnamed_person: someone you allowed','set_by: 👤 Set by {who} in {place}','written_by: ✏\ufe0f Last written by {who} in {place}: {fields}',
+export const reminderTexts=['you: you','person: {name}, a member','person_gone: {name}, no longer an active member',
+  'unnamed_person: a member','set_by: 👤 Set by {who} in {place}','written_by: ✏\ufe0f Last written by {who} in {place}: {fields}',
   'field_title: title','field_notes: notes','field_due: due day','closed_by: ☑\ufe0f Closed by {who} in {place}',
   'merged: 🔔 {count} reminders set in {place}',
   'more_waiting: ⏳ {count} more reminders set in {place} are due. They come in the next message; at most one message per group every 10 minutes.',
@@ -264,7 +279,7 @@ export const backgroundTexts=['running: ⏳ Approved. It runs now and reports he
   'stopped: 🚫 Stopped. Nothing more runs.','stopping: ⏳ Stopping. Nothing more runs.','failed: ⚠️ It stopped because of a problem. See Background work in the dashboard.',
   'rejected: ❌ Rejected. Nothing ran.','paused: ⏸ Approved. Member jobs are paused for now; it starts when they resume.',
   'checked: Starting it already used one secret check.',"unpriced: Cost can't be measured for this model: only the time limit applies",
-  'member_limit: It counts toward the daily limit of the person who asked, unless it is rejected.','notion_reads: It can read your Notion without asking. Changes still ask you.',
+  'notion_reads: It can read your Notion without asking. Changes still ask you.',
   'box: It can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads.',
   'box_repo: It can run commands and Python in a sealed box: no internet, no keys, only the checked messages of the chat it reads and the GitHub copy below.',
   'repo: It reads a copy of {repo_name}, {repo_branch} at {repo_commit}, copied {repo_copied} ({repo_size}). What it reads is secret-checked before the model sees it, and reading code adds to its cost. Your GitHub key stays outside the box.',
@@ -335,7 +350,7 @@ const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learni
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine,
   'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts,
-  'telegram.chat_adds':chatAddTexts};
+  'telegram.chat_adds':chatAddTexts,'telegram.member_daily_limit':memberDailyLimitReply,'telegram.group_tools_texts':groupToolsTexts};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

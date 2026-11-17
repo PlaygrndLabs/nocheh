@@ -14,6 +14,7 @@ import {storageGuardService} from '../src/stores/guard-service.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {installChatsForTest} from '../src/chats.js';
 import {families} from './fixture-families.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('a background job is started with one call, approved on its card, runs as one run in its own session and reports to its chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -24,7 +25,9 @@ test('a background job is started with one call, approved on its card, runs as o
   // The reply model's rates in USD per million tokens, as the runtime prices it; null where it has no price.
   const sonnet={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0};
   const cards:Record<string,any>[]=[],runs:string[]=[];let rates:Record<string,number|null>=sonnet,updates=0;
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9','8'],denied:[]},[other]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],topic_memory:'group' as const});
+  // The owner's members (step 3): 9 and 8 in the group, 9 in the other group too.
+  const grants={[group]:{granted:['9','8']},[other]:{granted:['9']}};
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -34,6 +37,7 @@ test('a background job is started with one call, approved on its card, runs as o
       assert.equal(operation,'telegram.approval');cards.push(input);
       return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};
     },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  let people=grantMembers(grants,{owner:'123'});
   const bot=String(Date.now()).slice(-9);
   const capture=async(label:string,payload:Record<string,unknown>,scope=group)=>{
     const event:Envelope={version:1,key:payload.update_id?`telegram:${bot}:update:${payload.update_id}`:key+':'+label,origin:'live',kind:'telegram_update',bot_id:payload.update_id?bot:key,scope,source_id:payload.update_id?String(payload.update_id):label,revision:'1',occurred_at:null,text:String((payload.message as any)?.text??''),payload};
@@ -95,7 +99,7 @@ test('a background job is started with one call, approved on its card, runs as o
     assert.match(card.text,/Background job: Open tasks/);assert.match(card.text,/6 messages/);assert.ok(card.text.includes('about $'+priced.toFixed(2)),card.text);
     assert.match(card.text,/🛑 Stops at \$5\.00 or 45 min, not counting the secret check\n/);assert.doesNotMatch(card.text,/can't be measured/);
     assert.match(card.text,/Find every task that is still open and who owns it\./);
-    assert.match(card.text,/🔎 Starting it already used one secret check\. It counts toward the daily limit of the person who asked, unless it is rejected\./);
+    assert.match(card.text,/🔎 Starting it already used one secret check\.\n/);assert.doesNotMatch(card.text,/daily limit/,'members have no daily job count (step 3)');
     const approve='na'+proposed.id.slice(0,40)+proposed.fingerprint.slice(0,16);
     assert.deepEqual(card.buttons,[['✅ Approve',approve],['❌ Reject','nd'+proposed.id.slice(0,40)+proposed.fingerprint.slice(0,16)]]);
     await s.actionCommands.callback(await press('other',approve,8));
@@ -241,14 +245,18 @@ test('a background job is started with one call, approved on its card, runs as o
       await assert.rejects(s.jobs.start(await actor((await privately('too-long-owner','Read it all')).id,null),{title:'Every year',instruction:'Read it all.'}),{code:'job_too_long'},'the owner too');
     } finally {sources.size=size;}
     assert.equal(Number((await stores.control.query('SELECT count(*) FROM background_jobs')).rows[0].count),before);
-    // Members start a few jobs a day per group; the owner sets how many.
+    // Members have no daily job count (step 3): their small jobs permission where they ask, and the cost limit, decide.
     const settings=await s.jobs.settings();
-    for(const minutes of [4,51,60])await assert.rejects(s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:minutes,member_daily_jobs:1,revision:settings.revision}),
+    for(const minutes of [4,51,60])await assert.rejects(s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:minutes,revision:settings.revision}),
       {status:400,code:'invalid_settings'},'a job runs 5 to 50 minutes');
-    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:1,revision:settings.revision});
-    await assert.rejects(s.jobs.start(await actor((await message('more')).id),{title:'More',instruction:'Again.'}),{code:'job_limit_reached'});
+    await assert.rejects(s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:1,revision:settings.revision}),
+      {status:400,code:'invalid_settings'},'there is no daily job count to set');
+    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,revision:settings.revision});
+    people();people=grantMembers(grants,{owner:'123',changes:{'9':{group_jobs:false}}});
+    await assert.rejects(s.jobs.start(await actor((await message('more')).id),{title:'More',instruction:'Again.'}),{status:403,code:'job_not_permitted'},'small jobs off for them');
+    people();people=grantMembers(grants,{owner:'123'});
     const ownerJob=await s.jobs.start(await actor((await message('owner-more',123)).id),{title:'Owner',instruction:'Again.'});
-    assert.equal(ownerJob.state,'proposed','the owner has no daily limit');
+    assert.equal(ownerJob.state,'proposed','the owner needs no permission');
     // A member may not stop the owner's job in their group; the owner stops any job, from any of their chats.
     await assert.rejects(s.jobs.stop(await actor((await message('stop-owner',9)).id),{id:ownerJob.id}),{status:403,code:'job_not_permitted'});
     assert.equal((await s.jobs.stop(await actor((await privately('owner-stops','Stop that one')).id,null),{id:ownerJob.id})).state,'stopped');
@@ -314,7 +322,7 @@ test('a background job is started with one call, approved on its card, runs as o
     assert.equal(Number((await job(mine.id)).cost_usd),0.1+0.28);
     const report=(await stores.control.query('SELECT a.* FROM background_reports b JOIN telegram_action_requests a ON a.id=b.action_id WHERE b.job_id=$1',[mine.id])).rows[0];
     assert.deepEqual([report?.destination,report?.scope,report?.state],['123','123','approved'],'the report goes to the owner\'s private chat');
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, from the request to the run (ADR-0252)',
@@ -327,7 +335,7 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
   assert.notEqual(chat,raw);
   const restore=installChatsForTest(family.directory([raw],{owner:'123',served:[raw]}));
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-digest-'));
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[raw],group_access:{[raw]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[raw],topic_memory:'group' as const});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -336,6 +344,8 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
       if(operation==='run.start'||operation==='run.cancel')return {state:'queued'};
       return {state:'done'};
     },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+  // 9 is a member in the group, by its Nocheh id (step 3).
+  const people=grantMembers({[chat]:{granted:['9']}},{owner:'123'});
   let sent=100;
   const message=async(label:string,from=9,text='Please find what is still open')=>{
     const payload={message:{message_id:++sent,date:1700000000,chat:{id:Number(raw),type:'supergroup'},from:{id:from,first_name:'Member'},text}};
@@ -350,7 +360,7 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
     const settings=await s.jobs.settings();
-    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:1,revision:settings.revision});
+    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,revision:settings.revision});
     for(let index=0;index<3;index++)await message('history-'+index,8,'Earlier message '+index);
     // The turn's chat is the group's Nocheh id, never the archive's Telegram id: the job is saved under it.
     const ask=await message('ask');
@@ -359,11 +369,12 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
     assert.equal(proposed.state,'proposed');assert.equal(proposed.approver,'requester');
     const saved=await job(proposed.id);
     assert.deepEqual([saved.scope,saved.space_id,saved.target,saved.requester],[chat,chat,chat,'9']);
-    // The member's daily limit counts this chat's jobs, and the group's list shows them.
-    await assert.rejects(s.jobs.start(await actor((await message('again')).id),{title:'Again',instruction:'Again.'}),{code:'job_limit_reached'});
+    // No daily count: the member's second job starts too, and the group's list shows them under this chat.
+    const again=await s.jobs.start(await actor((await message('again')).id),{title:'Again',instruction:'Again.'});
+    assert.deepEqual([again.state,(await job(again.id)).scope],['proposed',chat]);
     assert.ok((await s.jobs.list(await actor((await message('list')).id))).jobs.some(item=>item.id===proposed.id),'the group lists its own job');
-    // Approved by the person who asked, whose access TELEGRAM_GROUP_ACCESS keeps under the Telegram id; the run is
-    // served by the chat's row and its profile is the job's.
+    // Approved by the member who asked, who reaches the chat by its Nocheh id; the run is served by the chat's row and
+    // its profile is the job's.
     await s.jobs.decide('9',{id:proposed.id,fingerprint:proposed.fingerprint,decision:'approve'},await message('approve'));
     // The test before this one leaves jobs in their slots; they end, so this one starts now.
     await stores.control.query("UPDATE background_jobs SET state='stopped' WHERE state IN ('running','reporting') AND id<>$1",[proposed.id]);
@@ -377,7 +388,7 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
     // The member stops their own running job from the same chat: the run is asked to end.
     assert.equal((await s.jobs.stop(await actor((await message('stop')).id),{id:proposed.id})).state,'stopping');
     assert.equal((await job(proposed.id)).cancel_requested,true);
-  } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('a job whose group Nocheh stops serving before its report ends unreported, and the owner is told once (ADR-0254)',
@@ -388,10 +399,11 @@ test('a job whose group Nocheh stops serving before its report ends unreported, 
   const family=families[1]!,raw='-2'+String(Date.now()).slice(-12),chat=family.id(raw),key='background-unserved:'+Date.now();
   const restore=installChatsForTest(family.directory([raw],{owner:'123',served:[raw]}));
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-unserved-')),notices:Record<string,unknown>[]=[];
-  // Deselected as the owner does it: the group leaves group_ids and its access list goes with it (a list for a group not
-  // selected is refused), the restart applies the policy, which moves the epoch, and the directory turns the group off.
+  // Deselected as the owner does it: the directory turns the group off; the configure that follows moves no epoch,
+  // since which groups are on is never in the admitted document (ADR-0253). 9 is a member there (step 3).
   let served=true;
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:served?[raw]:[],group_access:served?{[raw]:{granted:['9'],denied:[]}}:{},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:served?[raw]:[],topic_memory:'group' as const});
+  const people=grantMembers({[chat]:{granted:['9']}},{owner:'123'});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -436,7 +448,7 @@ test('a job whose group Nocheh stops serving before its report ends unreported, 
   try {
     await s.guards.reconcile();await s.guards.setMode('on');await select(true);
     const settings=await s.jobs.settings();
-    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:10,revision:settings.revision});
+    await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,revision:settings.revision});
     // A member's job and the owner's own, both asked in the group, finish their runs; then the owner deselects the group.
     // Nothing is staged there and the owner hears of each in their private chat, since the bot may no longer edit a card in
     // the group: the member's job is not ended as not permitted, nor the owner's as outdated, without a word.
@@ -452,19 +464,19 @@ test('a job whose group Nocheh stops serving before its report ends unreported, 
     assert.ok(![raw,chat].some(id=>String(notices[0]!.text).includes(id)),'no chat id in the notice');
     for(const id of [member,own])assert.equal(await tick(id),'failed');
     assert.equal(notices.length,2,'each job is told once');
-    // A part staged while the group was served, then closed by the deselect's settings change as a changed context, not as
-    // not served: the owner is told all the same, and the job keeps the reason.
+    // A part staged while the group was served, then closed at its run once the group is off: the owner is told all the
+    // same, and the job keeps the reason.
     await select(true);notices.length=0;
     const staged=await ran('staged',9,'Staged tasks');
     assert.equal(await tick(staged),'waiting');
     const [part]=await reports(staged);assert.equal(part?.state,'approved');
     await select(false);
     assert.equal((await s.telegramActions.run(part.id,await authority('actions'))).state,'cancelled');
-    assert.deepEqual((await reports(staged)).map(row=>[row.state,row.error_code]),[['cancelled','action_context_changed']]);
+    assert.deepEqual((await reports(staged)).map(row=>[row.state,row.error_code]),[['cancelled','destination_not_served']]);
     assert.equal(await tick(staged),'failed');
     assert.deepEqual([(await job(staged)).state,(await job(staged)).error_code],['failed','job_report_not_served']);
     assert.deepEqual(notices.map(notice=>notice.id),[told(staged)]);
-  } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('a job card in the owner\'s private chat names the group and topic it was asked in, by the chat directory, in both families (ADR-0250, ADR-0252)',
@@ -479,7 +491,7 @@ test('a job card in the owner\'s private chat names the group and topic it was a
     const restore=installChatsForTest(family.directory([raw,thread],{owner:'123',served:[raw]}));
     const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-background-origin-'));
     const priced={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0},cards:Record<string,any>[]=[];let rates:Record<string,number|null>=priced;
-    const policy=()=>({enabled:true,owner_id:'123',group_ids:[raw],group_access:{[raw]:{granted:['8'],denied:[]}},topic_memory:'group' as const});
+    const policy=()=>({enabled:true,owner_id:'123',group_ids:[raw],topic_memory:'group' as const});
     const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
       runtime:async(operation,input)=>{
         if(operation==='guard.detect')return {literals:[]};
@@ -489,6 +501,7 @@ test('a job card in the owner\'s private chat names the group and topic it was a
         if(operation==='telegram.approval'){cards.push(input);return input.kind==='card'?{state:'done',chat_id:input.chat_id,message_id:'5'}:{state:'done'};}
         return {state:'done'};
       },memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
+    const people=grantMembers({[group]:{granted:['8']}},{owner:'123'});
     let sent=100;
     // A member's message in the topic, as Telegram sends it: the topic's first message names it.
     const ask=async(label:string)=>{
@@ -504,7 +517,7 @@ test('a job card in the owner\'s private chat names the group and topic it was a
     try {
       await s.guards.reconcile();await s.guards.setMode('on');
       const settings=await s.jobs.settings();
-      await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:10,revision:settings.revision});
+      await s.jobs.saveSettings({admin:true,scope:null},{cost_limit_usd:5,minutes_limit:45,revision:settings.revision});
       const first=await ask('unpriced');
       assert.deepEqual([(await s.turns.binding(await actor(first.id))).scope,(await actor(first.id)).space],[group,topic],family.name+': the turn names the group and its topic');
       // On a model with no price, the member's job waits for the owner: its card goes to the owner's private chat and says
@@ -526,7 +539,7 @@ test('a job card in the owner\'s private chat names the group and topic it was a
       const here=cards.filter(card=>card.kind==='card').at(-1)!;
       assert.deepEqual([here.chat_id,here.topic,here.reply_to],[raw,7,String(sent)],family.name+': the card goes where the topic is in Telegram');
       assert.doesNotMatch(here.text,/💬 Asked in/,family.name);
-    } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
+    } finally {people();restore();await stores.close();await rm(root,{recursive:true,force:true});}
   }
 });
 

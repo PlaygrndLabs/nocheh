@@ -17,6 +17,7 @@ import {legacyChats,legacyDirectory} from './fixture-groups.js';
 import {families} from './fixture-families.js';
 import {moveGroupTasks} from '../src/stores/tasks.js';
 import {installMembersForTest,memberIdFor} from '../src/members.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 // Who writes in a group besides the owner is a member (step 3): these tests' people are members with every permission
 // and no group switch, so they talk in every group served; the returned function also puts the chats back.
@@ -352,9 +353,10 @@ test('a reminder says who set it and where; people\'s reminders due together go 
   const notices:any[]=[];let telegram:'done'|'not_started'|'ambiguous'|number='done';
   // The chats this test uses, as the seeder makes their rows, with the names Telegram gave them (ADR-0252).
   const seeded=legacyChats([group,topic,work],{owner:'123',served:[group,work]}),titles:Record<string,string>={[group]:'Family',[topic]:'Plans',[work]:'Work'};
-  const restore=asMembers(installChatsForTest({...seeded,chats:seeded.chats.map(chat=>({...chat,title:titles[chat.id]??chat.title??null}))}));
-  // Sara (who writes in the topic) and Omid are allowed in Family, Pat in Work.
-  const policy={enabled:true,owner_id:'123',group_ids:[group,work],group_access:{[group]:{granted:['456','457'],denied:[]},[work]:{granted:['458'],denied:[]}}};
+  const restore=installChatsForTest({...seeded,chats:seeded.chats.map(chat=>({...chat,title:titles[chat.id]??chat.title??null}))});
+  // Sara (who writes in the topic) and Omid are members in Family, Pat in Work (step 3).
+  const policy={enabled:true,owner_id:'123',group_ids:[group,work]};
+  const people=grantMembers({[group]:{granted:['456','457']},[work]:{granted:['458']}},{owner:'123'});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -396,7 +398,7 @@ test('a reminder says who set it and where; people\'s reminders due together go 
   const batches=async(state:string)=>(await stores.control.query('SELECT id,message,tries FROM owner_task_reminder_batches WHERE group_id=$1 AND state=$2 ORDER BY created_at',[group,state])).rows;
   /** “name”, isolated, as code quotes a name. */
   const q=(name:string)=>'\u2068\u201c'+name+'\u201d\u2069',family='group '+q('Family'),plans=family+' \u203a topic '+q('Plans');
-  const allowed=(name:string)=>q(name)+', a person you allowed',setBy=(who:string,place:string)=>'\u{1f464} Set by '+who+' in '+place+'\n';
+  const allowed=(name:string)=>q(name)+', a member',setBy=(who:string,place:string)=>'\u{1f464} Set by '+who+' in '+place+'\n';
   const body=(title:string,list:string)=>'\u23f0 '+title+'\n\u{1f4c1} '+list;
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
@@ -675,7 +677,7 @@ test('a reminder says who set it and where; people\'s reminders due together go 
     // s. A person Nocheh could not tell is no member (step 3): their turn adds no task and sets no reminder.
     const ghost=await actor((await capture(group,{first_name:'Owner'})).id,group,group);
     await assert.rejects(s.tasks.chatCreate(ghost,{title:'Fix the gate',reminders:[soon(130)]}),{status:403,code:'member_access_changed'});
-  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('a project chat sees a task only as it is on that project\'s board, from when it joined',

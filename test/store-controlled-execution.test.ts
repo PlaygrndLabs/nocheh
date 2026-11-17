@@ -14,6 +14,8 @@ import {workflowDetail} from '../src/workflows/owner.js';
 import {policySnapshot,savePolicy} from '../src/security/store.js';
 import {hash,requestWorkflow} from '../src/workflows/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {accountIdFor} from '../src/chats.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('host tool execution fences exact authority and repairs durable results without repeating effects',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -25,6 +27,8 @@ test('host tool execution fences exact authority and repairs durable results wit
     runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution,event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:'1',revision:'1',occurred_at:null,text:'Tool execution source',
     payload:{message:{message_id:1,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Tool execution source'}}};
+  // The person who asks in the group is one of the owner's members there, so their requests are theirs to keep (step 3).
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123'});
   try {
     await s.guards.reconcile();await s.guards.setMode('on');const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);
     const binding=await s.guards.state(),actor={admin:false,scope:group,space:group,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
@@ -120,6 +124,12 @@ test('host tool execution fences exact authority and repairs durable results wit
     a.fence=async()=>{throw new HttpError(409,'guard_transition_pending');};
     try{assert.deepEqual(await x.claim(pw),{claimed:false});}finally{a.fence=fence;}
     assert.equal((await a.row(pending.id)).state,'approved');assert.deepEqual(ended(),[],'a pending publication ends nothing');
+    // A member's approved request runs only while they still talk where they asked: a pause since stops it (step 3).
+    const paused=await proposal('printf paused'),held=await host(paused.id);
+    assert.equal((await a.row(paused.id)).asker_account,accountIdFor('telegram','9'),'a member\'s request keeps their account');
+    const pause=grantMembers({[group]:{granted:['9']}},{owner:'123',changes:{'9':{state:'paused'}}});
+    try{assert.deepEqual(await x.claim(held),{claimed:false,blocked:paused.id,reason:'member_changed'});}finally{pause();}
+    assert.deepEqual(ended(),[paused.id],'the member change ends it');
     const privateSource=(await s.capture.capture({...event,key:key+':private',scope:'123',source_id:'2',text:'Made-up Notion request',
       payload:{message:{message_id:2,chat:{id:123,type:'private'},from:{id:123},text:'Made-up Notion request'}}})).source.reference;
     await s.guards.prepare(privateSource,'fixture',s.detect);
@@ -162,5 +172,5 @@ test('host tool execution fences exact authority and repairs durable results wit
     assert.deepEqual(ended(),[unclaimed.id],'a claim that stops an approved action ends it');await followed(unclaimed.id);
     assert.equal((await stores.archive.query("SELECT count(*)::int AS n FROM events WHERE kind LIKE 'controlled_%'")).rows[0].n,0);
     assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM pg_trigger WHERE tgname LIKE 'workflow_tool_%' AND NOT tgisinternal")).rows[0].n,0);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

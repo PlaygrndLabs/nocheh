@@ -4,8 +4,9 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {conversationScope,ownerChat} from '../assistant-policy.js';
-import {chats} from '../chats.js';
+import {conversationScope,ownerChat,telegramAccount} from '../assistant-policy.js';
+import {chats,type ChatDirectory} from '../chats.js';
+import {freshMembers,members} from '../members.js';
 import {telegramDestination} from '../chats-telegram.js';
 import {fillLine,labelName,placeLabel,quotedName} from '../chat-labels.js';
 import {allowedIn,servedDestination} from '../destinations.js';
@@ -38,6 +39,11 @@ const noticeText=(text:string)=>text.slice(0,/[\uD800-\uDBFF]/.test(text.charAt(
   .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,'\uFFFD');
 /** The chat a chat or topic belongs to. */
 const chatOf=(space:string)=>chats().parentOf(space)??space;
+/** Whether `destination` is a group, or a topic of one, other than the group `scope` (where it was asked) is or belongs
+ * to: a member's post there needs their permission to post to their other groups (step 3). */
+const otherGroup=(scope:string,destination:string,directory:ChatDirectory=chats())=>{
+  const group=directory.groupOf(destination);return group!==null&&group!==directory.groupOf(scope);
+};
 type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
   scope:string|null;space:string;profile:string;destination:string;fingerprint:string;text_hash:string;guard_revision:number|null};
 /** A trusted send's identity: its workflow key, source, authorization, destination and exact text. */
@@ -154,17 +160,31 @@ export class TelegramActionRepository {
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
     return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text});
   }
-  /** The person who wrote a live group turn, when they are allowed to talk to Nocheh there; null for the owner's private chat. */
+  /** The person who wrote a live group turn, when they may talk to Nocheh there (the owner or a member who talks there);
+   *  null for the owner's private chat. */
   private async requester(event:string,scope:string):Promise<string|null> {
     const row=(await this.stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
     const sender=row?conversationScope(this.access.policy(),JSON.parse(row.payload.toString()),scope):null;
     return sender&&!sender.owner?sender.user_id:null;
   }
-  /** Groups where this person may talk to Nocheh, by their chat ids: the owner in every served group, others where
-   * granted and not denied under any Telegram id the group has had, so an upgrade keeps who may talk there. */
-  private allowedGroups(user:string):string[] {
-    const policy=this.access.policy(),directory=chats();
-    return directory.all().filter(chat=>chat.kind==='group'&&directory.served(chat.id)&&(user===policy.owner_id||allowedIn(policy,chat.id,user,directory))).map(chat=>chat.id);
+  /** Groups this person may post to through Nocheh, by their chat ids: the owner every served group, first; a member the
+   * group they asked in (`asked`, a group or topic) while they talk there, and, while they may post from there, every other
+   * served group they reach with that permission: Telegram's newest row says they are in it (step 3), so a group they
+   * were never seen in goes to the owner's card. */
+  private allowedGroups(user:string,asked:string|null):string[] {
+    const policy=this.access.policy(),directory=chats(),account=telegramAccount(user),from=directory.groupOf(asked);
+    const posts=from!==null&&members().may(account,from,'post',directory);
+    return directory.all().filter(chat=>chat.kind==='group'&&directory.served(chat.id)&&(user===policy.owner_id||
+      (chat.id===from?members().talks(account,chat.id,directory):posts&&allowedIn(chat.id,user,'post',directory)))).map(chat=>chat.id);
+  }
+  /** Whether the member whose live turn asked for a send (asker_account) may still have it go out (step 3): they still
+   *  talk in the group they asked in and, for a post into another group, may still post from there. Read fresh, as the
+   *  last word before a send. A send the owner asked for, or that no member's turn asked for, has no asker. */
+  private async askerCurrent(row:any,directory:ChatDirectory):Promise<boolean> {
+    if(!row.asker_account)return true;
+    const current=await freshMembers();
+    return current.talks(row.asker_account,row.scope,directory)&&
+      (!otherGroup(row.scope,row.destination,directory)||current.may(row.asker_account,row.scope,'post',directory));
   }
   /** Why a live group request needs no approval, or null: a post in the same
    * group, or the owner's own request for their private chat, which already
@@ -177,19 +197,19 @@ export class TelegramActionRepository {
     return (policy.topic_memory==='topic'?destination===principal.space:chatOf(destination)===principal.scope)?'same_group_request':null;
   }
   /** A message from one group to another, or from one topic to another when
-   * topics keep separate memory, is reviewed by the person who asked when they
-   * are allowed in both: the approval only lets them see what will be sent. The
-   * owner reviews everything else, including their own requests. */
+   * topics keep separate memory, is reviewed by the member who asked when they
+   * may post to it (allowedGroups): the approval only lets them see what will be
+   * sent. The owner reviews everything else, including their own requests. */
   async reviewer(id:string):Promise<{user:string;space:string}|null> {
-    const row=(await this.stores.control.query('SELECT source_reference,space_id,destination FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
+    const row=(await this.stores.control.query('SELECT source_reference,scope,space_id,destination FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
     const source=row?.source_reference;if(source?.store!=='archive'||!row.space_id)return null;
     const original=await this.access.archive.verify(source);if(original.origin!=='live'||original.channel!=='telegram')return null;
     const user=await this.requester(source.id,original.scope),target=chatOf(String(row.destination));
     // A same-audience post never waits, so a pending one here crosses groups or separate topics.
-    if(!user||user===this.access.policy().owner_id||String(row.destination)===row.space_id||!this.allowedGroups(user).includes(target))return null;
+    if(!user||user===this.access.policy().owner_id||String(row.destination)===row.space_id||!this.allowedGroups(user,row.scope).includes(target))return null;
     return {user,space:row.space_id};
   }
-  /** The groups where a live group turn's writer is allowed, with their known names, for exact destinations. */
+  /** The groups a live group turn's writer may post to (allowedGroups), with their known names, for exact destinations. */
   async destinations(principal:Reader) {
     if(principal.admin||!principal.scope||principal.answer!==undefined||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'group_turn_required');
     const turn=await this.turns.binding(principal);if(turn.owner||turn.job)throw new HttpError(403,'group_turn_required');
@@ -197,14 +217,14 @@ export class TelegramActionRepository {
     if(source.store!=='archive')throw new HttpError(403,'external_effect_requires_live_turn');
     const original=await this.access.archive.verify(source);
     if(original.origin!=='live'||original.channel!=='telegram')throw new HttpError(403,'external_effect_requires_live_turn');
-    const requester=await this.requester(source.id,original.scope),groups=requester?this.allowedGroups(requester):[];
+    const requester=await this.requester(source.id,original.scope),groups=requester?this.allowedGroups(requester,principal.scope):[];
     // A group's name once the owner has refreshed it and Telegram answered, as before step 2b: the name that refresh
     // answered, never one a later update shows (ADR-0252; the old refresh table is only the seeder's now).
     const titles=new Map((await this.stores.control.query(`SELECT chat_id,refreshed_title FROM chat_details
       WHERE chat_id=ANY($1::text[]) AND refreshed_state='available' AND refreshed_title IS NOT NULL`,[groups])).rows
       .map(row=>[row.chat_id as string,row.refreshed_title as string]));
     return {groups:groups.map(group=>({destination:group,name:titles.get(group)??null,current:group===principal.scope})),
-      note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. Nocheh posts only in the owner\'s private chat and its topics, the owner\'s selected groups and their topics, and the private chats of people the owner allowed in those groups. A message to this same group is posted without approval; a message to another group or to a person\'s private chat is shown to the owner to approve first.'};
+      note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. Nocheh posts only in the owner\'s private chat and its topics, the owner\'s selected groups and their topics, and the private chats of the owner\'s members in those groups. A message to this same group is posted without approval; a member confirms their own message to another group from this list on a card, and a message to any other chat is shown to the owner to approve first.'};
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
     source:SourceReference|OperationReference,input:Record<string,unknown>,channel?:string,requester:string|null=null){
@@ -216,6 +236,11 @@ export class TelegramActionRepository {
     if(!text.trim()||requested==='current'&&channel!=='telegram')throw new HttpError(400,'invalid_action');
     const destination=requested==='current'?principal.space??turn.scope:telegramDestination(requested,directory);
     if(!destination||!servedDestination(this.access.policy(),destination,directory))throw new HttpError(403,'destination_not_served');
+    // The member whose live group turn asked, kept on the request and checked again before it is sent (step 3); never the
+    // owner, who is asked about first. Their post into another group needs their permission to post there, refused here
+    // before anything is recorded; a post in the same group is part of talking.
+    const asker=requester&&principal.scope&&requester!==this.access.policy().owner_id?telegramAccount(requester):null;
+    if(asker&&otherGroup(principal.scope!,destination,directory)&&!members().may(asker,principal.scope,'post',directory))throw new HttpError(403,'member_post_not_allowed');
     const id=digest(canonical([protocol,source,binding,destination,text]));
     const proposal=await this.derived.record({operation_id:'telegram-proposal:'+id,source,kind:'action_request',content:Buffer.from(text),
       producer:'nocheh',producer_version:protocol,configuration:{destination,binding},provenance:{purpose:'exact_owner_approval'}});
@@ -228,9 +253,9 @@ export class TelegramActionRepository {
     const fingerprint=digest(canonical({destination,text:preparedText})),db=await this.stores.control.connect();
     try {
       await db.query('BEGIN');await this.fence(db,binding);
-      await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
-        [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision]);
+      await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,asker_account)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`,
+        [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision,asker]);
       const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
       const effect=this.effect(row);let decision=await evaluate(db,effect);
@@ -354,12 +379,13 @@ export class TelegramActionRepository {
   async authorizeDelivery(value:unknown) {
     const body=object(value),row=await this.row(string(body.id,64));
     // The bot sends to the chat and topic the destination has in Telegram now, which storage gave it (ADR-0252).
-    const target=telegramAddress(row.destination);
+    const target=telegramAddress(row.destination),directory=await currentChats();
     if(row.state!=='running'||body.destination!==row.destination||typeof body.text!=='string'||
       digest(canonical({destination:body.destination,text:body.text}))!==row.fingerprint||!target||
       String(body.chat_id)!==target.chat_id||(body.topic==null?undefined:String(body.topic))!==(target.topic===undefined?undefined:String(target.topic))||
-      // The last word, asked by the bot before each message it sends: a chat Nocheh no longer serves gets nothing.
-      !servedDestination(this.access.policy(),row.destination,await currentChats()))
+      // The last word, asked by the bot before each message it sends: a chat Nocheh no longer serves gets nothing, and
+      // neither does a send whose member was paused, removed or switched off since they asked (step 3).
+      !servedDestination(this.access.policy(),row.destination,directory)||!await this.askerCurrent(row,directory))
       throw new HttpError(403,'action_delivery_denied');
     await this.text(row);
     if((await evaluate(this.stores.control,this.effect(row),row.authority??'exact_owner_approval')).outcome!=='allow')
@@ -389,7 +415,10 @@ export class TelegramActionRepository {
         // A send that can never go out now is closed, its approval kept, so the press, /approve and the card say why instead of
         // buttons that fail on every press (ADR-0254). An unserved chat is asked first: the settings change that deselects a
         // group also moves the epoch. A pending publication passes, so it stays an error.
-        let closed:string|null=servedDestination(this.access.policy(),current.destination,await currentChats())?null:'destination_not_served';
+        const directory=await currentChats();
+        let closed:string|null=!servedDestination(this.access.policy(),current.destination,directory)?'destination_not_served':
+          // A send a member asked for, approved after they were paused, removed or switched off, is closed the same way (step 3).
+          !await this.askerCurrent(current,directory)?'member_changed':null;
         if(!closed)try{await this.fence(db,current.binding);await this.text(current);}catch(error){
           if(!(error instanceof HttpError)||!['action_context_changed','guard_context_changed','action_proposal_changed','action_delivery_denied'].includes(error.code))throw error;
           closed=error.code==='guard_context_changed'?'action_context_changed':error.code;
@@ -463,8 +492,13 @@ export class TelegramActionRepository {
         }catch(error){await db.query('ROLLBACK');throw error;}
         return observation(state==='done'?'completed':state==='denied'?'denied':'waiting',state==='ambiguous'?'reconcile':'action',1,Date.now()+60000,state==='ambiguous'?'receipt_pending':null);
       };
-      // A send the bot refused because Nocheh no longer serves its chat keeps that reason, so its card says so.
-      const refused=async(state:string)=>state==='denied'&&!servedDestination(this.access.policy(),row.destination,await currentChats())?'destination_not_served':undefined;
+      // A send the bot refused because Nocheh no longer serves its chat, or its member may no longer have it sent, keeps that
+      // reason, so its card says so.
+      const refused=async(state:string)=>{
+        if(state!=='denied')return undefined;
+        const directory=await currentChats();
+        return !servedDestination(this.access.policy(),row.destination,directory)?'destination_not_served':!await this.askerCurrent(row,directory)?'member_changed':undefined;
+      };
       const durable=await this.derived.checkpoint('telegram-action-result:'+id+':done')??await this.derived.checkpoint('telegram-action-result:'+id+':denied');
       if(durable) {
         const state=JSON.parse(durable.content.toString()).state;
@@ -487,8 +521,15 @@ export class TelegramActionRepository {
         }
         // A chat Nocheh stopped serving after the approval, or one the directory no longer knows, gets nothing: the send is
         // closed with its reason instead of waiting for a chat that never comes back (ADR-0254).
-        if(!servedDestination(this.access.policy(),row.destination,await currentChats())) {
+        const directory=await currentChats();
+        if(!servedDestination(this.access.policy(),row.destination,directory)) {
           await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='destination_not_served',revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);
+          return observation('cancelled','action',0,Date.now(),'superseded');
+        }
+        // A send a member asked for, whom the owner paused, removed or switched off since, even one they approved
+        // themselves or the owner approved before that, is closed with its reason (step 3).
+        if(!await this.askerCurrent(row,directory)) {
+          await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='member_changed',revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);
           return observation('cancelled','action',0,Date.now(),'superseded');
         }
         await db.query('BEGIN');

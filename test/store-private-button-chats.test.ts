@@ -28,7 +28,7 @@ test('Answer privately works the same when the owner’s private chat and the pr
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-private-button-chats-')),base=Date.now(),token=digest('private-button-chats:'+base);
   // GP4 as the seeder leaves a group stored before step 2b; every other chat here is recorded by capture.
   // GP4 is on as the seeder left it; the owner adds Nocheh to NG1 and NG2 (ADR-0253).
-  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{},topic_memory:'group'};
+  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],topic_memory:'group'};
   const seeded=fixtureChats([GP4]);
   await seedChats(stores.control,{chats:seeded.chats.filter(row=>row.id===GP4),ids:seeded.ids.filter(row=>row.chat_id===GP4),owner_chat:null,accounts:[]});
   const policy=servedPolicy(()=>configured),ALICE=9,OWNER_CHAT=chatIdFor('telegram',OWNER);

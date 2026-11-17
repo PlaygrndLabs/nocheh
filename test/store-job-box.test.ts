@@ -17,6 +17,7 @@ import {notionJobFetch,notionReads} from '../src/stores/notion.js';
 import {storageServer} from '../src/stores/server.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('only the owner\'s approved private job gets the sealed box, its binding and live list follow the job, the guard and the switch, and its chat copy is the job\'s own checked chat, whole',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:600000},async()=>{
@@ -26,7 +27,9 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-box-')),key='job-box:'+Date.now(),group='-100888',other='-100999';
   const token=digest(key),boxToken='synthetic-box-token-'+'b'.repeat(24),owner:Reader={admin:true,scope:null};
   const previousBox=process.env.NOCHEH_BOX_TOKEN;process.env.NOCHEH_BOX_TOKEN=boxToken;
-  const policy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const};
+  const policy={enabled:true,owner_id:'123',group_ids:[group,other],topic_memory:'group' as const};
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123',groups:[other]});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -161,14 +164,14 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     await assert.rejects(s.jobs.saveSettings(owner,{...before,box_tools:false,revision:before.revision-1}),{code:'configuration_conflict'});
     const off=await switchBox(false);
     assert.equal(off.box_tools,false);assert.equal(off.revision,before.revision+1);
-    await assert.rejects(s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,revision:before.revision}),{code:'configuration_conflict'},
+    await assert.rejects(s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,revision:before.revision}),{code:'configuration_conflict'},
       'a limits edit from before the switch changed does not save over it');
     await assert.rejects(ask('Switched off',true),{code:'job_box_not_allowed'},'never dropped without a word');
     const limits=await s.jobs.settings();
-    assert.equal((await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:3,revision:limits.revision})).box_tools,false,'the limits leave the switch');
+    assert.equal((await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,revision:limits.revision})).box_tools,false,'the limits leave the switch');
     // The dashboard saves the switch with the limits: one save, one revision.
-    const both=await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:4,box_tools:true,revision:limits.revision+1});
-    assert.deepEqual([both.box_tools,both.member_daily_jobs,both.revision],[true,4,limits.revision+2]);
+    const both=await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,box_tools:true,revision:limits.revision+1});
+    assert.deepEqual([both.box_tools,both.revision],[true,limits.revision+2]);
 
     // The box job's run: its context, run text and binding carry the box; a plain job's do not.
     const a=await start(boxed,true);
@@ -372,6 +375,7 @@ test('only the owner\'s approved private job gets the sealed box, its binding an
     assert.deepEqual((await stores.control.query('SELECT state,error_code FROM background_jobs WHERE id=$1',[fourth.id])).rows[0],{state:'failed',error_code:'job_box_unavailable'});
     assert.deepEqual(await live(),[]);
   } finally {
+    people();
     if(previousBox===undefined)delete process.env.NOCHEH_BOX_TOKEN;else process.env.NOCHEH_BOX_TOKEN=previousBox;
     broker.closeAllConnections();await new Promise<void>(resolve=>broker.close(()=>resolve()));
     archive.closeAllConnections();await new Promise<void>(resolve=>archive.close(()=>resolve()));

@@ -15,6 +15,7 @@ import {storageGuardService} from '../src/stores/guard-service.js';
 import {storageServer} from '../src/stores/server.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 // The job tool's own list of codes it may relay; the broker relays exactly these.
 test('the broker relays the job codes the job tool names, the GitHub copy\'s among them',()=>{
@@ -30,7 +31,9 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-repo-')),key='job-repo:'+Date.now(),group='-100777',other='-100778';
   const token=digest(key),boxToken='synthetic-box-token-'+'r'.repeat(24),owner:Reader={admin:true,scope:null};
   const previousBox=process.env.NOCHEH_BOX_TOKEN;process.env.NOCHEH_BOX_TOKEN=boxToken;
-  const policy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const};
+  const policy={enabled:true,owner_id:'123',group_ids:[group,other],topic_memory:'group' as const};
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123',groups:[other]});
   const cards:Record<string,any>[]=[];let checks=0;
   // A card being posted can run something first, as a Remove that lands while Telegram answers; a settle that reaches the
   // gateway before its card was sent is not shown, as the gateway answers edited:false without a sent receipt.
@@ -447,6 +450,7 @@ test('a box job pins a GitHub copy the owner made: start, card, runs and binding
     refuse=()=>null;
     await retire(refusing.id);
   } finally {
+    people();
     if(previousBox===undefined)delete process.env.NOCHEH_BOX_TOKEN;else process.env.NOCHEH_BOX_TOKEN=previousBox;
     broker.closeAllConnections();await new Promise<void>(resolve=>broker.close(()=>resolve()));
     archive.closeAllConnections();await new Promise<void>(resolve=>archive.close(()=>resolve()));
