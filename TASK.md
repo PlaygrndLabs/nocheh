@@ -82,8 +82,21 @@ members live in the control store and are managed on the Members page.
   (976, 4 skipped, with the 2 environment errors that also occur on main) and the repository's
   Python tests (126, 2 skipped); the dashboard build, type and format checks and its tests (63 of
   63); the browser tests (62: 59 pass, and the 3 that also fail on main).
+- Merged main 7ae9ba1 (memory source labels, ADR-0257; Honcho workspace retries, which took
+  ADR-0259, so this step's ADR is [0260](docs/adr/0260-members-in-groups.md)). The owner's notes
+  review admits the owner and the members who talk there, reactions included, and its people
+  names read the member directory; refusals go out under the `refusal` send class
+  ([policy](test/assistant.test.ts), [reviews](test/store-native-review.test.ts),
+  [labels](test/source-labels.test.ts), [bot](services/telegram/test_approval_cards.py)).
+  Checks after the merge (2026-11-17): the build; node unit tests (734: 483 pass, 247 skipped,
+  and only the 4 workflow tests that also fail on main fail); all 105 store test files (293 pass,
+  0 fail); Python Telegram (152), Hermes (1012, 4 skipped, with the 2 environment errors that
+  also occur on main) and the repository's Python tests (143, 2 skipped); the dashboard build,
+  format check and its tests (66 of 66); the browser tests (62: 59 pass, and the 3 that also
+  fail on main).
   Pending:
-  - The whole full tester on images. It has not run on this step.
+  - The whole full tester on images. It has not run on this step, nor main's new memory
+    scenarios with members.
   - The add card's own project moving no epoch has no tester scenario; a store test covers it.
   - The privacy scan before a push.
   - Live acceptance on the owner's install after merge.

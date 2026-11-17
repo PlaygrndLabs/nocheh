@@ -327,7 +327,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             data=lambda choice:'n'+choice+'b'*56
             await gateway.send_approval({'kind':'card','id':'b'*64,'chat_id':'123','text':'Approve?','buttons':[['Approve',data('a')],['Reject',data('d')]],'send_class':'reply'})
             await gateway.send_approval({'kind':'settle','id':'b'*64,'chat_id':'123','text':'Approved'})
-            await gateway.send_refusal({'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','reply':'Sorry.','send_class':'reply'})
+            await gateway.send_refusal({'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','reply':'Sorry.','once':'not_allowed','send_class':'reply'})
             await gateway.send_notice({'id':'c'*64,'chat_id':'123','text':'Reminder','send_class':'reminder'})
             # A class the notice route does not send falls back to a notice, and the notice still goes.
             self.assertEqual(await gateway.send_notice({'id':'d'*64,'chat_id':'123','text':'Problem','send_class':'reply'}),{'state':'done'})
