@@ -240,7 +240,11 @@ becomes your private memory"). One pull request of several commits
   holds nothing of it: another bot's message, or one Nocheh never got, by its author as the
   reply shows it, and one in another chat or topic stays only when the archive holds it and its
   sender is allowed there; a quote inside a pinned message is judged the same way, and cut
-  when the archive never got the pinned message, which Telegram sends without its reply. A pin
+  when the archive never got the pinned message, which Telegram sends without its reply. So is a
+  quote inside a message another embeds (a poll or a checklist a service message shows), traced
+  through that message as archived in the same chat: one quoting Nocheh's words is cut from
+  everything learned, and so is one the archive can't trace, counted as a quote that could not
+  be traced (`quote_not_traced`), whoever it quoted. A pin
   of Nocheh's own message is never counted as kept out: one it
   learns stays in the pin, and a card, notice or reminder is taken out of it, so a pin of a card
   with nothing else to review is not reviewed at all. Memory › Assistant
@@ -261,9 +265,12 @@ becomes your private memory"). One pull request of several commits
   never the sender's own typing: Telegram names no one per task, and the owner can stop sharing
   one after others added tasks; only in the owner's private chat with Nocheh, where no one else
   can add tasks, does the owner's own stay the owner's. A poll someone else added an option to, a
-  deleted option, a message embedding someone else's and a Desktop export's checklist or poll
+  deleted option (except one from the owner's own poll in the owner's private chat), a message
+  embedding someone else's or one quoting a message, and a Desktop export's checklist or poll
   are read the same way. Each is labelled as a pin or quote of someone else's message, or as a
-  message holding someone else's words (no pin claimed), and still learned. A
+  message holding someone else's words (no pin claimed), and the owner's pin of such a message
+  of their own as a message holding someone else's words that the owner pinned, and still
+  learned. A
   rule is judged by the messages code recorded it was learned from, never by what the model
   cited, and rules resting on others' words label the note as theirs; only a review
   holding someone else's words reads them, as a review of Nocheh's own learned messages, alone or

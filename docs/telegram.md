@@ -251,17 +251,26 @@ message reports on, a giveaway's or a suggested post's message, the poll an
 option was added to, or one in a field Telegram adds later) is kept and
 labelled: Nocheh tells such a message by its shape, never by a field's name,
 cuts only its own words from it, and in the owner's notes review cuts one from
-someone not allowed there, counted as kept out. A poll option someone added is
-judged by who added it there the same way, one added in a chat's name never
-let in, and a deleted option's text is cut there; interpretations and
-long-term memory keep them, labelled. Telegram names no one per checklist task,
+someone not allowed there, counted as kept out. Telegram sends such a message
+with its quote but without its reply, so a quote inside one is traced through
+that message as Nocheh holds it in the same chat, as a pinned message's quote
+is: one quoting Nocheh's words is cut from everything learned, and so is one
+Nocheh can't trace (the message never archived, or archived answering
+nothing), counted as a quote that could not be traced, whoever it quoted. A
+poll option someone added is judged by who added it there the same way, one
+added in a chat's name never let in, and a deleted option's text is cut there,
+except in the owner's private chat, where an option the owner deleted from
+their own poll stays the owner's own; interpretations and long-term memory
+keep them, labelled. Telegram names no one per checklist task,
 and the owner can stop sharing a checklist after others added tasks, so a
 checklist others can add tasks to, and any checklist edited, pinned, quoted or
 forwarded, is labelled as someone else's words, never as the owner's own; in
 the owner's private chat with Nocheh no one else can add tasks, so the owner's
 own checklist there stays the owner's. A poll someone else added an option to,
-a deleted option and a message carrying someone else's are labelled the same
-way. All of it is still learned
+a deleted option and a message carrying someone else's, or one with a quote,
+are labelled the same way, and the owner's pin of such a message of their own
+as a message holding someone else's words that the owner pinned. All of it is
+still learned
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
 ## Mini app

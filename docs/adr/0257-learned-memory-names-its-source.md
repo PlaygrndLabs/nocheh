@@ -147,21 +147,39 @@ a recalled note names its source beside its chat).
   the message holding it someone else's words (section 2), whoever sent it.
   Only Nocheh's own words in it are cut, from everything learned, as from a pin:
   a message of Nocheh's own account, told by equality with `events.bot_id`, and
-  a quote of one (`nochehHeld`). Interpretations and Honcho read the rest,
-  labelled. The owner's notes review judges each one by its author as it judges
-  a message in that chat (`notesSender`), and a post in a chat's name is never
-  allowed: one from someone not allowed there is cut out of the message holding
-  it, the rest of that message stays, and the message counts once as
-  `sender_not_allowed`. A message Telegram no longer shows (date 0) carries
-  nothing and stays. A poll option someone added is judged the same way, by
-  `added_by_user`; one added in a chat's name (`added_by_chat`) is never
-  allowed, and the text of an option deleted from a poll, which names no one,
-  is always cut there. The review's store (`heldSenders`) returns the places it
-  lets in, and the learning context cuts every other place it finds
-  (`heldBy`, `cutHeld`), so a place the two read differently fails closed. A
-  quote is judged by what the message it is from holds too, as the reply shows
-  it now and as the archive holds it: a poll gets options added later without
-  an edit of its message.
+  a quote of one as its reply shows it (`nochehHeld`). Telegram leaves the reply
+  out of an embedded message but keeps its quote, so a quote inside one with no
+  reply to tell it by (`quotesToTrace`) is traced as a pinned message's quote
+  is, through that message's own archived event: the same chat's message by the
+  id Telegram gives it, looked up only when Telegram names the same chat for
+  both, told by equality (`embeddedSource`, `NoteSourceRepository.embeddedTo`).
+  It is cut from everything learned when a revision of that message answers
+  Nocheh's words, and also when the archive does not hold that message or holds
+  it answering nothing, since then nothing tells whose words the quote repeats
+  (it fails closed). That second cut is counted as `quote_not_traced`, in the
+  review's `left_out` and its records line (`quotes_not_traced`), and named
+  among the learning context's limitations. Interpretations and Honcho read the
+  rest, labelled. The owner's notes review judges each one by its author as it
+  judges a message in that chat (`notesSender`), and a post in a chat's name is
+  never allowed: one from someone not allowed there is cut out of the message
+  holding it, the rest of that message stays, and the message counts once as
+  `sender_not_allowed`. A traced quote inside one is judged there as a pinned
+  message's quote is, each archived revision of its message asked as a message
+  quoting is (`quotedSender`), and one refused is cut and counted the same way.
+  A message Telegram no longer shows (an `InaccessibleMessage`: date 0 and
+  nothing but its chat, id and date, `inaccessible`) carries nothing and stays;
+  one with date 0 and anything else, a shape Telegram does not send, is judged
+  by its author as any message is. A poll option someone added is judged the
+  same way, by `added_by_user`; one added in a chat's name (`added_by_chat`) is
+  never allowed, and the text of an option deleted from a poll, which names no
+  one, is cut there, except in the owner's own private chat, where the text of
+  an option deleted from the owner's own poll that is not a forward is the
+  owner's own (`ownDeletedOption`), since no one else can add one there. The
+  review's store (`heldSenders`) returns the places it lets in, and the
+  learning context cuts every other place it finds (`heldBy`, `cutHeld`), so a
+  place the two read differently fails closed. A quote is judged by what the
+  message it is from holds too, as the reply shows it now and as the archive
+  holds it: a poll gets options added later without an edit of its message.
 - Memory › Assistant notes says how many messages were kept out this generation
   (`kept_out` on the reviews list). Long-term memory and learning still take
   such a message, so in System › Background work its Memory notes step shows as
@@ -213,10 +231,16 @@ a recalled note names its source beside its chat).
   someone else, in a chat's name (`added_by_chat`) or by another account
   (`added_by_user`, told by equality) (`pollByOthers`), and so is the service
   message for an option deleted from a poll (`poll_option_deleted`), whose
-  adder Telegram does not name, and a message that embeds one that is not its
-  sender's own typed message (`othersIn`, read for the embedded message as for
-  the one a pin carries). The `held` fact marks a message that itself holds
-  such words, as against a pin of them, so its labels claim no pin. A Telegram
+  adder Telegram does not name, except the owner's own poll that is not a
+  forward in the owner's private chat (`deletedOwn`), and a message that embeds
+  one that is not its sender's own typed message, or one that quotes a message:
+  Telegram keeps the quote of an embedded message but not the reply, so such a
+  quote is never told as the sender's own (`othersIn`, read for the embedded
+  message as for the one a pin carries). The `held` fact marks a message that
+  itself holds such words, as against a pin of them, so its labels claim no
+  pin; `pinned_held` marks a pin of the sender's own such message, so its labels
+  say the sender pinned a message holding others' words, never that someone
+  else wrote it. A Telegram
   Desktop export names no one per task or option, so its checklist
   (`todo_list`) or poll is read the same way, whoever the archive proved sent
   it. The text of all of these is still learned.
@@ -253,7 +277,7 @@ a recalled note names its source beside its chat).
   another person's.
 - The review fragment's first line stays byte for byte. A second line, Nocheh's
   records, is one JSON object in fixed words with no names, listing each
-  message's full id under its class's phrase, at most 3,600 characters. A fixed
+  message's full id under its class's phrase, at most 3,700 characters. A fixed
   third line opens the evidence. The evidence slice is a fixed 7,500 characters,
   so a fragment stays within 11,900 and a changed records line never moves a
   cut.
@@ -312,9 +336,11 @@ a recalled note names its source beside its chat).
   Settings › Assistant), with {who} from the reminder lines and {place} from the
   approval texts' chat words, one set as in
   [ADR-0255](0255-reminders-say-who-set-them.md). Its lines `quote_nocheh`,
-  `pinned`, `pinned_nocheh` and `rules_others` name a quote of Nocheh's own
-  message, someone else's message pinned, Nocheh's own message pinned, and rules
-  learned from other people's messages, forwards or files. Trust is keyed on
+  `pinned`, `held`, `pinned_held`, `pinned_nocheh` and `rules_others` name a
+  quote of Nocheh's own message, someone else's message pinned, a message
+  holding someone else's words, the sender's own such message pinned, Nocheh's
+  own message pinned, and rules learned from other people's messages, forwards
+  or files. Trust is keyed on
   `from`, never on words.
 - **What the model sees.** In evidence mode each native notes block reaches the
   model as `{target, title, usage, about, notes:[{from, label, content}]}`: the
@@ -372,7 +398,10 @@ a recalled note names its source beside its chat).
   poll someone else added options to, a message embedding someone else's) is
   kept as the owner's pin of someone else's message is, with its own fixed
   pointer and `source` (`held`), which claim no pin; a member's stays on the
-  member with that `source`. Nocheh's reply about a forward goes to the
+  member with that `source`. The owner's pin of such a message of their own is
+  kept the same way, with its own pointer and `source` (`pinned_held`), which
+  say the owner pinned a message holding others' words, never that someone
+  else wrote it. Nocheh's reply about a forward goes to the
   forwards session.
 - In a group, a member's message, forward or pin stays on the member's peer,
   except a pin of Nocheh's own message, which leaves only the pointer. The
@@ -503,6 +532,19 @@ a recalled note names its source beside its chat).
     quote inside one the archive never got can't be traced and is cut too. The
     message stays, and interpretations and long-term memory keep the quote,
     labelled as someone else's.
+  - A quote inside a message another message embeds (a poll an option was
+    added to or deleted from, the checklist a "tasks done" message reports on),
+    which Telegram shows without its reply, is no longer the owner's own words:
+    the message holding it is labelled as holding someone else's words. It is
+    traced through the embedded message as the archive holds it. One quoting
+    Nocheh's words is cut from everything learned, as a quote of Nocheh's is.
+    One the archive can't trace, because Nocheh never got that message (sent
+    before Nocheh was there, or unseen in privacy mode) or holds it answering
+    nothing, is cut from everything learned too, even when it quoted the
+    owner's or an allowed person's words, and counted as a quote that could not
+    be traced; the rest of the message stays. One traced to someone else's
+    message stays for interpretations and long-term memory, and in the owner's
+    notes review only when whoever wrote the message it quotes is allowed there.
   - The owner's quote of their own message in another chat or topic, and a
     Telegram Desktop export's forward with no name for its sender (a deleted
     account's, or one marked only by `forwarded_from_id` or `saved_from`), are
@@ -523,7 +565,13 @@ a recalled note names its source beside its chat).
     still learned. In the owner's notes review the carried message, or a poll
     option, from someone not allowed there is cut out of it, and so is the text
     of an option deleted from a poll, the message counted as kept out;
-    interpretations and long-term memory keep them.
+    interpretations and long-term memory keep them. In the owner's private
+    chat the owner's deletion of an option from their own poll stays the
+    owner's own words, its text kept. The owner's pin of their own poll someone
+    else added an option to, or of their own message holding someone else's
+    words, reads on the Notes page "a message holding someone else's words,
+    such as a shared checklist or poll, that you pinned", never as someone
+    else's message.
   - The owner's checklist others can add tasks to, every edit, pin or quote of
     the owner's own checklist, and the owner's forward of it, are no longer the
     owner's own typing in a group: Telegram names no one per task and the owner
@@ -557,7 +605,7 @@ a recalled note names its source beside its chat).
     note is not the owner's own words either.
   - Small costs: one more parallel long-term memory read per owner turn
     (prefetched, with one guard check when it changes); one more recall ask; two
-    records for an own message with a file; about 3,600 more characters per
+    records for an own message with a file; about 3,700 more characters per
     review fragment, with the evidence slice 7,500 characters instead of 8,000;
     about 2,000 to 4,000 characters of labels per model call (cached); one
     label lookup per turn; two more indexes on long-term memory receipts; and a
@@ -644,7 +692,15 @@ a recalled note names its source beside its chat).
     message carrying it that someone allowed sent), labelled as someone else's
     words, never the owner's; their own service message saying they added it
     (`checklist_tasks_added`) is kept out as theirs. A message Telegram no
-    longer shows inside another (date 0) carries nothing to judge and stays.
+    longer shows inside another (date 0 and nothing but its chat, id and date)
+    carries nothing to judge and stays.
+  - A quote inside an embedded message whose message the archive never got, or
+    holds answering nothing, is cut from everything learned, whoever it quoted,
+    since nothing tells whose words it repeats; it is counted as
+    `quote_not_traced`. A quote inside an embedded message that answers one in
+    another chat (`external_reply`) is judged by that message alone and, in the
+    owner's notes review, is cut and counted as `sender_not_allowed`, as a
+    quote of a message in another chat is.
   - A poll option Telegram shows with no adder is read as the poll's own, its
     sender's, since Telegram names who added every option added after the poll
     was sent; Nocheh can't tell otherwise.

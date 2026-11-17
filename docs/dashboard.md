@@ -202,7 +202,10 @@ mix; a review of only your own and Nocheh's messages leaves such rules out. A
 pin counts as the words of the message it pinned, and a message you sent that
 holds someone else's words, such as a shared checklist, a poll someone else
 added an option to or a service message carrying another's message, reads "a
-message you sent ... holding someone else's words" (amber). Your quote or pin of
+message you sent ... holding someone else's words" (amber), and your pin of
+such a message of your own reads "a message holding someone else's words, such
+as a shared checklist or poll, that you pinned" (amber), never someone else's
+message. Your quote or pin of
 a message Nocheh learned as its own counts as Nocheh's (blue). Nocheh's code builds
 the label from its own record of who wrote the note, never from the note's
 text, and a note written during a turn is never labelled as yours. Notes
