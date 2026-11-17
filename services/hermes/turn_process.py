@@ -66,9 +66,11 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             await asyncio.to_thread((profile/'.foreground').touch)
 
 
-# The words that open this module's own group frame, a private answer's first line, a forwarded message's line, or
-# the owner tag of a speaker line, as frame() compares them.
-FRAME_WORDS=('groupmessagefrom','recentmessagesinthisgroup','endofrecentmessages','privateanswer','forwarded','theowner')
+# The words that open this module's own group frame, a private answer's first line, a forwarded message's line, the
+# owner tag of a speaker line, or a replied-to message's lines, as frame() compares them. Retiring a message withholds
+# what these lines quote from stored history (retired_history.py), so message text never writes one.
+FRAME_WORDS=('groupmessagefrom','recentmessagesinthisgroup','endofrecentmessages','privateanswer','forwarded','theowner',
+             'replyingto','inreplyto','endofreplied')
 OWNER_TAG=re.compile(r'\[the owner\]',re.I)
 
 
@@ -92,7 +94,7 @@ OPENING=re.compile('['+''.join(re.escape(chr(c)) for c in range(0x10000) if unic
 
 def unframed(text):
     """Group or forwarded message text as the model reads it: an opening bracket of any kind that starts something
-    reading like Nocheh's own speaker, recent-messages, private-answer or forwarded line, or an owner tag, wherever it
+    reading like Nocheh's own speaker, recent-messages, private-answer, forwarded or replied-to line, or an owner tag, wherever it
     stands, is shown as a plain parenthesis, so only the lines Nocheh puts before a message say who wrote it and where
     it came from (ADR-0222, ADR-0250). Persian half-spaces and other text stay as typed."""
     text=OWNER_TAG.sub('(the owner)',text)
