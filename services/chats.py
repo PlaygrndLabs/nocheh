@@ -176,11 +176,13 @@ class Served:
 
 class ServedList:
     """A process's served list: read on first use, again when it is older than the caller allows, and again (at most once
-    a second) while a pass carries a newer guard epoch than the list was read at, since every served change moves the
-    epoch. A chat or topic the app recorded after the list was read (a new forum topic, a group's new Telegram id) moves
-    no epoch: a caller that needs one names it with `holds`, and a list that does not hold it is read again (at most once
-    a second) before the caller decides. A read that fails holds nothing, so nothing is served until a read succeeds; it
-    is tried again at most once a second."""
+    a second) while a pass carries a newer guard epoch than the list was read at. The owner switching a group on or off
+    moves the epoch; Nocheh added to a group, removed from one or leaving one moves none (ADR-0253), so a caller bounds
+    how stale a list it accepts with `max_age`. A chat or topic the app recorded after the list was read (a new forum
+    topic, a group's new Telegram id) moves no epoch either: a caller that needs one names it with `holds`, and a list
+    that does not hold it is read again (at most once a second) before the caller decides. The list names no people:
+    who may talk in a group is the app's member directory (step 3). A read that fails holds nothing, so nothing is served
+    until a read succeeds; it is tried again at most once a second."""
 
     def __init__(self, url=None, token=None, opener=None, clock=time.monotonic):
         self._url, self._token, self._open, self._clock = url, token, opener or urllib.request.urlopen, clock

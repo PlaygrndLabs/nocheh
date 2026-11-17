@@ -34,6 +34,9 @@ HEX = re.compile(r'[a-f0-9]{64}')
 CHAT = re.compile(r'-?[1-9]\d{0,18}')
 MESSAGE = re.compile(r'[1-9]\d{0,15}')
 ERROR_NAME = re.compile(r'[A-Za-z_]{1,64}')
+# The kinds of a group's fixed reply, each sent at most once a UTC day per person and group: not allowed there, or over the
+# member daily message cap.
+REFUSAL_KINDS = ('not_allowed', 'daily_limit')
 
 
 def topic_of(value):
@@ -514,12 +517,16 @@ class TelegramService:
         return self.call(self.send_refusal(body))
 
     async def send_refusal(self, body):
-        """The owner's fixed reply to someone not allowed in an allowed group who
-        addressed Nocheh, or to anyone but the owner who writes to it privately,
-        there at most once a UTC day per person. No model runs and nothing else
-        about the chat is sent. Nocheh's core has already decided the message addressed the bot."""
+        """The owner's fixed reply to someone who may not talk to Nocheh in a served group and
+        addressed it, at most once a UTC day per person, group and kind (`once`: not allowed
+        there, or over the member daily message cap), or to anyone but the owner who writes
+        to it privately, at most once a UTC day per person. No model runs and nothing else
+        about the chat is sent. Nocheh's core has already decided the message addressed the
+        bot and that the sender may not talk there: who is a member is the core's alone (step 3)."""
         chat,user,message,topic=(str(body.get(key) or '') for key in ('chat_id','user_id','message_id','topic'))
         personal=body.get('private') is True
+        once=body.get('once')
+        if (once is not None) if personal else once not in REFUSAL_KINDS:raise ValueError('invalid_refusal')
         # A served group where it is in Telegram now, by the app's served list (ADR-0252).
         served=await asyncio.to_thread(self.policy.current,None,5.0,None if personal else lambda served:served.resolve(chat) is not None)
         group=None if personal else served.group(served.resolve(chat))
@@ -529,10 +536,11 @@ class TelegramService:
         reply=body.get('reply')
         if not isinstance(reply,str) or not reply.strip() or len(reply)>1000:raise ValueError('invalid_refusal')
         if user==served.owner_user():return {'state':'skipped'}
-        if not personal and self.policy.access(served,group,user):return {'state':'skipped'}
         if not self.connected():return {'state':'not_started','error_code':'telegram_not_connected'}
-        # One private reply a day: a stranger who keeps writing can't make the bot keep answering.
-        name='refusal-private-'+user+'-'+datetime.now(timezone.utc).strftime('%Y%m%d') if personal else 'refusal-'+body['event_id']
+        # One reply a day: someone who keeps writing can't make the bot keep answering. In a group, one for each kind, in
+        # the group whichever topic they write in.
+        day=datetime.now(timezone.utc).strftime('%Y%m%d')
+        name='refusal-private-'+user+'-'+day if personal else 'refusal-'+once+'-'+chat+'-'+user+'-'+day
         async with self.action_lock:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())

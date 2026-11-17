@@ -25,6 +25,13 @@ CHAT_IDS = [{'app': 'telegram', 'external_id': '-1001', 'chat_id': '-1001', 'sta
             {'app': 'telegram', 'external_id': '-1002', 'chat_id': '-1002', 'state': 'current', 'reason': None},
             {'app': 'telegram', 'external_id': '123', 'chat_id': '123', 'state': 'current', 'reason': None},
             {'app': 'telegram', 'external_id': '-1003', 'chat_id': 'e' * 64, 'state': 'current', 'reason': None}]
+# A member (step 3) with one account, a switch on in one group and off in another, and the daily message cap.
+MEMBER = 'c' * 64
+MEMBERS = {'members': [{'id': MEMBER, 'state': 'active', 'group_talk': True, 'group_jobs': True, 'group_post_other': False,
+                        'group_tools': True, 'tasks': 'read'}],
+           'member_accounts': [{'member_id': MEMBER, 'app': 'telegram', 'external_id': '701'}],
+           'member_chats': [{'member_id': MEMBER, 'chat_id': '-1001', 'enabled': True}, {'member_id': MEMBER, 'chat_id': 'e' * 64, 'enabled': False}],
+           'daily_messages': [{'daily_messages': 200}]}
 
 
 class ResetConfigurationTests(unittest.TestCase):
@@ -37,6 +44,7 @@ class ResetConfigurationTests(unittest.TestCase):
                            guard_mode=[{'mode': 'on'}])
         self.values['projects'] = [{'id': 'a' * 64, 'name': 'Saved project', 'description': 'Private configuration', 'state': 'active'}]
         self.values['chats'] = copy.deepcopy(CHATS); self.values['chat_ids'] = copy.deepcopy(CHAT_IDS)
+        self.values.update(copy.deepcopy(MEMBERS))
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()), 'executable': False, 'content_copied': False,
             'blockers': [], 'containers': [], 'volumes': [], 'installation': {'root': str(self.state.parent), 'state': str(self.state),
             'state_anchor': reset_inventory.entry(self.state, 'retain_root', 'fixture'), 'memory_state': str(self.state / 'honcho'),
@@ -82,8 +90,7 @@ class ResetConfigurationTests(unittest.TestCase):
         result = configuration.original_only(source, values, preferences, reset_id)
         self.assertEqual(result['layout'], 'original-only-v1')
         converted = result['configuration']
-        self.assertEqual(converted['runtime_configuration'][0]['document'],
-                         {'enabled': True, 'owner_id': '42', 'group_access': {}})
+        self.assertEqual(converted['runtime_configuration'][0]['document'], {'enabled': True, 'owner_id': '42'})
         self.assertEqual(converted['guard_mode'], [{'mode': 'off'}])
         self.assertEqual(converted['runtime_profiles'], [{'id': custom, 'name': 'research', 'owner_id': '42'}])
         rules = {row['destination']: row for row in converted['sharing_rules']}
@@ -101,12 +108,14 @@ class ResetConfigurationTests(unittest.TestCase):
                          [('-10', 'group', 'active'), ('-20', 'group', 'active'), ('-30', 'group', 'off'), ('-40', 'group', 'off'),
                           ('-50', 'group', 'off'), ('42', 'private', 'active')])
         self.assertEqual({row['external_id']: row['chat_id'] for row in converted['chat_ids']}, {row['id']: row['id'] for row in converted['chats']})
-        self.assertEqual(result['format'], 'nocheh-reset-configuration-v2')
+        self.assertEqual(result['format'], 'nocheh-reset-configuration-v3')
         self.assertEqual(configuration.original_only(source, values, preferences, reset_id), result)
+        # The legacy setup had no members, and a list of who may talk in a group left in its .env is not carried: the
+        # owner adds members after the reset (step 3).
+        self.assertEqual({name: converted[name] for name in MEMBERS},
+                         {'members': [], 'member_accounts': [], 'member_chats': [], 'daily_messages': [{'daily_messages': 200}]})
         values['TELEGRAM_GROUP_ACCESS'] = '{"-10":{"granted":["77"],"denied":["88"]}}'
-        preserved = configuration.original_only(source, values, preferences, reset_id)
-        self.assertEqual(preserved['configuration']['runtime_configuration'][0]['document']['group_access'],
-                         {'-10': {'granted': ['77'], 'denied': ['88']}})
+        self.assertEqual(configuration.original_only(source, values, preferences, reset_id), result)
 
     def test_legacy_conversion_rejects_unrepresentable_or_mismatched_setup(self):
         base = {'format': configuration.FORMAT, 'layout': 'legacy', 'configuration': {
@@ -184,26 +193,68 @@ class ResetConfigurationTests(unittest.TestCase):
                       "CASE WHEN t.id IS NOT NULL THEN 'inherit' ELSE a.mode END AS mode "
                       "FROM project_assignments a LEFT JOIN chats t ON t.id=a.space_id AND t.kind='topic'", sql)
 
-    def test_a_version_1_snapshot_still_validates_by_its_old_values(self):
-        # A snapshot taken before step 2b carries no chats; its values name chats in the old way, read once here.
-        values = {name: rows for name, rows in self.values.items() if name not in ('chats', 'chat_ids')}
-        values['project_assignments'] = [{'space_id': '-1001', 'project_id': 'a' * 64, 'mode': 'assigned'},
-                                         {'space_id': '-1001/topic/7', 'project_id': None, 'mode': 'inherit'}]
-        old = {'format': 'nocheh-reset-configuration-v1', 'layout': 'original-only-v1', 'configuration': values}
-        self.assertEqual(configuration.validate(copy.deepcopy(old)), old)
-        for space, mode, error in (('123', 'assigned', 'private_chat_requires_review'), ('-1001/topic/7', 'assigned', 'topic_follows_group')):
-            broken = copy.deepcopy(old); broken['configuration']['project_assignments'] = [{'space_id': space, 'project_id': 'a' * 64, 'mode': mode}]
-            with self.subTest(space=space), self.assertRaisesRegex(ValueError, error):
-                configuration.validate(broken)
+    def test_a_snapshot_an_older_version_took_is_refused(self):
+        # Version 3 is the only one (development mode): a v1 snapshot (no chats) or a v2 one (no members) stops the reset
+        # before anything is erased, as the stores refuse it.
+        current = {'format': configuration.FORMAT, 'layout': 'original-only-v1', 'configuration': copy.deepcopy(self.values)}
+        self.assertEqual(configuration.validate(copy.deepcopy(current)), current)
+        v2 = {name: rows for name, rows in self.values.items() if name not in MEMBERS}
+        v1 = {name: rows for name, rows in v2.items() if name not in ('chats', 'chat_ids')}
+        for format, values in (('nocheh-reset-configuration-v1', v1), ('nocheh-reset-configuration-v2', v2),
+                               ('nocheh-reset-configuration-v2', self.values)):
+            with self.subTest(format=format, tables=len(values)), self.assertRaisesRegex(ValueError, '^reset_configuration_invalid$'):
+                configuration.validate({'format': format, 'layout': 'original-only-v1', 'configuration': copy.deepcopy(values)})
         with self.assertRaisesRegex(ValueError, 'fields_invalid'):
-            configuration.validate({**old, 'configuration': {**values, 'chats': []}})
+            configuration.validate({**current, 'configuration': v2})
+        # A runtime document that still lists groups or who may talk in them is from before step 3.
+        for document in ({'enabled': True, 'owner_id': '123', 'group_access': {}}, {'enabled': True, 'owner_id': '123', 'group_ids': []},
+                         {'enabled': True}):
+            values = copy.deepcopy(self.values); values['runtime_configuration'] = [{'name': 'assistant', 'document': document}]
+            with self.subTest(document=document), self.assertRaisesRegex(ValueError, 'reset_runtime_configuration_requires_transfer'):
+                configuration.validate({**current, 'configuration': values})
+        values = copy.deepcopy(self.values); values['runtime_configuration'] = [{'name': 'assistant', 'document': {'enabled': True, 'owner_id': '123'}}]
+        configuration.validate({**current, 'configuration': values})
 
-    def test_the_snapshot_carries_each_chat_and_decides_kinds_from_its_rows(self):
-        # Version 2 carries the chats and their app ids (ADR-0252): a digest id is a group or topic by its row, and an id
-        # with no row counts as private, however it looks.
+    def test_the_snapshot_carries_the_members_and_never_a_name(self):
+        # Version 3 carries the members (step 3): their permissions, each linked account by its app id, their group
+        # switches and the daily message cap, read in one statement with the rest of the setup.
         query = Mock(return_value=json.dumps(self.values))
         result = configuration.snapshot(query, 'original-only-v1')
-        self.assertEqual(result['format'], 'nocheh-reset-configuration-v2')
+        self.assertEqual(result['format'], 'nocheh-reset-configuration-v3')
+        self.assertEqual({name: result['configuration'][name] for name in MEMBERS}, MEMBERS)
+        self.assertEqual(configuration.validate(copy.deepcopy(result)), result, 'what is frozen validates again unchanged')
+        sql = query.call_args.args[1]
+        self.assertIn('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks FROM members', sql)
+        self.assertIn('SELECT a.member_id,n.app,a.external_id FROM chat_accounts a JOIN chat_connections n ON n.id=a.connection_id '
+                      'WHERE a.member_id IS NOT NULL', sql)
+        self.assertIn('SELECT member_id,chat_id,enabled FROM member_chats', sql)
+        self.assertIn('SELECT daily_messages FROM member_directory_state WHERE singleton', sql)
+        for content in ('display_name', 'username', 'member_turns'):self.assertNotIn(content, sql)
+        for broken in ('private', 'topic', 'unknown_chat', 'stranger_switch', 'stranger_account', 'duplicate', 'no_cap', 'two_caps',
+                       'cap_low', 'cap_high', 'cap_text', 'enabled_text', 'name'):
+            values = copy.deepcopy(self.values)
+            if broken == 'private': values['member_chats'][0]['chat_id'] = '123'
+            if broken == 'topic': values['member_chats'][0]['chat_id'] = '-1001/topic/7'
+            if broken == 'unknown_chat': values['member_chats'][0]['chat_id'] = 'd' * 64
+            if broken == 'stranger_switch': values['member_chats'][0]['member_id'] = 'd' * 64
+            if broken == 'stranger_account': values['member_accounts'][0]['member_id'] = 'd' * 64
+            if broken == 'duplicate': values['members'].append(values['members'][0])
+            if broken == 'no_cap': values['daily_messages'] = []
+            if broken == 'two_caps': values['daily_messages'] *= 2
+            if broken == 'cap_low': values['daily_messages'] = [{'daily_messages': 0}]
+            if broken == 'cap_high': values['daily_messages'] = [{'daily_messages': 10001}]
+            if broken == 'cap_text': values['daily_messages'] = [{'daily_messages': '200'}]
+            if broken == 'enabled_text': values['member_chats'][0]['enabled'] = 'true'
+            if broken == 'name': values['member_accounts'][0]['display_name'] = 'Mira'
+            with self.subTest(broken=broken), self.assertRaisesRegex(ValueError, 'fields_invalid' if broken == 'name' else 'members_invalid'):
+                configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')
+
+    def test_the_snapshot_carries_each_chat_and_decides_kinds_from_its_rows(self):
+        # The snapshot carries the chats and their app ids (ADR-0252): a digest id is a group or topic by its row, and an
+        # id with no row counts as private, however it looks.
+        query = Mock(return_value=json.dumps(self.values))
+        result = configuration.snapshot(query, 'original-only-v1')
+        self.assertEqual(result['format'], 'nocheh-reset-configuration-v3')
         sql = query.call_args.args[1]
         self.assertIn("CASE WHEN c.title_source='owner' THEN c.title END AS title", sql, 'only names the owner gave travel')
         self.assertIn('FROM chat_ids i JOIN chat_connections n', sql)

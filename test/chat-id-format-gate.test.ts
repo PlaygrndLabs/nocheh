@@ -41,12 +41,11 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['src/stores/runtime-configuration.ts','adapter',1,'the policy document holds the raw Telegram owner id'],
   ['tools/cli/main.py','adapter',1,'configure-telegram owner id'],
   ['tools/operations/archive/telegram_directory.py','adapter',2,'Telegram group and user ids typed by the owner'],
-  ['tools/operations/installation/configuration.py','adapter',3,'installer checks of TELEGRAM_OWNER_ID and TELEGRAM_GROUP_ACCESS'],
+  ['tools/operations/installation/configuration.py','adapter',1,'installer check of TELEGRAM_OWNER_ID'],
   ['tools/operations/installation/mini_app.py','adapter',1,'the bot id in the bot token'],
-  ['tools/operations/security/group_access.py','adapter',1,'a Telegram user id typed by the owner'],
   ['services/hermes/preference_transfer.py','legacy',1,'a legacy-layout reset, or a preferences snapshot from before step 2b: its topic spaces read once'],
   ['src/honcho.ts','legacy',1,'legacy layout audience by sign'],
-  ['tools/acceptance/reset_configuration.py','legacy',1,'chat values of the legacy layout and of a version 1 reset snapshot, read once to convert them'],
+  ['tools/acceptance/reset_configuration.py','legacy',1,'chat values of the legacy layout, read once to convert them'],
   ['tools/operations/installation/store_recovery.py','unrelated',1,'a PostgreSQL sequence value'],
 ];
 /** Whole files that are the adapter: Telegram's formats live here. */
