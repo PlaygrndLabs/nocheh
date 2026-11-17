@@ -94,9 +94,9 @@ def directory(state, archive=None, bot_api=_bot_api, served=None):
         groups[('chat', identifier)] = {'id': identifier, 'external': external or None, 'name': _clean(observed.get('name')) or None, 'users': users}
     token = values['TELEGRAM_BOT_TOKEN']
     selected = served.groups()
-    # A name is the person's, not the group's: one Telegram gave in any group serves every other group in this request,
-    # and someone Telegram refused (a 4xx, such as for a person who was never in that group) is not asked about again.
-    names, refused = {}, set()
+    # A name is the person's, not the group's: one Telegram gave in any group serves every other group in this request.
+    # A refusal is the group's: someone Telegram refused in one group is still asked about in the next one they are in.
+    names = {}
     for served_group in selected[:20]:
         identifier = _id((served.address(served_group) or ('',))[0], GROUP)
         if not identifier:
@@ -127,17 +127,17 @@ def directory(state, archive=None, bot_api=_bot_api, served=None):
                 if user_id in names:
                     if known:
                         group['users'][user_id] = {**known, **names[user_id]}
-                elif user_id not in refused:
+                else:
                     wanted.append(user_id)
             for user_id in wanted[:40]:
                 try:
                     member = bot_api(token, 'getChatMember', chat_id=identifier, user_id=user_id)
                 except HTTPError as error:
                     error.close()
-                    if not 400 <= error.code < 500:
+                    # 429 is flood control on the bot, not an answer about the person: it ends the group's lookups.
+                    if error.code == 429 or not 400 <= error.code < 500:
                         raise
-                    # Telegram refused this one person; the others in the group are still asked.
-                    refused.add(user_id)
+                    # Telegram refused this one person here; the others in the group are still asked.
                     continue
                 person = _person(member.get('user')) if isinstance(member, dict) else None
                 if person and person['id'] == user_id:

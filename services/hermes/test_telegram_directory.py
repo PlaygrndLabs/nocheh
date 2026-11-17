@@ -70,11 +70,12 @@ class TelegramDirectoryTests(unittest.TestCase):
         self.assertEqual(asked, ['42', '900'], 'the owner and the unnamed member are asked; no named member is')
         self.assertEqual(people['900']['name'], 'Named 900')
 
-    def test_each_person_is_asked_once_and_a_refusal_ends_only_their_own_lookups(self):
+    def test_each_person_is_asked_once_and_a_refusal_ends_only_that_lookup(self):
         from io import BytesIO
         from urllib.error import HTTPError
 
-        # Two served groups list the same unnamed members: 91 is in the first; Telegram refuses 93, who was never there.
+        # Two served groups list the same unnamed members: Telegram refuses 93 in the first, which sorts first and which
+        # they were never in, and names them in the second, which they are in.
         served = Served.of('42', groups=['-10042', '-10043'])
         unnamed = lambda identifier: {'id': identifier, 'name': None, 'username': None, 'state': None, 'seen': False, 'member': True}
         observed = {'groups': [{'id': group, 'external': group, 'name': None, 'users': [unnamed('91'), unnamed('93'), unnamed('94')]}
@@ -85,19 +86,38 @@ class TelegramDirectoryTests(unittest.TestCase):
             if method == 'getChatAdministrators': return [{'user': {'id': 42, 'first_name': 'Owner'}}] if params['chat_id'] == '-10042' else []
             if method != 'getChatMember': return None
             asked.append((params['chat_id'], params['user_id']))
-            if params['user_id'] == '93':
+            if params == {'chat_id': '-10042', 'user_id': '93'}:
                 raise HTTPError('https://api.telegram.org/bot' + token + '/getChatMember', 400, 'Bad Request', {}, BytesIO(b'{}'))
             return {'user': {'id': int(params['user_id']), 'first_name': 'Named ' + params['user_id']}}
 
         result = directory.directory(self.state, observed, api, served)
-        # The name found in the first group serves the second; 93 is not asked again after Telegram refused them; the
-        # refusal does not stop 94's lookup; the owner, named by the first group's administrators, is never asked.
-        self.assertEqual(asked, [('-10042', '91'), ('-10042', '93'), ('-10042', '94')])
-        for group in result['groups']:
-            people = {person['id']: person for person in group['users']}
-            with self.subTest(group=group['id']):
-                self.assertEqual((people['91']['name'], people['93']['name'], people['94']['name']), ('Named 91', None, 'Named 94'))
+        # A name found in the first group serves the second, so 91 and 94 are asked once; the refusal does not stop 94's
+        # lookup, and 93 is still asked in the second group; the owner, named by the first group's administrators, is never asked.
+        self.assertEqual(asked, [('-10042', '91'), ('-10042', '93'), ('-10042', '94'), ('-10043', '93')])
+        groups = {group['id']: {person['id']: person for person in group['users']} for group in result['groups']}
+        self.assertEqual(groups['-10043']['93']['name'], 'Named 93')
+        for group, people in groups.items():
+            with self.subTest(group=group):
+                self.assertEqual((people['91']['name'], people['94']['name']), ('Named 91', 'Named 94'))
                 self.assertEqual((people['91']['member'], people['91']['seen']), (True, False), 'what storage knows stays')
+
+    def test_flood_control_ends_the_groups_lookups(self):
+        from io import BytesIO
+        from urllib.error import HTTPError
+
+        # 429 is Telegram's flood control on the bot, not an answer about the person: nobody else in the group is asked.
+        asked = []
+
+        def api(token, method, **params):
+            if method == 'getChat': return {'id': -10042, 'type': 'supergroup', 'title': 'Aurora group'}
+            if method != 'getChatMember': return None
+            asked.append(params['user_id'])
+            raise HTTPError('https://api.telegram.org/bot' + token + '/getChatMember', 429, 'Too Many Requests', {}, BytesIO(b'{}'))
+
+        result = directory.directory(self.state, self.observed, api, self.served)
+        self.assertEqual(asked, ['42'], 'the owner sorts first; the unnamed member 91 is not asked after the 429')
+        people = {person['id']: person for person in result['groups'][0]['users']}
+        self.assertEqual((result['groups'][0]['name'], people['91']['name'], people['91']['member']), ('Aurora group', None, True))
 
     def test_served_group_remains_visible_when_telegram_is_unavailable(self):
         def unavailable(*args, **kwargs):
