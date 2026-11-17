@@ -426,6 +426,32 @@ test('a fold never leaves a project naming no chat: once the card gave the new s
   }finally{await h.cleanup();await stores.close();}
 });
 
+test('an upgrade that neither folds nor stays apart still copies the members\' switches to the new chat, so no one switched off there talks again',fixture,async()=>{
+  const stores=await open(),policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
+  const h=harness(stores,()=>policy,'kept'),stage=await stageFor(stores,h.repository,()=>policy);
+  try {
+    const basic='-4'+String(h.base+1).slice(-9),next=h.group(1),old=chatIdFor('telegram',basic),fresh=chatIdFor('telegram',next);h.named.add(basic);
+    // The basic group is on from the owner's own add; one member is switched off there, another on (step 3).
+    await h.status(basic,h.update(1),Number(OWNER),'left','member','group');
+    const OFF=7851,ON=7852,off=memberIdFor(accountIdFor('telegram',String(OFF))),on=memberIdFor(accountIdFor('telegram',String(ON)));
+    await makeMember(stores,OFF);await makeMember(stores,ON);
+    await stores.control.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$3,false),($2,$3,true)',[off,on,old]);
+    // The new supergroup's own add comes first, and its card gives it its own project before the upgrade's messages are
+    // taken in: it may not fold, and the old group, on, does not stay apart either.
+    await h.status(next,h.update(2),Number(OWNER),'left','member');
+    await stage.settle([fresh]);
+    assert.ok((await stores.control.query('SELECT 1 FROM project_assignments WHERE space_id=$1',[fresh])).rowCount,'the card made the new chat\'s project');
+    const before=await memberRevision(stores);
+    await h.message(basic,h.update(3),{migrate_to_chat_id:Number(next)},'group');
+    await h.message(next,h.update(4),{migrate_from_chat_id:Number(basic)});
+    assert.deepEqual([(await row(stores,old)).state,(await row(stores,fresh)).state],['active','active'],'both chats stay');
+    const sorted=(rows:(string|boolean)[][])=>rows.sort((a,b)=>a[0]!<b[0]!?-1:1);
+    assert.deepEqual(await switches(stores,off,[old,fresh]),sorted([[old,false],[fresh,false]]),'the switch off follows the group');
+    assert.deepEqual(await switches(stores,on,[old,fresh]),sorted([[old,true],[fresh,true]]));
+    assert.equal(await memberRevision(stores),before+1,'the member directory reloads once; the second message copies nothing');
+  }finally{await h.cleanup();await stores.close();}
+});
+
 test('when the two stay apart, a new supergroup on only from the upgrade\'s echo takes the old group\'s Off, leave or could not leave, and a card that waits never goes; one its card said is on is never left',fixture,async()=>{
   const stores=await open(),ALICE=7841,policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'apart'),stage=await stageFor(stores,h.repository,()=>policy);
@@ -467,8 +493,8 @@ test('when the two stay apart, a new supergroup on only from the upgrade\'s echo
       const toOld=()=>h.message(basic,h.update(n*100+6),{migrate_to_chat_id:Number(next)},'group');
       const fromNew=()=>h.message(next,h.update(n*100+7),{migrate_from_chat_id:Number(basic)});
       if(first==='old'){await toOld();await fromNew();}else{await fromNew();await toOld();}
-      assert.deepEqual(await switches(stores,switched,[old,fresh]),[[old,false],...echo?[[fresh,false]]:[]].sort((a,b)=>a[0]!<b[0]!?-1:1),
-        label+': the switch is copied when the new chat takes the old one\'s state');
+      assert.deepEqual(await switches(stores,switched,[old,fresh]),[[old,false],[fresh,false]].sort((a,b)=>a[0]!<b[0]!?-1:1),
+        label+': the switch is copied whether or not the new chat takes the old one\'s state');
 
       // The two stay apart, and the project still names the new chat.
       assert.equal((await stores.control.query('SELECT chat_id FROM chat_ids WHERE external_id=$1',[next])).rows[0].chat_id,fresh,label);

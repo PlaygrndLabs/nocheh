@@ -68,8 +68,9 @@ earlier wording where the two differ.
    default in the groups they are in (the owner's design comment of
    2026-11-12). A member talks in a served group unless its switch for them is
    off. The "New here" badge only informs. Decisions made without a message from
-   that group still need Telegram's 'in'. The carry keeps today's exact reach,
-   and the add flow writes a row for every group it shows.
+   that group still need Telegram's 'in'. The carry keeps today's exact reach
+   in the groups Nocheh is in; a group it is added to again later is a new
+   group, on by default. The add flow writes a row for every group it shows.
 2. **No "Asked, not allowed" list.** There is no `not_allowed_people` table, no
    record at dispatch and no list on the page. Someone who writes in a group
    already shows among that group's people, because capture records every human
@@ -208,7 +209,8 @@ groups. Here each effect checks the member again just before it happens:
   and the card's `member_limit` line. A member needs `may(..., 'jobs')` where they
   ask, else 403 `job_not_permitted`. A running job asks `reaches(..., 'jobs')`, so
   a pause, a switch or permission turned off, or Telegram saying they left stops
-  it. Their own card's buttons work only while that holds. A job over the cost
+  it, also between the parts of its report. Their own card's buttons work only
+  while that holds. A job over the cost
   limit or with no price still needs the owner's card, and machines, the box and
   GitHub copies stay the owner's.
 - **Posts.** A post in the same group is part of talking. A member's post to
@@ -218,9 +220,12 @@ groups. Here each effect checks the member again just before it happens:
   shown them; otherwise the owner gets the card. The request keeps
   `asker_account`. Before the send runs, and in the bot's check before each
   message, the asker must still talk in the group they asked in, and for another
-  group still may post. Otherwise the send is cancelled as `member_changed`, and
-  its card says why (`reason_member_changed`). That also covers a send the
-  member confirmed, or the owner approved, before a pause.
+  group still may post. A post the member confirmed on their own card also needs
+  them to still reach the target group with that permission, as the card did; a
+  post the owner's card decided keeps the owner's word there. Otherwise the send
+  is cancelled as `member_changed`, and its card says why
+  (`reason_member_changed`). That also covers a send the member confirmed, or
+  the owner approved, before a pause.
 
 ## Web pages and outside tools
 
@@ -278,9 +283,10 @@ groups. Here each effect checks the member again just before it happens:
     a Telegram user ID with every group Nocheh is in shown and none ticked. Every
     group shown is sent, ticked or not.
   - Names come from `/v1/telegram/identities`. It now lists each member account
-    with a switch in a group (`member: true`), seen there or not, and the
-    management side asks Telegram for those names only (`getChatMember`). Nothing
-    at runtime asks Telegram who is a member.
+    switched on in a group Nocheh is in (`member: true`), seen there or not, and
+    the management side asks Telegram for those names only (`getChatMember`). A
+    switch that is off neither lists a group nor a person. Nothing at runtime
+    asks Telegram who is a member.
 - The group card in Chats becomes "Members here", read only:
   - You, always.
   - Each member, as "Can talk here", "Off here", "Paused" or "Talk switched off",
@@ -318,8 +324,10 @@ groups. Here each effect checks the member again just before it happens:
   - gets an account (`ensureAccount`) if Nocheh never saw them;
   - becomes a member with every permission on and tasks read and write;
   - keeps exact reach: a switched-on row for each group they were granted in, and
-    a switched-off row for every other group chat Nocheh has a row for (owner
-    decision 1).
+    a switched-off row for every other group chat Nocheh is in (not left, removed
+    or archived; owner decision 1). A group Nocheh is added to again later counts
+    as a new group, on by default. This keeps the table, and the reset snapshot
+    that carries it, to the groups that matter.
   - Telegram's rows are not asked, because the owner's list is the authority.
   - A database error stops the start, like any start step.
 - **Retired.** `TELEGRAM_GROUP_ACCESS` leaves the policy, Compose, `.env.example`,
@@ -339,8 +347,10 @@ groups. Here each effect checks the member again just before it happens:
 
 - When an upgrade's new chat folds into the old one, members' switches move to
   the old id before the new chat goes. When the two stay apart, they are copied
-  to the new id. A switch already there and off stays off, and both moves bump
-  the member revision. `ON DELETE CASCADE` is only a backstop.
+  to the new id, also when the new chat neither folds nor takes the old one's
+  state (it has its own project and the old chat is on). A switch already there
+  and off stays off, and a move or copy that writes a switch bumps the member
+  revision. `ON DELETE CASCADE` is only a backstop.
 - An add note's `member` flag (ADR-0253) means the adder's account is linked to a
   member.
 - The add card's own new project, holding only that group, runs its owner command

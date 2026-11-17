@@ -27,7 +27,7 @@ export function ownerAccount(policy:Pick<AssistantPolicy,'owner_id'>):string|nul
   try{return accountIdFor('telegram',policy.owner_id);}catch{return null;}
 }
 /** SQL: a group Nocheh is in (as setState refuses the others): not left, removed from or known only from history. */
-const joined=(c:string)=>`${c}.kind='group' AND ${c}.state NOT IN ('left','removed','archived')`;
+export const joined=(c:string)=>`${c}.kind='group' AND ${c}.state NOT IN ('left','removed','archived')`;
 
 /**
  * The rows the member directory is built from, read in one snapshot (REPEATABLE READ): members, the accounts linked to

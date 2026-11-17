@@ -31,7 +31,7 @@ members live in the control store and are managed on the Members page.
   [bot](services/telegram/test_approval_cards.py)). The owner's own group
   requests skip the tool card behind `let ownerGroupTools=true`.
 - The carry: at the first start, the lists the last start admitted become members with exactly
-  their reach, on rows for granted groups and off rows for every other group chat, once, with
+  their reach, on rows for granted groups and off rows for every other group chat Nocheh is in, once, with
   skips counted in the `member_carry` log line ([carry](test/store-member-carry.test.ts)).
   Reset snapshots are v3 only and carry the members
   ([reset](test/store-reset-setup.test.ts), [acceptance](test/store-reset-acceptance.test.ts),

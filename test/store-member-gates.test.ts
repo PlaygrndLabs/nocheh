@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
+import {ownerChat} from '../src/assistant-policy.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {installMembersForTest,memberDirectory,type MemberDirectory} from '../src/members.js';
 import {groupToolsLines,memberDailyLimitReply,notAllowedReply} from '../src/prompts.js';
@@ -14,7 +15,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {groupToolKind} from '../src/stores/controlled-actions.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {fixtureServices} from './fixture-brain.js';
-import {BOB,GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ID,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,NG_GROUP_IDS,OWNER,
+import {BOB,GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ACCOUNT,MEMBER_NG_ID,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,NG_GROUP_IDS,OWNER,
   fixtureChats,fixtureMemberDirectory,fixtureMembers,groupsPolicy,seedChats,seedMembers,type FixtureMembers} from './fixture-groups.js';
 
 /*
@@ -124,6 +125,26 @@ test('members are checked before every effect in their groups, the owner first, 
     const raced=await here('Paused while sending');atDelivery=()=>use(fixtureMemberDirectory({[MEMBER_GP_ID]:{state:'paused'}}));
     assert.equal((await actions.run(raced,authority)).state,'denied');assert.deepEqual(await closed(raced),['rejected','member_changed']);
     use(fixtureMemberDirectory());
+    // A post into another group the member approved on their own card goes out only while they still reach that group:
+    // switched off there, or Telegram saying they left, since they pressed Approve closes it, and so does a change while it
+    // is sent. A post the owner's card decided keeps the owner's word, though the member never reached that group.
+    let made=0;
+    const approved=async(principal:Reader,destination:string,card:string)=>{
+      const post=await actions.request(principal,{destination,text:'Approved post '+(++made)});assert.equal(post.state,'proposed');
+      const row=(await stores.control.query('UPDATE telegram_action_requests SET card_space=$2 WHERE id=$1 RETURNING fingerprint',[post.id,card])).rows[0];
+      assert.equal((await actions.decide(owner,{id:post.id,fingerprint:row.fingerprint,decision:'approve'})).state,'approved');return post.id;
+    };
+    for(const [label,changed] of [['switched off there',switchedOff(MEMBER_NG_ID,NG2)],['left there',leftIn(MEMBER_NG_ACCOUNT,NG2)]] as const) {
+      const id=await approved(ng,NG2,NG1),before=sends.length;use(changed);
+      assert.equal((await actions.run(id,authority)).state,'cancelled',label);assert.equal(sends.length,before,label);
+      assert.deepEqual(await closed(id),['cancelled','member_changed'],label);
+      use(fixtureMemberDirectory());
+    }
+    const crossed=await approved(ng,NG2,NG1);atDelivery=()=>use(switchedOff(MEMBER_NG_ID,NG2));
+    assert.equal((await actions.run(crossed,authority)).state,'denied');assert.deepEqual(await closed(crossed),['rejected','member_changed']);
+    use(fixtureMemberDirectory());
+    const owners=await approved(gp,GP2,ownerChat(policy)!);
+    assert.equal((await actions.run(owners,authority)).state,'completed');assert.equal(sends.at(-1)!.destination,GP2);
 
     // Web pages and outside tools. A member's web page read or outside tool call in a group runs with no card, under the
     // group's tools permission, and keeps who asked; a command still waits for the owner's card.
