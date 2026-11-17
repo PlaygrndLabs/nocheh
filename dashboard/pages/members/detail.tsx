@@ -27,7 +27,7 @@ const permissions: {key: MemberPermission; title: string; hint: string}[] = [
   {
     key: 'tools',
     title: 'Web pages and outside tools (no approval)',
-    hint: 'Opens web pages and uses connected tools without asking you. Commands and Notion still ask you, and each chat’s tool switches still apply.',
+    hint: 'Opens web pages and uses connected tools without asking you. Commands still ask you, Notion is never used in a group, and each chat’s tool switches still apply.',
   },
 ];
 

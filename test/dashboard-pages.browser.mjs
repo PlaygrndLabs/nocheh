@@ -2760,7 +2760,7 @@ test('a change whose answer was lost is applied when made again after a later ch
 
 test('the owner reads where group web pages and outside tools skip the card, and that members are chosen on Members', async () => {
   const groupTools =
-    'In a group, web pages and outside tools other than Notion run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands and Notion still wait.';
+    'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands still wait, and Notion is never used in a group.';
   const {page, problems} = await open('home');
   await page.getByText('Turn Nocheh on in a group and see who are members there.').waitFor();
   // The preview keeps no owner freedom setting, and the Inbox has no allowed action left here.
@@ -2779,15 +2779,48 @@ test('the owner reads where group web pages and outside tools skip the card, and
   await page
     .getByText('Except web pages and outside tools other than Notion asked for in a group', {exact: false})
     .waitFor();
-  // A group's Allowed actions with nothing allowed names the exception; the private chat has none.
+  // A group's Allowed actions with nothing allowed names the exceptions and what still waits; the private chat has none.
   await page.goto(origin + '/#chats?chat=-10073');
   const allowed = page.locator('section', {has: page.getByRole('heading', {name: 'Allowed actions'})});
-  await allowed
-    .getByText('Web pages and outside tools other than Notion run without a card when you ask here', {exact: false})
-    .waitFor();
+  const groupAllowed =
+    'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, and a message for this chat asked for here goes out without one. Commands still wait for your approval in the Inbox.';
+  await allowed.getByText(groupAllowed).waitFor();
+  assert.equal(await allowed.getByText('Anything else waits', {exact: false}).count(), 0);
+  const privateAllowed = 'Nothing without asking. Each action waits for your approval in the Inbox.';
   await page.goto(origin + '/#chats?chat=42');
-  await allowed
-    .getByText('Nothing without asking. Each action waits for your approval in the', {exact: false})
+  await allowed.getByText(privateAllowed).waitFor();
+  // A topic of the owner's private chat is no group: no member talks there, so nothing skips the card.
+  const ownerTopic = '42/topic/9';
+  await page.route(
+    url =>
+      url.pathname === '/api/nocheh/conversations' && !['q', 'kind', 'after'].some(name => url.searchParams.has(name)),
+    async route => {
+      const answer = await route.fetch();
+      const body = await answer.json();
+      const owner = body.items.find(item => item.space_id === '42');
+      const topic = {
+        ...owner,
+        space_id: ownerTopic,
+        name: 'Trip ideas',
+        kind: 'topic',
+        parent_space: '42',
+        parent_name: owner.name,
+        topic_key: '9',
+        configured: false,
+        closed: false,
+      };
+      await route.fulfill({response: answer, json: {...body, items: [...body.items, topic], total: body.total + 1}});
+    },
+  );
+  await page.goto(origin + '/#chats?chat=' + encodeURIComponent(ownerTopic));
+  await page.reload();
+  await allowed.getByText('Permissions belong to the whole private chat.').waitFor();
+  await allowed.getByText(privateAllowed).waitFor();
+  assert.equal(await allowed.getByText('run without a card', {exact: false}).count(), 0);
+  // A member's own switch says the same of Notion.
+  await page.goto(origin + '/#members?member=' + MIRA);
+  await page
+    .getByText('Commands still ask you, Notion is never used in a group, and each chat’s tool switches still apply.')
     .waitFor();
   await page.goto(origin + '/#settings?view=telegram');
   const groups = page.locator('section', {has: page.getByRole('heading', {name: 'In groups'})});

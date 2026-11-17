@@ -15,7 +15,7 @@ import {BackgroundJobLimits} from '../system/jobs';
 
 /** The one thing in a group that never waits, whichever is chosen: a group's web pages and outside tools (step 3). */
 const groupTools =
-  'In a group, web pages and outside tools other than Notion run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands and Notion still wait.';
+  'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands still wait, and Notion is never used in a group.';
 
 const freedom = [
   {
