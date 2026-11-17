@@ -95,6 +95,13 @@ test('failed sends to chat apps need a look and open the Problems list', () => {
   assert.equal(three.detail, 'Reaction: 1 · Reply: 2');
 });
 
+test('a leave Telegram refused is a problem named as the request', () => {
+  const item = sendIssue(
+    monitoring(sends({problems: 1, problem_kinds: {leave: 1}, latest_problems: [row('failed', 'leave', 'no_permission')]})),
+  );
+  assert.deepEqual([item.tone, item.text, item.detail], ['bad', '1 send to chat apps failed in the last day', 'Leave a group: 1']);
+});
+
 test('sends that may still have arrived warn instead of failing', () => {
   const item = sendIssue(
     monitoring(
@@ -129,9 +136,18 @@ test('each send reads in plain words, and what storage doesn’t count as a prob
   assert.equal(sendReason({state: 'not_sent', error_code: 'rate_limited'}), 'Held back: too many at once');
   assert.equal(sendReason({state: 'failed', error_code: 'something_new'}), 'something_new');
   assert.equal(sendReason({state: 'sent', error_code: null}), '');
+  // A leave is named as the request, so a refused one never reads as done; one that found Nocheh gone says so, in
+  // words that also fit a group that was deleted or that removed Nocheh.
+  assert.equal(sendWhat({kind: 'leave', detail: null}), 'Leave a group');
+  assert.equal(sendReason({state: 'failed', error_code: 'already_left'}), 'Nocheh was no longer in the chat');
   assert.equal(
     sendReason({state: 'failed', error_code: 'formatting_rejected', recovered: true}),
     'Formatting rejected; sent on a retry',
+  );
+  // A leave the stage settled as left from Telegram's own update was never retried, so it says Nocheh left.
+  assert.equal(
+    sendReason({state: 'uncertain', kind: 'leave', error_code: 'timed_out', recovered: true}),
+    'No answer in time; Nocheh left',
   );
 });
 

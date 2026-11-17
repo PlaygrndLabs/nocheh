@@ -263,15 +263,15 @@ def original_only(snapshot_value, values, preferences, reset_id):
         return source
     try:
         uuid.UUID(reset_id)
-        owner = preferences['owner']; profiles = preferences['profiles']
-        groups = sorted(set(value.strip() for value in values['TELEGRAM_GROUP_IDS'].split(',') if value.strip()))
-        if (preferences['groups'] != groups or owner != values['TELEGRAM_OWNER_ID'] or
-                not isinstance(profiles, list)):
+        # The groups Nocheh is on in are the ones the preserved preferences name (ADR-0253); the setup names none.
+        owner, groups, profiles = preferences['owner'], preferences['groups'], preferences['profiles']
+        if (not isinstance(groups, list) or groups != sorted(set(groups)) or
+                any(not isinstance(group, str) or not configuration.TELEGRAM_GROUP.fullmatch(group) for group in groups) or
+                owner != values['TELEGRAM_OWNER_ID'] or not isinstance(profiles, list)):
             raise ValueError
         runtime_profiles = [{'id': row['id'], 'name': row['name'], 'owner_id': owner}
                             for row in profiles if row.get('name') is not None]
-        assistant = {'enabled': values['TELEGRAM_ENABLED'] == 'true',
-                     'owner_id': owner, 'group_ids': groups,
+        assistant = {'enabled': values['TELEGRAM_ENABLED'] == 'true', 'owner_id': owner,
                      'group_access': configuration.group_access(values)}
     except (KeyError, TypeError, AttributeError, ValueError):
         raise ValueError('reset_legacy_configuration_invalid') from None

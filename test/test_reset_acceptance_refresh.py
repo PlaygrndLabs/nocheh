@@ -30,7 +30,7 @@ class AcceptanceRefreshTests(unittest.TestCase):
         self.state = Path(self.folder.name)
         configuration.initialize(self.state)
         values = configuration.load(self.state)
-        values.update(TELEGRAM_OWNER_ID='100', TELEGRAM_GROUP_IDS='-200')
+        values.update(TELEGRAM_OWNER_ID='100')
         configuration.write_env(configuration.env_path(self.state), values)
         self.journal = Journal(self.state)
         self.before = [{'service': name, 'id': name + '-old'} for name in

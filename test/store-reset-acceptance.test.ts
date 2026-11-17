@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {digest} from '../src/archive.js';
+import {connectionIdFor} from '../src/chats.js';
 import {connectStores,initializeStoreDatabases,storeNames,type StorePasswords} from '../src/stores/connections.js';
 import {verifyFreshAcceptance} from '../src/stores/reset-acceptance.js';
 import {storeSchemas} from '../src/stores/schema.js';
@@ -42,7 +43,9 @@ function stores(eventTime=fresh) {
   }};
   const control={query:async(sql:string,params:any[]=[])=>{
     if(sql.startsWith('SELECT generation::text'))return {rows:[{generation:'22222222-2222-4222-8222-222222222222'}]};
-    if(sql.includes('FROM runtime_configuration c'))return {rows:[{document:{enabled:true,owner_id:'123',group_ids:['-100']}}]};
+    if(sql.includes('FROM runtime_configuration c'))return {rows:[{document:{enabled:true,owner_id:'123',group_access:{}}}]};
+    // The dedicated group is one Nocheh serves: an active group's Telegram ids (chats.state, ADR-0253).
+    if(sql.includes('FROM chats c JOIN chat_ids i'))return {rows:[{external_id:'-100'}]};
     if(sql.includes('FROM dispatches'))return {rows:[{state:params[0]===ids.silence?'suppressed':'done',
       attempts:1,result_reference:params[0]===ids.silence?null:{id:'result'},
       error_code:params[0]===ids.silence?'intentional_silence':null,created_at:fresh,updated_at:fresh}]};
@@ -118,9 +121,13 @@ test('fresh reset acceptance queries the three real isolated PostgreSQL stores',
     }
 
     await control.query('INSERT INTO installation(singleton,generation) VALUES(true,$1)',[e.generation]);
-    const policy={enabled:true,owner_id:'123',group_ids:['-100']};
+    const policy={enabled:true,owner_id:'123',group_access:{}};
     await control.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint,created_at) VALUES('assistant',1,$1,$2,$3)",[policy,digest(JSON.stringify(policy)),when]);
     await control.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");
+    // The owner added Nocheh to the dedicated group: it is on (ADR-0253).
+    await control.query(`INSERT INTO chat_connections(id,app) VALUES($1,'telegram')`,[connectionIdFor('telegram')]);
+    await control.query(`INSERT INTO chats(id,connection_id,kind,state) VALUES('-100',$1,'group','active')`,[connectionIdFor('telegram')]);
+    await control.query(`INSERT INTO chat_ids(connection_id,external_id,chat_id,state) VALUES($1,'-100','-100','current')`,[connectionIdFor('telegram')]);
     for(const eventId of [ids.owner,ids.recall,ids.isolation,ids.silence,ids.restart])
       await control.query(`INSERT INTO dispatches(event_id,source_reference,state,attempts,result_reference,error_code,created_at,updated_at)
         VALUES($1,'{}',$2,1,$3,$4,$5,$5)`,[eventId,eventId===ids.silence?'suppressed':'done',eventId===ids.silence?null:{id:'result'},

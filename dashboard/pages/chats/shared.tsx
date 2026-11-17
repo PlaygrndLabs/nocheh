@@ -11,13 +11,9 @@ import {
   chatError,
   chatName,
   emptyRule,
-  groupListed,
   parseAccess,
-  parseGroupIds,
   serializeAccess,
-  serializeGroupIds,
   unknownChat,
-  withGroupListed,
   withPersonDecision,
   type Chat,
   type Directory,
@@ -32,15 +28,13 @@ export const telegramSettingsHref = href('settings', {view: 'telegram'});
 export const memoryRequestsHref = href('inbox', {kind: 'memory_access'});
 
 /**
- * The Telegram settings that decide where Nocheh answers and who may talk to it.
- * Changes are drafts in the shared settings store; the bottom save bar saves and applies them.
- * Until step 2b-2, TELEGRAM_GROUP_IDS still lists the groups Nocheh serves by their Telegram ids, and
- * TELEGRAM_GROUP_ACCESS keeps a group's people under one of them (ADR-0252); a chat is passed whole, never its id.
+ * The Telegram settings that decide how Nocheh answers and who may talk to it in a group.
+ * Changes are drafts in the shared settings store; the bottom save bar saves and applies them. Which groups Nocheh is
+ * on in is no setting: it is each group's state, which its switch changes at once (ADR-0253). TELEGRAM_GROUP_ACCESS
+ * keeps a group's people under one of its Telegram ids (ADR-0252); a chat is passed whole, never its id.
  */
 export function useTelegram() {
   const settings = useSettings();
-  const groupIds = parseGroupIds(settings.value('TELEGRAM_GROUP_IDS'));
-  const savedGroupIds = parseGroupIds(settings.saved('TELEGRAM_GROUP_IDS'));
   const access = parseAccess(settings.value('TELEGRAM_GROUP_ACCESS'));
   const savedAccess = parseAccess(settings.saved('TELEGRAM_GROUP_ACCESS'));
   const writeAccess = (next: typeof access) => serializeAccess(next, settings.saved('TELEGRAM_GROUP_ACCESS'));
@@ -63,28 +57,10 @@ export function useTelegram() {
       .filter(Boolean),
     topicMemory: settings.value('TELEGRAM_TOPIC_MEMORY') || 'group',
     topicMemoryChanged: settings.changed('TELEGRAM_TOPIC_MEMORY'),
-    savedGroupIds,
-    isOn: (chat: Chat | null | undefined) => groupListed(groupIds, chat),
-    onChanged: (chat: Chat | null | undefined) => groupListed(groupIds, chat) !== groupListed(savedGroupIds, chat),
     rule: (chat: Chat | null | undefined) => ruleOf(access, chat),
     savedRule: (chat: Chat | null | undefined) => ruleOf(savedAccess, chat),
-    /** Turning a group off also drops who was allowed there; turning it back on restores the saved list. */
-    setGroup(chat: Chat, on: boolean) {
-      const ids = withGroupListed(groupIds, chat, on, savedGroupIds);
-      const next = {...access};
-      if (on) {
-        // The saved people come back under an id the group is listed by now, as the settings require.
-        const from = accessKey(savedAccess, chat);
-        const to = accessKey({}, chat, ids, savedAccess);
-        if (from && to && savedAccess[from] && !appIds(chat).some(id => next[id])) next[to] = savedAccess[from]!;
-      } else for (const id of appIds(chat)) delete next[id];
-      settings.setMany({
-        TELEGRAM_GROUP_IDS: serializeGroupIds(ids, settings.saved('TELEGRAM_GROUP_IDS')),
-        TELEGRAM_GROUP_ACCESS: writeAccess(next),
-      });
-    },
     setPerson(chat: Chat, id: string, allow: boolean) {
-      const key = accessKey(access, chat, groupIds, savedAccess);
+      const key = accessKey(access, chat, savedAccess);
       if (!key) return;
       settings.set('TELEGRAM_GROUP_ACCESS', writeAccess(withPersonDecision(access, savedAccess, key, id, allow)));
     },

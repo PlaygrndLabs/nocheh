@@ -13,7 +13,9 @@ import {GuardRepository} from './guards.js';
 import {SourceAccessRepository} from './access.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 
-type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids:string[];group_access?:Record<string,GroupAccess>};
+/** A snapshot's runtime document. One taken before step 2b-2 also lists group_ids, which is checked by shape and ignored:
+ * chats.state says which groups are served (ADR-0253). */
+type AssistantPolicy={enabled:boolean;owner_id:string|null;group_ids?:string[];group_access?:Record<string,GroupAccess>};
 /** A chats row in a reset snapshot (ADR-0252): a name only when the owner gave it. */
 type SnapshotChat={id:string;app:ChatApp;kind:ChatRow['kind'];parent_id:string|null;topic_key:string|null;app_type:string|null;
   title:string|null;title_source:'owner'|null;is_forum:boolean;state:ChatRow['state']};
@@ -56,15 +58,16 @@ function policy(value:unknown):AssistantPolicy {
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('reset_setup_snapshot_invalid');
   const row=value as Record<string,unknown>;
   if(Object.keys(row).some(key=>!['enabled','owner_id','group_ids','group_access'].includes(key))||
-    !['enabled','owner_id','group_ids'].every(key=>key in row))throw Error('reset_setup_snapshot_invalid');
-  // The policy holds Telegram's own ids: the owner's account and the groups' chat ids, which are negative.
+    !['enabled','owner_id'].every(key=>key in row))throw Error('reset_setup_snapshot_invalid');
+  // The policy holds Telegram's own ids: the owner's account and, in an older document, the groups' chat ids, which are negative.
   if(typeof row.enabled!=='boolean'||row.owner_id!==null&&!isTelegramAccount(row.owner_id)||
-    !Array.isArray(row.group_ids)||row.group_ids.some(id=>!isTelegramChat(id)||isTelegramAccount(id))||
-    row.group_ids.join('\0')!==[...new Set(row.group_ids)].sort().join('\0')||row.enabled&&!row.owner_id)
+    row.group_ids!==undefined&&(!Array.isArray(row.group_ids)||row.group_ids.some(id=>!isTelegramChat(id)||isTelegramAccount(id)))||row.enabled&&!row.owner_id)
     throw Error('reset_setup_snapshot_invalid');
-  try {groupAccess(row.group_access??{},row.group_ids as string[],row.owner_id as string|null);}catch {throw Error('reset_setup_snapshot_invalid');}
+  try {groupAccess(row.group_access??{},row.owner_id as string|null);}catch {throw Error('reset_setup_snapshot_invalid');}
   return row as unknown as AssistantPolicy;
 }
+/** A runtime document as this version admits it: an older document's group_ids is dropped (ADR-0253). */
+export const admittedDocument=(document:AssistantPolicy):AssistantPolicy=>{const {group_ids:_groups,...rest}=document;return rest;};
 
 const appId=/^[A-Za-z0-9._:-]{1,128}$/;
 /** The chats and app ids of a version 2 snapshot, checked row by row; a version 1 snapshot has none. */
@@ -97,7 +100,8 @@ function snapshotChats(snapshot:SetupSnapshot):{chats:SnapshotChat[];ids:Snapsho
 function snapshotDirectory(snapshot:SetupSnapshot):ChatDirectory {
   const {chats,ids}=snapshotChats(snapshot),c=snapshot.configuration,assistant=c.runtime_configuration[0]?.document;
   const known=new Set(ids.filter(row=>row.app==='telegram').map(row=>row.external_id)),named=new Set(chats.map(row=>row.id));
-  const seeder=new ChatSeeder(undefined as never,{owner_id:assistant?.owner_id??null,group_ids:assistant?.group_ids??[]});
+  // An older document's groups get the row the seeder would give them, off like every group it seeds (ADR-0253).
+  const seeder=new ChatSeeder(undefined as never,{owner_id:assistant?.owner_id??null});
   for(const value of [assistant?.owner_id,...assistant?.group_ids??[],...c.project_assignments.map(row=>row.space_id),
     ...c.sharing_rules.flatMap(row=>Array.isArray(row.sources)?[...row.sources,row.destination]:[row.destination]),
     ...c.memory_access_settings.map(row=>row.destination),...c.chat_tool_settings.map(row=>row.space_id)])seeder.value(value);
@@ -125,6 +129,15 @@ const order=(a:string,b:string)=>a<b?-1:a>b?1:0;
 /** Chats and app ids in one order, whatever order a snapshot or a database gave them in. */
 export function sortedChats(value:{chats?:SnapshotChat[]|undefined;chat_ids?:SnapshotChatId[]|undefined}) {
   return {chats:[...value.chats??[]].sort((a,b)=>order(a.id,b.id)),chat_ids:[...value.chat_ids??[]].sort((a,b)=>order(a.app,b.app)||order(a.external_id,b.external_id))};
+}
+/**
+ * The chats as a restore writes them. A group still waiting to be left, and its topics, come back off: the reset does not
+ * carry its leave, so no add is on record, and a group seen with no add stays silent and Off (ADR-0253). Only for a
+ * snapshot's chats: a live store's are read as they are.
+ */
+export function restoredChats(value:{chats?:SnapshotChat[]|undefined;chat_ids?:SnapshotChatId[]|undefined}) {
+  const sorted=sortedChats(value);
+  return {...sorted,chats:sorted.chats.map(row=>row.state==='pending'?{...row,state:'off' as const}:row)};
 }
 
 /** Validate the content-free setup projection captured before erasure. */
@@ -213,9 +226,11 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     if(!installed||installed.generation===old)throw Error('reset_setup_target_not_fresh');
     if(installed.generation!==generation)await db.query('UPDATE installation SET generation=$1 WHERE singleton',[generation]);
     const runtime=(await db.query(`SELECT c.name,v.document FROM runtime_configuration c JOIN runtime_configuration_versions v USING(name,revision) ORDER BY c.name`)).rows;
-    if(runtime.length&&!same(runtime,configuration.runtime_configuration))throw Error('reset_setup_target_changed');
+    const documents=(rows:{name:string;document:AssistantPolicy}[])=>rows.map(row=>({name:row.name,document:admittedDocument(row.document)}));
+    if(runtime.length&&!same(documents(runtime),documents(configuration.runtime_configuration)))throw Error('reset_setup_target_changed');
     if(!runtime.length) {
-      await db.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint) VALUES('assistant',1,$1,$2)",[JSON.stringify(assistant),digest(canonical(assistant))]);
+      const document=admittedDocument(assistant);
+      await db.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint) VALUES('assistant',1,$1,$2)",[JSON.stringify(document),digest(canonical(document))]);
       await db.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");
     }
     const guard=(await db.query('SELECT mode FROM guard_state WHERE singleton FOR UPDATE')).rows[0];
@@ -230,7 +245,7 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     if(!same(current.memory_access_settings,defaultAccess)&&!same(current.memory_access_settings,configuration.memory_access_settings))throw Error('reset_setup_target_changed');
     for(const [name,rows] of Object.entries(current))if(name!=='memory_access_settings'&&(rows as unknown[]).length&&!same(rows,(configuration as any)[name]))throw Error('reset_setup_target_changed');
     // The chats come first, each with its own id and app ids, so every value below names the same chat (ADR-0252).
-    const existingChats=await chatRows(db),desiredChats=sortedChats(configuration);
+    const existingChats=await chatRows(db),desiredChats=restoredChats(configuration);
     if((existingChats.chats.length||existingChats.chat_ids.length)&&!same(existingChats,desiredChats))throw Error('reset_setup_target_changed');
     if(!existingChats.chats.length&&desiredChats.chats.length) {
       const connections=new Map<string,string>();
@@ -256,17 +271,17 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
     for(const row of configuration.chat_tool_settings)await db.query('INSERT INTO chat_tool_settings(space_id,shell,browser,mcp,revision) VALUES($1,$2,$3,$4,1) ON CONFLICT DO NOTHING',
       [row.space_id,row.shell,row.browser,row.mcp]);
     const updated=await setupRows(db);for(const name of Object.keys(updated))if(!same(updated[name],(configuration as any)[name]))throw Error('reset_setup_target_changed');
-    if(!same(await chatRows(db),sortedChats(configuration)))throw Error('reset_setup_target_changed');
+    if(!same(await chatRows(db),desiredChats))throw Error('reset_setup_target_changed');
     await db.query('COMMIT');
   } catch(error) {await db.query('ROLLBACK');throw error;} finally {db.release();}
   const archive=new ArchiveRepository(stores.archive),guards=new GuardRepository(stores,archive);
-  const access=new SourceAccessRepository(stores,archive,guards,()=>assistant),profiles=new RuntimeProfileRepository(access),owner={admin:true,scope:null};
+  const access=new SourceAccessRepository(stores,archive,guards,()=>({...admittedDocument(assistant),group_ids:[]})),profiles=new RuntimeProfileRepository(access),owner={admin:true,scope:null};
   const admitted=[];for(const command of commands)admitted.push(await profiles.save(owner,command));
   const restored=await setupRows(stores.control),runtimeProfiles=(await stores.control.query('SELECT id,name,owner_id FROM runtime_profiles WHERE state=\'active\' ORDER BY id')).rows;
   if(!same(restored.projects,configuration.projects)||!same(restored.project_assignments,configuration.project_assignments)||
     !same(restored.sharing_rules,configuration.sharing_rules)||!same(restored.memory_access_settings,configuration.memory_access_settings)||
     !same(restored.chat_tool_settings,configuration.chat_tool_settings)||!same(runtimeProfiles,configuration.runtime_profiles)||
-    !same(await chatRows(stores.control),sortedChats(configuration)))throw Error('reset_setup_verification_failed');
+    !same(await chatRows(stores.control),restoredChats(configuration)))throw Error('reset_setup_verification_failed');
   const binding=await guards.state();if(binding.generation!==generation||binding.mode!==configuration.guard_mode[0]!.mode)throw Error('reset_setup_verification_failed');
   return {reset_id:resetId,generation,binding,configuration_records:Object.values(configuration).reduce((count,rows)=>count+rows.length,0),
     projects:configuration.projects.length,assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,memory_access_settings:configuration.memory_access_settings.length,

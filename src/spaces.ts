@@ -74,8 +74,8 @@ export const groupSpace=(space:string|null|undefined):space is string=>chats().i
 /** Every group and topic of a group the chat directory holds: the SQL id list for "a.space_id is a group or one of
  * its topics" (`a.space_id=ANY($n::text[])`), served or not. */
 export const groupSpaces=():string[]=>chats().all().filter(chat=>chats().isGroup(chat.id)).map(chat=>chat.id);
-/** The groups Nocheh serves, as the chat directory holds them (in step 2b-1 the bridge sets them from
- * TELEGRAM_GROUP_IDS): groups themselves, never topics or private chats. */
+/** The groups Nocheh serves, as the chat directory holds them (chats.state: the owner adds Nocheh or turns it on,
+ * ADR-0253): groups themselves, never topics or private chats. */
 export const servedGroups=():string[]=>chats().all().filter(chat=>chat.kind==='group'&&chats().served(chat.id)).map(chat=>chat.id);
 /** Whether `id` is a group Nocheh serves (one of servedGroups()). */
 export const servedGroup=(id:string|null|undefined):boolean=>chats().kind(id)==='group'&&chats().served(id);

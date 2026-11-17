@@ -101,9 +101,10 @@ class TelegramOperationsTests(unittest.TestCase):
 
     def test_directory_names_groups_by_their_nocheh_id_and_keeps_who_their_messages_show(self):
         # Storage names each group by its Nocheh id, with its Telegram ids beside it (ADR-0252). The dashboard opens a group
-        # by that id, so it stays the group's id here; TELEGRAM_GROUP_IDS, which names a group Telegram upgraded by its
-        # earlier id, finds the group through any of its Telegram ids, and only Telegram ids are sent to Telegram.
-        newer, upgraded = 'a' * 64, 'c' * 64
+        # by that id, so it stays the group's id here. Telegram is asked only about the groups Nocheh serves now, as the
+        # app's served list says (ADR-0253), each by the Telegram id it has now.
+        from services.chats import Served
+        newer, upgraded, added = 'a' * 64, 'c' * 64, 'e' * 64
         archive = {'groups': [
             # Stored before step 2b: its Nocheh id is the Telegram id it had then; Telegram upgraded it since.
             {'id': '-1001000000001', 'external': '-1001000000009', 'telegram_ids': ['-1001000000009', '-1001000000001'],
@@ -118,35 +119,40 @@ class TelegramOperationsTests(unittest.TestCase):
             # No Telegram id here (imported): still named by its Nocheh id.
             {'id': 'b' * 64, 'external': None, 'telegram_ids': [], 'name': 'Gone', 'users': []},
             {'id': 'not an id', 'external': '-1009000000001', 'name': 'Broken', 'users': []}], 'truncated': False}
-        values = {'TELEGRAM_GROUP_IDS': '-1001000000001,-1002000000001,-4000000000001,-1004000000001', 'TELEGRAM_BOT_TOKEN': '',
-                  'TELEGRAM_OWNER_ID': '123', 'TELEGRAM_GROUP_ACCESS': '{}'}
+        # Served: three of them, and a group the owner just added that storage has seen nothing of yet.
+        served = Served.of('123', groups=[('-1001000000001', '-1001000000009'), (newer, '-1002000000001'), (upgraded, '-1003000000001'),
+                                          (added, '-1004000000001')],
+                           old={'-1001000000001': ['-1001000000001'], upgraded: ['-4000000000001']})
+        values = {'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '123', 'TELEGRAM_GROUP_ACCESS': '{}'}
         with patch.object(telegram_directory, 'load', return_value=values):
-            result = telegram_directory.directory(None, archive=archive)
+            result = telegram_directory.directory(None, archive=archive, served=served)
         self.assertEqual(result, {'groups': [
-            # Only TELEGRAM_GROUP_IDS names it, so it is named by that Telegram id, as before step 2b.
-            {'id': '-1004000000001', 'external': '-1004000000001', 'name': None, 'users': []},
             {'id': '-1001000000001', 'external': '-1001000000009', 'name': 'Aurora planning', 'users': [
                 {'id': '95', 'name': 'Lee', 'username': None, 'state': 'left', 'seen': False},
                 {'id': '73', 'name': 'Mira Chen', 'username': '@mira', 'state': 'in', 'seen': True}]},
+            # Only the served list names it so far: by its Nocheh id, with the Telegram id it has now.
+            {'id': added, 'external': '-1004000000001', 'name': None, 'users': []},
             {'id': upgraded, 'external': '-1003000000001', 'name': 'Garden swap', 'users': []},
             {'id': 'b' * 64, 'external': None, 'name': 'Gone', 'users': []},
             {'id': newer, 'external': '-1002000000001', 'name': 'Night sky club', 'users': [{'id': '91', 'name': 'Nia', 'username': None, 'state': 'left', 'seen': True}]}],
             'truncated': False})
-        # With a bot token, Telegram is asked about each listed group by the Telegram id the list gives, and what it says
-        # lands on the group storage knows.
+        # With a bot token, Telegram is asked about each served group by the Telegram id it has now, and what it says lands
+        # on the group storage knows. People saved under an older id of the group are asked about too.
         asked = []
 
         def api(token, method, **params):
-            asked.append((method, params['chat_id']))
+            asked.append((method, params['chat_id'], params.get('user_id')))
             if method == 'getChat' and params['chat_id'] == '-1002000000001': return {'id': -1002000000001, 'type': 'supergroup', 'title': 'Night sky'}
             if method == 'getChatAdministrators' and params['chat_id'] == '-1002000000001': return [{'user': {'id': 456, 'first_name': 'Bob'}}]
             return None
-        with patch.object(telegram_directory, 'load', return_value={**values, 'TELEGRAM_BOT_TOKEN': 'fixture-secret'}):
-            named = telegram_directory.directory(None, archive=archive, bot_api=api)
+        access = '{"-4000000000001":{"granted":["77"],"denied":[]}}'
+        with patch.object(telegram_directory, 'load', return_value={**values, 'TELEGRAM_BOT_TOKEN': 'fixture-secret', 'TELEGRAM_GROUP_ACCESS': access}):
+            named = telegram_directory.directory(None, archive=archive, bot_api=api, served=served)
         night = next(group for group in named['groups'] if group['id'] == newer)
         self.assertEqual((night['name'], [user['id'] for user in night['users']]), ('Night sky', ['456', '91']))
-        self.assertEqual({chat for _, chat in asked}, {'-1001000000001', '-1002000000001', '-4000000000001', '-1004000000001'})
-        self.assertEqual(len(named['groups']), 5, 'each listed group is the one storage knows')
+        self.assertEqual({chat for _, chat, _ in asked}, {'-1001000000009', '-1002000000001', '-1003000000001', '-1004000000001'})
+        self.assertIn(('getChatMember', '-1003000000001', '77'), asked)
+        self.assertEqual(len(named['groups']), 5, 'each served group is the one storage knows')
 
     def test_setup_makes_the_bot_folder_private(self):
         with tempfile.TemporaryDirectory() as folder:

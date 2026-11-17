@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 from .scopes import Scopes
+from services.chats import Served
 from .profile_config import configure_profile, inspect_profile, read, atomic_yaml
 from .policy_config import save, view
 
@@ -76,7 +77,7 @@ class NativeAdminTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
         self.env = patch.dict(os.environ, {'NOCHEH_RUNTIME_HOME': str(self.root)})
         self.env.start()
-        self.policy = Scopes({'enabled': True, 'owner_id': '42', 'group_ids': ['-10']})
+        self.policy = Scopes({'enabled': True}, Served.of('42', groups=['-10']))
         self.owner = self.root / 'profiles' / Scopes.profile('42')
         self.group = self.root / 'profiles' / Scopes.profile('-10')
         configure_profile(self.owner, 'gpt-5.6-sol'); configure_profile(self.group, 'gpt-5.6-sol')
@@ -212,7 +213,7 @@ class BrowserBoundaryTests(unittest.TestCase):
     def test_audience_revision_keeps_logical_preferences_without_copying_memory(self):
         from .native_admin import Administration
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);policy=Scopes({'enabled':True,'owner_id':'42','group_ids':['-10']})
+            root=Path(folder);policy=Scopes({'enabled':True},Served.of('42',groups=['-10']))
             with patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':str(root)}):
                 logical=root/'profiles'/Scopes.profile('-10')
                 original=configure_profile(logical,'model')
@@ -232,7 +233,7 @@ class BrowserBoundaryTests(unittest.TestCase):
         from .native_admin import Administration
         from .scopes import Scopes
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);policy=Scopes({'enabled':True,'owner_id':'42','group_ids':['-10']});revision=[1]
+            root=Path(folder);policy=Scopes({'enabled':True},Served.of('42',groups=['-10']));revision=[1]
             admin=Administration(None,root,'model',policy,'fixture',True,lambda _:revision[0])
             name,path=admin.profile(Scopes.profile('-10'))
             self.assertEqual(name,Scopes.profile('-10:policy:1'));self.assertFalse(path.exists())
@@ -251,7 +252,7 @@ class BrowserBoundaryTests(unittest.TestCase):
         from .native_admin import Administration
         from hermes_state import SessionDB
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);policy=Scopes({'enabled':False,'owner_id':'42','group_ids':['-10']})
+            root=Path(folder);policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
             owner=root/'profiles'/Scopes.profile('42');owner.mkdir(parents=True)
             group=root/'profiles'/Scopes.profile('-10');group.mkdir(parents=True)
             db=SessionDB(owner/'state.db');db.create_session('private-session',source='browser');db.close()
@@ -275,7 +276,7 @@ class BrowserBoundaryTests(unittest.TestCase):
         from fastapi.testclient import TestClient
         from .native_admin import create_app
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);policy=Scopes({'enabled':False,'owner_id':'42','group_ids':['-10']})
+            root=Path(folder);policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
             app=create_app(root,'model',policy,'fixture',True)
             with TestClient(app,base_url='http://127.0.0.1:8785') as client:
                 with client.websocket_connect('/api/ws?token=fixture') as ws:

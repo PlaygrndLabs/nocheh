@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from services.durable import digest
 from services.telegram.capture import instrument_request
 from services.telegram.gateway import TelegramService
+from services.telegram.poller import ABILITIES, ALLOWED_UPDATES
 from services.telegram.settings import Policy
 from tools.acceptance.telegram_mock import TelegramMock, TOKEN
 
@@ -62,7 +63,7 @@ class ServiceTests(unittest.TestCase):
                                               'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true'})
         environment.start(); self.addCleanup(environment.stop)
         self.allowed = True
-        for name in ('check_delivery_policy', 'check_action_policy'):
+        for name in ('check_delivery_policy', 'check_action_policy', 'check_leave_policy'):
             patcher = patch('services.telegram.gateway.' + name, side_effect=lambda *_: self.allowed)
             patcher.start(); self.addCleanup(patcher.stop)
         self.mock = TelegramMock(self.root / 'telegram.json')
@@ -108,8 +109,68 @@ class ServiceTests(unittest.TestCase):
         self.assertIn(f'telegram:{BOT_ID}:update:5', [event['key'] for event in events])
         self.assertEqual(self.service.identify(), {'state': 'connected', 'bot_id': BOT_ID, 'username': 'synthetic_fixture_bot', 'first_name': 'Synthetic'})
         self.assertEqual(self.service.health()['state'], 'connected')
+        # What getMe says the bot may do shows in health.
+        health = self.service.health()
+        self.assertEqual({key: health[key] for key in ABILITIES if key in health},
+                         {'can_join_groups': True, 'can_read_all_group_messages': True, 'supports_inline_queries': False,
+                          'can_connect_to_business': False})
         # No command menu is left in any scope.
         wait(lambda: not self.mock.state['commands'])
+
+    def test_polling_asks_only_for_the_updates_nocheh_reads(self):
+        self.assertEqual(ALLOWED_UPDATES, ('message', 'edited_message', 'channel_post', 'edited_channel_post', 'callback_query', 'message_reaction',
+                                           'message_reaction_count', 'my_chat_member', 'chat_member', 'chat_join_request'))
+        wait(lambda: self.mock.state['allowed_updates'] == list(ALLOWED_UPDATES))
+        bot, person = {'id': int(BOT_ID), 'is_bot': True, 'first_name': 'Synthetic'}, {'id': 456, 'is_bot': False, 'first_name': 'Alice'}
+        # Someone adds the bot to a group: its own membership update arrives and is archived under that group.
+        added = {'update_id': 61, 'my_chat_member': {'chat': {'id': -10088, 'type': 'supergroup', 'title': 'Bakery'}, 'from': person, 'date': 1700000000,
+                                                     'old_chat_member': {'user': bot, 'status': 'left'}, 'new_chat_member': {'user': bot, 'status': 'member'}}}
+        inline = {'update_id': 60, 'inline_query': {'id': '1', 'from': person, 'query': 'x', 'offset': ''}}
+        self.inject([inline, added])
+        wait(lambda: self.mock.state['offset'] == 62)
+        events = {event['key']: event for event in (json.loads(path.read_bytes()) for path in (self.root / 'spool/pending').glob('*.json'))}
+        self.assertEqual(events[f'telegram:{BOT_ID}:update:61']['scope'], '-10088')
+        self.assertNotIn(f'telegram:{BOT_ID}:update:60', events, 'an inline query is never asked for')
+
+    def leaving(self):
+        """The fake Telegram's leaveChat: True, or the fault queued for it."""
+        original = self.mock.call
+        async def call(method, data):
+            status, body = await original(method, data)
+            if method == 'leaveChat' and status == 400 and isinstance(body, dict) and body.get('description') == 'Bad Request: fixture method not implemented':
+                return 200, {'ok': True, 'result': True}
+            return status, body
+        self.mock.call = call
+
+    def test_a_leave_reaches_telegram_once_journaled_and_recorded(self):
+        self.leaving()
+        body = {'id': 'd' * 64, 'chat_id': '-10055'}
+        self.assertEqual(self.service.leave(body), {'state': 'done'})
+        self.assertEqual(self.service.leave(body), {'state': 'done'})
+        leaves = lambda: [call['parameters'] for call in self.mock.state['calls'] if call['method'] == 'leaveChat']
+        self.assertEqual(leaves(), [{'chat_id': '-10055'}], 'leaveChat once, for that chat alone')
+        # Never a served group, under its Telegram id now or before an upgrade.
+        for chat in (GROUP, NEW_TG, NEW_OLD):
+            with self.subTest(chat), self.assertRaisesRegex(ValueError, 'leave_chat_not_allowed'):
+                self.service.leave({'id': 'e' * 64, 'chat_id': chat})
+        self.mock.state['faults'].append({'method': 'leaveChat', 'code': 403, 'description': 'Forbidden: bot is not a member of the supergroup chat'})
+        self.assertEqual(self.service.leave({'id': 'f' * 64, 'chat_id': '-10066'}), {'state': 'done'}, 'already gone')
+        self.mock.state['faults'].append({'method': 'leaveChat', 'code': 400, 'description': 'Bad Request: not enough rights'})
+        self.assertEqual(self.service.leave({'id': '1' * 64, 'chat_id': '-10077000'}), {'state': 'failed', 'error_code': 'telegram_refused'})
+        self.assertEqual(len(leaves()), 3)
+        self.assertEqual(self.sent(), [])
+        # Journaled like every request that leaves, and a content-free send record says what it was.
+        events = [json.loads(path.read_bytes()) for path in (self.root / 'spool/pending').glob('*.json')]
+        self.assertIn(('-10055', 'leaveChat'), [(event['scope'], event['payload']['method']) for event in events if event['kind'] == 'outbound_intent'])
+        records = lambda: [json.loads(path.read_bytes()) for path in (self.root / 'spool/sends').glob('*.json')]
+        wait(lambda: len([row for row in records() if row['method'] == 'leaveChat']) == 3)
+        outcomes = {row['chat']: row for row in records() if row['method'] == 'leaveChat'}
+        record = outcomes['-10055']
+        self.assertEqual((record['state'], record['error_code']), ('sent', None))
+        self.assertTrue(record['reference'].startswith('leave:' + 'd' * 64 + ':'))
+        # A leave that found Nocheh gone is recorded as harmless, as the route counts it done; a refusal keeps its own code.
+        self.assertEqual([(outcomes[chat]['state'], outcomes[chat]['error_code']) for chat in ('-10066', '-10077000')],
+                         [('failed', 'already_left'), ('failed', 'no_permission')])
 
     def test_reply_is_silent_answers_the_message_and_keeps_one_receipt(self):
         body = self.turn(1, text='**Hi** there.')

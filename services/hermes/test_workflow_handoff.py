@@ -36,7 +36,7 @@ class WorkflowHandoffTests(unittest.TestCase):
             (folder/'job.json').write_text(json.dumps(job));calls=[]
             class API:
                 def call(self,path,body=None):calls.append((path,body));return {'state':'queued'}
-            with patch('tools.operations.workflows.workflow_handoff.load',return_value={'TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':''}):
+            with patch('tools.operations.workflows.workflow_handoff.load',return_value={'TELEGRAM_OWNER_ID':'42'}):
                 migration={'id':'a'*64,'to_owner':'inngest'}
                 self.assertEqual(import_records(root,API(),migration),{'staged':1,'closed':0})
                 self.assertEqual(calls[0][1]['completed'],1);self.assertFalse(calls[0][1]['review_approved']);self.assertEqual(calls[0][1]['learning_after'],0)
@@ -77,7 +77,7 @@ class WorkflowHandoffTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);identity='11111111-1111-4111-8111-111111111111';folder=root/'admin/jobs'/identity;folder.mkdir(parents=True)
             job={'id':identity,'kind':'import','state':'failed','review_approved':False,'mapping':{},'preview':{'sha256':'a'*64,'messages':3}}
-            (folder/'job.json').write_text(json.dumps(job));policy={'TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':''}
+            (folder/'job.json').write_text(json.dumps(job));policy={'TELEGRAM_OWNER_ID':'42'}
             receipt=folder/'workflow-receipt.json';body={'id':identity,'configuration_hash':'b'*64,'completed':3,'duplicates':1,'learning_after':0};receipt.write_text(json.dumps(body))
             class FinishedAPI:
                 fail=True

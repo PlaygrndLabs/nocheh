@@ -5,7 +5,7 @@
 import {useState} from 'react';
 import {useResource} from '../../lib/resource';
 import {href} from '../../lib/routes';
-import {parentOf, type Chat} from '../../lib/chats-model';
+import {chatName, parentOf, type Chat} from '../../lib/chats-model';
 import {Button, Card, CardBody, CardHeader, Notice, Select, Spinner} from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
 import {
@@ -35,6 +35,7 @@ type Assignment = {
 type Effective = {project: Project | null; inherited: boolean; own_assignment: Assignment | null};
 
 const NONE = '__none';
+const NEW = '__new';
 const UNANSWERED = '';
 
 /**
@@ -77,50 +78,48 @@ function useProjectChoices(current?: Project | null) {
 }
 
 /**
- * Asks which project a group joins, or none, when the owner turns Nocheh on in it and it has no answer yet. Nothing
- * is turned on until the owner answers; Cancel leaves the group off.
+ * Asks which project a group joins when the owner turns Nocheh on in it and it has no answer yet: one of the owner's
+ * projects, a new one named after the group, or none. The answer and the switch go in one request (ADR-0253), so
+ * nothing is turned on without an answer; Cancel leaves the group off.
  */
-export function JoinProjectDialog({
-  group,
-  name,
-  revision,
-  open,
-  onDone,
-}: {
-  group: string;
-  name: string;
-  /** The revision of the group's unanswered row, 0 when it has none. */
-  revision: number;
-  open: boolean;
-  onDone: (answered: boolean) => void;
-}) {
+export function JoinProjectDialog({chat, open, onDone}: {chat: Chat; open: boolean; onDone: () => void}) {
   const {choices} = useProjectChoices();
   const names = useChatNames();
   const action = useAction();
   const [choice, setChoice] = useState(UNANSWERED);
+  const group = chat.space_id,
+    name = chatName(chat);
+  // The server names a new project after the group's title, or "Group" when it has none.
+  const fresh = chat.name?.trim() || 'Group';
   const project = choices.find(item => item.id === choice);
   const save = async () => {
     const result = await action.run(
       'join',
-      '/projects/assignments',
+      '/chats/state',
       {
-        space_id: group,
-        ...(project ? {mode: 'assigned', project_id: project.id} : {mode: 'none', project_id: null}),
-        expected_revision: revision,
+        chat_id: group,
+        state: 'active',
+        project: project ? {mode: 'assigned', project_id: project.id} : choice === NEW ? {mode: 'new'} : {mode: 'none'},
       },
-      {success: project ? `${name} joins ${project.name}.` : `${name} joins no project.`},
+      {
+        success: project
+          ? `${name} joins ${project.name}.`
+          : choice === NEW
+            ? `${name} joins its new project.`
+            : `${name} joins no project.`,
+      },
     );
-    if (result) onDone(true);
+    if (result) onDone();
   };
   return (
     <Dialog
       open={open}
-      onOpenChange={next => !next && onDone(false)}
+      onOpenChange={next => !next && onDone()}
       title="Which project does this group join?"
       description={`Choose before Nocheh answers in ${name}. A family group belongs in none.`}
       footer={
         <>
-          <Button onClick={() => onDone(false)}>Cancel</Button>
+          <Button onClick={onDone}>Cancel</Button>
           <Button
             variant="primary"
             busy={action.busy === 'join'}
@@ -140,6 +139,7 @@ export function JoinProjectDialog({
           <option value={UNANSWERED} disabled>
             Choose a project…
           </option>
+          <option value={NEW}>New project “{fresh}”</option>
           <option value={NONE}>None</option>
           {choices.map(item => (
             <option key={item.id} value={item.id}>
@@ -150,7 +150,10 @@ export function JoinProjectDialog({
         {project ? (
           <JoinNotes space={group} name={name} project={project} names={names} />
         ) : (
-          <p className="text-[13px] text-muted">{relatedGroupsHint}</p>
+          <p className="text-[13px] text-muted">
+            {choice === NEW && 'A new project with only this group in it. You can rename it in Memory › Projects. '}
+            {relatedGroupsHint}
+          </p>
         )}
         <ActionError text={action.error} />
       </div>
@@ -159,14 +162,14 @@ export function JoinProjectDialog({
 }
 
 /**
- * What turning Nocheh on in a group first shows. `ask`: which project it joins, when the group has no answer yet and
- * projects exist. `project`: the project it is already in, whose other groups and task list are named before it turns
- * on, since it then joins them. `settled` turns true once that is known, or once loading failed, when the group's card
- * asks instead.
+ * What turning Nocheh on in a group first shows. `ask`: which project it joins, when the group has no answer yet.
+ * `project`: the project it is already in, whose other groups and task list are named before it turns on, since it
+ * then joins them. `settled` turns true once that is known, or once loading failed, when the group's card asks
+ * instead.
  */
 export function useJoinQuestion(group: string) {
   const effective = useResource<Effective>('/projects/effective?space=' + encodeURIComponent(group));
-  const {projects, choices} = useProjectChoices();
+  const {projects} = useProjectChoices();
   const own = effective.data?.own_assignment ?? null;
   const placed =
     own?.mode === 'assigned'
@@ -176,8 +179,7 @@ export function useJoinQuestion(group: string) {
       : null;
   return {
     settled: (!!effective.data && !!projects.data) || !!effective.error || !!projects.error,
-    ask: !!effective.data && !!projects.data && !answered(own) && choices.length > 0,
-    revision: own?.revision ?? 0,
+    ask: !!effective.data && !!projects.data && !answered(own),
     project: effective.data && projects.data ? placed : null,
   };
 }

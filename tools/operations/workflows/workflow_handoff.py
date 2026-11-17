@@ -9,7 +9,7 @@ from pathlib import Path
 from tools.operations.archive.archive import API,canonical,digest
 from tools.operations.installation.configuration import load
 from tools.operations.installation.workspaces import ports
-from tools.operations.archive.import_job import safe_name
+from tools.operations.archive.import_job import check_mapping, safe_name
 from tools.operations.security.tool_receipts import atomic
 
 
@@ -26,7 +26,7 @@ def stopped_dashboard(state=None):
 
 
 def import_records(state,api,migration):
-    policy=load(state);allowed=set(filter(None,[policy['TELEGRAM_OWNER_ID'],*policy['TELEGRAM_GROUP_IDS'].split(',')]))
+    owner=load(state)['TELEGRAM_OWNER_ID']
     staged=closed=0
     directory=Path(state)/'admin/jobs'
     if not directory.exists():return {'staged':0,'closed':0}
@@ -51,7 +51,7 @@ def import_records(state,api,migration):
                 closed+=1;continue
             if not isinstance(job.get('review_approved'),bool) or not isinstance(job.get('mapping'),dict) or not isinstance(job.get('preview'),dict):raise ValueError('confirmed_import_configuration_required')
             preview=job['preview'];mapping=job['mapping']
-            if any(not isinstance(k,str) or v not in allowed for k,v in mapping.items()):raise ValueError('scope_mapping_denied')
+            check_mapping(mapping,owner,api)
             source=folder/safe_name(preview['file'])
             if source.is_symlink() or not source.resolve().is_relative_to(folder.resolve()) or source.stat().st_size>32*1024*1024:raise ValueError('import_source_path_denied')
             if digest(source.read_bytes())!=preview['sha256']:raise ValueError('export_integrity_failed')

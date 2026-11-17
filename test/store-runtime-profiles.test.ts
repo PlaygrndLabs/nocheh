@@ -97,7 +97,9 @@ test('runtime profiles come from the chat directory: old chats keep their names,
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
     const managed=(await s.runtimeProfiles.list(owner)).profiles.filter(p=>p.managed);
-    assert.deepEqual(managed.map(p=>[p.scope,p.logical_profile]),[[OWNER,named(OWNER)],[GP1,named(GP1)],[NG1,named(NG1)],[NG2,named(NG2)]],
+    // The owner's chat first, then the groups that are on in the directory's order (chats.state, ADR-0253).
+    const byScope=(rows:string[][])=>[rows[0],...rows.slice(1).sort((a,b)=>a[0]!<b[0]!?-1:1)];
+    assert.deepEqual(byScope(managed.map(p=>[p.scope,p.logical_profile??''])),byScope([[OWNER,named(OWNER)],[GP1,named(GP1)],[NG1,named(NG1)],[NG2,named(NG2)]]),
       'the owner\'s chat and GP1 keep the names they had; NG1 and NG2 are named by their chat ids');
     assert.ok(!managed.some(p=>[named(NG1_TG),named(NG2_TG),named(NG2_OLD_TG)].includes(p.logical_profile??'')),'never by a Telegram id');
     assert.ok(!managed.some(p=>[GP2,UNSERVED].includes(p.scope)),'only served chats');

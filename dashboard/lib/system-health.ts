@@ -70,9 +70,10 @@ export type ChatSend = {
   error_code: string | null;
   reference: string | null;
   ms: number | null;
-  /** Counts for Health: refused or unanswered, not an expected no-op, and no later try delivered it. */
+  /** Counts for Health: refused or unanswered, not an expected no-op, and not recovered. */
   problem?: boolean;
-  /** A later try of the same send went through. */
+  /** A later try of the same send went through, or, for a leave, the stage settled that leave as left: then no later
+   *  try may have gone. */
   recovered?: boolean;
 };
 export type ChatSends = {

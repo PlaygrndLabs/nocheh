@@ -20,17 +20,19 @@ const {
   accessKey,
   appIdLabel,
   chatName,
+  chatStateLabels,
+  chatStateText,
   chatTree,
   currentAppId,
-  groupListed,
   groupOf,
   isGroupChat,
+  isOn,
   parentOf,
   shortIdLabel,
   sourceHits,
+  switchable,
   telegramProfile,
   unknownChat,
-  withGroupListed,
 } = model;
 
 const NEW = 'a'.repeat(64),
@@ -71,8 +73,8 @@ const chats = [
     app_ids: [tg('-10088')],
     state: 'off',
   },
-  // A group Telegram upgraded keeps its id under its new Telegram id.
-  {space_id: UPGRADED, name: 'Garden swap', kind: 'group', app_ids: [tg('-10099'), tg('-4005', 'old')], state: 'off'},
+  // A group Telegram upgraded keeps its id under its new Telegram id, and Nocheh is on there.
+  {space_id: UPGRADED, name: 'Garden swap', kind: 'group', app_ids: [tg('-10099'), tg('-4005', 'old')], state: 'active'},
 ];
 const find = space => chats.find(chat => chat.space_id === space) ?? null;
 
@@ -133,9 +135,8 @@ test('a group and its topics are told apart by kind and parent, and anything unk
   );
 });
 
-test('the tree puts your chat first, served groups next, and topics under their group in Telegram order', () => {
-  const served = chat => groupListed(['-4005'], chat) || chat.space_id === '-10042';
-  const tree = chatTree(chats, [{id: '-10073', name: 'Weekend notes'}, {id: '-10099'}], served, '');
+test('the tree puts your chat first, groups Nocheh is on in next, and topics under their group in Telegram order', () => {
+  const tree = chatTree(chats, [{id: '-10073', name: 'Weekend notes'}, {id: '-10099'}], '');
   assert.deepEqual(
     tree.privates.map(chat => chat.space_id),
     ['42', '73'],
@@ -143,7 +144,7 @@ test('the tree puts your chat first, served groups next, and topics under their 
   assert.deepEqual(
     tree.groups.map(entry => entry.group.space_id),
     ['-10042', UPGRADED, NEW, '-10073'],
-    'served first, then by name; a group seen only by its Telegram ID is not listed twice',
+    'on first, then by name; a group seen only by its Telegram ID is not listed twice',
   );
   assert.deepEqual(
     tree.groups[0].topics.map(chat => chat.space_id),
@@ -154,54 +155,89 @@ test('the tree puts your chat first, served groups next, and topics under their 
     [NEW_TOPIC],
   );
   // A search finds a chat by a Telegram ID it has had, and a topic by name under its group.
-  const old = chatTree(chats, [], served, '-4005');
+  const old = chatTree(chats, [], '-4005');
   assert.deepEqual(
     old.groups.map(entry => entry.group.space_id),
     [UPGRADED],
   );
-  const topic = chatTree(chats, [], served, 'meteor');
+  const topic = chatTree(chats, [], 'meteor');
   assert.deepEqual(
     topic.groups.map(entry => [entry.group.space_id, entry.topics.map(chat => chat.space_id)]),
     [[NEW, [NEW_TOPIC]]],
   );
 });
 
-test('until step 2b-2 a group is served by its Telegram IDs in TELEGRAM_GROUP_IDS', () => {
-  assert.equal(groupListed(['-4005'], find(UPGRADED)), true, 'an old id still lists the upgraded group');
-  assert.equal(groupListed(['-10042'], find(NEW)), false);
-  assert.deepEqual(withGroupListed(['-10042'], find(NEW), true), ['-10042', '-10088']);
-  assert.deepEqual(withGroupListed(['-4005'], find(UPGRADED), true), ['-4005'], 'already listed');
-  assert.deepEqual(withGroupListed(['-10042', '-4005', '-10099'], find(UPGRADED), false), ['-10042']);
-  assert.deepEqual(withGroupListed(['-10042'], unknownChat(NEW), true), ['-10042'], 'no Telegram id, nothing added');
-  // Off and back on in one draft lists the group by the id the saved list had, not by a new one.
-  assert.deepEqual(withGroupListed(['-10042'], find(UPGRADED), true, ['-10042', '-4005']), ['-10042', '-4005']);
-  assert.deepEqual(withGroupListed([], find(UPGRADED), true), ['-10099'], 'never listed: its current id');
-  assert.equal(accessKey({'-4005': {granted: ['73'], denied: []}}, find(UPGRADED)), '-4005');
-  assert.equal(accessKey({}, find(UPGRADED)), '-10099');
-  assert.equal(accessKey({}, unknownChat(NEW)), null);
+test('Nocheh is on where the chat’s state says so, and a topic follows its group (ADR-0253)', () => {
+  assert.equal(isOn(find('-10042')), true);
+  assert.equal(isOn(find('-10042/topic/7')), true, 'a topic carries its group’s state');
+  assert.equal(isOn(find(NEW)), false);
+  assert.equal(isOn(find(NEW_TOPIC)), false);
+  assert.equal(isOn(unknownChat(NEW)), false);
+  assert.equal(isOn(null), false);
+  // Only a group Nocheh is in has a switch: on, off, or one it couldn't leave.
+  const group = state => ({...find(NEW), state});
+  assert.deepEqual(
+    Object.keys(chatStateLabels).filter(state => switchable(group(state))),
+    ['active', 'off', 'could_not_leave'],
+  );
+  assert.equal(switchable(find('42')), false, 'a private chat has none');
+  assert.equal(switchable(find(NEW_TOPIC)), false, 'a topic follows its group');
+  assert.deepEqual(chatStateLabels, {
+    active: 'On',
+    off: 'Off',
+    pending: 'Leaving',
+    left: 'Left',
+    removed: 'Removed',
+    could_not_leave: 'Couldn’t leave',
+    archived: 'Imported history',
+  });
 });
 
-test('a group’s people are kept under a Telegram ID TELEGRAM_GROUP_IDS lists, as the settings require', () => {
-  // An upgraded group still served by its old id only: its first allowed person goes under that id, not the new one.
-  assert.equal(accessKey({}, find(UPGRADED), ['-10042', '-4005']), '-4005');
-  // Listed by both: the id that has saved people is kept.
+test('a group’s text says why Nocheh left only when an add or a removal is on record', () => {
+  const group = (state, more = {}) => chatStateText({...find(NEW), state, ...more});
+  assert.equal(group('off'), 'Nocheh doesn’t answer here.');
+  assert.equal(group('pending', {added_by: 'other'}), 'Someone else added Nocheh here, so it is leaving.');
+  assert.equal(
+    group('left', {added_by: 'other'}),
+    'Nocheh left because someone else added it. Add Nocheh yourself to use it here.',
+  );
+  // Telegram hides an admin who adds Nocheh with Remain anonymous on, who may be the owner: never "someone else".
+  assert.equal(
+    group('pending', {added_by: 'anonymous'}),
+    'Someone added Nocheh here without showing who, so it is leaving.',
+  );
+  assert.equal(
+    group('left', {added_by: 'anonymous'}),
+    'Nocheh left because someone added it without showing who. To use it here, turn off Remain anonymous and add Nocheh yourself.',
+  );
+  assert.equal(
+    group('could_not_leave', {added_by: 'anonymous'}),
+    'Someone added Nocheh here without showing who, and it couldn’t leave. It stays silent.',
+  );
+  // A group the seeder made, or one Nocheh left on its own, claims no add by someone else.
+  for (const by of ['seeded', 'owner', 'unknown', null, undefined])
+    assert.equal(group('left', {added_by: by}), 'Nocheh isn’t in this group any more.', String(by));
+  assert.equal(group('removed', {removed_event: true}), 'Nocheh was removed from this group.');
+  assert.equal(group('removed', {removed_event: false}), 'Nocheh isn’t in this group any more.', 'seeded as removed');
+  assert.equal(group('removed'), 'Nocheh isn’t in this group any more.');
+  assert.equal(
+    group('could_not_leave', {added_by: 'other'}),
+    'Someone else added Nocheh here and it couldn’t leave. It stays silent.',
+  );
+  assert.equal(group('archived'), 'From your imported history. Nocheh isn’t in this group.');
+});
+
+test('a group’s people stay under the Telegram ID that already holds them, else its current one', () => {
+  // People saved under a group's earlier Telegram ID stay there after Telegram upgraded it.
   const saved = {'-4005': {granted: ['73'], denied: []}};
-  assert.equal(accessKey({}, find(UPGRADED), ['-10099', '-4005'], saved), '-4005');
-  assert.equal(accessKey({}, find(UPGRADED), ['-10099', '-4005']), '-10099');
-  // Whatever the saved and draft lists hold, a key for an upgraded group is one its listing keeps.
-  const lists = [[], ['-4005'], ['-10099'], ['-4005', '-10099'], ['-10042', '-4005'], ['-10042']];
-  for (const savedIds of lists)
-    for (const draft of lists)
-      for (const people of [{}, saved]) {
-        const ids = withGroupListed(draft, find(UPGRADED), true, savedIds);
-        const key = accessKey({}, find(UPGRADED), ids, people);
-        assert.ok(ids.includes(key), JSON.stringify({savedIds, draft, people, ids, key}));
-      }
-  // The saved people come back under the id the group is listed by after it is turned off and on again.
-  const off = withGroupListed(['-10042', '-4005'], find(UPGRADED), false);
-  const on = withGroupListed(off, find(UPGRADED), true, ['-10042', '-4005']);
-  assert.deepEqual(on, ['-10042', '-4005']);
-  assert.equal(accessKey({}, find(UPGRADED), on, saved), '-4005');
+  assert.equal(accessKey(saved, find(UPGRADED)), '-4005');
+  assert.equal(accessKey({}, find(UPGRADED), saved), '-4005', 'a draft that dropped them all keeps the saved key');
+  assert.equal(accessKey({'-10099': {granted: ['74'], denied: []}}, find(UPGRADED), saved), '-10099');
+  assert.equal(accessKey({}, find(UPGRADED)), '-10099', 'nobody yet: its current id');
+  assert.equal(accessKey({}, find(NEW)), '-10088');
+  assert.equal(accessKey({}, unknownChat(NEW)), null, 'no Telegram id, no key');
+  // Another group's people never decide this one's key.
+  assert.equal(accessKey({'-10042': {granted: ['73'], denied: []}}, find(UPGRADED)), '-10099');
 });
 
 test('a rule keeps the search hits of its sources’ groups, matched by the hit’s chat, never by its raw scope', () => {

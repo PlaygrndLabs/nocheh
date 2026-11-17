@@ -7,11 +7,11 @@ import {connectStores,initializeStoreDatabases,storeNames,type StorePasswords} f
 import {storeSchemas} from '../src/stores/schema.js';
 import {resetSetupSnapshot,restoreResetSetup} from '../src/stores/reset-setup.js';
 import {verifyResetBaseline} from '../src/stores/reset-baseline.js';
-import {chatRows,sortedChats} from '../src/stores/reset-setup.js';
+import {chatRows,restoredChats,sortedChats} from '../src/stores/reset-setup.js';
 import {ChatSeeder} from '../src/stores/chat-seed.js';
 import {accountIdFor,chatDirectory,chatIdFor} from '../src/chats.js';
 import {loadChatSnapshot} from '../src/stores/chats.js';
-import {NG2,NG2_OLD_TG,NG2_TG} from './fixture-groups.js';
+import {GP1,NG1,NG1_TG,NG1_TOPIC,NG1_TOPIC_KEY,NG2,NG2_OLD_TG,NG2_TG} from './fixture-groups.js';
 
 const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000};
 /** Empty stores in a schema of their own, with the grants the services have. */
@@ -110,11 +110,14 @@ test('reset setup restores only current configuration under a new generation and
     await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'foreign','active',1)",['d'.repeat(64)]);
     await assert.rejects(restoreResetSetup(stores,input),/target_changed/);
     // A version 1 snapshot, taken before step 2b, names chats by their old values: it restores none, and the seeder
-    // gives each value its row, with the same id, when the app starts (ADR-0252).
+    // gives each value its row, with the same id, when the app starts (ADR-0252). Its group_ids is ignored: its groups
+    // come up off until the owner turns them on, and only the owner's private chat is on (ADR-0253).
     assert.deepEqual(await chatRows(stores.control),{chats:[],chat_ids:[]});
-    await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001','-1002']}).seed();
+    assert.deepEqual((await stores.control.query(`SELECT v.document FROM runtime_configuration c JOIN runtime_configuration_versions v USING(name,revision)`)).rows[0].document,
+      {enabled:true,owner_id:'123'},'the restored runtime document leaves the old group list out');
+    await new ChatSeeder(stores,{owner_id:'123'}).seed();
     assert.deepEqual((await chatRows(stores.control)).chats.map(row=>[row.id,row.kind,row.parent_id,row.state]),
-      [['-1001','group',null,'active'],['-1001/topic/3','topic','-1001','active'],['-1002','group',null,'active'],['123','private',null,'active']]);
+      [['-1001','group',null,'off'],['-1001/topic/3','topic','-1001','off'],['-1002','group',null,'off'],['123','private',null,'active']]);
   } finally {await drop();}
 });
 
@@ -152,13 +155,41 @@ test('a version 2 snapshot restores its chats and app ids exactly, and decides w
     // The app's start then finds every value already has its row...
     const people=async()=>(await stores.control.query(`SELECT id,account_id FROM chats WHERE kind='private'`)).rows.map(row=>[row.id,row.account_id]).sort();
     assert.deepEqual(await people(),[['123',null],[bob,null]].sort(),'a snapshot carries no person');
-    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001',NG2_TG]}).seed(),{chats:0,topics:0});
+    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123'}).seed(),{chats:0,topics:0});
     // ...and names each restored private chat's person by its Telegram id, so the owner's and a member's private chat are
     // theirs again: Answer privately claims only in the asker's own private chat, found by its person (ADR-0249).
     assert.deepEqual(await people(),[['123',accountIdFor('telegram','123')],[bob,accountIdFor('telegram','456')]].sort());
     const directory=chatDirectory(await loadChatSnapshot(stores.control,{owner_id:'123'}));
     assert.equal(directory.get(bob)?.account_id,accountIdFor('telegram','456'));assert.equal(directory.ownerChat(),'123');
-    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123',group_ids:['-1001',NG2_TG]}).seed(),{chats:0,topics:0});
+    assert.deepEqual(await new ChatSeeder(stores,{owner_id:'123'}).seed(),{chats:0,topics:0});
     assert.deepEqual(await people(),[['123',accountIdFor('telegram','123')],[bob,accountIdFor('telegram','456')]].sort(),'a second start changes nothing');
+  } finally {await drop();}
+});
+
+test('a group still waiting to be left when the snapshot was taken, and its topic, come back off',fixture,async()=>{
+  const {stores,drop}=await freshStores();
+  // Someone else added Nocheh to NG1 and its leave had not happened yet; GP1's leave was tried and refused.
+  const chat=(id:string,kind:'group'|'topic'|'private',state:string,extra:Record<string,unknown>={})=>({id,app:'telegram',kind,parent_id:null,topic_key:null,
+    app_type:kind==='topic'?null:kind==='private'?'private':'supergroup',title:null,title_source:null,is_forum:false,state,...extra});
+  const chats=[chat(NG1,'group','pending',{is_forum:true}),chat(NG1_TOPIC,'topic','pending',{parent_id:NG1,topic_key:NG1_TOPIC_KEY}),
+    chat(GP1,'group','could_not_leave'),chat('123','private','active')];
+  const chatIds=[{app:'telegram',external_id:NG1_TG,chat_id:NG1,state:'current',reason:null},{app:'telegram',external_id:GP1,chat_id:GP1,state:'current',reason:null},
+    {app:'telegram',external_id:'123',chat_id:'123',state:'current',reason:null}];
+  const snapshot={format:'nocheh-reset-configuration-v2',layout:'original-only-v1',configuration:{
+    security_policy:[{document:{version:1,rules:[]}}],installation_generation:[{generation:'11111111-1111-4111-8111-111111111111'}],guard_mode:[{mode:'on'}],
+    runtime_configuration:[{name:'assistant',document:{enabled:true,owner_id:'123'}}],projects:[],project_assignments:[],sharing_rules:[],
+    memory_access_settings:[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time'}],
+    chat_tool_settings:[],runtime_profiles:[],chats,chat_ids:chatIds}};
+  const input={snapshot,generation:'22222222-2222-4222-8222-222222222222',reset_id:'44444444-4444-4444-8444-444444444444',profile_commands:[]};
+  try {
+    assert.deepEqual(resetSetupSnapshot(snapshot),snapshot);
+    const first=await restoreResetSetup(stores,input),again=await restoreResetSetup(stores,input);
+    assert.deepEqual(again,first,'a second restore finds the chats it wrote');
+    // The reset does not carry the leave, so nothing would ever leave the group or settle it: it is silent and the owner can switch it.
+    const byId=(a:{id:string},b:{id:string})=>a.id<b.id?-1:1,states=async()=>(await stores.control.query('SELECT id,state,added_by_role,add_event FROM chats')).rows.sort(byId);
+    assert.deepEqual(await states(),[{id:NG1,state:'off',added_by_role:'seeded',add_event:null},{id:NG1_TOPIC,state:'off',added_by_role:'seeded',add_event:null},
+      {id:GP1,state:'could_not_leave',added_by_role:'seeded',add_event:null},{id:'123',state:'active',added_by_role:'seeded',add_event:null}].sort(byId));
+    assert.deepEqual(await chatRows(stores.control),restoredChats(snapshot.configuration as any));
+    await verifyResetBaseline(stores,input);
   } finally {await drop();}
 });

@@ -12,6 +12,8 @@ import {isTelegramAccount,isTelegramChat,telegramTopicId} from './chats-telegram
  * linked channel's posts into its discussion group.
  */
 const proxyAccounts=new Set(['1087968824','136817688','777000']);
+/** GroupAnonymousBot and Channel_Bot: a bot-status change from them hides who made it. */
+const hiddenAdders=new Set(['1087968824','136817688']);
 const record=(value:unknown):Record<string,any>=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:{};
 const clean=(value:unknown,length=200):string|null=>typeof value==='string'&&value.trim()?value.replace(/\s+/g,' ').trim().slice(0,length):null;
 const external=(value:unknown):string=>typeof value==='number'&&Number.isSafeInteger(value)?String(value):typeof value==='string'?value:'';
@@ -44,7 +46,14 @@ export interface TelegramUpdateFacts {
   migration:{from:string;to:string}|null;
   /** The update is a message (or a message edit), which counts as the chat being seen. */
   message:boolean;
+  /** A my_chat_member update: whether this bot was in the chat before and after, and who changed it (ADR-0253). */
+  bot_status:TelegramBotStatus|null;
 }
+/**
+ * by is the person or bot Telegram names as the changer; null when nobody is named or the change came from an
+ * anonymous admin or a channel (anonymous). self: this bot changed its own status (it left on its own).
+ */
+export interface TelegramBotStatus {was_in:boolean;now_in:boolean;by:TelegramPerson|null;anonymous:boolean;self:boolean}
 
 function person(value:unknown):TelegramPerson|null {
   const actor=record(value),id=external(actor.id);
@@ -79,15 +88,17 @@ function topicName(message:Record<string,any>,key:string):string|null {
 /**
  * The facts in one Telegram update whose archive scope is `scope` (the chat's Telegram id). An update about another
  * chat, or one with no chat, has no chat facts. Membership is only what Telegram shows: a person who sent a message is
- * in, new_chat_members are in, left_chat_member is out, and a chat_member update says either.
+ * in, new_chat_members are in, left_chat_member is out, and a chat_member update says either. `bot` is the Telegram id
+ * of the bot that received the update (the archive row's bot_id): a my_chat_member update about another bot, or one
+ * whose statuses Telegram did not name, has no bot status.
  */
-export function telegramUpdateFacts(payload:unknown,scope:string):TelegramUpdateFacts {
+export function telegramUpdateFacts(payload:unknown,scope:string,bot:string|null=null):TelegramUpdateFacts {
   const update=record(payload),message=record(update.message??update.edited_message??update.channel_post??update.edited_channel_post);
   const memberUpdate=record(update.chat_member);
   const source=Object.keys(message).length?message.chat:update.chat_member?.chat??update.my_chat_member?.chat??update.message_reaction?.chat??
     update.message_reaction_count?.chat??update.chat_join_request?.chat??update.chat_boost?.chat;
   const found=chat(source),facts:TelegramUpdateFacts={update_id:Number.isSafeInteger(update.update_id)&&update.update_id>=0?update.update_id:null,
-    chat:found&&found.external===scope?found:null,topic:null,people:[],memberships:[],migration:null,message:Object.keys(message).length>0};
+    chat:found&&found.external===scope?found:null,topic:null,people:[],memberships:[],migration:null,message:Object.keys(message).length>0,bot_status:null};
   if(!facts.chat)return facts;
   const people=new Map<string,TelegramPerson>(),seen=(value:TelegramPerson|null)=>{if(value&&!people.has(value.external))people.set(value.external,value);return value;};
   // One membership per person: what the update says last about them wins, so leaving outranks the leave message's sender.
@@ -108,6 +119,13 @@ export function telegramUpdateFacts(payload:unknown,scope:string):TelegramUpdate
   if(Object.keys(memberUpdate).length) {
     const update=record(memberUpdate.new_chat_member),state=present(update);seen(person(memberUpdate.from));
     const who=seen(person(update.user));if(state!==null)member(who,state?'in':'left','event');
+  }
+  const status=record(update.my_chat_member);
+  if(!facts.message&&Object.keys(status).length) {
+    const before=present(record(status.old_chat_member)),after=present(record(status.new_chat_member));
+    const subject=external(record(record(status.new_chat_member).user).id),from=person(status.from);
+    const anonymous=!from||hiddenAdders.has(from.external),by=anonymous?null:seen(from);
+    if(before!==null&&after!==null&&(bot===null||subject===bot))facts.bot_status={was_in:before,now_in:after,by,anonymous,self:bot!==null&&by?.external===bot};
   }
   facts.memberships=[...members.values()];
   facts.people=[...people.values()];

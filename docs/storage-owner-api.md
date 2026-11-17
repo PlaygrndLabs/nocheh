@@ -39,6 +39,8 @@ source identifiers and links do not change when a derivative is activated.
 | POST `/v1/learned/:id/correct` | Owner correction or retirement with an expected revision |
 | GET/POST `/v1/projects` | List, with each project's served `groups`, or create/edit/archive a project |
 | GET/POST `/v1/projects/assignments` | A group's project, or none; a topic only follows its group |
+| POST `/v1/chats/state` | Turn Nocheh on or off in a group it is in, at once and as one owner command: `chat_id`, `state` (`active` or `off`), `operation_id`, and, only when turning it on, an optional `project` (`{"mode":"new"}` for a new project named after the group, `{"mode":"assigned","project_id":…}` or `{"mode":"none"}`); answers `chat_id`, `state` and `project_id`; 400 `chat_not_group`, 404 `chat_not_found`, 409 `chat_not_joined` for a group Nocheh left, was removed from or knows only from imported history ([ADR-0253](adr/0253-only-the-owner-adds-nocheh.md)) |
+| POST `/v1/telegram/chats/refresh` | Ask Telegram for the current names of up to 50 groups Nocheh is on in, those never refreshed first, then those refreshed longest ago, ties by id; sends nothing to a chat and never changes whether a group is on, though an upgraded group gets its new id at once; answers `chats` (one row per Telegram id asked, so an upgraded group answers twice) and `remaining`, the groups not asked that were not refreshed in the last hour, counted once each; 503 `telegram_refresh_unavailable` when Telegram cannot be asked ([ADR-0253](adr/0253-only-the-owner-adds-nocheh.md)) |
 | GET `/v1/projects/effective?space=…` | Effective membership, with inheritance shown |
 | GET/POST `/v1/sharing/rules` | Selected source spaces, exact destination, mode and enabled state |
 | POST `/v1/sharing/preview`; GET `/v1/sharing/previews[/:id]`; POST `/v1/sharing/previews/:id/approve` | Prepare, inspect or approve a release from chosen sources |
@@ -54,8 +56,14 @@ build or parse one; find a chat in GET `/v1/conversations`, whose `q` matches a
 chat's id, its name, its group's name and every Telegram ID it has had, current
 or old (a topic has its group's), and whose items carry `kind`, `parent_space`, `topic_key`,
 `app_ids` (each app id with `current` or `old`, so an upgraded group lists both),
-`is_forum`, `state` and `owner`. Only a group the chat directory knows, or one of
-its topics, joins a project or shares; any other id counts as a private chat.
+`is_forum`, `state` and `owner`. Optional `kind` (`private`, `group` or `topic`)
+and `state` (any chat state; a topic is in its group's) keep only matching
+chats. They apply with `q` before paging, so a page and its `next_cursor` hold
+only matches; a bad value is refused with `invalid_conversation_kind` or
+`invalid_conversation_state`. `/v1/owner/conversations` takes them too
+([ADR-0253](adr/0253-only-the-owner-adds-nocheh.md)). Only a group the chat
+directory knows, or one of its topics, joins a project or shares; any other id
+counts as a private chat.
 
 List cursors use `after`; histories use `before`. Learned filters use both
 `scope_kind=conversation|project` and `scope_id`. Sharing rules configure preparation;

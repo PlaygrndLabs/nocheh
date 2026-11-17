@@ -65,6 +65,7 @@ import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
 import {PrivateAnswerRepository} from './private-answers.js';
 import {ChatRepository} from './chats.js';
+import {ChatAdds} from './chat-adds.js';
 import {accountIdFor} from '../chats.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
@@ -103,6 +104,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   // Nocheh's chat records (ADR-0252): what each captured Telegram original says of its chat, its topic and its people.
   const chats=new ChatRepository(stores,options.policy);
   const capture=new CaptureCoordinator(archive,stores.control,new GeneratedCaptureRepository(operations,derived),chats);
+  // What is left to do once someone adds Nocheh to a group or removes it: leave, the card and the owner's notes (ADR-0253).
+  const chatAdds=new ChatAdds(stores.control,options.policy,options.runtime,chats);
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
   const memoryMap=new MemoryMapRepository(stores,memoryAccess);
@@ -151,7 +154,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),...await sender(source.reference.id)};
   },{call:options.runtime,owner:()=>ownerChat(options.policy()),policy:options.policy,record:send=>chatSends.recordLocal(send)},topicMemory);
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
-  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers),machines=new MachineRepository(access,jobs);
+  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers,chatAdds),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
   // A card edit is best effort: a job or an operation never fails because its card could not be updated.
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
@@ -160,7 +163,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const supervision=new OwnerSupervisionRepository({stores,projects,controlledActions,telegramActions,memory,knowledge,shared,chats,memoryAccess});
   // Voice notes saved before a transcription provider was chosen are transcribed once one is.
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
-  return {brain:options.brain,chats,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {brain:options.brain,chats,chatAdds,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

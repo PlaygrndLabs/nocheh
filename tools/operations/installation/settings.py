@@ -34,10 +34,16 @@ def revision(values):
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
 
+# A retired setting stays in an older .env; at its old default it is still left out, so an upgrade
+# does not ask for Apply. A listed group list was in the revision before and stays in it.
+RETIRED_DEFAULTS = {'TELEGRAM_GROUP_IDS': ''}
+
+
 def service_revision(values):
     """What the running services use; Apply records it. Settings that work live are left out, and so
-    are settings at their default, so a newly added setting does not ask for Apply."""
-    return revision({key: value for key, value in values.items() if key not in LIVE and DEFAULTS.get(key) != value})
+    are settings at their default, so a newly added or retired setting does not ask for Apply."""
+    defaults = {**RETIRED_DEFAULTS, **DEFAULTS}
+    return revision({key: value for key, value in values.items() if key not in LIVE and defaults.get(key) != value})
 
 
 def view(state):

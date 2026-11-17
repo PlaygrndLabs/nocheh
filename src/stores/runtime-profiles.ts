@@ -35,11 +35,10 @@ export class RuntimeProfileRepository {
   private owner(){const id=this.access.policy().owner_id;if(!id)throw new HttpError(409,'owner_profile_unavailable');return id;}
   /** The owner's private chat, whose profile is the default (ADR-0252: its chat id, not the owner's account). */
   private ownerChat(){const id=ownerChat(this.access.policy());if(!id)throw new HttpError(409,'owner_profile_unavailable');return id;}
-  /** The served groups, by chat id, in the order the policy names them, then any other the directory serves. */
+  /** The served groups, by chat id, in the directory's order: the active groups (chats.state, ADR-0253). */
   private groups():string[] {
-    const directory=chats(),group=(id:string|null):id is string=>!!id&&directory.kind(id)==='group'&&directory.served(id);
-    return [...new Set([...this.access.policy().group_ids.map(id=>directory.resolve('telegram',id)).filter(group),
-      ...directory.all().map(chat=>chat.id).filter(group)])];
+    const directory=chats();
+    return directory.all().map(chat=>chat.id).filter(id=>directory.kind(id)==='group'&&directory.served(id));
   }
   private entry(space:string,binding:GuardBinding,custom?:any,label?:Label){
     // A profile's name and session are made from its chat id, unchanged for a chat stored before step 2b (ADR-0252).

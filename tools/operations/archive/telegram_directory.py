@@ -48,9 +48,11 @@ def _bot_api(token, method, **params):
     return result.get('result') if isinstance(result, dict) and result.get('ok') is True else None
 
 
-def directory(state, archive=None, bot_api=_bot_api):
+def directory(state, archive=None, bot_api=_bot_api, served=None):
+    """Each group storage knows, with who is in it. Telegram is asked about each group Nocheh serves now (`served`, the
+    app's served list: services/chats.py) by its Telegram id now, and about the people saved for it under any Telegram id
+    it has had."""
     values = load(state)
-    selected = [group.strip() for group in values['TELEGRAM_GROUP_IDS'].split(',') if GROUP.fullmatch(group.strip())]
     if archive is None:
         try:
             from tools.operations.archive.archive import API
@@ -59,10 +61,16 @@ def directory(state, archive=None, bot_api=_bot_api):
             archive = {'groups': [], 'truncated': False}
     if not isinstance(archive, dict):
         archive = {'groups': [], 'truncated': False}
-    # A group storage knows keeps its Nocheh chat id, which is how the dashboard opens it; its Telegram ids, current and
-    # older, only match TELEGRAM_GROUP_IDS and name it to Telegram (ADR-0252). A group only that list names is named by
-    # the Telegram id it gives. Nocheh ids and Telegram ids are kept apart and never compared.
-    groups, by_telegram = {}, {}
+    if served is None:
+        from services.chats import Served
+        try:
+            from tools.operations.archive.archive import served_chats
+            served = served_chats()
+        except Exception:
+            served = Served.empty(False)
+    # A group keeps its Nocheh chat id, which is how the dashboard opens it and how the served list names it; its
+    # Telegram ids only name it to Telegram (ADR-0252). Nocheh ids and Telegram ids are kept apart and never compared.
+    groups = {}
     for observed in archive.get('groups', []):
         if not isinstance(observed, dict):
             continue
@@ -70,11 +78,6 @@ def directory(state, archive=None, bot_api=_bot_api):
         if not identifier or ('chat', identifier) in groups:
             continue
         external = _id(observed.get('external'), GROUP)
-        telegram = observed.get('telegram_ids') if isinstance(observed.get('telegram_ids'), list) else []
-        for value in [external, *telegram[:20]]:
-            value = _id(value, GROUP)
-            if value:
-                by_telegram.setdefault(value, ('chat', identifier))
         users = {}
         for user in observed.get('users', []):
             person = _person(user) if isinstance(user, dict) else None
@@ -87,9 +90,12 @@ def directory(state, archive=None, bot_api=_bot_api):
                 users[person['id']] = person
         groups[('chat', identifier)] = {'id': identifier, 'external': external or None, 'name': _clean(observed.get('name')) or None, 'users': users}
     token = values['TELEGRAM_BOT_TOKEN']
-    for identifier in selected[:20]:
-        key = by_telegram.get(identifier, ('telegram', identifier))
-        group = groups.setdefault(key, {'id': identifier, 'external': identifier, 'name': None, 'users': {}})
+    selected = served.groups()
+    for served_group in selected[:20]:
+        identifier = _id((served.address(served_group) or ('',))[0], GROUP)
+        if not identifier:
+            continue
+        group = groups.setdefault(('chat', served_group), {'id': served_group, 'external': identifier, 'name': None, 'users': {}})
         if not token:
             continue
         try:
@@ -102,12 +108,13 @@ def directory(state, archive=None, bot_api=_bot_api):
                 if person:
                     group['users'][person['id']] = person
             candidates = {values['TELEGRAM_OWNER_ID']}
-            try:
-                access = json.loads(values['TELEGRAM_GROUP_ACCESS']).get(identifier, {})
-                candidates.update(access.get('granted', []))
-                candidates.update(access.get('denied', []))
-            except (TypeError, ValueError, AttributeError):
-                pass
+            for external in served.app_ids(served_group):
+                try:
+                    access = json.loads(values['TELEGRAM_GROUP_ACCESS']).get(external, {})
+                    candidates.update(access.get('granted', []))
+                    candidates.update(access.get('denied', []))
+                except (TypeError, ValueError, AttributeError):
+                    pass
             for user_id in sorted(value for value in candidates if isinstance(value, str))[:40]:
                 if not USER.fullmatch(user_id) or user_id in group['users']:
                     continue
