@@ -243,8 +243,9 @@ becomes your private memory"). One pull request of several commits
   when the archive never got the pinned message, which Telegram sends without its reply. So is a
   quote inside a message another embeds (a poll or a checklist a service message shows), traced
   through that message as archived in the same chat: one quoting Nocheh's words is cut from
-  everything learned, and so is one the archive can't trace, counted as a quote that could not
-  be traced (`quote_not_traced`), whoever it quoted. A pin
+  everything learned, and so is one the archive can't trace (that message never archived,
+  archived in a revision answering nothing, or archived only as Telegram Desktop exports),
+  counted as a quote that could not be traced (`quote_not_traced`), whoever it quoted. A pin
   of Nocheh's own message is never counted as kept out: one it
   learns stays in the pin, and a card, notice or reminder is taken out of it, so a pin of a card
   with nothing else to review is not reviewed at all. Memory › Assistant

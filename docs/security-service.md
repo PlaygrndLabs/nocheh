@@ -146,9 +146,11 @@ to), is kept and labelled: only Nocheh's own words in it are cut, and a quote
 inside it is traced through the archived event of the embedded message itself,
 as a pinned message's quote is: one quoting Nocheh's words is cut from
 everything learned, and so is one the archive can't trace (that message never
-archived, or archived answering nothing), counted as `quote_not_traced`,
-whoever it quoted. The owner's notes review cuts one from someone not allowed
-there, a traced quote of such a person, a poll option such a person added or
+archived, archived in a revision answering nothing, or archived only as
+Telegram Desktop exports), counted as `quote_not_traced`, whoever it quoted.
+The owner's notes review cuts one from someone not allowed there, a quote inside
+one of such a person's message (one of a message in another chat included,
+judged as a top-level quote of one is), a poll option such a person added or
 one added in a chat's name, and a deleted option's text other than the owner's
 own in the owner's private chat, counting the message as kept out. In the
 owner's notes review a quote inside a pinned message is judged by who wrote the

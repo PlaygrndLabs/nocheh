@@ -154,18 +154,26 @@ a recalled note names its source beside its chat).
   id Telegram gives it, looked up only when Telegram names the same chat for
   both, told by equality (`embeddedSource`, `NoteSourceRepository.embeddedTo`).
   It is cut from everything learned when a revision of that message answers
-  Nocheh's words, and also when the archive does not hold that message or holds
-  it answering nothing, since then nothing tells whose words the quote repeats
-  (it fails closed). That second cut is counted as `quote_not_traced`, in the
-  review's `left_out` and its records line (`quotes_not_traced`), and named
-  among the learning context's limitations. Interpretations and Honcho read the
-  rest, labelled. The owner's notes review judges each one by its author as it
-  judges a message in that chat (`notesSender`), and a post in a chat's name is
-  never allowed: one from someone not allowed there is cut out of the message
-  holding it, the rest of that message stays, and the message counts once as
-  `sender_not_allowed`. A traced quote inside one is judged there as a pinned
-  message's quote is, each archived revision of its message asked as a message
-  quoting is (`quotedSender`), and one refused is cut and counted the same way.
+  Nocheh's words, and also when the archive does not hold that message, holds a
+  revision of it answering nothing, or holds only Telegram Desktop exports of
+  it, since then nothing tells whose words the quote repeats (it fails closed).
+  An export records its reply as `reply_to_message_id`, which can't tell
+  Nocheh's card from a learned reply, so it never traces a quote alone; beside a
+  live revision that shows the reply, it answers as that one does. That second
+  cut is counted as `quote_not_traced`, in the review's `left_out` and its
+  records line (`quotes_not_traced`), and named among the learning context's
+  limitations. Interpretations and Honcho read the rest, labelled. The owner's
+  notes review judges each one by its author as it judges a message in that
+  chat (`notesSender`), and a post in a chat's name is never allowed: one from
+  someone not allowed there is cut out of the message holding it, the rest of
+  that message stays, and the message counts once as `sender_not_allowed`. Every
+  quote inside one is judged there as a pinned message's quote is, through that
+  message's archived revisions in the same chat (`embeddedTo` with every quote),
+  each asked as a message quoting is (`quotedSender`): one whose embedded copy
+  keeps its reply to a message in another chat (`external_reply`) is judged by
+  that message alone, as a top-level quote of one is, and stays when the archive
+  holds it and its sender is allowed where they wrote it. One refused is cut and
+  counted the same way.
   A message Telegram no longer shows (an `InaccessibleMessage`: date 0 and
   nothing but its chat, id and date, `inaccessible`) carries nothing and stays;
   one with date 0 and anything else, a shape Telegram does not send, is judged
@@ -694,13 +702,16 @@ a recalled note names its source beside its chat).
     (`checklist_tasks_added`) is kept out as theirs. A message Telegram no
     longer shows inside another (date 0 and nothing but its chat, id and date)
     carries nothing to judge and stays.
-  - A quote inside an embedded message whose message the archive never got, or
-    holds answering nothing, is cut from everything learned, whoever it quoted,
-    since nothing tells whose words it repeats; it is counted as
-    `quote_not_traced`. A quote inside an embedded message that answers one in
-    another chat (`external_reply`) is judged by that message alone and, in the
-    owner's notes review, is cut and counted as `sender_not_allowed`, as a
-    quote of a message in another chat is.
+  - A quote inside an embedded message whose message the archive never got,
+    holds in a revision answering nothing, or holds only as Telegram Desktop
+    exports, is cut from everything learned, whoever it quoted, since nothing
+    tells whose words it repeats; it is counted as `quote_not_traced`. A quote
+    inside an embedded message that answers one in another chat
+    (`external_reply`) is judged by that message alone, as a top-level quote of
+    one is: in the owner's notes review it stays when the archive holds the
+    embedded message and the one it answers and that one's sender is allowed
+    where they wrote it, and is otherwise cut and counted as
+    `sender_not_allowed`.
   - A poll option Telegram shows with no adder is read as the poll's own, its
     sender's, since Telegram names who added every option added after the poll
     was sent; Nocheh can't tell otherwise.
