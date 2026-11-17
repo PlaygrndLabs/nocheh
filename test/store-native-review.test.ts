@@ -10,12 +10,13 @@ import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {observedSource} from '../src/observed-source.js';
 import {fixtureServices} from './fixture-brain.js';
-import {NativeReviewRepository,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
+import {NativeReviewRepository,nativeAttemptLimit,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {captureEvidence} from '../src/stores/generated-capture.js';
 import {evidenceMarker,legendIntro,reviewBody} from '../src/source-labels.js';
+import {requestWorkflow} from '../src/workflows/store.js';
 
 test('native review preserves profile waits, guarded inputs, durable completion and uncertain execution identity',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -23,20 +24,25 @@ test('native review preserves profile waits, guarded inputs, durable completion 
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-')),key='review:'+Date.now(),group='-'+Date.now();
-  const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null},receipts=new Set<string>();
-  let mode:'busy'|'lose'|'missing'|'done'='busy',writes=0,requests=0,observations=0;
+  const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null},receipts=new Set<string>(),launched=new Set<string>();
+  // missing: the start never reaches the brain; cut: the brain launches the review and its answer is lost.
+  let mode:'busy'|'lose'|'missing'|'cut'|'done'='busy',writes=0,requests=0,observations=0,observed:((id:string)=>Promise<unknown>)|null=null;
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};
       assert.equal(operation,'memory.review');assert.equal(input.scope,'123');
-      if(input.observe_only){observations++;assert.equal(input.archive_credential,undefined);return {state:receipts.has(String(input.id))?'done':'not_found'};}
+      if(input.observe_only) {
+        observations++;assert.equal(input.archive_credential,undefined);await observed?.(String(input.id));
+        return {state:receipts.has(String(input.id))?'done':launched.has(String(input.id))?'ambiguous':'not_found'};
+      }
       requests++;assert.ok(!String(input.content).includes('saffronpass'));
       const actor=reader({headers:{authorization:'Bearer '+input.archive_credential}} as IncomingMessage,token),binding=await services.turns.binding(actor);
       assert.equal(actor.purpose,'memory-review');assert.equal(binding.scope,'123');assert.equal(binding.owner,true);
       await assert.rejects(services.turns.binding({...actor,purpose:'assistant'}),{code:'turn_source_denied'});
       assert.equal(binding.profile,services.turns.profile({...actor,purpose:'assistant'},await services.guards.state()));
       if(mode==='busy')return {state:'waiting',error_code:'profile_busy'};
-      if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');
+      if(mode==='missing')throw Error('synthetic_connection_lost_before_launch');
+      launched.add(String(input.id));if(mode==='cut')throw Error('synthetic_connection_lost_after_launch');
       receipts.add(String(input.id));writes++;if(mode==='lose')throw Error('synthetic_lost_completion');return {state:'done'};
     },memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const makeSource=async(index:number)=>{
@@ -77,14 +83,46 @@ test('native review preserves profile waits, guarded inputs, durable completion 
     const beforeRecovery={requests,observations,writes};assert.equal(await services.reviews.run(next,authority),'done');
     assert.deepEqual({requests,observations,writes},beforeRecovery,'durable completion requires neither native execution nor another observation');
 
-    const third=await makeSource(3),uncertain=((await services.reviews.queue(third)).ids)[0]!;mode='missing';
-    assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');const attempted=requests;
+    // A review the brain launched before its answer was lost has a start record: no receipt does not authorize repeating it.
+    const third=await makeSource(3),uncertain=((await services.reviews.queue(third)).ids)[0]!;mode='cut';
+    assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');let attempted=requests;
     assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');assert.equal(requests,attempted,'no receipt does not authorize repeating a native note mutation');
     const suspended=await services.reviews.controlJob(owner,uncertain,{action:'pause',expected_revision:1});assert.equal(suspended.state,'ambiguous');assert.equal(suspended.paused,true);
     assert.equal(await services.reviews.run(uncertain,authority),'paused');
     await services.reviews.controlJob(owner,uncertain,{action:'resume',expected_revision:2});
     assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');assert.equal(requests,attempted);
-    const fourth=await makeSource(4),notStarted=((await services.reviews.queue(fourth)).ids)[0]!;
+
+    // A start the brain never received leaves no start record: the review waits again as new work and runs once.
+    const lost=((await services.reviews.queue(await makeSource(5))).ids)[0]!;mode='missing';
+    assert.equal(await services.reviews.run(lost,authority),'ambiguous');assert.equal(requests,++attempted);
+    assert.equal(await services.reviews.run(lost,authority),'pending');assert.equal(requests,attempted,'an observation starts nothing');
+    const requeued=await services.reviews.inspect(lost);
+    assert.deepEqual([requeued.state,requeued.attempts,requeued.reconciliations,requeued.error_code],['pending',1,0,'native_review_not_started']);
+    mode='done';const written=writes;
+    assert.equal(await services.reviews.run(lost,authority),'done');assert.equal(requests,++attempted);assert.equal(writes,written+1,'the review ran exactly once');
+    assert.equal((await services.reviews.inspect(lost)).attempts,2);
+    assert.equal(await services.reviews.run(lost,authority),'done');assert.equal(requests,attempted);
+
+    // So does a review the app claimed and then stopped mid-request.
+    const stopped=((await services.reviews.queue(await makeSource(6))).ids)[0]!;
+    await stores.control.query("UPDATE native_review_jobs SET state='running',attempts=1 WHERE id=$1",[stopped]);
+    assert.equal(await services.reviews.run(stopped,authority),'pending');assert.equal(requests,attempted);
+    assert.deepEqual(await services.reviews.inspect(stopped).then(row=>[row.state,row.attempts]),['pending',1]);
+
+    // An owner pause during the observation wins: the review stays paused and uncertain until the owner resumes it.
+    const held=((await services.reviews.queue(await makeSource(7))).ids)[0]!;mode='missing';
+    assert.equal(await services.reviews.run(held,authority),'ambiguous');assert.equal(requests,++attempted);
+    observed=async id=>{observed=null;await services.reviews.controlJob(owner,id,{action:'pause',expected_revision:(await services.reviews.inspect(id)).revision});};
+    assert.equal(await services.reviews.run(held,authority),'ambiguous');
+    const paused2=await services.reviews.inspect(held);
+    assert.deepEqual([paused2.state,paused2.paused,paused2.error_code],['ambiguous',true,'native_review_unconfirmed']);
+    await services.reviews.controlJob(owner,held,{action:'resume',expected_revision:paused2.revision});
+    assert.equal(await services.reviews.run(held,authority),'pending');assert.equal(requests,attempted);
+
+    // Waiting again, it is new work: consent revoked before it starts again keeps it from starting.
+    const fourth=await makeSource(4),notStarted=((await services.reviews.queue(fourth)).ids)[0]!;mode='missing';
+    assert.equal(await services.reviews.run(notStarted,authority),'ambiguous');assert.equal(requests,++attempted);
+    assert.equal(await services.reviews.run(notStarted,authority),'pending');
     await services.access.setConsent(owner,fourth,{enabled:false,expected_revision:0,operation_id:key+':revoke'});
     await assert.rejects(services.reviews.run(notStarted,authority),{code:'guard_context_changed'});assert.equal(requests,attempted);
     receipts.add(uncertain);assert.equal(await services.reviews.run(uncertain,authority),'done','old native receipts reconcile without granting old contexts');assert.equal(requests,attempted);
@@ -99,13 +137,16 @@ test('native review runs once per source across authorization epochs and stops o
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-once-')),key='review-once:'+Date.now(),group='-'+Date.now();
   const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null};
-  let mode:'done'|'missing'|'running'|'failed'='done',starts=0,observations=0;
+  // missing: the start never reaches the brain; cut: the brain launches the review and its answer is lost.
+  let mode:'done'|'missing'|'cut'|'running'|'failed'='done',starts=0,observations=0;const launched=new Set<string>();
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
       assert.equal(operation,'memory.review');
-      if(input.observe_only){observations++;return {state:mode==='running'?'running':mode==='failed'?'failed':'ambiguous'};}
-      starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_receipt');return {state:['running','failed'].includes(mode)?'running':'done'};
+      if(input.observe_only){observations++;return {state:!launched.has(String(input.id))?'not_found':mode==='running'?'running':mode==='failed'?'failed':'ambiguous'};}
+      starts++;if(mode==='missing')throw Error('synthetic_connection_lost_before_launch');
+      launched.add(String(input.id));if(mode==='cut')throw Error('synthetic_connection_lost_after_launch');
+      return {state:['running','failed'].includes(mode)?'running':'done'};
     },memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
   const makeSource=async(index:number,text='Synthetic note '+index,reply?:number)=>{
     const event:Envelope={version:1,key:key+':'+index,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:String(index),revision:'1',occurred_at:null,
@@ -154,8 +195,8 @@ test('native review runs once per source across authorization epochs and stops o
     await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[changed]);
     assert.equal((await operations.memory_review!('native:'+queued,authority)).state,'completed');assert.equal(starts,3);
 
-    // A review whose start was never confirmed is observed with growing gaps, never relaunched, then closed as uncertain.
-    const [uncertain]=(await services.reviews.queue(await makeSource(3))).ids;mode='missing';
+    // A review launched without a confirmed answer is observed with growing gaps, never relaunched, then closed as uncertain.
+    const [uncertain]=(await services.reviews.queue(await makeSource(3))).ids;mode='cut';
     assert.equal(await services.reviews.run(uncertain!,authority),'ambiguous');assert.equal(starts,4);
     const gaps:number[]=[];
     for(let index=0;index<nativeReconcileLimit;index++) {
@@ -314,6 +355,40 @@ test('native review runs once per source across authorization epochs and stops o
     assert.equal(replacedText.split('\n')[0],failedText.split('\n')[0]);assert.notEqual(replacedText.split('\n')[1],failedText.split('\n')[1]);
     assert.equal(reviewBody(replacedText),reviewBody(failedText));
     assert.equal(await services.reviews.queue(longSource).then(found=>found.ids.join()),renewed.join(),'a later sweep keeps them');
+
+    // A start the brain never received waits again as new work after one observation, up to the attempt limit,
+    // then closes as uncertain like any unconfirmed review.
+    const [unstarted]=(await services.reviews.queue(await makeSource(16))).ids;mode='missing';
+    const [lostStarts,lostObservations]=[starts,observations],seen:string[]=[];
+    let ended;
+    for(let index=0;index<40&&!ended;index++) {
+      await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[unstarted]);
+      const before=await services.reviews.inspect(unstarted!),result=await operations.memory_review!('native:'+unstarted,authority);
+      if(before.state==='ambiguous'&&before.reconciliations===0)seen.push(result.state+':'+(await services.reviews.inspect(unstarted!)).state);
+      if(result.state==='ambiguous')ended=result;
+    }
+    assert.deepEqual(seen,['waiting:pending','waiting:pending','waiting:pending','waiting:ambiguous'],'each lost start is observed once, then waits again until the attempts run out');
+    assert.equal(starts,lostStarts+nativeAttemptLimit,'a review whose start was lost starts again, at most four starts in all');
+    assert.equal(observations,lostObservations+nativeAttemptLimit-1+nativeReconcileLimit);
+    assert.deepEqual([ended?.state,ended?.waiting_reason],['ambiguous','native_review_unconfirmed']);
+    const spent=await services.reviews.inspect(unstarted!);
+    assert.deepEqual([spent.state,spent.attempts,spent.error_code],['ambiguous',nativeAttemptLimit,'native_review_unconfirmed']);
+
+    // A review closed as uncertain before it could wait again is repaired by the owner's resume, even when a workflow
+    // opened while it waited already took the generation its new revision names.
+    const [closedEarlier]=(await services.reviews.queue(await makeSource(17))).ids;
+    await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[closedEarlier]);
+    assert.equal((await operations.memory_review!('native:'+closedEarlier,authority)).state,'waiting');
+    await stores.control.query('UPDATE native_review_jobs SET reconciliations=$2 WHERE id=$1',[closedEarlier,nativeReconcileLimit]);
+    assert.equal((await operations.memory_review!('native:'+closedEarlier,authority)).state,'ambiguous');
+    const closedRow=await services.reviews.inspect(closedEarlier!),taken=await stores.control.connect();
+    try{await requestWorkflow(taken,'memory_review','native:'+closedEarlier,closedRow.revision+1);}finally{taken.release();}
+    await stores.control.query("UPDATE workflow_registry SET state='skipped',waiting_reason='superseded' WHERE family='memory_review' AND job_id=$1",['native:'+closedEarlier]);
+    await services.reviews.controlJob(owner,closedEarlier!,{action:'resume',expected_revision:closedRow.revision});
+    const open=await stores.control.query("SELECT 1 FROM workflow_registry WHERE family='memory_review' AND job_id=$1 AND state IN ('queued','waiting','running')",['native:'+closedEarlier]);
+    assert.equal(open.rowCount,1,'a resumed review always gets an open workflow');
+    assert.equal((await operations.memory_review!('native:'+closedEarlier,authority)).state,'waiting');
+    assert.deepEqual(await services.reviews.inspect(closedEarlier!).then(row=>[row.state,row.attempts,row.error_code]),['pending',1,'native_review_not_started']);
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

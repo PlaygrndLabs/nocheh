@@ -68,6 +68,11 @@ def review_profile(root,policy,model,body):
     return prepare_profile(root,scope,model)
 
 
+# Nocheh observes a start it saw fail no sooner than 60 seconds later and then starts a `not_found` review again,
+# possibly under a newer id (ADR-0258), so a start still on its way to the launch after this long launches nothing.
+LAUNCH_DEADLINE=45
+
+
 def profile_recent(profile):
     activity=profile/'.foreground'
     return activity.exists() and time.time()-activity.stat().st_mtime<60
@@ -97,6 +102,7 @@ def start(root,policy,model,credentials,body):
     import fcntl
     from services.durable import immutable_file
     from .native_memory import notes_snapshot
+    began=time.monotonic()
     previous=observe(root,policy,body)
     if previous['state'] not in ('not_found','failed'):return previous
     profile=review_profile(root,policy,model,body)
@@ -118,7 +124,7 @@ def start(root,policy,model,credentials,body):
             for marker in ('.failed','.started'):(directory/(body['id']+marker)).unlink(missing_ok=True)
         previous=observe(root,policy,body)
         if previous['state'] not in ('not_found','failed'):return previous
-        if profile_recent(profile):return {'state':'waiting','error_code':'profile_busy'}
+        if profile_recent(profile) or time.monotonic()-began>LAUNCH_DEADLINE:return {'state':'waiting','error_code':'profile_busy'}
         immutable_file(directory,body['id']+'.started',b'{}')
         owned=locks.pop_all()
         def execute():

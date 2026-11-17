@@ -201,6 +201,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Sent to your private chat, with a Resume button, when member jobs pause by themselves past your pause mark, until 00:00 UTC. {spent}, {mark} (the pause mark) and {members} are filled in as in the spend notice.',
   },
   {
+    key: 'telegram.chat_adds',
+    title: 'Groups: when someone adds Nocheh',
+    hint: 'One “name: text” line each: left_member, left_anonymous and could_not_leave are your notes when someone else adds Nocheh to a group ({name}, {group}), and someone stands in for a hidden adder; removed is the line when Nocheh is removed from a group it was on in ({group}); card is the card after you add Nocheh ({group}, {project}); move ({project}), no_project and turn_off are its buttons; moved, unassigned and turned_off answer a press; changed and only_owner answer a press that cannot act. A line you remove keeps its default.',
+  },
+  {
     key: 'background.member_texts',
     title: 'Member jobs: notice lines and buttons',
     hint: 'One “name: text” line each: member is a line of {members} with {name}, {group} and {spent}; more sums the rest with {count} and {spent}; unnamed_member ({id}) and unnamed_group stand in for a missing name; pause and resume are the buttons; paused and resumed answer a press and are added under the notice; only_owner answers anyone else. A line you remove keeps its default.',

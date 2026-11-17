@@ -108,7 +108,7 @@ test('an allowed sender is the owner or a granted, not denied person in that sel
   assert.equal(allowedSender(policy,update(-20,456),'-20'),false,'someone not granted');
   assert.equal(allowedSender(granted,update(-30,456),'-30'),false,'granted in another group only');
   assert.equal(allowedSender({...policy,group_access:{'-20':{granted:['456'],denied:['456']}}},update(-20,456),'-20'),false,'a deny wins');
-  // A group no longer selected: the directory, which follows TELEGRAM_GROUP_IDS, no longer serves it (ADR-0252).
+  // A group no longer served: the directory, which follows chats.state, no longer serves it (ADR-0252, ADR-0253).
   const unselected={...granted,group_ids:['-30']},restore=installChatsForTest(policyDirectory(unselected,['-20','456','-99']));
   try{assert.equal(allowedSender(unselected,update(-20,456),'-20'),false,'a group no longer selected');}finally{restore();}
   assert.equal(allowedSender(policy,update(123,456,'private'),'123'),false,'a stranger in private');
@@ -183,7 +183,7 @@ test('an allowed sender is judged in the chat the directory finds: digest groups
     assert.equal(allowedSender(listed,voice(stray,BOB),stray),false,'a group with no row');
     assert.equal(allowedSender(listed,voice(stray,OWNER),stray),true,'the owner, wherever they write');
     assert.equal(allowedSender(served,voice(BOB,BOB,'private'),BOB),false,'a member in their own private chat');
-    // The directory, which follows TELEGRAM_GROUP_IDS, decides what is served: a digest group it no longer serves.
+    // The directory, which follows chats.state, decides what is served: a digest group it no longer serves.
     installChatsForTest(fixtureDirectory([...GP_GROUP_IDS]));
     assert.equal(allowedSender(served,voice(NG1_TG,BOB),NG1_TG),false,'a digest group no longer served');
     assert.equal(allowedSender(served,voice(GP1,BOB),GP1),true);
@@ -202,6 +202,26 @@ test('the owner listed as a person allowed or denied in a group stops the servic
     await writeFile(file,JSON.stringify({...policy,group_access:{'-20':{granted:['456'],denied:[]}}}));
     assert.deepEqual(assistantPolicy(file).group_access,{'-20':{granted:['456'],denied:[]}});
   }finally{await rm(folder,{recursive:true,force:true});}
+});
+
+test('which groups are served is never configured: a group list is ignored and access keys are checked by shape only',async()=>{
+  const folder=await mkdtemp(join(tmpdir(),'nocheh-policy-')),saved={...process.env};
+  try {
+    // ADR-0253: the owner adds Nocheh to a group or turns it on in Chats; servedPolicy derives group_ids from chats.state.
+    const file=join(folder,'policy.json');
+    await writeFile(file,JSON.stringify({...policy,group_access:{'-1001234567890':{granted:['456'],denied:[]}}}));
+    assert.deepEqual(assistantPolicy(file).group_ids,[],'a policy file\'s group_ids is ignored');
+    assert.deepEqual(assistantPolicy(file).group_access,{'-1001234567890':{granted:['456'],denied:[]}},'a key for a group in no list is kept');
+    for(const key of ['-0','20','-20x','group']) {
+      await writeFile(file,JSON.stringify({...policy,group_access:{[key]:{granted:['456'],denied:[]}}}));
+      assert.throws(()=>assistantPolicy(file),/Invalid TELEGRAM_GROUP_ACCESS/,key);
+    }
+    Object.assign(process.env,{TELEGRAM_ENABLED:'true',TELEGRAM_OWNER_ID:'123',TELEGRAM_GROUP_IDS:'-20,not a list',TELEGRAM_GROUP_ACCESS:'{"-30":{"granted":["456"],"denied":[]}}'});
+    assert.deepEqual([assistantPolicy().group_ids,Object.keys(assistantPolicy().group_access!)],[[],['-30']],'TELEGRAM_GROUP_IDS is not read');
+  }finally{
+    for(const key of Object.keys(process.env))if(!(key in saved))delete process.env[key];Object.assign(process.env,saved);
+    await rm(folder,{recursive:true,force:true});
+  }
 });
 
 test('final Telegram delivery checks the original sender after grant revocation',()=>{

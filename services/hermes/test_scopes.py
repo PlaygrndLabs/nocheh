@@ -40,8 +40,8 @@ def turn(update,scopes,scope=None,**changes):
 
 class ScopeTests(unittest.TestCase):
     def setUp(self):
-        self.scopes=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20','-30'],'topics':[['-20/topic/42','-20','42']],
-                            'group_access':{'-30':{'granted':['456'],'denied':[]}}})
+        self.scopes=Scopes({'enabled':True,'group_access':{'-30':{'granted':['456'],'denied':[]}}},
+                           Served.of('123',groups=['-20','-30'],topics=[['-20/topic/42','-20','42']]))
 
     def update(self,chat,user,kind='group'):
         return {'update_id':1,'message':{'message_id':1,'chat':{'id':chat,'type':kind},'from':{'id':user,'is_bot':False}}}
@@ -53,8 +53,7 @@ class ScopeTests(unittest.TestCase):
     def test_group_access_defaults_to_owner_and_denies_override_grants(self):
         self.assertIsNone(self.resolve(self.update(-20,456),'-20'))
         self.assertIsNotNone(self.resolve(self.update(-30,456),'-30'))
-        denied=Scopes({'enabled':True,'owner_id':'123','group_ids':['-30'],
-                       'group_access':{'-30':{'granted':['456'],'denied':['456']}}})
+        denied=Scopes({'enabled':True,'group_access':{'-30':{'granted':['456'],'denied':['456']}}},Served.of('123',groups=['-30']))
         self.assertIsNone(self.resolve(self.update(-30,456),'-30',denied))
         self.assertIsNotNone(self.resolve(self.update(-30,123),'-30',denied))
 
@@ -145,6 +144,10 @@ class ScopeTests(unittest.TestCase):
         # The environment names no owner or group any more: they come from the app's served list.
         with patch.dict(os.environ,{'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'123','TELEGRAM_GROUP_IDS':'-20'},clear=True):
             self.assertIsInstance(Scopes.load(None).served,ServedList)
+        # Nor does a policy file (ADR-0253): a group is served once the owner adds Nocheh there, never by a list.
+        with tempfile.NamedTemporaryFile('w',suffix='.json') as policy:
+            policy.write('{"enabled":true,"owner_id":"123","group_ids":["-20"]}');policy.flush()
+            self.assertIsInstance(Scopes.load(policy.name).served,ServedList)
 
     def test_a_topic_recorded_after_the_list_was_read_is_served_on_its_first_turn(self):
         # A new forum topic, or a group's new Telegram id, moves no guard epoch (ADR-0252): the turn's pass names a space

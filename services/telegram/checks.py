@@ -66,6 +66,14 @@ def outbound_check(chat_id, topic, authorized, cancelled=None, requests=None, ma
     return check
 
 
+def leave_check(chat_id):
+    """Bind a leave to the one chat Nocheh was asked to leave: leaveChat there, and no other request."""
+    def check(method, parameters):
+        if method != 'leaveChat' or set(parameters) != {'chat_id'} or str(parameters.get('chat_id')) != str(chat_id):
+            raise Held('telegram_delivery_audience_changed')
+    return check
+
+
 def reaction_check(chat_id, message_id, authorized):
     """Bind a working reaction to the one message a turn answers.
 
@@ -140,24 +148,34 @@ def approval_links(links,length):
 # Presses on the owner's notices that storage handles: Retry failed under a problem notice, and Pause or Resume under a
 # notice about members' job spend (ADR-0251). Storage acts only on the owner's own press in their private chat.
 NOTICE_CALLBACKS=('nr','njp','nju')
+# The card about a group the owner added Nocheh to (ADR-0253): Move to one of its offered projects (0-2), No project (x)
+# or Turn off (o), each with the first 32 hex of the add's archive event.
+CARD_CALLBACK=re.compile(r'ng[012xo][a-f0-9]{32}')
 
 
 def notice_buttons(buttons):
-    """One row of buttons under a notice in the owner's private chat: open a page in the mini app or a browser, or a
-    press that storage handles (NOTICE_CALLBACKS). Anything else is refused."""
+    """Buttons under a notice in the owner's private chat, one row (a list of buttons) or up to three rows (a list of
+    lists) of up to three each: open a page in the mini app or a browser, or a press that storage handles
+    (NOTICE_CALLBACKS, or CARD_CALLBACK). Anything else is refused."""
     if buttons is None:return None
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-    if not isinstance(buttons,list) or not 0<len(buttons)<=3:raise ValueError('invalid_notice')
-    row=[]
-    for button in buttons:
-        label=button.get('text') if isinstance(button,dict) else None
-        if not isinstance(label,str) or not 0<len(label)<=40 or len(button)!=2:raise ValueError('invalid_notice')
-        web,url,callback=button.get('web_app'),button.get('url'),button.get('callback')
-        if isinstance(web,str) and len(web)<=512 and re.fullmatch(r'https://\S+',web):row.append(InlineKeyboardButton(label,web_app=WebAppInfo(web)))
-        elif isinstance(url,str) and len(url)<=512 and re.fullmatch(r'https?://\S+',url):row.append(InlineKeyboardButton(label,url=url))
-        elif callback in NOTICE_CALLBACKS:row.append(InlineKeyboardButton(label,callback_data=callback))
-        else:raise ValueError('invalid_notice')
-    return InlineKeyboardMarkup([row])
+    rows=buttons if isinstance(buttons,list) and buttons and all(isinstance(row,list) for row in buttons) else [buttons]
+    if len(rows)>3:raise ValueError('invalid_notice')
+    keyboard=[]
+    for buttons in rows:
+        if not isinstance(buttons,list) or not 0<len(buttons)<=3:raise ValueError('invalid_notice')
+        row=[]
+        for button in buttons:
+            label=button.get('text') if isinstance(button,dict) else None
+            if not isinstance(label,str) or not 0<len(label)<=40 or len(button)!=2:raise ValueError('invalid_notice')
+            web,url,callback=button.get('web_app'),button.get('url'),button.get('callback')
+            if isinstance(web,str) and len(web)<=512 and re.fullmatch(r'https://\S+',web):row.append(InlineKeyboardButton(label,web_app=WebAppInfo(web)))
+            elif isinstance(url,str) and len(url)<=512 and re.fullmatch(r'https?://\S+',url):row.append(InlineKeyboardButton(label,url=url))
+            elif callback in NOTICE_CALLBACKS or isinstance(callback,str) and CARD_CALLBACK.fullmatch(callback):
+                row.append(InlineKeyboardButton(label,callback_data=callback))
+            else:raise ValueError('invalid_notice')
+        keyboard.append(row)
+    return InlineKeyboardMarkup(keyboard)
 
 
 def answer_button(button, chat_id, event_id, owner):
@@ -223,3 +241,14 @@ def check_action_policy(body):
             headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
         with urllib.request.urlopen(request,timeout=10) as response:return json.loads(response.read(1024)).get('valid') is True
     except Exception:return False
+
+
+def check_leave_policy(body):
+    """The app's last word on a leave (ADR-0253): True while the group whose Telegram id is `chat_id` is still pending
+    from the add `id`, False once the owner turned it on or off or it was added again, None when the app cannot answer."""
+    try:
+        request=urllib.request.Request(archive_url()+'/internal/chats/leave',data=canonical({'id':body['id'],'chat_id':body['chat_id']}),
+            headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
+        with urllib.request.urlopen(request,timeout=10) as response:valid=json.loads(response.read(1024)).get('valid')
+    except Exception:return None
+    return valid if isinstance(valid,bool) else None

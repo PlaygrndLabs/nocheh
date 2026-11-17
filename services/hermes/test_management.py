@@ -3,13 +3,14 @@ import json
 import unittest
 from pathlib import Path
 from .scopes import Scopes
+from services.chats import Served
 from .management import dispatch, profile_path
 
 
 class ManagementTests(unittest.TestCase):
     def test_native_notes_sessions_pagination_and_wrong_profile(self):
         from hermes_state import SessionDB
-        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20','-30']})
+        policy=Scopes({'enabled':True},Served.of('123',groups=['-20','-30']))
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             for chat in ('-20','-30'):
@@ -35,7 +36,7 @@ class ManagementTests(unittest.TestCase):
         # Storage puts each note's record in the owner's words (ADR-0257); a file Hermes could not read lists no notes,
         # and the page shows it whole.
         from . import note_sources
-        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        policy=Scopes({'enabled':True},Served.of('123',groups=['-20']))
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);profile=profile_path(root,'-20',policy);(profile/'memories').mkdir(parents=True)
             (profile/'memories/MEMORY.md').write_text('Alice likes tea.\n§\nBob is away.\n§\nAlice likes tea.')
@@ -53,7 +54,7 @@ class ManagementTests(unittest.TestCase):
             self.assertEqual(memories['MEMORY.md']['text'],'Alice likes tea.\n§\nBob is away.\n§\nAlice likes tea.')
 
     def test_a_project_role_and_skills_are_kept_in_their_own_folder(self):
-        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        policy=Scopes({'enabled':True},Served.of('123',groups=['-20']))
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);call=lambda **body:dispatch(root,'test-model',policy,body);scope='project:'+'d'*64
             first=call(action='persona',scope=scope)
@@ -64,7 +65,7 @@ class ManagementTests(unittest.TestCase):
                 with self.assertRaises(ValueError):call(action='persona',scope=bad)
 
     def test_the_private_chats_and_the_groups_defaults_are_kept_apart(self):
-        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        policy=Scopes({'enabled':True},Served.of('123',groups=['-20']))
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);call=lambda **body:dispatch(root,'test-model',policy,body)
             private,groups=call(action='persona',scope='default'),call(action='persona',scope='default:groups')
@@ -81,7 +82,7 @@ class ManagementTests(unittest.TestCase):
                 with self.assertRaises(ValueError):call(action='persona',scope=bad)
 
     def test_owner_inspects_retired_topic_notes_by_registered_profile(self):
-        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        policy=Scopes({'enabled':True},Served.of('123',groups=['-20']))
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);name=Scopes.profile('-20/topic/1:policy:2');path=root/'profiles'/name
             (path/'memories').mkdir(parents=True)
@@ -95,7 +96,7 @@ class ManagementTests(unittest.TestCase):
             with self.assertRaises(ValueError):dispatch(root,'test',policy,{'action':'memory','scope':'-20/topic/2','profile':name})
 
     def test_a_private_answers_profile_is_named_by_its_receipt(self):
-        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':['-20']})
+        policy=Scopes({'enabled':True},Served.of('123',groups=['-20']))
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             for name,receipt in (('nocheh-'+'a1'*12,{'group':'“Team” › Plans','at':'2026-11-12T10:00:00+00:00'}),('nocheh-'+'b2'*12,None)):
@@ -109,7 +110,7 @@ class ManagementTests(unittest.TestCase):
             self.assertTrue(listing['nocheh-'+'b2'*12]['private_answer'])
 
     def test_preferences_use_revision_and_policy(self):
-        policy=Scopes({'enabled':True,'owner_id':'123','group_ids':[]})
+        policy=Scopes({'enabled':True},Served.of('123'))
         with tempfile.TemporaryDirectory() as root:
             request={'action':'preferences','scope':'123'}
             first=dispatch(root,'test',policy,request)

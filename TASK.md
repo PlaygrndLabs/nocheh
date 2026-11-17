@@ -2,12 +2,140 @@
 
 <current>
 
+Members step 2b-2: only the owner adds Nocheh to groups
+([ADR-0253](docs/adr/0253-only-the-owner-adds-nocheh.md); owner, 2026-11-12, approving the
+Members design: only the owner adds Nocheh to a group, and anyone else's add leaves; 2026-11-14:
+a group Nocheh is already in that the owner never turned on stays silent and is listed as Off).
+One branch: five parts and their integration. `TELEGRAM_GROUP_IDS` is retired: a group is on
+while its chat record says so.
+- Which groups are on: `chats.state` `active` alone serves a group, and a topic follows its
+  group. The policy's `group_ids` is derived from the groups that are on, and the runtime
+  configuration document is `{enabled, owner_id, group_access}`, so the first start after the
+  upgrade writes one revision and one guard epoch. Access keys are checked by shape only and are
+  kept while a group is off. New and seeded groups start off, and at each start the owner's
+  private chat is the one private chat that is on. A state change moves the directory revision,
+  and every process sees it within the 2 s watch
+  ([adoption](test/store-chat-adoption.test.ts), [records](test/store-chat-records.test.ts),
+  [seeding](test/store-chat-seed.test.ts), [configuration](test/store-runtime-configuration.test.ts),
+  [reset](test/store-reset-setup.test.ts)). A reset that keeps setup brings a group still
+  waiting to be left back off, with its topics, and an old `TELEGRAM_GROUP_IDS` line, empty or
+  not, never makes Settings ask for Apply ([settings](services/hermes/test_settings.py)).
+- Adds and removals: a `my_chat_member` update about Nocheh's own bot says who added or removed
+  it ([updates](test/chats-telegram-updates.test.ts)). Only a live update about a group's current
+  Telegram id, newer than the last state change and taken in after the first start of this
+  build (`chat_seed_state.adopt_after`), changes the group; older adds and removals are kept in
+  the record only. The owner's add turns it on at once; anyone else's add, a hidden adder's
+  included, makes it `pending`, and Nocheh leaves. An add to a group that is on changes
+  nothing, and an upgrade is never an add: any add, the owner's too, to an off, pending or
+  could-not-leave group within 10 minutes of its upgrade is the upgrade's echo, except the
+  owner's add to an off group first recorded in those 10 minutes with no add or state change on
+  record, whose own add was not recorded yet. Nocheh leaving makes the group `left`; a removal
+  makes it `removed`. An upgrade's new supergroup folds into the old chat when only its own add
+  served it and it has no project answer; an owner add folded in turns on only an old chat
+  Nocheh was not in, or an off one first recorded just then in the same way. When the two stay
+  apart, a new chat on only from the owner's add within 10 minutes of the upgrade takes the old
+  chat's Off, Couldn't leave or Leaving and who added Nocheh, and its waiting card never goes; a
+  Leaving group's leave moves to the new id and the old chat becomes `left`, unless the new
+  chat's card was already sent. Each add or removal keeps a content-free record
+  ([adoption](test/store-chat-adoption.test.ts)).
+- The add stage: the storage worker's `adds` stage leaves 30 s after someone else's add,
+  retrying after 1, 2, 4 and up to 60 minutes with no limit, and settles `left` or
+  `could_not_leave`; a leave Telegram still answers with the group's upgrade after six tries,
+  over an hour, settles `could_not_leave`. It tells the owner of a member's or a hidden adder's
+  add, at most once per group and ten times in all a day; a stranger's add gets no note. A
+  removal from a group that was on gets one line, outside those caps. 30 s after the owner's
+  add, a group with no project answer joins a new project named after the group, and the
+  owner's card offers Move to the three projects updated last, No project, and Turn off; only
+  the owner's press in the private chat acts, and each press is its own owner command. A card
+  whose send did not go is tried again only while the group is still on from that add and in
+  its project; otherwise it ends with no card, and a project it left empty is archived in an
+  owner command of its own. The texts are the owner's, under
+  `telegram.chat_adds` ([stage](test/store-chat-adds.test.ts),
+  [card and backoff](test/chat-adds.test.ts)).
+- The owner's switch: `POST /v1/chats/state` turns a group Nocheh is in on or off in one owner
+  command, with a project answer when it is turned on (new, an existing project, or none), and
+  refuses a chat that is not a group or that Nocheh is not in
+  ([adoption](test/store-chat-adoption.test.ts)). The dashboard switch applies at once and
+  shows each group's state, a topic its group's, with its own texts for an anonymous add;
+  Settings › Telegram has no group list; the import page offers every group that is on, read
+  through `/v1/conversations` filtered by `kind` and `state` before paging; System › Sent to
+  apps names a leave "Leave a group", and a leave that found Nocheh gone (`already_left`) is not
+  a problem, nor is any failed or uncertain try of a leave the stage settled as left, with no
+  time window ("Nocheh left"). A served list whose last read failed is not whole, so the import
+  page says some groups may be missing. Refresh group names asks at most 50 groups a press,
+  those checked longest ago first, and says how many were not checked in the last hour
+  ([model](test/dashboard-chats-model.test.mjs),
+  [served groups](test/dashboard-chat-directory.test.mjs),
+  [filters](test/store-owner-supervision.test.ts), [records](test/store-chat-sends.test.ts),
+  [refresh](test/store-telegram-chats.test.ts), [pages](test/dashboard-pages.browser.mjs)).
+- The bot and the tools: nocheh-telegram leaves a group through `/internal/telegram/leave`,
+  which refuses the owner's chat, a positive id and any chat that is on. Inside its send lock,
+  right before the leave, it reads the served list again and asks the app
+  (`POST /internal/chats/leave`) whether the group is still pending from that add
+  ([route](test/store-server.test.ts)). It keeps a leave's answer by add and Telegram id, so an
+  upgraded group's new id is asked on its own. It asks Telegram only for the update kinds Nocheh
+  reads, sends the card's buttons in rows, and shows the bot's `getMe` abilities in its health ([leave](services/telegram/test_leave.py),
+  [service](services/telegram/test_service.py), [health](services/telegram/test_health.py),
+  [cards](services/telegram/test_approval_cards.py)). `configure-telegram --group-id` is
+  refused; import mapping, the Telegram directory, Hermes scopes and the reset tools read the
+  groups that are on from `GET /internal/chats`
+  ([configuration](services/hermes/test_configuration.py), [scopes](services/hermes/test_scopes.py),
+  [imports](services/hermes/test_import_jobs.py), [directory](services/hermes/test_telegram_directory.py),
+  [reset](services/hermes/test_reset_preservation.py), [operations](test/test_telegram_operations.py)).
+- Full tester: the fake Telegram leaves a chat and reports Nocheh's status change, and the
+  owner adds the fixture groups at connect. New scenarios cover a member's, a stranger's and an
+  anonymous admin's add, a member's re-add, a leave Telegram refuses, a removal, the owner's
+  add, and the dashboard switch. Before an add that expects a note, the tester moves other
+  groups' earlier leave notes out of the 24 hours, so a kept fixture never fills the cap on all
+  notes ([scenarios](tools/acceptance/product_scenarios.py),
+  [fake](services/telegram/test_telegram_http_fixture.py)).
+
+  Checks on the integrated branch: the build; all 98 store test files on old-shaped and digest
+  chats (256 pass, 0 fail); Python Hermes (970, 4 skipped, with the 2 environment errors that
+  also occur on main). On each part's branch: node unit tests (only the 4 workflow tests that
+  also fail on main fail); Python Telegram (134); the dashboard tests (51 of 51) and its
+  browser tests (50: 47 pass, and the 3 that also fail on main); the tester's own unit tests
+  and the Python tests of its fake and reset tools.
+  Review fixes, five branches merged here (2026-11-16): the adoption boundary, upgrade echoes
+  and folds, each card press as its own command, removal lines outside the caps, the bot's last
+  checks before a leave and `already_left`, the served-group list and dashboard texts, the
+  reset of a waiting group, the retired list's Apply, and the tester's room for notes. Each
+  fix's store tests passed on its own branch (chat adoption, chat adds, chat sends, server,
+  owner supervision, owner API, reset setup, reset acceptance and the other chat files), and
+  the browser tests on the dashboard branch (52: 49 pass, and the 3 that also fail on main).
+  On the merged branch: the build; node unit tests (410: 355 pass, 51 skipped, and
+  only the 4 workflow tests that also fail on main fail); the dashboard build and format check;
+  Python Telegram (145) and settings (11).
+  Second review fixes, four branches merged here (2026-11-16): the owner's add to a group first
+  recorded during its upgrade, the stay-apart echo, a card tried again only while still true, a
+  leave Telegram keeps answering as upgraded, leave receipts by add and Telegram id, a leave try
+  cleared once the leave settled as left, Refresh group names 50 at a time, and a failed read
+  again of the served list. Each fix's store tests passed on its own branch: chat adoption
+  (10), chat adds (7), chat sends (2), Telegram chats (2), server (2) and the other chat files;
+  the browser tests on the dashboard branch (52: 49 pass, and the 3 that also fail on main).
+  On the merged branch: the build; node unit tests (411: 356 pass, 51 skipped, and only the 4
+  workflow tests that also fail on main fail); the dashboard build and format check; Python
+  Telegram (146).
+  Pending:
+  - The whole full tester on images. It has not run on this step.
+  - The store suite and the browser tests on the merged branch.
+  - A live Telegram check of the upgrade echo rule and the fold: when Telegram upgrades a group,
+    in which order do the upgrade messages and the bot's status update come.
+  - Live acceptance on the owner's install after merge.
+  Owner steps: after the upgrade, Nocheh stays on in the groups `TELEGRAM_GROUP_IDS` listed,
+  and every other group it is in stays silent and reads Off. Add Nocheh yourself to a new group,
+  and turn a group on or off in Chats. The old `.env` line is ignored. Take a backup before
+  upgrading, and run the app and the bot from the same revision
+  ([deploy](docs/deploy.md#upgrade-to-step-2b-2)). A rollback to 2b-1 needs `TELEGRAM_GROUP_IDS` made again from the groups that are
+  on ([deploy](docs/deploy.md#roll-back-to-step-2b-1)).
+
 Members step 2b-1: Nocheh's own chat ids ([ADR-0252](docs/adr/0252-chats-get-nochehs-own-ids.md);
 owner, 2026-11-12: "I just review the tables and seems what I want if there is a important point
 or need my answer ask, else start build.", approving the Members design, whose step 2b is "Chat
 records ready for Slack"; "want ensure the db design cover slack for future"). One branch: a
 shared contract, four parts and their integration. What Nocheh serves does not change, and
 redeploying main undoes it: no stored value is rewritten and the archive is never changed.
+Step 2b-2 retired `TELEGRAM_GROUP_IDS`, which this step still read.
 - Contract: the chat records (`chat_connections`, `chat_accounts`, `chats`, `chat_ids`,
   `chat_memberships`, `chat_directory_state`), bot-free ids (`chatIdFor`), one chat id check
   and the synchronous chat directory, which fails closed for an id it does not know
@@ -183,10 +311,6 @@ redeploying main undoes it: no stored value is rewritten and the archive is neve
   - The full tester's waits for the person card (10 minutes) and the memory rebuild (15 minutes)
     are too short when every scenario runs on one fixture: raise them, or keep running it in
     rounds.
-  - 2b-2, "Only the owner adds Nocheh": adoption, leave-and-tell, the Telegram "which
-    project?" card, and the served set kept in `chats` with `TELEGRAM_GROUP_IDS` retired. It
-    waits on the owner's answer about groups Nocheh is already in that the owner never turned
-    on.
   - A live check after merge: that the first seeding on a real archive gives every stored chat
     value a row (no group, topic, task, rule or switch becomes unknown) and how long it took
     (the `ms` of the `chat_records_ready` log; about 23 s per 300,000 archived events in a
@@ -1004,6 +1128,17 @@ not affected
 ([ADR-0239](docs/adr/0239-notes-reviews-make-room-in-full-notes.md),
 [check](services/hermes/test_native_memory.py)). Pending: a review on full notes on a
 running installation that saves its note.
+
+Notes reviews stuck after a restart (2026-11-16): a full tester run left 26 Hermes
+native notes reviews closed as uncertain for good. Each had waited for a busy profile,
+its next start request failed while Hermes or the app restarted, and Hermes then
+reported it `not_found`, which the app counted as unconfirmed until the review closed.
+A review Hermes reports `not_found` now waits again as new work, up to its four
+attempts; Hermes launches a start only within 45 seconds of receiving it, the owner's
+resume always opens a new workflow, and `memory pause`/`memory resume` take
+`--revision` ([ADR-0258](docs/adr/0258-a-notes-review-whose-start-was-lost-waits-again.md),
+[check](test/store-native-review.test.ts), [Hermes](services/hermes/test_review_handoff.py)).
+Pending: resuming the reviews already closed this way on a running installation.
 
 Notion inside background jobs (owner, 2026-11-01: chose "All three, in order" to
 build steps 2 to 4 so Nocheh works like a Claude Code session, to check a Notion

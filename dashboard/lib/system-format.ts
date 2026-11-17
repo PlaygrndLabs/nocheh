@@ -448,6 +448,7 @@ export const sendKinds: Record<string, string> = {
   refusal: 'Not-allowed reply',
   notice: 'Notice',
   notice_update: 'Notice update',
+  leave: 'Leave a group',
   reaction: 'Reaction',
   setup: 'Bot setup',
   other: 'Other',
@@ -484,6 +485,8 @@ const sendReasons: Record<string, string> = {
   formatting_rejected: 'Formatting rejected',
   button_answer_expired: 'Button press expired',
   reaction_not_allowed: 'Reactions not allowed in this chat',
+  // Any answer saying Nocheh is not there: it left before, was removed, or the group was deleted.
+  already_left: 'Nocheh was no longer in the chat',
   no_permission: 'Bot lacks permission',
   message_too_long: 'Message too long',
   button_rejected: 'A button was rejected',
@@ -502,14 +505,20 @@ const sendReasons: Record<string, string> = {
   reaction_unbound: 'Not tied to a current message',
   refused: 'Stopped by Nocheh’s own check',
 };
-/** Why a send didn't go through, in short plain words; an unknown code shows as it is. */
-export function sendReason(row: {state: string; error_code?: string | null; recovered?: boolean}): string {
+/** Why a send didn't go through, in short plain words; an unknown code shows as it is. A recovered leave says
+ * Nocheh left, since the stage may have learned that from Telegram rather than from a retry. */
+export function sendReason(row: {
+  state: string;
+  kind?: string;
+  error_code?: string | null;
+  recovered?: boolean;
+}): string {
   const code = row.error_code;
   if (!code) return '';
   // Not sent and rate limited is Nocheh's own flood window, not the app asking.
   const reason =
     code === 'rate_limited' && row.state === 'not_sent' ? 'Held back: too many at once' : (sendReasons[code] ?? code);
-  return row.recovered ? reason + '; sent on a retry' : reason;
+  return row.recovered ? reason + (row.kind === 'leave' ? '; Nocheh left' : '; sent on a retry') : reason;
 }
 
 /* ---------- Databases ---------- */

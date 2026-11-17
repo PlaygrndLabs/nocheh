@@ -67,6 +67,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       authorize(req,config.token);const owner=s.access.policy().owner_id;
       return json(res,200,servedChats(await currentChats(),owner?{app:'telegram',external:owner}:null));
     }
+    if(req.method==='POST'&&path==='/internal/chats/leave') {
+      // The bot asks right before Nocheh leaves a group (ADR-0253): is it still pending from this add?
+      authorize(req,config.token);const body=object(await readJson(req,1024));
+      return json(res,200,{valid:await s.chatAdds.leaveStands(string(body.id,64),string(body.chat_id,32))});
+    }
     if(req.method==='POST'&&path==='/internal/sources/retired') {
       // Hermes withholds retired turns from its own native history before each turn.
       authorize(req,config.token);const ids=object(await readJson(req,64*1024)).event_ids;
@@ -206,7 +211,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         return json(res,200,{...found,groups:found.groups.filter(group=>all||directory.served(group.id))});
       }
       if(view==='conversations')return json(res,200,await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
-        limit:limit(url.searchParams.get('limit'),50,100)},await s.supervision.outsiders(policy)));
+        limit:limit(url.searchParams.get('limit'),50,100),kind:url.searchParams.get('kind')??'',state:url.searchParams.get('state')??''},await s.supervision.outsiders(policy)));
       if(view==='conversation-context') {
         const space=url.searchParams.get('space')??'';
         if(await s.supervision.outsider(policy,space))throw new HttpError(404,'conversation_not_found');

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from .browser_gateway import BrowserGateway
 from .scopes import Scope,Scopes
+from services.chats import Served
 
 
 class BrowserGatewayTests(unittest.TestCase):
@@ -219,7 +220,7 @@ class BrowserGatewayTests(unittest.TestCase):
         from .scopes import Scopes
         profile=Scopes.profile('-10');home=self.root/'profiles'/profile
         admin=SimpleNamespace(root=self.root,model='gpt-5.6-sol',
-            profile=lambda _: (profile,home),binding=lambda _:Scope('-10','42',False,profile,'-10'),policy=Scopes({'enabled':True,'owner_id':'42','group_ids':['-10']}))
+            profile=lambda _: (profile,home),binding=lambda _:Scope('-10','42',False,profile,'-10'),policy=Scopes({'enabled':True},Served.of('42',groups=['-10'])))
         with patch.dict(os.environ,{'SERVICE_TOKEN':'fixture-only','ARCHIVE_URL':'http://127.0.0.1:9','NOCHEH_SECURITY_RUNTIME':'isolated','NOCHEH_MEMORY_CONTEXT':'evidence'}):
             argv,cwd,env=launch(admin,profile=profile)
         self.assertEqual(env['NOCHEH_SECURITY_RUNTIME'],'isolated');self.assertEqual(env['NOCHEH_MEMORY_CONTEXT'],'evidence')

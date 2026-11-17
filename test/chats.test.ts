@@ -102,7 +102,7 @@ test('old-shaped and digest chats classify alike, from their rows',()=>{
   assert.ok(directory.served(OWNER),'the owner chat is active');assert.ok(!directory.served(BOB_CHAT),'any other private chat is off');
   assert.ok(!directory.served(UNSERVED)&&directory.isGroup(UNSERVED),'a group Nocheh does not serve is still a group');
   const gpOnly=fixtureDirectory();
-  assert.ok(gpOnly.served(GP4)&&!gpOnly.served(NG1)&&!gpOnly.served(NG1_TOPIC),'served follows TELEGRAM_GROUP_IDS (the 2b-1 bridge)');
+  assert.ok(gpOnly.served(GP4)&&!gpOnly.served(NG1)&&!gpOnly.served(NG1_TOPIC),'served follows chats.state');
   assert.equal(chatDirectory(fixtureChats(served)).all().length,directory.all().length);
 });
 
@@ -191,6 +191,7 @@ test('the owner\'s private chat is separate from the owner\'s account',()=>{
     Object.assign(process.env,{TELEGRAM_ENABLED:'true',TELEGRAM_OWNER_ID:OWNER,TELEGRAM_GROUP_IDS:GP1,TELEGRAM_GROUP_ACCESS:'{}'});
     const policy=assistantPolicy();
     assert.equal(policy.owner_chat,OWNER,'2b-1 seeds the owner chat under the id it always had');assert.equal(ownerChat(policy),OWNER);
+    assert.deepEqual(policy.group_ids,[],'TELEGRAM_GROUP_IDS is not read: chats.state says which groups are on (ADR-0253)');
     assert.equal(ownerChat({owner_id:OWNER}),OWNER,'a policy from before step 2b');assert.equal(ownerChat({owner_id:OWNER,owner_chat:NG1}),NG1);
     delete process.env.TELEGRAM_OWNER_ID;process.env.TELEGRAM_ENABLED='false';assert.equal(assistantPolicy().owner_chat,null);
   }finally{for(const key of Object.keys(process.env))if(!(key in saved))delete process.env[key];Object.assign(process.env,saved);}

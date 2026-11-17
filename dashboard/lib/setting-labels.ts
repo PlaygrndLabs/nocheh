@@ -3,7 +3,6 @@ export const settingLabels: Record<string, string> = {
   TELEGRAM_ENABLED: 'Telegram on/off',
   TELEGRAM_BOT_TOKEN: 'Bot token',
   TELEGRAM_OWNER_ID: 'Your Telegram user ID',
-  TELEGRAM_GROUP_IDS: 'Groups Nocheh is on in',
   TELEGRAM_GROUP_ACCESS: 'Who can talk in groups',
   TELEGRAM_GROUP_REPLIES: 'When Nocheh answers in groups',
   TELEGRAM_BOT_NAMES: 'Names that call Nocheh',

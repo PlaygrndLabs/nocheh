@@ -47,7 +47,7 @@ test('owner Telegram directory gives recorded names, ids and membership, and who
       {id:'73',name:'Mira Chen',username:'@mira',state:'in',seen:true},
       {id:'91',name:'Nia',username:null,state:'left',seen:true},
       {id:'123',name:'Owner',username:null,state:'in',seen:true}]},
-    // Named by its Nocheh id, with every Telegram id it has had for matching TELEGRAM_GROUP_IDS (ADR-0252).
+    // Named by its Nocheh id, with every Telegram id it has had, for asking Telegram about it (ADR-0252).
     {id:newer,external:newerTg,telegram_ids:[newerTg,newerOld],name:'@p2group',users:[{id:'456',name:null,username:'@bob',state:'in',seen:true}]},
   ],truncated:false});
   // Without the archive, everyone recorded counts as seen, and the groups keep their Telegram ids.

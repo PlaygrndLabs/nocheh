@@ -17,15 +17,18 @@ const appId=(column:string)=>`${column} ~ '^[A-Za-z0-9._:-]{1,128}$'`;
  * - chat_accounts: a person or bot in an app (team '' on Telegram). member_id stays null until step 3 adds members and
  *   its foreign key; standing is Slack's member, external, guest or deleted.
  * - chats: private chats, groups and topics. A topic has a parent and a topic_key and is found by them. A private chat
- *   names its person (account_id). The added_by_* columns, add_event and state_seq record who added Nocheh and the
- *   last bot-status update applied; step 2b-2 fills them. title_source says whether the owner named a topic.
+ *   names its person (account_id). The added_by_* columns and add_event record who last added Nocheh (ADR-0253);
+ *   state_seq, state_bot and state_at order state changes, so an older bot-status update never undoes a newer change
+ *   (an owner or system change leaves seq and bot null). title_source says whether the owner named a topic.
  * - chat_ids: each app id a chat has had, current or old (a group Telegram upgraded keeps its old id here). A topic has
  *   none of its own.
  * - chat_memberships: who is in a group (topics share their group's rows). since is when the current state began;
  *   seen_seq and seen_bot are the last update applied and the bot that took it in, so an older update never undoes a
  *   newer one (src/stores/chats.ts newerUpdate).
- * - chat_directory_state: a revision bumped whenever a chat or chat id is added, so the directory snapshot can tell it
- *   is stale.
+ * - chat_state_events: one per bot-status update that added or removed Nocheh, and what is left to do about it (card,
+ *   leave, tell). Content-free: who and when, never a name or message text.
+ * - chat_directory_state: a revision bumped whenever a chat, chat id or chat state changes, so the directory snapshot
+ *   can tell it is stale.
  */
 export const chatSchema=`
 CREATE TABLE IF NOT EXISTS chat_connections (
@@ -101,6 +104,28 @@ CREATE TABLE IF NOT EXISTS chat_memberships (
  PRIMARY KEY(chat_id,account_id)
 );
 CREATE INDEX IF NOT EXISTS chat_memberships_account ON chat_memberships(account_id,state);
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS state_bot text CHECK(state_bot IS NULL OR ${appId('state_bot')});
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS state_at timestamptz;
+CREATE TABLE IF NOT EXISTS chat_state_events (
+ event_id text PRIMARY KEY CHECK(${hex('event_id')}),
+ chat_id text NOT NULL REFERENCES chats(id),
+ external_id text NOT NULL CHECK(${appId('external_id')}),
+ kind text NOT NULL CHECK(kind IN ('added','removed')),
+ role text CHECK(role IS NULL OR role IN ('owner','other','anonymous','unknown')),
+ account_id text REFERENCES chat_accounts(id),
+ member boolean NOT NULL DEFAULT false,
+ action text NOT NULL CHECK(action IN ('card','leave','tell','none')),
+ state text NOT NULL DEFAULT 'waiting' CHECK(state IN ('waiting','done','skipped')),
+ outcome text CHECK(outcome IS NULL OR outcome IN ('carded','answered','left','could_not_leave','told','superseded')),
+ due_at timestamptz NOT NULL DEFAULT now(),
+ attempts integer NOT NULL DEFAULT 0,
+ project_id text,
+ offered text[] NOT NULL DEFAULT '{}',
+ notice text NOT NULL DEFAULT 'none' CHECK(notice IN ('none','sent','capped','failed')),
+ created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS chat_state_events_due ON chat_state_events(due_at) WHERE state='waiting';
+CREATE INDEX IF NOT EXISTS chat_state_events_chat ON chat_state_events(chat_id,created_at);
 CREATE TABLE IF NOT EXISTS chat_directory_state (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  revision bigint NOT NULL DEFAULT 1 CHECK(revision>=1)

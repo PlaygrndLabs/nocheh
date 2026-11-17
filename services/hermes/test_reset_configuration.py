@@ -73,7 +73,8 @@ class ResetConfigurationTests(unittest.TestCase):
                 {'id': '-50', 'overrides': {'mode': 'filtered', 'sources': ['42']}},
                 {'id': '42', 'overrides': {'mode': 'filtered', 'sources': ['-40']}}]}}
         custom = 'profile-' + 'a' * 48
-        preferences = {'owner': '42', 'groups': ['-10', '-20', '-30'], 'profiles': [
+        # The groups Nocheh is on in come from the preserved preferences, never the setup's old group list (ADR-0253).
+        preferences = {'owner': '42', 'groups': ['-10', '-20'], 'profiles': [
             {'id': custom, 'space': '42', 'name': 'research', 'overrides': {}}]}
         values = {'TELEGRAM_ENABLED': 'true', 'TELEGRAM_OWNER_ID': '42',
                   'TELEGRAM_GROUP_IDS': '-30,-20,-10', 'NOCHEH_GUARD_MODE': 'off'}
@@ -82,7 +83,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertEqual(result['layout'], 'original-only-v1')
         converted = result['configuration']
         self.assertEqual(converted['runtime_configuration'][0]['document'],
-                         {'enabled': True, 'owner_id': '42', 'group_ids': ['-10', '-20', '-30'], 'group_access': {}})
+                         {'enabled': True, 'owner_id': '42', 'group_access': {}})
         self.assertEqual(converted['guard_mode'], [{'mode': 'off'}])
         self.assertEqual(converted['runtime_profiles'], [{'id': custom, 'name': 'research', 'owner_id': '42'}])
         rules = {row['destination']: row for row in converted['sharing_rules']}
@@ -97,7 +98,7 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertTrue(all(set(row) == {'id', 'name', 'sources', 'destination', 'enabled', 'mode', 'instructions'} for row in rules.values()))
         # Each chat the setup names keeps its old value as its id, served as the setup says (ADR-0252).
         self.assertEqual([(row['id'], row['kind'], row['state']) for row in converted['chats']],
-                         [('-10', 'group', 'active'), ('-20', 'group', 'active'), ('-30', 'group', 'active'), ('-40', 'group', 'off'),
+                         [('-10', 'group', 'active'), ('-20', 'group', 'active'), ('-30', 'group', 'off'), ('-40', 'group', 'off'),
                           ('-50', 'group', 'off'), ('42', 'private', 'active')])
         self.assertEqual({row['external_id']: row['chat_id'] for row in converted['chat_ids']}, {row['id']: row['id'] for row in converted['chats']})
         self.assertEqual(result['format'], 'nocheh-reset-configuration-v2')
@@ -117,8 +118,9 @@ class ResetConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'requires_review'):
             configuration.original_only(base, values, preferences, str(uuid.uuid4()))
         safe = copy.deepcopy(base); safe['configuration']['memory_spaces'] = []
-        with self.assertRaisesRegex(ValueError, 'legacy_configuration_invalid'):
-            configuration.original_only(safe, values, {**preferences, 'owner': '99'}, str(uuid.uuid4()))
+        for changed in ({'owner': '99'}, {'groups': ['-20', '-10']}, {'groups': ['10']}, {'groups': '-10'}):
+            with self.assertRaisesRegex(ValueError, 'legacy_configuration_invalid'):
+                configuration.original_only(safe, values, {**preferences, **changed}, str(uuid.uuid4()))
 
     def test_a_private_chat_in_a_rule_or_project_stops_the_reset_before_erasure(self):
         rule = {'id': 'b' * 64, 'name': 'Saved share', 'sources': ['-1001'], 'destination': '-1002', 'enabled': True,

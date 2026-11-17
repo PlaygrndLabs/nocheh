@@ -322,7 +322,7 @@ test('a group first seen after step 2b keeps its jobs under its Nocheh chat id, 
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
-  // The group's Telegram id is what the archive and TELEGRAM_GROUP_IDS hold; its Nocheh id is a digest (the second family).
+  // The group's Telegram id is what the archive holds; its Nocheh id is a digest (the second family).
   const family=families[1]!,raw='-2'+String(Date.now()).slice(-12),chat=family.id(raw),key='background-digest:'+Date.now();
   assert.notEqual(chat,raw);
   const restore=installChatsForTest(family.directory([raw],{owner:'123',served:[raw]}));

@@ -12,7 +12,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
-import {GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG1_TOPIC_KEY,NG2,NG2_OLD_TG,NG2_TG,OWNER} from './fixture-groups.js';
+import {NG1,NG1_TG,NG1_TOPIC,NG1_TOPIC_KEY,NG2,NG2_OLD_TG,NG2_TG,OWNER} from './fixture-groups.js';
 
 // Dispatch on chats first seen after step 2b (ADR-0252), as the running service has them: capture records each chat and
 // this process's directory reloads, so no chat here is seeded. NG2 is served by the Telegram id the owner configured
@@ -25,8 +25,9 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-chats-')),base=Date.now(),token=digest('dispatch-chats:'+base);
-  // TELEGRAM_GROUP_IDS names NG2 by the id it had before the upgrade; the service serves as servedPolicy says.
-  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[...GP_GROUP_IDS,NG1_TG,NG2_OLD_TG],group_access:{},topic_memory:'group'};
+  // The owner adds Nocheh to NG1 and to NG2 before its upgrade (ADR-0253); the service serves as servedPolicy says, from
+  // chats.state alone.
+  const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{},topic_memory:'group'};
   const policy=servedPolicy(()=>configured),ALICE=9;
   const started:any[]=[],replies:any[]=[];let serial=base;
   const runtime:FakeCall=async(operation,input)=>{
@@ -49,6 +50,13 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
     assert.equal((await services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'))).state,'completed');
     await services.telegram.run(id,await authority('telegram'));return id;
   };
+  /** The owner adds Nocheh to a group: it is on at once (ADR-0253). */
+  const ownerAdds=async(telegram:string)=>{
+    const update=++serial,bot={id:123456,is_bot:true,first_name:'Nocheh'};
+    await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:telegram,
+      source_id:String(update),revision:'1',occurred_at:null,text:null,payload:{update_id:update,my_chat_member:{chat:chatOf(telegram),
+        from:{id:Number(OWNER),is_bot:false,first_name:'Owner'},date:1700000000+update-base,old_chat_member:{status:'left',user:bot},new_chat_member:{status:'member',user:bot}}}} as Envelope);
+  };
   const turnOf=(event:string)=>started.find(turn=>turn.event_id===event);
   const replyTo=(event:string)=>replies.filter(reply=>reply.event_id===event).at(-1);
   const pass=(turn:any)=>reader({headers:{authorization:'Bearer '+turn.archive_credential}} as any,token);
@@ -57,7 +65,8 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
 
-    // NG2 is a basic group: its first message makes its chat, named from that first Telegram id.
+    // NG2 is a basic group: the owner's add makes its chat, named from that first Telegram id.
+    await ownerAdds(NG2_OLD_TG);
     await say(NG2_OLD_TG,'Lunch is at noon',ALICE);
     assert.equal(chats().resolve('telegram',NG2_OLD_TG),NG2);assert.ok(chats().served(NG2));
     const before=await say(NG2_OLD_TG,'Nocheh, who is coming?');
@@ -72,7 +81,7 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
     await say(NG2_TG,null,ALICE,{migrate_from_chat_id:Number(NG2_OLD_TG)});
     assert.equal(chats().resolve('telegram',NG2_TG),NG2,'the new id names the same chat');
     assert.deepEqual(chats().appIds(NG2),{app:'telegram',chat:NG2_TG,topic:null,old:[NG2_OLD_TG]});
-    assert.ok(chats().served(NG2),'still served, though TELEGRAM_GROUP_IDS names only its old id');
+    assert.ok(chats().served(NG2),'still served under its new id');
     assert.ok(policy().group_ids.includes(NG2_TG),'the served policy holds every id the group has had');
 
     // Under its new id, the group's turn sees what was said under the old one, and is answered where the group is now.
@@ -94,7 +103,8 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
     assert.equal(chats().resolve('telegram',NG2_TG),NG2,'after the directory looked again');
     assert.equal(replyTo(after).chat_id,NG2_TG);assert.equal(replyTo(after).topic,undefined);
 
-    // NG1 is a forum: a topic message makes the group and its topic, and its turn is the topic's.
+    // NG1 is a forum: the owner adds Nocheh, a topic message makes its topic, and its turn is the topic's.
+    await ownerAdds(NG1_TG);
     const topic=await say(NG1_TG,'Nocheh, plans for this topic?',Number(OWNER),{message_thread_id:Number(NG1_TOPIC_KEY),is_topic_message:true});
     assert.equal(chats().resolve('telegram',NG1_TG),NG1);assert.equal(chats().resolve('telegram',NG1_TG,NG1_TOPIC_KEY),NG1_TOPIC);
     const inTopic=turnOf(topic);

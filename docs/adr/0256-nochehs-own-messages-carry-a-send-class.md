@@ -61,7 +61,13 @@ kinds. The memory half, which labels each learned note by these classes, is
   model's send request is `approved_post` and a scheduled result
   `scheduled_run`. A system send must name its class (`prepareSystem`): a job's
   report `job_report`, the group's line about it `notice`, the memory-access
-  notification `notice` and its follow-ups `approved_post`.
+  notification `notice` and its follow-ups `approved_post`. The card after the
+  owner adds Nocheh to a group, the note when Nocheh left a group someone else
+  added it to and the line when it was removed from one
+  ([ADR-0253](0253-only-the-owner-adds-nocheh.md)) are each `notice`, and the
+  card's edit after a press is a `card_update` by its route. Leaving a group
+  sends no message, but its route runs under `notice` and its dispatch key's
+  default is `notice`, so nothing a leave returns could be learned.
 - `telegram_action_requests.send_class` (added if missing, checked against the
   four values) keeps an approved send's class. An older row has none and is sent
   as `approved_post`. The class is not part of an action's id.

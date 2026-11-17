@@ -9,13 +9,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from .review_worker import start,observe
 from .scopes import Scopes
+from services.chats import Served
 
 
 class ReviewHandoffTests(unittest.TestCase):
     def setUp(self):
         self.directory=tempfile.TemporaryDirectory();self.addCleanup(self.directory.cleanup)
         self.root=Path(self.directory.name);self.profile=self.root/'profiles'/('nocheh-'+'c'*24)
-        self.profile.mkdir(parents=True);self.policy=Scopes({'enabled':True,'owner_id':'42','group_ids':[]})
+        self.profile.mkdir(parents=True);self.policy=Scopes({'enabled':True},Served.of('42'))
         self.body={'id':'a'*64,'scope':'42','content':'synthetic protected input','archive_credential':'synthetic credential'}
         self.prepare=patch('services.hermes.review_worker.review_profile',return_value=self.profile)
         self.prepare.start();self.addCleanup(self.prepare.stop)
@@ -53,6 +54,7 @@ class ReviewHandoffTests(unittest.TestCase):
                 self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
                 self.assertEqual(start(self.root,self.policy,'model',None,second),{'state':'waiting','error_code':'profile_busy'})
                 self.assertFalse((self.root/'nocheh-review-runs'/(second['id']+'.started')).exists())
+                self.assertEqual(observe(self.root,self.policy,second),{'state':'not_found'},'a busy start leaves nothing that began')
                 with (self.profile/'.turn.lock').open('a') as lock:
                     with self.assertRaises(BlockingIOError):fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 self.assertEqual(child.call_count,1)
@@ -215,6 +217,36 @@ class ReviewHandoffTests(unittest.TestCase):
             self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'waiting','error_code':'profile_busy'})
             child.assert_not_called()
             self.assertEqual(observe(self.root,self.policy,self.body),{'state':'not_found'})
+        # Nocheh starts a not_found review again (ADR-0258); once the profile is quiet it runs once.
+        (self.profile/'.foreground').unlink()
+        with patch('services.hermes.review_worker._review',return_value={'state':'done'}) as child:
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'done');self.assertEqual(child.call_count,1)
+
+    def test_a_start_that_fails_before_launch_leaves_no_start_marker(self):
+        # Profile preparation runs before any lock, so a failure there (a restart, a busy file system) starts nothing.
+        for failure in (OSError('fixture_preparation_failed'),ValueError('owner_review_required')):
+            with patch('services.hermes.review_worker.review_profile',side_effect=failure), \
+                    patch('services.hermes.review_worker._review',side_effect=AssertionError('launched')):
+                with self.assertRaises(type(failure)):start(self.root,self.policy,'model',None,self.body)
+            self.assertFalse((self.root/'nocheh-review-runs'/(self.body['id']+'.started')).exists())
+            self.assertEqual(observe(self.root,self.policy,self.body),{'state':'not_found'})
+        with patch('services.hermes.review_worker._review',return_value={'state':'done'}) as child:
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'done')
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'done'})
+            self.assertEqual(child.call_count,1)
+
+    def test_a_start_past_its_launch_deadline_launches_nothing(self):
+        # Nocheh may already have given this start up and started the review again (ADR-0258).
+        with patch('services.hermes.review_worker.LAUNCH_DEADLINE',-1), \
+                patch('services.hermes.review_worker._review',side_effect=AssertionError('launched')):
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'waiting','error_code':'profile_busy'})
+        self.assertFalse((self.root/'nocheh-review-runs'/(self.body['id']+'.started')).exists())
+        self.assertEqual(observe(self.root,self.policy,self.body),{'state':'not_found'})
+        with patch('services.hermes.review_worker._review',return_value={'state':'done'}) as child:
+            self.assertEqual(start(self.root,self.policy,'model',None,self.body),{'state':'running'})
+            self.wait_state(self.body,'done');self.assertEqual(child.call_count,1)
 
     def test_observation_and_launch_reject_symlinked_supervisor_state(self):
         other=self.root/'other';other.mkdir();(self.root/'nocheh-review-runs').symlink_to(other,target_is_directory=True)
