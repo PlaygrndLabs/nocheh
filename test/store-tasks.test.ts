@@ -16,7 +16,17 @@ import {HttpError} from '../src/http.js';
 import {legacyChats,legacyDirectory} from './fixture-groups.js';
 import {families} from './fixture-families.js';
 import {moveGroupTasks} from '../src/stores/tasks.js';
+import {installMembersForTest,memberIdFor} from '../src/members.js';
 
+// Who writes in a group besides the owner is a member (step 3): these tests' people are members with every permission
+// and no group switch, so they talk in every group served; the returned function also puts the chats back.
+const asMembers=(restore:()=>void,people:readonly string[]=['456','457','458'])=>{
+  const accounts=people.map(id=>accountIdFor('telegram',id));
+  const back=installMembersForTest({members:accounts.map(account=>({id:memberIdFor(account),state:'active' as const,group_talk:true,group_jobs:true,
+    group_post_other:true,group_tools:true,tasks:'write' as const})),accounts:accounts.map(account=>({account_id:account,member_id:memberIdFor(account)})),
+    chats:[],presence:[],owner_account:accountIdFor('telegram','123')});
+  return ()=>{back();restore();};
+};
 const states=(counts:any)=>({open:counts.open,done:counts.done,dropped:counts.dropped});
 
 test('the owner keeps task lists from the dashboard and their private chat; an unassigned group reaches none',
@@ -27,7 +37,7 @@ test('the owner keeps task lists from the dashboard and their private chat; an u
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks:'+Date.now(),group='-'+Date.now();
   const owner:Reader={admin:true,scope:null};
   // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
-  const restore=installChatsForTest(legacyDirectory([group,group+'/topic/7','456'],{owner:'123',served:[group]}));
+  const restore=asMembers(installChatsForTest(legacyDirectory([group,group+'/topic/7','456'],{owner:'123',served:[group]})));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
@@ -151,7 +161,7 @@ test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, 
   const owner:Reader={admin:true,scope:null};
   const notices:any[]=[];let telegram:'done'|'not_started'|'ambiguous'='done';
   // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
-  const restore=installChatsForTest(legacyDirectory([group,group+'/topic/7'],{owner:'123',served:[group]}));
+  const restore=asMembers(installChatsForTest(legacyDirectory([group,group+'/topic/7'],{owner:'123',served:[group]})));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -342,7 +352,7 @@ test('a reminder says who set it and where; people\'s reminders due together go 
   const notices:any[]=[];let telegram:'done'|'not_started'|'ambiguous'|number='done';
   // The chats this test uses, as the seeder makes their rows, with the names Telegram gave them (ADR-0252).
   const seeded=legacyChats([group,topic,work],{owner:'123',served:[group,work]}),titles:Record<string,string>={[group]:'Family',[topic]:'Plans',[work]:'Work'};
-  const restore=installChatsForTest({...seeded,chats:seeded.chats.map(chat=>({...chat,title:titles[chat.id]??chat.title??null}))});
+  const restore=asMembers(installChatsForTest({...seeded,chats:seeded.chats.map(chat=>({...chat,title:titles[chat.id]??chat.title??null}))}));
   // Sara (who writes in the topic) and Omid are allowed in Family, Pat in Work.
   const policy={enabled:true,owner_id:'123',group_ids:[group,work],group_access:{[group]:{granted:['456','457'],denied:[]},[work]:{granted:['458'],denied:[]}}};
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
@@ -662,11 +672,9 @@ test('a reminder says who set it and where; people\'s reminders due together go 
     assert.equal(notices.length,1,'saving the same list again tells nothing new');
     assert.deepEqual((await reminders(tent.id)).map(item=>[item.set_by,item.source]),[['owner',setBy('you',family).trimEnd()]]);
 
-    // s. A person Nocheh could not tell is never named by what they typed: their task and reminder are kept, set by
-    // someone you allowed.
+    // s. A person Nocheh could not tell is no member (step 3): their turn adds no task and sets no reminder.
     const ghost=await actor((await capture(group,{first_name:'Owner'})).id,group,group);
-    const gate=await s.tasks.chatCreate(ghost,{title:'Fix the gate',reminders:[soon(130)]});
-    assert.deepEqual((await reminders(gate.id)).map(item=>[item.set_by,item.source]),[['person',setBy('someone you allowed',family).trimEnd()]]);
+    await assert.rejects(s.tasks.chatCreate(ghost,{title:'Fix the gate',reminders:[soon(130)]}),{status:403,code:'member_access_changed'});
   }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
@@ -678,7 +686,7 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-board:'+Date.now(),group='-'+Date.now(),porch='-3'+Date.now();
   const owner:Reader={admin:true,scope:null};
   // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
-  const restore=installChatsForTest(legacyDirectory([group,porch],{owner:'123',served:[group,porch]}));
+  const restore=asMembers(installChatsForTest(legacyDirectory([group,porch],{owner:'123',served:[group,porch]})));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group,porch]}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
@@ -896,7 +904,7 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
   const group='-'+Date.now(),forum='-100'+Date.now(),other='-2'+Date.now();
   const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[];
   // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
-  const restore=installChatsForTest(legacyDirectory([group,forum,other,forum+'/topic/7','456'],{owner:'123',served:[group,forum,other]}));
+  const restore=asMembers(installChatsForTest(legacyDirectory([group,forum,other,forum+'/topic/7','456'],{owner:'123',served:[group,forum,other]})));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[group,forum,other]}),
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -1087,7 +1095,7 @@ for(const family of families)test(`a group or topic reaches only its own tasks a
   const t1='-1001'+stamp,t2='-1002'+stamp,t3='-1003'+stamp,id=family.id,g1=id(t1),g2=id(t2),g3=id(t3),at=(group:string,key:number)=>id(group+'/topic/'+key);
   const owner:Reader={admin:true,scope:null};let memory:'group'|'topic'='group';
   // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
-  const restore=installChatsForTest(family.directory([t1,t2,t3,...[5,6,7,8].map(topic=>t1+'/topic/'+topic),t2+'/topic/3'],{owner:'123',served:[t1,t2,t3]}));
+  const restore=asMembers(installChatsForTest(family.directory([t1,t2,t3,...[5,6,7,8].map(topic=>t1+'/topic/'+topic),t2+'/topic/3'],{owner:'123',served:[t1,t2,t3]})));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[t1,t2,t3],topic_memory:memory}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;
@@ -1294,7 +1302,7 @@ for(const family of families)test(`a group's move, archive or trash takes only t
   const t1='-1001'+stamp,t2='-1002'+stamp,g1=family.id(t1),g2=family.id(t2);
   const owner:Reader={admin:true,scope:null};
   // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
-  const restore=installChatsForTest(family.directory([t1,t2],{owner:'123',served:[t1,t2]}));
+  const restore=asMembers(installChatsForTest(family.directory([t1,t2],{owner:'123',served:[t1,t2]})));
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[t1,t2],topic_memory:'group'}),
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
   let serial=0;

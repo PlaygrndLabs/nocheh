@@ -46,8 +46,8 @@ export type ChatAddRow={event_id:string;chat_id:string;kind:'added'|'removed';ro
   member:boolean;action:'card'|'leave'|'tell'|'none';outcome:string|null;attempts:number;project_id:string|null;offered:string[];notice:string;created_at:Date};
 type Outcome='carded'|'answered'|'left'|'could_not_leave'|'told'|'superseded';
 
-/** The note after a leave: only for an add by a person the owner allowed somewhere, or by someone who hid who they were.
- *  Strangers get the content-free record alone. */
+/** The note after a leave: only for an add by a member (their account is linked to one, step 3), or by someone who hid
+ *  who they were. Strangers get the content-free record alone. */
 export function noteLine(row:Pick<ChatAddRow,'role'|'member'>,outcome:string|null):'left_member'|'left_anonymous'|'could_not_leave'|null {
   if(!row.member&&row.role!=='anonymous')return null;
   if(outcome==='left')return row.role==='anonymous'?'left_anonymous':'left_member';

@@ -1,6 +1,6 @@
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
-import {groupAccessOf,type AssistantPolicy} from '../assistant-policy.js';
+import type {AssistantPolicy} from '../assistant-policy.js';
 import {conversationFields,type ChatDirectory} from '../chats.js';
 import {telegramUsername} from '../chats-telegram.js';
 import {HttpError} from '../http.js';
@@ -16,6 +16,7 @@ import type {TelegramActionRepository} from './telegram-actions.js';
 import type {NativeMemoryRepository} from './native-memory.js';
 import type {SharingContentRepository} from './sharing.js';
 import type {MemoryAccessRepository} from './memory-access.js';
+import {memberView,ownerAccount} from './members.js';
 
 export const decisionKinds=['controlled_action','telegram_action','memory_access','entity','knowledge'] as const;
 export type DecisionKind=typeof decisionKinds[number];
@@ -281,10 +282,15 @@ export class OwnerSupervisionRepository {
       this.stores.control.query('SELECT * FROM organization_delegations WHERE scopes ? $1 ORDER BY id',[space]),
       this.services.memory.status(),
     ]);
-    // The policy keys a group's access by its Telegram ids, joined over every id the group has had as the turn gate joins
-    // them (groupAccessFor); the owner's private chat is the directory's, and so is whether the group is on (chats.state).
-    const guard=memory.guard,policy=configuration?.policy,externals=chats.get(parent)?.app_ids.map(label=>label.external)??[parent];
-    const access=groupAccessOf(policy,externals),owner=space===chats.ownerChat();
+    // Who may use Nocheh in the group is its members (step 3): each member with a switch for it, or whom Telegram has a
+    // row for there, with the switch (on with no row), what Telegram last said and whether it is new to them. The owner's
+    // private chat is the directory's, and so is whether the group is on (chats.state).
+    const guard=memory.guard,policy=configuration?.policy,owner=space===chats.ownerChat();
+    const members=chats.kind(parent)==='group'?(await memberView(this.stores.control,policy?ownerAccount(policy):null,null,false)).members.flatMap(member=>{
+      const group=member.groups.find(item=>item.chat_id===parent);
+      return group?[{id:member.id,account_id:member.account_id,name:member.name,username:member.username,telegram_id:member.telegram_id,state:member.state,
+        talk:member.permissions.talk,on:group.on,telegram:group.telegram,new:group.new}]:[];
+    }):[];
     // While a group's topics share memory, a turn there reads the rules into the group and every one of its topics too.
     const groupWide=(policy?.topic_memory??'group')==='group'&&chats.kind(parent)==='group';
     const sharingRules=rules.rows.filter(row=>row.destination===space||groupWide).map(row=>row.destination===space?row:{...row,through_group:true});
@@ -309,7 +315,7 @@ export class OwnerSupervisionRepository {
     }
     return {conversation,observed_at:new Date().toISOString(),state:configuration&&security.rows[0]?'current':'partial',
       addressing:{state:configuration?'current':'unavailable',enabled:policy?.enabled??false,owner_id:policy?.owner_id??null,
-        group_enabled:!!policy?.enabled&&chats.kind(parent)==='group'&&chats.served(parent),granted:access?.granted??[],denied:access?.denied??[],revision:configuration?.revision??null},
+        group_enabled:!!policy?.enabled&&chats.kind(parent)==='group'&&chats.served(parent),members,revision:configuration?.revision??null},
       knowledge_access:{source_scope:space,owner_access:owner,sharing_rules:sharingRules,
         fact_grants:grants.rows.map(({binding,...row})=>({...row,current:currentBinding(binding)&&factRevisions.get(row.fact_id)===row.fact_revision&&row.state==='active'&&(!row.expires_at||new Date(row.expires_at).getTime()>Date.now()),authorization:'rechecked_on_use'})),
         sharing_releases:sharingReleases,
