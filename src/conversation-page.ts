@@ -2,6 +2,7 @@ import {HttpError} from './http.js';
 import {messageSender} from './stores/archive-row-details.js';
 import {reactionPreview} from './reaction-preview.js';
 import {sourceContentTypes} from './source-content.js';
+import {repliesElsewhere} from './observed-source.js';
 
 /** How a conversation is read in order: one page of messages, oldest first. */
 export const PAGE_TEXT=1500,FILE_TEXT=1000,PAGE_BUDGET=30000;
@@ -53,7 +54,9 @@ function exportedReactions(message:Record<string,any>) {
   });
 }
 
-/** One record in the compact form the agent pages through. Reply and topic ids are Telegram message ids.
+/** One record in the compact form the agent pages through. Reply and topic ids are Telegram message ids; an exported
+ *  reply into another chat has none, since its id names that chat's message (repliesElsewhere). A sender is named by
+ *  the name or username Telegram showed, else as "a person", never by an id (ADR-0259).
  *  `whole`, for a sealed job box's copy, keeps every file and cuts texts only past one record's budget. */
 export function pageItem(input:{id:string;kind:string;at:Date;payload:unknown;text:string;files?:{kind:string;text:string}[]},whole=false) {
   const entry=pageEntry(input.kind,input.payload)!,value=object(input.payload);
@@ -61,7 +64,7 @@ export function pageItem(input:{id:string;kind:string;at:Date;payload:unknown;te
   const exported=input.kind.startsWith('telegram_desktop_');
   const reaction=entry==='reaction'?reactionPreview(input.kind,input.payload):null;
   const sender=entry==='assistant'||entry==='reaction'?null:messageSender(input.kind,input.payload);
-  const reply=exported?identifier(message.reply_to_message_id):identifier(object(message.reply_to_message).message_id);
+  const reply=exported?repliesElsewhere(message)?null:identifier(message.reply_to_message_id):identifier(object(message.reply_to_message).message_id);
   const topic=exported?identifier(value.topic_id):message.is_topic_message?identifier(message.message_thread_id):null;
   const id=identifier(exported?message.id:message.message_id);
   const reactions=exported?exportedReactions(message):undefined;
@@ -70,7 +73,7 @@ export function pageItem(input:{id:string;kind:string;at:Date;payload:unknown;te
   const [text,...texts]:{text:string;truncated?:boolean}[]=whole?boxTexts([input.text,...files.map(file=>file.text)]):[cut(input.text,PAGE_TEXT),...files.map(file=>cut(file.text,FILE_TEXT))];
   return {source:'nocheh:event:'+input.id,at:input.at.toISOString(),type:entry,
     ...(id?{message_id:id}:{}),...(reply?{reply_to:reply}:{}),...(topic?{topic}:{}),
-    ...(sender?{from:sender.name??(sender.username?'@'+sender.username:sender.id)}:{}),
+    ...(sender?{from:sender.name??(sender.username?'@'+sender.username:'a person')}:{}),
     ...(reaction?{reaction:{change:reaction.change,by:reaction.actor,message_id:reaction.target}}:{}),
     ...(input.text?text:{}),...(types.length?{content:types}:{}),
     ...(reactions?.length?{reactions}:{}),

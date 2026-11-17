@@ -90,6 +90,12 @@ function fitted(text:string,size:number):string {
 const workspaceId=(protocol:string,generation:string,revision:number)=>digest(canonical(revision===1?[protocol,generation]:[protocol,generation,revision]));
 type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
 
+/** How many messages of each learned batch a memory search hit names by source (ADR-0259): the first 3 references of each
+ *  receipt; later ones keep today's fields alone. */
+export const SEARCH_TAGGED_PER_BATCH=3;
+/** The ids of a memory search to name by source: those among the first SEARCH_TAGGED_PER_BATCH of their batch. */
+export const searchTagged=(found:{ids:readonly string[];from?:readonly {position:number}[]}):Set<string>=>
+  new Set(found.ids.filter((_id,index)=>(found.from?.[index]?.position??SEARCH_TAGGED_PER_BATCH)<SEARCH_TAGGED_PER_BATCH));
 /** Long-term memory behind the memory socket (ADR-0232). The engine, Honcho today, stores and learns; Nocheh owns guarded
  * inputs, immutable results, recoverable receipts, sharing rules, corrections and deletions.
  * One memory space serves the installation; sessions bound conversations; guard epochs never rebuild it. */
@@ -1148,7 +1154,9 @@ export class NativeMemoryRepository {
   }
   /** Archived messages the engine finds by meaning among what was learned for this audience, best first.
    * Only their ids leave here: the reader gets the messages back through the archive's own access check. */
-  async search(principal:Reader,query:string,count:number):Promise<{ids:string[];learned:boolean;syncing?:boolean}> {
+  /** Archived messages by meaning, in the engine's order. `from` says, for each id, the receipt it came from and its
+   *  position among that receipt's references, so the first few of each can be named (ADR-0259). */
+  async search(principal:Reader,query:string,count:number):Promise<{ids:string[];learned:boolean;syncing?:boolean;from?:{receipt:string;position:number}[]}> {
     string(query,2000);if(!query.trim())throw new HttpError(400,'empty_query');
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
     if(!workspace)return {ids:[],learned:false};
@@ -1161,7 +1169,7 @@ export class NativeMemoryRepository {
     // The question is checked for secrets before it reaches the engine, as a recall question is.
     const question=await this.prepared.prepare(actor,query,this.detect);
     const found=await this.engine.search(id,String(question),{limit:Math.min(50,count*3),sessions});
-    const ids:string[]=[];
+    const ids:string[]=[],from:{receipt:string;position:number}[]=[];
     for(const message of found.slice(0,50)) {
       if(!engineId(message.id)||!/^[a-f0-9]{64}$/.test(message.receipt))continue;
       const row=(await this.control.query(`SELECT source_reference,source_references FROM memory_ingestion_receipts
@@ -1169,10 +1177,10 @@ export class NativeMemoryRepository {
         AND (CASE WHEN $6::text[] IS NOT NULL THEN ${readSetSql('audience',6)} ELSE ($4::text='owner' OR ${recallCondition('audience','$4','$5')}) END)`,
         [message.receipt,id,message.id,audience,group,reads])).rows[0];
       if(!row)continue;
-      for(const reference of (row.source_references?.length?row.source_references:[row.source_reference]).slice(0,30))
-        if(typeof reference?.id==='string'&&/^[a-f0-9]{64}$/.test(reference.id)&&!ids.includes(reference.id))ids.push(reference.id);
+      for(const [position,reference] of (row.source_references?.length?row.source_references:[row.source_reference]).slice(0,30).entries())
+        if(typeof reference?.id==='string'&&/^[a-f0-9]{64}$/.test(reference.id)&&!ids.includes(reference.id)){ids.push(reference.id);from.push({receipt:message.receipt,position});}
     }
     await this.current(id);await this.prepared.audience.assert(principal);
-    return {ids,learned:true,...(current.row.state==='building'?{syncing:true}:{})};
+    return {ids,learned:true,...(current.row.state==='building'?{syncing:true}:{}),from};
   }
 }

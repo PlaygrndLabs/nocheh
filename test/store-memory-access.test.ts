@@ -55,6 +55,9 @@ test('fact grants authorize exact destinations while relationships only create r
     assert.ok(!(await services.memoryAccess.grants(owner,'','-1'+Date.now())).grants.some(item=>item.id===grant.id),'another chat does not list them');
     let actor=await principal(groupSource),context=await services.memoryAccess.context(actor,'checkpoint complete');
     assert.equal(context.sources.length,1);assert.equal(context.sources[0]!.text,'The checkpoint is complete.');
+    // A grant names only that the owner shared it, and the day of the grant in UTC, never its sources (ADR-0259).
+    const granted=(await stores.control.query('SELECT created_at FROM memory_fact_grants WHERE id=$1',[grant.id])).rows[0].created_at as Date;
+    assert.deepEqual([context.sources[0]!.tag,context.sources[0]!.by],['shared by the owner on '+granted.toISOString().slice(0,10),'shared']);
     assert.equal((await services.memoryAccess.context(await principal(groupSource,group+'/topic/7'),'checkpoint complete')).sources[0]?.text,'The checkpoint is complete.',
       'every topic of a group shares its grants by default');
     policy.topic_memory='topic';

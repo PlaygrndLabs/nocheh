@@ -97,7 +97,6 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     const reference={store:'control' as const,kind:'operation' as const,id:operation.id,generation:operation.generation,input_hash:operation.input_hash};
     await operations.verify(reference);return reference;
   },options.detectorVersion);
-  const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
   // One reader of where messages and notes came from, for reviews, Hermes's lookups, the Notes page, recall and Honcho.
   const noteSources=new NoteSourceRepository(stores,options.policy,access);
   const projects=new ProjectRepository(stores.control,servedGroups),entities=new EntityRepository(stores,access,projects,noteSources),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
@@ -106,6 +105,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
   // Who · where · when for a search hit or an opened original, built by code and secret-checked together (ADR-0259).
   const tags=new SourceTagRepository(stores,access,noteSources,(principal,value,check)=>prepared.prepare(principal,value,check),detect,options.policy);
+  const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value),tags);
   const turns=new RuntimeTurnRepository(access,prepared);
   // Nocheh's chat records (ADR-0252): what each captured Telegram original says of its chat, its topic and its people.
   const chats=new ChatRepository(stores,options.policy);

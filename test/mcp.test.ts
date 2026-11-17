@@ -9,6 +9,7 @@ import {HttpError,readJson} from '../src/http.js';
 import {brokerServer,jobErrors as relayedJobErrors} from '../src/security/broker.js';
 import {loopback,protocolVersions,serveMcp,toolSurface,turnDeadline} from '../src/mcp/server.js';
 import {inParts,jobErrors,mcpTools,memoryRoutes,timeoutFor,type ToolContext} from '../src/mcp/tools.js';
+import {sourceTagUsage} from '../src/source-tags.js';
 
 const ID='a'.repeat(64);
 type Call={method:string;path:string;body:unknown;timeout:number};
@@ -49,6 +50,13 @@ test('the data tools keep their names, closed schemas and engine-neutral words',
     new Set(['organization','project_save','project_assignment','entity_rename','entity_correct','entity_merge','entity_unmerge','sharing_rule','fact_grant','fact_revoke']));
   for(const branch of proposal.properties.proposal.oneOf){assert.equal(branch.additionalProperties,false);assert.equal('approved' in branch.properties,false);assert.equal('delegation_id' in branch.properties,false);}
   assert.match(tool('memory_recall').description,/mcp__nocheh__archive_read/);
+  // What a source tag means is said once, in the tool descriptions, never in a result (ADR-0259).
+  assert.equal(mcpTools.filter(item=>item.description.includes(sourceTagUsage)).length,1);
+  assert.ok(tool('archive_search').description.includes(sourceTagUsage));
+  assert.match(tool('archive_search').description,/tag \(who · where · when\), by \(whose words: owner, person, forward, file, mixed, nocheh, shared or unknown\)/);
+  assert.match(tool('archive_search').description,/time zone in the owner's own chats and in UTC elsewhere/);
+  assert.match(tool('memory_search').description,/carry tag, by and at/);
+  assert.match(tool('archive_page').description,/reply_source opens, with mcp__nocheh__archive_read/);
   assert.match(toolSurface(),/^[a-f0-9]{64}$/);
   // The broker relays exactly the job codes the job tool may name.
   assert.equal(relayedJobErrors,jobErrors);assert.ok(jobErrors.has('job_repo_not_allowed'));

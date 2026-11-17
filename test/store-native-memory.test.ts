@@ -9,7 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
-import {NativeMemoryRepository,assistantPeer,materialPeer,materialSessionKey} from '../src/stores/native-memory.js';
+import {NativeMemoryRepository,assistantPeer,materialPeer,materialSessionKey,searchTagged} from '../src/stores/native-memory.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {captureEvidence} from '../src/stores/generated-capture.js';
 import {honchoPointer,honchoSource} from '../src/source-labels.js';
@@ -299,7 +299,14 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}})});
   const group={admin:false,scope:'-100',space:'-100/topic/3',turnEvent:digest('turn')} as Reader;
-  assert.deepEqual(await memory.search(group,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
+  // Each id says the batch it came from and its place there, so the first 3 of a batch are named by source (ADR-0259).
+  const batches=[{receipt:digest('receipt-a'),position:0},{receipt:digest('receipt-c'),position:1}];
+  const searched=await memory.search(group,'who sends the invoice',4);
+  assert.deepEqual(searched,{ids:[digest('first'),digest('second')],learned:true,from:batches});
+  assert.deepEqual([...searchTagged(searched)],[digest('first'),digest('second')]);
+  assert.deepEqual([...searchTagged({ids:['a','b','c','d','e'],from:[0,1,2,3,0].map(position=>({receipt:'r',position}))})],['a','b','c','e'],
+    'a batch\'s fourth message and later keep today\'s fields alone');
+  assert.deepEqual([...searchTagged({ids:['a']})],[],'without positions, nothing is named');
   assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,filters:{session_id:{in:sessions}}}});
   assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
   // The group is bound as its id and its topics' ids, from the chat rows (ADR-0252).
@@ -312,7 +319,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   const answer={admin:false,scope:'123',space:'123',turnEvent:digest('start'),answer:'a'.repeat(32),
     reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
   queries.length=0;
-  assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
+  assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true,from:batches});
   // Its groups are bound as their ids and their topics' ids, from the chat rows (ADR-0252).
   // The read set reaches the provenance query whole, and SQL takes its ids only as marked read set entries.
   const frozen=['-100','-100/topic/3','-200'].map(id=>'read:'+id);

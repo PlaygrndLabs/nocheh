@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {Reader} from '../access.js';
 import {reactionObservation} from '../reaction-observation.js';
+import {sourceTagUsage} from '../source-tags.js';
 
 /** One loop-back call to this service's own route, with the caller's bearer. Any status comes back; only a broken answer throws. */
 export type Loopback=(method:'GET'|'POST',path:string,body:unknown,timeoutMs:number)=>Promise<{status:number;body:unknown}>;
@@ -403,19 +404,25 @@ function proposalSchema():Value {
 }
 
 const day={type:['string','null']},ids={type:'array',items:{type:'string'},maxItems:20};
+/** What a hit's source fields mean (ADR-0259): said once, in archive_search's description, with the usage sentence, and
+ *  never inside a tool result, so stored history does not pile it up. */
+const TAGS=' Each hit has tag (who · where · when), by (whose words: owner, person, forward, file, mixed, nocheh, shared or unknown) and at '+
+  '(when, as an ISO time). Times in tags are in the owner\'s Settings › Tasks time zone in the owner\'s own chats and in UTC elsewhere. '+sourceTagUsage;
 /** Nocheh's data tools, as the brain sees them under the MCP server name nocheh (mcp__nocheh__<name>). Arguments and answers are
  * those the brain's own plugin tools had, so a turn reads the same evidence the same way (ADR-0233). */
 export const mcpTools:readonly McpTool[]=[
-  {name:'archive_search',description:'Find permitted archive evidence in your authorized scope. For reaction questions without a known note ID, use mode=current_reactions with no query. Results include the guarded reaction observation and bounded target text; read source references for further detail. An individual empty new_reaction list records that actor removing their reaction; it does not prove task completion or that nobody else reacted. This captured evidence is incomplete; empty search results do not prove no reactions. For mode=text (default), query is required and every query word must match; try one or two distinctive words when a longer search misses. Cite returned source references.',
+  {name:'archive_search',description:'Find permitted archive evidence in your authorized scope. For reaction questions without a known note ID, use mode=current_reactions with no query. Results include the guarded reaction observation and bounded target text; read source references for further detail. An individual empty new_reaction list records that actor removing their reaction; it does not prove task completion or that nobody else reacted. This captured evidence is incomplete; empty search results do not prove no reactions. For mode=text (default), query is required and every query word must match; try one or two distinctive words when a longer search misses. Cite returned source references.'+TAGS,
     inputSchema:shape({mode:{type:'string',enum:['text','current_reactions']},query:{type:'string',description:'Required for text mode; omitted for current_reactions.'},limit:{type:'integer',minimum:1,maximum:10}}),run:search},
   {name:'archive_read',description:'Read an archived source, its observed reaction data, and links to captured current reactions. Follow reaction links to inspect changes or removals; a reaction is not proof of task completion. Originals and generated artifacts have distinct provenance.',
     inputSchema:shape({id:{type:'string'}},['id']),run:archiveRead},
   {name:'archive_page',description:'Read a conversation in time order, oldest first, one page at a time: messages, edits, reactions, replies and the text of their files and voice notes. '+
     'Use it to go through a period (from and to as YYYY-MM-DD) or a whole chat; pass next as after for the following page until complete is true. '+
-    'position says how many of the chat\'s records are read through. Only the owner may name another chat, by an ID from mcp__nocheh__owner_read.',
+    'position says how many of the chat\'s records are read through. Only the owner may name another chat, by an ID from mcp__nocheh__owner_read. '+
+    'owner is true on the owner\'s own typing; reply_source opens, with mcp__nocheh__archive_read, the message a reply answers when it is not on the page.',
     inputSchema:shape({chat:{type:'string'},from:{type:'string'},to:{type:'string'},after:{type:'string'},limit:{type:'integer',minimum:1,maximum:50}}),run:page},
   {name:'memory_search',description:'Find archived messages by meaning rather than exact words, among the messages learned into memory for this audience. '+
-    'Chats that were not learned return nothing (learned is false); use mcp__nocheh__archive_search or mcp__nocheh__archive_page for them. Cite returned source references.',
+    'Chats that were not learned return nothing (learned is false); use mcp__nocheh__archive_search or mcp__nocheh__archive_page for them. Cite returned source references. '+
+    'The first messages of each learned batch carry tag, by and at, as archive_search hits do.',
     inputSchema:shape({query:{type:'string'},limit:{type:'integer',minimum:1,maximum:10}},['query']),run:memorySearch},
   {name:'memory_recall',description:'Recall long-term memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the conclusions memory holds, so read them with mcp__nocheh__archive_read before relying on a claim that matters.',
     inputSchema:shape({query:{type:'string'},profile:{type:'string'},limit:{type:'integer',minimum:1,maximum:50}},['query']),run:memoryRecall},

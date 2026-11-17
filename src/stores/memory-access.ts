@@ -16,6 +16,7 @@ import type {ProjectRepository} from './projects.js';
 import {defaultLogicalProfile} from './runtime-profile.js';
 import type {SourceAccessRepository} from './access.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
+import {shareTag} from './sharing.js';
 
 const protocol='nocheh-memory-access-v1';
 const ID=/^[a-f0-9]{64}$/;
@@ -338,6 +339,10 @@ export class MemoryAccessRepository {
   }
   private async suspend(id:string,reason:string){await this.stores.control.query("UPDATE memory_fact_grants SET state='suspended',suspended_reason=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='active'",[id,reason]);}
   private async suspendRequest(id:string,expected:number){await this.stores.control.query("UPDATE memory_access_requests SET state='suspended',revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$2 AND state='pending'",[id,expected]);}
+  /** A grant as a group reads it: its wording, named only as shared by the owner on the day of the grant (ADR-0259). */
+  private granted(row:{id:string;created_at:Date},text:string) {
+    return {id:row.id,source:'nocheh:grant:'+row.id,kind:'owner_approved' as const,text,limitations:[] as string[],...shareTag(row.created_at)};
+  }
   async context(principal:Reader,query:string) {
     if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');string(query,2000);await this.reconcile();
     // Persistent grants to any conversation the principal recalls apply, so a group's topics share them. An answer reader
@@ -346,7 +351,7 @@ export class MemoryAccessRepository {
     const binding=await this.prepared.audience.assert(principal),rows=(await this.stores.control.query(`SELECT * FROM memory_fact_grants
       WHERE ${recallCondition('destination','$1','$2')} AND mode='persistent' AND state='active' AND (expires_at IS NULL OR expires_at>now()) ORDER BY id LIMIT 100`,
       [home.space,groupWithTopics(home.group)])).rows,sources=[];
-    for(const row of rows){const text=await this.validateGrant(row,binding);if(text&&(!query.trim()||relevant(query,text)))sources.push({id:row.id,source:'nocheh:grant:'+row.id,kind:'owner_approved' as const,text,limitations:[]});if(sources.length>=10)break;}
+    for(const row of rows){const text=await this.validateGrant(row,binding);if(text&&(!query.trim()||relevant(query,text)))sources.push(this.granted(row,text));if(sources.length>=10)break;}
     await this.prepared.audience.assert(principal);return {sources};
   }
 }

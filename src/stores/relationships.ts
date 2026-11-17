@@ -95,6 +95,25 @@ export class RelationshipRepository {
       next:rows.length>limit?rows[limit-1].id:null};
   }
 
+  /**
+   * The messages each of these events replies to (ADR-0259): every archived copy of each reply target, oldest first, the
+   * way context() finds them, in one read. Only copies whose conversation the audience admits are kept (permits): a
+   * target outside it, external to the reader, is left out as context() leaves it out. An access check (canRead) is the
+   * caller's, as for context().
+   */
+  async replyTargets(ids:readonly string[],audience:RelationshipAudience):Promise<Map<string,SourceReference[]>> {
+    const found=new Map<string,SourceReference[]>(),wanted=[...new Set(ids)];
+    if(!wanted.length)return found;
+    const rows=(await this.pool.query(`SELECT r.event_id AS reply,e.id,e.revision,e.payload_hash FROM source_relations r
+      JOIN source_revisions v ON v.object_id=r.target_id JOIN source_observations o ON o.revision_id=v.id JOIN events e ON e.id=o.event_id
+      WHERE r.event_id=ANY($1::text[]) AND r.kind='reply_to' ORDER BY r.event_id,e.received_at,e.id`,[wanted])).rows;
+    const chats=await this.describeMany(rows.map(row=>row.id));
+    for(const row of rows) {
+      if(!permits(audience,chats.get(row.id)?.chat??null))continue;
+      const list=found.get(row.reply)??[];list.push({store:'archive',kind:'event',id:row.id,revision:row.revision,input_hash:row.payload_hash});found.set(row.reply,list);
+    }
+    return found;
+  }
   /** This scope filter is also intersected with the control repository's consent/access policy by callers. */
   async context(reference:SourceReference,audience:RelationshipAudience,limit=100):Promise<{
     source:SourceReference|null;targets:{kind:string;identity:SourceIdentity;references:SourceReference[];unresolved:boolean;next:string|null}[];

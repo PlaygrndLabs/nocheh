@@ -34,6 +34,7 @@ import {retryButton} from './action-commands.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {memoryProblems} from './note-sources.js';
+import {searchTagged} from './native-memory.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {currentChats} from './chats.js';
@@ -426,7 +427,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
       const body=object(await readJson(req)),count=limit(body.limit,5,10);
       const found=await timed(s.stores.control,principal.turnEvent,'longterm_search','nocheh',()=>s.memory.search(principal,string(body.query??'',2000),count));
-      return result({sources:await s.sources.found(principal,found.ids,count),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
+      // The first 3 messages of each learned batch name their source (ADR-0259); the hits are today's, in today's order.
+      return result({sources:await s.sources.found(principal,found.ids,count,searchTagged(found)),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
     }
     if(path==='/v1/memory/context'&&req.method==='GET') {
       const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);

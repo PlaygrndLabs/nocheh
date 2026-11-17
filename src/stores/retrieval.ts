@@ -24,6 +24,10 @@ import {archiveScopes,parentSpace,readSetGroups,sourceChat} from '../spaces.js';
 import {chats} from '../chats.js';
 import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
+import {unavailableTag,type Tag} from '../source-tags.js';
+import type {SourceTagRepository,TagOptions} from './source-tags.js';
+import {bucketOf} from '../source-facts.js';
+import {telegramTopicOpening} from '../chats-telegram.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
 // One chat's records in time order, under every id the chat has had ($1, archiveScopes: ADR-0252). Telegram gives a
@@ -41,13 +45,31 @@ export function scopedObservation(value:unknown):any {
   }
   return result;
 }
+/** The message a payload carries, live or exported. */
+const carriedMessage=(payload:unknown)=>{const body=payload&&typeof payload==='object'?payload as Record<string,any>:{};
+  return body.message??body.edited_message??body.channel_post??body.edited_channel_post;};
+type Tagged=Pick<Tag,'tag'|'by'|'at'>;
 export class SourceRepository {
   readonly audience:AudienceRepository;
+  /** `tags` names each hit's and each opened original's source (ADR-0259); without it, results keep today's shapes. */
   constructor(readonly access:SourceAccessRepository,readonly attachments:AttachmentRepository,readonly selections:SelectionRepository,
-    readonly allowPrepared:(principal:Reader,value:unknown)=>Promise<void>=async()=>{}) {
+    readonly allowPrepared:(principal:Reader,value:unknown)=>Promise<void>=async()=>{},readonly tags:SourceTagRepository|null=null) {
     this.audience=new AudienceRepository(access.guards);
   }
   private get stores(){return this.access.stores;}
+  /**
+   * Who · where · when for what a reader is shown (ADR-0259), by id: one batched read and one secret check for the whole
+   * request (SourceTagRepository). A source the reader cannot read reads "source not available here". Nothing for the
+   * owner's dashboard (admin), whose shapes stay as they were, nor for a reader outside a turn, which has no turn to
+   * secret-check new text for (PreparedContextRepository.prepare): it reads today's shapes too.
+   */
+  private async tagsFor(principal:Reader,binding:GuardBinding|null,references:readonly SourceReference[],options:TagOptions={}):Promise<Map<string,Tagged>> {
+    const found=new Map<string,Tagged>();
+    if(principal.admin||!principal.turnEvent||!binding||!this.tags||!references.length)return found;
+    const tags=await this.tags.tags(principal,binding,references,options);
+    for(const reference of references){const tag=tags.get(reference.id);found.set(reference.id,tag?{tag:tag.tag,by:tag.by,at:tag.at}:{...unavailableTag('here'),at:null});}
+    return found;
+  }
   /** Relations are shown within the conversations the principal recalls. */
   private relationAudience(principal:Reader):RelationshipAudience {
     // An answer reader sees relations within the groups frozen in its record (ADR-0249).
@@ -112,6 +134,10 @@ export class SourceRepository {
         reaction_observation:reactionObservation(reaction.event.payload),targets:previews});
       if(sources.length===count)break;
     }
+    // The reaction and each target it shows name their source (ADR-0259); the reaction's own fields are unchanged.
+    const tags=await this.tagsFor(principal,binding,references);
+    const tagOf=(source:string)=>{const tag=tags.get(source.slice('nocheh:event:'.length));return tag?{tag:tag.tag,by:tag.by}:{};};
+    for(const item of sources){Object.assign(item,tagOf(item.source));for(const target of item.targets)Object.assign(target,tagOf(target.source));}
     if(binding){for(const reference of references)await this.permitted(principal,reference.id,binding);await this.audience.assert(principal);}
     // Empty or bounded results never establish that a message has no reactions.
     const result={sources,complete:false as const};await this.allowPrepared(principal,result);return result;
@@ -191,7 +217,7 @@ export class SourceRepository {
     const reviews=principal.admin?await actionReviews(this.stores.control,rows.rows.map(row=>row.id),'separated'):new Map();
     // An exported copy of a message the bot also captured live is the same message; the owner sees it marked, the agent once.
     const liveCopies=await this.access.retirements?.liveCopies(rows.rows.map(row=>row.id))??new Set<string>();
-    const hits:any[]=[];
+    const hits:any[]=[],references:SourceReference[]=[],shown=new Map<string,unknown>();
     for(const candidate of rows.rows) {
       if(!principal.admin&&liveCopies.has(candidate.id))continue;
       const captured=await this.access.archive.captured(candidate.id),reference=captured.reference;
@@ -211,8 +237,12 @@ export class SourceRepository {
         content_types:sourceContentTypes(original.kind,binding?.mode==='on'?(value as {payload?:unknown}).payload:JSON.parse(payload.toString()),artifactKinds),
         ...(principal.admin?{reaction_preview:reactionPreview(original.kind,JSON.parse(payload.toString())),sender:messageSender(original.kind,JSON.parse(payload.toString())),
           ...(liveCopies.has(reference.id)?{live_copy:true}:{})}:{})});
+      references.push(reference);if(binding?.mode==='on')shown.set(reference.id,(value as {payload?:unknown}).payload??null);
       if(hits.length===count)break;
     }
+    // Each hit names its source (ADR-0259), from the copy this reader was just shown; every field above stays.
+    const tags=await this.tagsFor(principal,binding,references,{shown});
+    for(const hit of hits)Object.assign(hit,tags.get(hit.id)??{});
     if(binding){for(const hit of hits)await this.permitted(principal,hit.id,binding);await this.audience.assert(principal);}
     if(principal.admin){
       const retired=await this.access.retirements?.retiredEvents(hits.map(hit=>hit.id));
@@ -223,26 +253,31 @@ export class SourceRepository {
     }
     await this.allowPrepared(principal,hits);return hits;
   }
-  /** Messages another index found, such as memory search by meaning, read back through the reader's own access. */
-  async found(principal:Reader,ids:string[],count:number){return afterEpoch(jobRun(principal),()=>this.foundOnce(principal,ids,count));}
-  private async foundOnce(principal:Reader,ids:string[],count:number) {
+  /** Messages another index found, such as memory search by meaning, read back through the reader's own access. Those in
+   *  `tagged` name their source (ADR-0259); the rest keep today's fields alone. */
+  async found(principal:Reader,ids:string[],count:number,tagged:ReadonlySet<string>=new Set()){return afterEpoch(jobRun(principal),()=>this.foundOnce(principal,ids,count,tagged));}
+  private async foundOnce(principal:Reader,ids:string[],count:number,tagged:ReadonlySet<string>) {
     const binding=principal.admin?null:await this.audience.assert(principal);
     const liveCopies=await this.access.retirements?.liveCopies(ids)??new Set<string>();
-    const hits:{source:string;scope:string;chat_id:string|null;kind:string;occurred_at:string|null;text:string;truncated?:true}[]=[];
+    const hits:({source:string;scope:string;chat_id:string|null;kind:string;occurred_at:string|null;text:string;truncated?:true}&Partial<Tagged>)[]=[];
+    const references:SourceReference[]=[],shown=new Map<string,unknown>();
     for(const id of ids) {
       if(hits.length===count)break;
       if(!principal.admin&&liveCopies.has(id))continue;
       const captured=await this.access.archive.captured(id).catch(()=>null);
       if(!captured||binding&&!await this.access.canRead(principal,captured.reference,binding))continue;
       const original=(await this.stores.archive.query('SELECT occurred_at,original_text FROM events WHERE id=$1',[id])).rows[0];
-      let text=original.original_text?.toString()??'';
+      let text=original.original_text?.toString()??'',payload:unknown;
       if(binding?.mode==='on') {
         const guarded=await this.access.guards.read('events:'+id,binding).catch(error=>{if(pending(error))return null;throw error;});
         if(!guarded)continue;
-        text=String(scopedObservation(guarded.value).text??'');
+        const value=scopedObservation(guarded.value);text=String(value.text??'');payload=value.payload??null;
       }
       hits.push({source:'nocheh:event:'+id,scope:captured.scope,chat_id:sourceChat(captured),kind:captured.kind,occurred_at:original.occurred_at,text:text.slice(0,2000),...(text.length>2000?{truncated:true as const}:{})});
+      if(tagged.has(id)){references.push(captured.reference);if(binding?.mode==='on')shown.set(id,payload);}
     }
+    const tags=await this.tagsFor(principal,binding,references,{shown});
+    for(const hit of hits)Object.assign(hit,tags.get(hit.source.slice(13))??{});
     if(binding){for(const hit of hits)await this.permitted(principal,hit.source.slice(13),binding);await this.audience.assert(principal);}
     await this.allowPrepared(principal,hits);return hits;
   }
@@ -320,15 +355,47 @@ export class SourceRepository {
       if(whole&&items.length&&size+length>budget){last=previous;full=true;break;}
       size+=length;items.push(entry);
     }
+    const linked=whole||principal.admin?[]:await this.pageLinks(principal,binding,items,shown);
     const more=full||rows.length>200;
     const position=(await this.stores.archive.query(`SELECT count(*)::integer AS total,
       count(*) FILTER (WHERE $4::bigint IS NOT NULL AND (e.micros,e.id)<=($4::bigint,$5))::integer AS through ${records}`,
       [scopes,from,to,last?.micros??after?.micros??null,last?.id??after?.id??''])).rows[0];
-    if(binding){for(const id of shown)await this.permitted(principal,id,binding);await this.audience.assert(principal);}
+    if(binding){for(const id of [...shown,...linked])await this.permitted(principal,id,binding);await this.audience.assert(principal);}
     const result={chat,items,next:more&&last?last.micros+'-'+last.id:null,position:{through:position.through,total:position.total},complete:!more,...(whole?{checking}:{})};
     // A box copy fills the box; what box tools return from it is checked as tool output. Its pages are not kept as prepared values,
     // which every later model call of the job would load.
     if(!whole)await this.allowPrepared(principal,result);return result;
+  }
+  /**
+   * What a page adds for the agent (ADR-0259): `owner:true` on the owner's own typing (bucketOf, as a tag's by=owner), and
+   * `reply_source` on a reply whose message is not on this page: an id that archive_read opens, from the archive's reply
+   * relation within what the reader may see (relationAudience, then canRead). A reply to a forum topic's opening is no
+   * reply and gets none. Returns the ids it links, to check again with the page.
+   */
+  private async pageLinks(principal:Reader,binding:GuardBinding|null,items:Record<string,unknown>[],shown:readonly string[]):Promise<string[]> {
+    const id=(item:Record<string,unknown>)=>String(item.source).slice('nocheh:event:'.length);
+    const classes=this.tags&&shown.length?await this.tags.notes.classesFor(shown):new Map();
+    for(const item of items)if(classes.get(id(item))&&bucketOf(classes.get(id(item))!.class)==='owner')item.owner=true;
+    const replying=items.filter(item=>item.reply_to!==undefined).map(id);
+    if(!replying.length)return [];
+    const targets=await this.access.relationships.replyTargets(replying,binding?this.relationAudience(principal):{kind:'owner'});
+    const candidates=[...targets.values()].flat(),onPage=new Set(shown);
+    const readable=binding?await this.access.readable(principal,candidates,binding):new Map(candidates.map(reference=>[reference.id,true]));
+    const openings=await this.topicOpenings(candidates.map(reference=>reference.id));
+    const linked:string[]=[];
+    for(const item of items) {
+      const found=targets.get(id(item))??[];
+      if(!found.length||found.some(reference=>onPage.has(reference.id)||openings.has(reference.id)))continue;
+      const target=found.find(reference=>readable.get(reference.id)===true);
+      if(target){item.reply_source='nocheh:event:'+target.id;linked.push(target.id);}
+    }
+    return linked;
+  }
+  /** Which of these events are a forum topic's opening (telegramTopicOpening), told by a field's presence alone. */
+  private async topicOpenings(ids:readonly string[]):Promise<Set<string>> {
+    const wanted=[...new Set(ids)];if(!wanted.length)return new Set();
+    const rows=(await this.stores.archive.query('SELECT id,payload FROM events WHERE id=ANY($1::text[])',[wanted])).rows;
+    return new Set(rows.filter(row=>{try{return telegramTopicOpening(carriedMessage(JSON.parse(row.payload.toString())));}catch{return false;}}).map(row=>row.id as string));
   }
   async bytes(principal:Reader,id:string):Promise<Buffer> {
     const binding=principal.admin?null:await this.audience.assert(principal);
