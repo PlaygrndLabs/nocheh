@@ -97,6 +97,40 @@ class NativeMemoryTests(unittest.TestCase):
             rows=[hit for hit in hits if hit['kind']=='native_session']
             self.assertTrue(rows);self.assertTrue(all(hit['role'] in ('user','assistant') for hit in rows))
 
+    def test_owner_recall_session_hits_carry_their_own_text_and_time_never_a_neighbours(self):
+        # Hermes's search drops a hit's content and, unless its fields leave it out, adds the rows before and after it,
+        # without their ids (`context`). A stale profile's next turn withholds those neighbours here (a retired turn
+        # message, and a turn quoting a retired recent message); recall reads the hit's own snippet and time instead.
+        from hermes_state import SessionDB
+        from .retired_history import withheld_ids
+        retired,quoted,source='a'*64,'b'*64,'c'*64
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);profile=root/'profiles'/Scopes.profile('123');(profile/'memories').mkdir(parents=True)
+            db=SessionDB(profile/'state.db');db.create_session('s',source='telegram')
+            db.append_message('s',role='user',content='Bob PIN is 4321, keep it.\n\n[Archive source: nocheh:event:'+retired+']')
+            db.append_message('s',role='assistant',content='Juniper walk is set for noon, as nocheh:event:'+source+' says.')
+            db.append_message('s',role='user',content='[Recent messages in this group that were not addressed to you, oldest first]\n\n'
+                              '[Group message from Bob] (source nocheh:event:'+quoted+')\nvault code 9876\n\n[End of recent messages]\n\nok'
+                              '\n\n[Archive source: nocheh:event:'+'d'*64+']')
+            db.close()
+            lookup=lambda ids:{'revision':'1:','retired':[i for i in ids if i in (retired,quoted)],'answered':{}}
+            self.assertEqual(withheld_ids(profile/'state.db',lookup),{1,3},'both neighbours are withheld rows')
+            asked=[]
+            original=SessionDB.search_messages
+            def search(db,*args,**kwargs):
+                asked.append(kwargs.get('fields'));return original(db,*args,**kwargs)
+            with patch.object(SessionDB,'search_messages',search):
+                hits=recall(root,{'query':'Juniper','limit':20},retirements=lookup)['hits']
+            rows=[hit for hit in hits if hit['kind']=='native_session']
+            self.assertEqual(len(rows),1)
+            self.assertIn('Juniper walk',rows[0]['text'],'the hit reads its own row')
+            self.assertLessEqual(len(rows[0]['text']),120)
+            self.assertRegex(rows[0]['at'],r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$')
+            self.assertEqual(rows[0]['citations'],['nocheh:event:'+source])
+            self.assertEqual(rows[0]['role'],'assistant')
+            self.assertTrue(asked and all(fields is not None and 'context' not in fields for fields in asked),'neighbours are never asked for')
+            for secret in ('4321','9876',retired,quoted):self.assertNotIn(secret,json.dumps(hits))
+
     def test_a_review_reports_the_memory_operations_its_forks_asked_for(self):
         # So its parent can tell which notes a new note replaced; without every fork's messages it reports none.
         from agent import background_review as native

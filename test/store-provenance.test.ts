@@ -139,3 +139,51 @@ test('a private answer searches Honcho only through the sessions and receipts of
     restore();await stores.close();
   }
 });
+
+test('recall evidence reads the receipts its recall asked: a sibling topic\'s only when topics share memory, never a retired one, and only what a group can read',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
+  try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),guards=new GuardRepository(stores,archive);
+  const key='topic-evidence:'+Date.now(),workspace=digest(key),conclusion='t'.repeat(21);
+  // GP1's topic 3 asks; topic 4 is its sibling. One write each, a retired write in topic 3, and one of topic 3's
+  // messages the reader may not read.
+  const group='-100',topic=group+'/topic/3',sibling=group+'/topic/4',writes=['own','sibling','retired','unreadable'] as const;
+  const audienceOf={own:topic,sibling,retired:topic,unreadable:topic},remote=(name:string)=>(name[0]!+'m').repeat(10)+name[0]!;
+  const call=async(path:string,body:any)=>{
+    assert.equal(path,'/v3/workspaces/'+workspace+'/nocheh/provenance');assert.deepEqual(body,{conclusion_ids:[conclusion]});
+    return {roots:[conclusion],nodes:[{id:conclusion,parents:[],deleted:false,exact_citations:true}],
+      messages:writes.map(name=>({message_id:remote(name),receipt_id:digest(key+':receipt:'+name)})),limitations:[],exact_citations:true};
+  };
+  const provenance=new MemoryProvenanceRepository(stores,archive,guards,honchoEngine(call));
+  try {
+    const binding=await guards.state(),sources:Record<string,any>={};
+    await stores.control.query('INSERT INTO memory_generations(id,installation_generation,guard_epoch,audience) VALUES($1,$2,$3,$4)',[workspace,binding.generation,binding.epoch,'owner']);
+    for(const name of writes) {
+      const event:Envelope={version:1,key:key+':'+name,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:group,source_id:name,revision:'1',occurred_at:null,text:'Synthetic '+name,payload:{}};
+      sources[name]=(await archive.capture(event)).source.reference;
+      await stores.control.query(`INSERT INTO memory_ingestion_receipts(id,generation,source_reference,guard_source_id,prepared_id,content_hash,state,remote_id,audience,retired_at)
+        VALUES($1,$2,$3,$4,$5,$6,'done',$7,$8,$9)`,[digest(key+':receipt:'+name),workspace,JSON.stringify(sources[name]),'events:'+sources[name].id,
+        digest(key+':prepared:'+name),digest('fixture'),remote(name),audienceOf[name],name==='retired'?new Date():null]);
+    }
+    await stores.control.query('UPDATE memory_engine_connection SET attached=true,verified=true');
+    const checked:string[]=[],canRead=async(reference:any)=>{checked.push(reference.id);return reference.id!==sources.unreadable.id;};
+    const shared=await provenance.read(workspace,topic,[conclusion],binding,{group:[group,topic,sibling],canRead});
+    assert.deepEqual(shared.evidence,[sources.own,sources.sibling],'topics that share memory keep the sibling topic\'s evidence the recall read');
+    assert.ok(shared.limitations.includes('ingestion_reference_unavailable'),'a retired write is not evidence');
+    assert.ok(shared.limitations.includes('source_reference_unreadable'),'a message the group cannot read is left out, and says so');
+    assert.deepEqual(checked.sort(),[sources.own.id,sources.sibling.id,sources.unreadable.id].sort(),'every reference is checked for the reader');
+    const separate=await provenance.read(workspace,topic,[conclusion],binding,{group:null,canRead});
+    assert.deepEqual(separate.evidence,[sources.own],'a topic with its own memory reads only its own receipts');
+    const owner=await provenance.read(workspace,'owner',[conclusion],binding);
+    assert.deepEqual(owner.evidence,[sources.own,sources.sibling,sources.unreadable],'the owner reads every audience\'s evidence, but never a retired write');
+    assert.ok(owner.limitations.includes('ingestion_reference_unavailable'));
+  } finally {
+    await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false');
+    await stores.control.query('DELETE FROM memory_ingestion_receipts WHERE generation=$1',[workspace]);
+    await stores.control.query('DELETE FROM memory_generations WHERE id=$1',[workspace]);
+    await stores.close();
+  }
+});

@@ -125,17 +125,42 @@ def recall(root, body, retirements=None):
             withheld = withheld_ids(database, lookup)
             db = SessionDB(database, read_only=True)
             try:
-                for row in db.search_messages(query, limit=limit):
+                # Hermes returns no row's content, only a snippet of the hit's own row; its `context` would add the
+                # rows before and after without their ids, so a neighbour the skip below misses could be read
+                # through it. It is never asked for (ADR-0259).
+                for row in db.search_messages(query, limit=limit, fields=SESSION_FIELDS):
                     if row.get('id') in withheld: continue
                     # Who wrote the row: the person, Nocheh, or a tool, which storage puts in words.
-                    role = row.get('role')
+                    role, snippet = row.get('role'), row.get('snippet') if isinstance(row.get('snippet'), str) else ''
                     hits.append({'profile': profile.name, **where, 'kind': 'native_session',
-                                 'session': row.get('session_id'), 'text': str(row.get('content', ''))[:8000],
+                                 'session': row.get('session_id'), 'text': around_match(snippet), **sent_at(row.get('timestamp')),
+                                 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', snippet),
                                  'role': role if role in ('user', 'assistant', 'tool', 'system') else None})
             finally: db.close()
     # A per-profile query can refine a truncated global search without exposing paths.
     return {'hits': hits[:limit], 'truncated': len(hits) > limit,
             'next_profile': profiles[99].name if len(profiles) > 100 else None}
+
+
+# The search result fields owner recall reads from Hermes: never `context`, the neighbouring rows' text.
+SESSION_FIELDS = ('id', 'session_id', 'role', 'snippet', 'timestamp')
+SNIPPET_SIZE = 120
+
+
+def around_match(snippet):
+    """At most SNIPPET_SIZE characters of a hit's snippet, from a little before the first match, without the `>>>` and
+    `<<<` Hermes puts around each match."""
+    match, text = snippet.find('>>>'), snippet.replace('>>>', '').replace('<<<', '')
+    start = max(0, match - 40) if len(text) > SNIPPET_SIZE else 0
+    return text[start:start + SNIPPET_SIZE]
+
+
+def sent_at(timestamp):
+    """When Hermes stored the row, in UTC seconds, or nothing when it has no usable time."""
+    from datetime import datetime, timezone
+    if type(timestamp) not in (int, float):return {}
+    try:return {'at': datetime.fromtimestamp(timestamp, timezone.utc).isoformat(timespec='seconds')}
+    except (OverflowError, OSError, ValueError):return {}
 
 
 def review_ops(results):

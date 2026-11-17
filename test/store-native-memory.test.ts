@@ -239,17 +239,19 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   t.after(installChatsForTest(recallChats()));
   const workspace=digest('evidence-workspace'),root={store:'archive',kind:'event',id:digest('evidence-root'),revision:'1',input_hash:digest('evidence-root-hash')};
   const sessions=[digest('evidence-session')],first='A'.repeat(21),second='B'.repeat(21);
-  const archived={store:'archive',kind:'event',id:digest('evidence-message'),revision:'1',input_hash:digest('evidence-message-hash')};
-  const bodies:any[]=[],reads:any[]=[],outputs:any[]=[];let recorded='',failRead=false;
+  const archived:SourceReference={store:'archive',kind:'event',id:digest('evidence-message'),revision:'1',input_hash:digest('evidence-message-hash')};
+  const bodies:any[]=[],reads:any[]=[],outputs:any[]=[],checks:any[]=[];let recorded='',failRead=false;
   const contexts={access:{stores:{control:nothingForwarded},policy:()=>({owner_id:'123'}),
-    recall:(principal:Reader)=>({space:principal.space,group:'-100'})},
+    recall:(principal:Reader)=>({space:principal.space,group:'-100'}),
+    canRead:async(principal:Reader,reference:SourceReference,current:unknown,options:unknown)=>{checks.push({principal,reference,current,options});return true;}},
     guards:{prepareContext:async()=>null,read:async()=>({value:{text:recorded}})}};
   const derived={record:async(input:any)=>{if(input.kind==='memory_result'){recorded=input.content.toString();outputs.push(input);}
     return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
   const binding={generation:'fixture',epoch:1,mode:'on'};
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
-  const provenance={sessions:async()=>sessions,read:async(id:string,audience:string,ids:string[],current:unknown)=>{
-    reads.push({id,audience,ids,current});if(failRead)throw Error('provenance_down');
+  const provenance={sessions:async()=>sessions,read:async(id:string,audience:string,ids:string[],current:unknown,
+    reader:{group?:readonly string[]|null;canRead?:(reference:SourceReference)=>Promise<boolean>}={})=>{
+    reads.push({id,audience,ids,current,group:reader.group,checked:reader.canRead?await reader.canRead(archived):null});if(failRead)throw Error('provenance_down');
     return {conclusions:ids.map(item=>({id:item,parents:[],deleted:false,exact_citations:true})),evidence:[archived],limitations:[],exact_citations:true};}};
   const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,honchoEngine(async(path:string,body:any)=>{
     bodies.push(body);const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;
@@ -261,7 +263,10 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   const reader={admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader;
   const result=await memory.recall(reader,'Who planned the trip?') as any;
   assert.ok(bodies.every(body=>body.include_evidence===true),'every peer answer carries Honcho\'s evidence');
-  assert.deepEqual(reads,[{id:workspace,audience:'-100',ids:[first,second],current:binding}],'conclusions are read once, deduplicated, within the audience');
+  assert.deepEqual(reads,[{id:workspace,audience:'-100',ids:[first,second],current:binding,group:['-100','-100/topic/3'],checked:true}],
+    'conclusions are read once, deduplicated, within the sessions the recall asked (here the whole group, as its topics share memory)');
+  assert.deepEqual(checks,[{principal:reader,reference:archived,current:binding,options:{historical:true}}],
+    'each message is checked for the group reader, as learned evidence');
   const source=result.sources.at(-1);
   assert.deepEqual(source.evidence_sources,['nocheh:event:'+archived.id]);
   assert.equal(source.exact_citations,false,'what Honcho read is not what the answer relied on, even when its conclusions cite exact messages');

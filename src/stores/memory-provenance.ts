@@ -42,7 +42,12 @@ export class MemoryProvenanceRepository {
     if(!sessions.length)throw new HttpError(409,'learning_context_pending');
     return sessions;
   }
-  async read(workspace:string,audience:string,factIds:string[],binding:GuardBinding) {
+  /** The facts' ancestry and the archived messages behind them, as the audience may read them: receipts of its own
+   * sessions, or of every conversation of its group when `group` (groupWithTopics of the reader's group, as its recall
+   * asked) is given, and never a retired write. A reader other than the owner passes `canRead`, and keeps only the
+   * messages it lets that reader read; the owner's own API reads any audience's evidence, as the owner reads any. */
+  async read(workspace:string,audience:string,factIds:string[],binding:GuardBinding,
+    reader:{group?:readonly string[]|null;canRead?:(reference:SourceReference)=>Promise<boolean>}={}) {
     if(!/^[a-f0-9]{64}$/.test(workspace)||!Array.isArray(factIds)||factIds.length<1||factIds.length>32||factIds.some(id=>!engineId(id)))
       throw new HttpError(400,'invalid_provenance_request');
     await this.current(workspace,audience,binding);
@@ -56,14 +61,18 @@ export class MemoryProvenanceRepository {
     const evidence=new Map<string,SourceReference>();
     for(const write of result.writes) {
       const row=(await this.stores.control.query(`SELECT source_reference,source_references FROM memory_ingestion_receipts
-        WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done' AND ($4::text='owner' OR audience=$4)`,[write.receipt,workspace,write.id,audience])).rows[0];
+        WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done' AND retired_at IS NULL
+        AND ($4::text='owner' OR ${recallCondition('audience','$4','$5')})`,
+        [write.receipt,workspace,write.id,audience,reader.group?[...reader.group]:null])).rows[0];
       if(!row){limitations.add('ingestion_reference_unavailable');continue;}
       const references=row.source_references?.length?row.source_references:[row.source_reference];
       if(references.length>30)throw new HttpError(502,'invalid_ingestion_provenance');
       for(const item of references) {
         if(evidence.has(item.id))continue;
         if(evidence.size>=256){limitations.add('source_reference_limit');continue;}
-        const reference=(await this.archive.verify(item)).reference;evidence.set(reference.id,reference);
+        const reference=(await this.archive.verify(item)).reference;
+        if(audience!=='owner'&&reader.canRead&&!await reader.canRead(reference)){limitations.add('source_reference_unreadable');continue;}
+        evidence.set(reference.id,reference);
       }
     }
     await this.current(workspace,audience,binding);

@@ -1057,14 +1057,19 @@ export class NativeMemoryRepository {
   }
   /** The engine lists the facts it read while answering. The archived messages they cite, listed first, let the
    * agent check a claim against the original; a fact without citations brings its whole learning batch and
-   * says so in the limitations. A fact that was read is not proof the answer relied on it. */
-  private async evidence(workspace:string,audience:string,responses:{evidence:string[]}[],binding:GuardBinding):Promise<{references:SourceReference[];limitations:string[]}> {
+   * says so in the limitations. A fact that was read is not proof the answer relied on it. The messages are those this
+   * reader may read: within the sessions its recall asked (its group's, when the group's topics share memory), never a
+   * retired write, and for a group or topic only each message it can read. */
+  private async evidence(workspace:string,audience:string,responses:{evidence:string[]}[],binding:GuardBinding,principal:Reader,group:readonly string[]|null):
+    Promise<{references:SourceReference[];limitations:string[]}> {
     if(!this.engine.trace)return {references:[],limitations:['evidence_unsupported']};
     const ids=[...new Set(responses.flatMap(response=>response.evidence))].filter(engineId);
     if(!ids.length)return {references:[],limitations:['no_conclusion_evidence']};
     const limitations=ids.length>32?['evidence_conclusion_limit']:[];
     try {
-      const read=await this.provenance.read(workspace,audience,ids.slice(0,32),binding);
+      // Learned evidence is read as it was when it was learned: a later reaction change does not take it back.
+      const read=await this.provenance.read(workspace,audience,ids.slice(0,32),binding,{group,
+        ...audience==='owner'?{}:{canRead:(reference:SourceReference)=>this.contexts.access.canRead(principal,reference,binding,{historical:true})}});
       return {references:read.evidence,limitations:['evidence_lists_conclusions_read_not_relied_on',...read.limitations,...limitations]};
     } catch {return {references:[],limitations:['evidence_unavailable',...limitations]};}
   }
@@ -1118,7 +1123,7 @@ export class NativeMemoryRepository {
       if(!answers.length)return corrections.length?{sources:corrections,limited_memory:false,syncing,...missing.length?{limitations:missing}:{}}:
         missing.length?{...limited,limitations:missing}:{...limited,note:'No authorized person or project memory matched this request.'};
       const included=read.slice(0,answers.length);
-      const evidence=await this.evidence(id,audience,included.map(({response})=>response),current.binding);
+      const evidence=await this.evidence(id,audience,included.map(({response})=>response),current.binding,principal,group);
       const limitations=['reasoning_response_has_no_exact_conclusion_citations',...evidence.limitations,...missing,...cut?['recall_answer_cut']:[]];
       const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(answers.join('\n\n')),
         producer:this.engine.id,producer_version:this.protocol,configuration:{workspace:id,audience,reasoning_level:'low',peers:connected.items.slice(0,4),
