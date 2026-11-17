@@ -2,7 +2,7 @@ import type pg from 'pg';
 import type {Reader} from '../access.js';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {chats} from '../chats.js';
-import {telegramSenderName} from '../chats-telegram.js';
+import {telegramMessage,telegramSenderName} from '../chats-telegram.js';
 import {forwardFacts} from '../forwarded.js';
 import {HttpError} from '../http.js';
 import {sourceChat} from '../spaces.js';
@@ -23,7 +23,7 @@ export interface TagOptions {precision?:'minute'|'day';historical?:boolean;shown
 /** The one call that runs every request's tag texts through the secret check (PreparedContextRepository.prepare). */
 type Prepare=(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>)=>Promise<unknown>;
 /** A guard binding that moved on is the caller's to retry, never a tag that failed. */
-const bindingMoved=(error:unknown)=>error instanceof HttpError&&['guard_context_changed','guard_transition_pending'].includes(error.code);
+export const bindingMoved=(error:unknown)=>error instanceof HttpError&&['guard_context_changed','guard_transition_pending'].includes(error.code);
 
 /** Where a forward came from (forwardFacts), its kind from the original and its name only from the reader's own copy:
  *  with no such copy, no name. */
@@ -98,13 +98,12 @@ export class SourceTagRepository {
     const sources:TagSource[]=ids.map(id=>{
       const row=rows.get(id)!,found=classes.get(id),payload=shown.get(id),original=JSON.parse((row.payload as Buffer).toString());
       if(!found)throw new HttpError(404,'source_not_found');
-      const message=(value:unknown)=>{const body=value&&typeof value==='object'?value as Record<string,any>:{};
-        return row.kind.startsWith('telegram_desktop_')?body.message:body.message??body.edited_message??body.channel_post??body.edited_channel_post;};
       const {moment,at}=sourceMoment(row);
       return {id,class:found.class,facts:found.facts,sender:telegramSenderName(row.kind,payload),
-        forward:row.channel==='telegram'?shownForward(message(original),message(payload)):null,
+        forward:row.channel==='telegram'?shownForward(telegramMessage(original),telegramMessage(payload)):null,
         file_name:shownFileName(row.kind,payload),saved:saved.get(id)??null,
-        chat:described.get(id)?.chat??sourceChat({channel:row.channel,scope:row.scope}),web:row.channel==='browser',moment,at};
+        chat:described.get(id)?.chat??sourceChat({channel:row.channel,scope:row.scope}),web:row.channel==='browser',
+        exported:row.kind.startsWith('telegram_desktop_'),moment,at};
     });
     // Chat and topic names once; anyone but the owner reads only the names Telegram showed.
     const names=await recallNames(this.stores,[...new Set(sources.map(source=>source.chat).filter((chat):chat is string=>chat!==null))],{shownOnly:!owner});

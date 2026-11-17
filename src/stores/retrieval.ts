@@ -25,9 +25,10 @@ import {chats} from '../chats.js';
 import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
 import {unavailableTag,zonedDay,type Tag,type TagDetails} from '../source-tags.js';
-import {ownerReader,type SourceTagRepository,type TagOptions} from './source-tags.js';
+import {bindingMoved,ownerReader,type SourceTagRepository,type TagOptions} from './source-tags.js';
+import {countMemoryStep} from './note-sources.js';
 import {bucketOf,sourceFacts} from '../source-facts.js';
-import {telegramTopicOpening} from '../chats-telegram.js';
+import {telegramMessage,telegramTopicOpening} from '../chats-telegram.js';
 import {repliesElsewhere} from '../observed-source.js';
 import type {LearnedMemoryRepository} from './learned.js';
 import {ownerTimeZone} from './task-settings.js';
@@ -54,9 +55,6 @@ const ANSWER_TEXT=500,THREAD_TEXT=300;
 const LEARNED_EVIDENCE=5;
 /** At most `size` characters of a text, never half of one that takes two. */
 const clip=(text:string,size:number)=>{const chars=Array.from(text);return chars.length>size?{text:chars.slice(0,size).join(''),truncated:true as const}:{text};};
-/** The message a payload carries, live or exported. */
-const carriedMessage=(payload:unknown)=>{const body=payload&&typeof payload==='object'?payload as Record<string,any>:{};
-  return body.message??body.edited_message??body.channel_post??body.edited_channel_post;};
 type Tagged=Pick<Tag,'tag'|'by'|'at'>;
 export class SourceRepository {
   readonly audience:AudienceRepository;
@@ -227,7 +225,14 @@ export class SourceRepository {
   private async openedOnce(principal:Reader,id:string,options:{replies:number;chain:number}) {
     const found=await this.readOnce(principal,id);
     if(principal.admin||!principal.turnEvent||!this.tags)return found;
-    const binding=await this.audience.assert(principal),thread=await this.thread(principal,binding,found.reference,found.event.payload,options);
+    const binding=await this.audience.assert(principal);
+    // A thread that cannot be worked out never fails the read: the message opens as before, with its source "not
+    // available right now", and the failure is counted as a `source_tags` problem.
+    const thread=await this.thread(principal,binding,found.reference,found.event.payload,options).catch(async error=>{
+      if(bindingMoved(error))throw error;
+      await countMemoryStep(this.stores.control,'source_tags',false);
+      return {fields:{...unavailableTag('now'),at:null},linked:[] as string[]};
+    });
     for(const linked of thread.linked)await this.permitted(principal,linked,binding);
     await this.audience.assert(principal);
     const result={...found,...thread.fields};
@@ -240,7 +245,7 @@ export class SourceRepository {
     return new Map(rows.map(row=>{let payload:any=null;try{payload=JSON.parse(row.payload.toString());}catch{}return [row.id as string,{kind:row.kind,channel:row.channel,scope:row.scope,payload}];}));
   }
   /** Whether an event is an old Telegram Desktop export of a reply into another chat (repliesElsewhere). */
-  private static elsewhere(row:{kind:string;payload:any}|undefined):boolean {return !!row&&row.kind.startsWith('telegram_desktop_')&&repliesElsewhere(carriedMessage(row.payload));}
+  private static elsewhere(row:{kind:string;payload:any}|undefined):boolean {return !!row&&row.kind.startsWith('telegram_desktop_')&&repliesElsewhere(telegramMessage(row.payload));}
   /** The text of an event as this reader's own copy holds it (the guarded copy when the secret check is on), with its
    *  payload; null while that copy is being checked. */
   private async shownCopy(id:string,binding:GuardBinding):Promise<{text:string;payload:unknown}|null> {
@@ -269,7 +274,7 @@ export class SourceRepository {
     const answered=answersId?await this.access.archive.captured(answersId).then(found=>found.reference).catch(()=>null):null;
     const answers=answered&&(await readable([answered])).get(answered.id)===true?answered:null;
     // The messages that reply to it: each once, by its first readable copy; never an export's reply into another chat.
-    const opening=telegramTopicOpening(carriedMessage(self.payload));
+    const opening=telegramTopicOpening(telegramMessage(self.payload));
     let replying:SourceReference[]=[],complete=true;
     if(!opening) {
       const object=(await this.access.relationships.describeMany([reference.id])).get(reference.id)?.object_id;
@@ -470,13 +475,13 @@ export class SourceRepository {
       }
       const files=captured.artifact_ids.length?await this.derivedTexts(row.id,binding).catch(error=>{if(pending(error))return null;throw error;}):[];
       if(whole&&files===null){checking++;continue;}
-      const item=pageItem({id:row.id,kind:row.kind,at:row.at,payload:value.payload,text:String(value.text??''),files:files??[]},whole);
+      const item=pageItem({id:row.id,kind:row.kind,at:row.at,payload:value.payload,text:String(value.text??''),files:files??[]},whole,ownerReader(principal));
       const entry=files===null?{...item,files_checking:true}:item,length=JSON.stringify(entry).length;
       // A box page ends before a record that would take it over its size; a record near the size on its own comes alone.
       if(whole&&items.length&&size+length>budget){last=previous;full=true;break;}
       size+=length;items.push(entry);
     }
-    const linked=whole||principal.admin?[]:await this.pageLinks(principal,binding,items,shown);
+    const linked=whole||principal.admin?[]:await this.pageLinksOrNone(principal,binding,items,shown);
     const more=full||rows.length>200;
     const position=(await this.stores.archive.query(`SELECT count(*)::integer AS total,
       count(*) FILTER (WHERE $4::bigint IS NOT NULL AND (e.micros,e.id)<=($4::bigint,$5))::integer AS through ${records}`,
@@ -486,6 +491,17 @@ export class SourceRepository {
     // A box copy fills the box; what box tools return from it is checked as tool output. Its pages are not kept as prepared values,
     // which every later model call of the job would load.
     if(!whole)await this.allowPrepared(principal,result);return result;
+  }
+  /** pageLinks, which never fails the page: when it cannot be worked out, the page reads as it did before, without
+   *  `owner` or `reply_source`, and the failure is counted as a `source_tags` problem. A guard binding that moved on is
+   *  the caller's to retry. */
+  private async pageLinksOrNone(principal:Reader,binding:GuardBinding|null,items:Record<string,unknown>[],shown:readonly string[]):Promise<string[]> {
+    try {return await this.pageLinks(principal,binding,items,shown);}
+    catch(error) {
+      if(bindingMoved(error))throw error;
+      for(const item of items){delete item.owner;delete item.reply_source;}
+      await countMemoryStep(this.stores.control,'source_tags',false);return [];
+    }
   }
   /**
    * What a page adds for the agent (ADR-0259): `owner:true` on the owner's own typing (bucketOf, as a tag's by=owner), and
@@ -516,7 +532,7 @@ export class SourceRepository {
   private async topicOpenings(ids:readonly string[]):Promise<Set<string>> {
     const wanted=[...new Set(ids)];if(!wanted.length)return new Set();
     const rows=(await this.stores.archive.query('SELECT id,payload FROM events WHERE id=ANY($1::text[])',[wanted])).rows;
-    return new Set(rows.filter(row=>{try{return telegramTopicOpening(carriedMessage(JSON.parse(row.payload.toString())));}catch{return false;}}).map(row=>row.id as string));
+    return new Set(rows.filter(row=>{try{return telegramTopicOpening(telegramMessage(JSON.parse(row.payload.toString())));}catch{return false;}}).map(row=>row.id as string));
   }
   async bytes(principal:Reader,id:string):Promise<Buffer> {
     const binding=principal.admin?null:await this.audience.assert(principal);

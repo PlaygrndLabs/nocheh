@@ -4,6 +4,7 @@ import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
 import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.js';
 import {sourceChat} from '../spaces.js';
+import {telegramMessage} from '../chats-telegram.js';
 import {bucketOf,eventClass,heldBy,heldKey,nochehHeld,nochehPinned,nochehQuoted,quotesToTrace,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
 import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
@@ -16,8 +17,6 @@ import {recallNames} from './recall-places.js';
 type Pools={archive:Pick<pg.Pool,'query'>;derived:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>};
 const fullId=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
-/** The Telegram message an archived payload holds: a message, an edit or a channel post. */
-const telegramMessage=(payload:unknown)=>{const found=record(payload);return record(found?.message??found?.edited_message??found?.channel_post??found?.edited_channel_post);};
 /** Whether a message answers another, as the archive's reply relation is made from it: in this chat, or in another. */
 const replies=(message:Record<string,any>|null|undefined)=>!!record(message?.reply_to_message)||!!record(message?.external_reply);
 /** Whether a message answers anything at all: as replies() tells it, or as a Telegram Desktop export records its reply

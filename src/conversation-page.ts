@@ -43,31 +43,34 @@ export function pageEntry(kind:string,payload:unknown):PageEntry|null {
   return null;
 }
 
-/** Reactions an exported message carries, as counts with the names Telegram listed. */
-function exportedReactions(message:Record<string,any>) {
+/** Reactions an exported message carries, as counts with the names Telegram listed (`named`), else as counts alone. */
+function exportedReactions(message:Record<string,any>,named:boolean) {
   if(!Array.isArray(message.reactions))return undefined;
   return message.reactions.slice(0,20).map((item:unknown)=>{
     const reaction=object(item),recent=Array.isArray(reaction.recent)?reaction.recent:[];
     const by=recent.map(entry=>object(entry).from).filter((name:unknown):name is string=>typeof name==='string'&&name.length>0).slice(0,10);
     return {reaction:reaction.type==='emoji'&&typeof reaction.emoji==='string'?reaction.emoji.slice(0,16):'custom',
-      count:Number.isSafeInteger(reaction.count)?reaction.count:by.length,...(by.length?{by}:{})};
+      count:Number.isSafeInteger(reaction.count)?reaction.count:by.length,...(by.length&&named?{by}:{})};
   });
 }
 
 /** One record in the compact form the agent pages through. Reply and topic ids are Telegram message ids; an exported
  *  reply into another chat has none, since its id names that chat's message (repliesElsewhere). A sender is named by
- *  the name or username Telegram showed, else as "a person", never by an id (ADR-0259).
+ *  the name or username Telegram showed, else as "a person", never by an id (ADR-0259). A Telegram Desktop export wrote
+ *  the names the exporting account saw, which for a saved contact is the name the owner gave them, so its sender and
+ *  the people it lists on reactions are named only for the owner (`exportNames`); anyone else reads "a person".
  *  `whole`, for a sealed job box's copy, keeps every file and cuts texts only past one record's budget. */
-export function pageItem(input:{id:string;kind:string;at:Date;payload:unknown;text:string;files?:{kind:string;text:string}[]},whole=false) {
+export function pageItem(input:{id:string;kind:string;at:Date;payload:unknown;text:string;files?:{kind:string;text:string}[]},whole=false,exportNames=true) {
   const entry=pageEntry(input.kind,input.payload)!,value=object(input.payload);
   const message=object(value.message??value.edited_message??value.channel_post??value.edited_channel_post);
   const exported=input.kind.startsWith('telegram_desktop_');
   const reaction=entry==='reaction'?reactionPreview(input.kind,input.payload):null;
-  const sender=entry==='assistant'||entry==='reaction'?null:messageSender(input.kind,input.payload);
+  const found=entry==='assistant'||entry==='reaction'?null:messageSender(input.kind,input.payload);
+  const sender=found&&exported&&!exportNames?{name:null,username:null}:found;
   const reply=exported?repliesElsewhere(message)?null:identifier(message.reply_to_message_id):identifier(object(message.reply_to_message).message_id);
   const topic=exported?identifier(value.topic_id):message.is_topic_message?identifier(message.message_thread_id):null;
   const id=identifier(exported?message.id:message.message_id);
-  const reactions=exported?exportedReactions(message):undefined;
+  const reactions=exported?exportedReactions(message,exportNames):undefined;
   const types=sourceContentTypes(input.kind,input.payload).filter(type=>type!=='reaction');
   const files=whole?input.files??[]:input.files?.slice(0,5)??[];
   const [text,...texts]:{text:string;truncated?:boolean}[]=whole?boxTexts([input.text,...files.map(file=>file.text)]):[cut(input.text,PAGE_TEXT),...files.map(file=>cut(file.text,FILE_TEXT))];

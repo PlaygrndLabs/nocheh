@@ -1,6 +1,6 @@
 import {fillLine} from './chat-labels.js';
 import {chats,type ChatDirectory} from './chats.js';
-import {desktopLocalTime,telegramUsername} from './chats-telegram.js';
+import {desktopLocalTime,telegramMessage,telegramUsername} from './chats-telegram.js';
 import type {Forward} from './forwarded.js';
 import {bucketOf,type EventClass,type SourceFacts} from './source-facts.js';
 import {modelPlace,modelSourceWords} from './source-labels.js';
@@ -18,7 +18,6 @@ import {placeName} from './stores/recall-places.js';
 /** Whose words a source carries: bucketOf for one message, `mixed` for a fact learned from several kinds, `shared` for
  *  what the owner shared or granted, and `unknown` when it could not be told. */
 export type TagBy='owner'|'person'|'forward'|'file'|'mixed'|'nocheh'|'shared'|'unknown';
-export const tagBys:readonly TagBy[]=['owner','person','forward','file','mixed','nocheh','shared','unknown'];
 /** One source as a tool result names it, beside the fields it had before. `at` is the moment archive_page orders the
  *  message by, as an ISO time in UTC, so `archive_page {chat, from:at}` opens the conversation around it. */
 export interface Tag {source:string;tag:string;by:TagBy;at:string|null}
@@ -82,15 +81,15 @@ export const zonedDay=(instant:number,zone:string):string=>zoned(instant,zone).d
 /** The file name a message shows, read from the reader's own copy: a Bot API document's or audio file's, or the one a
  *  Telegram Desktop export wrote. */
 export function shownFileName(kind:string,payload:unknown):string|null {
-  const body=payload&&typeof payload==='object'&&!Array.isArray(payload)?payload as Record<string,any>:null;
-  const message=body?.message??body?.edited_message??body?.channel_post??body?.edited_channel_post;
+  const message=telegramMessage(payload);
   const name=kind.startsWith('telegram_desktop_')?message?.file_name:message?.document?.file_name??message?.audio?.file_name;
   return typeof name==='string'&&name.trim()?name:null;
 }
 
 /** What code knows of one source: its class and facts (NoteSourceRepository.classesFor), its sender and forward origin
  *  as the reader's own copy shows them (telegramSenderName, forwardFacts), the name the owner gave its sender in People
- *  (ownerChosenName; the owner reader only), the chat it belongs to and its moment. */
+ *  (ownerChosenName; the owner reader only), the chat it belongs to and its moment. `exported` marks a Telegram Desktop
+ *  export, whose names are the ones the exporting account saw: a saved contact's is the name the owner gave it. */
 export interface TagSource {
   id:string;class:EventClass;facts:SourceFacts;
   sender:{name:string|null;username:string|null};
@@ -98,8 +97,12 @@ export interface TagSource {
   file_name?:string|null;
   saved?:string|null;
   chat:string|null;web?:boolean;
+  exported?:boolean;
   moment:Moment|null;at:string|null;
 }
+/** Whether a name from the message may be shown to this reader: anyone's for the owner; for anyone else, never one a
+ *  Telegram Desktop export wrote, which for a saved contact is the name the owner gave them (fail closed). */
+const namesShown=(source:TagSource,reader:TagReader)=>reader.owner||source.exported!==true;
 /** Who reads a tag: the owner (the owner's private chat, web chat and the owner's own jobs) or anyone else (a group, a
  *  topic or a private answer); the reader's own chat; the owner's Tasks time zone; and whether the time is a minute or a
  *  day. Anyone but the owner reads UTC and no People name, whatever is passed. */
@@ -113,7 +116,7 @@ function who(source:TagSource,reader:TagReader,size:number):string {
   const username=telegramUsername(source.sender.username);
   if(facts.author==='bot')return username?fillLine(words.bot_named,{name:username}):words.bot;
   // A person, someone code cannot tell, or the owner read by anyone else: by the name Telegram showed (Q1).
-  const name=tagName(source.sender.name,size);
+  const name=namesShown(source,reader)?tagName(source.sender.name,size):'';
   let label=name?fillLine(words.named,{name}):words.person;
   if(username)label+=fillLine(words.username,{username});
   if(reader.owner&&facts.author!=='owner'&&source.saved) {
@@ -123,8 +126,10 @@ function who(source:TagSource,reader:TagReader,size:number):string {
   return label;
 }
 
-function origin(source:TagSource,from:Exclude<Forward['from'],'own'>,size:number):string {
+function origin(source:TagSource,reader:TagReader,from:Exclude<Forward['from'],'own'>,size:number):string {
   const found=source.forward?.from===from?source.forward.rawName:null;
+  // An inline bot's public username is no name the owner chose; anything else an export wrote is shown only to the owner.
+  if(from!=='bot'&&!namesShown(source,reader))return {person:words.unnamed_person,channel:words.unnamed_channel,chat:words.unnamed_chat,hidden:words.origin_hidden}[from];
   if(from==='bot'){const name=telegramUsername(found);return name?fillLine(words.origin_bot,{name}):words.unnamed_bot;}
   const name=tagName(found,size);
   if(from==='hidden')return name?fillLine(words.origin_hidden_named,{name}):words.origin_hidden;
@@ -133,11 +138,11 @@ function origin(source:TagSource,from:Exclude<Forward['from'],'own'>,size:number
 }
 
 /** What a message carries when it is not its sender's own typing (B1.5), or null. */
-function what(source:TagSource,size:number):string|null {
+function what(source:TagSource,reader:TagReader,size:number):string|null {
   const cls=source.class;
   if(cls.startsWith('forward_')) {
     const from=cls.slice('forward_'.length,cls.lastIndexOf('_by_')) as Exclude<Forward['from'],'own'>;
-    return fillLine(from==='bot'?words.through_bot:words.forward,{origin:origin(source,from,size)});
+    return fillLine(from==='bot'?words.through_bot:words.forward,{origin:origin(source,reader,from,size)});
   }
   if(cls.startsWith('file_')){const name=tagName(source.file_name,size);return name?fillLine(words.file,{name}):words.file_unnamed;}
   if(cls.startsWith('audio_'))return words.audio;
@@ -185,7 +190,7 @@ export function sourceTag(source:TagSource,reader:TagReader,names:ReadonlyMap<st
   const by=bucketOf(source.class),result=(tag:string):Tag=>({source:'nocheh:event:'+source.id,tag,by,at:source.at});
   let tag='';
   for(const size of [TAG_NAME_LIMIT,24,12,0]) {
-    const carried=what(source,size);
+    const carried=what(source,reader,size);
     tag=[who(source,reader,size)+(carried?', '+carried:''),where(source,reader,names,size,directory),when(source,reader)].join(' · ');
     if(length(tag)<=TAG_LIMIT)return result(tag);
   }
@@ -199,7 +204,7 @@ export function sourceTag(source:TagSource,reader:TagReader,names:ReadonlyMap<st
  */
 export function sourceDetails(source:TagSource,reader:TagReader,names:ReadonlyMap<string,string>,directory:ChatDirectory=chats()):TagDetails {
   const details:TagDetails={};
-  if(source.class.startsWith('forward_'))details.forward=what(source,TAG_NAME_LIMIT)!;
+  if(source.class.startsWith('forward_'))details.forward=what(source,reader,TAG_NAME_LIMIT)!;
   const topic=source.chat!==null&&directory.parentOf(source.chat)!==null&&(reader.owner||directory.groupOf(source.chat)!==null);
   if(topic)details.topic=modelPlace({chat:source.chat,web:false},names,TAG_NAME_LIMIT,directory);
   return details;

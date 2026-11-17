@@ -61,6 +61,10 @@ turn's own message and answer stay.
   look-alikes and control or format characters go, the joiners Persian and
   Arabic names need stay, and a name is cut at 40 characters. Who wrote a
   message is read only by `telegramSenderName` in `src/chats-telegram.ts`.
+  A Telegram Desktop export wrote the names the exporting account saw, which
+  for a saved contact is the name the owner gave them, so anyone but the owner
+  reads `a person` for an exported sender and an unnamed origin for an
+  exported forward (an inline bot's public username still shows).
 - **People names.** Only in the owner's own chats, and only a name the owner
   set (`ownerChosenName`: never an untouched identity's or the automatic
   `telegram actor …` name), and only when it differs from the name Telegram
@@ -105,7 +109,8 @@ turn's own message and answer stay.
   `by=shared`) and `archive_page` items name their source. Nothing any of them
   showed before is removed.
 - `archive_page`: `from` no longer falls back to the numeric sender id (it
-  reads `a person`); an item the owner typed has `owner:true`; a reply whose
+  reads `a person`); for anyone but the owner, a Telegram Desktop export's
+  sender reads `a person` and its reactions are counts without names; an item the owner typed has `owner:true`; a reply whose
   message is off the page has `reply_source`, which `archive_read` opens. A
   message in a forum topic is no reply to the topic's opening, so it gets
   none; a Telegram Desktop export's reply into another chat
@@ -119,18 +124,24 @@ turn's own message and answer stay.
   it), `forward` (where a forward came from) and `topic`; `answers` (the
   message Nocheh's reply answers, with its own read check); `reply_to` (the
   message it replies to) and `chain` (the messages before that); and `replies`
-  (how many readable replies, counting up to 100 and saying `complete:false`
-  beyond, and the first of them). Each related message has its source, tag,
+  (how many readable replies, counting up to 100 in the reader's own groups and
+  saying `complete:false` beyond, and the first of them). Each related message has its source, tag,
   `by` and the reader's own copy of its text, cut short.
 - Outgoing links come from the archive's relations filtered by audience, then
   the read check. Incoming links come from a new
-  `RelationshipRepository.replies`, filtered by audience, then the read check.
+  `RelationshipRepository.replies`, read only in the audience's own groups (so
+  replies elsewhere never take the place of those it may see), filtered by
+  audience, then the read check.
   A topic's opening has no reply target: a message in the topic names the
   topic instead, and the opening's replies read
   `{count:0, items:[], topic:true}`, since `archive_page` opens the topic.
 - The whole result stays within 16,000 characters: only what this decision
   adds is cut (further replies, the chain, `answers`, `reply_to`), and the
   result then says `thread_cut:true`.
+- A thread or a page's links that cannot be worked out never fail the read:
+  the message opens as before with its source `not available right now`, the
+  page reads without `owner` or `reply_source`, and the failure is counted as
+  `source_tags`.
 - `archive_read` also opens `nocheh:grant:<id>` (what the owner granted, through
   the grant's own checks) and `nocheh:learned:<id>:<revision>` (an entry's
   active revision, with who wrote it, its day in the reader's zone and five of
@@ -148,12 +159,23 @@ turn's own message and answer stay.
   for the rest of that turn like a retired turn message: its tool calls and
   results are withheld, the note written from them is removed, and the
   delivered answer keeps its text with only its reasoning cleared. The turn's
-  own message and marker stay.
+  own message and marker stay. A tool result withheld because it held a
+  retired message's text counts the same way for the rest of its turn, so a
+  note copied from it goes too. A second retirement in the same block keeps
+  the first one's notice, and `archive_page`'s `reply_source` link alone, which
+  holds none of that message's text, cites nothing.
+- The checked revision is stored with the version of these rules, so a
+  profile checked before them is planned again once, and a message retired
+  before this change leaves its recent blocks too. Until a profile's next turn,
+  owner recall skips the rows that turn will withhold and the notes it will
+  remove.
 - Recall evidence is read only from writes that are not retired. For anyone
   but the owner it is read within the reader's group when its topics share
   memory (so a sibling topic's evidence is kept), and each source passes the
   reader's read check; one that does not is dropped and counted as
-  `source_reference_unreadable`.
+  `source_reference_unreadable`. The owner's own turns check their evidence
+  too, so a message retired since it was learned is no evidence; the check is
+  one batch for all of a recall's messages.
 
 ## 5. Owner recall shows what it found
 
@@ -188,6 +210,11 @@ turn's own message and answer stay.
   today is removed.
 - **Withholding only the quoted text of a retired message.** Rejected: the
   turn's search results and its note would keep what was retired.
+- **Forgetting a topic's name when its opening message is retired.** Rejected:
+  a topic's name is the place's name, kept in the chat directory as Telegram
+  showed it, carried by every later message in the topic and shown to every
+  member by Telegram, as a group's title is; retiring a message retires it as
+  a memory source, not the name of the place it was in.
 </alternatives>
 
 <consequences>
@@ -202,6 +229,8 @@ turn's own message and answer stay.
   - Members read `› a topic` for a topic whose only name the owner typed.
   - People names show only when the owner set them.
   - Old Desktop export times read as the export's local time.
+  - Members no longer read the names a Desktop export wrote on
+    `archive_page` (its sender and the people on its reactions).
   - Retiring a recent message or a replied-to message also withholds that
     turn's tool results and notes in later turns; the delivered answer stays.
 - Tags are information for the model, not permission: every access check is

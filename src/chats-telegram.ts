@@ -158,6 +158,10 @@ export function telegramDestination(value:unknown,directory:DestinationDirectory
 }
 
 const fields=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
+/** The Telegram message an archived payload holds: a message, an edit or a channel post, live or as a Telegram Desktop
+ *  export wrote it (`message`); null when it holds none. */
+export const telegramMessage=(payload:unknown):Record<string,any>|null=>{
+  const found=fields(payload);return fields(found?.message??found?.edited_message??found?.channel_post??found?.edited_channel_post);};
 const shownText=(value:unknown):string|null=>typeof value==='string'&&value.trim()?value:null;
 /**
  * Who sent a message, as Telegram showed them (ADR-0259): a Bot API sender's first and last name and public username,
@@ -172,7 +176,7 @@ export function telegramSenderName(kind:string,payload:unknown):{name:string|nul
   if(kind.startsWith('telegram_desktop_')){const message=fields(body.message);return {name:shownText(message?.from),username:null};}
   if(kind!=='telegram_update')return none;
   const reaction=fields(body.message_reaction);
-  const message=fields(body.message??body.edited_message??body.channel_post??body.edited_channel_post);
+  const message=telegramMessage(body);
   if(!reaction&&(!message||fields(message.sender_chat)||body.channel_post!==undefined||body.edited_channel_post!==undefined))return none;
   const user=reaction?fields(reaction.user):fields(message!.from);
   if(!user)return none;

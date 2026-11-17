@@ -98,11 +98,12 @@ test('archive_read opens a message with its source and its thread, each part onl
     assert.deepEqual(Object.keys(first).filter(field=>!(field in plain)).sort(),['at','by','chat_id','replies','tag']);
     assert.deepEqual([first.tag,first.by,first.at,first.chat_id],['“Bob” (@bob_gp) · this chat · 2025-11-03 14:12 UTC','person','2025-11-03T14:12:00.000Z',A]);
     // Its replies: Ana's, the owner's and the imported one, oldest first; never the export's reply into another chat,
-    // never GP2's.
+    // never GP2's. The export's sender reads "a person" for a member: an export names people as the exporting account
+    // saw them, a saved contact by the name the owner gave them.
     assert.deepEqual(first.replies,{count:3,items:[
       {source:'nocheh:event:'+ana2.id,tag:'“Ana” · this chat · 2025-11-03 14:13 UTC',by:'person',text:'Ana reply to the plan'},
       {source:'nocheh:event:'+sam3.id,tag:'“Sam” (@sam_owner) · this chat · 2025-11-03 14:14 UTC',by:'owner',text:'Owner reply to the plan'},
-      {source:'nocheh:event:'+imported.id,tag:'“Ana” · this chat · 2025-11-03 14:21 local time of the export',by:'person',text:'Ana imported reply'}]});
+      {source:'nocheh:event:'+imported.id,tag:'a person · this chat · 2025-11-03 14:21 local time of the export',by:'person',text:'Ana imported reply'}]});
     assert.ok(!JSON.stringify(first).includes(elsewhere.id)&&!JSON.stringify(first).includes(quoted.id));
     assert.deepEqual((await open(general,bob1,1)).replies.items.map((item:any)=>item.source),['nocheh:event:'+ana2.id],'replies shows the first ones, and counts them all');
     assert.equal((await open(general,bob1,0)).replies.count,3);
@@ -141,6 +142,8 @@ test('archive_read opens a message with its source and its thread, each part onl
     // The owner reads the whole thread, GP2's reply into GP1 too, in the Tasks time zone.
     const owned=await open(owner,bob1,10);
     assert.deepEqual([owned.tag,owned.replies.count,owned.replies.items.at(-1)?.source],['“Bob” (@bob_gp) · group “GP1” · 2025-11-03 15:12 Europe/Berlin',4,'nocheh:event:'+quoted.id]);
+    assert.equal(owned.replies.items.find((item:any)=>item.source==='nocheh:event:'+imported.id)?.tag,'“Ana” · group “GP1” · 2025-11-03 14:21 local time of the export',
+      'the owner reads the name the export wrote');
     // A reader outside a turn, as the dashboard reads, gets today's fields alone.
     const outside:Reader={admin:false,scope:A,space:A,generation:binding.generation,guard_epoch:binding.epoch};
     assert.deepEqual(await open(outside,bob1),await s.sources.read(outside,bob1.id));
@@ -162,6 +165,32 @@ test('archive_read opens a message with its source and its thread, each part onl
     const after=await open(general,bob1);
     assert.deepEqual([after.replies.count,after.replies.items.map((item:any)=>item.source)],[2,['nocheh:event:'+ana2.id,'nocheh:event:'+imported.id]]);
     await assert.rejects(s.sources.learnedEntry(general,learnedId,1),{code:'learned_memory_not_found'});
+
+    // Replies in chats the reader can't reach never take the place of its own: three GP2 quotes of GP1's message come
+    // first, then Ana's reply in GP1; read two at a time, GP1 still finds Ana's, and says nothing of more elsewhere.
+    const busy=message(GP1,20,bob,'Busy plan',T+900),busyRef=await capture(A,{message:busy});
+    for(let n=0;n<3;n++)await capture(B,{message:message(GP2,30+n,bob,'GP2 quotes the busy plan',T+910+n,{external_reply:{origin:{type:'user',sender_user:bob,date:T+900},chat:GP1,message_id:20}})});
+    const anaBusy=await capture(A,{message:message(GP1,21,ana,'Ana on the busy plan',T+990,{reply_to_message:busy})});
+    const busyObject=(await s.access.relationships.describeMany([busyRef.id])).get(busyRef.id)!.object_id;
+    const scoped=await s.access.relationships.replies(busyObject,{kind:'recall',scope:{space:A,group:A}},2);
+    assert.deepEqual([scoped.replies.flatMap(reply=>reply.references.map(item=>item.id)),scoped.more],[[anaBusy.id],false]);
+    const everyone=await s.access.relationships.replies(busyObject,{kind:'owner'},2);
+    assert.equal(everyone.more,true,'the owner reads every chat, and is told there are more');
+
+    // A thread or a page's links that can't be worked out never fail the read: the message opens as read() gives it,
+    // with its source "not available right now", the page reads as it did before, and each failure is counted.
+    const failures=async()=>(await stores.control.query(`SELECT coalesce(sum(failed),0)::integer AS failed FROM memory_problem_days
+      WHERE kind='source_tags' AND day=(now() AT TIME ZONE 'UTC')::date`)).rows[0].failed as number;
+    const before=await failures(),relations=s.access.relationships,targets=relations.replyTargets;
+    relations.replyTargets=async()=>{throw new Error('relations down');};
+    try {
+      const broken=await open(general,bob4),read=await s.sources.read(general,bob4.id) as any;
+      for(const field of Object.keys(read))assert.deepEqual(broken[field],read[field],field);
+      assert.deepEqual([broken.tag,broken.by,broken.at,broken.reply_to,broken.replies],['source not available right now','unknown',null,undefined,undefined]);
+      const page=await s.sources.page(general,{chat:'',from:'',to:'',after:'',count:30}) as any;
+      assert.ok(page.items.length>0&&page.items.every((item:any)=>item.reply_source===undefined&&item.owner===undefined));
+    } finally {relations.replyTargets=targets;}
+    assert.equal(await failures(),before+2,'each failure is counted as a source_tags problem');
   } finally {
     await stores.control.query('UPDATE owner_task_settings SET settings=$1 WHERE singleton',[JSON.stringify(zone)]).catch(()=>{});
     await Promise.all([stores.archive.end(),stores.derived.end(),stores.control.end()]);await rm(root,{recursive:true,force:true});

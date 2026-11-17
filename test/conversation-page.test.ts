@@ -32,6 +32,11 @@ test('a page item names the sender, the replied message, the topic and the react
   assert.equal(pageItem({id,kind:'telegram_update',at,text:'Hi',payload:{message:{message_id:16,chat,from:{id:5}}}}).from,'a person');
   assert.equal(pageItem({id,kind:'telegram_desktop_message',at,text:'Hi',payload:{message:{id:17,from:'',from_id:'user5'}}}).from,'a person');
   assert.equal(pageItem({id,kind:'telegram_update',at,text:'Hi',payload:{message:{message_id:18,chat,from:{id:5,username:'sam_lee'}}}}).from,'@sam_lee');
+  // A member reads no name an export wrote (for a saved contact, the owner's own name for them): the sender is "a
+  // person" and reactions are counts alone. A live message keeps the name Telegram showed everyone.
+  const forMember=pageItem(exportedInput,false,false);
+  assert.deepEqual([forMember.from,forMember.reactions],['a person',[{reaction:'✅',count:2},{reaction:'custom',count:1}]]);
+  assert.equal(pageItem({id,kind:'telegram_update',at,text:'x',payload:{message:{message_id:12,chat,from:{id:5,first_name:'Sam'}}}},false,false).from,'Sam');
   // An exported reply into another chat names that chat's message id, so it shows no reply_to; every other one keeps it.
   const elsewhere=pageItem({...exportedInput,payload:{...exportedInput.payload,message:{...exportedInput.payload.message,reply_to_peer_id:'channel77'}}});
   assert.deepEqual([elsewhere.message_id,elsewhere.reply_to,elsewhere.from],['13',undefined,'Sam']);

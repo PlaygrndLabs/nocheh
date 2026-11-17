@@ -4,7 +4,7 @@ import {telegramMessageAudience,type ObservedAudience,type ObservedReaction} fro
 import {canonical} from '../archive.js';
 import {sourceObjectId,type SourceIdentity} from '../source-model.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
-import {inReadSet,inRecall,observedChat,type ReadSet,type RecallScope} from '../spaces.js';
+import {archiveScopes,inReadSet,inRecall,observedChat,readSetGroups,type ReadSet,type RecallScope} from '../spaces.js';
 
 /** `recall` admits the known conversations of a recall scope: its own, or every conversation of its group when the
  * group's topics share memory. `reads` admits the known conversations of a read set, for an answer reader (ADR-0249).
@@ -12,6 +12,10 @@ import {inReadSet,inRecall,observedChat,type ReadSet,type RecallScope} from '../
 export type RelationshipAudience={kind:'owner'}|{kind:'recall';scope:RecallScope}|{kind:'reads';set:ReadSet};
 const permits=(audience:RelationshipAudience,chat:string|null):boolean=>audience.kind==='owner'||chat!==null&&
   (audience.kind==='reads'?inReadSet(audience.set,chat):inRecall(audience.scope,chat));
+/** The archive scopes (every Telegram id) of the groups an audience reads, to narrow a read in SQL before permits()
+ *  decides each row; null for the owner, who reads every chat. */
+const audienceScopes=(audience:RelationshipAudience):string[]|null=>audience.kind==='owner'?null:
+  archiveScopes(audience.kind==='reads'?readSetGroups(audience.set):[audience.scope.group??audience.scope.space]);
 
 // Resolve the older adapter's unknown General projection from the immutable
 // full message. This changes neither archived bytes nor the saved descriptor.
@@ -117,13 +121,16 @@ export class RelationshipRepository {
   /**
    * The messages that reply to an object (ADR-0259), by the archive's reply relation (source_relations, its target
    * index): each replying message once, with every copy of it the audience admits (permits), oldest first, its first
-   * copy deciding the order. At most `limit` copies are read; `more` says there were others. canRead is the caller's.
+   * copy deciding the order. Only copies in the audience's own groups are read (in SQL, so replies elsewhere never take
+   * the place of those it may see); at most `limit` of them, and `more` says there were others there. canRead is the
+   * caller's.
    */
   async replies(objectId:string,audience:RelationshipAudience,limit=100):Promise<{replies:{object:string;references:SourceReference[]}[];more:boolean}> {
     if(!Number.isInteger(limit)||limit<1||limit>200)throw new HttpError(400,'invalid_relationship_page');
     const rows=(await this.pool.query(`SELECT e.id,e.revision,e.payload_hash,v.object_id FROM source_relations r JOIN events e ON e.id=r.event_id
       JOIN source_observations o ON o.event_id=e.id JOIN source_revisions v ON v.id=o.revision_id
-      WHERE r.target_id=$1 AND r.kind='reply_to' ORDER BY e.received_at,e.id LIMIT $2`,[objectId,limit+1])).rows;
+      WHERE r.target_id=$1 AND r.kind='reply_to' AND ($3::text[] IS NULL OR e.scope=ANY($3::text[])) ORDER BY e.received_at,e.id LIMIT $2`,
+      [objectId,limit+1,audienceScopes(audience)])).rows;
     const chats=await this.describeMany(rows.slice(0,limit).map(row=>row.id)),replies=new Map<string,SourceReference[]>();
     for(const row of rows.slice(0,limit)) {
       if(row.object_id===objectId||!permits(audience,chats.get(row.id)?.chat??null))continue;

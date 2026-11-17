@@ -169,6 +169,26 @@ test('places: this chat, a group and its topic, the owner\'s view of a member\'s
   assert.equal(at1(BOB_CHAT,{...member,chat:BOB_CHAT}),'this chat','an answer reader\'s own private chat');
 });
 
+test('a Telegram Desktop export\'s names (a saved contact\'s is the owner\'s own) are shown to the owner only; a member reads "a person"',()=>{
+  // The export wrote the name the exporting account saw: for a saved contact, the name the owner gave them.
+  const payload={message:{id:9,from:'Brother - owes me 200',from_id:'user456',forwarded_from:'Mum (saved)',text:'Synthetic'}};
+  const read={...sourceFacts({channel:'telegram',kind:'telegram_desktop_message',payload},'123'),author:'person' as const};
+  const exported:TagSource={id:hex(40),class:eventClass(read),facts:read,sender:telegramSenderName('telegram_desktop_message',payload),
+    forward:forwardFacts(payload.message,payload.message),chat:GP1,exported:true,moment:{local:'2025-11-03 14:20'},at:atIso};
+  assert.equal(sourceTag(exported,owner,names,directory).tag,
+    '“Brother - owes me 200”, forwarded from a person who hides their account, shown as “Mum (saved)” · group “GP1” · 2025-11-03 14:20 local time of the export');
+  const shown=sourceTag(exported,member,names,directory).tag;
+  assert.equal(shown,'a person, forwarded from a person who hides their account · this chat · 2025-11-03 14:20 local time of the export');
+  assert.doesNotMatch(shown,/Brother|Mum/);
+  assert.equal(sourceDetails(exported,member,names,directory).forward,'forwarded from a person who hides their account');
+  // An inline bot's public username is no name the owner chose: everyone reads it.
+  const viaBot={message:{id:10,from:'Brother',from_id:'user456',via_bot:'gif_bot',text:'x'}};
+  const bot={...sourceFacts({channel:'telegram',kind:'telegram_desktop_message',payload:viaBot},'123'),author:'person' as const};
+  assert.match(sourceTag({...exported,class:eventClass(bot),facts:bot,forward:forwardFacts(viaBot.message,viaBot.message)},member,names,directory).tag,/^a person, sent through the inline bot @gif_bot · /);
+  // A live message's name is the one Telegram showed everyone.
+  assert.match(sourceTag({...exported,exported:false,forward:null,class:'person_message'},member,names,directory).tag,/^“Brother - owes me 200” · /);
+});
+
 test('a sender\'s name is read from name fields only: Bot API from and reaction user, Desktop from; nobody for a chat\'s post',()=>{
   assert.deepEqual(telegramSenderName('telegram_update',message({id:5,first_name:'Bob',last_name:'Ray',username:'bob_gp'})),{name:'Bob Ray',username:'bob_gp'});
   assert.deepEqual(telegramSenderName('telegram_update',{edited_message:{from:{id:5,first_name:'Bob',username:'x'}}}),{name:'Bob',username:null},'a username Telegram can\'t have is left out');
