@@ -3,7 +3,7 @@ never asks for a group switch the owner's Rule 1 refuses: a new switch that is o
 in that group, so the tester only ever writes off switches or flips existing ones."""
 import unittest
 
-from tools.acceptance.telegram_scenarios import Scenarios
+from tools.acceptance.telegram_scenarios import Fixture, Scenarios
 
 GROUP, OTHER, THIRD = '-10042', '-10043', 'd4'*32
 LISTED = [{'chat_id': GROUP, 'title': 'Synthetic Forum -10042', 'state': 'active'},
@@ -69,6 +69,47 @@ class TesterMembers(unittest.TestCase):
         found.change_member(member(778, [row(OTHER, True)]), groups={-10043: False}, post=False)
         (path, body), = [call for call in calls if call[1] is not None]
         self.assertEqual(body['changes'], {'post': False, 'groups': {OTHER: False}})
+
+
+class KeptFixture(FakeFixture):
+    """A fixture kept between runs: its message ids keep counting, as Telegram's update ids do."""
+    def __init__(self):
+        self.next_id = 1000
+
+    def ids(self):
+        self.next_id += 10
+        return self.next_id
+
+    message = Fixture.message
+
+
+class TesterFixedReplies(unittest.TestCase):
+    """The bot answers someone who may not talk in a group at most once a UTC day per person and group, and keeps that in
+    its spool. A scenario that waits for that reply asks as someone new to the fixture, so a second run on a kept fixture
+    the same day still gets one."""
+
+    def refused_people(self, found, scenario):
+        """Who a scenario waits for a fixed reply from, with every call to the fixture and the Members routes stubbed."""
+        asked = []
+        listed = lambda person: {'telegram_id': str(person), 'state': 'active', 'groups': []}
+        found.not_allowed_reply = lambda update, topic, chat=-10042: asked.append((update['message']['from']['id'], chat))
+        found.refused_quietly = found.turn = found.gate = found.wait = found.nothing_restarted = found.members_allowed = lambda *args, **kwargs: None
+        found.service_starts = dict
+        found.add_member = lambda person, groups: listed(person)
+        found.member_item = listed
+        found.change_member = lambda item, groups=None, **changes: item
+        found.remove_member = lambda item: None
+        getattr(found, scenario)()
+        return asked
+
+    def test_each_run_waits_for_a_fixed_reply_from_someone_new(self):
+        from tools.acceptance.product_scenarios import ProductScenarios
+        kept = KeptFixture()
+        for scenario in ('participant_not_permitted', 'granted_participant', 'member_switched_off_in_a_group'):
+            first, second = (self.refused_people(ProductScenarios(kept, None), scenario) for _ in range(2))
+            with self.subTest(scenario):
+                self.assertEqual((len(first), len(second)), (1, 1))
+                self.assertNotEqual(first[0][0], second[0][0], 'the second run on the kept fixture asks as someone else')
 
 
 if __name__ == '__main__':

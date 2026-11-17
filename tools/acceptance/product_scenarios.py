@@ -3120,18 +3120,20 @@ class ProductScenarios(Scenarios):
         self.refused_quietly(self.f.message(GROUP, 'باز هم سلام', sender=newcomer, topic=ADD_TOPIC), GROUP, ADD_TOPIC)
 
     def member_switched_off_in_a_group(self):
-        # GUEST is a member with OTHER_GROUP switched off for them. Addressing Nocheh there, they get the same fixed reply as
-        # a stranger, once a UTC day per group, and no model turn. The owner switches OTHER_GROUP on for them on the Members
-        # page and they talk there at once; it is switched off again after.
-        self.members_allowed()
-        self.not_allowed_reply(self.f.message(OTHER_GROUP, 'سلام، اینجا هم کمک می‌کنی؟', sender=GUEST, topic=SWITCH_TOPIC), SWITCH_TOPIC, chat=OTHER_GROUP)
-        self.refused_quietly(self.f.message(OTHER_GROUP, 'هنوز نه؟', sender=GUEST, topic=SWITCH_TOPIC), OTHER_GROUP, SWITCH_TOPIC)
+        # A member in GROUP only, so OTHER_GROUP is switched off for them. Addressing Nocheh there, they get the same fixed
+        # reply as a stranger, once a UTC day per group, and no model turn. The owner switches OTHER_GROUP on for them on the
+        # Members page and they talk there at once. A member new to the fixture, since the reply comes at most once a UTC day
+        # per person and group; they are removed at the end.
+        guest = self.fresh_person()
+        item = self.add_member(guest, (GROUP,))
         try:
-            switched = self.change_member(self.member_item(GUEST), groups={OTHER_GROUP: True})
+            self.not_allowed_reply(self.f.message(OTHER_GROUP, 'سلام، اینجا هم کمک می‌کنی؟', sender=guest, topic=SWITCH_TOPIC), SWITCH_TOPIC, chat=OTHER_GROUP)
+            self.refused_quietly(self.f.message(OTHER_GROUP, 'هنوز نه؟', sender=guest, topic=SWITCH_TOPIC), OTHER_GROUP, SWITCH_TOPIC)
+            switched = self.change_member(self.member_item(guest), groups={OTHER_GROUP: True})
             self.gate('switched_on', any(row['chat_id'] == self.f.chat(OTHER_GROUP) and row['on'] for row in switched['groups']), member=switched)
-            self.turn(self.f.message(OTHER_GROUP, 'حالا چطور؟', sender=GUEST, topic=SWITCH_TOPIC), OTHER_GROUP, SWITCH_TOPIC)
+            self.turn(self.f.message(OTHER_GROUP, 'حالا چطور؟', sender=guest, topic=SWITCH_TOPIC), OTHER_GROUP, SWITCH_TOPIC)
         finally:
-            self.change_member(self.member_item(GUEST), groups={OTHER_GROUP: False})
+            self.remove_member(item)
 
     def paused_member_is_stopped(self):
         # The owner pauses a member who has work in flight, and nothing they asked for goes out after that. A member new to

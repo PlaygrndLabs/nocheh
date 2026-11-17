@@ -62,8 +62,7 @@ members live in the control store and are managed on the Members page.
   2 skipped); the dashboard build, type and format checks and its tests (60 of 60); the browser
   tests (59: 56 pass, and the 3 that also fail on main).
   Pending:
-  - The whole full tester on images. It has not run on this step. Two not-allowed scenarios use
-    fixed people, so a second run on the same UTC day may not see the first reply.
+  - The whole full tester on images. It has not run on this step.
   - The add card's own project moving no epoch has no tester scenario; a store test covers it.
   - The privacy scan before a push.
   - Live acceptance on the owner's install after merge.

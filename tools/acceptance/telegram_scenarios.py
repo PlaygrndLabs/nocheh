@@ -772,8 +772,10 @@ class Scenarios:
 
     def participant_not_permitted(self):
         # A stranger who addresses Nocheh in a group gets the fixed reply once; the same day a second message gets nothing.
-        self.not_allowed_reply(self.f.message(GROUP, 'سلام ربات', sender=PARTICIPANT, topic=16), 16)
-        self.refused_quietly(self.f.message(GROUP, 'سلام دوباره، کسی هست؟', sender=PARTICIPANT, topic=16), GROUP, 16)
+        # A person new to the fixture, since everyone gets the reply at most once a UTC day per group.
+        stranger = self.fresh_person()
+        self.not_allowed_reply(self.f.message(GROUP, 'سلام ربات', sender=stranger, topic=16), 16)
+        self.refused_quietly(self.f.message(GROUP, 'سلام دوباره، کسی هست؟', sender=stranger, topic=16), GROUP, 16)
 
     def leave_calls(self, chat):
         """Every leaveChat the Telegram service made for a chat, refused ones included."""
@@ -1164,21 +1166,22 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         self.turn(self.f.message(OWNER, 'بعد از راه‌اندازی دوباره'), OWNER)
 
     def granted_participant(self):
-        # The owner makes PARTICIPANT a member by their Telegram user ID, with only OTHER_GROUP ticked, through the
-        # dashboard's Members routes: they talk there at once, with no restart. Switching OTHER_GROUP off for them takes
-        # effect at once too: they get the fixed reply there, as a stranger does. (OTHER_GROUP, because PARTICIPANT already
-        # had today's one fixed reply in GROUP.) Removed, they are a stranger again.
+        # The owner makes someone a member by their Telegram user ID, with only OTHER_GROUP ticked, through the dashboard's
+        # Members routes: they talk there at once, with no restart. Switching OTHER_GROUP off for them takes effect at once
+        # too: they get the fixed reply there, as a stranger does. Removed, they are a stranger again. A person new to the
+        # fixture, since everyone gets the fixed reply at most once a UTC day per group.
+        person = self.fresh_person()
         starts = self.service_starts()
-        item = self.add_member(PARTICIPANT, (OTHER_GROUP,))
+        item = self.add_member(person, (OTHER_GROUP,))
         try:
             self.gate('member_listed_with_their_group', item['state'] == 'active' and any(row['chat_id'] == self.f.chat(OTHER_GROUP) and row['on']
                                                                                     for row in item['groups']), member=item)
-            self.turn(self.f.message(OTHER_GROUP, 'سلام، اجازه دارم؟', sender=PARTICIPANT, topic=22), OTHER_GROUP, 22)
-            item = self.change_member(self.member_item(PARTICIPANT), groups={OTHER_GROUP: False})
-            self.not_allowed_reply(self.f.message(OTHER_GROUP, 'هنوز اجازه دارم؟', sender=PARTICIPANT, topic=22), 22, chat=OTHER_GROUP)
+            self.turn(self.f.message(OTHER_GROUP, 'سلام، اجازه دارم؟', sender=person, topic=22), OTHER_GROUP, 22)
+            item = self.change_member(self.member_item(person), groups={OTHER_GROUP: False})
+            self.not_allowed_reply(self.f.message(OTHER_GROUP, 'هنوز اجازه دارم؟', sender=person, topic=22), 22, chat=OTHER_GROUP)
         finally:
             self.remove_member(item)
-        self.gate('not_listed_after_removal', self.member_item(PARTICIPANT) is None)
+        self.gate('not_listed_after_removal', self.member_item(person) is None)
         self.nothing_restarted(starts)
 
     # Operations -------------------------------------------------------------------
