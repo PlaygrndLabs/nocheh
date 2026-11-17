@@ -613,10 +613,11 @@ const server=createServer((req,res)=>{void(async()=>{
    // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
    return json(res,200,{profiles:current,history_profiles:[...current,{owner:false,scope:'42',profile:'nocheh-'+'a1'.repeat(12),private_answer:true,
     answer_group:'“Aurora planning” › Iceland planning',answer_at:'2026-11-12T10:00:00+00:00'},{owner:false,scope:'42',profile:'nocheh-'+'b2'.repeat(12),private_answer:true}]});}
-  if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy.\n§\nAlice is planning a trip to Iceland.',citations:[],
+  if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy.\n§\nAlice is planning a trip to Iceland.\n§\nThe lunch poll now offers tacos on Friday.',citations:[],
     // Each note with where it came from, in the owner's words (ADR-0257).
     entries:[{target:'memory',text:'Synthetic memory: interested in astronomy.',from:'owner',label:'Your own messages in your private chat'},
-      {target:'memory',text:'Alice is planning a trip to Iceland.',from:'forward',label:'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”'}]},
+      {target:'memory',text:'Alice is planning a trip to Iceland.',from:'forward',label:'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”'},
+      {target:'memory',text:'The lunch poll now offers tacos on Friday.',from:'forward',label:'Nocheh’s notes review of a message holding someone else’s words, such as a shared checklist or poll, that you pinned in your private chat'}]},
     {name:'USER.md',exists:true,text:'Prefers short answers.',citations:[],entries:[{target:'user',text:'Prefers short answers.',from:'turn',label:'Nocheh’s note from your private chat on 2026-11-12'}]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));

@@ -36,6 +36,10 @@ export interface SourceFacts {
    *  tasks someone else added, a poll option someone else added, an option's text deleted from a poll, or a message
    *  Telegram shows inside it that is not the sender's own typed message. `pinned` is then 'other'. */
   held:boolean;
+  /** Whether the message a pin carries is the sender's own message holding words that may be someone else's (othersIn:
+   *  their checklist or poll others may have added to, a message shown inside it). `pinned` is then 'other', and labels
+   *  say the pinned message holds someone else's words, never that someone else wrote it. */
+  pinned_held:boolean;
   /** Text read from a file or an image the sender sent, and that file's name, unchecked. */
   file:boolean;file_name:string|null;
   /** A transcript of an audio file, which is not the sender's own voice. */
@@ -60,11 +64,26 @@ const text=(value:unknown):string|null=>typeof value==='string'&&value.trim()?va
 const fullId=(value:unknown):string|null=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value)?value:null;
 /** The recordings of the sender's own voice; any other transcript is of an audio file someone made. */
 export const ownVoice:ReadonlySet<string>=new Set(['voice','video_note','voice_message','video_message']);
-const none:SourceFacts={author:'unknown',account:null,name:null,act:'other',forward:null,forward_name:null,quote:null,pinned:null,held:false,file:false,
-  file_name:null,audio:false,recording:false,send_class:null,answers:null};
+const none:SourceFacts={author:'unknown',account:null,name:null,act:'other',forward:null,forward_name:null,quote:null,pinned:null,held:false,pinned_held:false,
+  file:false,file_name:null,audio:false,recording:false,send_class:null,answers:null};
 /** A Telegram account's id as text, or null when the value names none. Compared by equality only, never by its shape. */
 const accountOf=(user:unknown):string|null=>{const id=record(user)?.id;return typeof id==='number'||typeof id==='string'?String(id):null;};
+const given=(value:unknown):boolean=>value!==undefined&&value!==null;
+/** Whether a message is one Telegram no longer shows (an InaccessibleMessage: date 0, and nothing but its chat, id and
+ *  date), which carries no words. One with date 0 and anything else is read as any message is. */
+export function inaccessible(message:unknown):boolean {
+  const found=record(message);
+  return !!found&&found.date===0&&Object.keys(found).every(name=>['chat','message_id','date'].includes(name));
+}
+/** Whether a poll option is one someone added (Telegram names who: added_by_user, or added_by_chat for one added in a
+ *  chat's name); an option naming no one is the poll's own. */
+export const addedOption=(option:Record<string,any>):boolean=>given(option.added_by_user)||given(option.added_by_chat);
 
+/** A message's sender as othersIn compares it, by equality alone: the person's account Telegram names in `from`, or
+ *  null for a post in a chat's name, a bot or an account it cannot tell (`account` given: what sender() read). */
+function senderOf(message:Record<string,any>,account=record(message.sender_chat)?null:sender(record(message.from),null).account):string|null {
+  return account===null?null:String(record(message.from)?.id);
+}
 /** A Telegram sender: the owner's account, another person's, or a bot's. */
 function sender(user:Record<string,any>|null,owner:string|null):Pick<SourceFacts,'author'|'account'|'name'> {
   if(!user)return {author:'unknown',account:null,name:null};
@@ -88,7 +107,7 @@ function telegram(payload:unknown,owner:string|null,ownChat:boolean):SourceFacts
   const act=update.edited_message!==undefined||update.edited_channel_post!==undefined?'edit':'message';
   // An anonymous admin and a post in a channel's or group's name (sender_chat) are never the owner (ADR-0251).
   const who=channel||record(message.sender_chat)?{author:'anonymous' as const,account:null,name:text(record(message.sender_chat)?.title)}:sender(record(message.from),owner);
-  const raw=who.account===null?null:String(record(message.from)?.id);
+  const raw=senderOf(message,who.account);
   // Only a new message that is not a forward shows its checklist for the first time; a forward, even of the sender's own,
   // shows one that may have been shared since.
   const held=othersIn(message,raw,act==='message'&&!forwardFacts(message),ownChat);
@@ -116,21 +135,32 @@ function sharedChecklist(message:Record<string,any>|null,fresh:boolean,ownChat:b
 function pollByOthers(message:Record<string,any>,sender:string|null):boolean {
   const options=record(message.poll)?.options;
   return Array.isArray(options)&&options.some(option=>{
-    const found=record(option);if(!found)return false;
-    if(found.added_by_chat!==undefined&&found.added_by_chat!==null)return true;
-    return found.added_by_user!==undefined&&found.added_by_user!==null&&(sender===null||accountOf(found.added_by_user)!==sender);
+    const found=record(option);
+    return !!found&&addedOption(found)&&(given(found.added_by_chat)||sender===null||accountOf(found.added_by_user)!==sender);
   });
 }
+/** Whether the option a poll_option_deleted reports is `sender`'s own words: Telegram names no one who added a deleted
+ *  option, so only in the owner's own private chat with Nocheh (`ownChat`), where nobody else can add one, and only from
+ *  the sender's own poll that is not a forward, as Telegram shows it with the deletion (shownOf). Anywhere else, or when
+ *  the poll is not shown, it may be someone else's. */
+function deletedOwn(deleted:Record<string,any>,sender:string|null,ownChat:boolean):boolean {
+  const poll=record(deleted.poll_message);
+  return ownChat&&!!poll&&!forwardFacts(poll)&&shownOf(poll,sender,ownChat).pinned==='own';
+}
+/** deletedOwn for the sender of `message` (senderOf), as the owner's notes review asks it of what a message holds. */
+export const ownDeletedOption=(deleted:Record<string,any>,message:Record<string,any>,ownChat:boolean):boolean=>deletedOwn(deleted,senderOf(message),ownChat);
 /**
  * Whether a message holds words that may be someone other than `sender`'s, besides a forward, a quote or a pin: a
  * checklist that may hold someone else's tasks (sharedChecklist), a poll option someone else added (pollByOthers), an
- * option's text deleted from a poll (poll_option_deleted), whose adder Telegram does not name, or a message it embeds
- * (embeddedMessages) that is not the sender's own typed message (shownOf). Read for a message itself, the message a pin
- * carries, the one a quote is from, and each message those embed.
+ * option's text deleted from a poll (poll_option_deleted), whose adder Telegram does not name (deletedOwn), or a message
+ * it embeds (embeddedMessages) that is not the sender's own typed message, or quotes one (shownOf): Telegram leaves the
+ * reply out of an embedded message but keeps its quote, which is then never the sender's own. Read for a message
+ * itself, the message a pin carries, the one a quote is from, and each message those embed.
  */
 function othersIn(message:Record<string,any>,sender:string|null,fresh:boolean,ownChat:boolean):boolean {
-  return sharedChecklist(message,fresh,ownChat)||pollByOthers(message,sender)||!!record(message.poll_option_deleted)||
-    embeddedMessages(message).some(item=>shownOf(item.message,sender,ownChat).pinned==='other');
+  const deleted=record(message.poll_option_deleted);
+  return sharedChecklist(message,fresh,ownChat)||pollByOthers(message,sender)||!!deleted&&!deletedOwn(deleted,sender,ownChat)||
+    embeddedMessages(message).some(item=>{const shown=shownOf(item.message,sender,ownChat);return shown.pinned==='other'||shown.quote==='other';});
 }
 function forwarded(message:unknown):Pick<SourceFacts,'forward'|'forward_name'> {
   const found=forwardFacts(message);
@@ -155,26 +185,30 @@ function quoteOf(message:Record<string,any>,sender:string|null,ownChat:boolean):
   return sender!==null&&author===sender?'own':'other';
 }
 
+type Shown=Partial<Pick<SourceFacts,'forward'|'forward_name'|'quote'|'pinned'>>&{held?:true};
 /**
  * Whose words a message shown inside another carries: the message a pin carries (a pin has no words of its own), or one
  * a message embeds (embeddedMessages). A forward of someone else's there, an inline bot's message included, is a forward
- * the sender passed on; a message the sender did not write (another person's, or a post in a chat's name), and the
- * sender's own message holding words that may be someone else's (othersIn: a checklist, a poll an option was added to,
- * a message it embeds in turn), is someone else's; only the sender's own typed message stays theirs, with its own quote
- * read as any quote is. A message Telegram no longer shows (date 0) carries nothing.
+ * the sender passed on; a message the sender did not write (another person's, or a post in a chat's name) is someone
+ * else's, and so is the sender's own message holding words that may be someone else's (othersIn: a checklist, a poll an
+ * option was added to, a message it embeds in turn), which is `held`; only the sender's own typed message stays theirs,
+ * with its own quote read as any quote is. A message Telegram no longer shows (inaccessible) carries nothing.
  */
-function shownOf(shown:Record<string,any>,sender:string|null,ownChat:boolean):Partial<Pick<SourceFacts,'forward'|'forward_name'|'quote'|'pinned'>> {
-  if(shown.date===0)return {};
+function shownOf(shown:Record<string,any>,sender:string|null,ownChat:boolean):Shown {
+  if(inaccessible(shown))return {};
   const found=forwardFacts(shown);
   if(found&&found.from!=='own')return {forward:found.from,forward_name:found.rawName,pinned:'other'};
-  if(sender===null||record(shown.sender_chat)||accountOf(shown.from)!==sender||othersIn(shown,sender,false,ownChat))return {pinned:'other'};
+  if(sender===null||record(shown.sender_chat)||accountOf(shown.from)!==sender)return {pinned:'other'};
+  if(othersIn(shown,sender,false,ownChat))return {pinned:'other',held:true};
   const quote=quoteOf(shown,sender,ownChat);
   return {pinned:'own',...(quote?{quote}:{})};
 }
-/** What a pin carries, read as any message shown inside another is (shownOf). An update without a pin carries none. */
-function pinnedOf(message:Record<string,any>,sender:string|null,ownChat:boolean):Partial<Pick<SourceFacts,'forward'|'forward_name'|'quote'|'pinned'>> {
-  const pinned=record(message.pinned_message);
-  return pinned?shownOf(pinned,sender,ownChat):{};
+/** What a pin carries, read as any message shown inside another is (shownOf): the sender's own message holding others'
+ *  words is `pinned_held`. An update without a pin carries none. */
+function pinnedOf(message:Record<string,any>,sender:string|null,ownChat:boolean):Partial<Pick<SourceFacts,'forward'|'forward_name'|'quote'|'pinned'|'pinned_held'>> {
+  const pinned=record(message.pinned_message);if(!pinned)return {};
+  const {held,...shown}=shownOf(pinned,sender,ownChat);
+  return {...shown,...(held?{pinned_held:true}:{})};
 }
 
 /**
@@ -189,10 +223,11 @@ function nochehWords(message:Record<string,any>|null,bot:string|null):boolean {
   const origin=record(message.forward_origin);
   return isBotAccount(message.from,bot)||origin?.type==='user'&&isBotAccount(origin.sender_user,bot)||!origin&&isBotAccount(message.forward_from,bot);
 }
-/** Whether the message a pin carries is Nocheh's own words (nochehWords). One Telegram no longer shows (date 0) carries none. */
+/** Whether the message a pin carries is Nocheh's own words (nochehWords). One Telegram no longer shows (inaccessible)
+ *  carries none. */
 export function nochehPinned(message:unknown,bot:string|null):boolean {
   const pinned=record(record(message)?.pinned_message);
-  return !!pinned&&pinned.date!==0&&nochehWords(pinned,bot);
+  return !!pinned&&!inaccessible(pinned)&&nochehWords(pinned,bot);
 }
 /** Whether a message's quote is of Nocheh's own words: the message it answers in the same chat carries them
  *  (nochehWords), or the one it answers in another chat (external_reply) was first sent by Nocheh's own account. A
@@ -261,8 +296,7 @@ export function heldBy(message:Record<string,any>):Held[] {
     const options=record(holder.message.poll)?.options;
     if(Array.isArray(options))options.forEach((option,index)=>{
       const added=record(option);
-      if(added&&(added.added_by_user!==undefined&&added.added_by_user!==null||added.added_by_chat!==undefined&&added.added_by_chat!==null))
-        found.push({kind:'option',path:[...holder.path,'poll','options',index],value:added});
+      if(added&&addedOption(added))found.push({kind:'option',path:[...holder.path,'poll','options',index],value:added});
     });
     const deleted=record(holder.message.poll_option_deleted);
     if(deleted&&(deleted.option_text!==undefined||deleted.option_text_entities!==undefined))
@@ -292,10 +326,19 @@ export function cutHeld(message:Record<string,any>,items:readonly Held[]):void {
 }
 /** The places (heldKey) of what a message holds that is Nocheh's own words, by the bot the update came to, compared by
  *  equality alone (nochehWords): a message it embeds that Nocheh sent or first sent, or a quote inside one that quotes
- *  Nocheh's words (nochehQuoted). Everyone's copy loses them; with no known bot, none is. */
+ *  Nocheh's words as its reply shows them (nochehQuoted). Everyone's copy loses them; with no known bot, none is. A quote
+ *  inside one with no reply to tell it by is not told here (quotesToTrace). */
 export function nochehHeld(message:unknown,bot:string|null):string[] {
   const found=record(message);if(!found)return [];
   return heldBy(found).filter(item=>item.kind==='message'?nochehWords(item.value,bot):item.kind==='quote'&&nochehQuoted(item.value,bot)).map(item=>heldKey(item.path));
+}
+/** The quotes inside messages a message embeds that carry no reply to tell them by (reply_to_message, external_reply),
+ *  which Telegram leaves out of an embedded message, as heldBy lists them: each quote's place, and the embedded message
+ *  holding it as its value. NoteSourceRepository.carried traces each through that message's own archived event, as it
+ *  traces a pinned message's quote, and cuts it for everyone when it quotes Nocheh's words or cannot be traced. */
+export function quotesToTrace(message:unknown):Held[] {
+  const found=record(message);if(!found)return [];
+  return heldBy(found).filter(item=>item.kind==='quote'&&!record(item.value.reply_to_message)&&!record(item.value.external_reply));
 }
 
 /**

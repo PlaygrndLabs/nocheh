@@ -43,7 +43,9 @@ export interface PreparedLearningContext {
  * notice or reminder, and Nocheh's own account's message the archive does not hold as Nocheh's learned one (not archived
  * yet, or a forward of one); a quote of Nocheh's own words is left out of the message quoting it, and out of a message a
  * pin carries (NoteSourceRepository.carried, ADR-0256, ADR-0257); and a message embeds is kept, labelled by the class
- * of the message holding it, except Nocheh's own words (nochehHeld), which go.
+ * of the message holding it, except Nocheh's own words (nochehHeld), which go, and a quote inside one that can't be
+ * traced through the archive (carried: `untraced`), which goes too and is counted (`quote_not_traced`; `collect` gets
+ * its message's id in `untraced`).
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
@@ -51,7 +53,7 @@ export interface LearningContextOptions {
   admitQuoted?:(reference:SourceReference)=>Promise<boolean>;
   admitPinnedQuote?:(reference:SourceReference)=>Promise<boolean>;
   admitHeld?:(reference:SourceReference)=>Promise<ReadonlySet<string>>;
-  collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;empty_pin?:boolean;inputs:Map<string,string[]>};
+  collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;empty_pin?:boolean;inputs:Map<string,string[]>;untraced?:string[]};
 }
 export class LearningContextRepository {
   constructor(readonly access:SourceAccessRepository,readonly guards:GuardRepository,readonly learned:LearnedMemoryRepository,
@@ -82,7 +84,8 @@ export class LearningContextRepository {
     }
     // A quote repeats part of the message replied to, so it goes when that message was left out.
     const unquote=[...dropped].some(id=>targets.has(id));
-    const dependencies:PreparedDependency[]=[],evidence:LearningEvidence[]=[],observations:PreparedLearningContext['observations']=[],unpinned:string[]=[],unquoted:string[]=[],unheld:string[]=[];
+    const dependencies:PreparedDependency[]=[],evidence:LearningEvidence[]=[],observations:PreparedLearningContext['observations']=[],unpinned:string[]=[],unquoted:string[]=[],unheld:string[]=[],
+      untraced:string[]=[];
     let emptyPin=false;
     for(const reference of references.values()) {
       const id='events:'+reference.id,guarded=await this.guards.read(id,binding),value=guarded.value as any;
@@ -136,21 +139,25 @@ export class LearningContextRepository {
         // A message it embeds stays, as a pin's does, and the message is labelled as holding someone else's words unless it
         // is the sender's own (SourceFacts.held): the checklist a service message reports on, a giveaway's or suggested
         // post's message, a poll's, or one in a field Telegram adds later. Nocheh's own words in one go for everyone
-        // (carried: `held`). In the owner's notes review, what someone not allowed there wrote, or what can't be told,
-        // goes too and is counted: a message it embeds by its own author, the quote inside one, a poll option by who added
-        // it, and a deleted option's text, whose adder Telegram does not name (admitHeld).
+        // (carried: `held`), and so does a quote inside one that can't be traced through the archive, counted as such
+        // (carried: `untraced`). In the owner's notes review, what someone not allowed there wrote, or what can't be told,
+        // goes too and is counted: a message it embeds by its own author, the quote inside one by the message it is from,
+        // a poll option by who added it, and a deleted option's text, whose adder Telegram does not name (admitHeld).
         const held=heldBy(message);
         if(held.length) {
-          const nocheh=new Set(carried?.held??[]),admitted=options.admit&&options.admitHeld?await options.admitHeld(reference):null,cut:Held[]=[];
-          let refused=false;
+          const nocheh=new Set(carried?.held??[]),unknown=new Set(carried?.untraced??[]),admitted=options.admit&&options.admitHeld?await options.admitHeld(reference):null;
+          const cut:Held[]=[];let refused=false,untold=false;
           for(const item of held) {
             // What is inside something already cut goes with it; a deleted option loses only its text.
             if(cut.some(outer=>outer.kind!=='deleted_option'&&heldWithin(item.path,outer.path)))continue;
-            if(nocheh.has(heldKey(item.path)))cut.push(item);
-            else if(admitted&&!admitted.has(heldKey(item.path))){cut.push(item);refused=true;}
+            const place=heldKey(item.path);
+            if(nocheh.has(place))cut.push(item);
+            else if(unknown.has(place)){cut.push(item);untold=true;}
+            else if(admitted&&!admitted.has(place)){cut.push(item);refused=true;}
           }
           cutHeld(message,cut);
           if(refused){limitations.push('sender_not_allowed');unheld.push(reference.id);}
+          if(untold){limitations.push('quote_not_traced');untraced.push(reference.id);}
         }
         // The source itself, a pin of only Nocheh's card or of Nocheh's message not archived yet, leaves nothing to review.
         if(pinned==='not_learned'&&reference.id===source.id&&!texts.some(text=>text.trim())&&!derivatives.length)emptyPin=true;
@@ -217,6 +224,7 @@ export class LearningContextRepository {
     }
     if(options.collect) {
       options.collect.dropped.push(...new Set([...dropped,...unpinned,...unquoted,...unheld]));options.collect.versions.push(...versions);options.collect.refused.push(...unread);
+      options.collect.untraced?.push(...new Set(untraced));
       for(const [id,inputs] of recorded)options.collect.inputs.set(id,inputs);
       // A reaction left with nothing it reacts to says nothing the owner's notes could use, nor does a pin of a card alone.
       options.collect.bare_reaction=[...reacted].some(id=>dropped.has(id))&&![...reacted].some(id=>references.has(id));

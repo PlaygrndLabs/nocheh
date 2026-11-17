@@ -13,7 +13,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import {notesSender,ownerChat} from '../assistant-policy.js';
 import {servedGroup,sourceChat} from '../spaces.js';
 import {applicableInterpretations,type InterpretationVersion} from '../interpretations.js';
-import {bucketOf,heldBy,heldKey,ownerTyped} from '../source-facts.js';
+import {bucketOf,heldBy,heldKey,inaccessible,ownDeletedOption,ownerTyped,type Held} from '../source-facts.js';
 import {REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,reviewBody,reviewFragment,ruleBuckets,type ReviewProvenance,type RuleBucket} from '../source-labels.js';
 import {NoteSourceRepository} from './note-sources.js';
 
@@ -41,6 +41,10 @@ export type NotesSkip='sender_not_allowed'|'target_not_allowed';
  * recorded: nothing in it is anyone's). */
 export interface QueuedReviews {ids:string[];left_out:NotesSkip|'nocheh_message'|null}
 const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
+/** An archived event as notesSender reads it. */
+type Archived={channel:string;kind:string;scope:string;payload:unknown};
+/** Reads an archived event (NativeReviewRepository.archived), once per review being queued. */
+type Read=(id:string)=>Promise<Archived|null>;
 const protocol='hermes-native-review-v3';
 /** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
 export const nativeReconcileLimit=8;
@@ -113,15 +117,16 @@ export class NativeReviewRepository {
     const leave=async(reason:NotesSkip):Promise<QueuedReviews>=>{await this.skip(source,binding,reason);return {ids:kept.filter(id=>!waiting.includes(id)),left_out:reason};};
     const decision=await this.decide(source,binding);if(decision!=='review')return await leave(decision);
     // Related messages are asked the same question, each once; a pin's message by its own author, a quote's by the
-    // message it answers, and what a message holds by whoever wrote or added each part.
+    // message it answers, and what a message holds by whoever wrote or added each part. Each archived event is read once.
+    const reads=new Map<string,Promise<Archived|null>>(),read=(id:string)=>{let found=reads.get(id);if(!found)reads.set(id,found=this.archived(id));return found;};
     const asked=new Map<string,Promise<boolean>>(),admit=(reference:SourceReference)=>{
-      let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id).then(value=>value==='review'));return allowed;};
+      let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id,read).then(value=>value==='review'));return allowed;};
     const options:Required<LearningContextOptions>={admit,
-      admitPinned:reference=>this.pinnedSender(reference.id).then(value=>value==='not_learned'?value:value==='review'),
-      admitQuoted:reference=>this.quotedSender(reference.id,admit).then(value=>value==='review'),
-      admitPinnedQuote:reference=>this.pinnedQuotedSender(reference.id,admit).then(value=>value==='review'),
-      admitHeld:reference=>this.heldSenders(reference.id),
-      collect:{dropped:[],versions:[],refused:[],bare_reaction:false,empty_pin:false,inputs:new Map()}};
+      admitPinned:reference=>this.pinnedSender(reference.id,read).then(value=>value==='not_learned'?value:value==='review'),
+      admitQuoted:reference=>this.quotedSender(reference.id,admit,read).then(value=>value==='review'),
+      admitPinnedQuote:reference=>this.pinnedQuotedSender(reference.id,admit,read).then(value=>value==='review'),
+      admitHeld:reference=>this.heldSenders(reference.id,admit,read),
+      collect:{dropped:[],versions:[],refused:[],bare_reaction:false,empty_pin:false,inputs:new Map(),untraced:[]}};
     let context;
     try{context=await this.contexts.prepare(source,binding,options);}
     catch(error) {
@@ -228,7 +233,8 @@ export class NativeReviewRepository {
     const provenance:ReviewProvenance={version:1,source:source.id,
       events:context.observations.map(item=>({id:item.source.id,class:classes.get(item.source.id)?.class??'unknown'})),owner_account_only:ownerOnly,
       rules:!read.length?'none':read.every(ownRule)?'owner':'others',rule_buckets:ruleBuckets.filter((bucket:RuleBucket)=>buckets.has(bucket)),
-      left_out:{sender_not_allowed:collect.dropped.length,rule_sender_not_allowed:collect.refused.length,rules_left_out_for_owner_label:left}};
+      left_out:{sender_not_allowed:collect.dropped.length,rule_sender_not_allowed:collect.refused.length,rules_left_out_for_owner_label:left,
+        quote_not_traced:collect.untraced?.length??0}};
     return {provenance,rules:left?applicableInterpretations(read):context.rules,
       limitations:left?[...context.limitations,'rules_left_out_for_owner_label']:context.limitations};
   }
@@ -257,15 +263,20 @@ export class NativeReviewRepository {
     return await this.sender(source.id);
   }
   /** An archived event as notesSender reads it, or null when it is missing or unreadable. */
-  private async archived(id:string):Promise<{channel:string;kind:string;scope:string;payload:unknown}|null> {
+  private async archived(id:string):Promise<Archived|null> {
     const event=(await this.contexts.access.stores.archive.query('SELECT channel,kind,scope,payload FROM events WHERE id=$1',[id])).rows[0];
     if(!event)return null;
     try{return {channel:event.channel,kind:event.kind,scope:event.scope,payload:JSON.parse((event.payload as Buffer).toString())};}catch{return null;}
   }
   /** notesSender over an archived event; one that is missing or unreadable is not let in. */
-  private async sender(id:string):Promise<'review'|'sender_not_allowed'> {
-    const event=await this.archived(id);
+  private async sender(id:string,read:Read=id=>this.archived(id)):Promise<'review'|'sender_not_allowed'> {
+    const event=await read(id);
     return event?notesSender(this.contexts.access.policy(),event):'sender_not_allowed';
+  }
+  /** notesSender over a message an archived event shows (`shown`: the message a pin carries, one it embeds, or the one it
+   *  answers), by that message's own author as if it were sent in the holding message's chat. */
+  private askedInChat(event:Archived,holder:Record<string,any>,shown:Record<string,any>):'review'|'sender_not_allowed' {
+    return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...shown,chat:holder.chat}}});
   }
   /** notesSender over the message an archived pin carries, by that message's own author in the pin's chat; a pin whose
    *  message can't be read is not let in. A message Telegram no longer shows (date 0) carries no words to leave out.
@@ -273,34 +284,46 @@ export class NativeReviewRepository {
    *  notice or reminder is not learned, nor is Nocheh's own account's message the archive does not hold as Nocheh's (not
    *  archived yet, or a forward of one), which is cut as a card is. Anyone else's, another bot's included, is asked as
    *  its sender is. */
-  private async pinnedSender(id:string):Promise<'review'|'sender_not_allowed'|'not_learned'> {
-    const event=await this.archived(id),update=record(event?.payload),message=record(update?.message??update?.edited_message),pinned=record(message?.pinned_message);
+  private async pinnedSender(id:string,read:Read):Promise<'review'|'sender_not_allowed'|'not_learned'> {
+    const event=await read(id),update=record(event?.payload),message=record(update?.message??update?.edited_message),pinned=record(message?.pinned_message);
     if(!event||!message||!pinned)return 'sender_not_allowed';
-    if(pinned.date===0&&Object.keys(pinned).every(name=>['chat','message_id','date'].includes(name)))return 'review';
+    if(inaccessible(pinned))return 'review';
     const own=(await this.sources.carried([id])).get(id)?.pinned;
     if(own)return own==='learned'?'review':'not_learned';
-    return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...pinned,chat:message.chat}}});
+    return this.askedInChat(event,message,pinned);
   }
   /**
    * The places (heldKey) of what an archived message holds that may go into the owner's notes (heldBy, ADR-0257): a
    * message it embeds by that message's own author, and a poll option by who added it, each asked as notesSender asks a
    * message sent in the holding message's chat, as pinnedSender asks a pin's. A post in a chat's name is never let in, nor
-   * is an option added in a chat's name. A message Telegram no longer shows (date 0) holds no words. A quote inside an
-   * embedded message, whose reply Telegram leaves out, and a deleted option's text, whose adder Telegram does not name,
-   * have nothing to judge them by and are not let in. Nocheh's own words are cut for everyone before this is asked.
+   * is an option added in a chat's name. A message Telegram no longer shows (inaccessible) holds no words. A quote inside
+   * an embedded message, whose reply Telegram leaves out, is judged as a pinned message's is (pinnedQuotedSender): by that
+   * message as the archive holds it (embeddedTo), each revision asked as a message quoting is (quotedSender); one the
+   * archive does not hold has nothing to judge it by and is not let in. A deleted option's text, whose adder Telegram does
+   * not name, is let in only when it is the owner's own (heldAllowed). Nocheh's own words, and a quote that can't be
+   * traced, are cut for everyone before this is asked.
    */
-  private async heldSenders(id:string):Promise<Set<string>> {
-    const event=await this.archived(id),update=record(event?.payload),admitted=new Set<string>();
+  private async heldSenders(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<Set<string>> {
+    const event=await read(id),update=record(event?.payload),admitted=new Set<string>();
     const message=record(update?.message??update?.edited_message??update?.channel_post??update?.edited_channel_post);
     if(!event||!message)return admitted;
-    for(const item of heldBy(message))if(this.heldAllowed(event,message,item))admitted.add(heldKey(item.path));
+    const held=heldBy(message),traced=held.some(item=>item.kind==='quote')?(await this.sources.embeddedTo([id])).get(id):undefined;
+    for(const item of held) {
+      const place=heldKey(item.path);
+      if(item.kind==='quote'?await this.shownQuoteSender(traced?.get(place)??[],admit,read)==='review':this.heldAllowed(event,message,item))admitted.add(place);
+    }
     return admitted;
   }
-  /** Whether one thing a message holds (heldBy) may go into the owner's notes, as heldSenders asks it. */
-  private heldAllowed(event:{channel:string;kind:string;scope:string},message:Record<string,any>,item:ReturnType<typeof heldBy>[number]):boolean {
-    const asked=(shown:Record<string,any>)=>notesSender(this.contexts.access.policy(),{...event,payload:{message:{...shown,chat:message.chat}}})==='review';
-    if(item.kind==='message')return item.value.date===0&&Object.keys(item.value).every(name=>['chat','message_id','date'].includes(name))||asked(item.value);
-    if(item.kind==='option')return (item.value.added_by_chat===undefined||item.value.added_by_chat===null)&&asked({from:item.value.added_by_user});
+  /** Whether one thing a message holds (heldBy) may go into the owner's notes, as heldSenders asks it: a message it embeds,
+   *  a poll option, or, in the owner's own private chat (told by equality with ownerChat), the text of an option deleted
+   *  from the sender's own poll, which no one else can have added there (ownDeletedOption). A quote is asked apart. */
+  private heldAllowed(event:Archived,message:Record<string,any>,item:Held):boolean {
+    if(item.kind==='message')return inaccessible(item.value)||this.askedInChat(event,message,item.value)==='review';
+    if(item.kind==='option')return (item.value.added_by_chat===undefined||item.value.added_by_chat===null)&&this.askedInChat(event,message,{from:item.value.added_by_user})==='review';
+    if(item.kind==='deleted_option') {
+      const policy=this.contexts.access.policy(),chat=sourceChat(event);
+      return chat!==null&&!!policy.owner_id&&chat===ownerChat(policy)&&ownDeletedOption(item.value,message,true);
+    }
     return false;
   }
   /**
@@ -313,8 +336,8 @@ export class NativeReviewRepository {
    * option someone added, a message it embeds) must be let in too, as heldSenders asks it, both as the archive holds it
    * and as the reply shows it now. A quote with nothing to judge it by is not let in.
    */
-  private async quotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>):Promise<'review'|'sender_not_allowed'> {
-    const event=await this.archived(id),update=record(event?.payload);
+  private async quotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<'review'|'sender_not_allowed'> {
+    const event=await read(id),update=record(event?.payload);
     const message=record(update?.message??update?.edited_message??update?.channel_post??update?.edited_channel_post);
     if(!event||!message)return 'sender_not_allowed';
     const external=!!record(message.external_reply),relationships=this.contexts.access.relationships;
@@ -330,13 +353,13 @@ export class NativeReviewRepository {
     if(held.length) {
       for(const reference of held) {
         if(!await admit(reference))return 'sender_not_allowed';
-        const target=await this.archived(reference.id),found=record(target?.payload),shown=record(found?.message??found?.edited_message);
+        const target=await read(reference.id),found=record(target?.payload),shown=record(found?.message??found?.edited_message);
         if(target&&shown&&heldBy(shown).some(item=>!this.heldAllowed(target,shown,item)))return 'sender_not_allowed';
       }
       return 'review';
     }
     if(external||!replied)return 'sender_not_allowed';
-    return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...replied,chat:message.chat}}});
+    return this.askedInChat(event,message,replied);
   }
   /**
    * Whether the quote inside the message an archived pin carries may go into the owner's notes, by the message that quote
@@ -345,10 +368,14 @@ export class NativeReviewRepository {
    * archived, its author as the pinned message shows it is allowed in that chat. Telegram leaves the reply out of a pinned
    * message, so the quote inside one the archive never got has nothing to judge it by and is not let in.
    */
-  private async pinnedQuotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>):Promise<'review'|'sender_not_allowed'> {
-    const held=(await this.sources.pinnedTo([id])).get(id)??[];
-    for(const target of held)if(await this.quotedSender(target,admit)!=='review')return 'sender_not_allowed';
-    return held.length?'review':'sender_not_allowed';
+  private async pinnedQuotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<'review'|'sender_not_allowed'> {
+    return this.shownQuoteSender((await this.sources.pinnedTo([id])).get(id)??[],admit,read);
+  }
+  /** Whether the quote inside a message another shows may go into the owner's notes, by that message's archived revisions
+   *  (`targets`), each asked as a message quoting is (quotedSender); with none archived it has nothing to judge it by. */
+  private async shownQuoteSender(targets:readonly string[],admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<'review'|'sender_not_allowed'> {
+    for(const target of targets)if(await this.quotedSender(target,admit,read)!=='review')return 'sender_not_allowed';
+    return targets.length?'review':'sender_not_allowed';
   }
   private async record(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
     await this.control.query('INSERT INTO native_review_skips(event_id,generation,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[source.id,binding.generation,reason]);

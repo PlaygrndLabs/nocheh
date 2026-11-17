@@ -65,9 +65,10 @@ function fileName(payload:any):string|null {
   return typeof name==='string'?name:null;
 }
 /** A prepared observation without the quote its reply carries, nor the quote inside a message it pinned. Only
- *  LearningContextRepository.prepare's observations come here, which hold no message a reply answers already; a message
- *  that embeds another never does, since it holds words that may be someone else's (SourceFacts.held) and is written
- *  whole as such. */
+ *  LearningContextRepository.prepare's observations come here, which hold no message a reply answers already. A quote
+ *  inside a message it embeds is never left here: Telegram leaves the reply out of an embedded message but keeps its
+ *  quote, which makes the message holding it someone else's words (SourceFacts.held), written whole as such, never the
+ *  sender's own. */
 function unquoted(value:unknown):unknown {
   const copy=structuredClone(value) as any;
   for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(copy?.payload?.[kind]) {
@@ -402,8 +403,9 @@ export class NativeMemoryRepository {
    * words and voice on the owner's participant; the text of a file or audio file, and someone else's quote, go beside it
    * in the same session on the forwards-and-files participant, so a caption still links to its file. Someone else's
    * message the owner pinned is kept as such a forward is, and so is the owner's message holding words that may be someone
-   * else's (a checklist or poll others may have added to, a message Telegram shows inside it), whose words say it is not a
-   * pin. A quote of Nocheh's own message, by anyone, is the sender's
+   * else's (a checklist or poll others may have added to, a message Telegram shows inside it, or one quoting a message),
+   * whose words say it is not a pin, and the owner's pin of such a message of their own, whose words say no one else wrote
+   * it. A quote of Nocheh's own message, by anyone, is the sender's
    * words without it, and is written nowhere else: a learned one is already learned as Nocheh's, and a card, notice or
    * reminder is not learned at all. A pin of Nocheh's own message, by anyone, an anonymous admin included, leaves only a
    * note in that chat that it was pinned, for the same reason. So does a quote or pin of Nocheh's own account's message the
@@ -436,8 +438,9 @@ export class NativeMemoryRepository {
       const from=facts.forward!==null&&facts.forward!=='own'?facts.forward:null,pin=facts.pinned!==null?carried:(message:any)=>message;
       const shown=from?forwardOrigin(pin(messageOf(original)),pin(messageOf(guarded))):null,forward:Forward|null=from?shown?.from===from?shown:{from,name:null}:null;
       // A message that holds someone else's words itself (SourceFacts.held: a checklist or poll others may have added to,
-      // a message Telegram shows inside it) is not a pin, and its fixed words say so.
-      const kind=facts.held?'held' as const:'pinned' as const;
+      // a message Telegram shows inside it) is not a pin, and its fixed words say so; a pin of the sender's own such
+      // message (pinned_held) never says someone else wrote it.
+      const kind=facts.held?'held' as const:facts.pinned_held?'pinned_held' as const:'pinned' as const;
       const text=document(observations,honchoSource(forward?{part:'forward',forward}:{part:kind}));
       if(facts.author!=='owner')return [{text,writer:'speaker',session:'conversation',record:'labelled_source',subjects:true}];
       return [{text,writer:'material',session:'material',record:'labelled_material',subjects:true},

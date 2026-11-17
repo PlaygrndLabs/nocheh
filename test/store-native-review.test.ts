@@ -348,7 +348,7 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
   const bump=async()=>{const before=(await services.guards.state()).epoch;await services.guards.setMode('off');await services.guards.setMode('on');assert.ok((await services.guards.state()).epoch>before);};
   // What code recorded about a source's batch when its review was queued.
   const recorded=async(source:{id:string})=>(await stores.control.query("SELECT provenance FROM native_review_jobs WHERE source_reference->>'id'=$1",[source.id])).rows.map(row=>row.provenance);
-  const left=(sender=0,rule=0,others=0)=>({sender_not_allowed:sender,rule_sender_not_allowed:rule,rules_left_out_for_owner_label:others});
+  const left=(sender=0,rule=0,others=0,untraced=0)=>({sender_not_allowed:sender,rule_sender_not_allowed:rule,rules_left_out_for_owner_label:others,quote_not_traced:untraced});
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
     const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='memory_review'")).rows[0].epoch};
@@ -610,6 +610,35 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.deepEqual(await recorded(heldQuoted),[{version:1,source:heldQuoted.id,events:[{id:heldQuoted.id,class:'quote'},{id:heldPoll.id,class:'pinned'}],
       owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(2)}]);
     assert.ok((await read(optionQuoted)).includes('"SARAOPT wire the deposit"'),'interpretations still read the quote');
+    // Telegram leaves the reply out of a message another embeds, so a quote inside one is traced through that message's own
+    // archived event, as a pinned message's is: one quoting Nocheh's words goes for everyone, not counted; one that can't be
+    // traced (the poll archived answering nothing, or never archived) goes for everyone and is counted as such; one quoting
+    // Bob stays, and one quoting Sara goes from the owner's notes review only, counted, while interpretations read it.
+    const pollQuoting=(id:number,mark:string,extra:Record<string,unknown>={})=>({...textless(id,123,{poll:{id:'q'+id,question:`${mark}POLL lunch?`,options:[],
+      total_voter_count:0,is_closed:false,is_anonymous:false,type:'regular',allows_multiple_answers:false}}),quote:{text:`${mark}TEXT`,position:0},...extra});
+    const nochehSaid={...message(130,bot,'CARDQTEXT book the 9am'),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
+    await capture({message:pollQuoting(131,'CARDQ',{reply_to_message:nochehSaid})});await capture({message:pollQuoting(132,'BAREQ')});
+    await capture({message:pollQuoting(134,'BOBQ',{reply_to_message:message(1,456,'Bob: the venue is booked')})});
+    await capture({message:pollQuoting(135,'SARAQ',{reply_to_message:message(2,789,'SARAMARK the party moved to Saturday')})});
+    for(const [poll,mark,inReview,inMemory,counted] of [[131,'CARDQ',false,false,left()],[132,'BAREQ',false,false,left(0,0,0,1)],[133,'LOSTQ',false,false,left(0,0,0,1)],
+      [134,'BOBQ',true,true,left()],[135,'SARAQ',false,true,left(1)]] as const) {
+      const added=await capture({message:textless(poll+10,456,{poll_option_added:{poll_message:pollQuoting(poll,mark),option_persistent_id:'z',option_text:`${mark}OPTION Friday`}})});
+      const reviewed=(await input(((await services.reviews.queue(added)).ids)[0]!)).text as string,learned=await read(added);
+      assert.equal(reviewed.includes(`${mark}TEXT`),inReview,mark);assert.equal(learned.includes(`${mark}TEXT`),inMemory,mark);
+      for(const text of [reviewed,learned])assert.ok(text.includes(`${mark}POLL lunch?`)&&text.includes(`${mark}OPTION Friday`),mark);
+      assert.deepEqual((await recorded(added))[0].left_out,counted,mark);
+      assert.equal((await services.contexts.prepare(added,await services.guards.state())).limitations.includes('quote_not_traced'),counted.quote_not_traced===1,mark);
+    }
+    // In the owner's own private chat nobody else can add options, so the text of an option deleted from the owner's own
+    // poll there is the owner's own words: it stays in the owner's notes, labelled as the owner's, and nothing is counted.
+    const inOwnerChat=(id:number,extra:Record<string,unknown>)=>({...textless(id,123,extra),chat:{id:123,type:'private'}});
+    const privatePoll=inOwnerChat(150,{poll:{id:'p150',question:'PRIVPOLL lunch?',options:[{persistent_id:'a',text:'PRIVOPT pizza',voter_count:0}],total_voter_count:0,
+      is_closed:false,is_anonymous:false,type:'regular',allows_multiple_answers:false}});
+    await capture({message:privatePoll},'123');
+    const privateDeleted=await capture({message:inOwnerChat(151,{poll_option_deleted:{poll_message:privatePoll,option_persistent_id:'d',option_text:'OWNERDEL bring the cash'}})},'123');
+    const privateDeletedInput=(await input(((await services.reviews.queue(privateDeleted)).ids)[0]!)).text as string;
+    assert.ok(privateDeletedInput.includes('OWNERDEL bring the cash')&&privateDeletedInput.includes('PRIVOPT pizza'));
+    assert.deepEqual((await recorded(privateDeleted)).map(row=>[row.events,row.left_out]),[[[{id:privateDeleted.id,class:'owner_message'}],left()]]);
     // A quote inside a pinned message stays in the owner's notes review only when the message it quotes is by someone
     // allowed there: Bob's pinned reply quoting Sara loses its quote there, and it is counted; quoting the owner, it
     // keeps it. A pinned message the archive never got carries no reply to judge its quote by, so its quote goes too.
@@ -661,7 +690,7 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.equal(lines[0],`Source nocheh:event:${own.id}; conversation ${space}; fragment 1. Speakers are not necessarily the owner.`);
     assert.ok(lines[1].startsWith(legendIntro));
     assert.deepEqual(JSON.parse(lines[1].slice(legendIntro.length)),{sent_from_the_owner_account_only:true,events:{'the owner\'s own message':[own.id]},
-      left_out:{messages_from_people_not_allowed:0,rules_from_people_not_allowed:1,rules_not_the_owners:2}});
+      left_out:{messages_from_people_not_allowed:0,rules_from_people_not_allowed:1,rules_not_the_owners:2,quotes_not_traced:0}});
     assert.doesNotMatch(lines[1],/Alice|Bob|Sara/);
     assert.equal(lines[2],evidenceMarker);assert.equal(JSON.parse(lines[3]).space,space);
     // Bob's message reads every rule, and long-term memory reads them for the owner's message too.

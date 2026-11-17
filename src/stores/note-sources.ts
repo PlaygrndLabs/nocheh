@@ -4,11 +4,11 @@ import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
 import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.js';
 import {sourceChat} from '../spaces.js';
-import {bucketOf,eventClass,nochehHeld,nochehPinned,nochehQuoted,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
+import {bucketOf,eventClass,heldKey,nochehHeld,nochehPinned,nochehQuoted,quotesToTrace,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
 import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
 import {nameKeys,type Who} from '../task-reminder-text.js';
-import {pinnedSource,sourceObjectId} from '../source-model.js';
+import {embeddedSource,pinnedSource,sourceObjectId,type SourceIdentity} from '../source-model.js';
 import type {SourceReference} from './archive.js';
 import {peopleNames} from './people-names.js';
 import {recallNames} from './recall-places.js';
@@ -16,6 +16,10 @@ import {recallNames} from './recall-places.js';
 type Pools={archive:Pick<pg.Pool,'query'>;derived:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>};
 const fullId=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
+/** The Telegram message an archived payload holds: a message, an edit or a channel post. */
+const telegramMessage=(payload:unknown)=>{const found=record(payload);return record(found?.message??found?.edited_message??found?.channel_post??found?.edited_channel_post);};
+/** Whether a message answers another, as the archive's reply relation is made from it: in this chat, or in another. */
+const replies=(message:Record<string,any>|null|undefined)=>!!record(message?.reply_to_message)||!!record(message?.external_reply);
 
 /** The channels a turn that writes notes runs on; the scheduler's and background jobs' are jobs. */
 export const turnChannels=['telegram','browser','scheduler','background'] as const;
@@ -28,8 +32,9 @@ export type StoredOrigin={by:'review';review:string}|
 export interface NoteInput {key:string;origins:StoredOrigin[];more:number;cites:string[];more_cites:boolean;space:string|null}
 /** A note's source: the fixed token trust is keyed on, and its label. */
 export interface NoteSource {from:NoteFrom;label:string}
-/** What of the words a message carries is Nocheh's own (NoteSourceRepository.carried). */
-export interface Carried {pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;pinned_quote:boolean;held:string[]}
+/** What of the words a message carries is Nocheh's own (NoteSourceRepository.carried), and the quotes inside the messages
+ *  it embeds that can't be traced (`untraced`), which are cut for everyone too. */
+export interface Carried {pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;pinned_quote:boolean;held:string[];untraced:string[]}
 
 /**
  * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes and naming
@@ -171,23 +176,32 @@ export class NoteSourceRepository {
    * own words (repliesToNocheh, or nochehQuoted: a forward of Nocheh's message and a reply in another chat included).
    * `pinned_quote`: the message a pin carries quotes Nocheh's words, as the pin shows it or as the archive holds that
    * message. `held`: the places (heldKey) of what it holds that is Nocheh's own words (nochehHeld: a message it embeds,
-   * or the quote inside one). Only a message that carries any of these is in the result. Another bot's message, and one
-   * sent through an inline bot, is someone else's: it carries none of these, and is learned labelled as someone else's.
+   * or the quote inside one). A quote inside a message it embeds, whose reply Telegram leaves out (quotesToTrace), is
+   * traced as the pinned message's is, through that message's own archived event (embeddedTo): it is `held` when a
+   * revision of that message answers Nocheh's words, and `untraced` when the archive does not hold that message or holds
+   * a revision of it that answers nothing; both are cut for everyone, since a quote only repeats part of a message that
+   * is learned from its own event. Only a message that carries any of these is in the result. Another bot's message, and
+   * one sent through an inline bot, is someone else's: it carries none of these, and is learned labelled as someone else's.
    */
   async carried(ids:readonly string[]):Promise<Map<string,Carried>> {
     const wanted=[...new Set(ids.filter(fullId))],found=new Map<string,Carried>();
     if(!wanted.length)return found;
-    const [messages,pinnedTo,replies]=await Promise.all([this.messages(wanted),this.pinnedTo(wanted),this.repliesToNocheh(wanted)]);
-    const held=[...new Set([...pinnedTo.values()].flat())];
-    const [pins,heldMessages,heldReplies]=await Promise.all([this.nochehOf(pinnedTo),this.messages(held),this.repliesToNocheh(held)]);
+    const [messages,pinnedTo,replied,embedded]=await Promise.all([this.messages(wanted),this.pinnedTo(wanted),this.repliesToNocheh(wanted),this.embeddedTo(wanted)]);
+    const shown=[...new Set([...pinnedTo.values(),...[...embedded.values()].flatMap(places=>[...places.values()])].flat())];
+    const [pins,shownMessages,shownReplies]=await Promise.all([this.nochehOf(pinnedTo),this.messages(shown),this.repliesToNocheh(shown)]);
     for(const id of wanted) {
       // The bot the pin or reply came to is the one whose own messages it may carry.
       const {message=null,bot=null}=messages.get(id)??{},inner=record(message?.pinned_message);
-      const pinned=pins.get(id)??(nochehPinned(message,bot)?'bot':null),quote=replies.has(id)||nochehQuoted(message,bot);
-      const pinnedQuote=!!record(inner?.quote)&&(nochehQuoted(inner,bot)||
-        (pinnedTo.get(id)??[]).some(target=>heldReplies.has(target)||nochehQuoted(heldMessages.get(target)?.message,bot)));
-      const held=nochehHeld(message,bot);
-      if(pinned||quote||pinnedQuote||held.length)found.set(id,{pinned,quote,pinned_quote:pinnedQuote,held});
+      const nocheh=(target:string)=>shownReplies.has(target)||nochehQuoted(shownMessages.get(target)?.message,bot);
+      const pinned=pins.get(id)??(nochehPinned(message,bot)?'bot':null),quote=replied.has(id)||nochehQuoted(message,bot);
+      const pinnedQuote=!!record(inner?.quote)&&(nochehQuoted(inner,bot)||(pinnedTo.get(id)??[]).some(nocheh));
+      const held=nochehHeld(message,bot),untraced:string[]=[];
+      for(const item of quotesToTrace(message)) {
+        const place=heldKey(item.path),targets=embedded.get(id)?.get(place)??[];
+        if(targets.some(nocheh))held.push(place);
+        else if(!targets.length||targets.some(target=>!replies(shownMessages.get(target)?.message)))untraced.push(place);
+      }
+      if(pinned||quote||pinnedQuote||held.length||untraced.length)found.set(id,{pinned,quote,pinned_quote:pinnedQuote,held,untraced});
     }
     return found;
   }
@@ -197,8 +211,8 @@ export class NoteSourceRepository {
     const found=new Map<string,{message:Record<string,any>;bot:string|null}>();
     if(!ids.length)return found;
     for(const row of (await this.stores.archive.query('SELECT id,payload,bot_id FROM events WHERE id=ANY($1::text[])',[ids])).rows) {
-      let payload:Record<string,any>|null=null;try{payload=record(JSON.parse((row.payload as Buffer).toString()));}catch{}
-      const message=record(payload?.message??payload?.edited_message??payload?.channel_post??payload?.edited_channel_post);
+      let payload:unknown=null;try{payload=JSON.parse((row.payload as Buffer).toString());}catch{}
+      const message=telegramMessage(payload);
       if(message)found.set(String(row.id),{message,bot:typeof row.bot_id==='string'?row.bot_id:null});
     }
     return found;
@@ -228,19 +242,42 @@ export class NoteSourceRepository {
    * that is not a pin is left out. The owner's notes review reads it too, to judge a quote inside a pinned message.
    */
   async pinnedTo(ids:readonly string[]):Promise<Map<string,string[]>> {
+    return this.shownTo(ids,(id,object,payload)=>{const target=pinnedSource(object,payload);return target?[[id,target]]:[];});
+  }
+  /**
+   * Every archived message each quote inside a message these events embed is from (quotesToTrace), by event id and the
+   * quote's place (heldKey): the same chat's message the embedded one is, found as a pin's is (embeddedSource), then each
+   * revision observed of it. A quote whose message names another chat or none, or one the archive does not hold, is left
+   * out. The owner's notes review reads it too, to judge such a quote.
+   */
+  async embeddedTo(ids:readonly string[]):Promise<Map<string,Map<string,string[]>>> {
+    const found=new Map<string,Map<string,string[]>>();
+    const shown=await this.shownTo(ids,(id,object,payload)=>{
+      const message=telegramMessage(payload);
+      return quotesToTrace(message).flatMap(item=>{const target=embeddedSource(object,message,item.value);return target?[[JSON.stringify([id,heldKey(item.path)]),target]]:[];});
+    });
+    for(const [key,targets] of shown) {
+      const [id,place]=JSON.parse(key) as [string,string];
+      if(targets.length)found.set(id,(found.get(id)??new Map<string,string[]>()).set(place,targets));
+    }
+    return found;
+  }
+  /** Each archived revision of the messages `find` names from each of these events' own archived message (an event that
+   *  names none is left out), by the key `find` gives each. */
+  private async shownTo(ids:readonly string[],find:(id:string,object:SourceIdentity,payload:unknown)=>[string,SourceIdentity][]):Promise<Map<string,string[]>> {
     const found=new Map<string,string[]>(),objects=new Map<string,string>();
     if(!ids.length)return found;
     for(const row of (await this.stores.archive.query(`SELECT o.event_id,s.platform,s.namespace,s.kind,s.external_id,e.payload FROM source_observations o
       JOIN source_revisions v ON v.id=o.revision_id JOIN source_objects s ON s.id=v.object_id JOIN events e ON e.id=o.event_id
       WHERE o.event_id=ANY($1::text[])`,[ids])).rows) {
       let payload:unknown=null;try{payload=JSON.parse((row.payload as Buffer).toString());}catch{}
-      const target=pinnedSource({platform:row.platform,namespace:row.namespace,kind:row.kind,external_id:row.external_id},payload);
-      if(target)objects.set(String(row.event_id),sourceObjectId(target));
+      const object={platform:row.platform,namespace:row.namespace,kind:row.kind,external_id:row.external_id};
+      for(const [key,target] of find(String(row.event_id),object,payload))objects.set(key,sourceObjectId(target));
     }
     if(!objects.size)return found;
     const observed=(await this.stores.archive.query(`SELECT v.object_id,o.event_id FROM source_revisions v JOIN source_observations o ON o.revision_id=v.id
       WHERE v.object_id=ANY($1::text[]) ORDER BY o.event_id`,[[...new Set(objects.values())]])).rows;
-    for(const [pin,object] of objects)found.set(pin,observed.filter(row=>row.object_id===object).map(row=>String(row.event_id)));
+    for(const [key,object] of objects)found.set(key,observed.filter(row=>row.object_id===object).map(row=>String(row.event_id)));
     return found;
   }
 

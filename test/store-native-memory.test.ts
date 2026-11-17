@@ -890,6 +890,25 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     const done=await written(listDone);
     assert.ok(done.some(row=>row.record==='labelled_source'&&row.value.source===honchoSource({part:'held'})&&row.content.includes('TASKMARK')),JSON.stringify(shape(done)));
     assert.ok(done.every(row=>row.writer!==ownerPeer&&row.writer!==materialPeer),'on the member, never the owner');
+    // A quote inside a message the owner's message embeds is someone else's words unless traced as the owner's own: the
+    // owner's tasks-done message on the owner's own checklist quoting a message is kept with the forwards and files,
+    // labelled as holding someone else's words, never as the owner's, and the quote, which the archive can't trace here,
+    // goes. The owner's pin of the owner's own poll others added options to says the owner pinned a message holding
+    // others' words, never that someone else wrote it.
+    const quotingList={message_id:++serial,date:1700000000,chat:chatOf('123'),from:alice,checklist:alicesList(false),quote:{text:'LISTQUOTEMARK the keys',position:0}};
+    const quotedDone=await say('123',123,{checklist_tasks_done:{checklist_message:quotingList,marked_as_done_task_ids:[1]}});
+    const ownPoll={message_id:++serial,date:1700000000,chat:chatOf('123'),from:alice,poll:{id:'pp',question:'POLLMARK lunch?',options:[
+      {persistent_id:'a',text:'MYOPTMARK pizza',voter_count:0},{persistent_id:'b',text:'BOBOPTMARK tacos',voter_count:0,added_by_user:{id:456,is_bot:false,first_name:'Bob'},
+      addition_date:2}],total_voter_count:0,is_closed:false,is_anonymous:false,type:'regular',allows_multiple_answers:false}};
+    const pollPin=await say('123',123,{pinned_message:ownPoll});
+    for(const source of [quotedDone,pollPin])pins.push(...await services.memory.queueSource(source));
+    for(const [source,kind,mark] of [[quotedDone,'held','TASKMARK'],[pollPin,'pinned_held','BOBOPTMARK']] as const) {
+      const rows=await written(source);
+      assert.deepEqual(shape(rows),[[materialPeer,'labelled_material','material'],[assistantPeer,'labelled_pointer','conversation']],kind);
+      assert.equal(rows[0]!.value.source,honchoSource({part:kind}));assert.ok(rows[0]!.content.includes(mark),kind);
+      assert.deepEqual(rows[1]!.value,honchoPointer(kind));assert.ok(!rows[1]!.content.includes(mark),kind);
+      assert.ok(rows.every(row=>!row.content.includes('LISTQUOTEMARK')),kind);
+    }
     // The owner's quote of the card is the owner's words alone, and nothing of the card goes to the forwards and files.
     const okay=await say('123',123,{text:'OKMARK sure',quote:{text:'CARDQUOTEMARK approve',position:0},
       reply_to_message:{message_id:cardId,date:1700000000+cardId,chat:chatOf('123'),from:{id:bot,is_bot:true,first_name:'Nocheh'},text:'CARDMARK approve the booking?'}});

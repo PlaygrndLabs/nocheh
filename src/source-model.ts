@@ -117,14 +117,29 @@ const external=(value:unknown):string|undefined=>typeof value==='string'&&value.
  *  pin carries. */
 const sameChat=(source:SourceIdentity,id:string):SourceIdentity=>({...source,external_id:id});
 
+/** A message a live Telegram message shows inside it, as the archive names it: the same chat's message, by the id
+ *  Telegram gives it there, beside the holder's own archived message. */
+const shownSource=(object:SourceIdentity,shown:unknown):SourceIdentity|null=>{
+  const id=external(record(shown).message_id);
+  return id&&object.platform==='telegram'&&object.kind==='message'?sameChat(object,id):null;
+};
 /**
  * The message a live Telegram pin carries, as the archive names it, found the way a reply's target is (legacySource):
  * the same chat's message, from the pin's own archived message and the id of the message it pinned. Null when the update
  * is not a pin. No id's shape is read.
  */
 export function pinnedSource(object:SourceIdentity,payload:unknown):SourceIdentity|null {
-  const body=record(payload),message=record(body.message??body.edited_message),pinned=external(record(message.pinned_message).message_id);
-  return pinned&&object.platform==='telegram'&&object.kind==='message'?sameChat(object,pinned):null;
+  const body=record(payload),message=record(body.message??body.edited_message);
+  return shownSource(object,message.pinned_message);
+}
+/**
+ * A message a live Telegram message embeds (`shown`, such as the checklist a service message reports on), as the
+ * archive names it, found as a pin's is (pinnedSource): the same chat's message by the id Telegram gives it, only when
+ * Telegram names the same chat for both, told by equality of the ids it gives, never their shape. Null otherwise.
+ */
+export function embeddedSource(object:SourceIdentity,message:unknown,shown:unknown):SourceIdentity|null {
+  const chat=external(record(record(shown).chat).id);
+  return chat!==undefined&&chat===external(record(record(message).chat).id)?shownSource(object,shown):null;
 }
 
 /** Frozen v1 projections for existing captures; originals and event hashes are untouched. */
