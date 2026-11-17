@@ -114,3 +114,72 @@ test('sources outside any conversation close instead of waiting, and refresh swe
   assert.equal((await operations.memory_review!('refresh',authority)).state,'completed');
   assert.deepEqual(registered,[update,'source:'+update],'only the update is prepared and reviewed again');
 });
+
+test('Nocheh\'s own cards, notices and reminders close every learning step unlearned, and a review already waiting for one never runs',async()=>{
+  const calls:string[]=[];let skip:'nocheh_message'|null='nocheh_message';
+  const client={release:()=>{},query:async(sql:string)=>{
+    if(sql.includes('pg_try_advisory_lock_shared'))return {rows:[{locked:true}]};
+    if(sql.includes('FROM workflow_owners'))return {rows:[{owner:'inngest',admission:true,epoch:1}]};
+    if(sql.includes('FROM memory_engine_connection'))return {rows:[{attached:true}]};
+    if(sql.includes('INSERT INTO workflow_registry'))calls.push('submit');
+    return {rows:[]};
+  }};
+  const card=digest('synthetic-card'),binding={generation:'1',epoch:1,mode:'on'};
+  const waitingReview={id:digest('synthetic-review'),state:'pending',paused:false,source_reference:{id:card},binding,attempts:0,next_attempt:new Date()};
+  const services:any={stores:{control:{connect:async()=>client,query:client.query}},guards:{state:async()=>binding,assertCurrent:async()=>{}},
+    archive:{captured:async(id:string)=>({reference:{id},origin:'live'})},
+    // canLearn still says yes: a card stays context for the owner's reply to it.
+    access:{space:async()=>'owner-chat',canLearn:async()=>true,notLearned:async()=>skip},
+    preparation:{status:async()=>({state:'completed'})},
+    reviews:{queue:async()=>{calls.push('queue');return [];},withdraw:async(source:{id:string})=>{calls.push('withdraw:'+source.id);},
+      unwanted:async()=>skip,inspect:async()=>waitingReview,run:async()=>{calls.push('run');}},
+    learning:{renew:async()=>{calls.push('renew');},request:async()=>{calls.push('request');}},
+    memory:{ingested:async()=>false,queueSource:async()=>{calls.push('honcho');return [];}}};
+  const operations=storageWorkflowOperations(services,async()=>{throw Error('no runtime calls');});
+  const authority={owner:'inngest' as const,epoch:1};
+  // The source step, Honcho's write and an ingest requeue (as a sweep or a rebuild asks) all close the same way.
+  for(const [family,job] of [['memory_review','source:'+card],['honcho','source:'+card],['honcho','ingest:'+card]] as const) {
+    const closed=await operations[family]!(job,authority);
+    assert.deepEqual([closed.state,closed.waiting_reason],['skipped','nocheh_message'],job);safeMetadata(closed);
+  }
+  const native=await operations.memory_review!('native:'+waitingReview.id,authority);
+  assert.deepEqual([native.state,native.waiting_reason],['skipped','nocheh_message'],'a review queued before the class was read');safeMetadata(native);
+  assert.deepEqual(calls,Array(4).fill('withdraw:'+card),'nothing is reviewed, renewed, written to Honcho or interpreted');
+  // A learned class, or the owner's yes on that one message, leaves notLearned silent and learning goes on.
+  skip=null;calls.length=0;
+  assert.equal((await operations.memory_review!('source:'+card,authority)).state,'completed');
+  assert.deepEqual(calls,['queue','renew','submit']);
+  // A review waiting for a message whose sender is no longer allowed there, or for a reaction to one, is withdrawn the
+  // same way (ADR-0257).
+  for(const reason of ['sender_not_allowed','target_not_allowed'] as const) {
+    services.reviews.unwanted=async()=>reason;calls.length=0;
+    const left=await operations.memory_review!('native:'+waitingReview.id,authority);
+    assert.deepEqual([left.state,left.waiting_reason,calls],['skipped',reason,['withdraw:'+card]]);safeMetadata(left);
+  }
+});
+
+test('a pin of Nocheh\'s card alone asks for no learning, and its long-term memory step says why',async()=>{
+  const client={release:()=>{},query:async(sql:string)=>{
+    if(sql.includes('pg_try_advisory_lock_shared'))return {rows:[{locked:true}]};
+    if(sql.includes('FROM workflow_owners'))return {rows:[{owner:'inngest',admission:true,epoch:1}]};
+    if(sql.includes('FROM memory_engine_connection'))return {rows:[{attached:true}]};
+    return {rows:[]};
+  }};
+  const pin=digest('synthetic-card-pin'),binding={generation:'1',epoch:1,mode:'on'};let asked:string|null=null;const requests:string[]=[];
+  const services:any={stores:{control:{connect:async()=>client,query:client.query}},guards:{state:async()=>binding,assertCurrent:async()=>{}},
+    archive:{captured:async(id:string)=>({reference:{id},origin:'live'})},
+    access:{space:async()=>'5001',canLearn:async()=>true,notLearned:async()=>null,policy:()=>({owner_id:'5001'})},
+    preparation:{status:async()=>({state:'completed'})},
+    learning:{request:async(source:{id:string})=>{requests.push(source.id);return asked;}},
+    memory:{queueSource:async()=>[{audience:'owner',workspace:'w',receipts:['r']}],settled:async()=>true}};
+  const operations=storageWorkflowOperations(services,async()=>{throw Error('no runtime calls');});
+  const authority={owner:'inngest' as const,epoch:1};
+  // Learning finds nothing left once the card is cut out (null): Honcho's note that it was pinned is still written.
+  const empty=await operations.honcho!('source:'+pin,authority);
+  assert.deepEqual([empty.state,empty.waiting_reason],['completed','nocheh_message']);safeMetadata(empty);
+  // Anything else learning asks for completes the step as before.
+  asked=digest('synthetic-learning-job');
+  const learned=await operations.honcho!('source:'+pin,authority);
+  assert.deepEqual([learned.state,learned.waiting_reason],['completed',null]);
+  assert.deepEqual(requests,[pin,pin]);
+});

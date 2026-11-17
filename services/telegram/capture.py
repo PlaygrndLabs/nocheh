@@ -16,9 +16,13 @@ from time import perf_counter
 from urllib.parse import urlsplit
 
 from services.durable import canonical, digest, immutable_file
-from .sends import Sends
+from .sends import Sends, class_of
 
 DISPATCH_KEY = contextvars.ContextVar('nocheh_dispatch_key', default=None)
+# The kind of message a route sends, and the archived message it answers; both ride in the send's result, never its key.
+SEND_CLASS = contextvars.ContextVar('nocheh_send_class', default=None)
+SEND_ANSWERS = contextvars.ContextVar('nocheh_send_answers', default=None)
+EVENT_ID = re.compile(r'[a-f0-9]{64}')
 OUTBOUND_CHECK = contextvars.ContextVar('nocheh_outbound_check', default=None)
 
 
@@ -159,8 +163,13 @@ class Capture:
     def complete(self, key, method, parameters, response):
         status, raw = response if response else (0, b'')
         state = self.outcome(response)
-        event = self.event(key + ':result', 'outbound_result', {'intent_key': key + ':intent', 'method': method,
-                           'state': state, 'status': status, 'wire_base64': base64.b64encode(raw).decode()}, parameters.get('chat_id', 'system'))
+        payload = {'intent_key': key + ':intent', 'method': method, 'state': state, 'status': status, 'wire_base64': base64.b64encode(raw).decode()}
+        # Kept with the delivered message so memory can leave Nocheh's own cards and notices out (ADR-0256). They are never
+        # part of the key, so a send made before this was added is still found, and replaying a result keeps what it had.
+        send_class, answers = class_of(self.dispatch_of(key, method, parameters), SEND_CLASS.get()), SEND_ANSWERS.get()
+        if send_class: payload['send_class'] = send_class
+        if isinstance(answers, str) and EVENT_ID.fullmatch(answers): payload['answers'] = answers
+        event = self.event(key + ':result', 'outbound_result', payload, parameters.get('chat_id', 'system'))
         saved = {'state':state, 'status':status, 'wire':base64.b64encode(raw).decode(), 'event':event}
         immutable_file(self.root / 'outbound', digest(key) + '.result', canonical(saved))
         self.enqueue(event)

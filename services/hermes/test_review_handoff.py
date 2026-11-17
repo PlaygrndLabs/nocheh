@@ -161,6 +161,37 @@ class ReviewHandoffTests(unittest.TestCase):
         self.assertEqual([(c.kwargs['reason'],c.kwargs.get('cause')) for c in record.call_args_list],
                          [('provider_error','overloaded:529'),('timed_out',None)])
 
+    def test_the_parent_records_the_review_as_the_writer_of_the_notes_it_changed(self):
+        # The review asked to replace a forward's note: the new note keeps that note's source, and the review is named
+        # first, by its id. A review that stops after writing is recorded too (ADR-0257).
+        import json,subprocess
+        from . import note_sources
+        from .review_worker import _review
+        credentials=SimpleNamespace(runtime=lambda:{'api_mode':'chat_completions'})
+        memories=self.profile/'memories';memories.mkdir()
+        (memories/'MEMORY.md').write_text('Alice forwarded: the trip is in May.')
+        forward={'by':'review','review':'b'*64}
+        note_sources.save(self.profile,{note_sources.key('memory','Alice forwarded: the trip is in May.'):{'origins':[forward],'more':0,'at':'2026-11-01'}})
+        sent=[]
+        def run(*args,**kwargs):
+            sent.append(json.loads(kwargs['input']))
+            (memories/'MEMORY.md').write_text('The trip is in June.')
+            return SimpleNamespace(returncode=0,stdout=json.dumps({'state':'done','memory_ops':[
+                {'action':'replace','target':'memory','old_text':'trip is in May','content':'The trip is in June.'}]}).encode())
+        labels={note_sources.key('memory','Alice forwarded: the trip is in May.'):{'from':'forward','label':'a forward'}}
+        with patch('services.hermes.security_transport.isolated_enabled',return_value=False),patch('services.hermes.usage.record'),\
+             patch.object(note_sources,'lookup',return_value=labels),patch('services.hermes.review_worker.subprocess.run',side_effect=run):
+            self.assertEqual(_review(self.profile,self.policy,'model',credentials,self.body),{'state':'done'})
+        self.assertEqual(sent[0]['note_sources'],labels)
+        record=note_sources.load(self.profile)[note_sources.key('memory','The trip is in June.')]
+        self.assertEqual(record['origins'],[{'by':'review','review':self.body['id']},forward])
+        def stopped(*args,**kwargs):
+            (memories/'MEMORY.md').write_text('The trip is in June.\n§\nHalf written.');raise subprocess.TimeoutExpired('review',220)
+        with patch('services.hermes.security_transport.isolated_enabled',return_value=False),patch('services.hermes.usage.record'),\
+             patch.object(note_sources,'lookup',return_value={}),patch('services.hermes.review_worker.subprocess.run',side_effect=stopped):
+            with self.assertRaises(subprocess.TimeoutExpired):_review(self.profile,self.policy,'model',credentials,self.body)
+        self.assertEqual(note_sources.load(self.profile)[note_sources.key('memory','Half written.')]['origins'],[{'by':'review','review':self.body['id']}])
+
     def test_failed_thread_launch_keeps_ambiguity_and_releases_capacity(self):
         with patch('services.hermes.review_worker.threading.Thread.start',side_effect=RuntimeError('fixture_launch_failed')):
             with self.assertRaisesRegex(RuntimeError,'fixture_launch_failed'):start(self.root,self.policy,'model',None,self.body)

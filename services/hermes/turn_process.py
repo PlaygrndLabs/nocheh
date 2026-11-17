@@ -51,7 +51,17 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             from .isolated_profile import database_path
             from .retired_history import service_lookup, withhold_retired
             await asyncio.to_thread(withhold_retired, database_path(profile), service_lookup, profile/'memories')
-            return await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress)
+            # This parent records who wrote each note the turn adds or changes, outside the turn's reach (ADR-0257). A
+            # private answer has no memory tool, so it writes no notes.
+            from . import note_sources
+            watch=None if scope.answer else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile))
+            result=None
+            try:
+                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'])
+                return result
+            finally:
+                # Also after a cancelled or failed turn: its notes may have changed before it stopped.
+                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result)
         finally:
             await asyncio.to_thread((profile/'.foreground').touch)
 
@@ -147,7 +157,7 @@ def job_run(limits):
     return limits
 
 
-async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None):
+async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None):
     if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
     # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
     # later if nothing stopped it before. Every other turn has the usual reply time.
@@ -209,7 +219,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                **transport, 'stream':emit is not None,
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image'],
-               'turn_deadline_epoch':background['hard_deadline'] if background else time.time()+230,'prompts':body.get('prompts') or {}}
+               'turn_deadline_epoch':background['hard_deadline'] if background else time.time()+230,'prompts':body.get('prompts') or {},
+               # Each native note's source, as storage labels it from this parent's records, by the note's key.
+               'note_sources':note_sources or {}}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
     if background:
@@ -277,6 +289,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             usage=result.pop('usage',None)
             await asyncio.to_thread(record, part_of(body), usage, model, result.get('state')!='done',
                                     reason=result.pop('failure_reason',None), cause=result.pop('failure_cause',None))
+            # A turn that could not read long-term memory, or part of it, says so; it is counted for the owner's notice.
+            from .usage import note_done, note_failed
+            problem=result.pop('memory_problem',None)
+            if problem=='memory_read':await asyncio.to_thread(note_failed,'memory_read')
+            elif result.get('state')=='done' and not answer:await asyncio.to_thread(note_done,'memory_read')
             # A job run reports Hermes's own token counts too; Nocheh prices them at the rates frozen on the job's card.
             if background:
                 from .job_progress import run_tokens

@@ -76,6 +76,42 @@ class NativeMemoryTests(unittest.TestCase):
             self.assertEqual((hits['Juniper plain']['space'],hits['Juniper plain']['owner'],hits['Juniper plain']['answer']),(None,False,False))
             self.assertEqual((hits['Juniper named']['owner'],hits['Juniper named']['answer']),(True,False),'an owner-named profile is the owner\'s')
 
+    def test_each_recalled_note_line_carries_its_whole_notes_record_and_each_row_its_writer(self):
+        # A hit is one line, but its source is the note it is in (ADR-0257): found by walking the file note by note.
+        from hermes_state import SessionDB
+        from . import note_sources
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);profile=root/'profiles'/Scopes.profile('family');(profile/'memories').mkdir(parents=True)
+            first='Trip planning:\nJuniper cabin booked for May.\nnocheh:event:'+'c'*64
+            (profile/'memories/MEMORY.md').write_text('\ufeff'+first+'\n§\nJuniper is Alice\'s dog.')
+            (profile/'space.json').write_text(json.dumps({'space':'chat-family','owner':False}))
+            origin={'by':'review','review':'a'*64}
+            note_sources.save(profile,{note_sources.key('memory',first):{'origins':[origin],'more':0,'at':'2026-11-08'}})
+            db=SessionDB(profile/'state.db');db.create_session('s',source='telegram')
+            db.append_message('s',role='user',content='Juniper walk at noon?');db.append_message('s',role='assistant',content='Juniper walk is set.');db.close()
+            nothing_retired=lambda ids:{'revision':'0:','retired':[],'answered':[]}
+            hits=recall(root,{'query':'Juniper','limit':20},retirements=nothing_retired)['hits']
+            notes={hit['text']:hit['note'] for hit in hits if hit['kind']=='native_note'}
+            self.assertEqual(notes['Juniper cabin booked for May.'],{'key':note_sources.key('memory',first),'origins':[origin],'more':0,'cites':['c'*64]})
+            self.assertEqual(notes["Juniper is Alice's dog."],{'key':note_sources.key('memory',"Juniper is Alice's dog."),'origins':[{'by':'unknown'}],'more':0,'cites':[]})
+            rows=[hit for hit in hits if hit['kind']=='native_session']
+            self.assertTrue(rows);self.assertTrue(all(hit['role'] in ('user','assistant') for hit in rows))
+
+    def test_a_review_reports_the_memory_operations_its_forks_asked_for(self):
+        # So its parent can tell which notes a new note replaced; without every fork's messages it reports none.
+        from agent import background_review as native
+        call={'id':'c','type':'function','function':{'name':'memory','arguments':json.dumps({'action':'replace','target':'user','old_text':'old','content':'new'})}}
+        def spawn(parent,messages,**options):
+            def target():
+                fork,_,_=native.build_cache_parity_fork(parent);fork.run_conversation('review')
+            return target,'native prompt'
+        for result,expected in (({'completed':True,'messages':[{'role':'assistant','tool_calls':[call]},{'role':'tool','content':'ok'}]},
+                                  {'state':'done','memory_ops':[{'action':'replace','target':'user','old_text':'old','content':'new'}]}),
+                                 ({'completed':True},{'state':'done'})):
+            fork=SimpleNamespace(valid_tool_names={'memory'},run_conversation=lambda *_,value=result:value)
+            with patch.object(native,'build_cache_parity_fork',return_value=(fork,None,False)),patch.object(native,'spawn_background_review_thread',side_effect=spawn):
+                self.assertEqual(native_review(object(),'source'),expected)
+
     def test_native_review_waits_for_actual_completion_and_denies_extra_tools(self):
         from agent import background_review as native
         original=native.build_cache_parity_fork

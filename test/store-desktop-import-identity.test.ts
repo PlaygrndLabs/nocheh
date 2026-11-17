@@ -24,6 +24,10 @@ test('a Desktop export observes the live message and person only where Telegram 
   assert.deepEqual(author(desktop('-1001234567890',supergroup,message)),author(live('-1001234567890',5,9,'hello')),'a user id is one account everywhere');
   assert.deepEqual(mapped.relations.find(relation=>relation.kind==='reply_to')?.target,{...bot.object,external_id:'4'});
   assert.deepEqual(mapped.relations.find(relation=>relation.kind==='contained_in')?.target,bot.relations.find(relation=>relation.kind==='contained_in')?.target);
+  // A reply to another chat records that chat's message id beside reply_to_peer_id: this chat's message 4 is another
+  // message, so no reply relation is made, mapped or not.
+  for(const scope of ['-1001234567890','desktop:private_supergroup:1234567890'])
+    assert.ok(!observedSource(desktop(scope,supergroup,{...message,reply_to_peer_id:'channel42'})).relations.some(relation=>relation.kind==='reply_to'),scope);
   // Unmapped, mapped elsewhere, or a basic group that numbers messages per member: the message stays a Desktop object.
   for(const value of [desktop('desktop:private_supergroup:1234567890',supergroup,message),desktop('-1009999999999',supergroup,message),
     desktop('-1234567890',{id:1234567890,type:'private_group'},message)]) {

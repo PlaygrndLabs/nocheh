@@ -198,6 +198,34 @@ the next turn. Session messages are paginated in groups of 50, with a 20,000
 character preview per message. Notes are bounded to 256 KiB and explicitly show
 truncation. A note's presence does not establish source provenance.
 
+Each note is listed on its own with a label under it saying where it came from,
+coloured by kind: green for a note drawn only from your own messages, blue for
+Nocheh's own work (a review that included its replies or reports, or a note
+written while answering your own message), and amber for other people's words,
+a forward, a file, a mix, or a note written after the turn read something
+outside. Only a review that held other people's messages reads rules learned
+from others' words, and one learned from a forward or a file can make its note a
+mix; a review of only your own and Nocheh's messages leaves such rules out. A
+pin counts as the words of the message it pinned, and a message you sent that
+holds someone else's words, such as a shared checklist, a poll someone else
+added an option to or a service message carrying another's message, reads "a
+message you sent ... holding someone else's words" (amber), and your pin of
+such a message of your own reads "a message holding someone else's words, such
+as a shared checklist or poll, that you pinned" (amber), never someone else's
+message. Your quote or pin of
+a message Nocheh learned as its own counts as Nocheh's (blue). Nocheh's code builds
+the label from its own record of who wrote the note, never from the note's
+text, and a note written during a turn is never labelled as yours. Notes
+written before labels existed say "Source not recorded"; a label that could not
+be looked up says "Source not available right now". System › Health counts
+each failure to tell where notes came from, and says what you see while it
+fails. The words are yours to edit in Settings › Assistant under **Note sources
+on the Notes page**; the assistant reads fixed words of its own beside each
+note. A group's `USER.md` is titled **About people here**. When messages from
+people not allowed where they wrote were kept out of your notes, a line above
+the notes counts them; they are still in that group's long-term memory
+([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
+
 ```sh
 ./bin/nocheh memory list
 ./bin/nocheh memory show --scope CHAT_ID
@@ -485,6 +513,26 @@ Hermes's native memory review, with no external-action tools. Pause/resume contr
 operate on queued work; an interrupted native write is marked ambiguous and needs
 an explicit resume. Retrying an ambiguous review may repeat a native memory edit.
 
+The owner's notes review takes only messages from the owner, from people allowed
+where they wrote, Nocheh's own learned messages and the web chat. A message from
+anyone else is recorded as kept out for the installation generation. Long-term
+memory and learning still take it, so in System › Background work its Memory
+notes step shows as Done, with the reason under it and under **Note** in its
+details: "From someone not allowed there: kept out of your notes, still in group
+memory", or "A reaction to someone not allowed there: kept out of your notes,
+still in group memory". A pin of such a message is reviewed without the message
+it pinned, and a message carrying one of theirs (the checklist a "tasks done"
+message reports on, or a poll option they added) is reviewed without it. A pin of Nocheh's own message is never counted as kept out: a pin of
+a message it learns is reviewed with it, and a pin of its card, notice or
+reminder without it. Nocheh's own cards, notices and reminders are not learned anywhere, so their
+step shows as skipped ("Nocheh's own card, notice or reminder: kept, not
+learned"); a pin of one with nothing else to review is not reviewed, and its
+step shows as Done with those words under it. When anyone pins one of Nocheh's
+messages, long-term memory keeps only a note that it was pinned.
+`memory reviews` returns the count as `kept_out`. Each review also stores which
+kinds of messages it read, and whose words the rules it read rest on, so its
+notes can be labelled later.
+
 A chat or topic is named by its Nocheh id ([ADR-0252](adr/0252-chats-get-nochehs-own-ids.md)):
 the value it was stored under before step 2b, or a digest for one first seen later. Its link in Chats
 carries it; never build one from a Telegram ID.
@@ -595,8 +643,10 @@ the page. Hermes keeps its native interface and integration link.
 Background work retains global running, waiting, failed, last confirmed success and
 unpublished backlog totals, independent of table pagination and chart filters.
 Workflow history is paginated; its details drawer holds receipts, publication,
-revision-aware retry/cancel, and source links. Status combines words, icons and
-color. Stale worker observations are uncertainty, not proof of a failed service.
+revision-aware retry/cancel, and source links. A task's recorded reason shows
+there under **Waiting for** while the task is open, and under **Note** once it
+completed, failed, was skipped, cancelled or denied. Status combines words,
+icons and color. Stale worker observations are uncertainty, not proof of a failed service.
 
 Owner-authenticated `GET /api/nocheh/workflows/metrics?range=24h|7d&family=…`
 (and the legacy `/api/plugins/nocheh` alias) proxies `/v1/workflows/metrics`.

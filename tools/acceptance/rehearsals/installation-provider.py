@@ -28,7 +28,10 @@ class ScriptedBrain:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes)(?::([^\]]*))?\]\]')
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes|note_from|memory_about)(?::([^\]]*))?\]\]')
+    # A notes review (its one tool is memory) that reads [[review-note:TEXT]] in a message saves TEXT as a native note,
+    # as a model notes what it read, so a scenario sees which messages a review read and how the note is labelled.
+    REVIEW_NOTE = re.compile(r'\[\[review-note:([^\]]{1,300})\]\]')
     # Any Nocheh tool (Hermes names Nocheh's MCP tools mcp__nocheh__<tool>), Hermes's own memory or to-do tool, or a
     # Hermes tool of a job's sealed box, with exact JSON arguments: [[tool:mcp__nocheh__tasks {"action":"list"}]],
     # [[tool:memory {"action":"add",...}]]. Several in one turn are called one after another.
@@ -84,23 +87,43 @@ class ScriptedBrain:
         inner = value['result']
         return (inner if isinstance(inner, str) else json.dumps(inner, ensure_ascii=False)) + text[end:]
 
-    def notes(self, body):
-        """The native notes the model sees: the system prompt, and the native entries of the
-        memory evidence. Never the conversation, which also quotes a note when it was saved."""
+    def evidence_entries(self, body):
+        """The entries of Nocheh's memory evidence messages; none when a message is not well formed."""
         found = []
         for message in body.messages:
             text = self.text(message.content)
-            if message.role == 'system':
-                found.append(text)
-            elif text.startswith(self.EVIDENCE):
-                try:
-                    entries, _ = json.JSONDecoder().raw_decode(text[len(self.EVIDENCE):])
-                    entries = entries['entries']
-                except (ValueError, KeyError, TypeError):
-                    continue
-                found += [json.dumps(entry.get('content'), ensure_ascii=False) for entry in entries
-                          if isinstance(entry, dict) and str(entry.get('source', '')).startswith('hermes.native.memory.')]
+            if message.role == 'system' or not text.startswith(self.EVIDENCE):
+                continue
+            try:
+                entries, _ = json.JSONDecoder().raw_decode(text[len(self.EVIDENCE):])
+                entries = entries['entries']
+            except (ValueError, KeyError, TypeError):
+                continue
+            found += [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
         return found
+
+    def evidence_notes(self, body):
+        """The native notes of the memory evidence, each with the source Nocheh's code labelled it with (from, label)
+        and its text (content)."""
+        return [note for entry in self.evidence_entries(body)
+                if str(entry.get('source', '')).startswith('hermes.native.memory.') and isinstance(entry.get('notes'), list)
+                for note in entry['notes'] if isinstance(note, dict)]
+
+    def memory_blocks(self, body):
+        """The long-term memory blocks of the memory evidence (Nocheh's context for the turn), each with its text and what
+        Nocheh's code says it is about: the owner, or the owner's forwards and files (ADR-0257)."""
+        found = []
+        for entry in self.evidence_entries(body):
+            content = entry.get('content') if entry.get('source') == 'nocheh.memory.recall' else None
+            sources = content.get('sources') if isinstance(content, dict) else None
+            found += [source for source in sources if isinstance(source, dict)] if isinstance(sources, list) else []
+        return found
+
+    def notes(self, body):
+        """The native notes the model sees: the system prompt, and the native notes of the
+        memory evidence. Never the conversation, which also quotes a note when it was saved."""
+        return ([self.text(message.content) for message in body.messages if message.role == 'system']
+                + [json.dumps(note.get('content'), ensure_ascii=False) for note in self.evidence_notes(body)])
 
     def record(self, **event):
         self.events = (self.events + [event])[-500:]
@@ -145,8 +168,27 @@ class ScriptedBrain:
             self.record(directive='restart', phase='seen', todo='Your last to-do list was:' in current,
                         earlier=sum(1 for message in messages[:index] if not self.text(message.content).startswith(self.EVIDENCE)))
 
+    def review(self, body):
+        """A notes review whose evidence holds [[review-note:TEXT]] directives: save each TEXT once, then say so. Any other
+        review keeps the ordinary mock, which saves nothing."""
+        whole = '\n'.join(self.text(message.content) for message in body.messages)
+        notes = list(dict.fromkeys(found.strip() for found in self.REVIEW_NOTE.findall(whole) if found.strip()))
+        if not notes:
+            return None
+        if self.canary in whole:
+            self.counts['raw_canary_outside_detector'] += 1
+            return {'error': 'unguarded_fixture_canary'}
+        results = [message for message in body.messages if message.role == 'tool']
+        if not results:
+            self.record(directive='review-note', argument='\n'.join(notes), phase='call', tool='memory')
+            return {'tool': 'memory', 'arguments': {'target': 'memory', 'operations': [{'action': 'add', 'content': note} for note in notes]}}
+        self.record(directive='review-note', argument='\n'.join(notes), phase='final', tool='memory', result=self.text(results[-1].content)[:2000])
+        return {'content': 'Saved.'}
+
     def script(self, body):
         names = {tool.get('function', {}).get('name') for tool in body.tools or [] if isinstance(tool, dict)}
+        if names == {'memory'}:
+            return self.review(body)
         if not any(isinstance(name, str) and name.startswith(self.NOCHEH) for name in names):
             return None
         messages = [message for message in body.messages if message.role != 'system']
@@ -225,6 +267,17 @@ class ScriptedBrain:
             present = bool(argument) and any(argument in note for note in self.notes(body))
             self.record(directive=kind, argument=argument, phase='final', present=present)
             return {'content': '[brain] notes ' + argument + (' present' if present else ' absent')}
+        if kind == 'note_from':
+            # The source a native note with the marker carries, as Nocheh's code labelled it: owner, person, turn...
+            found = next((note for note in self.evidence_notes(body) if argument and argument in str(note.get('content'))), None)
+            source = str(found.get('from')) if found else 'absent'
+            self.record(directive=kind, argument=argument, phase='final', present=found is not None, source=source)
+            return {'content': '[brain] note_from ' + argument + ' ' + source}
+        if kind == 'memory_about':
+            # Which long-term memory blocks of the turn hold the marker, by what Nocheh's code says each is about.
+            about = sorted({str(block.get('about') or 'none') for block in self.memory_blocks(body) if argument and argument in str(block.get('text'))})
+            self.record(directive=kind, argument=argument, phase='final', present=bool(about), about=about)
+            return {'content': '[brain] memory_about ' + argument + ' ' + (','.join(about) or 'absent')}
         if kind == 'context':
             earlier = '\n'.join(self.text(message.content) for message in body.messages
                                 if message is not messages[index])

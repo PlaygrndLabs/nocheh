@@ -172,8 +172,12 @@ def _review(profile,policy,model,credentials,body):
     env={key:os.environ[key] for key in ('PATH','HOME','LANG','LC_ALL','PYTHONPATH','LD_LIBRARY_PATH','ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE') if key in os.environ}
     env.update(HERMES_HOME=str(profile),GUARD_MODE=body.get('guard_mode','on'))
     transport = credentials.runtime()
+    # This parent records who wrote each note the review adds or changes, outside the review's reach (ADR-0257).
+    from . import note_sources
+    watch=note_sources.before(profile,served.owner_chat)
     request={'review':True,'review_id':body['id'],'text':body['content'],'model':model,'archive_credential':body['archive_credential'],'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
-             'session_id':'review-'+body['id'],'prompts':body.get('prompts') or {},'owner':True,'chat_id':served.owner_chat,'user_id':served.owner_user() or '',**transport}
+             'session_id':'review-'+body['id'],'prompts':body.get('prompts') or {},'owner':True,'chat_id':served.owner_chat,'user_id':served.owner_user() or '',
+             'note_sources':watch['sources'],**transport}
     from .security_transport import isolated_enabled,scoped_transport
     module='services.hermes.assistant_turn'
     if isolated_enabled():
@@ -186,15 +190,22 @@ def _review(profile,policy,model,credentials,body):
         request['preferences']=preferences(effective)
         env['SERVICE_TOKEN']=secret('SERVICE_TOKEN');module='services.hermes.security_client'
     from .usage import record
-    try:result=subprocess.run([sys.executable,'-m',module],input=json.dumps(request).encode(),
-                              stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env,timeout=220,cwd=Path(__file__).resolve().parents[2])
-    except subprocess.TimeoutExpired:
-        # A review stopped at its time limit reports nothing else; count it so its failure shows.
-        record('memory_review',None,model,True,reason='timed_out');raise
-    if result.returncode or len(result.stdout)>1024*1024:
-        record('memory_review',None,model,True,reason='nocheh_error');raise RuntimeError('review_worker_failed')
-    value=json.loads(result.stdout)
-    if isinstance(value,dict):
-        record('memory_review',value.pop('usage',None),model,value.get('state')!='done',reason=value.pop('failure_reason',None),
-               cause=value.pop('failure_cause',None))
-    return value
+    ops=None
+    try:
+        try:result=subprocess.run([sys.executable,'-m',module],input=json.dumps(request).encode(),
+                                  stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env,timeout=220,cwd=Path(__file__).resolve().parents[2])
+        except subprocess.TimeoutExpired:
+            # A review stopped at its time limit reports nothing else; count it so its failure shows.
+            record('memory_review',None,model,True,reason='timed_out');raise
+        if result.returncode or len(result.stdout)>1024*1024:
+            record('memory_review',None,model,True,reason='nocheh_error');raise RuntimeError('review_worker_failed')
+        value=json.loads(result.stdout)
+        if isinstance(value,dict):
+            record('memory_review',value.pop('usage',None),model,value.get('state')!='done',reason=value.pop('failure_reason',None),
+                   cause=value.pop('failure_cause',None))
+            # The memory operations the review asked for, so a note it rewrote keeps that note's sources.
+            found=value.pop('memory_ops',None);ops=found if isinstance(found,list) else None
+        return value
+    finally:
+        # Also after a failed or stopped review: its notes may have changed before it stopped.
+        note_sources.after(profile,watch,{'by':'review','review':body['id']},ops)

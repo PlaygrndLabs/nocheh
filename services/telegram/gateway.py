@@ -19,10 +19,10 @@ from time import perf_counter
 
 from services.durable import canonical, digest, immutable_file
 from . import settings
-from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK
+from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, SEND_ANSWERS, SEND_CLASS
 from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, check_leave_policy,
                      delivery_failure, leave_check, no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
-from .sends import GONE
+from .sends import GONE, route_class
 
 # Telegram shows "typing…" for about five seconds per chat action, so presence renews it a little sooner.
 TYPING_INTERVAL = 4.0
@@ -34,6 +34,10 @@ HEX = re.compile(r'[a-f0-9]{64}')
 CHAT = re.compile(r'-?[1-9]\d{0,18}')
 MESSAGE = re.compile(r'[1-9]\d{0,15}')
 ERROR_NAME = re.compile(r'[A-Za-z_]{1,64}')
+# The classes storage may ask for on each route (ADR-0256); anything else gets the route's own, and the send still goes.
+REPLY_CLASSES = ('reply', 'follow_up', 'private_answer', 'card')
+ACTION_CLASSES = ('approved_post', 'job_report', 'scheduled_run', 'notice')
+NOTICE_CLASSES = ('notice', 'reminder')
 
 
 def topic_of(value):
@@ -321,6 +325,8 @@ class TelegramService:
         await asyncio.to_thread(immutable_file, self.receipts, name + '.intent', canonical({'event_id': body['event_id'], 'attempt': body['attempt']}))
         requests, cancelled = [], self.cancels[key]
         dispatch = DISPATCH_KEY.set(body['dispatch_key'])
+        # The reply answers this turn's message, which reply() checked against its dispatch key.
+        kind, answers = SEND_CLASS.set(route_class(body.get('send_class'), REPLY_CLASSES, 'reply')), SEND_ANSWERS.set(body['event_id'])
         check = OUTBOUND_CHECK.set(outbound_check(chat, topic, lambda: check_delivery_policy(credential), cancelled, requests, markup))
         started, sending = int(time.time() * 1000), perf_counter()
         try:
@@ -345,6 +351,8 @@ class TelegramService:
                     if isinstance(value, str) and ERROR_NAME.fullmatch(value) and field not in result: result[field] = value
         finally:
             OUTBOUND_CHECK.reset(check)
+            SEND_ANSWERS.reset(answers)
+            SEND_CLASS.reset(kind)
             DISPATCH_KEY.reset(dispatch)
         finished = max(started, int(time.time() * 1000))
         result['timings'] = {'telegram_send': {'ms': min(86400000, max(0, round((perf_counter() - sending) * 1000))), 'calls': 1}}
@@ -386,6 +394,7 @@ class TelegramService:
                 return result
             await asyncio.to_thread(immutable_file, self.receipts, name + '.intent', canonical({'action_id': body['id']}))
             token = DISPATCH_KEY.set('action:' + body['id'])
+            kind = SEND_CLASS.set(route_class(body.get('send_class'), ACTION_CLASSES, 'approved_post'))
             check = OUTBOUND_CHECK.set(outbound_check(chat_id, topic, lambda: check_action_policy(body)))
             try:
                 # Any failure is reported as possibly sent: the caller reconciles rather than sending twice.
@@ -394,6 +403,7 @@ class TelegramService:
                 result = {'state': 'ambiguous'}
             finally:
                 OUTBOUND_CHECK.reset(check)
+                SEND_CLASS.reset(kind)
                 DISPATCH_KEY.reset(token)
             await asyncio.to_thread(immutable_file, self.receipts, name + '.result', canonical(result))
             return result
@@ -446,7 +456,7 @@ class TelegramService:
                 if receipt.exists():return json.loads(receipt.read_bytes())
                 if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
                 await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'action_id':body['id'],'chat_id':chat}))
-                token=DISPATCH_KEY.set('approval:'+body['id'])
+                token,kind=DISPATCH_KEY.set('approval:'+body['id']),SEND_CLASS.set('card')
                 check=OUTBOUND_CHECK.set(outbound_check(chat,topic,lambda:True,markup=keyboard))
                 try:
                     # In the chat where it was asked, the card is the reply to the request.
@@ -456,7 +466,7 @@ class TelegramService:
                                                 link_preview_options=no_preview())
                     result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}
                 except Exception:result={'state':'ambiguous'}
-                finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
+                finally:OUTBOUND_CHECK.reset(check);SEND_CLASS.reset(kind);DISPATCH_KEY.reset(token)
                 await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
                 return result
         if body.get('kind')=='settle':
@@ -485,13 +495,13 @@ class TelegramService:
                         or not 0<len(stop[0][0])<=40 or not isinstance(stop[0][1],str) or not re.fullmatch(r'ns[a-f0-9]{56}',stop[0][1])):raise ValueError('invalid_approval')
                 stop=InlineKeyboardMarkup([[InlineKeyboardButton(stop[0][0],callback_data=stop[0][1])]])
             if card.get('state')!='done' or card.get('chat_id')!=chat:return {'state':'done','edited':False}
-            token=DISPATCH_KEY.set('approval-settle:'+body['id'])
+            token,kind=DISPATCH_KEY.set('approval-settle:'+body['id']),SEND_CLASS.set('card_update')
             # The decided card keeps its text with the outcome.
             # Telegram refuses a repeated identical edit, which changes nothing.
             try:return {'state':'done','edited':bool(await bot.edit_message_text(text,chat_id=int(chat),message_id=int(card['message_id']),entities=entities,parse_mode=None,reply_markup=stop,
                                                                              link_preview_options=no_preview()))}
             except Exception:return {'state':'done','edited':False}
-            finally:DISPATCH_KEY.reset(token)
+            finally:SEND_CLASS.reset(kind);DISPATCH_KEY.reset(token)
         if body.get('kind')=='answer':
             query,start=body.get('callback_query_id'),body.get('start')
             if (not isinstance(query,str) or not 0<len(query)<=64 or len(text)>200 or
@@ -538,14 +548,14 @@ class TelegramService:
             if receipt.exists():return json.loads(receipt.read_bytes())
             if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'event_id':body['event_id']}))
-            token=DISPATCH_KEY.set('refusal:'+body['event_id'])
+            token,kind=DISPATCH_KEY.set('refusal:'+body['event_id']),SEND_CLASS.set('refusal')
             check=OUTBOUND_CHECK.set(outbound_check(chat,topic,lambda:True))
             try:
                 await self.bot.send_message(int(chat),reply,message_thread_id=int(topic) if topic else None,
                                             reply_to_message_id=int(message),allow_sending_without_reply=True,link_preview_options=no_preview())
                 result={'state':'done'}
             except Exception:result={'state':'ambiguous'}
-            finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
+            finally:OUTBOUND_CHECK.reset(check);SEND_CLASS.reset(kind);DISPATCH_KEY.reset(token)
             await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
             return result
 
@@ -572,7 +582,7 @@ class TelegramService:
             if receipt.exists():return {key:value for key,value in json.loads(receipt.read_bytes()).items() if key!='message_id'}
             if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'notice_id':body['id']}))
-            token=DISPATCH_KEY.set('notice:'+body['id'])
+            token,kind=DISPATCH_KEY.set('notice:'+body['id']),SEND_CLASS.set(route_class(body.get('send_class'),NOTICE_CLASSES,'notice'))
             check=OUTBOUND_CHECK.set(outbound_check(chat,None,lambda:True,markup=markup))
             sent=None
             try:
@@ -585,7 +595,7 @@ class TelegramService:
                     sent=await self.bot.send_message(int(chat),text,parse_mode=None,link_preview_options=no_preview())
                 result={'state':'done'}
             except Exception:result={'state':'ambiguous'}
-            finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
+            finally:OUTBOUND_CHECK.reset(check);SEND_CLASS.reset(kind);DISPATCH_KEY.reset(token)
             # The receipt keeps which message it was, so the notice can be edited later; callers get only the state.
             message=getattr(sent,'message_id',None) if result['state']=='done' else None
             await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical({**result,**({'message_id':message} if isinstance(message,int) else {})}))
@@ -628,7 +638,8 @@ class TelegramService:
             if refused:=await unserved():return refused
             stands=await asyncio.to_thread(check_leave_policy,{'id':body['id'],'chat_id':chat})
             if stands is not True:return {'state':'not_started','error_code':'leave_superseded' if stands is False else 'leave_check_unavailable'}
-            token=DISPATCH_KEY.set('leave:'+body['id']+':'+uuid.uuid4().hex)
+            # A leave sends no message; it still runs under a class that is never learned (ADR-0256).
+            token,kind=DISPATCH_KEY.set('leave:'+body['id']+':'+uuid.uuid4().hex),SEND_CLASS.set('notice')
             check=OUTBOUND_CHECK.set(leave_check(chat))
             try:
                 await self.bot.leave_chat(int(chat))
@@ -640,7 +651,7 @@ class TelegramService:
                 # A basic group that became a supergroup: storage learns its new id from the upgrade and asks again there.
                 return {'state':'not_started','error_code':'telegram_chat_migrated'}
             except Exception:return {'state':'not_started','error_code':'telegram_leave_unconfirmed'}
-            finally:OUTBOUND_CHECK.reset(check);DISPATCH_KEY.reset(token)
+            finally:OUTBOUND_CHECK.reset(check);SEND_CLASS.reset(kind);DISPATCH_KEY.reset(token)
             await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical({**result,'chat_id':chat}))
             return result
 
@@ -654,7 +665,7 @@ class TelegramService:
         message=sent.get('message_id') if isinstance(sent,dict) and sent.get('state')=='done' else None
         if not isinstance(message,int):return {'state':'not_found'}
         from telegram.error import BadRequest, Forbidden
-        token=DISPATCH_KEY.set('notice-edit:'+name+':'+uuid.uuid4().hex)
+        token,kind=DISPATCH_KEY.set('notice-edit:'+name+':'+uuid.uuid4().hex),SEND_CLASS.set('card_update')
         edit=lambda reply_markup:self.bot.edit_message_text(text,chat_id=int(chat),message_id=message,parse_mode=None,
                                                             reply_markup=reply_markup,link_preview_options=no_preview())
         try:
@@ -666,5 +677,5 @@ class TelegramService:
                 except BadRequest:return {'state':'done','edited':False}
         except Forbidden:return {'state':'done','edited':False}
         except Exception:return {'state':'not_started','error_code':'telegram_edit_failed'}
-        finally:DISPATCH_KEY.reset(token)
+        finally:SEND_CLASS.reset(kind);DISPATCH_KEY.reset(token)
 

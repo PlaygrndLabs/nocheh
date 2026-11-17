@@ -72,6 +72,8 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const inspected=await s.telegramActions.inspect(owner,proposal.id!);assert.ok(!JSON.stringify(inspected).includes('fixture-secret'));
     assert.equal((await s.scheduled.delivery(delivered)).state,'proposed');assert.equal((await saved(delivered.event_id)).state,'done');
     assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM telegram_action_requests WHERE source_reference->>\'id\'=$1',[delivered.event_id])).rows[0].n,1);
+    // Sent as a scheduled result, which memory learns with its class (ADR-0256).
+    assert.equal((await stores.control.query('SELECT send_class FROM telegram_action_requests WHERE id=$1',[proposal.id])).rows[0].send_class,'scheduled_run');
     assert.equal((await s.scheduled.history({profile:delivered.profile,job_id:delivered.job})).runs[0]!.native_session,contexts.get(delivered.event_id).conversation);
     await assert.rejects(s.telegramActions.requestScheduled({admin:false,scope:'-123'},delivered.event_id),{status:403});
     const recovered=await capture();failCompletion=true;assert.equal((await run(recovered.event_id)).state,'waiting');

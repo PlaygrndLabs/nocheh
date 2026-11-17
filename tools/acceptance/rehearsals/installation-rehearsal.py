@@ -22,6 +22,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tools.operations.installation.configuration import initialize, write_env, compose_command, compose_environment
 from tools.acceptance.github_mock import prepare as prepare_github
+from tools.operations.memory.honcho_setup import DIALECTIC_LEVELS, INPUT_TOKENS, QUERY_CHARACTERS, model_answers
 
 # The deterministic model service, configured as an ordinary custom provider.
 # Routes accept this plain-HTTP address only inside an installation fixture.
@@ -30,6 +31,31 @@ FIXTURE_PROVIDER = 'model-fixture'
 FIXTURE_REPLY_RATES = {'input': 50, 'output': 50, 'cache_read': 0.5, 'cache_write': 50}
 # The fake GitHub on the model fixture; github.py accepts this plain-HTTP address only inside an installation fixture.
 FIXTURE_GITHUB_URL = 'http://model-fixture:8317/github'
+
+
+def honcho_env(password, token, model):
+    """The fixture Honcho's settings: its own database, cache and provider gateway, with the real setup's limits and the
+    way it asks its model for answers (honcho_setup.py), so the tester's Honcho takes and answers what Nocheh's does."""
+    native = {'DB_CONNECTION_URI': f'postgresql+psycopg://experiment:{password}@honcho-postgres:5432/honcho_experiment',
+        'CACHE_URL': 'redis://honcho-redis:6379/0?suppress=true', 'CACHE_ENABLED': 'true', 'AUTH_USE_AUTH': 'false',
+        'PYTHON_DOTENV_DISABLED': '1', 'HONCHO_CONFIG_TOML_DISABLED': '1', 'LLM_OPENAI_API_KEY': token,
+        'EXPERIMENT_INTERNAL_TOKEN': token, 'DERIVER_WORKERS': '1', 'DERIVER_FLUSH_ENABLED': 'true',
+        'DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS': '0', 'DERIVER_REPRESENTATION_BATCH_MAX_AGE_SECONDS': '1',
+        'DERIVER_POLLING_STARTUP_JITTER_SECONDS': '0', 'DERIVER_POLLING_BACKOFF_ENABLED': 'false',
+        'PEER_CARD_ENABLED': 'false', 'DREAM_ENABLED': 'false', 'SUMMARY_ENABLED': 'true', 'EMBED_MESSAGES': 'true', 'LOG_LEVEL': 'WARNING',
+        'DIALECTIC_MAX_QUERY_LENGTH': str(QUERY_CHARACTERS), 'DIALECTIC_MAX_INPUT_TOKENS': str(INPUT_TOKENS),
+        'SUMMARY_MAX_INPUT_TOKENS': str(INPUT_TOKENS),
+        'EMBEDDING_VECTOR_DIMENSIONS': '1536', 'EMBEDDING_MODEL_CONFIG__TRANSPORT': 'openai',
+        'EMBEDDING_MODEL_CONFIG__MODEL': 'text-embedding-3-small'}
+    prefixes = ['DERIVER_MODEL_CONFIG', 'SUMMARY_MODEL_CONFIG', 'DREAM_DEDUCTION_MODEL_CONFIG', 'DREAM_INDUCTION_MODEL_CONFIG']
+    prefixes += [f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG' for level in DIALECTIC_LEVELS]
+    for prefix in prefixes + ['EMBEDDING_MODEL_CONFIG']:
+        native.update({prefix + '__OVERRIDES__BASE_URL': 'http://honcho-provider-gateway:8790/v1',
+                       prefix + '__OVERRIDES__API_KEY_ENV': 'EXPERIMENT_INTERNAL_TOKEN'})
+        if prefix != 'EMBEDDING_MODEL_CONFIG':
+            native.update({prefix + '__TRANSPORT': 'openai', prefix + '__MODEL': model})
+    native.update(model_answers())
+    return native
 
 
 def main():
@@ -89,26 +115,7 @@ def main():
         path = memory / name
         path.write_text(value)
         path.chmod(0o600)
-    native = {'DB_CONNECTION_URI': f'postgresql+psycopg://experiment:{password}@honcho-postgres:5432/honcho_experiment',
-        'CACHE_URL': 'redis://honcho-redis:6379/0?suppress=true', 'CACHE_ENABLED': 'true', 'AUTH_USE_AUTH': 'false',
-        'PYTHON_DOTENV_DISABLED': '1', 'HONCHO_CONFIG_TOML_DISABLED': '1', 'LLM_OPENAI_API_KEY': token,
-        'EXPERIMENT_INTERNAL_TOKEN': token, 'DERIVER_WORKERS': '1', 'DERIVER_FLUSH_ENABLED': 'true',
-        'DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS': '0', 'DERIVER_REPRESENTATION_BATCH_MAX_AGE_SECONDS': '1',
-        'DERIVER_POLLING_STARTUP_JITTER_SECONDS': '0', 'DERIVER_POLLING_BACKOFF_ENABLED': 'false',
-        'PEER_CARD_ENABLED': 'false', 'DREAM_ENABLED': 'false', 'SUMMARY_ENABLED': 'true', 'EMBED_MESSAGES': 'true', 'LOG_LEVEL': 'WARNING',
-        'EMBEDDING_VECTOR_DIMENSIONS': '1536', 'EMBEDDING_MODEL_CONFIG__TRANSPORT': 'openai',
-        'EMBEDDING_MODEL_CONFIG__MODEL': 'text-embedding-3-small'}
-    prefixes = ['DERIVER_MODEL_CONFIG', 'SUMMARY_MODEL_CONFIG', 'DREAM_DEDUCTION_MODEL_CONFIG', 'DREAM_INDUCTION_MODEL_CONFIG']
-    prefixes += [f'DIALECTIC_LEVELS__{level}__MODEL_CONFIG' for level in ('minimal', 'low', 'medium', 'high', 'max')]
-    for prefix in prefixes + ['EMBEDDING_MODEL_CONFIG']:
-        native.update({prefix + '__OVERRIDES__BASE_URL': 'http://honcho-provider-gateway:8790/v1',
-                       prefix + '__OVERRIDES__API_KEY_ENV': 'EXPERIMENT_INTERNAL_TOKEN'})
-        if prefix != 'EMBEDDING_MODEL_CONFIG':
-            native.update({prefix + '__TRANSPORT': 'openai', prefix + '__MODEL': config['NOCHEH_MODEL']})
-    native['DERIVER_MODEL_CONFIG__STRUCTURED_OUTPUT_MODE'] = 'json_object'
-    for level in ('minimal', 'low', 'medium', 'high', 'max'):
-        native[f'DIALECTIC_LEVELS__{level}__MAX_OUTPUT_TOKENS'] = '2500'
-    write_env(memory / 'honcho.env', native)
+    write_env(memory / 'honcho.env', honcho_env(password, token, config['NOCHEH_MODEL']))
     write_env(memory / 'meter.env', {})
     env = compose_environment(state)
     # The dashboard asks Docker for container status and storage sizes; on a

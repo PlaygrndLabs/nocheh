@@ -15,6 +15,7 @@ import {
   familyName,
   readable,
   reason,
+  reasonHeading,
   runState,
   runStates,
   timeZone,
@@ -396,7 +397,9 @@ function RunDrawer() {
         ['Updated', dateTime(detail.updated_at)],
         ['Step', sentence(readable(detail.stage)) || '—'],
         ['Tries', String(detail.attempts ?? '—')],
-        ...(detail.waiting_reason ? ([['Waiting for', reason(detail.waiting_reason)]] as [string, string][]) : []),
+        ...(detail.waiting_reason
+          ? ([[reasonHeading(detail.state), reason(detail.waiting_reason)]] as [string, string][])
+          : []),
         ...(detail.total != null
           ? ([['Progress', `${count(detail.completed)} of ${count(detail.total)} done`]] as [string, string][])
           : []),

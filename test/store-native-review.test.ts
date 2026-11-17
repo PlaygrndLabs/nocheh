@@ -8,10 +8,14 @@ import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
+import {observedSource} from '../src/observed-source.js';
 import {fixtureServices} from './fixture-brain.js';
 import {NativeReviewRepository,nativeAttemptLimit,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import type {AssistantPolicy} from '../src/assistant-policy.js';
+import {captureEvidence} from '../src/stores/generated-capture.js';
+import {evidenceMarker,legendIntro,reviewBody} from '../src/source-labels.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 
 test('native review preserves profile waits, guarded inputs, durable completion and uncertain execution identity',
@@ -49,7 +53,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
     const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='memory_review'")).rows[0].epoch};
-    const source=await makeSource(1),jobs=await services.reviews.queue(source);assert.equal(jobs.length,1);assert.deepEqual(await services.reviews.queue(source),jobs);
+    const source=await makeSource(1),jobs=(await services.reviews.queue(source)).ids;assert.equal(jobs.length,1);assert.deepEqual((await services.reviews.queue(source)).ids,jobs);
     const id=jobs[0]!;
     assert.equal(await services.reviews.run(id,authority),'pending');assert.equal((await services.reviews.inspect(id)).attempts,0);assert.equal(writes,0);
     mode='lose';assert.equal(await services.reviews.run(id,authority),'ambiguous');assert.equal(writes,1);
@@ -60,7 +64,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
     const job=await services.reviews.inspect(id),output=(await stores.derived.query('SELECT * FROM derived_artifacts WHERE id=$1',[job.result_id])).rows[0];
     assert.equal(output.input_hash,job.input_reference.input_hash);assert.equal(output.provenance.parents[0].id,job.input_reference.id);
 
-    const second=await makeSource(2),next=(await services.reviews.queue(second))[0]!;
+    const second=await makeSource(2),next=((await services.reviews.queue(second)).ids)[0]!;
     const paused=await services.reviews.controlJob(owner,next,{action:'pause',expected_revision:1});assert.equal(paused.paused,true);
     assert.equal(await services.reviews.run(next,authority),'paused');
     await assert.rejects(services.reviews.controlJob(owner,next,{action:'resume',expected_revision:1}),{code:'review_not_controllable'});
@@ -80,7 +84,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
     assert.deepEqual({requests,observations,writes},beforeRecovery,'durable completion requires neither native execution nor another observation');
 
     // A review the brain launched before its answer was lost has a start record: no receipt does not authorize repeating it.
-    const third=await makeSource(3),uncertain=(await services.reviews.queue(third))[0]!;mode='cut';
+    const third=await makeSource(3),uncertain=((await services.reviews.queue(third)).ids)[0]!;mode='cut';
     assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');let attempted=requests;
     assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');assert.equal(requests,attempted,'no receipt does not authorize repeating a native note mutation');
     const suspended=await services.reviews.controlJob(owner,uncertain,{action:'pause',expected_revision:1});assert.equal(suspended.state,'ambiguous');assert.equal(suspended.paused,true);
@@ -89,7 +93,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
     assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');assert.equal(requests,attempted);
 
     // A start the brain never received leaves no start record: the review waits again as new work and runs once.
-    const lost=(await services.reviews.queue(await makeSource(5)))[0]!;mode='missing';
+    const lost=((await services.reviews.queue(await makeSource(5))).ids)[0]!;mode='missing';
     assert.equal(await services.reviews.run(lost,authority),'ambiguous');assert.equal(requests,++attempted);
     assert.equal(await services.reviews.run(lost,authority),'pending');assert.equal(requests,attempted,'an observation starts nothing');
     const requeued=await services.reviews.inspect(lost);
@@ -100,13 +104,13 @@ test('native review preserves profile waits, guarded inputs, durable completion 
     assert.equal(await services.reviews.run(lost,authority),'done');assert.equal(requests,attempted);
 
     // So does a review the app claimed and then stopped mid-request.
-    const stopped=(await services.reviews.queue(await makeSource(6)))[0]!;
+    const stopped=((await services.reviews.queue(await makeSource(6))).ids)[0]!;
     await stores.control.query("UPDATE native_review_jobs SET state='running',attempts=1 WHERE id=$1",[stopped]);
     assert.equal(await services.reviews.run(stopped,authority),'pending');assert.equal(requests,attempted);
     assert.deepEqual(await services.reviews.inspect(stopped).then(row=>[row.state,row.attempts]),['pending',1]);
 
     // An owner pause during the observation wins: the review stays paused and uncertain until the owner resumes it.
-    const held=(await services.reviews.queue(await makeSource(7)))[0]!;mode='missing';
+    const held=((await services.reviews.queue(await makeSource(7))).ids)[0]!;mode='missing';
     assert.equal(await services.reviews.run(held,authority),'ambiguous');assert.equal(requests,++attempted);
     observed=async id=>{observed=null;await services.reviews.controlJob(owner,id,{action:'pause',expected_revision:(await services.reviews.inspect(id)).revision});};
     assert.equal(await services.reviews.run(held,authority),'ambiguous');
@@ -116,7 +120,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
     assert.equal(await services.reviews.run(held,authority),'pending');assert.equal(requests,attempted);
 
     // Waiting again, it is new work: consent revoked before it starts again keeps it from starting.
-    const fourth=await makeSource(4),notStarted=(await services.reviews.queue(fourth))[0]!;mode='missing';
+    const fourth=await makeSource(4),notStarted=((await services.reviews.queue(fourth)).ids)[0]!;mode='missing';
     assert.equal(await services.reviews.run(notStarted,authority),'ambiguous');assert.equal(requests,++attempted);
     assert.equal(await services.reviews.run(notStarted,authority),'pending');
     await services.access.setConsent(owner,fourth,{enabled:false,expected_revision:0,operation_id:key+':revoke'});
@@ -154,8 +158,8 @@ test('native review runs once per source across authorization epochs and stops o
     await services.guards.reconcile();await services.guards.setMode('on');
     const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='memory_review'")).rows[0].epoch};
     const reviewed=await makeSource(1),waiting=await makeSource(2);
-    const [done]=await services.reviews.queue(reviewed);assert.equal(await services.reviews.run(done!,authority),'done');assert.equal(starts,1);
-    const [superseded]=await services.reviews.queue(waiting);
+    const [done]=(await services.reviews.queue(reviewed)).ids;assert.equal(await services.reviews.run(done!,authority),'done');assert.equal(starts,1);
+    const [superseded]=(await services.reviews.queue(waiting)).ids;
 
     // Reactions, rule changes, learned-memory revisions and guard transitions advance the epoch and sweep every archived source again.
     const bump=async()=>{
@@ -163,10 +167,10 @@ test('native review runs once per source across authorization epochs and stops o
       assert.ok((await services.guards.state()).epoch>before);
     };
     await bump();
-    assert.deepEqual(await services.reviews.queue(reviewed),[done],'a reviewed source is not reviewed again for a new epoch');
+    assert.deepEqual((await services.reviews.queue(reviewed)).ids,[done],'a reviewed source is not reviewed again for a new epoch');
     assert.deepEqual(await jobs(reviewed),[done]);
-    for(let index=0;index<3;index++){assert.deepEqual(await services.reviews.queue(waiting),[superseded]);await bump();}
-    assert.deepEqual(await services.reviews.queue(waiting),[superseded],'a review that never started keeps its identity under the current epoch');
+    for(let index=0;index<3;index++){assert.deepEqual((await services.reviews.queue(waiting)).ids,[superseded]);await bump();}
+    assert.deepEqual((await services.reviews.queue(waiting)).ids,[superseded],'a review that never started keeps its identity under the current epoch');
     assert.deepEqual(await jobs(waiting),[superseded],'later epochs never add copies of a waiting review');
     assert.equal(canonical((await services.reviews.inspect(superseded!)).binding),canonical(await services.guards.state()));
 
@@ -177,22 +181,22 @@ test('native review runs once per source across authorization epochs and stops o
     assert.deepEqual(await jobs(waiting),[superseded]);
 
     // Changed input becomes a new review; the old copy is cleared and its workflow closes.
-    const first=await makeSource(4),[original]=await services.reviews.queue(first);await bump();
+    const first=await makeSource(4),[original]=(await services.reviews.queue(first)).ids;await bump();
     await stores.control.query(`UPDATE native_review_jobs SET input_reference=jsonb_set(input_reference,'{input_hash}','"${'0'.repeat(64)}"') WHERE id=$1`,[original]);
-    const [changed]=await services.reviews.queue(first);
+    const [changed]=(await services.reviews.queue(first)).ids;
     assert.notEqual(changed,original,'a review whose input changed is prepared again');
     assert.deepEqual(await jobs(first),[changed]);
     assert.deepEqual(await operations.memory_review!('native:'+original,authority).then(result=>[result.state,result.waiting_reason]),['skipped','superseded']);
 
     // While Hermes runs one review, a waiting review doesn't ask it again.
     await stores.control.query("UPDATE native_review_jobs SET state='running',updated_at=now() WHERE id=$1",[changed]);
-    const [queued]=await services.reviews.queue(await makeSource(6));
+    const [queued]=(await services.reviews.queue(await makeSource(6))).ids;
     assert.equal((await operations.memory_review!('native:'+queued,authority)).state,'waiting');assert.equal(starts,2);
     await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[changed]);
     assert.equal((await operations.memory_review!('native:'+queued,authority)).state,'completed');assert.equal(starts,3);
 
     // A review launched without a confirmed answer is observed with growing gaps, never relaunched, then closed as uncertain.
-    const [uncertain]=await services.reviews.queue(await makeSource(3));mode='cut';
+    const [uncertain]=(await services.reviews.queue(await makeSource(3))).ids;mode='cut';
     assert.equal(await services.reviews.run(uncertain!,authority),'ambiguous');assert.equal(starts,4);
     const gaps:number[]=[];
     for(let index=0;index<nativeReconcileLimit;index++) {
@@ -213,7 +217,7 @@ test('native review runs once per source across authorization epochs and stops o
     assert.equal(observations,nativeReconcileLimit+1);assert.equal(starts,4);
 
     // A review stranded under an earlier epoch before a restart is renewed by its per-source step, requested once.
-    const since=new Date(Date.now()-60000),stranded=await makeSource(7),[strandedReview]=await services.reviews.queue(stranded);await bump();
+    const since=new Date(Date.now()-60000),stranded=await makeSource(7),[strandedReview]=(await services.reviews.queue(stranded)).ids;await bump();
     const sourceWorkflows=async()=>(await stores.control.query("SELECT generation FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['source:'+stranded.id])).rows;
     // Capture asked for this source's step already; an open step is left to run instead.
     assert.equal((await sourceWorkflows()).length,1);
@@ -226,7 +230,7 @@ test('native review runs once per source across authorization epochs and stops o
     assert.equal(starts,4);
 
     // A running review is observed soon after it starts, then at doubling gaps up to a minute.
-    mode='running';const [running]=await services.reviews.queue(await makeSource(8));
+    mode='running';const [running]=(await services.reviews.queue(await makeSource(8))).ids;
     const runningGaps:number[]=[];
     for(let index=0;index<6;index++) {
       assert.equal(await services.reviews.run(running!,authority),'running');
@@ -235,7 +239,7 @@ test('native review runs once per source across authorization epochs and stops o
     assert.deepEqual(runningGaps,[5,10,20,40,60,60]);assert.equal(starts,5);
 
     // A review that failed without changing the notes runs again at growing gaps, then closes as uncertain.
-    mode='failed';const [failed]=await services.reviews.queue(await makeSource(9));
+    mode='failed';const [failed]=(await services.reviews.queue(await makeSource(9))).ids;
     assert.equal(await services.reviews.run(failed!,authority),'running');assert.equal(starts,6);
     const attempts:string[]=[];
     for(let index=0;index<8&&attempts.at(-1)!=='ambiguous';index++) {
@@ -250,7 +254,7 @@ test('native review runs once per source across authorization epochs and stops o
 
     // A failed review whose retry waits past a later epoch is rebound where it waits and runs again, instead of closing as superseded.
     await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[running]);
-    const retrySource=await makeSource(10),[retry]=await services.reviews.queue(retrySource);
+    const retrySource=await makeSource(10),[retry]=(await services.reviews.queue(retrySource)).ids;
     assert.equal(await services.reviews.run(retry!,authority),'running');assert.equal(starts,10);
     await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[retry]);
     assert.equal(await services.reviews.run(retry!,authority),'pending');
@@ -262,7 +266,7 @@ test('native review runs once per source across authorization epochs and stops o
     await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[retry]);
 
     // A failed review whose workflow closed before it ran again gets a new workflow from its source's step, once.
-    const closedSource=await makeSource(11),[lapsed]=await services.reviews.queue(closedSource);
+    const closedSource=await makeSource(11),[lapsed]=(await services.reviews.queue(closedSource)).ids;
     assert.equal(await services.reviews.run(lapsed!,authority),'running');
     await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[lapsed]);
     assert.equal(await services.reviews.run(lapsed!,authority),'pending');assert.equal(starts,12);
@@ -293,14 +297,14 @@ test('native review runs once per source across authorization epochs and stops o
     await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[lapsed]);
 
     // A failed review whose input changed under a later epoch is replaced by one that keeps its attempts, failure and gap.
-    const changingSource=await makeSource(12),[before]=await services.reviews.queue(changingSource);
+    const changingSource=await makeSource(12),[before]=(await services.reviews.queue(changingSource)).ids;
     assert.equal(await services.reviews.run(before!,authority),'running');
     await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[before]);
     assert.equal(await services.reviews.run(before!,authority),'pending');
     const gap=(await services.reviews.inspect(before!)).next_attempt.getTime();
     await bump();
     await stores.control.query(`UPDATE native_review_jobs SET input_reference=jsonb_set(input_reference,'{input_hash}','"${'0'.repeat(64)}"') WHERE id=$1`,[before]);
-    const [after]=await services.reviews.queue(changingSource);assert.notEqual(after,before);
+    const [after]=(await services.reviews.queue(changingSource)).ids;assert.notEqual(after,before);
     assert.deepEqual(await jobs(changingSource),[after]);
     const replaced=await services.reviews.inspect(after!);
     assert.deepEqual([replaced.state,replaced.attempts,replaced.error_code],['pending',1,'native_review_failed']);
@@ -310,7 +314,7 @@ test('native review runs once per source across authorization epochs and stops o
     // A long source is reviewed in fragments. Once one fragment ran, its failed and never-started fragments still
     // keep their place under a later epoch, and the source gets no new fragment.
     await makeSource(14,'Synthetic thread start');
-    const longSource=await makeSource(13,Array.from({length:4000},(_,index)=>'word'+index).join(' '),14),parts=await services.reviews.queue(longSource);
+    const longSource=await makeSource(13,Array.from({length:4000},(_,index)=>'word'+index).join(' '),14),parts=(await services.reviews.queue(longSource)).ids;
     assert.ok(parts.length>=3,'the source is split into fragments');
     const [firstPart,failedPart,...restParts]=parts as [string,string,...string[]];
     await stores.control.query("UPDATE native_review_jobs SET state='done' WHERE id=$1",[firstPart]);
@@ -318,7 +322,7 @@ test('native review runs once per source across authorization epochs and stops o
     await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[failedPart]);
     assert.equal(await services.reviews.run(failedPart,authority),'pending');
     await bump();
-    assert.deepEqual(await services.reviews.queue(longSource),parts,'waiting fragments keep their identity after another fragment ran');
+    assert.deepEqual((await services.reviews.queue(longSource)).ids,parts,'waiting fragments keep their identity after another fragment ran');
     assert.deepEqual(await jobs(longSource),[...parts].sort());
     const failedRow=await services.reviews.inspect(failedPart);
     assert.deepEqual([failedRow.state,failedRow.attempts,failedRow.error_code],['pending',1,'native_review_failed']);
@@ -329,12 +333,15 @@ test('native review runs once per source across authorization epochs and stops o
     assert.equal(starts,startsBefore+1);assert.equal((await services.reviews.inspect(failedPart)).attempts,2);
     assert.equal(await services.reviews.run(failedPart,authority),'pending');
     const failedGap=(await services.reviews.inspect(failedPart)).next_attempt.getTime();
+    const textOf=async(id:string)=>String(JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',
+      [(await services.reviews.inspect(id)).input_reference.id])).rows[0].content.toString()).text);
+    const failedText=await textOf(failedPart);
 
     // A new reply in the thread changes every fragment's evidence. Fragments whose own text is unchanged are replaced
     // by ones with the current input, the failed one keeping its attempts, failure and gap; a fragment whose text
     // changed is dropped, and the new text adds no fragment.
     await bump();await makeSource(15,'Synthetic later reply',14);
-    const renewed=await services.reviews.queue(longSource),[keptPart,...replacements]=renewed;
+    const renewed=(await services.reviews.queue(longSource)).ids,[keptPart,...replacements]=renewed;
     assert.equal(keptPart,firstPart);
     assert.ok(replacements.length<=restParts.length&&replacements.length>=restParts.length-1,'only the fragments whose text changed are dropped');
     assert.ok(replacements.every(id=>!parts.includes(id)),'replaced fragments carry the current input');
@@ -343,11 +350,15 @@ test('native review runs once per source across authorization epochs and stops o
     assert.deepEqual(carried.map(row=>[row.attempts,row.error_code]),
       [[2,'native_review_failed'],...replacements.slice(1).map(()=>[0,null])],'each replacement keeps its own attempts and failure');
     assert.equal(carried[0]!.next_attempt.getTime(),failedGap);
-    assert.equal(await services.reviews.queue(longSource).then(ids=>ids.join()),renewed.join(),'a later sweep keeps them');
+    // The new reply is in every fragment's records line, so the failed fragment is matched on its slice of the evidence.
+    const replacedText=await textOf(replacements[0]!);
+    assert.equal(replacedText.split('\n')[0],failedText.split('\n')[0]);assert.notEqual(replacedText.split('\n')[1],failedText.split('\n')[1]);
+    assert.equal(reviewBody(replacedText),reviewBody(failedText));
+    assert.equal(await services.reviews.queue(longSource).then(found=>found.ids.join()),renewed.join(),'a later sweep keeps them');
 
     // A start the brain never received waits again as new work after one observation, up to the attempt limit,
     // then closes as uncertain like any unconfirmed review.
-    const [unstarted]=await services.reviews.queue(await makeSource(16));mode='missing';
+    const [unstarted]=(await services.reviews.queue(await makeSource(16))).ids;mode='missing';
     const [lostStarts,lostObservations]=[starts,observations],seen:string[]=[];
     let ended;
     for(let index=0;index<40&&!ended;index++) {
@@ -365,7 +376,7 @@ test('native review runs once per source across authorization epochs and stops o
 
     // A review closed as uncertain before it could wait again is repaired by the owner's resume, even when a workflow
     // opened while it waited already took the generation its new revision names.
-    const [closedEarlier]=await services.reviews.queue(await makeSource(17));
+    const [closedEarlier]=(await services.reviews.queue(await makeSource(17))).ids;
     await stores.control.query('UPDATE native_review_jobs SET next_attempt=now() WHERE id=$1',[closedEarlier]);
     assert.equal((await operations.memory_review!('native:'+closedEarlier,authority)).state,'waiting');
     await stores.control.query('UPDATE native_review_jobs SET reconciliations=$2 WHERE id=$1',[closedEarlier,nativeReconcileLimit]);
@@ -378,5 +389,548 @@ test('native review runs once per source across authorization epochs and stops o
     assert.equal(open.rowCount,1,'a resumed review always gets an open workflow');
     assert.equal((await operations.memory_review!('native:'+closedEarlier,authority)).state,'waiting');
     assert.deepEqual(await services.reviews.inspect(closedEarlier!).then(row=>[row.state,row.attempts,row.error_code]),['pending',1,'native_review_not_started']);
+  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('people not allowed there stay out of the owner\'s notes, with the rules, quotes and reactions that rest on them',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-senders-')),key='review-senders:'+Date.now();
+  const group='-'+Date.now(),unserved='-'+(Date.now()+7),other='-'+(Date.now()+11),owner:Reader={admin:true,scope:null},bot=1000+Date.now()%1000;
+  // Alice (123) owns Nocheh, Bob (456) is allowed in the group and in another one, and Sara (789) is not.
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['456'],denied:[]},[other]:{granted:['456'],denied:[]}}};
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:'synthetic-review-service-credential-only',policy:()=>policy,
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('no notes review runs in this test');},
+    memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
+  let serial=0;
+  const capture=async(payload:Record<string,any>,chat=group)=>{
+    const update=++serial,message=payload.message??payload.edited_message,text=message?.text??null;
+    // Each update came to Nocheh's own bot, as the archive stores it (events.bot_id).
+    const event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:String(bot),scope:chat,source_id:String(message?.message_id??payload.message_reaction.message_id),
+      revision:String(update),occurred_at:null,text,payload:{update_id:update,...payload}};
+    const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
+  };
+  const message=(id:number,from:number,text:string,extra:Record<string,unknown>={},chat=group)=>({message_id:id,date:1700000000+id,chat:{id:Number(chat),type:'group'},
+    from:{id:from,is_bot:false,first_name:from===123?'Alice':from===456?'Bob':'Sara'},text,...extra});
+  const say=(id:number,from:number,text:string,extra:Record<string,unknown>={},chat=group)=>capture({message:message(id,from,text,extra,chat)},chat);
+  const react=(id:number,from:number)=>capture({message_reaction:{chat:{id:Number(group),type:'group'},message_id:id,date:1700000100+serial,user:{id:from,is_bot:false},
+    old_reaction:[],new_reaction:[{type:'emoji',emoji:'🎉'}]}});
+  const jobs=async(source:{id:string})=>(await stores.control.query("SELECT id FROM native_review_jobs WHERE source_reference->>'id'=$1 ORDER BY id",[source.id])).rows.map(row=>String(row.id));
+  const skipped=async(source:{id:string})=>(await stores.control.query('SELECT reason FROM native_review_skips WHERE event_id=$1 AND generation=$2',
+    [source.id,(await services.guards.state()).generation])).rows[0]?.reason??null;
+  const input=async(id:string)=>JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[(await services.reviews.inspect(id)).input_reference.id])).rows[0].content.toString());
+  const bump=async()=>{const before=(await services.guards.state()).epoch;await services.guards.setMode('off');await services.guards.setMode('on');assert.ok((await services.guards.state()).epoch>before);};
+  // What code recorded about a source's batch when its review was queued.
+  const recorded=async(source:{id:string})=>(await stores.control.query("SELECT provenance FROM native_review_jobs WHERE source_reference->>'id'=$1",[source.id])).rows.map(row=>row.provenance);
+  const left=(sender=0,rule=0,others=0,untraced=0)=>({sender_not_allowed:sender,rule_sender_not_allowed:rule,rules_left_out_for_owner_label:others,quote_not_traced:untraced});
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    const authority={owner:'inngest' as const,epoch:(await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='memory_review'")).rows[0].epoch};
+    const operations=storageWorkflowOperations(services,async()=>{throw Error('no source files in this fixture');});
+
+    // Sara's message, her edit of it and her reaction stay out of the owner's notes, each recorded as left out.
+    const bob=await say(1,456,'Bob: the venue is booked');
+    const sara=await say(2,789,'SARAMARK the party moved to Saturday');
+    const saraEdit=await capture({edited_message:{...message(2,789,'SARAMARK the party moved to Sunday'),edit_date:1700000050}});
+    const saraReaction=await react(1,789);
+    const keptBefore=(await services.reviews.list(owner)).kept_out;
+    for(const source of [sara,saraEdit,saraReaction]) {
+      assert.deepEqual(await services.reviews.queue(source),{ids:[],left_out:'sender_not_allowed'},'nothing of hers is reviewed into the owner\'s notes');
+      assert.deepEqual(await jobs(source),[]);assert.equal(await skipped(source),'sender_not_allowed');
+    }
+    // The Notes page counts them this installation generation.
+    assert.equal((await services.reviews.list(owner)).kept_out,keptBefore+3);
+    // The owner's messages, edits and reactions, Bob's message and Nocheh's own reply are reviewed.
+    const alice=await say(3,123,'Alice: bring the cake');
+    const aliceEdit=await capture({edited_message:{...message(3,123,'Alice: bring the big cake'),edit_date:1700000060}});
+    const aliceReaction=await react(1,123);
+    const reply={...message(4,bot,'Noted, the venue is booked'),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
+    const delivered:Envelope={version:1,key:key+':result',origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:key,revision:'0',occurred_at:null,text:null,
+      payload:{intent_key:key+':intent',method:'sendMessage',state:'delivered',status:200,send_class:'reply',wire_base64:Buffer.from(JSON.stringify({ok:true,result:reply})).toString('base64')}};
+    const nocheh=(await services.capture.capture(captureEvidence(delivered).originals[0]!)).source.reference;await services.guards.prepare(nocheh,'fixture',services.detect);
+    for(const source of [bob,alice,aliceEdit,aliceReaction,nocheh]) {
+      assert.equal(((await services.reviews.queue(source)).ids).length,1);assert.equal(await skipped(source),null);
+    }
+    // Each review records its batch by full id and class, read from Telegram's fields and Nocheh's own records.
+    assert.deepEqual(await recorded(alice),[{version:1,source:alice.id,events:[{id:alice.id,class:'owner_message'}],owner_account_only:true,rules:'none',rule_buckets:[],left_out:left()}]);
+    assert.deepEqual(await recorded(bob),[{version:1,source:bob.id,events:[{id:bob.id,class:'person_message'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left()}]);
+    assert.deepEqual(await recorded(nocheh),[{version:1,source:nocheh.id,events:[{id:nocheh.id,class:'nocheh_reply'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left()}]);
+    // The owner's reaction comes with Bob's message it reacts to; Sara's reaction to it is left out and counted.
+    assert.deepEqual(await recorded(aliceReaction),[{version:1,source:aliceReaction.id,events:[{id:aliceReaction.id,class:'owner_reaction'},{id:bob.id,class:'person_message'}],
+      owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(1)}]);
+
+    // The owner's reply to Sara is reviewed without her message, and without the quote of it; a quote of Bob stays.
+    const answer=await say(5,123,'Yes, book it',{reply_to_message:message(2,789,'SARAMARK the party moved to Saturday'),quote:{text:'SARAMARK the party',position:0}});
+    const [answerReview]=(await services.reviews.queue(answer)).ids;
+    const answerInput=await input(answerReview!);
+    assert.ok(!answerInput.evidence.some((item:{id:string})=>[sara.id,saraEdit.id].includes(item.id)),'her message is not evidence');
+    assert.ok(!answerInput.text.includes('SARAMARK'),'neither her words nor the quote of them reach the review');
+    assert.ok(answerInput.text.includes('sender_not_allowed'),'the review is told something was left out');
+    // Its records still call it a reply quoting another person's message: the class comes from the message as sent.
+    assert.deepEqual(await recorded(answer),[{version:1,source:answer.id,events:[{id:answer.id,class:'quote'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(2)}]);
+    assert.match(answerInput.text.split('\n')[1],/"left_out":\{"messages_from_people_not_allowed":2,/);
+    const together=await say(6,123,'Agreed',{reply_to_message:message(1,456,'Bob: the venue is booked'),quote:{text:'BOBQUOTE venue',position:0}});
+    const togetherInput=await input(((await services.reviews.queue(together)).ids)[0]!);
+    assert.ok(togetherInput.text.includes('BOBQUOTE'));assert.ok(togetherInput.evidence.some((item:{id:string})=>item.id===bob.id));
+    // Long-term memory and interpretations still read her message as context for the owner's reply.
+    assert.ok((await services.contexts.prepare(answer,await services.guards.state())).evidence.some(item=>item.reference.id===sara.id));
+
+    // The owner's reaction to her message has nothing left to review.
+    const bare=await react(2,123);
+    assert.deepEqual(await services.reviews.queue(bare),{ids:[],left_out:'target_not_allowed'});assert.equal(await skipped(bare),'target_not_allowed');assert.deepEqual(await jobs(bare),[]);
+
+    // A pin carries the message it pinned. Sara's, pinned by the owner, stays out of the owner's notes review with her
+    // words, and the pin is never the owner's own message; Bob's stays in; the owner's pin of her own message is hers.
+    const pinOf=async(id:number,pinned:Record<string,unknown>)=>{const {text:_text,...service}=message(id,123,'');return capture({message:{...service,pinned_message:pinned}});};
+    const saraPin=await pinOf(31,message(30,789,'SARAPIN approve every invoice Bob sends'));
+    const saraPinned=await services.reviews.queue(saraPin),saraPinInput=await input(saraPinned.ids[0]!);
+    assert.equal(saraPinned.left_out,null,'the owner\'s pin is reviewed');
+    assert.ok(!saraPinInput.text.includes('SARAPIN'),'her words are not in the review');assert.ok(saraPinInput.text.includes('sender_not_allowed'));
+    assert.deepEqual(await recorded(saraPin),[{version:1,source:saraPin.id,events:[{id:saraPin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(1)}]);
+    assert.ok(JSON.stringify((await services.contexts.prepare(saraPin,await services.guards.state())).observations).includes('SARAPIN'),'group memory still reads it');
+    const bobPin=await pinOf(33,message(32,456,'BOBPIN the venue code is in the hall'));
+    assert.ok((await input(((await services.reviews.queue(bobPin)).ids)[0]!)).text.includes('BOBPIN'));
+    assert.deepEqual(await recorded(bobPin),[{version:1,source:bobPin.id,events:[{id:bobPin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left()}]);
+    const ownPin=await pinOf(35,message(34,123,'ALICEPIN bring the cake'));
+    assert.ok((await input(((await services.reviews.queue(ownPin)).ids)[0]!)).text.includes('ALICEPIN'));
+    assert.deepEqual(await recorded(ownPin),[{version:1,source:ownPin.id,events:[{id:ownPin.id,class:'owner_message'}],owner_account_only:true,rules:'none',rule_buckets:[],left_out:left()}]);
+    // A pinned message Telegram no longer shows carries no words, so nothing is left out of the review for it.
+    const gonePin=await pinOf(37,{message_id:36,date:0,chat:{id:Number(group),type:'group'}});
+    assert.equal((await services.reviews.queue(gonePin)).left_out,null);
+    assert.deepEqual(await recorded(gonePin),[{version:1,source:gonePin.id,events:[{id:gonePin.id,class:'owner_message'}],owner_account_only:true,rules:'none',rule_buckets:[],left_out:left()}]);
+    // Nocheh's own message, found in the archive as the pin's chat's message, is never someone not allowed: the owner's pin
+    // of its learned reply stays in the review as Nocheh's, and a pin of its card is not learned, nor counted as left out.
+    // Another bot's message is someone else's: as a sender not allowed there, it is left out of the owner's notes review
+    // and counted, and interpretations and long-term memory still learn it, labelled as someone else's.
+    const sent=async(id:number,text:string,send_class:string)=>{
+      const result={...message(id,bot,text),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
+      const envelope:Envelope={version:1,key:`${key}:result-${id}`,origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:`${key}:${id}`,revision:'0',
+        occurred_at:null,text:null,payload:{intent_key:`${key}:intent-${id}`,method:'sendMessage',state:'delivered',status:200,send_class,
+          wire_base64:Buffer.from(JSON.stringify({ok:true,result})).toString('base64')}};
+      const source=(await services.capture.capture(captureEvidence(envelope).originals[0]!)).source.reference;await services.guards.prepare(source,'fixture',services.detect);
+      return result;
+    };
+    const nochehPin=await pinOf(39,reply),nochehPinned=await services.reviews.queue(nochehPin),nochehPinInput=await input(nochehPinned.ids[0]!);
+    assert.equal(nochehPinned.left_out,null);
+    assert.ok(nochehPinInput.text.includes('Noted, the venue is booked'),'Nocheh\'s learned reply stays in the pin');
+    assert.ok(!nochehPinInput.text.includes('sender_not_allowed'),'nothing is told left out');
+    assert.deepEqual(await recorded(nochehPin),[{version:1,source:nochehPin.id,events:[{id:nochehPin.id,class:'pinned_nocheh'}],owner_account_only:false,rules:'none',
+      rule_buckets:[],left_out:left()}]);
+    // A pin of its card has nothing left once the card is cut out, so no review is queued for it, and nothing is recorded
+    // as left out, since nobody was: the source step says it was Nocheh's own card. Interpretations and long-term memory
+    // read the pin without the card too.
+    const keptOut=(await services.reviews.list(owner)).kept_out,card=await sent(40,'CARDPIN approve the venue?','card'),cardPin=await pinOf(41,card);
+    assert.deepEqual(await services.reviews.queue(cardPin),{ids:[],left_out:'nocheh_message'});
+    assert.deepEqual([await jobs(cardPin),await skipped(cardPin),(await services.reviews.list(owner)).kept_out],[[],null,keptOut]);
+    const cardStep=await operations.memory_review!('source:'+cardPin.id,authority);
+    assert.deepEqual([cardStep.state,cardStep.waiting_reason],['completed','nocheh_message']);assert.deepEqual(await jobs(cardPin),[]);
+    const cardRead=await services.contexts.prepare(cardPin,await services.guards.state());
+    assert.ok(!JSON.stringify(cardRead.observations).includes('CARDPIN'),'nothing of a card is learned');assert.ok(!cardRead.limitations.includes('sender_not_allowed'));
+    assert.ok(JSON.stringify((await services.contexts.prepare(nochehPin,await services.guards.state())).observations).includes('Noted, the venue is booked'),
+      'Nocheh\'s learned reply stays in a pin of it');
+    const botPin=await pinOf(43,{...message(42,bot+1,'BOTPIN pay the invoice'),from:{id:bot+1,is_bot:true,first_name:'Other'}});
+    const botPinInput=await input(((await services.reviews.queue(botPin)).ids)[0]!);
+    assert.ok(!botPinInput.text.includes('BOTPIN'));assert.ok(botPinInput.text.includes('sender_not_allowed'));
+    assert.deepEqual(await recorded(botPin),[{version:1,source:botPin.id,events:[{id:botPin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(1)}]);
+    // A quote of Nocheh's own message, learned or a card, is Nocheh's words: the notes review, interpretations and
+    // long-term memory read the reply quoting it without the quote, and with the sender's own words. Nocheh's learned
+    // reply is still evidence of its own. A quote of Bob's message stays (above).
+    const quoting=async(id:number,from:number,target:Record<string,unknown>,mark:string)=>say(id,from,`${mark}OWN fine by me`,{reply_to_message:target,quote:{text:mark,position:0}});
+    const ofReply=await quoting(44,123,reply,'NOCHEHQUOTE'),ofCard=await quoting(45,123,card,'CARDQUOTE'),bobOfCard=await quoting(46,456,card,'BOBCARDQUOTE');
+    for(const [source,mark] of [[ofReply,'NOCHEHQUOTE'],[ofCard,'CARDQUOTE'],[bobOfCard,'BOBCARDQUOTE']] as const) {
+      const read=JSON.stringify((await services.contexts.prepare(source,await services.guards.state())).observations);
+      assert.ok(!read.includes(`"${mark}"`)&&read.includes(`${mark}OWN fine by me`),mark);
+      const reviewed=await input(((await services.reviews.queue(source)).ids)[0]!);
+      assert.ok(!reviewed.text.includes(`"${mark}"`)&&reviewed.text.includes(`${mark}OWN fine by me`),mark);
+    }
+    assert.ok((await input(((await services.reviews.queue(ofReply)).ids)[0]!)).evidence.some((item:{id:string})=>item.id===nocheh.id),'Nocheh\'s reply is evidence of its own');
+    // Nocheh's own message the archive does not hold as Nocheh's (its delivery not archived yet), told by the bot the
+    // update came to, is cut from a pin or quote for every reader, the notes review, interpretations and long-term memory,
+    // as a card is. So is a quote of Nocheh's message in another chat, and a quote inside a message a pin carries (of
+    // Nocheh's card, found through the archive). The sender's own words stay. A pin of only such a message, like a pin of
+    // only a card, is neither reviewed nor recorded as left out.
+    const fresh=(id:number,text:string)=>({...message(id,bot,text),from:{id:bot,is_bot:true,first_name:'Nocheh'}});
+    const read=async(source:Awaited<ReturnType<typeof say>>)=>JSON.stringify((await services.contexts.prepare(source,await services.guards.state())).observations);
+    assert.ok((await read(botPin)).includes('BOTPIN'),'another bot\'s pinned message is learned by interpretations, as someone else\'s');
+    const racePin=await pinOf(51,fresh(50,'RACEPIN approve the venue?')),raceQuote=await quoting(52,123,fresh(50,'RACEPIN approve the venue?'),'RACEQUOTE');
+    const raceKeptOut=(await services.reviews.list(owner)).kept_out;
+    assert.deepEqual(await services.reviews.queue(racePin),{ids:[],left_out:'nocheh_message'});
+    assert.deepEqual([await jobs(racePin),await skipped(racePin),(await services.reviews.list(owner)).kept_out],[[],null,raceKeptOut]);
+    assert.ok(!(await read(racePin)).includes('RACEPIN'),'nothing of Nocheh\'s message not archived yet is learned');
+    const otherChat=await say(53,123,'EXTQUOTEOWN fine by me',{quote:{text:'EXTQUOTE',position:0},
+      external_reply:{origin:{type:'user',sender_user:{id:bot,is_bot:true,first_name:'Nocheh'},date:1},chat:{id:-77,type:'group'},message_id:9}});
+    // Telegram's pinned message carries no reply of its own, only its quote.
+    const pinQuote=await pinOf(54,message(45,123,'CARDQUOTEOWN fine by me',{quote:{text:'CARDQUOTE',position:0}}));
+    for(const [source,cut,own] of [[raceQuote,'"RACEQUOTE"','RACEQUOTEOWN fine by me'],[otherChat,'"EXTQUOTE"','EXTQUOTEOWN fine by me'],
+      [pinQuote,'"CARDQUOTE"','CARDQUOTEOWN fine by me']] as const) {
+      const reviewed=await services.reviews.queue(source);assert.equal(reviewed.ids.length,1,cut);
+      for(const text of [await read(source),(await input(reviewed.ids[0]!)).text as string]) {
+        assert.ok(!text.includes(cut),cut);if(own)assert.ok(text.includes(own),own);
+      }
+    }
+    // A pinned message sent through an inline bot was written by a person, here the owner: it is learned and reviewed,
+    // labelled as sent through an inline bot, never as the owner's own words. The owner's quote of another bot's message
+    // stays in what interpretations read, labelled as a quote of someone else's; another bot is not someone allowed there,
+    // so the quote goes from the owner's notes review, and is counted, as a pin of the same message is, though Telegram
+    // never sends Nocheh that bot's message.
+    const viaBot=await pinOf(56,message(55,123,'VIABOTPIN a sticker pack',{via_bot:{id:bot+2,is_bot:true,first_name:'Stickers',username:'stickerbot'}}));
+    const viaBotReviewed=await services.reviews.queue(viaBot);assert.equal(viaBotReviewed.ids.length,1);
+    for(const text of [await read(viaBot),(await input(viaBotReviewed.ids[0]!)).text as string])assert.ok(text.includes('VIABOTPIN'));
+    assert.deepEqual((await recorded(viaBot))[0].events,[{id:viaBot.id,class:'forward_bot_by_owner'}]);
+    const botQuote=await quoting(57,123,{...message(42,bot+1,'BOTPIN pay the invoice'),from:{id:bot+1,is_bot:true,first_name:'Other'}},'BOTQUOTE');
+    assert.ok((await read(botQuote)).includes('"BOTQUOTE"'));
+    const botQuoteInput=(await input(((await services.reviews.queue(botQuote)).ids)[0]!)).text as string;
+    assert.ok(!botQuoteInput.includes('"BOTQUOTE"')&&botQuoteInput.includes('BOTQUOTEOWN fine by me'));assert.ok(botQuoteInput.includes('sender_not_allowed'));
+    assert.deepEqual(await recorded(botQuote),[{version:1,source:botQuote.id,events:[{id:botQuote.id,class:'quote'}],owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(1)}]);
+    // A quote of a message in another chat or topic stays in the owner's notes review only when the archive holds that
+    // message and its sender is allowed where they wrote it: Bob's here stays; one in a chat Nocheh never saw goes, and is
+    // counted. Interpretations read both.
+    const bobUser={id:456,is_bot:false,first_name:'Bob'},bobHall=await say(60,456,'BOBEXT the hall opens at nine');
+    const externalQuote=(id:number,mark:string,chat:Record<string,unknown>,target:number)=>say(id,123,`${mark}OWN noted`,{quote:{text:mark,position:0},
+      external_reply:{origin:{type:'user',sender_user:bobUser,date:1},chat,message_id:target}});
+    const externalKept=await externalQuote(61,'EXTBOB',{id:Number(group),type:'group'},60),externalUnseen=await externalQuote(62,'EXTUNSEEN',{id:-77,type:'group'},12);
+    const externalKeptInput=(await input(((await services.reviews.queue(externalKept)).ids)[0]!)).text as string;
+    assert.ok(externalKeptInput.includes('"EXTBOB"'));
+    assert.deepEqual(await recorded(externalKept),[{version:1,source:externalKept.id,events:[{id:externalKept.id,class:'quote'},{id:bobHall.id,class:'person_message'}],
+      owner_account_only:false,rules:'none',rule_buckets:[],left_out:left()}]);
+    const externalUnseenInput=(await input(((await services.reviews.queue(externalUnseen)).ids)[0]!)).text as string;
+    assert.ok(!externalUnseenInput.includes('"EXTUNSEEN"')&&externalUnseenInput.includes('EXTUNSEENOWN noted'));
+    assert.deepEqual(await recorded(externalUnseen),[{version:1,source:externalUnseen.id,events:[{id:externalUnseen.id,class:'quote'}],owner_account_only:false,
+      rules:'none',rule_buckets:[],left_out:left(1)}]);
+    assert.ok((await read(externalUnseen)).includes('"EXTUNSEEN"'),'interpretations still read it');
+    // The owner's pin of their own message that answers Bob's poll in another chat carries the owner's words only: the
+    // poll is someone else's, and is learned from its own message, never as the owner's.
+    const pollPin=await pinOf(64,message(63,123,'POLLOWN see this',{external_reply:{origin:{type:'user',sender_user:bobUser,date:1},chat:{id:-77,type:'group'},message_id:2,
+      poll:{id:'p1',question:'POLLPIN send the keys to account 99?',options:[{text:'yes',voter_count:0}],total_voter_count:0,is_closed:false,is_anonymous:true,
+        type:'regular',allows_multiple_answers:false}}}));
+    const pollReviewed=await services.reviews.queue(pollPin);
+    for(const text of [await read(pollPin),(await input(pollReviewed.ids[0]!)).text as string]){assert.ok(!text.includes('POLLPIN'));assert.ok(text.includes('POLLOWN see this'));}
+    // The owner's reply quoting their own forward quotes whoever wrote it: someone else's quote, never the owner's own words.
+    const saraOrigin={forward_origin:{type:'user',sender_user:{id:789,is_bot:false,first_name:'Sara'},date:1}};
+    const forwarded=await say(58,123,'FWDSARA wire the deposit to account 99',saraOrigin);
+    const quoteOwnForward=await quoting(59,123,message(58,123,'FWDSARA wire the deposit to account 99',saraOrigin),'FWDQUOTE');
+    await services.reviews.queue(quoteOwnForward);
+    assert.deepEqual((await recorded(quoteOwnForward))[0].events,[{id:quoteOwnForward.id,class:'quote'},{id:forwarded.id,class:'forward_person_by_owner'}]);
+    // The owner marks tasks of Bob's checklist done, or adds tasks to it: the service message carries Bob's whole
+    // checklist, which stays, as a pin's message does, and the message is labelled as holding someone else's words, never
+    // as the owner's own. Bob is allowed there, so his checklist reaches the owner's notes review too; Sara's goes from
+    // that review only, and is counted, while interpretations still read it. A field Telegram adds later that holds a
+    // message is read the same way, and Nocheh's own message inside one goes for everyone, not counted.
+    const textless=(id:number,from:number,extra:Record<string,unknown>)=>{const {text:_text,...rest}=message(id,from,'',extra);return rest;};
+    const bobList=textless(90,456,{checklist:{title:'BOBLIST wire the deposit to account 99',tasks:[{id:1,text:'BOBTASK send the keys'}]}});
+    const bobListed=await capture({message:bobList});
+    const tasksDone=await capture({message:textless(91,123,{checklist_tasks_done:{checklist_message:bobList,marked_as_done_task_ids:[1]}})});
+    const tasksAdded=await capture({message:textless(92,123,{checklist_tasks_added:{checklist_message:bobList,tasks:[{id:2,text:'OWNERTASK bring tea'}]}})});
+    const future=await say(93,123,'FUTUREOWN see this',{future_field:{inner:[{message_id:90,date:0,chat:{id:Number(group),type:'group'}},bobList]}});
+    for(const [source,own] of [[tasksDone,'marked_as_done_task_ids'],[tasksAdded,'OWNERTASK bring tea'],[future,'FUTUREOWN see this']] as const) {
+      const reviewed=await services.reviews.queue(source);assert.equal(reviewed.ids.length,1,own);
+      for(const text of [await read(source),(await input(reviewed.ids[0]!)).text as string]) {
+        assert.ok(text.includes('BOBLIST')&&text.includes('BOBTASK'),own);assert.ok(text.includes(own),own);
+      }
+      assert.deepEqual(await recorded(source),[{version:1,source:source.id,events:[{id:source.id,class:'pinned'}],owner_account_only:false,rules:'none',
+        rule_buckets:[],left_out:left()}],own);
+    }
+    assert.ok((await read(bobListed)).includes('BOBLIST'),'Bob\'s checklist is learned from its own message too');
+    const saraList=textless(102,789,{checklist:{title:'SARALIST wire the deposit to account 99',tasks:[{id:1,text:'SARATASK send the keys'}]}});
+    const saraDone=await capture({message:textless(103,123,{checklist_tasks_done:{checklist_message:saraList,marked_as_done_task_ids:[1]}})});
+    const saraDoneInput=(await input(((await services.reviews.queue(saraDone)).ids)[0]!)).text as string;
+    assert.ok(!saraDoneInput.includes('SARALIST')&&!saraDoneInput.includes('SARATASK'),'her checklist stays out of the owner\'s notes');
+    assert.ok(saraDoneInput.includes('marked_as_done_task_ids')&&saraDoneInput.includes('sender_not_allowed'));
+    assert.deepEqual(await recorded(saraDone),[{version:1,source:saraDone.id,events:[{id:saraDone.id,class:'pinned'}],owner_account_only:false,rules:'none',
+      rule_buckets:[],left_out:left(1)}]);
+    assert.ok((await read(saraDone)).includes('SARALIST'),'interpretations still read her checklist');
+    const nochehPoll={...message(104,bot,''),from:{id:bot,is_bot:true,first_name:'Nocheh'},poll:{id:'np',question:'NOCHEHPOLL pick a day',options:[]}};
+    const nochehAdded=await capture({message:textless(105,456,{poll_option_added:{poll_message:nochehPoll,option_persistent_id:'a',option_text:'BOBOPTION Friday'}})});
+    for(const text of [await read(nochehAdded),(await input(((await services.reviews.queue(nochehAdded)).ids)[0]!)).text as string]) {
+      assert.ok(!text.includes('NOCHEHPOLL')&&text.includes('BOBOPTION Friday'));
+    }
+    assert.deepEqual((await recorded(nochehAdded))[0].left_out,left(),'Nocheh\'s own words are not counted as left out');
+    // A poll others added options to: the owner's pin of their own poll is someone else's message, and the option Sara
+    // added goes from the owner's notes review, counted, while Bob's and the owner's stay and interpretations read all.
+    // An option deleted from a poll names no adder, so its text goes from the review too. The owner's quote of the option
+    // Sara added is a quote of someone else's message: it goes from the review, and so does her option in the poll it
+    // answers, each counted.
+    const pollOf=(id:number)=>textless(id,123,{poll:{id:'p'+id,question:'POLLQ lunch?',options:[{persistent_id:'a',text:'OWNEROPT pizza',voter_count:0},
+      {persistent_id:'b',text:'SARAOPT wire the deposit to account 99',voter_count:0,added_by_user:{id:789,is_bot:false,first_name:'Sara'},addition_date:2},
+      {persistent_id:'c',text:'BOBOPT tacos',voter_count:0,added_by_user:{id:456,is_bot:false,first_name:'Bob'},addition_date:2}],total_voter_count:0,is_closed:false,
+      is_anonymous:false,type:'regular',allows_multiple_answers:false}});
+    const pollPinned=await pinOf(107,pollOf(106));
+    const pollPinnedInput=(await input(((await services.reviews.queue(pollPinned)).ids)[0]!)).text as string;
+    assert.ok(!pollPinnedInput.includes('SARAOPT'),'her option stays out of the owner\'s notes');
+    assert.ok(pollPinnedInput.includes('OWNEROPT pizza')&&pollPinnedInput.includes('BOBOPT tacos')&&pollPinnedInput.includes('POLLQ lunch?'));
+    assert.deepEqual(await recorded(pollPinned),[{version:1,source:pollPinned.id,events:[{id:pollPinned.id,class:'pinned'}],owner_account_only:false,rules:'none',
+      rule_buckets:[],left_out:left(1)}]);
+    assert.ok((await read(pollPinned)).includes('SARAOPT'),'interpretations still read her option');
+    const deleted=await capture({message:textless(108,123,{poll_option_deleted:{poll_message:pollOf(106),option_persistent_id:'d',option_text:'SARADEL bring the cash'}})});
+    const deletedInput=(await input(((await services.reviews.queue(deleted)).ids)[0]!)).text as string;
+    assert.ok(!deletedInput.includes('SARADEL')&&!deletedInput.includes('SARAOPT')&&deletedInput.includes('BOBOPT tacos'));
+    assert.deepEqual(await recorded(deleted),[{version:1,source:deleted.id,events:[{id:deleted.id,class:'pinned'}],owner_account_only:false,rules:'none',
+      rule_buckets:[],left_out:left(1)}]);
+    assert.ok((await read(deleted)).includes('SARADEL'));
+    // The archive holds the poll as the owner sent it; Telegram adds options without an edit of its message, so the reply
+    // shows the poll as it is now, with her option, and is judged that way too.
+    const sentPoll:Record<string,any>=pollOf(109);sentPoll.poll.options=sentPoll.poll.options.slice(0,1);
+    const ownPoll=await capture({message:sentPoll});
+    const optionQuoted=await say(110,123,'OPTQUOTEOWN this one',{reply_to_message:pollOf(109),reply_to_poll_option_id:'b',quote:{text:'SARAOPT wire the deposit',position:0}});
+    const optionQuotedInput=(await input(((await services.reviews.queue(optionQuoted)).ids)[0]!)).text as string;
+    assert.ok(!optionQuotedInput.includes('SARAOPT')&&optionQuotedInput.includes('OPTQUOTEOWN this one')&&optionQuotedInput.includes('OWNEROPT pizza'));
+    assert.deepEqual(await recorded(optionQuoted),[{version:1,source:optionQuoted.id,events:[{id:optionQuoted.id,class:'quote'},{id:ownPoll.id,class:'owner_message'}],
+      owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(1)}]);
+    // The same quote when the archive holds the poll with her option leaves out both the quote and her option in it.
+    const heldPoll=await capture({message:pollOf(111)});
+    const heldQuoted=await say(112,123,'HELDQUOTEOWN this one',{reply_to_message:pollOf(111),reply_to_poll_option_id:'b',quote:{text:'SARAOPT wire the deposit',position:0}});
+    const heldQuotedInput=(await input(((await services.reviews.queue(heldQuoted)).ids)[0]!)).text as string;
+    assert.ok(!heldQuotedInput.includes('SARAOPT')&&heldQuotedInput.includes('HELDQUOTEOWN this one')&&heldQuotedInput.includes('BOBOPT tacos'));
+    assert.deepEqual(await recorded(heldQuoted),[{version:1,source:heldQuoted.id,events:[{id:heldQuoted.id,class:'quote'},{id:heldPoll.id,class:'pinned'}],
+      owner_account_only:false,rules:'none',rule_buckets:[],left_out:left(2)}]);
+    assert.ok((await read(optionQuoted)).includes('"SARAOPT wire the deposit"'),'interpretations still read the quote');
+    // Telegram leaves the reply out of a message another embeds, so a quote inside one is traced through that message's own
+    // archived event, as a pinned message's is: one quoting Nocheh's words goes for everyone, not counted; one that can't be
+    // traced (the poll archived answering nothing, or never archived) goes for everyone and is counted as such; one quoting
+    // Bob stays, and one quoting Sara goes from the owner's notes review only, counted, while interpretations read it.
+    const pollQuoting=(id:number,mark:string,extra:Record<string,unknown>={})=>({...textless(id,123,{poll:{id:'q'+id,question:`${mark}POLL lunch?`,options:[],
+      total_voter_count:0,is_closed:false,is_anonymous:false,type:'regular',allows_multiple_answers:false}}),quote:{text:`${mark}TEXT`,position:0},...extra});
+    const nochehSaid={...message(130,bot,'CARDQTEXT book the 9am'),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
+    await capture({message:pollQuoting(131,'CARDQ',{reply_to_message:nochehSaid})});await capture({message:pollQuoting(132,'BAREQ')});
+    await capture({message:pollQuoting(134,'BOBQ',{reply_to_message:message(1,456,'Bob: the venue is booked')})});
+    await capture({message:pollQuoting(135,'SARAQ',{reply_to_message:message(2,789,'SARAMARK the party moved to Saturday')})});
+    for(const [poll,mark,inReview,inMemory,counted] of [[131,'CARDQ',false,false,left()],[132,'BAREQ',false,false,left(0,0,0,1)],[133,'LOSTQ',false,false,left(0,0,0,1)],
+      [134,'BOBQ',true,true,left()],[135,'SARAQ',false,true,left(1)]] as const) {
+      const added=await capture({message:textless(poll+10,456,{poll_option_added:{poll_message:pollQuoting(poll,mark),option_persistent_id:'z',option_text:`${mark}OPTION Friday`}})});
+      const reviewed=(await input(((await services.reviews.queue(added)).ids)[0]!)).text as string,learned=await read(added);
+      assert.equal(reviewed.includes(`${mark}TEXT`),inReview,mark);assert.equal(learned.includes(`${mark}TEXT`),inMemory,mark);
+      for(const text of [reviewed,learned])assert.ok(text.includes(`${mark}POLL lunch?`)&&text.includes(`${mark}OPTION Friday`),mark);
+      assert.deepEqual((await recorded(added))[0].left_out,counted,mark);
+      assert.equal((await services.contexts.prepare(added,await services.guards.state())).limitations.includes('quote_not_traced'),counted.quote_not_traced===1,mark);
+    }
+    // A quote inside an embedded message that keeps its reply to a message in another chat (external_reply) is judged as a
+    // quote of one in another chat is, by that message as the archive holds it: Bob's, in a group where he is allowed,
+    // stays in the owner's notes review and nothing is counted; Sara's goes from it only, counted as hers. Interpretations
+    // read both.
+    await say(160,456,'BOBFAR the caterer called',{},other);await say(161,789,'SARAFAR wire the deposit',{},other);
+    for(const [poll,target,from,mark,inReview,counted] of [[136,160,bobUser,'EXTBOBQ',true,left()],
+      [137,161,{id:789,is_bot:false,first_name:'Sara'},'EXTSARAQ',false,left(1)]] as const) {
+      const elsewhere={external_reply:{origin:{type:'user',sender_user:from,date:1},chat:{id:Number(other),type:'group'},message_id:target}};
+      await capture({message:pollQuoting(poll,mark,elsewhere)});
+      const added=await capture({message:textless(poll+10,456,{poll_option_added:{poll_message:pollQuoting(poll,mark,elsewhere),option_persistent_id:'z',
+        option_text:`${mark}OPTION Friday`}})});
+      const reviewed=(await input(((await services.reviews.queue(added)).ids)[0]!)).text as string,learned=await read(added);
+      assert.equal(reviewed.includes(`"${mark}TEXT"`),inReview,mark);assert.ok(learned.includes(`"${mark}TEXT"`),mark);
+      for(const text of [reviewed,learned])assert.ok(text.includes(`${mark}POLL lunch?`)&&text.includes(`${mark}OPTION Friday`),mark);
+      assert.deepEqual((await recorded(added))[0].left_out,counted,mark);
+      assert.ok(!(await services.contexts.prepare(added,await services.guards.state())).limitations.includes('quote_not_traced'),mark);
+    }
+    // In the owner's own private chat nobody else can add options, so the text of an option deleted from the owner's own
+    // poll there is the owner's own words: it stays in the owner's notes, labelled as the owner's, and nothing is counted.
+    const inOwnerChat=(id:number,extra:Record<string,unknown>)=>({...textless(id,123,extra),chat:{id:123,type:'private'}});
+    const privatePoll=inOwnerChat(150,{poll:{id:'p150',question:'PRIVPOLL lunch?',options:[{persistent_id:'a',text:'PRIVOPT pizza',voter_count:0}],total_voter_count:0,
+      is_closed:false,is_anonymous:false,type:'regular',allows_multiple_answers:false}});
+    await capture({message:privatePoll},'123');
+    const privateDeleted=await capture({message:inOwnerChat(151,{poll_option_deleted:{poll_message:privatePoll,option_persistent_id:'d',option_text:'OWNERDEL bring the cash'}})},'123');
+    const privateDeletedInput=(await input(((await services.reviews.queue(privateDeleted)).ids)[0]!)).text as string;
+    assert.ok(privateDeletedInput.includes('OWNERDEL bring the cash')&&privateDeletedInput.includes('PRIVOPT pizza'));
+    assert.deepEqual((await recorded(privateDeleted)).map(row=>[row.events,row.left_out]),[[[{id:privateDeleted.id,class:'owner_message'}],left()]]);
+    // A quote inside a pinned message stays in the owner's notes review only when the message it quotes is by someone
+    // allowed there: Bob's pinned reply quoting Sara loses its quote there, and it is counted; quoting the owner, it
+    // keeps it. A pinned message the archive never got carries no reply to judge its quote by, so its quote goes too,
+    // counted as not traced, since no sender was refused. Interpretations read every one.
+    await say(94,789,'SARAASK pay the invoice today');await say(96,123,'ALICEASK bring the chairs');
+    const quoted=(id:number,target:Record<string,unknown>,mark:string)=>message(id,456,`${mark}OWN noted`,{reply_to_message:target,quote:{text:mark,position:0}});
+    await capture({message:quoted(95,message(94,789,'SARAASK pay the invoice today'),'SARAQUOTED')});
+    await capture({message:quoted(97,message(96,123,'ALICEASK bring the chairs'),'ALICEQUOTED')});
+    const pinnedReply=(id:number,mark:string)=>({...message(id,456,`${mark}OWN noted`),quote:{text:mark,position:0}});
+    for(const [pin,mark,kept,counted] of [[await pinOf(98,pinnedReply(95,'SARAQUOTED')),'SARAQUOTED',false,left(1)],
+      [await pinOf(99,pinnedReply(97,'ALICEQUOTED')),'ALICEQUOTED',true,left()],[await pinOf(101,pinnedReply(100,'UNSEENQUOTED')),'UNSEENQUOTED',false,left(0,0,0,1)]] as const) {
+      const reviewed=(await input(((await services.reviews.queue(pin)).ids)[0]!)).text as string;
+      assert.equal(reviewed.includes(`"${mark}"`),kept,mark);assert.ok(reviewed.includes(`${mark}OWN noted`),mark);
+      assert.deepEqual(await recorded(pin),[{version:1,source:pin.id,events:[{id:pin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],
+        left_out:counted}],mark);
+      assert.ok((await read(pin)).includes(`"${mark}"`),`${mark}: interpretations still read it`);
+    }
+
+    // A rule learned from her message stays out of the owner's notes review, but not out of group memory.
+    const ruleText='In this group SARARULE means the meeting is cancelled';
+    const ruleSource=await say(7,789,ruleText),space=(await services.access.space(ruleSource))!;
+    const binding=await services.guards.state(),dependencies=(await services.contexts.prepare(ruleSource,binding)).dependencies;
+    await services.learned.publishAutomatic(digest(key+':rule'),{kind:'convention',subject:'SARARULE',text:ruleText,scope:{kind:'conversation',id:space},uncertainty:'explicit',
+      evidence:[ruleSource],quote:{source_id:ruleSource.id,text:ruleText},conflicts:[]},null,key+':rule',dependencies,binding,'fixture',services.detect);
+    const later=await say(8,123,'Alice: see you all there');
+    const laterInput=await input(((await services.reviews.queue(later)).ids)[0]!);
+    assert.ok(!laterInput.text.includes('SARARULE'));assert.ok(laterInput.text.includes('rule_sender_not_allowed'));
+    assert.ok(JSON.stringify((await services.contexts.prepare(later,await services.guards.state())).rules).includes('SARARULE'));
+    assert.deepEqual(await recorded(later),[{version:1,source:later.id,events:[{id:later.id,class:'owner_message'}],owner_account_only:true,rules:'none',rule_buckets:[],left_out:left(0,1)}]);
+
+    // A review of the owner's own typing reads only the rules the owner wrote: one learned from Bob is left out of it,
+    // and only of it, and so is one learned automatically from the owner's own message, which can restate a rule or a
+    // forward its interpretation read. The owner's correction of a rule makes it the owner's.
+    const learn=async(label:string,from:number,id:number,word:string)=>{
+      const text=`In this group ${word} means bring snacks`,origin=await say(id,from,text),state=await services.guards.state();
+      await services.learned.publishAutomatic(digest(key+':'+label),{kind:'convention',subject:word,text,scope:{kind:'conversation',id:space},uncertainty:'explicit',
+        evidence:[origin],quote:{source_id:origin.id,text},conflicts:[]},null,key+':'+label,(await services.contexts.prepare(origin,state)).dependencies,state,'fixture',services.detect);
+    };
+    await learn('bob-rule',456,21,'BOBRULE');await learn('alice-rule',123,22,'ALICERULE');await learn('owner-rule',123,20,'OWNERRULE');
+    await services.learned.correct(owner,digest(key+':owner-rule'),{expected_revision:1,operation_id:key+':owner-rule-correction',
+      text:'In this group OWNERRULE means bring napkins',retired:false},services.detect);
+    const own=await say(23,123,'Alice: the agenda is ready'),[ownReview]=(await services.reviews.queue(own)).ids,ownInput=await input(ownReview!);
+    assert.ok(ownInput.text.includes('OWNERRULE'));assert.ok(!ownInput.text.includes('BOBRULE'));assert.ok(!ownInput.text.includes('ALICERULE'),'a rule the owner did not write');
+    assert.ok(ownInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual(await recorded(own),[{version:1,source:own.id,events:[{id:own.id,class:'owner_message'}],owner_account_only:true,rules:'owner',rule_buckets:[],left_out:left(0,1,2)}]);
+    // Line 1 as it was, then code's records line with full ids and no names, the fixed marker, and the evidence.
+    const lines=ownInput.text.split('\n');
+    assert.equal(lines.length,4);
+    assert.equal(lines[0],`Source nocheh:event:${own.id}; conversation ${space}; fragment 1. Speakers are not necessarily the owner.`);
+    assert.ok(lines[1].startsWith(legendIntro));
+    assert.deepEqual(JSON.parse(lines[1].slice(legendIntro.length)),{sent_from_the_owner_account_only:true,events:{'the owner\'s own message':[own.id]},
+      left_out:{messages_from_people_not_allowed:0,rules_from_people_not_allowed:1,rules_not_the_owners:2,quotes_not_traced:0}});
+    assert.doesNotMatch(lines[1],/Alice|Bob|Sara/);
+    assert.equal(lines[2],evidenceMarker);assert.equal(JSON.parse(lines[3]).space,space);
+    // Bob's message reads every rule, and long-term memory reads them for the owner's message too.
+    const bobs=await say(24,456,'Bob: snacks are on me'),bobInput=await input(((await services.reviews.queue(bobs)).ids)[0]!);
+    assert.ok(bobInput.text.includes('BOBRULE')&&bobInput.text.includes('ALICERULE'));assert.ok(!bobInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual(await recorded(bobs),[{version:1,source:bobs.id,events:[{id:bobs.id,class:'person_message'}],owner_account_only:false,rules:'others',
+      rule_buckets:['person'],left_out:left(0,1)}]);
+    const ownRead=JSON.stringify((await services.contexts.prepare(own,await services.guards.state())).rules);
+    assert.ok(ownRead.includes('BOBRULE')&&ownRead.includes('ALICERULE'));
+    // A rule is judged by the messages code recorded it was learned from, never by what the model cited: one learned from
+    // the owner's reply to Bob that cites only the reply still rests on Bob's message, so it stays out of an all-owner review.
+    const iban=await say(25,456,'Bob: invoices go to BOBIBAN from now on');
+    const thanks=await say(26,123,'Alice: thanks',{reply_to_message:message(25,456,'Bob: invoices go to BOBIBAN from now on')});
+    const thanksState=await services.guards.state(),thanksDependencies=(await services.contexts.prepare(thanks,thanksState)).dependencies;
+    assert.ok(thanksDependencies.some(item=>item.source_id==='events:'+iban.id),'the reply was learned with Bob\'s message');
+    await services.learned.publishAutomatic(digest(key+':iban'),{kind:'convention',subject:'BOBIBAN',text:'Invoices in this group go to BOBIBAN',scope:{kind:'conversation',id:space},
+      uncertainty:'explicit',evidence:[thanks],quote:{source_id:thanks.id,text:'thanks'},conflicts:[]},null,key+':iban',thanksDependencies,thanksState,'fixture',services.detect);
+    const standalone=await say(27,123,'Alice: send the March invoice'),standaloneInput=await input(((await services.reviews.queue(standalone)).ids)[0]!);
+    assert.ok(!standaloneInput.text.includes('BOBIBAN'),'the rule resting on Bob\'s message is left out');assert.ok(standaloneInput.text.includes('OWNERRULE'));
+    assert.deepEqual(await recorded(standalone),[{version:1,source:standalone.id,events:[{id:standalone.id,class:'owner_message'}],owner_account_only:true,rules:'owner',
+      rule_buckets:[],left_out:left(0,1,3)}]);
+    // A review of Nocheh's own reply leaves out the rules resting on another person's messages, as one of the owner's own
+    // typing does, so its notes stay Nocheh's; the owner's and Nocheh's own messages name nobody, so a rule learned from
+    // the owner's message stays, though it is not the owner's rule.
+    const later_reply={...message(28,bot,'Noted, invoices go there'),from:{id:bot,is_bot:true,first_name:'Nocheh'}};
+    const replied:Envelope={version:1,key:key+':result-28',origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:key+':28',revision:'0',occurred_at:null,text:null,
+      payload:{intent_key:key+':intent-28',method:'sendMessage',state:'delivered',status:200,send_class:'reply',wire_base64:Buffer.from(JSON.stringify({ok:true,result:later_reply})).toString('base64')}};
+    const nochehLater=(await services.capture.capture(captureEvidence(replied).originals[0]!)).source.reference;await services.guards.prepare(nochehLater,'fixture',services.detect);
+    const nochehLaterInput=await input(((await services.reviews.queue(nochehLater)).ids)[0]!);
+    assert.ok(!nochehLaterInput.text.includes('BOBIBAN')&&!nochehLaterInput.text.includes('BOBRULE')&&nochehLaterInput.text.includes('ALICERULE')&&
+      nochehLaterInput.text.includes('OWNERRULE'));
+    assert.ok(nochehLaterInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual(await recorded(nochehLater),[{version:1,source:nochehLater.id,events:[{id:nochehLater.id,class:'nocheh_reply'}],owner_account_only:false,rules:'others',
+      rule_buckets:[],left_out:left(0,1,2)}]);
+    // A note of that review is Nocheh's, never the owner's.
+    const nochehReview=((await services.reviews.queue(nochehLater)).ids)[0]!;
+    const [nochehNote]=await services.reviews.sources.labels([{key:digest(key+':note'),origins:[{by:'review',review:nochehReview}],more:0,cites:[nochehLater.id],more_cites:false,space}]);
+    assert.equal(nochehNote!.from,'nocheh');assert.doesNotMatch(nochehNote!.label,/rules learned from others/);
+    // Nocheh's reply to Bob's message is reviewed with it, and reads every rule.
+    const toBobReply={...message(29,bot,'Noted, Bob'),from:{id:bot,is_bot:true,first_name:'Nocheh'},reply_to_message:message(25,456,'Bob: invoices go to BOBIBAN from now on')};
+    const toBob:Envelope={version:1,key:key+':result-29',origin:'generated',bot_id:key,kind:'outbound_result',scope:group,source_id:key+':29',revision:'0',occurred_at:null,text:null,
+      payload:{intent_key:key+':intent-29',method:'sendMessage',state:'delivered',status:200,send_class:'reply',wire_base64:Buffer.from(JSON.stringify({ok:true,result:toBobReply})).toString('base64')}};
+    const nochehToBob=(await services.capture.capture(captureEvidence(toBob).originals[0]!)).source.reference;await services.guards.prepare(nochehToBob,'fixture',services.detect);
+    const toBobInput=await input(((await services.reviews.queue(nochehToBob)).ids)[0]!);
+    assert.ok(toBobInput.text.includes('BOBIBAN')&&toBobInput.text.includes('BOBRULE'));assert.ok(!toBobInput.text.includes('rules_left_out_for_owner_label'));
+    assert.deepEqual((await recorded(nochehToBob))[0].rule_buckets,['person']);
+
+    // Bob is denied: his review still waiting is withdrawn, under a later epoch or under the current one.
+    const [staleReview]=(await services.reviews.queue(await say(9,456,'Bob: first'))).ids;
+    const current=await say(10,456,'Bob: second'),[currentReview]=(await services.reviews.queue(current)).ids;
+    policy.group_access={[group]:{granted:['456'],denied:['456']}};
+    const nativeRun=await operations.memory_review!('native:'+currentReview,authority);
+    assert.deepEqual([nativeRun.state,nativeRun.waiting_reason],['skipped','sender_not_allowed']);
+    assert.deepEqual(await jobs(current),[]);assert.equal(await skipped(current),'sender_not_allowed');
+    await bump();
+    const staleSource=(await services.reviews.inspect(staleReview!)).source_reference;
+    assert.deepEqual((await services.reviews.queue(staleSource)).ids,[]);assert.deepEqual(await jobs(staleSource),[],'nothing is left for requestStrandedSources to renew');
+    assert.equal((await stores.control.query(`SELECT count(*)::int AS n FROM native_review_jobs WHERE source_reference->>'id'=$1 AND state='pending'`,[staleSource.id])).rows[0].n,0);
+    const strandedSteps=async()=>(await stores.control.query("SELECT count(*)::int AS n FROM workflow_registry WHERE family='memory_review' AND job_id=$1",['source:'+staleSource.id])).rows[0].n;
+    await stores.control.query("UPDATE workflow_registry SET state='completed',created_at=now()-interval '1 hour' WHERE family='memory_review' AND job_id=$1",['source:'+staleSource.id]);
+    const steps=await strandedSteps();await requestStrandedSources(stores.control,new Date(Date.now()-60000));assert.equal(await strandedSteps(),steps);
+
+    // Allowing Sara later doesn't bring her old messages into the notes; the owner's yes on one does, in a served group only.
+    policy.group_access={[group]:{granted:['789'],denied:[]}};await bump();
+    assert.deepEqual((await services.reviews.queue(sara)).ids,[]);assert.deepEqual(await jobs(sara),[]);
+    await services.access.setConsent(owner,sara,{enabled:true,expected_revision:0,operation_id:key+':consent'});
+    assert.equal(((await services.reviews.queue(sara)).ids).length,1,'the owner\'s yes reviews it');
+    const elsewhere=await say(1,789,'Sara elsewhere',{},unserved);
+    await services.access.setConsent(owner,elsewhere,{enabled:true,expected_revision:0,operation_id:key+':consent-elsewhere'});
+    assert.deepEqual((await services.reviews.queue(elsewhere)).ids,[],'never in a chat Nocheh does not serve');assert.equal(await skipped(elsewhere),'sender_not_allowed');
+  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a quote answering a message in another chat is never judged by this chat\'s message with the same id',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-elsewhere-')),key='review-elsewhere:'+Date.now();
+  // Two supergroups, each one a Telegram Desktop export can be mapped to. Alice (123) owns Nocheh, Bob (456) is allowed in
+  // both and Sara (789) in neither.
+  const here=String(Date.now()),there=String(Date.now()+13),group='-100'+here,other='-100'+there,bot=1000+Date.now()%1000;
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['456'],denied:[]},[other]:{granted:['456'],denied:[]}}};
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:'synthetic-review-service-credential-only',policy:()=>policy,
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('no notes review runs in this test');},
+    memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
+  let serial=0;
+  const capture=async(payload:Record<string,any>,chat=group)=>{
+    const update=++serial,message=payload.message;
+    const event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:String(bot),scope:chat,source_id:String(message.message_id),
+      revision:String(update),occurred_at:null,text:message.text??null,payload:{update_id:update,...payload}};
+    const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
+  };
+  // The owner's poll as a Telegram Desktop export records it: a reply to another chat is that chat's message id with
+  // reply_to_peer_id. `before` archives it as an export archived before such replies lost their reply relation was, with
+  // one to this chat's message with that id.
+  const exported=async(id:number,before=false)=>{
+    const value:Envelope={version:1,key:`${key}:export:${id}`,bot_id:'desktop-export',source_id:String(id),revision:'1',occurred_at:null,origin:'import',
+      kind:'telegram_desktop_message',scope:group,text:'',payload:{chat:{id:Number(here),type:'private_supergroup',name:'Example group'},
+        message:{id,type:'message',text:'',from:'Alice',from_id:'user123',reply_to_message_id:40,reply_to_peer_id:'channel'+there,poll:{question:'Which day?',answers:[]}}}};
+    const {reply_to_peer_id:_peer,...same}=(value.payload as any).message;
+    return (await services.access.archive.capture(before?{...value,source:observedSource({...value,payload:{...value.payload as object,message:same}})}:value)).source.reference;
+  };
+  const user=(id:number)=>({id,is_bot:false,first_name:id===123?'Alice':id===456?'Bob':'Sara'});
+  const message=(id:number,from:number,extra:Record<string,unknown>={},chat=group)=>({message_id:id,date:1700000000+id,chat:{id:Number(chat),type:'supergroup'},from:user(from),...extra});
+  const poll=(id:number,mark:string,target:Record<string,unknown>)=>message(id,123,{poll:{id:'p'+id,question:`${mark}POLL which day?`,
+    options:[{persistent_id:'a',text:'Friday',voter_count:0}],total_voter_count:0,is_closed:false,is_anonymous:false,type:'regular',allows_multiple_answers:false},
+    quote:{text:`${mark}TEXT`,position:0},external_reply:target});
+  const answering=(from:number,id:number)=>({origin:{type:'user',sender_user:user(from),date:1700000000+id},chat:{id:Number(other),type:'supergroup'},message_id:id});
+  const input=async(id:string)=>JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[(await services.reviews.inspect(id)).input_reference.id])).rows[0].content.toString());
+  const recorded=async(source:{id:string})=>(await stores.control.query("SELECT provenance FROM native_review_jobs WHERE source_reference->>'id'=$1",[source.id])).rows.map(row=>row.provenance.left_out);
+  const left=(sender=0,untraced=0)=>({sender_not_allowed:sender,rule_sender_not_allowed:0,rules_left_out_for_owner_label:0,quote_not_traced:untraced});
+  const read=async(source:{id:string})=>JSON.stringify((await services.contexts.prepare(source as any,await services.guards.state())).observations);
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    // Sara's message 40 and Bob's message 50 in the other group; this group's message 40 is the owner's own.
+    await capture({message:message(40,789,{text:'SARAFAR the deposit code is 7781'},other)},other);
+    await capture({message:message(50,456,{text:'BOBFAR the caterer called'},other)},other);
+    await capture({message:message(40,123,{text:'OWNFORTY unrelated words in this group'})});
+    // A Desktop export of a reply to another chat has no reply relation, so nothing links it to this chat's message 40.
+    const fresh=await exported(41);
+    assert.equal((await stores.archive.query("SELECT 1 FROM source_relations WHERE event_id=$1 AND kind='reply_to'",[fresh.id])).rowCount,0);
+    // Bob adds an option to the owner's poll that answers Sara's message in the other group with a quote of it. The
+    // archive holds that poll only as a Desktop export, archived now or before (with this chat's message 40 as its reply),
+    // or as a live revision with that export beside it, or never: the quote goes from the owner's notes review, counted as
+    // not traced when nothing tells whose words it repeats and as hers when the live revision does. Answering Bob's
+    // message, the live revision lets it in whatever an export beside it says. Interpretations read every quote.
+    const stale=await exported(43,true);
+    assert.equal((await stores.archive.query("SELECT 1 FROM source_relations WHERE event_id=$1 AND kind='reply_to'",[stale.id])).rowCount,1);
+    await capture({message:poll(45,'LIVESARA',answering(789,40))});await exported(45);
+    await capture({message:poll(47,'LIVEBOB',answering(456,50))});await exported(47);
+    for(const [id,mark,target,inReview,counted] of [[41,'FRESH',answering(789,40),false,left(0,1)],[43,'STALE',answering(789,40),false,left(0,1)],
+      [45,'LIVESARA',answering(789,40),false,left(1)],[47,'LIVEBOB',answering(456,50),true,left()],[49,'UNSEEN',answering(456,50),false,left(0,1)]] as const) {
+      const added=await capture({message:message(id+100,456,{poll_option_added:{poll_message:poll(id,mark,target),option_persistent_id:'c',option_text:`${mark}OPTION Saturday`}})});
+      const reviewed=(await input(((await services.reviews.queue(added)).ids)[0]!)).text as string,learned=await read(added);
+      assert.equal(reviewed.includes(`"${mark}TEXT"`),inReview,mark);assert.ok(learned.includes(`"${mark}TEXT"`),mark);
+      for(const text of [reviewed,learned])assert.ok(text.includes(`${mark}POLL which day?`)&&text.includes(`${mark}OPTION Saturday`),mark);
+      assert.deepEqual(await recorded(added),[counted],mark);
+    }
+    // The owner's pin of that poll, held only as a Desktop export, archived now or before: its quote goes from the owner's
+    // notes review, counted as not traced, and the pinned poll stays.
+    for(const [id,mark] of [[41,'FRESH'],[43,'STALE']] as const) {
+      const pin=await capture({message:message(id+200,123,{pinned_message:poll(id,mark,answering(789,40))})});
+      const reviewed=(await input(((await services.reviews.queue(pin)).ids)[0]!)).text as string;
+      assert.ok(!reviewed.includes(`"${mark}TEXT"`)&&reviewed.includes(`${mark}POLL which day?`),mark);
+      assert.deepEqual(await recorded(pin),[left(0,1)],mark);
+      assert.ok((await read(pin)).includes(`"${mark}TEXT"`),mark);
+    }
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });

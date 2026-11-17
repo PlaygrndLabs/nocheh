@@ -32,11 +32,14 @@ MAX_FOLLOWED = 50
 # What each kind of problem needs to read before it may count as cleared.
 SOURCES = {'application': 'application', 'service': 'services', 'models': 'routes', 'work_unchecked': 'work', 'workers': 'work',
            'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram',
-           'reader': 'readers',
+           'reader': 'readers', 'notes': 'notes', 'memory_read': 'notes', 'note_labels': 'store_notes', 'forwards_read': 'store_notes',
            'backup': 'backups', 'backup_unreadable': 'backups', 'backup_skipped': 'backups', 'offsite': 'backups', 'offsite_skipped': 'backups'}
-# A part's model calls and a reader's files, counted per day with the calls or reads that worked: they clear once
-# one works after the last failure a check saw.
-COUNTED_TODAY = ('model', 'reader')
+# A part's model calls, a reader's files, the steps that tell where notes came from and turns that read long-term
+# memory, counted per day with those that worked: they clear once one works after the last failure a check saw. Hermes's
+# steps (notes, memory_read) and the stores' (note_labels, forwards_read) are lines of their own, so a step that works on
+# one side never clears the other's.
+COUNTED_TODAY = ('model', 'reader', 'notes', 'memory_read', 'note_labels', 'forwards_read')
+NOTE_LINES = ('notes', 'memory_read', 'note_labels', 'forwards_read')
 # Sends of the notices themselves, left out of the 'sends' count so a notice that fails cannot feed itself.
 OWN_SENDS = ('notice', 'notice_update')
 # Background work families, as System › Work names them.
@@ -176,6 +179,13 @@ def problems(monitoring, usage_rows, today):
                 label=row.get('label') or row['reader'], failure=row['failure'],
                 # Reads that worked today, so a notice can say when reading works again.
                 ok=row.get('ok') if type(row.get('ok')) is int else None)
+    # Steps that failed to record or look up where notes came from, counted per attempt so a failure that comes back
+    # grows the count, and turns that could not read long-term memory in full (ADR-0257; services/hermes/usage.py NOTE_KINDS),
+    # then the stores' own: labelling notes, and recall's ask of the owner's forwards and files (monitoring.STORE_NOTE_KINDS).
+    notes = monitoring.get('note_problems')
+    for row in notes if isinstance(notes, list) else []:
+        if row.get('day') == today and row.get('kind') in NOTE_LINES and type(row.get('failed')) is int:
+            add(f"{row['kind']}:{today}", row['failed'], row['kind'], ok=row.get('ok') if type(row.get('ok')) is int else None)
     # Nocheh's GitHub app: its key never expires, so only a refused one gives a notice.
     if (monitoring.get('github') or {}).get('reconnect'):
         add('github', 1, 'github', reason='reconnect')
@@ -272,6 +282,20 @@ def text(problem, new):
         label, one, many, verb = READERS.get(problem['reader'], (problem['label'], 'file', 'files', 'read'))
         return (f"{label}: {_plural(count, one, many)} couldn’t be {verb} today because {WRITE_FAILURES[problem['failure']]}. "
                 f"The originals are kept: Make a new version on a message’s page {'reads' if verb == 'read' else 'transcribes'} one again.")
+    if kind == 'notes':
+        return (f"Memory labels: telling where notes came from failed {_plural(count, 'time', 'times')} today. Notes written "
+                'while it failed show “Source not recorded” or a less exact source, and replies may have seen “source not '
+                'available”. The notes themselves are kept.')
+    if kind == 'memory_read':
+        return (f"Long-term memory: Nocheh couldn’t read memory from your forwards and files, or your memory context, "
+                f"{_plural(count, 'time', 'times')} today; replies used the rest of your memory.")
+    if kind == 'note_labels':
+        return (f"Memory labels: looking up where notes came from failed {_plural(count, 'time', 'times')} today. Recall and "
+                'the Notes page showed those notes as “source not available right now” or without their chat, and replies may '
+                'have seen them without their chat. The notes and what was recorded about them are kept.')
+    if kind == 'forwards_read':
+        return (f"Long-term memory: recall couldn’t ask your forwards and files {_plural(count, 'time', 'times')} today; "
+                'it answered from the rest of your memory.')
     if kind == 'backup':
         reason = BACKUP_REASONS.get(problem.get('reason'), BACKUP_REASONS['backup_failed'])
         if count == 1:
@@ -379,6 +403,11 @@ def readable(monitoring):
         found.add('telegram')
     if isinstance(monitoring.get('reader_problems'), list):
         found.add('readers')
+    if isinstance(monitoring.get('note_problems'), list):
+        found.add('notes')
+        # The stores' lines only when their counts were read too: an archive that could not be read clears none of them.
+        if isinstance((monitoring.get('archive') or {}).get('memory_problems'), list):
+            found.add('store_notes')
     return found
 
 

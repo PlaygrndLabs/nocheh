@@ -262,10 +262,11 @@ export class ChatAdds {
   }
   private owner() {return telegramAddress(ownerChat(this.policy()));}
   /** A notice in the owner's private chat, at most once by its id. A Telegram service that refuses its buttons before it
-   *  sends anything gets the text alone. True once it went, or may have. */
+   *  sends anything gets the text alone. True once it went, or may have. The card, a note and a removal line are each
+   *  Nocheh's own notice, kept but never learned (ADR-0256); the card's edit after a press is a card update. */
   private async send(id:string,text:string,buttons?:Button[][]):Promise<boolean> {
     const target=this.owner();if(!target)return false;
-    const notice={id,...target,text};let result;
+    const notice={id,...target,text,send_class:'notice'};let result;
     try{result=await this.call('telegram.notice',buttons?{...notice,buttons}:notice,30000);}
     catch(error) {
       if(!buttons||!(error instanceof HttpError)||error.code!=='telegram_rejected_request')return false;

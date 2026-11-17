@@ -150,6 +150,8 @@ test('someone else\'s add is left after the wait, as one leave call, and only a 
     const note=(event:string)=>notes.filter(item=>item.input.id===digest('chat-add-note:'+event));
     assert.equal(notes.length,5);
     for(const item of notes){assert.equal(item.input.chat_id,OWNER);assert.equal(item.input.buttons,undefined);assert.equal(item.input.topic,undefined);}
+    // Each is Nocheh's own notice, kept but never learned (ADR-0256).
+    assert.ok(notes.every(item=>item.input.send_class==='notice'));
     assert.equal(note(memberAdd)[0]!.input.text,`${quoted('Mina')} added Nocheh to ${shown(memberId,h.title(member))}. Only you can add Nocheh, so it left. To use it there, add it yourself.`);
     assert.equal(note(hiddenAdd)[0]!.input.text,`Someone added Nocheh to ${shown(hiddenId,h.title(hidden))} without showing who, so it left. To use it there, turn off Remain anonymous and add Nocheh yourself.`);
     assert.equal(note(legacyAdd)[0]!.input.text,`${quoted('Mina')} added Nocheh to ${shown(legacy,h.title(legacy))}. Only you can add Nocheh, so it left. To use it there, add it yourself.`);
@@ -222,7 +224,7 @@ test('a leave Telegram still answers with the group\'s upgrade after over an hou
     for(const value of [member,stranger]){const saved=await h.chat(tg(value));assert.deepEqual([saved.state,saved.state_seq],['could_not_leave',null]);}
     assert.deepEqual(await outcome(offlineAdd),['waiting',null,'none',7]);assert.equal((await h.chat(tg(offline))).state,'pending');
     assert.deepEqual(h.calls.filter(item=>item.operation==='telegram.notice').map(item=>item.input),[{id:digest('chat-add-note:'+memberAdd),chat_id:OWNER,
-      text:`${quoted('Mina')} added Nocheh to ${shown(tg(member),h.title(member))}, and it couldn't leave. It stays silent there.`}]);
+      text:`${quoted('Mina')} added Nocheh to ${shown(tg(member),h.title(member))}, and it couldn't leave. It stays silent there.`,send_class:'notice'}]);
     // Once settled, nothing is tried again, and the owner can turn the group on or off.
     await h.due();await h.adds.settle();
     assert.deepEqual([leaves(memberAdd),leaves(strangerAdd)],[7,7]);
@@ -259,7 +261,7 @@ test('notes about leaving are capped at one per group and ten in all a day, a re
     await h.adds.settle();
     assert.deepEqual([(await h.row(removal)).outcome,(await h.row(removal)).notice],['told','sent']);
     assert.equal(sent().length,11);
-    assert.deepEqual(sent().at(-1)!.input,{id:digest('chat-add-tell:'+removal),chat_id:OWNER,text:`Nocheh was removed from ${shown(chatIdFor('telegram',on),h.title(on))}.`});
+    assert.deepEqual(sent().at(-1)!.input,{id:digest('chat-add-tell:'+removal),chat_id:OWNER,text:`Nocheh was removed from ${shown(chatIdFor('telegram',on),h.title(on))}.`,send_class:'notice'});
     await h.adds.settle();assert.equal(sent().length,11,'told once');
     // Nor does a removal's line count toward the cap: with nine notes about leaving and that line in the 24 hours, the next
     // hidden adder's note still goes.
@@ -328,11 +330,12 @@ test('the owner\'s add gets its own project and a card, in one owner command; th
     const text=(chatId:string,value:string)=>`Nocheh is on in ${shown(chatId,h.title(value))}, in its new project ${quoted(h.title(value))}. You can move it to another project, take it out of projects, or turn Nocheh off there.`;
     const freshCard=card(freshAdd);
     assert.equal(freshCard.length,1);
-    assert.deepEqual(freshCard[0]!.input,{id:digest('chat-add-card:'+freshAdd),chat_id:OWNER,text:text(freshId,fresh),buttons:[
+    // The card is Nocheh's own notice, never learned (ADR-0256); its edit after a press is a card update by its route.
+    assert.deepEqual(freshCard[0]!.input,{id:digest('chat-add-card:'+freshAdd),chat_id:OWNER,text:text(freshId,fresh),send_class:'notice',buttons:[
       [{text:'Move to Shop 4',callback:'ng0'+freshAdd.slice(0,32)},{text:'Move to Shop 3',callback:'ng1'+freshAdd.slice(0,32)},{text:'Move to Shop 2',callback:'ng2'+freshAdd.slice(0,32)}],
       [{text:'No project',callback:'ngx'+freshAdd.slice(0,32)},{text:'Turn off',callback:'ngo'+freshAdd.slice(0,32)}]]});
     assert.deepEqual(card(legacyAdd).map(item=>!!item.input.buttons),[true,false],'refused buttons: the card goes as text');
-    assert.equal(card(legacyAdd)[1]!.input.text,text(legacy,legacy));
+    assert.equal(card(legacyAdd)[1]!.input.text,text(legacy,legacy));assert.equal(card(legacyAdd)[1]!.input.send_class,'notice','the card without its buttons is still a notice');
     assert.equal(card(answeredAdd).length+card(offAdd).length,0);
     const count=h.calls.length;
     await h.adds.settle();assert.equal(h.calls.length,count,'a second settle sends nothing');
@@ -463,8 +466,8 @@ test('Nocheh removed from a group it was on in is told once; from a group that w
     assert.deepEqual([(await h.row(onAdd)).outcome,(await h.row(legacyAdd)).outcome],['superseded','superseded']);
     const tells=h.calls.filter(item=>item.operation==='telegram.notice');
     assert.deepEqual(tells.map(item=>item.input),[
-      {id:digest('chat-add-tell:'+removals[0]),chat_id:OWNER,text:`Nocheh was removed from ${shown(chatIdFor('telegram',on),h.title(on))}.`},
-      {id:digest('chat-add-tell:'+removals[1]),chat_id:OWNER,text:`Nocheh was removed from ${shown(legacy,h.title(legacy))}.`}]);
+      {id:digest('chat-add-tell:'+removals[0]),chat_id:OWNER,text:`Nocheh was removed from ${shown(chatIdFor('telegram',on),h.title(on))}.`,send_class:'notice'},
+      {id:digest('chat-add-tell:'+removals[1]),chat_id:OWNER,text:`Nocheh was removed from ${shown(legacy,h.title(legacy))}.`,send_class:'notice'}]);
     for(const event of removals.slice(0,2))assert.deepEqual([(await h.row(event)).state,(await h.row(event)).outcome,(await h.row(event)).notice],['done','told','sent']);
     assert.deepEqual([(await h.row(removals[2]!)).action,(await h.row(removals[2]!)).state,(await h.row(removals[2]!)).notice],['none','done','none']);
     await h.adds.settle();assert.equal(h.calls.length,2,'told once');

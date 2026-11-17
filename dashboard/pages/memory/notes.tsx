@@ -20,6 +20,7 @@ import {
   LoadingRows,
   Notice,
   Select,
+  type Tone,
 } from '../../ui/core';
 import {Drawer} from '../../ui/overlay';
 import {useChats} from './shared';
@@ -34,12 +35,25 @@ type Profile = {
   answer_group?: string;
   answer_at?: string;
 };
-type Note = {name: string; exists: boolean; text: string; truncated?: boolean; citations: unknown[]};
+/** One note, with where it came from in your words (ADR-0257); `from` is the fixed kind its colour is keyed on. */
+type Entry = {target: string; text: string; from: string; label: string};
+type Note = {name: string; exists: boolean; text: string; truncated?: boolean; citations: unknown[]; entries?: Entry[]};
 type Session = {id: string; title: string; source: string};
 type MemoryView = {memories: Note[]; sessions: Session[]};
 type Message = {id: string; role: string; content: unknown; truncated?: boolean};
 
 const noteTitle: Record<string, string> = {'MEMORY.md': 'General notes', 'USER.md': 'About you'};
+// Your own messages only; Nocheh's own work; other people's words or what a turn read; nobody known.
+const fromTone: Record<string, Tone> = {
+  owner: 'good',
+  nocheh: 'info',
+  turn: 'info',
+  person: 'warn',
+  forward: 'warn',
+  file: 'warn',
+  mixed: 'warn',
+  turn_read: 'warn',
+};
 const roleLabel: Record<string, string> = {
   user: 'Person',
   assistant: 'Assistant',
@@ -74,8 +88,16 @@ export function Notes() {
     profile ? '/memory?' + new URLSearchParams({scope: profile.scope, profile: profile.profile}) : null,
     30000,
   );
+  // Messages from people not allowed where they wrote stay out of your notes; the reviews list counts them.
+  const reviews = useResource<{kept_out?: number}>('/memory/reviews', 60000);
+  const keptOut = reviews.data?.kept_out ?? 0;
   const [query, setQuery] = useState('');
   useEffect(() => setQuery(''), [profile?.profile]);
+  // A group's USER.md is what Nocheh noted about the people there, not about you.
+  const title = (name: string) =>
+    name === 'USER.md' && profile && !profile.owner && !profile.private_answer
+      ? 'About people here'
+      : (noteTitle[name] ?? name);
   const sessions = (memory.data?.sessions ?? []).filter(s =>
     (s.title || s.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
@@ -110,6 +132,13 @@ export function Notes() {
       {memory.error && (
         <LoadError what="notes for this chat" error={memory.error} onRetry={() => void refreshResources()} />
       )}
+      {keptOut > 0 && (
+        <p className="text-[13px] text-muted">
+          {keptOut === 1
+            ? '1 message from a person not allowed there was kept out of your notes (it’s still in group memory).'
+            : `${keptOut} messages from people not allowed there were kept out of your notes (they’re still in group memory).`}
+        </p>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
         <Card>
@@ -123,8 +152,26 @@ export function Notes() {
             ) : (
               memory.data?.memories.map(note => (
                 <section key={note.name}>
-                  <h3 className="mb-1.5 text-sm font-semibold">{noteTitle[note.name] ?? note.name}</h3>
-                  {note.exists && note.text ? (
+                  <h3 className="mb-1.5 text-sm font-semibold">{title(note.name)}</h3>
+                  {note.entries?.length ? (
+                    <ul className="max-h-[28rem] space-y-2 overflow-auto rounded-lg bg-subtle p-3">
+                      {note.entries.map((entry, index) => (
+                        <li key={index} className="space-y-1">
+                          <p className="text-[13px] leading-relaxed break-words whitespace-pre-wrap" dir="auto">
+                            {entry.text}
+                          </p>
+                          <Badge
+                            tone={fromTone[entry.from] ?? 'neutral'}
+                            dot
+                            title={entry.label}
+                            className="whitespace-normal"
+                          >
+                            {entry.label}
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : note.exists && note.text ? (
                     <pre
                       className="max-h-[28rem] overflow-auto rounded-lg bg-subtle p-3 font-sans text-[13px] leading-relaxed break-words whitespace-pre-wrap"
                       dir="auto"

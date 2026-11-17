@@ -132,6 +132,7 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     assert.ok(!JSON.stringify(turn).includes(GP2)&&!JSON.stringify(turn).includes(GP3),'no group ID reaches the turn');
     assert.ok(!JSON.stringify(turn).includes('fixture-secret'),'a name comes from its guarded copy, never the original');
     assert.equal(replyTo(start).chat_id,OWNER);assert.equal(replyTo(start).button,undefined,'a private answer carries no button');
+    assert.equal(replyTo(start).send_class,'private_answer');assert.equal(replyTo(asked).send_class,'reply');
     const answered=await row(id);
     assert.equal(answered.state,'answered');assert.equal(answered.start_event,start);assert.equal(answered.reply_chat_id,OWNER);
 

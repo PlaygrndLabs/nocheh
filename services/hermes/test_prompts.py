@@ -33,6 +33,15 @@ class PromptTests(unittest.TestCase):
             self.assertEqual(prompts.text({'reply.group': value}, 'reply.group'), prompts.DEFAULTS['reply.group'])
         self.assertEqual(prompts.text(None, 'memory.limited'), prompts.DEFAULTS['memory.limited'])
 
+    def test_the_model_is_told_what_each_note_source_means_and_reviews_leave_labels_to_nocheh(self):
+        # ADR-0257: from and label are Nocheh's; the evidence text explains them, and a review never copies the records line.
+        from .prompts import DEFAULTS
+        for token in ('from=owner','from=nocheh','from=turn','turn_read','unknown or unavailable'):self.assertIn(token,DEFAULTS['memory.evidence'])
+        # A note from Nocheh's replies may rest on rules learned from others, so it is never the owner's own words.
+        self.assertIn("rules Nocheh learned in that chat, including from other people's messages, and is not the owner's own words",DEFAULTS['memory.evidence'])
+        self.assertIn('do not copy the records line into notes',DEFAULTS['memory.notes_review'])
+        self.assertIn('nocheh:event:<id>',DEFAULTS['memory.notes_review'])
+
     def test_management_reports_the_defaults_for_the_dashboard(self):
         from .management import dispatch
         self.assertEqual(dispatch('/nonexistent', 'model', None, {'action': 'prompts'}),

@@ -62,6 +62,10 @@ test('recall results are labelled from saved names, and a failed lookup only lea
   const failed=await withRecallPlaces({control:broken,archive:broken},{hits:[{profile:'b',space:'-1005/topic/9',owner:false,answer:false,text:'two'}]}) as any;
   assert.deepEqual(failed.hits,[{profile:'b',place:'A Telegram group › a topic',text:'two'}]);
   assert.deepEqual(await withRecallPlaces(stores,{error:'x'}),{error:'x'},'anything but hits passes through');
+  // A note's source and a row's writer, put in words before the places are named, stay as they are (ADR-0257).
+  const labelled=await withRecallPlaces(stores,{hits:[{profile:'a',space:'123',owner:true,answer:false,kind:'native_note',text:'one',source:{from:'turn',label:'Nocheh\'s note'}},
+    {profile:'a',space:'123',owner:true,answer:false,kind:'native_session',text:'two',role:'Nocheh\'s reply'}]}) as any;
+  assert.deepEqual(labelled.hits.map((hit:any)=>[hit.place,hit.source??hit.role]),[['Your private chat',{from:'turn',label:'Nocheh\'s note'}],['Your private chat','Nocheh\'s reply']]);
 });
 
 test('a recalled hit is named by its chat row, never by how its id looks: digest groups, an upgraded group and unknown ids (ADR-0252)',async t=>{

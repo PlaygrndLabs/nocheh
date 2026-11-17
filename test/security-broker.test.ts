@@ -1,7 +1,5 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync,readFileSync} from 'node:fs';
-import {join} from 'node:path';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
@@ -10,11 +8,12 @@ import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,br
 import {createServer,type IncomingMessage} from 'node:http';
 import {once} from 'node:events';
 import {effectLog} from '../src/security/store.js';
+import {readFileSync} from 'node:fs';
+import {servicesFile} from './services-file.js';
 
 // Hermes's machine backend has words for every code a machine command may come back with; a cleanup's own code never reaches it.
 test('the machine backend words every code a machine command is refused or fails with',()=>{
-  const places=[new URL('../../services/hermes/machine_box.py',import.meta.url).pathname,join(process.env.PYTHONPATH??'/nonexistent','services/hermes/machine_box.py')];
-  const source=readFileSync(places.find(place=>existsSync(place))!,'utf8'),block=source.match(/^REFUSALS=\{\n([^}]*)\n\}$/m);
+  const source=readFileSync(servicesFile('services/hermes/machine_box.py'),'utf8'),block=source.match(/^REFUSALS=\{\n([^}]*)\n\}$/m);
   assert.ok(block,'REFUSALS is one dict');
   assert.deepEqual([...block[1]!.matchAll(/^\s*'([a-z_]+)':/gm)].map(match=>match[1]!).sort(),[...machineErrors].filter(code=>code!=='machine_cleanup_failed').sort());
 });

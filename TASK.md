@@ -343,6 +343,244 @@ Step 2b-2 retired `TELEGRAM_GROUP_IDS`, which this step still read.
   group by its digest, imported where the first start already gave that group its old id,
   does not reach the group until adoption.
 
+Security fixes: where memory comes from (owner, 2026-11-14: "all yes", approving the fixes of
+the prompt-injection review with what each one loses; this is risk 5, "Other people's text
+becomes your private memory"). One pull request of several commits
+([ADR-0256](docs/adr/0256-nochehs-own-messages-carry-a-send-class.md),
+[ADR-0257](docs/adr/0257-learned-memory-names-its-source.md)):
+- Send classes: each message Nocheh sends carries a class, set where the send is decided and
+  kept in its archived copy. Cards, card updates, refusals, notices and reminders are kept,
+  searchable and context for the owner's reply, but not learned unless the owner turns
+  learning on for one; replies, follow-ups, private answers, job reports, scheduled results and
+  approved posts are learned. Nothing already in long-term memory is rebuilt
+  ([classes](test/send-classes.test.ts), [workflows](test/learning-workflow.test.ts),
+  [capture](test/store-generated-capture.test.ts), [Telegram](services/telegram/test_service.py),
+  [sends](test/store-telegram-actions.test.ts), [reminders](test/store-tasks.test.ts)).
+- People not allowed: a message from someone not allowed where they wrote, or a reaction to
+  one, stays out of the owner's notes review and only there; group replies, group memory,
+  interpretations and search keep it. A review drops such messages, rules learned from them
+  and quotes of them from its context, and cuts such a message out of a pin of it; a later
+  grant adds nothing back. A quote is judged by the message it answers even when the review
+  holds nothing of it: another bot's message, or one Nocheh never got, by its author as the
+  reply shows it, and one in another chat or topic stays only when the archive holds it and its
+  sender is allowed there; a quote inside a pinned message is judged the same way, and cut
+  when the archive never got the pinned message, which Telegram sends without its reply,
+  counted as a quote that could not be traced (`quote_not_traced`), since no sender was
+  refused. So is a
+  quote inside a message another embeds (a poll or a checklist a service message shows), traced
+  through that message as archived in the same chat: one quoting Nocheh's words is cut from
+  everything learned, and so is one the archive can't trace (that message never archived,
+  archived in a revision answering nothing, or archived only as Telegram Desktop exports),
+  counted as a quote that could not be traced (`quote_not_traced`), whoever it quoted. One that
+  keeps its reply to a message in another chat is judged there by that message, and cut and
+  counted as not traced when the archive holds no revision of the embedded message to judge it
+  by. A Telegram Desktop export's reply to another chat (`reply_to_peer_id`) gets no reply
+  relation, since its id is that chat's, and the review never judges a quote by one an earlier
+  export was given. A pin
+  of Nocheh's own message is never counted as kept out: one it
+  learns stays in the pin, and a card, notice or reminder is taken out of it, so a pin of a card
+  with nothing else to review is not reviewed at all. Memory › Assistant
+  notes counts what was kept out, and System › Background work shows the message's Memory notes
+  step as Done with the reason under it, which its details show under "Note", as for every task
+  that ended, not under "Waiting for"
+  ([reviews](test/store-native-review.test.ts),
+  [context](test/store-learning-engine.test.ts), [senders](test/assistant.test.ts),
+  [workflows](test/store-workflows.test.ts)).
+- Labels: every note carries a label built by code from Hermes's own record of who wrote it
+  and what that run read, made when the note is read. "You" only for a review of nothing but
+  the owner's own messages that cites them and reads no rule but those the owner wrote (a rule
+  learned automatically, even from the owner's own messages, can restate others' words); a
+  turn's note never. A quote of a message in another chat or topic is never the sender's own
+  (in a forum topic Telegram also points the reply at the topic's first message), and a
+  Telegram Desktop export's message is a forward when it carries any of its forward fields. A
+  checklist others can add tasks to, and any checklist edited, pinned, quoted or forwarded, is
+  never the sender's own typing: Telegram names no one per task, and the owner can stop sharing
+  one after others added tasks; only in the owner's private chat with Nocheh, where no one else
+  can add tasks, does the owner's own stay the owner's. A poll someone else added an option to, a
+  deleted option (except one from the owner's own poll in the owner's private chat), a message
+  embedding someone else's or one quoting a message, and a Desktop export's checklist or poll
+  are read the same way. Each is labelled as a pin or quote of someone else's message, or as a
+  message holding someone else's words (no pin claimed), and the owner's pin of such a message
+  of their own as a message holding someone else's words that the owner pinned, and still
+  learned. A
+  rule is judged by the messages code recorded it was learned from, never by what the model
+  cited, and rules resting on others' words label the note as theirs; only a review
+  holding someone else's words reads them, as a review of Nocheh's own learned messages, alone or
+  with the owner's own, leaves them out. A pin carries the words of the message it pinned, and
+  the owner's quote or pin of Nocheh's own learned message counts as Nocheh's. A turn's reads
+  count a search by meaning as other chats and an earlier read in its session only when the note
+  copies from it. A forward of the sender's own message is never a read in the message the turn
+  answers; earlier in the session only the owner's in their private chat is skipped, so any other
+  own forward counts, the owner's own in a group or in a private answer carried from one included
+  (it fails closed).
+  The model reads fixed words beside the unchanged note, with a fixed sentence on what they
+  mean, and `from=nocheh` is not the owner's own words; the owner reads editable words ("Note
+  sources on the Notes page") under each note; each recalled note carries its own source. Each
+  review carries a records line in fixed words. Every failure to record or look up a label, to
+  read a turn's messages, or to read the forwards block, in Hermes or in storage, is counted per
+  day into the owner's problem notice, which says what the owner sees while it fails; storage
+  writes a step that worked only after that day's failure of its kind, so steady use writes nothing,
+  and its failures are lines of their own, apart from Hermes's, so one side working never clears
+  the other's
+  ([facts](test/source-facts.test.ts), [labels](test/source-labels.test.ts),
+  [route](test/store-note-sources.test.ts), [records](services/hermes/test_note_sources.py),
+  [evidence](services/hermes/test_memory_evidence.py), [recall](test/recall-places.test.ts),
+  [notices](services/hermes/test_monitoring.py), [notice lines](services/hermes/test_problem_notices.py),
+  [turns](services/hermes/test_turn_process.py),
+  [status](test/store-server.test.ts), [health](test/dashboard-system-health.test.mjs)).
+- Long-term memory: one peer that is not a person writes the owner's forwards and files.
+  Someone else's forward goes to the owner's own forwards session, with a fixed pointer left
+  in the chat; file and audio text is a second record in the same chat session; the owner's
+  forwards and files in a group stay in that group's session. Someone else's message the owner
+  pins is kept as a forward is. A quote of any of Nocheh's own messages, by anyone, is learned
+  as the sender's words without it, in learning too, where the owner's quote of a learned one
+  stays direct; a pin of any of Nocheh's own messages, by anyone, an anonymous admin included,
+  leaves only a pointer in the chat where it was pinned, and nothing learned reads a pinned card.
+  Nocheh's own account's message the archive does not hold as Nocheh's learned one (its
+  delivery not archived yet, or a forward of Nocheh's message), told by an equality check with
+  the bot the update came to (`events.bot_id`, `isBotAccount`), is cut from a pin or quote the
+  same way, also from a quote of a reply in another chat or inside a pinned message, and its
+  pin leaves the same pointer. Only Nocheh's own words are cut: another bot's message is
+  learned labelled as someone else's (the owner's pin of it kept with the forwards and files),
+  and a message sent through an inline bot, which its sender wrote, is labelled as sent through
+  an inline bot. The owner's quote of their own forward quotes whoever wrote it, never the
+  owner's own words. A card the owner replies to stays context of the reply (ADR-0256). In
+  learning the owner's pin of Nocheh's learned message, and the owner's pin or quote of a card
+  or of Nocheh's message not archived yet, passes nothing on, so the owner's claims beside it
+  can stay direct; a claim citing the pin or quote never is. A pin of only a card, or of only
+  Nocheh's message not archived yet, asks no interpretation or notes review either. A pinned
+  message's own reply (a poll or a contact it answers in another chat) is never learned with
+  the pin. A message another embeds (the checklist a service message reports on, a giveaway's or
+  a suggested post's message, the poll an option was added to), found by shape alone so a field
+  Telegram adds later is found too, is kept and labelled, not cut: only Nocheh's own words in it
+  are cut, and in the owner's notes review one from someone not allowed there, a poll option
+  such a person added and a deleted option's text are cut out by place and counted, while
+  interpretations and long-term memory keep them. Owner
+  turns read the forwards block apart from the owner's, and
+  recall asks it; when that ask fails, recall keeps the other answers and says so, and
+  answers stay whole under their headers within 20,000 characters. A claim resting on a
+  forward, a file, a pin or someone else's message is reported or inferred, never direct.
+  Messages already learned keep their form, also after a rebuild retired their writes
+  ([memory](test/store-native-memory.test.ts), [entities](test/store-entities.test.ts),
+  [engine](test/memory-engine.test.ts)).
+- Full tester: `not_allowed_group_text_stays_out_of_owner_notes`, `display_name_cannot_borrow`,
+  `forward_kept_apart_and_labelled` and `own_file_stays_recallable`, and new checks in the
+  not-allowed reply, forwarded message, member card, reminder, notes, job report, document,
+  photo and voice scenarios. Since the tester's Honcho answers from the deterministic model,
+  `own_file_stays_recallable` checks that recall asked the forwards participant, got its answer
+  and that this participant holds the file's text. Both scenarios check that only that
+  participant's conclusions about itself hold the private mark, and ask which block holds it
+  by its number only, since a question holding the mark is the owner's own words, learned about
+  the owner ([forward reads](test/test_forward_memory_reads.py)). Every check that can wait
+  behind the owner's notes reviews (a review, a message's notes and memory steps settling, an
+  import's review steps)
+  waits up to 40 minutes, stops at once when the review it waits for was paused or stayed
+  uncertain after Nocheh gave up observing it (8 looks, read from the code), and on a timeout
+  names how many reviews still waited, or says that count is unknown. The
+  tester's Honcho takes the real setup's query and input limits and asks its model for answers
+  as the real setup does, `json_object` at every dialectic level, from the same settings code
+  ([scenarios](tools/acceptance/product_scenarios.py), [brain](test/test_scripted_brain.py),
+  [waits](test/test_product_review_waits.py),
+  [rehearsal](tools/acceptance/rehearsals/installation-rehearsal.py),
+  [tester Honcho](test/test_installation_rehearsal.py)).
+
+  Nothing real lost: everything is still learned somewhere, and what leaves the owner's notes
+  or the owner's long-term memory block stays in the archive, search and group memory, or in
+  the forwards block. Checked: the type check and build; the unit tests (the 4 workflow tests
+  that need Postgres fail, as on main); the store suite in the Docker fixture (all 97 files);
+  the Telegram, Hermes and tester Python checks (Hermes's two environment-only errors, as
+  before); the dashboard tests and format check; and Honcho v3.6.0 makes no embeddings call
+  for the extra reads. After the review's fixes: the store files they touch, the unit tests,
+  the whole Hermes suite, the Telegram checks and the dashboard checks again. After the second
+  review's fixes (pins and quotes of Nocheh's own messages, the owner-and-Nocheh rule leave-out,
+  counting a success only after a failure, the "Note" heading, a member's own forward in earlier
+  rows, the tester's checks): the build; the unit tests (the same 4 fail); the dashboard tests
+  and format check; the store files they touch (note sources, reviews, entities, long-term
+  memory, status, forwards); the whole Hermes suite (its two environment-only errors); the
+  tester's Python tests and the Honcho setup test. After the third review's fixes (Nocheh's cards
+  out of every pin and quote, a pin of only a card not reviewed, the owner's pin or quote of
+  Nocheh's message passing nothing on in learning, the stores' notice lines apart, one helper for
+  the tests that read a Python file, every review wait, the tester's Honcho answers, where the
+  owner's own forward is skipped): the build; the unit tests (the same 4 fail); the dashboard
+  tests and format check; the notice, note-source and tester Python tests; the Honcho setup tests
+  and the docs test. After the fourth review's fixes (a bot's words cut from a pin or quote whose
+  message the archive does not hold as Nocheh's, a quote inside a pinned message, an anonymous
+  admin's pin of Nocheh's message, the owner's pin or quote of a card passing nothing on, no
+  interpretation for a pin of only a card, review waits that stop only at a review given up, the
+  stores' notice line naming replies): the build; the unit tests (the same 4 fail); the dashboard
+  tests and format check; the store files that read pins and quotes (reviews, long-term memory,
+  entities, learning, note sources, relationships, retrieval, actions, workflows); the notice
+  Python tests and every test/test_*.py. After the fifth review's fixes (only Nocheh's own
+  account's words cut, told by `events.bot_id`, so another bot's and an inline bot's text is
+  learned again as someone else's; the owner's quote of their own forward never the owner's
+  words; a pin of only Nocheh's message not archived yet neither reviewed nor interpreted): the
+  build; the unit tests (the same 4 fail); the dashboard tests and format check; the store files
+  they touch (note sources, reviews, long-term memory, entities, learning), each new check also
+  run without its fix and failing. After the sixth review's fixes (a quote in another chat or
+  topic never the owner's, a Desktop export's forward by any of its fields, a review of only the
+  owner's messages reading only the rules the owner wrote, a pinned message's own reply not
+  learned, a quote of another bot's or of an unarchived or outside message judged in the
+  owner's notes review): the build; the unit tests (the same 4 fail); the dashboard tests and
+  format check; the reviews store file and those that read the same paths (long-term memory,
+  note sources, relationships, the rule catalog); the sweep's probes; each new check also run
+  without its fix and failing. After the seventh review's fixes (messages a message embeds left
+  out of what is learned, by shape; a checklist that may hold others' tasks never the owner's;
+  a quote inside a pinned message judged in the owner's notes review): the build; the unit tests
+  (the same 4 fail); the dashboard tests and format check; the reviews store file and those that
+  read the same paths (long-term memory, note sources, learning, entity suggestions); the
+  sweep's four probes; each new check also run without its fix and failing. After the eighth
+  review's fixes (a message another embeds kept and labelled instead of cut, judged by its author
+  in the owner's notes review; a poll others added options to, or an option deleted, never the
+  owner's; the owner's forward of a checklist shown again; a Desktop export's checklist or poll
+  never the owner's; the owner's checklist in the private chat the owner's own): the build; the
+  unit tests (the same 4 fail); the dashboard tests and format check; the reviews store file and
+  those that read the same paths (long-term memory, note sources, learning, entity
+  suggestions); the sweep's probes; each new check also run without its fix and failing.
+  The ninth to eleventh reviews' fixes (a quote inside a message another embeds judged, and cut
+  as `quote_not_traced` when nothing traces it; the owner's own deleted poll option in the
+  private chat the owner's own; a pin of the owner's message holding others' words worded as
+  such; a quote traced through every revision; a Desktop export's reply to another chat never
+  linked to this chat's message with the same number) were each checked the same way, with a
+  field-by-field sweep of every Telegram message field finding nothing labelled as the owner's
+  that the owner did not type. Final checks on the last code: the build; the unit tests (the
+  same 4 fail); the dashboard tests and format check; the whole store suite (the 4 files that
+  fail on main fail, every other file passes); the Hermes (its two environment-only errors),
+  Telegram and tester Python tests; the cloud tester's memory scenarios (group members, people
+  not allowed, display names, forwards, files, forwarded commands, tasks and reminders, the
+  owner's review, background jobs, native notes, the fixed reply, private chat out of groups,
+  import with learning, the search model change, the private marks sweep, nothing left running
+  and every dashboard page), all passing; the forward and file scenarios now ask which block
+  holds a forward by the mark's number, since the owner's own question carrying the mark was
+  learned as the owner's in a race. Pending: the private names scan at push; a live look at a
+  labelled note, a forward and a skipped card on the owner's install after merge. Open owner
+  question: whether the message of someone not allowed that the owner replies or reacts to
+  should come along as labelled context for the note (built without it, as the rule says, until
+  the owner answers). Left for later: labels on search hits; a dashboard page for one message's
+  learning setting; web-chat replies carry no class; no test covers Hermes counting a missing
+  forwards block; a rule's recorded inputs are not checked against who is allowed there, only
+  the messages it cites; an earlier read a turn restates in its own words is not counted;
+  Members step 4 must make `canLearn` check the chat is served before the owner's yes; a pin or
+  quote handled before Nocheh's own message is archived, or after its capture failed, is labelled
+  as someone else's (it fails closed), and its words, Nocheh's own account's, are cut from
+  everything learned, except where the stored bot is not an account (an import), where it is
+  learned as someone else's; a forward of Nocheh's message sent on its own is learned as a
+  forward from a person shown as Nocheh, someone else's, card or not; a task someone not allowed
+  there added to a shared checklist reaches the owner's notes review when the checklist is shown
+  again or carried by a service message someone allowed sent, labelled as someone else's words,
+  since Telegram names no one per task; a poll option Telegram shows with no adder is read as the
+  poll's own; a rule
+  learned automatically from the owner's
+  messages can restate others' words, and a review of the owner's and Nocheh's own messages
+  reads it as Nocheh's; a quote of Nocheh's message is cut whole, so the notes review and
+  interpretations no longer see which part was quoted; Hermes's own notes line adds up its own
+  steps, so a lookup that works can mark a record failure working again; on deploy day today's
+  store failures show once more as their own line; the owner's own forward in a group, or in a
+  private answer carried from one, counts as a forward read in later turns of that session, so
+  their notes read as having read a forward (it fails closed). Owner steps: none. Notes from
+  before read "Source not recorded" until the next fresh notes; Nocheh's cards and reminders no
+  longer show up in what it learned; Memory › Long-term › Re-run says that replacing long-term
+  memory from saved messages learns them by today's rules.
+
 Security fixes, part 2: fixes that lose nothing (owner, 2026-11-14: "all yes"). One pull
 request with seven fixes, each built and reviewed on its own
 ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)):

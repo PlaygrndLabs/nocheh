@@ -51,14 +51,19 @@ ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS guard_mode text;
 ALTER TABLE memory_ingestion_receipts ADD COLUMN IF NOT EXISTS retired_at timestamptz;
 CREATE INDEX IF NOT EXISTS memory_receipts_live_session ON memory_ingestion_receipts(session_id,state) WHERE retired_at IS NULL;
 CREATE INDEX IF NOT EXISTS memory_receipts_live_source ON memory_ingestion_receipts((source_reference->>'id')) WHERE retired_at IS NULL;
+CREATE INDEX IF NOT EXISTS memory_receipts_source ON memory_ingestion_receipts((source_reference->>'id')) WHERE projection_reference IS NULL;
+CREATE INDEX IF NOT EXISTS memory_receipts_live_writer ON memory_ingestion_receipts(generation,peer_id) WHERE retired_at IS NULL AND state='done';
 CREATE TABLE IF NOT EXISTS memory_sessions (
  workspace text NOT NULL REFERENCES memory_generations(id),key text NOT NULL,audience text NOT NULL,
- kind text NOT NULL CHECK(kind IN ('conversation','entity_evidence','projection')),
+ kind text NOT NULL CHECK(kind IN ('conversation','entity_evidence','projection','material')),
  revision integer NOT NULL DEFAULT 1,session_id text NOT NULL UNIQUE,
  work_revision integer NOT NULL DEFAULT 0,prefetched_revision integer NOT NULL DEFAULT 0,
  created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(workspace,key)
 );
 CREATE INDEX IF NOT EXISTS memory_sessions_audience ON memory_sessions(workspace,audience,updated_at);
+-- The owner's forwards and files have a session of their own (ADR-0257).
+ALTER TABLE memory_sessions DROP CONSTRAINT IF EXISTS memory_sessions_kind_check;
+ALTER TABLE memory_sessions ADD CONSTRAINT memory_sessions_kind_check CHECK(kind IN ('conversation','entity_evidence','projection','material'));
 CREATE TABLE IF NOT EXISTS memory_session_deletions (
  session_id text PRIMARY KEY,workspace text NOT NULL REFERENCES memory_generations(id),session_key text NOT NULL,
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','done')),deleted_conclusions integer NOT NULL DEFAULT 0,

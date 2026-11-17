@@ -176,6 +176,8 @@ def install_tool_search_policy():
 
 # Hermes run results of this process, for Nocheh's usage tracker (token counts and cost, no content).
 RUNS=[]
+# Long-term memory this turn could not read in full, for the parent to count (memory_problem).
+PROBLEMS=[]
 
 
 def conversation_result(result, session_id):
@@ -304,7 +306,12 @@ def run(body, emit=None, relay=None):
     if not review:
         from .archive_tools import request
         try: memory=request('/v1/memory/longterm/context',{})
-        except Exception: memory={'limited_memory':True,'note':prompt('memory.limited')}
+        except Exception: memory={'limited_memory':True,'note':prompt('memory.limited')};PROBLEMS.append('memory_read')
+        # Long-term memory that failed to read, or whose forwards-and-files part did, is counted for the owner's notice.
+        parts=[memory,*(memory.get('sources') if isinstance(memory,dict) and isinstance(memory.get('sources'),list) else [])]
+        if isinstance(memory,dict) and memory.get('error')=='memory_context_failed' or any(
+                isinstance(part,dict) and isinstance(part.get('limitations'),list) and 'forwards_unavailable' in part['limitations'] for part in parts):
+            PROBLEMS.append('memory_read')
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
@@ -313,7 +320,7 @@ def run(body, emit=None, relay=None):
     from . import memory_evidence
     placement=body.get('memory_context','legacy')
     if placement not in ('legacy','evidence'):raise ValueError('invalid_memory_context')
-    restore_evidence=memory_evidence.install(memory if not review else None) if placement=='evidence' else lambda:None
+    restore_evidence=memory_evidence.install(memory if not review else None,body.get('note_sources') or {}) if placement=='evidence' else lambda:None
     if placement=='evidence':long_term='\n'+prompt('memory.evidence')
     if background:
         # Each model call of the run, and its to-do list, go out as progress lines; the cost notice comes from them too.
@@ -452,6 +459,7 @@ def main():
     from .request_boundary import model_refusals
     measured=combine(RUNS)
     if measured:result['usage']=measured
+    if PROBLEMS:result['memory_problem']=PROBLEMS[0]
     # Why it failed, as codes for the usage tracker: a run's own reason and the provider's exact error, or the code of
     # Nocheh's own refusal, such as its secret check's; else Nocheh's error.
     if result.get('state')!='done':

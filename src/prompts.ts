@@ -10,7 +10,7 @@ import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.
  * learning text it sends to long-term memory. Only replacements are stored, so a text the
  * owner never changed follows the code's default.
  */
-export const promptKeys=['reply.common','reply.owner','reply.group','reply.private','memory.limited','memory.evidence','memory.notes_review',
+export const promptKeys=['reply.common','reply.owner','reply.group','reply.private','memory.limited','memory.evidence','memory.notes_review','memory.source_texts',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
   'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','tasks.reminder_texts','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
@@ -159,6 +159,12 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
     schedule_not_sent:['{chat}','{reason}'],schedule_not_run:['{chat}','{reason}'],job_report_not_sent:['{chat}','{reason}']},
   'tasks.reminder_texts':{person:['{name}'],person_gone:['{name}'],set_by:['{who}','{place}'],written_by:['{who}','{place}','{fields}'],
     closed_by:['{who}','{place}'],merged:['{count}','{place}'],more_waiting:['{count}'],note_line:['{line}'],removed_in_group:['{count}','{times}']},
+  'memory.source_texts':{said:['{who}','{place}'],reaction:['{who}','{place}'],person_not_allowed:['{name}'],anonymous:['{place}'],forward:['{who}','{place}','{origin}'],
+    origin_person:['{name}'],origin_channel:['{name}'],origin_group:['{name}'],file:['{name}','{who}','{place}'],file_unnamed:['{who}','{place}'],
+    audio:['{who}','{place}'],quote:['{who}','{place}'],quote_nocheh:['{who}','{place}'],pinned:['{who}','{place}'],held:['{who}','{place}'],pinned_held:['{who}','{place}'],pinned_nocheh:['{who}','{place}'],unknown_message:['{place}'],nocheh_reply:['{place}'],nocheh_about_forward:['{place}'],nocheh_follow_up:['{place}'],
+    nocheh_private_answer:['{place}'],nocheh_job_report:['{place}'],nocheh_scheduled_run:['{place}'],nocheh_approved_post:['{place}'],nocheh_unlearned:['{place}'],
+    review_owner:['{place}'],review:['{sources}'],rules:['{place}'],rules_others:['{place}'],turn_own:['{place}','{date}'],turn:['{place}','{date}'],turn_read:['{place}','{date}','{read}'],
+    job_turn:['{place}','{date}','{read}'],more:['{count}']},
 };
 /** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
  *  Object property ('constructor', '__proto__') is just a line; a text with no such lines is not read at all. */
@@ -199,6 +205,41 @@ export type ReminderText='you'|'person'|'person_gone'|'unnamed_person'|'set_by'|
  * from the default. */
 export function reminderLines(text:string|undefined):Record<ReminderText,string> {
   return checkedLines('tasks.reminder_texts',reminderTexts,text) as Record<ReminderText,string>;
+}
+/** Where each learned note came from, in the owner's words, as the Notes page shows it: one line per kind of message and
+ * per kind of note. Code picks the line from Telegram's own fields and Nocheh's records, never from what a message
+ * says, and fills in who ({who}, the reminder lines' words), where ({place}, the approval texts' chat words) and the
+ * names people chose ({name}, quoted). The model reads fixed words instead (src/source-labels.ts), and Hermes never
+ * gets these lines. */
+export const sourceTexts=['said: {who} in {place}','reaction: a reaction by {who} in {place}','person_not_allowed: {name}, a person not allowed there now',
+  'anonymous: an anonymous admin, or a post in a chat\'s name, in {place}','forward: a message {who} forwarded in {place}, from {origin}',
+  'origin_person: a person shown as {name}','origin_hidden: a person who hides their account','origin_channel: the channel {name}','origin_group: the group {name}',
+  'origin_bot: an inline bot','origin_unnamed: someone Telegram doesn\'t name','file: the file {name} {who} sent in {place}','file_unnamed: a file {who} sent in {place}',
+  'audio: an audio file {who} sent in {place}','quote: a reply by {who} in {place}, quoting someone else\'s message',
+  'quote_nocheh: a reply by {who} in {place}, quoting Nocheh\'s own message','pinned: a message by someone else that {who} pinned in {place}',
+  'held: a message {who} sent in {place} holding someone else\'s words, such as a shared checklist or poll',
+  'pinned_held: a message holding someone else\'s words, such as a shared checklist or poll, that {who} pinned in {place}',
+  'pinned_nocheh: Nocheh\'s own message that {who} pinned in {place}','unknown_message: a message Nocheh can\'t describe, in {place}',
+  'nocheh_reply: Nocheh\'s reply in {place}','nocheh_about_forward: Nocheh\'s reply in {place} about a message you forwarded','nocheh_follow_up: Nocheh\'s follow-up in {place}',
+  'nocheh_private_answer: Nocheh\'s private answer in {place}','nocheh_job_report: Nocheh\'s report in {place}','nocheh_scheduled_run: Nocheh\'s scheduled result in {place}',
+  'nocheh_approved_post: Nocheh\'s post in {place}, sent after you approved it','nocheh_unlearned: Nocheh\'s card, notice or reminder in {place}',
+  'review_owner: Your own messages in {place}','review: Nocheh\'s notes review of {sources}','rules: rules Nocheh learned in {place}',
+  'rules_others: rules Nocheh learned in {place} from other people\'s messages, forwards or files',
+  'turn_own: Nocheh\'s note from {place} on {date}, written while answering your own message','turn: Nocheh\'s note from {place} on {date}',
+  'turn_read: Nocheh\'s note from {place} on {date}, after reading {read}','job_turn: Nocheh\'s note from a job or scheduled run in {place} on {date}, after reading {read}',
+  'earlier: also an earlier note it replaced','read_message: the message it answered','read_forward: a forwarded message','read_file: a file',
+  'read_recent: recent group messages','read_archive: messages from your chats','read_web: web pages','read_notion: Notion','read_tools: tool servers',
+  'read_commands: command results','read_past: past conversations','read_other: other tools','unknown: Source not recorded',
+  'unavailable: Source not available right now','more: {count} more'].join('\n');
+export type SourceText='said'|'reaction'|'person_not_allowed'|'anonymous'|'forward'|'origin_person'|'origin_hidden'|'origin_channel'|'origin_group'|'origin_bot'|
+  'origin_unnamed'|'file'|'file_unnamed'|'audio'|'quote'|'quote_nocheh'|'pinned'|'held'|'pinned_held'|'pinned_nocheh'|'unknown_message'|'nocheh_reply'|'nocheh_about_forward'|'nocheh_follow_up'|'nocheh_private_answer'|
+  'nocheh_job_report'|'nocheh_scheduled_run'|'nocheh_approved_post'|'nocheh_unlearned'|'review_owner'|'review'|'rules'|'rules_others'|'turn_own'|'turn'|'turn_read'|'job_turn'|
+  'earlier'|'read_message'|'read_forward'|'read_file'|'read_recent'|'read_archive'|'read_web'|'read_notion'|'read_tools'|'read_commands'|'read_past'|'read_other'|
+  'unknown'|'unavailable'|'more';
+/** The source lines, with any line the owner removed or left empty, or stored without a value it must keep, taken from
+ * the default. */
+export function sourceLines(text:string|undefined):Record<SourceText,string> {
+  return checkedLines('memory.source_texts',sourceTexts,text) as Record<SourceText,string>;
 }
 /** Sent to the owner's private chat once an import's messages are all prepared. */
 export const importReady='✅ Import ready: {chats}\n{messages} messages are saved, read and checked for secrets. You can ask about them now.\n⚠️ {failed} of them could not be prepared; see System › Health.';
@@ -331,7 +372,7 @@ export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerTe
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
   'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,
-  'telegram.private_answer':privateAnswerFrame,'telegram.private_answer_texts':privateAnswerTexts,'tasks.reminder':taskReminder,'tasks.reminder_texts':reminderTexts,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
+  'telegram.private_answer':privateAnswerFrame,'telegram.private_answer_texts':privateAnswerTexts,'tasks.reminder':taskReminder,'tasks.reminder_texts':reminderTexts,'memory.source_texts':sourceTexts,'imports.ready':importReady,'system.problems':problemNotice,'system.problem_buttons':problemButtons,
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine,
   'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts,

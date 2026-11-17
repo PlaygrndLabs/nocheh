@@ -302,7 +302,8 @@ test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, 
     telegram='done';
     assert.equal(await s.tasks.remind(),1);
     assert.equal(notices.length,2,'the same reminder is offered again after Telegram was not connected');
-    assert.deepEqual(notices.at(-1),{id:notices[0].id,chat_id:'123',text:`⏰ Water the plants\n📅 ${new Date(shift(8)+'T12:00:00Z').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}`});
+    // Sent as a reminder, which memory keeps but does not learn (ADR-0256).
+    assert.deepEqual(notices.at(-1),{id:notices[0].id,chat_id:'123',send_class:'reminder',text:`⏰ Water the plants\n📅 ${new Date(shift(8)+'T12:00:00Z').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric',timeZone:'UTC'})}`});
     assert.equal(await s.tasks.remind(),0,'a sent reminder is not sent again');
     assert.deepEqual((await s.tasks.get(owner,following.id)).reminders.map((item:any)=>item.state),['sent']);
     assert.deepEqual((await s.tasks.get(owner,quiet.id)).reminders.map((item:any)=>item.state),['skipped']);
@@ -436,7 +437,7 @@ test('a reminder says who set it and where; people\'s reminders due together go 
     assert.equal(await s.tasks.remind(),4);
     assert.deepEqual(notices.map(item=>item.text),[body('Book the hall','Launch'),body('Book the hall','Launch'),
       '\u{1f514} 2 reminders set in '+family+'\n\n'+setBy(allowed('Sara'),plans)+body('Book the hall','Launch')+'\n\n'+setBy(allowed('Omid'),family)+body('Book the hall','Launch')]);
-    assert.ok(notices.every(item=>item.chat_id==='123'),'all to the owner\'s private chat');
+    assert.ok(notices.every(item=>item.chat_id==='123'&&item.send_class==='reminder'),'all to the owner\'s private chat, as reminders');
     assert.deepEqual((await reminders(hall.id)).map(item=>item.state),['sent','sent','sent','sent']);
 
     // f. The group's turn: Sara's next reminder waits while the owner's goes at once; 10 minutes later hers goes alone.

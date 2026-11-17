@@ -4,6 +4,7 @@ import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {engineErrors,engineSummary} from '../src/memory/engine.js';
 import {HonchoEngine,honchoClient,type HonchoCall} from '../src/memory/honcho.js';
+import {materialPeer} from '../src/stores/native-memory.js';
 
 type Call={path:string;body:unknown;method:string|undefined};
 /** A fake Honcho that records each call and answers from a route table. */
@@ -56,6 +57,15 @@ test('participants and sessions map roles to Honcho observation',async()=>{
       project:{observe_me:false,observe_others:true},
       assistant:{observe_me:false,observe_others:false}}}],
   ]);
+});
+
+test('the participant of the owner\'s forwards and files is learned from its own writes and never learns from others\'',async()=>{
+  const {calls,engine}=fake(()=>({}));
+  assert.equal(materialPeer,'nocheh_forwards_and_files','one fixed name per installation, naming no person');
+  await engine.addParticipant('space',materialPeer,'writer');
+  await engine.openSession('space','session',{[materialPeer]:'writer',project:'subject'});
+  assert.deepEqual(calls.map(c=>c.body),[{id:materialPeer},{id:'session',peers:{
+    [materialPeer]:{observe_me:true,observe_others:false},project:{observe_me:false,observe_others:true}}}]);
 });
 
 test('writes carry the receipt, and an answer that is not a list is invalid',async()=>{

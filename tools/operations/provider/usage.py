@@ -81,6 +81,17 @@ def reader_rows(state, day):
             for row in rows]
 
 
+def note_rows(state, day):
+    """The steps that tell where native notes came from, and turns that read long-term memory, on `day`
+    (services/hermes/usage.py NOTE_KINDS), each with how many worked and failed; [] while none was counted, and None
+    without a tracker."""
+    rows = _read(Path(state) / 'hermes/usage/usage.sqlite', 'SELECT day,kind,done,failed FROM note_daily WHERE day=?', (day,))
+    if rows is None:
+        return None
+    count = lambda value: value if type(value) is int and value >= 0 else 0
+    return [{'day': row['day'], 'kind': row['kind'], 'done': count(row['done']), 'failed': count(row['failed'])} for row in rows]
+
+
 def honcho_rows(state, since):
     from tools.operations.memory.honcho_setup import state_for
     rows = _read(state_for(state) / 'ledger/budget.sqlite', 'SELECT * FROM usage_daily WHERE day>=?', (since,))

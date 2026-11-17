@@ -141,6 +141,30 @@ def _memory_writes(row):
     return written,spans
 
 
+def memory_ops(row):
+    """The memory operations a stored assistant row's tool calls asked for, one by one (a batch's operations each on
+    their own), as {action, target, old_text, content}, from the model's raw arguments as Hermes parses them. Whether
+    Hermes carried one out is not known here."""
+    calls=_parsed(row.get('tool_calls') or '[]')
+    found=[]
+    for call in calls if isinstance(calls,list) else []:
+        function=call.get('function') if isinstance(call,dict) else None
+        if not isinstance(function,dict) or function.get('name')!='memory':continue
+        arguments=_parsed(function.get('arguments') or '{}')
+        if not isinstance(arguments,dict):continue
+        operations=_parsed(arguments.get('operations'))
+        operations=[operations] if isinstance(operations,dict) else operations if isinstance(operations,list) else []
+        for change in [arguments]+[_parsed(item) for item in operations]:
+            if not isinstance(change,dict):continue
+            target=change.get('target') or arguments.get('target')
+            content=change.get('content') if change.get('content') is not None else change.get('new_text')
+            found.append({'action':change.get('action') if isinstance(change.get('action'),str) else None,
+                          'target':target if target in ('memory','user') else 'memory',
+                          'old_text':change.get('old_text') if isinstance(change.get('old_text'),str) else None,
+                          'content':content if isinstance(content,str) else None})
+    return found
+
+
 def _parsed(value):
     if not isinstance(value,str):return value
     try:return json.loads(value)
@@ -238,7 +262,7 @@ def plan(rows,lookup):
 
 def _rows(connection):
     available=_columns(connection,'messages')
-    selected=['id','session_id','role','content','timestamp','tool_calls']+[key for key in ('_compressed_summary',*DERIVED) if key in available]
+    selected=['id','session_id','role','content','timestamp','tool_calls']+[key for key in ('tool_name','_compressed_summary',*DERIVED) if key in available]
     connection.row_factory=sqlite3.Row
     return [dict(row) for row in connection.execute('SELECT '+','.join(selected)+' FROM messages ORDER BY session_id,id')]
 

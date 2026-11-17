@@ -230,7 +230,10 @@ export class TelegramDispatchRepository {
     if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
     if(await this.earlierReply(row,input,receipt))return await this.receive(row,{state:'running',stage:'delivery'});
     const button=await this.privateButton(input,receipt);
-    const sent=await sendReply(this.call,target,String(input.body.source_key),receipt.reply,{notify:false,presence:input.body.control_reply==null,...(button?{button}:{})});
+    // Worked out here, never kept in the turn's input, so a turn already in flight keeps its input. A fixed reply (a command's
+    // answer or the /start refusal) is Nocheh's own card and is not learned.
+    const sendClass=input.body.control_reply!=null?'card':input.principal.answer!==undefined?'private_answer':'reply';
+    const sent=await sendReply(this.call,target,String(input.body.source_key),receipt.reply,{notify:false,presence:input.body.control_reply==null,sendClass,...(button?{button}:{})});
     if(!sent||!closed.has(String(sent.state)))return await this.receive(row,{state:'running',stage:'delivery'});
     return await this.storeResult(row,deliveredReceipt(receipt,sent));
   }

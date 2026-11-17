@@ -77,6 +77,15 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     await request(consentPath,{...deny,enabled:true,operation_id:key+':stale-consent'},409);
     await request(consentPath,{enabled:true,expected_revision:1,operation_id:key+':learning-allowed'});
     assert.equal((await request(consentPath)).effective,true);
+    // Nocheh's own reminder is kept but not learned until the owner turns it on, with the same switch (ADR-0256).
+    const reminder:Envelope={version:1,key:key+':reminder',origin:'live',bot_id:'fixture',kind:'telegram_delivered_message',scope:'123',source_id:'89',revision:'1',occurred_at:null,
+      text:'Water the plants',payload:{message:{message_id:89,date:1700000000,chat:{id:123,type:'private'},text:'Water the plants'},send_class:'reminder'}};
+    const kept=(await services.capture.capture(reminder)).source.reference,reminderPath='/v1/sources/'+kept.id+'/learning-consent';
+    const told=await request(reminderPath);assert.deepEqual([told.effective,told.authority],[false,'send_class']);
+    assert.equal(await services.access.notLearned(kept),'nocheh_message');
+    await request(reminderPath,{enabled:true,expected_revision:0,operation_id:key+':reminder-allowed'});
+    const learned=await request(reminderPath);assert.deepEqual([learned.effective,learned.authority],[true,'owner']);
+    assert.equal(await services.access.notLearned(kept),null);
     const scopedConsent=await fetch(base+consentPath,{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}});
     assert.equal(scopedConsent.status,403,'conversation content cannot grant learning consent');
     const body={artifact_id:file.id,input_hash:file.input_hash,producer:'fixture',producer_version:'1',configuration:{},operation_id:key+':reprocess'};

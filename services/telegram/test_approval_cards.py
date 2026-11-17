@@ -22,7 +22,7 @@ except ImportError:
     fake.MessageEntity=type('MessageEntity',(),{'TEXT_LINK':'text_link','__init__':lambda self,type,offset,length,url=None:self.__dict__.update(type=type,offset=offset,length=length,url=url)})
     sys.modules['telegram']=fake
 
-from .capture import OUTBOUND_CHECK
+from .capture import OUTBOUND_CHECK, SEND_CLASS
 from .gateway import TelegramService
 from .settings import Policy
 
@@ -250,6 +250,29 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'c'*64,'buttons':[{'text':'Pause','callback':bad}]})
             self.assertEqual(len(sent),2,'a refused button sends nothing')
             with self.assertRaises(ValueError):await gateway.send_notice({**notice,'id':'d'*64,'chat_id':'-20'})  # only the owner's private chat
+
+    async def test_cards_refusals_and_notices_are_sent_under_their_own_class(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];edits=[];gateway=self.gateway(Path(folder),sent,edits,[])
+            classes=[];bot=gateway.bot
+            def marked(send):
+                async def call(*args,**options):classes.append(SEND_CLASS.get());return await send(*args,**options)
+                return call
+            gateway.bot=SimpleNamespace(send_message=marked(bot.send_message),edit_message_text=marked(bot.edit_message_text),answer_callback_query=bot.answer_callback_query)
+            data=lambda choice:'n'+choice+'b'*56
+            await gateway.send_approval({'kind':'card','id':'b'*64,'chat_id':'123','text':'Approve?','buttons':[['Approve',data('a')],['Reject',data('d')]],'send_class':'reply'})
+            await gateway.send_approval({'kind':'settle','id':'b'*64,'chat_id':'123','text':'Approved'})
+            await gateway.send_refusal({'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','reply':'Sorry.','send_class':'reply'})
+            await gateway.send_notice({'id':'c'*64,'chat_id':'123','text':'Reminder','send_class':'reminder'})
+            # A class the notice route does not send falls back to a notice, and the notice still goes.
+            self.assertEqual(await gateway.send_notice({'id':'d'*64,'chat_id':'123','text':'Problem','send_class':'reply'}),{'state':'done'})
+            await gateway.send_notice({'id':'d'*64,'chat_id':'123','text':'Cleared','edit':True})
+            # The card about a group the owner added Nocheh to, and its edit after a press, are a notice and a card update (ADR-0253).
+            press='ngx'+'e'*32
+            await gateway.send_notice({'id':'f'*64,'chat_id':'123','text':'Nocheh is on in “Bakery”.','buttons':[{'text':'No project','callback':press}],'send_class':'notice'})
+            await gateway.send_notice({'id':'f'*64,'chat_id':'123','text':'“Bakery” is in no project now.','edit':True})
+            self.assertEqual(classes,['card','card_update','refusal','reminder','notice','card_update','notice','card_update'])
+            self.assertIsNone(SEND_CLASS.get(),'each route resets its class')
 
     async def test_a_group_card_carries_rows_of_its_presses_and_no_other(self):
         # The card about a group the owner added Nocheh to (ADR-0253): a Move button per offered project, then No project and Turn off.
