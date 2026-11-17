@@ -240,12 +240,19 @@ becomes your private memory"). One pull request of several commits
   holds nothing of it: another bot's message, or one Nocheh never got, by its author as the
   reply shows it, and one in another chat or topic stays only when the archive holds it and its
   sender is allowed there; a quote inside a pinned message is judged the same way, and cut
-  when the archive never got the pinned message, which Telegram sends without its reply. So is a
+  when the archive never got the pinned message, which Telegram sends without its reply,
+  counted as a quote that could not be traced (`quote_not_traced`), since no sender was
+  refused. So is a
   quote inside a message another embeds (a poll or a checklist a service message shows), traced
   through that message as archived in the same chat: one quoting Nocheh's words is cut from
   everything learned, and so is one the archive can't trace (that message never archived,
   archived in a revision answering nothing, or archived only as Telegram Desktop exports),
-  counted as a quote that could not be traced (`quote_not_traced`), whoever it quoted. A pin
+  counted as a quote that could not be traced (`quote_not_traced`), whoever it quoted. One that
+  keeps its reply to a message in another chat is judged there by that message, and cut and
+  counted as not traced when the archive holds no revision of the embedded message to judge it
+  by. A Telegram Desktop export's reply to another chat (`reply_to_peer_id`) gets no reply
+  relation, since its id is that chat's, and the review never judges a quote by one an earlier
+  export was given. A pin
   of Nocheh's own message is never counted as kept out: one it
   learns stays in the pin, and a card, notice or reminder is taken out of it, so a pin of a card
   with nothing else to review is not reviewed at all. Memory › Assistant

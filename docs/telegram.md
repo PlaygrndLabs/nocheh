@@ -244,8 +244,13 @@ and counted, and a quote of a message in another chat or topic stays only when
 Nocheh holds that message and its sender is allowed there. A quote inside a
 pinned message is judged the same way, by the message it quotes as Nocheh holds
 the pinned message; Telegram sends a pinned message without its reply, so the
-quote inside one Nocheh never got is cut. A pinned message's own reply, such as
-a poll it answers in another chat, is never learned with the pin. Any other
+quote inside one Nocheh never got is cut, counted as a quote that could not be
+traced. A Telegram Desktop export records a reply to another chat by that
+chat's message id, which names a different message in this chat: an export
+imported now is not linked to that message, and the owner's notes review never
+judges a quote by the link an earlier import made. A pinned message's own
+reply, such as a poll it answers in another chat, is never learned with the
+pin. Any other
 message one carries (the checklist that a "tasks done" or "tasks added" service
 message reports on, a giveaway's or a suggested post's message, the poll an
 option was added to, or one in a field Telegram adds later) is kept and
@@ -256,7 +261,10 @@ with its quote but without its reply, so a quote inside one is traced through
 that message as Nocheh holds it in the same chat, as a pinned message's quote
 is: one quoting Nocheh's words is cut from everything learned, and so is one
 Nocheh can't trace (the message never archived, or archived answering
-nothing), counted as a quote that could not be traced, whoever it quoted. A
+nothing), counted as a quote that could not be traced, whoever it quoted. One
+that keeps its reply to a message in another chat is judged in the owner's
+notes review by that message, and cut and counted as not traced when Nocheh
+holds no copy of the message carrying the quote. A
 poll option someone added is judged by who added it there the same way, one
 added in a chat's name never let in, and a deleted option's text is cut there,
 except in the owner's private chat, where an option the owner deleted from

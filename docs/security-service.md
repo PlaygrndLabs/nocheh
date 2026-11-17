@@ -154,7 +154,12 @@ judged as a top-level quote of one is), a poll option such a person added or
 one added in a chat's name, and a deleted option's text other than the owner's
 own in the owner's private chat, counting the message as kept out. In the
 owner's notes review a quote inside a pinned message is judged by who wrote the
-message it quotes, and cut when that can't be traced. The evidence
+message it quotes, and cut when that can't be traced, counted as
+`quote_not_traced`, as is a quote inside an embedded message that answers one
+in another chat when the archive holds no revision of the embedded message to
+judge it by. A Telegram Desktop export's reply to another chat
+(`reply_to_peer_id`) gets no reply relation, since its id is that chat's, and
+the review never judges a quote by one an earlier export was given. The evidence
 instruction says a `nocheh` note is not the owner's own words either. What a
 turn read comes from its own session:
 a search by meaning counts as reading other chats, an earlier tool result or

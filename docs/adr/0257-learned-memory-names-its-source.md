@@ -91,9 +91,10 @@ a recalled note names its source beside its chat).
   when the message it answers is archived and admitted or, never archived, its
   author as that reply shows it is allowed there. Telegram sends a pinned
   message without its reply, so the quote inside one the archive never got has
-  nothing to judge it by and is cut too. A quote refused this way is cut out of
-  the pinned message, which stays, and counted as `sender_not_allowed`, once per
-  message. A pinned message Telegram no longer shows carries no words and is let
+  nothing to judge it by and is cut too, counted as `quote_not_traced`, since no
+  sender was refused. A quote refused for its sender is cut out of the pinned
+  message, which stays, and counted as `sender_not_allowed`, once per message.
+  A pinned message Telegram no longer shows carries no words and is let
   through. Nocheh's
   own message, found in the archive as the same chat's message the pin names
   (the way a reply's target is found), is never someone not allowed: a learned
@@ -173,7 +174,19 @@ a recalled note names its source beside its chat).
   keeps its reply to a message in another chat (`external_reply`) is judged by
   that message alone, as a top-level quote of one is, and stays when the archive
   holds it and its sender is allowed where they wrote it. One refused is cut and
-  counted the same way.
+  counted the same way. One the archive holds no revision of to judge it by (the
+  embedded message was never archived, the usual case in a group in privacy
+  mode, where Telegram sends the service message but not the poll) is cut there
+  too and counted as `quote_not_traced`, not as a sender refused (`heldSenders`
+  names its place apart). A Telegram Desktop export records a reply to another
+  chat as that chat's message id beside `reply_to_peer_id`, so it gets no reply
+  relation (`repliesElsewhere`, the Desktop adapter's version 4): this chat's
+  message with that id is another message. Projections are made once, at
+  capture, so an export archived before keeps the reply relation it was given;
+  the notes review never judges a quote by such a revision's relation
+  (`quotedSender`), but by the live revisions beside it, and with none nothing
+  tells whose words the quote repeats: it is cut and counted as
+  `quote_not_traced`. The same holds for a quote inside a pinned message.
   A message Telegram no longer shows (an `InaccessibleMessage`: date 0 and
   nothing but its chat, id and date, `inaccessible`) carries nothing and stays;
   one with date 0 and anything else, a shape Telegram does not send, is judged
@@ -710,8 +723,19 @@ a recalled note names its source beside its chat).
     (`external_reply`) is judged by that message alone, as a top-level quote of
     one is: in the owner's notes review it stays when the archive holds the
     embedded message and the one it answers and that one's sender is allowed
-    where they wrote it, and is otherwise cut and counted as
-    `sender_not_allowed`.
+    where they wrote it. It is cut and counted as `sender_not_allowed` when that
+    sender is not allowed there or the archive does not hold the message it
+    answers, and as `quote_not_traced` when the archive holds no revision of the
+    embedded message to judge it by: never archived, or held only as Telegram
+    Desktop exports, which name a message in another chat by that chat's id
+    alone. Interpretations and Honcho keep it, labelled.
+  - A Telegram Desktop export archived before its reply to another chat lost its
+    reply relation keeps one to this chat's message with the same id: the notes
+    review never judges a quote by it, but group memory, turn context, recall
+    and the evidence graph still show that message as the one it answers, and
+    when that message is Nocheh's, a quote inside a pin or an embedded copy of
+    the export's message is cut as Nocheh's words (failing closed). A reimport
+    rebuilds the projection without it.
   - A poll option Telegram shows with no adder is read as the poll's own, its
     sender's, since Telegram names who added every option added after the poll
     was sent; Nocheh can't tell otherwise.
