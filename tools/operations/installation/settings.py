@@ -34,9 +34,10 @@ def revision(values):
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
 
-# A retired setting stays in an older .env; at its old default it is still left out, so an upgrade
-# does not ask for Apply. A listed group list was in the revision before and stays in it.
-RETIRED_DEFAULTS = {'TELEGRAM_GROUP_IDS': ''}
+# A retired setting stays in an older .env, hidden and unsaveable, and no service reads it; at its old default it is still
+# left out, so an upgrade does not ask for Apply. Another value was in the revision before and stays in it, for the same
+# reason: the group list (ADR-0253), and the lists of who may talk in each group, which members replace (step 3).
+RETIRED_DEFAULTS = {'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}'}
 
 
 def service_revision(values):

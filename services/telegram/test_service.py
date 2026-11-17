@@ -31,8 +31,8 @@ NEW, NEW_TG, NEW_OLD = 'b' * 64, '-10077', '-77'
 TOPICS = [(GROUP + '/topic/1', GROUP, '1'), (GROUP + '/topic/7', GROUP, '7'), ('c' * 64, NEW, '5')]
 
 
-def served_policy(enabled=True, access=None):
-    return Policy.of(enabled, OWNER, [GROUP, (NEW, NEW_TG)], access or {}, topics=TOPICS, old={NEW: [NEW_OLD]})
+def served_policy(enabled=True):
+    return Policy.of(enabled, OWNER, [GROUP, (NEW, NEW_TG)], topics=TOPICS, old={NEW: [NEW_OLD]})
 
 
 def binding(chat, topic=None):
@@ -304,7 +304,7 @@ class ServiceTests(unittest.TestCase):
         # A topic of the owner's private chat, as the app lists it: Hermes runs the owner's turns only in the chat itself,
         # so the bot refuses a pass bound there, as it did before step 2b, and nothing is shown or sent.
         topic = 'd' * 64
-        self.service.policy = self.policy = Policy.of(True, OWNER, [GROUP, (NEW, NEW_TG)], {}, topics=[*TOPICS, (topic, OWNER, '3')], old={NEW: [NEW_OLD]})
+        self.service.policy = self.policy = Policy.of(True, OWNER, [GROUP, (NEW, NEW_TG)], topics=[*TOPICS, (topic, OWNER, '3')], old={NEW: [NEW_OLD]})
         self.assertEqual(self.policy.current().binding(topic), {'app': 'telegram', 'chat': OWNER, 'topic': '3'})
         body = self.turn(25, OWNER, 3, space=topic, text='In a topic of my chat')
         for call in (self.service.presence, self.service.reply):
@@ -390,7 +390,7 @@ class ServiceTests(unittest.TestCase):
         def opener(request, timeout):
             reads.append(request.full_url)
             return Response(before if len(reads) == 1 else after)
-        self.service.policy = Policy(True, {}, ServedList('http://app.test', SECRET, opener=opener, clock=lambda: now[0]))
+        self.service.policy = Policy(True, ServedList('http://app.test', SECRET, opener=opener, clock=lambda: now[0]))
         self.assertEqual(self.service.reply(self.turn(40, NEW_TG, scope=NEW, space=NEW, text='before'))['state'], 'done')
         now[0] = 2.0
         self.assertEqual(self.service.reply(self.turn(41, NEW_TG, 11, scope=NEW, space='e' * 64, text='first in topic'))['state'], 'done')
@@ -409,7 +409,7 @@ class ServiceTests(unittest.TestCase):
     def test_a_failed_served_list_serves_nothing(self):
         from services.chats import ServedList
         failing = ServedList('http://127.0.0.1:9', SECRET, opener=lambda *_args, **_kw: (_ for _ in ()).throw(OSError('down')))
-        self.service.policy = Policy(True, {}, failing)
+        self.service.policy = Policy(True, failing)
         with self.assertRaises(ValueError):
             self.service.reply(self.turn(37, text='x'))
         self.assertEqual(self.sent(), [])
@@ -436,16 +436,6 @@ class ServiceTests(unittest.TestCase):
 
 
 class PolicyTests(unittest.TestCase):
-    def test_group_access_holds_under_any_id_a_group_has_had(self):
-        for bad in ({GROUP: {'granted': ['x'], 'denied': []}}, {GROUP: {'granted': ['0456'], 'denied': []}}, {GROUP: {'granted': []}}, {'': {'granted': [], 'denied': []}}):
-            with self.assertRaisesRegex(ValueError, 'invalid_group_access'): served_policy(access=bad)
-        policy = served_policy(access={NEW_OLD: {'granted': ['456', '789'], 'denied': []}, NEW_TG: {'granted': [], 'denied': ['789']}})
-        served = policy.current()
-        # Granted before the upgrade still counts; a denial under any id wins.
-        self.assertTrue(policy.access(served, NEW, '456'))
-        self.assertFalse(policy.access(served, NEW, '789'))
-        self.assertFalse(policy.access(served, GROUP, '456'))
-
     def test_the_served_list_is_read_again_on_a_newer_epoch_and_fails_closed(self):
         from services.chats import Served, ServedList
         reads, now = [], [0.0]
@@ -481,12 +471,12 @@ class PolicyTests(unittest.TestCase):
 class DisabledTests(unittest.TestCase):
     def test_disabled_service_polls_and_sends_nothing(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'SERVICE_TOKEN': SECRET}):
-            service = TelegramService(Policy.of(False, None, [], {}), TOKEN, Path(directory) / 'spool', Path(directory) / 'state')
+            service = TelegramService(Policy.of(False, None, []), TOKEN, Path(directory) / 'spool', Path(directory) / 'state')
             service.start()
             self.assertEqual(service.health()['state'], 'disabled')
             self.assertEqual(service.identify(), {'state': 'disabled'})
             self.assertIsNone(service.loop)
-            missing = TelegramService(Policy.of(True, OWNER, [], {}), '', Path(directory) / 'spool', Path(directory) / 'state')
+            missing = TelegramService(Policy.of(True, OWNER, []), '', Path(directory) / 'spool', Path(directory) / 'state')
             self.assertEqual(missing.health()['state'], 'credentials_missing')
 
 

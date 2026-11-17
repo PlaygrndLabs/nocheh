@@ -30,10 +30,11 @@ BOOTSTRAP = r'''
 import pg from 'pg';
 import {canonical,digest} from './dist/src/archive.js';
 import {bootstrapStores} from './dist/src/stores/bootstrap.js';
+import {ChatSeeder} from './dist/src/stores/chat-seed.js';
 await bootstrapStores();
 const store=async name=>{const client=new pg.Client({host:'nocheh-db',user:'nocheh',database:'nocheh_'+name,password:process.env.PGPASSWORD});
  await client.connect();return client;};
-const marker=process.env.PRIVATE_MARKER,assistant={enabled:false,owner_id:'42',group_access:{}};
+const marker=process.env.PRIVATE_MARKER,assistant={enabled:false,owner_id:'42'};
 const archive=await store('archive'),derived=await store('derived'),control=await store('control');
 await archive.query("INSERT INTO events(id,source_key,channel,bot_id,scope,source_id,revision,origin,kind,payload,payload_hash,original_text,search_text) VALUES($1,'fixture-source','telegram','fixture','42','1','1','live','telegram_update',$2,$3,$4,$5)",
  ['a'.repeat(64),Buffer.from('{}'),digest('{}'),Buffer.from(marker),marker]);
@@ -43,7 +44,11 @@ await control.query("INSERT INTO runtime_configuration_versions(name,revision,do
 await control.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");
 await control.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,'Fixture share','[\"-11\"]','-10',true,'filtered','Only fixture facts.',1)",['c'.repeat(64)]);
 await control.query("INSERT INTO runtime_profiles(id,name,owner_id,state,revision) VALUES($1,'research','42','active',1)",[process.env.CUSTOM_PROFILE]);
-for(const client of [archive,derived,control])await client.end();'''
+// The chats the saved values name, as the stores seed them at start (ADR-0252).
+const pool=name=>new pg.Pool({host:'nocheh-db',user:'nocheh',database:'nocheh_'+name,password:process.env.PGPASSWORD});
+const pools={archive:pool('archive'),derived:pool('derived'),control:pool('control')};
+await new ChatSeeder(pools,{owner_id:'42'}).seed();
+for(const client of [archive,derived,control,...Object.values(pools)])await client.end();'''
 
 
 def output(arguments, environment=None):

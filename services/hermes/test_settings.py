@@ -70,20 +70,29 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(saved['apply_state'], 'pending')
             self.assertEqual(save(state, {'NOCHEH_DASHBOARD_URL': ''}, saved['revision'])['apply_state'], 'current')
 
-    def test_the_retired_group_list_does_not_ask_for_apply_after_an_upgrade(self):
+    def test_a_retired_setting_is_hidden_unsaveable_and_does_not_ask_for_apply_after_an_upgrade(self):
         from tools.operations.installation.configuration import DEFAULTS
         from tools.operations.installation.settings import LIVE, revision
-        # The revision a build that still had the group list setting recorded at Apply.
-        old = {**DEFAULTS, 'TELEGRAM_GROUP_IDS': ''}
-        before = lambda values: revision({key: value for key, value in values.items() if key not in LIVE and old.get(key) != value})
-        for listed in ('', '-10'):
-            with self.subTest(listed=listed), tempfile.TemporaryDirectory() as folder:
-                state = Path(folder); values = initialize(state)
-                values['TELEGRAM_GROUP_IDS'] = listed; write_env(env_path(state), values)
-                self.assertEqual(load(state)['TELEGRAM_GROUP_IDS'], listed)
-                (state / 'admin').mkdir(exist_ok=True)
-                (state / 'admin/applied.json').write_text(json.dumps({'revision': before(load(state))}))
-                self.assertEqual(view(state)['apply_state'], 'current')
+        # The group list (ADR-0253) and the lists of who may talk in each group, which members replace (step 3): an older
+        # .env keeps its line, at the old default or not.
+        access = json.dumps({'-10': {'granted': ['77'], 'denied': ['78']}})
+        for key, default, listed in (('TELEGRAM_GROUP_IDS', '', '-10'), ('TELEGRAM_GROUP_ACCESS', '{}', access)):
+            # The revision a build that still had the setting recorded at Apply.
+            old = {**DEFAULTS, key: default}
+            before = lambda values: revision({name: value for name, value in values.items() if name not in LIVE and old.get(name) != value})
+            for value in (default, listed):
+                with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as folder:
+                    state = Path(folder); values = initialize(state)
+                    self.assertNotIn(key, values, 'a new .env has no line for it')
+                    values[key] = value; write_env(env_path(state), values)
+                    self.assertEqual(load(state)[key], value)
+                    (state / 'admin').mkdir(exist_ok=True)
+                    (state / 'admin/applied.json').write_text(json.dumps({'revision': before(load(state))}))
+                    current = view(state)
+                    self.assertEqual(current['apply_state'], 'current')
+                    self.assertNotIn(key, [field['key'] for field in current['fields']])
+                    with self.assertRaisesRegex(ValueError, 'unsupported_setting'): save(state, {key: listed}, current['revision'])
+                    self.assertEqual(load(state)[key], value)
 
     def test_models_are_owner_settings_and_embeddings_never_mix(self):
         import sqlite3

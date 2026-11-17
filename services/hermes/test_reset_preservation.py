@@ -40,11 +40,12 @@ class ResetPreservationTests(unittest.TestCase):
         self.loaded = configuration.load(self.state); configuration.validate(self.loaded)
         blockers = []; paths = reset_inventory.files(self.state, self.memory, self.config, blockers)
         self.database = {name: [] for name in reset_preservation.reset_configuration.catalog('original-only-v1')}
-        policy = {'enabled': False, 'owner_id': '42', 'group_access': {}}
+        policy = {'enabled': False, 'owner_id': '42'}
         self.database.update(security_policy=[{'document': {'version': 1, 'rules': []}}],
                              installation_generation=[{'generation': '11111111-1111-4111-8111-111111111111'}],
                              guard_mode=[{'mode': 'on'}],
-                             runtime_configuration=[{'name': 'assistant', 'document': policy}])
+                             runtime_configuration=[{'name': 'assistant', 'document': policy}],
+                             daily_messages=[{'daily_messages': 200}])
         self.preflight = {'format': 'nocheh-reset-preflight-v1', 'id': str(uuid.uuid4()),
             'executable': False, 'content_copied': False, 'blockers': blockers,
             'containers': [], 'volumes': [], 'paths': paths, 'external_archives': [],
@@ -141,7 +142,7 @@ class ResetPreservationTests(unittest.TestCase):
         self.assertEqual(snapshot['chats']['groups'], {'-10': ['-10']})
 
     def test_database_policy_mismatch_blocks_completion(self):
-        self.database['runtime_configuration'][0]['document']['group_access'] = {'-10': {'granted': ['77'], 'denied': []}}
+        self.database['runtime_configuration'][0]['document']['enabled'] = True
         self.recovery.query.return_value = json.dumps(self.database)
         with reset_protocol.locked(self.state) as journal:
             self.ready(journal)

@@ -11,14 +11,16 @@ class TelegramDirectoryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.state = Path(self.temp.name)
-        self.values = {'TELEGRAM_BOT_TOKEN': 'fixture-secret', 'TELEGRAM_OWNER_ID': '42',
-                       'TELEGRAM_GROUP_ACCESS': '{"-10042":{"granted":["91"],"denied":["73"]}}'}
+        self.values = {'TELEGRAM_BOT_TOKEN': 'fixture-secret', 'TELEGRAM_OWNER_ID': '42'}
         # The groups Nocheh serves come from the app (ADR-0253), never from a setting.
         self.served = Served.of('42', groups=['-10042'])
         mocked = patch.object(directory, 'load', return_value=self.values)
         mocked.start(); self.addCleanup(mocked.stop)
+        # Storage lists the members with a switch for the group (step 3), also one Nocheh never saw there, who has no name yet.
         self.observed = {'groups': [{'id': '-10042', 'external': '-10042', 'telegram_ids': ['-10042'], 'name': 'Old name',
-                                     'users': [{'id': '73', 'name': 'Mira Chen', 'username': '@mira'}]}],
+                                     'users': [{'id': '73', 'name': 'Mira Chen', 'username': '@mira', 'state': 'in', 'seen': True, 'member': True},
+                                               {'id': '91', 'name': None, 'username': None, 'state': None, 'seen': False, 'member': True},
+                                               {'id': '92', 'name': None, 'username': None, 'state': 'left', 'seen': False, 'member': False}]}],
                          'truncated': False}
 
     def test_live_group_title_and_administrators_fill_observed_directory(self):
@@ -38,11 +40,15 @@ class TelegramDirectoryTests(unittest.TestCase):
         self.assertEqual(result['groups'][0]['name'], 'Aurora group')
         people = {person['id']: person for person in result['groups'][0]['users']}
         self.assertEqual(people['42']['name'], 'Owner')
-        self.assertEqual(people['73']['name'], 'Mira Chen')
+        self.assertEqual(people['73'], {'id': '73', 'name': 'Mira Chen', 'username': '@mira', 'state': 'in', 'seen': True, 'member': True})
         self.assertEqual(people['84']['username'], '@devon')
-        self.assertEqual(people['91']['name'], 'Known member')
+        # A carried member who never wrote gets a name from Telegram; what storage knows about them stays.
+        self.assertEqual(people['91'], {'id': '91', 'name': 'Known member', 'username': None, 'seen': False, 'member': True})
+        self.assertEqual(people['92'], {'id': '92', 'name': None, 'username': None, 'state': 'left', 'seen': False})
         self.assertNotIn('85', people)
-        self.assertEqual([method for method, _ in calls], ['getChat', 'getChatAdministrators', 'getChatMember'])
+        # Only members with no name are asked about: never someone who is not a member, nor one Telegram already named.
+        self.assertEqual([(method, params.get('user_id')) for method, params in calls],
+                         [('getChat', None), ('getChatAdministrators', None), ('getChatMember', '91')])
 
     def test_served_group_remains_visible_when_telegram_is_unavailable(self):
         def unavailable(*args, **kwargs):

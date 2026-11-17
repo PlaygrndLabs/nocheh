@@ -1,14 +1,11 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools.operations.installation import configuration
 from tools.acceptance import reset_acceptance
 from tools.acceptance import reset_acceptance_refresh as refresh
 from tools.acceptance import reset_protocol
-from tools.operations.installation import settings
 
 
 class Journal:
@@ -24,59 +21,56 @@ class Journal:
         pass
 
 
-class AcceptanceRefreshTests(unittest.TestCase):
+class AcceptanceActivationTests(unittest.TestCase):
+    """What a runtime image replacement rebinds during reset acceptance (reset_acceptance_code_refresh). A member change
+    needs none: members are live, and no setting names who may talk in a group (step 3)."""
+
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory(prefix='nocheh-refresh-')
         self.state = Path(self.folder.name)
-        configuration.initialize(self.state)
-        values = configuration.load(self.state)
-        values.update(TELEGRAM_OWNER_ID='100')
-        configuration.write_env(configuration.env_path(self.state), values)
         self.journal = Journal(self.state)
-        self.before = [{'service': name, 'id': name + '-old'} for name in
-                       ('hermes', 'nocheh-app', 'nocheh-dashboard', 'nocheh-db', 'nocheh-security', 'nocheh-telegram')]
+        self.containers = {name: {'id': name + '-old', 'restart_policy': {'Name': 'no', 'MaximumRetryCount': 0}}
+                           for name in ('hermes', 'nocheh-app', 'nocheh-db', 'nocheh-telegram')}
         self.activation = {'format': reset_acceptance.FORMAT, 'stage': 'acceptance_running',
                            'reset_id': self.journal.value['reset_id'], 'generation': self.journal.value['generation'],
-                           'plan': {'desired': [row['service'] for row in self.before],
-                                    'initial_containers': {'nocheh-db': 'nocheh-db-old'}},
-                           'containers': self.before}
+                           'plan': {'desired': sorted(self.containers), 'initial_containers': {'nocheh-db': 'nocheh-db-old'}},
+                           'containers': [{'service': name, 'id': row['id']} for name, row in sorted(self.containers.items())]}
         reset_protocol.atomic(self.journal.directory / 'acceptance-mode.json', self.activation, create=True)
-        settings.save(self.state, {'TELEGRAM_GROUP_ACCESS': json.dumps({'-200': {'granted': ['300'], 'denied': []}})},
-                      settings.view(self.state)['revision'])
 
     def tearDown(self):
         self.folder.cleanup()
 
-    def test_exact_group_grant_rebinds_only_planned_healthy_containers(self):
-        after = [{**row, 'id': row['service'] + '-new'} if row['service'] in refresh.SERVICES else row
-                 for row in self.before]
-        with patch.object(refresh, '_containers', return_value=self.before):
-            self.assertEqual(refresh.prepare(self.journal, environment={})['stage'], 'prepared')
-        with (patch.object(refresh, '_containers', return_value=after),
-              patch.object(refresh, '_assert_environment')):
-            self.assertEqual(refresh.finish(self.journal, environment={})['stage'], 'complete')
-            self.assertEqual(refresh.finish(self.journal, environment={})['stage'], 'complete')
-        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json')['containers'], after)
-        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-refresh.json')['stage'], 'complete')
-        self.assertEqual(settings.view(self.state)['apply_state'], 'current')
+    def test_the_activation_is_this_resets_running_acceptance(self):
+        self.assertEqual(refresh._activation(self.journal), self.activation)
+        self.journal.value['steps'] = self.journal.value['steps'][:7]
+        with self.assertRaisesRegex(ValueError, 'reset_refresh_phase_required'):
+            refresh._activation(self.journal)
+        self.journal.value['steps'].append({'step': 'telegram_boundary'})
+        for change in ({'stage': 'prepared'}, {'reset_id': 'c' * 36}, {'generation': 'd' * 36}):
+            with self.subTest(change=change):
+                reset_protocol.atomic(self.journal.directory / 'acceptance-mode.json', {**self.activation, **change})
+                with self.assertRaisesRegex(ValueError, 'reset_refresh_activation_changed'):
+                    refresh._activation(self.journal)
 
-    def test_unexpected_replacement_fails_closed_without_rebinding(self):
-        after = [{**row, 'id': row['service'] + '-new'} for row in self.before]
-        with patch.object(refresh, '_containers', return_value=self.before):
-            refresh.prepare(self.journal, environment={})
-        with patch.object(refresh, '_containers', return_value=after):
-            with self.assertRaisesRegex(RuntimeError, 'unexpected_container_replacement'):
-                refresh.finish(self.journal, environment={})
-        self.assertEqual(reset_protocol.read(self.journal.directory / 'acceptance-mode.json'), self.activation)
-        self.assertEqual(settings.view(self.state)['apply_state'], 'unverified')
+    def test_the_containers_are_running_healthy_unfenced_and_never_restarted_by_docker(self):
+        states = {row['id']: {'Status': 'running', 'Health': {'Status': 'healthy'}} for row in self.containers.values()}
 
-    def test_unrelated_configuration_change_fails_closed(self):
-        values = configuration.load(self.state)
-        values['NOCHEH_MODEL'] = 'different-model'
-        configuration.write_env(configuration.env_path(self.state), values)
-        with self.assertRaisesRegex(ValueError, 'unrelated_configuration_change'):
-            refresh.prepare(self.journal, environment={})
-        self.assertFalse((self.journal.directory / 'acceptance-refresh.json').exists())
+        def current(changes=None, fences=0):
+            with (patch.object(reset_acceptance, '_owned', return_value=self.containers),
+                  patch.object(reset_acceptance, '_state', side_effect=lambda identifier, runner, environment: {**states[identifier], **(changes or {}).get(identifier, {})}),
+                  patch.object(reset_acceptance, '_fence_state', return_value=fences)):
+                return refresh._containers(self.journal, self.activation, None, {})
+
+        self.assertEqual(current(), self.activation['containers'])
+        with self.assertRaisesRegex(RuntimeError, 'reset_refresh_service_not_healthy'):
+            current({'hermes-old': {'Health': {'Status': 'starting'}}})
+        with self.assertRaisesRegex(RuntimeError, 'reset_refresh_service_not_healthy'):
+            current({'nocheh-app-old': {'Status': 'exited'}})
+        with self.assertRaisesRegex(RuntimeError, 'reset_refresh_fence_changed'):
+            current(fences=3)
+        self.containers['nocheh-telegram']['restart_policy'] = {'Name': 'unless-stopped', 'MaximumRetryCount': 0}
+        with self.assertRaisesRegex(RuntimeError, 'reset_acceptance_restart_owner_enabled'):
+            current()
 
 
 if __name__ == '__main__':

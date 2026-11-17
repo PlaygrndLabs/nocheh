@@ -123,7 +123,7 @@ class TelegramOperationsTests(unittest.TestCase):
         served = Served.of('123', groups=[('-1001000000001', '-1001000000009'), (newer, '-1002000000001'), (upgraded, '-1003000000001'),
                                           (added, '-1004000000001')],
                            old={'-1001000000001': ['-1001000000001'], upgraded: ['-4000000000001']})
-        values = {'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '123', 'TELEGRAM_GROUP_ACCESS': '{}'}
+        values = {'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '123'}
         with patch.object(telegram_directory, 'load', return_value=values):
             result = telegram_directory.directory(None, archive=archive, served=served)
         self.assertEqual(result, {'groups': [
@@ -137,7 +137,10 @@ class TelegramOperationsTests(unittest.TestCase):
             {'id': newer, 'external': '-1002000000001', 'name': 'Night sky club', 'users': [{'id': '91', 'name': 'Nia', 'username': None, 'state': 'left', 'seen': True}]}],
             'truncated': False})
         # With a bot token, Telegram is asked about each served group by the Telegram id it has now, and what it says lands
-        # on the group storage knows. People saved under an older id of the group are asked about too.
+        # on the group storage knows. A member storage lists for the group who has no name yet (added by Telegram user ID,
+        # step 3) is asked about there too.
+        garden = next(group for group in archive['groups'] if group['id'] == upgraded)
+        garden['users'] = [{'id': '77', 'name': None, 'username': None, 'state': None, 'seen': False, 'member': True}]
         asked = []
 
         def api(token, method, **params):
@@ -145,8 +148,7 @@ class TelegramOperationsTests(unittest.TestCase):
             if method == 'getChat' and params['chat_id'] == '-1002000000001': return {'id': -1002000000001, 'type': 'supergroup', 'title': 'Night sky'}
             if method == 'getChatAdministrators' and params['chat_id'] == '-1002000000001': return [{'user': {'id': 456, 'first_name': 'Bob'}}]
             return None
-        access = '{"-4000000000001":{"granted":["77"],"denied":[]}}'
-        with patch.object(telegram_directory, 'load', return_value={**values, 'TELEGRAM_BOT_TOKEN': 'fixture-secret', 'TELEGRAM_GROUP_ACCESS': access}):
+        with patch.object(telegram_directory, 'load', return_value={**values, 'TELEGRAM_BOT_TOKEN': 'fixture-secret'}):
             named = telegram_directory.directory(None, archive=archive, bot_api=api, served=served)
         night = next(group for group in named['groups'] if group['id'] == newer)
         self.assertEqual((night['name'], [user['id'] for user in night['users']]), ('Night sky', ['456', '91']))

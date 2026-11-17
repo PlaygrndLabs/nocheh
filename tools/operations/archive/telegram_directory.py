@@ -87,6 +87,9 @@ def directory(state, archive=None, bot_api=_bot_api, served=None):
                     person['state'] = user['state']
                 if isinstance(user.get('seen'), bool):
                     person['seen'] = user['seen']
+                # A member with a switch for this group, whether Nocheh ever saw them there or not (step 3).
+                if user.get('member') is True:
+                    person['member'] = True
                 users[person['id']] = person
         groups[('chat', identifier)] = {'id': identifier, 'external': external or None, 'name': _clean(observed.get('name')) or None, 'users': users}
     token = values['TELEGRAM_BOT_TOKEN']
@@ -107,21 +110,18 @@ def directory(state, archive=None, bot_api=_bot_api, served=None):
                 person = _person(member.get('user')) if isinstance(member, dict) else None
                 if person:
                     group['users'][person['id']] = person
-            candidates = {values['TELEGRAM_OWNER_ID']}
-            for external in served.app_ids(served_group):
-                try:
-                    access = json.loads(values['TELEGRAM_GROUP_ACCESS']).get(external, {})
-                    candidates.update(access.get('granted', []))
-                    candidates.update(access.get('denied', []))
-                except (TypeError, ValueError, AttributeError):
-                    pass
+            # Telegram is asked for the names of the owner and of the members storage lists for this group that no update
+            # named yet, such as a member added by Telegram user ID who never wrote there (step 3). Only the name is used:
+            # whether they are in the group stays what storage knows.
+            candidates = {values['TELEGRAM_OWNER_ID']} | {user_id for user_id, person in group['users'].items() if person.get('member')}
             for user_id in sorted(value for value in candidates if isinstance(value, str))[:40]:
-                if not USER.fullmatch(user_id) or user_id in group['users']:
+                known = group['users'].get(user_id)
+                if not USER.fullmatch(user_id) or known and (known['name'] or known['username']):
                     continue
                 member = bot_api(token, 'getChatMember', chat_id=identifier, user_id=user_id)
                 person = _person(member.get('user')) if isinstance(member, dict) else None
                 if person and person['id'] == user_id:
-                    group['users'][user_id] = person
+                    group['users'][user_id] = {'id': user_id, **(known or {}), 'name': person['name'], 'username': person['username']}
         except Exception:
             # The archive and saved IDs remain useful during Bot API outages.
             continue
