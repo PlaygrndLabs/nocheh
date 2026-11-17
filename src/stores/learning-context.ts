@@ -32,27 +32,30 @@ export interface PreparedLearningContext {
  * reminder is not learned. `admitQuoted` asks the same of the message a quote repeats part of, even one never archived
  * (another bot's, or one in a chat this review does not read); one it refuses is taken out of the message quoting it,
  * which stays. `admitPinnedQuote` asks the same of the message a quote inside a pinned message repeats part of; one it
- * refuses is taken out of the pinned message, which stays. `collect` gets the ids left out (a pin's or a quote's own id
+ * refuses is taken out of the pinned message, which stays. Either says `not_traced` for a quote the archive holds nothing
+ * to judge by: it is taken out the same way, and counted as not traced (`quote_not_traced`), not as left out for a
+ * sender. `collect` gets the ids left out (a pin's or a quote's own id
  * when only what it carried was), the rules kept, the ids of the rules left out with them, `bare_reaction` when the
  * source is a reaction to a message that was left out, `empty_pin` when the source is a pin of Nocheh's card, notice or
  * reminder, or of Nocheh's message not archived yet, with nothing else in it, and each kept rule's recorded inputs
  * (`inputs`: the source ids of its stored dependencies, by rule id). Honcho passes none and interpretations only
  * `collect`, so they learn from everyone's messages, as before, other bots' included. `admitHeld` names the places
  * (heldKey) of what a message holds that may go in (heldBy: a message it embeds, by its own author, a poll option, by who
- * added it); everything else it holds is taken out of it, which stays. For every caller a pin loses Nocheh's card,
+ * added it), and apart from them the places of the quotes inside embedded messages the archive holds nothing to judge
+ * by (`untraced`); everything else it holds is taken out of it, which stays. For every caller a pin loses Nocheh's card,
  * notice or reminder, and Nocheh's own account's message the archive does not hold as Nocheh's learned one (not archived
  * yet, or a forward of one); a quote of Nocheh's own words is left out of the message quoting it, and out of a message a
  * pin carries (NoteSourceRepository.carried, ADR-0256, ADR-0257); and a message embeds is kept, labelled by the class
  * of the message holding it, except Nocheh's own words (nochehHeld), which go, and a quote inside one that can't be
  * traced through the archive (carried: `untraced`), which goes too and is counted (`quote_not_traced`; `collect` gets
- * its message's id in `untraced`).
+ * its message's id in `untraced`, once, as for every quote counted as not traced).
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
   admitPinned?:(reference:SourceReference)=>Promise<boolean|'not_learned'>;
-  admitQuoted?:(reference:SourceReference)=>Promise<boolean>;
-  admitPinnedQuote?:(reference:SourceReference)=>Promise<boolean>;
-  admitHeld?:(reference:SourceReference)=>Promise<ReadonlySet<string>>;
+  admitQuoted?:(reference:SourceReference)=>Promise<boolean|'not_traced'>;
+  admitPinnedQuote?:(reference:SourceReference)=>Promise<boolean|'not_traced'>;
+  admitHeld?:(reference:SourceReference)=>Promise<{admitted:ReadonlySet<string>;untraced:ReadonlySet<string>}>;
   collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;empty_pin?:boolean;inputs:Map<string,string[]>;untraced?:string[]};
 }
 export class LearningContextRepository {
@@ -118,9 +121,15 @@ export class LearningContextRepository {
         // message the archive does not hold as Nocheh's (not archived yet, or a forward of one) is cut as a card is.
         // Another bot's message is someone else's, and its quote stays, as anyone else's does, except in the owner's notes
         // review, where a quote of what someone not allowed there wrote goes, another bot's included, archived or not.
+        // A quote cut there is counted by why: the sender of the message it is from is not allowed there (false), or
+        // nothing in the archive tells whose words it repeats (`not_traced`).
+        const leftOut=(verdict:boolean|'not_traced')=>{
+          if(verdict===false){limitations.push('sender_not_allowed');unquoted.push(reference.id);}
+          else if(verdict==='not_traced'){limitations.push('quote_not_traced');untraced.push(reference.id);}
+        };
         const quoted=!message.quote||unquote||carried?.quote||!options.admit||!options.admitQuoted?true:await options.admitQuoted(reference);
-        if(unquote||carried?.quote||!quoted)delete message.quote;
-        if(!quoted){limitations.push('sender_not_allowed');unquoted.push(reference.id);}
+        if(unquote||carried?.quote||quoted!==true)delete message.quote;
+        leftOut(quoted);
         // A pin carries the message it pinned whole. Nocheh's own card, notice or reminder stays out of everything learned
         // from it, whoever pinned it, and so does Nocheh's own account's message the archive does not hold as Nocheh's
         // (carried: `bot`); what someone not allowed there wrote, another bot's message included, stays out of the owner's
@@ -132,8 +141,10 @@ export class LearningContextRepository {
         else if(carried?.pinned_quote&&message.pinned_message&&typeof message.pinned_message==='object')delete message.pinned_message.quote;
         // In the owner's notes review, a quote inside the pinned message goes when what it quotes is by someone not
         // allowed there, or can't be told; the pin and the pinned message's own words stay.
-        else if(options.admit&&options.admitPinnedQuote&&message.pinned_message?.quote&&!await options.admitPinnedQuote(reference)) {
-          delete message.pinned_message.quote;limitations.push('sender_not_allowed');unquoted.push(reference.id);
+        else if(options.admit&&options.admitPinnedQuote&&message.pinned_message?.quote) {
+          const kept=await options.admitPinnedQuote(reference);
+          if(kept!==true)delete message.pinned_message.quote;
+          leftOut(kept);
         }
         if(pinned===false){limitations.push('sender_not_allowed');unpinned.push(reference.id);}
         // A message it embeds stays, as a pin's does, and the message is labelled as holding someone else's words unless it
@@ -142,18 +153,20 @@ export class LearningContextRepository {
         // (carried: `held`), and so does a quote inside one that can't be traced through the archive, counted as such
         // (carried: `untraced`). In the owner's notes review, what someone not allowed there wrote, or what can't be told,
         // goes too and is counted: a message it embeds by its own author, the quote inside one by the message it is from,
-        // a poll option by who added it, and a deleted option's text, whose adder Telegram does not name (admitHeld).
+        // a poll option by who added it, and a deleted option's text, whose adder Telegram does not name (admitHeld). A
+        // quote there that the archive holds nothing to judge by is counted as not traced (admitHeld: `untraced`), not as
+        // left out for a sender.
         const held=heldBy(message);
         if(held.length) {
-          const nocheh=new Set(carried?.held??[]),unknown=new Set(carried?.untraced??[]),admitted=options.admit&&options.admitHeld?await options.admitHeld(reference):null;
+          const nocheh=new Set(carried?.held??[]),unknown=new Set(carried?.untraced??[]),judged=options.admit&&options.admitHeld?await options.admitHeld(reference):null;
           const cut:Held[]=[];let refused=false,untold=false;
           for(const item of held) {
             // What is inside something already cut goes with it; a deleted option loses only its text.
             if(cut.some(outer=>outer.kind!=='deleted_option'&&heldWithin(item.path,outer.path)))continue;
             const place=heldKey(item.path);
             if(nocheh.has(place))cut.push(item);
-            else if(unknown.has(place)){cut.push(item);untold=true;}
-            else if(admitted&&!admitted.has(place)){cut.push(item);refused=true;}
+            else if(unknown.has(place)||judged?.untraced.has(place)){cut.push(item);untold=true;}
+            else if(judged&&!judged.admitted.has(place)){cut.push(item);refused=true;}
           }
           cutHeld(message,cut);
           if(refused){limitations.push('sender_not_allowed');unheld.push(reference.id);}

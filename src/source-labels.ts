@@ -46,7 +46,8 @@ export type NoteOrigin=
 /** What a notes review recorded about its batch when it was queued: event ids and fixed class tokens only, whose words
  *  the rules it read rest on, by the messages code recorded each rule was learned from, and how many messages and rules
  *  were left out and why: someone not allowed there sent them or the messages they rest on, rules not the owner's, and
- *  messages that lost a quote inside a message they embed that can't be traced (`quote_not_traced`, cut for everyone). */
+ *  messages that lost a quote nothing tells whose words it repeats (`quote_not_traced`): one inside a message they embed
+ *  that can't be traced, cut for everyone, or, in this review alone, one the archive holds nothing to judge by. */
 export interface ReviewProvenance {
   version:1;source:string;events:{id:string;class:EventClass}[];owner_account_only:boolean;rules:'none'|'owner'|'others';rule_buckets:RuleBucket[];
   left_out:{sender_not_allowed:number;rule_sender_not_allowed:number;rules_left_out_for_owner_label:number;quote_not_traced:number};

@@ -16,6 +16,7 @@ import {applicableInterpretations,type InterpretationVersion} from '../interpret
 import {bucketOf,heldBy,heldKey,inaccessible,ownDeletedOption,ownerTyped,type Held} from '../source-facts.js';
 import {REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,reviewBody,reviewFragment,ruleBuckets,type ReviewProvenance,type RuleBucket} from '../source-labels.js';
 import {NoteSourceRepository} from './note-sources.js';
+import {repliesElsewhere} from '../observed-source.js';
 
 export const nativeReviewSchema=`
 CREATE TABLE IF NOT EXISTS native_review_jobs (
@@ -45,6 +46,11 @@ const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='obj
 type Archived={channel:string;kind:string;scope:string;payload:unknown};
 /** Reads an archived event (NativeReviewRepository.archived), once per review being queued. */
 type Read=(id:string)=>Promise<Archived|null>;
+/** How the owner's notes review judges a quote (quotedSender): let in, refused for the sender of the message it is from,
+ *  or with nothing in the archive to tell whose words it repeats. */
+type QuoteVerdict='review'|'sender_not_allowed'|'quote_not_traced';
+/** A quote's verdict as the learning context takes it (LearningContextOptions.admitQuoted). */
+const quoteVerdict=(value:QuoteVerdict):boolean|'not_traced'=>value==='review'||(value==='quote_not_traced'?'not_traced':false);
 const protocol='hermes-native-review-v3';
 /** An uncertain review is observed at most this many times, with growing gaps, then left closed as uncertain. */
 export const nativeReconcileLimit=8;
@@ -123,8 +129,8 @@ export class NativeReviewRepository {
       let allowed=asked.get(reference.id);if(!allowed)asked.set(reference.id,allowed=this.sender(reference.id,read).then(value=>value==='review'));return allowed;};
     const options:Required<LearningContextOptions>={admit,
       admitPinned:reference=>this.pinnedSender(reference.id,read).then(value=>value==='not_learned'?value:value==='review'),
-      admitQuoted:reference=>this.quotedSender(reference.id,admit,read).then(value=>value==='review'),
-      admitPinnedQuote:reference=>this.pinnedQuotedSender(reference.id,admit,read).then(value=>value==='review'),
+      admitQuoted:reference=>this.quotedSender(reference.id,admit,read).then(quoteVerdict),
+      admitPinnedQuote:reference=>this.pinnedQuotedSender(reference.id,admit,read).then(quoteVerdict),
       admitHeld:reference=>this.heldSenders(reference.id,admit,read),
       collect:{dropped:[],versions:[],refused:[],bare_reaction:false,empty_pin:false,inputs:new Map(),untraced:[]}};
     let context;
@@ -299,21 +305,25 @@ export class NativeReviewRepository {
    * is an option added in a chat's name. A message Telegram no longer shows (inaccessible) holds no words. A quote inside
    * an embedded message is judged as a pinned message's is (pinnedQuotedSender): by that message as the archive holds it
    * (embeddedTo, every quote, one whose embedded copy keeps external_reply included), each revision asked as a message
-   * quoting is (quotedSender), which judges one answering a message in another chat by that message alone; one the
-   * archive does not hold has nothing to judge it by and is not let in. A deleted option's text, whose adder Telegram does
-   * not name, is let in only when it is the owner's own (heldAllowed). Nocheh's own words, and a quote that can't be
-   * traced, are cut for everyone before this is asked.
+   * quoting is (quotedSender), which judges one answering a message in another chat by that message alone. One the
+   * archive holds no revision of to judge it by (never archived, or held only as Telegram Desktop exports of a reply to
+   * another chat) tells nothing of whose words it repeats: it is not let in, and its place is named in `untraced`, apart
+   * from the places refused for a sender. A deleted option's text, whose adder Telegram does not name, is let in only when
+   * it is the owner's own (heldAllowed). Nocheh's own words, and a quote that can't be traced for any reader, are cut for
+   * everyone before this is asked.
    */
-  private async heldSenders(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<Set<string>> {
-    const event=await read(id),update=record(event?.payload),admitted=new Set<string>();
+  private async heldSenders(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<{admitted:Set<string>;untraced:Set<string>}> {
+    const event=await read(id),update=record(event?.payload),admitted=new Set<string>(),untraced=new Set<string>();
     const message=record(update?.message??update?.edited_message??update?.channel_post??update?.edited_channel_post);
-    if(!event||!message)return admitted;
+    if(!event||!message)return {admitted,untraced};
     const held=heldBy(message),traced=held.some(item=>item.kind==='quote')?(await this.sources.embeddedTo([id],true)).get(id):undefined;
     for(const item of held) {
       const place=heldKey(item.path);
-      if(item.kind==='quote'?await this.shownQuoteSender(traced?.get(place)??[],admit,read)==='review':this.heldAllowed(event,message,item))admitted.add(place);
+      if(item.kind!=='quote'){if(this.heldAllowed(event,message,item))admitted.add(place);continue;}
+      const verdict=await this.shownQuoteSender(traced?.get(place)??[],admit,read);
+      if(verdict==='review')admitted.add(place);else if(verdict==='quote_not_traced')untraced.add(place);
     }
-    return admitted;
+    return {admitted,untraced};
   }
   /** Whether one thing a message holds (heldBy) may go into the owner's notes, as heldSenders asks it: a message it embeds,
    *  a poll option, or, in the owner's own private chat (told by equality with ownerChat), the text of an option deleted
@@ -335,12 +345,16 @@ export class NativeReviewRepository {
    * bot's message, or one sent before Nocheh was there) is judged by its author as the reply shows it, in this chat, as
    * pinnedSender judges a pin's. A quote repeats part of that message, so whatever that message holds (heldBy: a poll
    * option someone added, a message it embeds) must be let in too, as heldSenders asks it, both as the archive holds it
-   * and as the reply shows it now. A quote with nothing to judge it by is not let in.
+   * and as the reply shows it now. A quote with nothing to judge it by is not let in. A Telegram Desktop export's revision
+   * of a reply to another chat (repliesElsewhere) names that chat's message by an id the archive can't place, and an
+   * export archived before such replies lost their reply relation (observedSource) names this chat's message with that id
+   * instead: it is never judged by that relation, and tells nothing of whose words the quote repeats (`quote_not_traced`).
    */
-  private async quotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<'review'|'sender_not_allowed'> {
+  private async quotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<QuoteVerdict> {
     const event=await read(id),update=record(event?.payload);
     const message=record(update?.message??update?.edited_message??update?.channel_post??update?.edited_channel_post);
     if(!event||!message)return 'sender_not_allowed';
+    if(event.kind.startsWith('telegram_desktop_')&&repliesElsewhere(message))return 'quote_not_traced';
     const external=!!record(message.external_reply),relationships=this.contexts.access.relationships;
     // The archive's reply relation for one in another chat or topic is marked external (observedSource).
     const targets=(await this.contexts.access.stores.archive.query(`SELECT o.platform,o.namespace,o.kind,o.external_id FROM source_relations r
@@ -364,19 +378,27 @@ export class NativeReviewRepository {
   }
   /**
    * Whether the quote inside the message an archived pin carries may go into the owner's notes, by the message that quote
-   * repeats part of (ADR-0257): the pinned message as the archive holds it is asked as any quote is (quotedSender), each
-   * revision, so its quote stays only when the message it answers is archived and admitted, or, when that one was never
-   * archived, its author as the pinned message shows it is allowed in that chat. Telegram leaves the reply out of a pinned
-   * message, so the quote inside one the archive never got has nothing to judge it by and is not let in.
+   * repeats part of (ADR-0257): the pinned message as the archive holds it is asked as any quote is (shownQuoteSender),
+   * each revision, so its quote stays only when the message it answers is archived and admitted, or, when that one was
+   * never archived, its author as the pinned message shows it is allowed in that chat. Telegram leaves the reply out of a
+   * pinned message, so the quote inside one the archive never got, or holds only as Telegram Desktop exports of a reply to
+   * another chat, has nothing to judge it by: it is not let in, and nothing tells whose words it repeats.
    */
-  private async pinnedQuotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<'review'|'sender_not_allowed'> {
+  private async pinnedQuotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<QuoteVerdict> {
     return this.shownQuoteSender((await this.sources.pinnedTo([id])).get(id)??[],admit,read);
   }
   /** Whether the quote inside a message another shows may go into the owner's notes, by that message's archived revisions
-   *  (`targets`), each asked as a message quoting is (quotedSender); with none archived it has nothing to judge it by. */
-  private async shownQuoteSender(targets:readonly string[],admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<'review'|'sender_not_allowed'> {
-    for(const target of targets)if(await this.quotedSender(target,admit,read)!=='review')return 'sender_not_allowed';
-    return targets.length?'review':'sender_not_allowed';
+   *  (`targets`), each asked as a message quoting is (quotedSender): refused when one is refused, and otherwise let in when
+   *  one is, so a Telegram Desktop export's revision that can't be traced is judged by the revisions beside it. With none
+   *  that tells anything (none archived, or only such exports), nothing tells whose words it repeats. */
+  private async shownQuoteSender(targets:readonly string[],admit:(reference:SourceReference)=>Promise<boolean>,read:Read):Promise<QuoteVerdict> {
+    let traced=false;
+    for(const target of targets) {
+      const verdict=await this.quotedSender(target,admit,read);
+      if(verdict==='sender_not_allowed')return verdict;
+      if(verdict==='review')traced=true;
+    }
+    return traced?'review':'quote_not_traced';
   }
   private async record(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
     await this.control.query('INSERT INTO native_review_skips(event_id,generation,reason) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[source.id,binding.generation,reason]);

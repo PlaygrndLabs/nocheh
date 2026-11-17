@@ -8,6 +8,7 @@ import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
+import {observedSource} from '../src/observed-source.js';
 import {fixtureServices} from './fixture-brain.js';
 import {NativeReviewRepository,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
@@ -658,19 +659,19 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.deepEqual((await recorded(privateDeleted)).map(row=>[row.events,row.left_out]),[[[{id:privateDeleted.id,class:'owner_message'}],left()]]);
     // A quote inside a pinned message stays in the owner's notes review only when the message it quotes is by someone
     // allowed there: Bob's pinned reply quoting Sara loses its quote there, and it is counted; quoting the owner, it
-    // keeps it. A pinned message the archive never got carries no reply to judge its quote by, so its quote goes too.
-    // Interpretations read every one.
+    // keeps it. A pinned message the archive never got carries no reply to judge its quote by, so its quote goes too,
+    // counted as not traced, since no sender was refused. Interpretations read every one.
     await say(94,789,'SARAASK pay the invoice today');await say(96,123,'ALICEASK bring the chairs');
     const quoted=(id:number,target:Record<string,unknown>,mark:string)=>message(id,456,`${mark}OWN noted`,{reply_to_message:target,quote:{text:mark,position:0}});
     await capture({message:quoted(95,message(94,789,'SARAASK pay the invoice today'),'SARAQUOTED')});
     await capture({message:quoted(97,message(96,123,'ALICEASK bring the chairs'),'ALICEQUOTED')});
     const pinnedReply=(id:number,mark:string)=>({...message(id,456,`${mark}OWN noted`),quote:{text:mark,position:0}});
-    for(const [pin,mark,kept] of [[await pinOf(98,pinnedReply(95,'SARAQUOTED')),'SARAQUOTED',false],[await pinOf(99,pinnedReply(97,'ALICEQUOTED')),'ALICEQUOTED',true],
-      [await pinOf(101,pinnedReply(100,'UNSEENQUOTED')),'UNSEENQUOTED',false]] as const) {
+    for(const [pin,mark,kept,counted] of [[await pinOf(98,pinnedReply(95,'SARAQUOTED')),'SARAQUOTED',false,left(1)],
+      [await pinOf(99,pinnedReply(97,'ALICEQUOTED')),'ALICEQUOTED',true,left()],[await pinOf(101,pinnedReply(100,'UNSEENQUOTED')),'UNSEENQUOTED',false,left(0,0,0,1)]] as const) {
       const reviewed=(await input(((await services.reviews.queue(pin)).ids)[0]!)).text as string;
       assert.equal(reviewed.includes(`"${mark}"`),kept,mark);assert.ok(reviewed.includes(`${mark}OWN noted`),mark);
       assert.deepEqual(await recorded(pin),[{version:1,source:pin.id,events:[{id:pin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],
-        left_out:left(kept?0:1)}],mark);
+        left_out:counted}],mark);
       assert.ok((await read(pin)).includes(`"${mark}"`),`${mark}: interpretations still read it`);
     }
 
@@ -778,5 +779,83 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     const elsewhere=await say(1,789,'Sara elsewhere',{},unserved);
     await services.access.setConsent(owner,elsewhere,{enabled:true,expected_revision:0,operation_id:key+':consent-elsewhere'});
     assert.deepEqual((await services.reviews.queue(elsewhere)).ids,[],'never in a chat Nocheh does not serve');assert.equal(await skipped(elsewhere),'sender_not_allowed');
+  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
+test('a quote answering a message in another chat is never judged by this chat\'s message with the same id',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-elsewhere-')),key='review-elsewhere:'+Date.now();
+  // Two supergroups, each one a Telegram Desktop export can be mapped to. Alice (123) owns Nocheh, Bob (456) is allowed in
+  // both and Sara (789) in neither.
+  const here=String(Date.now()),there=String(Date.now()+13),group='-100'+here,other='-100'+there,bot=1000+Date.now()%1000;
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['456'],denied:[]},[other]:{granted:['456'],denied:[]}}};
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:'synthetic-review-service-credential-only',policy:()=>policy,
+    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('no notes review runs in this test');},
+    memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
+  let serial=0;
+  const capture=async(payload:Record<string,any>,chat=group)=>{
+    const update=++serial,message=payload.message;
+    const event:Envelope={version:1,key:key+':'+update,origin:'live',kind:'telegram_update',bot_id:String(bot),scope:chat,source_id:String(message.message_id),
+      revision:String(update),occurred_at:null,text:message.text??null,payload:{update_id:update,...payload}};
+    const source=(await services.capture.capture(event)).source.reference;await services.guards.prepare(source,'fixture',services.detect);return source;
+  };
+  // The owner's poll as a Telegram Desktop export records it: a reply to another chat is that chat's message id with
+  // reply_to_peer_id. `before` archives it as an export archived before such replies lost their reply relation was, with
+  // one to this chat's message with that id.
+  const exported=async(id:number,before=false)=>{
+    const value:Envelope={version:1,key:`${key}:export:${id}`,bot_id:'desktop-export',source_id:String(id),revision:'1',occurred_at:null,origin:'import',
+      kind:'telegram_desktop_message',scope:group,text:'',payload:{chat:{id:Number(here),type:'private_supergroup',name:'Example group'},
+        message:{id,type:'message',text:'',from:'Alice',from_id:'user123',reply_to_message_id:40,reply_to_peer_id:'channel'+there,poll:{question:'Which day?',answers:[]}}}};
+    const {reply_to_peer_id:_peer,...same}=(value.payload as any).message;
+    return (await services.access.archive.capture(before?{...value,source:observedSource({...value,payload:{...value.payload as object,message:same}})}:value)).source.reference;
+  };
+  const user=(id:number)=>({id,is_bot:false,first_name:id===123?'Alice':id===456?'Bob':'Sara'});
+  const message=(id:number,from:number,extra:Record<string,unknown>={},chat=group)=>({message_id:id,date:1700000000+id,chat:{id:Number(chat),type:'supergroup'},from:user(from),...extra});
+  const poll=(id:number,mark:string,target:Record<string,unknown>)=>message(id,123,{poll:{id:'p'+id,question:`${mark}POLL which day?`,
+    options:[{persistent_id:'a',text:'Friday',voter_count:0}],total_voter_count:0,is_closed:false,is_anonymous:false,type:'regular',allows_multiple_answers:false},
+    quote:{text:`${mark}TEXT`,position:0},external_reply:target});
+  const answering=(from:number,id:number)=>({origin:{type:'user',sender_user:user(from),date:1700000000+id},chat:{id:Number(other),type:'supergroup'},message_id:id});
+  const input=async(id:string)=>JSON.parse((await stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[(await services.reviews.inspect(id)).input_reference.id])).rows[0].content.toString());
+  const recorded=async(source:{id:string})=>(await stores.control.query("SELECT provenance FROM native_review_jobs WHERE source_reference->>'id'=$1",[source.id])).rows.map(row=>row.provenance.left_out);
+  const left=(sender=0,untraced=0)=>({sender_not_allowed:sender,rule_sender_not_allowed:0,rules_left_out_for_owner_label:0,quote_not_traced:untraced});
+  const read=async(source:{id:string})=>JSON.stringify((await services.contexts.prepare(source as any,await services.guards.state())).observations);
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    // Sara's message 40 and Bob's message 50 in the other group; this group's message 40 is the owner's own.
+    await capture({message:message(40,789,{text:'SARAFAR the deposit code is 7781'},other)},other);
+    await capture({message:message(50,456,{text:'BOBFAR the caterer called'},other)},other);
+    await capture({message:message(40,123,{text:'OWNFORTY unrelated words in this group'})});
+    // A Desktop export of a reply to another chat has no reply relation, so nothing links it to this chat's message 40.
+    const fresh=await exported(41);
+    assert.equal((await stores.archive.query("SELECT 1 FROM source_relations WHERE event_id=$1 AND kind='reply_to'",[fresh.id])).rowCount,0);
+    // Bob adds an option to the owner's poll that answers Sara's message in the other group with a quote of it. The
+    // archive holds that poll only as a Desktop export, archived now or before (with this chat's message 40 as its reply),
+    // or as a live revision with that export beside it, or never: the quote goes from the owner's notes review, counted as
+    // not traced when nothing tells whose words it repeats and as hers when the live revision does. Answering Bob's
+    // message, the live revision lets it in whatever an export beside it says. Interpretations read every quote.
+    const stale=await exported(43,true);
+    assert.equal((await stores.archive.query("SELECT 1 FROM source_relations WHERE event_id=$1 AND kind='reply_to'",[stale.id])).rowCount,1);
+    await capture({message:poll(45,'LIVESARA',answering(789,40))});await exported(45);
+    await capture({message:poll(47,'LIVEBOB',answering(456,50))});await exported(47);
+    for(const [id,mark,target,inReview,counted] of [[41,'FRESH',answering(789,40),false,left(0,1)],[43,'STALE',answering(789,40),false,left(0,1)],
+      [45,'LIVESARA',answering(789,40),false,left(1)],[47,'LIVEBOB',answering(456,50),true,left()],[49,'UNSEEN',answering(456,50),false,left(0,1)]] as const) {
+      const added=await capture({message:message(id+100,456,{poll_option_added:{poll_message:poll(id,mark,target),option_persistent_id:'c',option_text:`${mark}OPTION Saturday`}})});
+      const reviewed=(await input(((await services.reviews.queue(added)).ids)[0]!)).text as string,learned=await read(added);
+      assert.equal(reviewed.includes(`"${mark}TEXT"`),inReview,mark);assert.ok(learned.includes(`"${mark}TEXT"`),mark);
+      for(const text of [reviewed,learned])assert.ok(text.includes(`${mark}POLL which day?`)&&text.includes(`${mark}OPTION Saturday`),mark);
+      assert.deepEqual(await recorded(added),[counted],mark);
+    }
+    // The owner's pin of that poll, held only as a Desktop export, archived now or before: its quote goes from the owner's
+    // notes review, counted as not traced, and the pinned poll stays.
+    for(const [id,mark] of [[41,'FRESH'],[43,'STALE']] as const) {
+      const pin=await capture({message:message(id+200,123,{pinned_message:poll(id,mark,answering(789,40))})});
+      const reviewed=(await input(((await services.reviews.queue(pin)).ids)[0]!)).text as string;
+      assert.ok(!reviewed.includes(`"${mark}TEXT"`)&&reviewed.includes(`${mark}POLL which day?`),mark);
+      assert.deepEqual(await recorded(pin),[left(0,1)],mark);
+      assert.ok((await read(pin)).includes(`"${mark}TEXT"`),mark);
+    }
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
 });
