@@ -20,6 +20,8 @@ BOT={**BOT_USER,'can_join_groups':True,'can_read_all_group_messages':True,'suppo
      'can_connect_to_business':False,'has_main_web_app':False}
 # Telegram's stand-in for a group admin with Remain anonymous on: the `from` of what such an admin does.
 ANONYMOUS_ADMIN={'id':1087968824,'is_bot':True,'first_name':'Group','username':'GroupAnonymousBot'}
+# Telegram's stand-in for a channel that posts in a group in its own name: the `from` of such a post.
+CHANNEL_BOT={'id':136817688,'is_bot':True,'first_name':'Channel','username':'Channel_Bot'}
 # https://core.telegram.org/bots/api#chatmemberadministrator: the rights every administrator entry carries.
 ADMIN_RIGHTS=('can_manage_chat','can_delete_messages','can_manage_video_chats','can_restrict_members','can_promote_members',
               'can_change_info','can_invite_users','can_post_stories','can_edit_stories','can_delete_stories')
@@ -38,6 +40,27 @@ def bot_status(update_id,chat,by,old='left',new='member',date=None):
     status in `chat` from `old` to `new`. An add is left to member; Telegram reports a leave with the bot itself as `by`."""
     return {'update_id':update_id,'my_chat_member':{'chat':chat,'from':by,'date':int(time.time()) if date is None else date,
             'old_chat_member':chat_member(BOT_USER,old),'new_chat_member':chat_member(BOT_USER,new)}}
+
+
+def left_member(update_id,chat,user,by=None,date=None):
+    """Telegram's service message that `user`, a User, is no longer in the group `chat`
+    (https://core.telegram.org/bots/api#message, left_chat_member). Its `from` is who removed them, or the user
+    themselves when they left on their own. A bot gets it in privacy mode too. The update id is also the message id."""
+    return {'update_id':update_id,'message':{'message_id':update_id,'date':int(time.time()) if date is None else date,'chat':chat,
+            'from':by or user,'left_chat_member':user}}
+
+
+def in_chat_name(update_id,chat,text,sender_chat=None,topic=None,entities=None,date=None):
+    """A message posted in a group in a chat's own name (https://core.telegram.org/bots/api#message, sender_chat). With no
+    `sender_chat` it is an anonymous admin's: sender_chat is the group itself and `from` is GroupAnonymousBot. Given a
+    channel, it is that channel's post: `from` is Channel_Bot. Neither names the person who wrote it. `entities` are the
+    text's own, such as a mention of the bot; the update id is also the message id."""
+    sender=chat if sender_chat is None else sender_chat
+    message={'message_id':update_id,'date':int(time.time()) if date is None else date,'chat':chat,
+             'from':ANONYMOUS_ADMIN if sender['id']==chat['id'] else CHANNEL_BOT,'sender_chat':sender,'text':text}
+    if entities:message['entities']=entities
+    if topic is not None:message.update(message_thread_id=topic,is_topic_message=True)
+    return {'update_id':update_id,'message':message}
 
 
 def press(update_id,message,data,by):

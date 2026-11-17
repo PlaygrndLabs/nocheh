@@ -37,8 +37,9 @@ NEW_GROUP, NEW_TOPIC = -10045, 5
 UPGRADED_GROUP, UPGRADED_SUPERGROUP = -4046, -10047
 REFRESHED_GROUP, REFRESHED_SUPERGROUP = -4048, -10049
 MENTION = '@synthetic_fixture_bot'
-# The fixed, editable reply for people the owner has not allowed (src/prompts.ts).
-NOT_ALLOWED = 'Sorry, I only work with people the owner has allowed in this group.'
+# The fixed, editable reply in a group for anyone who may not use Nocheh there: a stranger, or a member who is paused or
+# switched off there. It comes at most once a UTC day per person and group (src/prompts.ts).
+NOT_ALLOWED = 'Sorry, in this group I only work with the owner and the owner\'s members.'
 CANARY = 'fixture-secret-ORCHID-2718'
 PRIVATE_FACT = 'رنگ مورد علاقه‌ی خواهرم فیروزه‌ای است PRIVFACT91'
 
@@ -630,23 +631,149 @@ class Scenarios:
         self.gate('finished_schedule_removed', self.f.native('/api/cron/jobs/'+job['id']+'?profile=default', {}, 'DELETE') == {'ok': True}
                   and all(row['id'] != job['id'] for row in self.f.native('/api/cron/jobs?profile=default')))
 
+    # Members ------------------------------------------------------------------
+
+    # Every permission on and the member active: what Add by Telegram user ID gives a member.
+    MEMBER_DEFAULTS = {'state': 'active', 'talk': True, 'jobs': True, 'post': True, 'tools': True, 'tasks': 'write'}
+
+    def members_api(self, path='', body=None, allow_error=False, signed_in=False):
+        """The owner's Members routes (GET /v1/members; POST /v1/members, /settings, /<id> and /<id>/remove) as the
+        dashboard calls them: through its own proxy, /api/nocheh/members..., signed in like the browser. A fixture without
+        the preview relay (started without --preview-port) is asked on the owner API directly. A change takes effect at
+        once, with no restart. `allow_error` returns {status, body} instead of failing on an error."""
+        if getattr(self, 'members_session', None) is None:
+            from tools.acceptance.owner_dashboard import Dashboard, preview_port
+            try:
+                port = preview_port(self.f.manifest)
+            except ValueError:
+                port = None
+            self.members_session = Dashboard(self.f, port) if port else False
+        if not self.members_session:
+            return self.f.app('/v1/members'+path, body, allow_error=allow_error)
+        result = self.members_session.call('GET' if body is None else 'POST', '/members'+path, body, allow_error=True)
+        if result['status'] == 401 and not signed_in:
+            # The browser session is gone, as after the dashboard service restarted: sign in again, once.
+            self.members_session = None
+            return self.members_api(path, body, allow_error, signed_in=True)
+        if result['status'] >= 400 and not allow_error:
+            raise Failed('members_http_'+str(result['status'])+':'+(path or '/')+':'+json.dumps(result['body'])[:300])
+        return result if allow_error else result['body']
+
+    def fresh_person(self):
+        """A Telegram user id no earlier scenario used, for someone whose once-a-day replies must start fresh."""
+        return 5000000+self.f.ids()%1000000
+
+    @staticmethod
+    def operation_id(kind):
+        return 'tester-'+kind+'-'+str(time.time_ns())
+
+    def member_item(self, person, listing=None):
+        """The member whose account is the Telegram user `person`, as the owner's Members list shows them, or None."""
+        listing = listing or self.members_api()
+        return next((item for item in listing['members'] if item.get('telegram_id') == str(person)), None)
+
+    def member_switches(self, groups, listing):
+        """A member's group switches as Add by Telegram user ID sends them: the Telegram groups in `groups` ticked, every
+        other group Nocheh is in unticked."""
+        ticked = {self.f.chat(group) for group in groups}
+        return {**{row['chat_id']: row['chat_id'] in ticked for row in listing['groups']}, **{chat: True for chat in ticked}}
+
+    def add_member(self, person, groups, listing=None):
+        """The owner makes the Telegram user `person` a member by their Telegram user ID, with `groups` (Telegram group
+        ids) ticked, every other group Nocheh is in unticked and every permission on. Someone already a member, as on a
+        kept fixture, is set the same way. Returns the member as the list shows them."""
+        listing = listing or self.members_api()
+        switches, item = self.member_switches(groups, listing), self.member_item(person, listing)
+        if item is None:
+            return self.members_api('', {'operation_id': self.operation_id('member-add'), 'telegram_id': str(person), 'groups': switches})['member']
+        return self.change_member_switches(item, switches, self.MEMBER_DEFAULTS)
+
+    def set_members(self, wanted):
+        """Members as the owner sets them on the Members page: {Telegram user id: Telegram group ids ticked}."""
+        listing = self.members_api()
+        return {person: self.add_member(person, groups, listing) for person, groups in wanted.items()}
+
+    def change_member_switches(self, item, switches, changes):
+        """Send the owner's change of a member, only what differs from the list's `item`: `switches` by Nocheh chat id, and
+        state and permissions (talk, jobs, post, tools, tasks). A group with no switch counts as on, so turning one on that
+        is already on sends nothing, and a new switch is only ever an off one. Returns the member as the list shows them."""
+        current = {row['chat_id']: row['on'] for row in item['groups']}
+        held = {**item['permissions'], 'state': item['state']}
+        body = {key: value for key, value in changes.items() if held.get(key) != value}
+        groups = {chat: on for chat, on in switches.items() if current.get(chat, True) != on}
+        if groups:
+            body['groups'] = groups
+        if not body:
+            return item
+        return self.members_api('/'+item['id'], {'operation_id': self.operation_id('member-change'), 'changes': body})['member']
+
+    def change_member(self, item, groups=None, **changes):
+        """The owner's change of a member: `groups` maps Telegram group ids to on or off; `changes` are state='paused' or
+        'active', talk, jobs, post, tools (True or False) and tasks ('write' or 'read')."""
+        return self.change_member_switches(item, {self.f.chat(group): on for group, on in (groups or {}).items()}, changes)
+
+    def remove_member(self, item):
+        """The owner removes a member; one already removed is left as it is."""
+        result = self.members_api('/'+item['id']+'/remove', {'operation_id': self.operation_id('member-remove')}, allow_error=True)
+        if result['status'] not in (200, 404):
+            raise Failed('member_not_removed:'+str(result['status'])+':'+json.dumps(result['body'])[:300])
+
+    def seen_in(self, person, groups):
+        """Make sure Telegram has shown the member `person` in each of `groups`, as the owner's Members list says it. What is
+        decided without a message from a group, such as a post into it from another group, a job's run or a send to the
+        member's private chat, needs it there. A group where the list does not say 'in' gets a message from them there that
+        addresses nobody."""
+        for group in groups:
+            chat = self.f.chat(group)
+            if self.member_presence(person, chat) != 'in':
+                self.turn(self.f.message(group, 'سلام به همه', sender=person, mention=False), group, expect_reply=False)
+                self.wait('telegram_shows_member_in_group', lambda: self.member_presence(person, chat) == 'in', 60)
+
+    def member_presence(self, person, chat):
+        """What Telegram last said of the member `person` in a group (a Nocheh chat id), as the owner's Members list shows
+        it: 'in', 'left' or None."""
+        return next((row['telegram'] for row in (self.member_item(person) or {}).get('groups', []) if row['chat_id'] == chat), None)
+
+    def service_starts(self):
+        """When each running service of the fixture last started, by service name."""
+        ids = subprocess.check_output(self.f.command+['ps', '-q'], text=True).split()
+        lines = subprocess.check_output(['docker', 'inspect', '--format', '{{index .Config.Labels "com.docker.compose.service"}} {{.State.StartedAt}}',
+                                         *ids], text=True).splitlines() if ids else []
+        return dict(line.split(' ', 1) for line in lines if ' ' in line)
+
+    def nothing_restarted(self, before):
+        """A member change needs no restart: every service that ran before still runs since the same start."""
+        after = self.service_starts()
+        restarted = sorted(name for name, started in before.items() if after.get(name) != started)
+        self.gate('no_service_restarted', bool(before) and not restarted, restarted=restarted)
+
     # Audience policy ----------------------------------------------------------
 
-    def not_allowed_reply(self, update, topic):
-        """Someone not allowed addresses Nocheh: no model turn, one fixed reply under their message."""
+    def not_allowed_reply(self, update, topic, chat=GROUP):
+        """Someone who may not use Nocheh in the group addresses it: no model turn, one fixed reply under their message."""
         before = len(self.f.sent())
         self.f.inject(update)
         row = self.finished(self.captured(update))
         self.gate('no_model_turn', row['state'] in ('suppressed', 'cancelled'), state=row['state'], error=row['error'])
-        new = self.wait('fixed_reply', lambda: self.replies(before, GROUP, topic), 120)
+        new = self.wait('fixed_reply', lambda: self.replies(before, chat, topic), 120)
         time.sleep(3)
-        new = self.replies(before, GROUP, topic)
+        new = self.replies(before, chat, topic)
         target = json.loads(new[0]['parameters'].get('reply_parameters', '{}') or '{}').get('message_id')
         self.gate('one_fixed_reply_to_the_message', len(new) == 1 and new[0]['message']['text'] == NOT_ALLOWED
                   and target == update['message']['message_id'], count=len(new), text=new[0]['message']['text'])
 
+    def refused_quietly(self, update, chat, topic=None):
+        """Someone already refused in the group today addresses Nocheh again: no model turn and no second fixed reply, as
+        the reply comes at most once a UTC day per person and group."""
+        before = len(self.f.sent())
+        self.turn(update, chat, topic, expect_reply=False)
+        time.sleep(3)
+        self.gate('no_second_fixed_reply_that_day', not [row for row in self.replies(before, chat, topic) if row['message'].get('text') == NOT_ALLOWED])
+
     def participant_not_permitted(self):
+        # A stranger who addresses Nocheh in a group gets the fixed reply once; the same day a second message gets nothing.
         self.not_allowed_reply(self.f.message(GROUP, 'سلام ربات', sender=PARTICIPANT, topic=16), 16)
+        self.refused_quietly(self.f.message(GROUP, 'سلام دوباره، کسی هست؟', sender=PARTICIPANT, topic=16), GROUP, 16)
 
     def leave_calls(self, chat):
         """Every leaveChat the Telegram service made for a chat, refused ones included."""
@@ -1037,23 +1164,22 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         self.turn(self.f.message(OWNER, 'بعد از راه‌اندازی دوباره'), OWNER)
 
     def granted_participant(self):
-        def apply(access):
-            for service in self.f.manifest['services'].values():
-                environment = service.get('environment') or {}
-                if isinstance(environment, dict) and 'TELEGRAM_GROUP_ACCESS' in environment:
-                    environment['TELEGRAM_GROUP_ACCESS'] = json.dumps(access)
-            path = self.f.directory/'compose.json'
-            path.write_text(json.dumps(self.f.manifest));path.chmod(0o600)
-            names = [name for name, service in self.f.manifest['services'].items()
-                     if isinstance(service.get('environment'), dict) and 'TELEGRAM_GROUP_ACCESS' in service['environment']]
-            self.f.run('up', '-d', '--no-build', '--no-deps', '--force-recreate', '--wait', *names)
-            wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected', 180)
-            return names
-        names = apply({str(GROUP): {'granted': [str(PARTICIPANT)], 'denied': []}})
-        self.current['recreated'] = names
-        self.turn(self.f.message(GROUP, 'سلام، اجازه دارم؟', sender=PARTICIPANT, topic=22), GROUP, 22)
-        apply({str(GROUP): {'granted': [], 'denied': [str(PARTICIPANT)]}})
-        self.not_allowed_reply(self.f.message(GROUP, 'هنوز اجازه دارم؟', sender=PARTICIPANT, topic=22), 22)
+        # The owner makes PARTICIPANT a member by their Telegram user ID, with only OTHER_GROUP ticked, through the
+        # dashboard's Members routes: they talk there at once, with no restart. Switching OTHER_GROUP off for them takes
+        # effect at once too: they get the fixed reply there, as a stranger does. (OTHER_GROUP, because PARTICIPANT already
+        # had today's one fixed reply in GROUP.) Removed, they are a stranger again.
+        starts = self.service_starts()
+        item = self.add_member(PARTICIPANT, (OTHER_GROUP,))
+        try:
+            self.gate('member_listed_with_their_group', item['state'] == 'active' and any(row['chat_id'] == self.f.chat(OTHER_GROUP) and row['on']
+                                                                                    for row in item['groups']), member=item)
+            self.turn(self.f.message(OTHER_GROUP, 'سلام، اجازه دارم؟', sender=PARTICIPANT, topic=22), OTHER_GROUP, 22)
+            item = self.change_member(self.member_item(PARTICIPANT), groups={OTHER_GROUP: False})
+            self.not_allowed_reply(self.f.message(OTHER_GROUP, 'هنوز اجازه دارم؟', sender=PARTICIPANT, topic=22), 22, chat=OTHER_GROUP)
+        finally:
+            self.remove_member(item)
+        self.gate('not_listed_after_removal', self.member_item(PARTICIPANT) is None)
+        self.nothing_restarted(starts)
 
     # Operations -------------------------------------------------------------------
 
