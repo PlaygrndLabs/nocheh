@@ -90,7 +90,8 @@ export function useChatNames(): (space: string) => string {
 
 /**
  * Runs one owner action right away: busy state, plain error, toast, then fresh data.
- * Retrying the same failed request reuses its operation ID so it is never applied twice.
+ * Retrying the same failed request reuses its operation ID so it is never applied twice, until a change to the same path
+ * goes through.
  * `describe` puts a refusal in plain words; the Members page passes its own.
  */
 export function useAction(describe: (error: unknown) => string = chatError) {
@@ -111,7 +112,11 @@ export function useAction(describe: (error: unknown) => string = chatError) {
     setError('');
     try {
       const result = await apiPost<T>(path, options.operation === false ? body : {...body, operation_id: operation});
-      operations.current.delete(signature);
+      // A change that went through retires every retry kept for its path, its own included. A failed request there may
+      // have been applied with its answer lost; sent again after this change it is a new change, and must be applied, not
+      // answered with that request's old receipt (Pause, Resume, then Pause again).
+      for (const kept of [...operations.current.keys()])
+        if (kept.startsWith(path + '{')) operations.current.delete(kept);
       if (options.success) toast(options.success);
       void refreshResources();
       return (result ?? ({} as T)) as T;

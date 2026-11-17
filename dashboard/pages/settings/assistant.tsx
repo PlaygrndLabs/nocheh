@@ -13,16 +13,24 @@ import {ToolSwitches} from '../chats/tools';
 import {BuiltInInstructions} from './instructions';
 import {BackgroundJobLimits} from '../system/jobs';
 
+/** The one thing in a group that never waits, whichever is chosen: a group's web pages and outside tools (step 3). */
+const groupTools =
+  'In a group, web pages and outside tools other than Notion run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands and Notion still wait.';
+
 const freedom = [
   {
     value: 'approval_required',
     title: 'Ask me first',
-    text: 'Every message Nocheh sends for you and every tool it runs waits for your yes in the Inbox or your private chat.',
+    text:
+      'Every message Nocheh sends for you and every other tool it runs waits for your yes in the Inbox or your private chat. ' +
+      groupTools,
   },
   {
     value: 'owner_requests_execute',
     title: 'Do what I ask',
-    text: 'When you ask in your private chat, it acts without a separate yes. Messages to groups always show you a card first. Requests from groups, schedules and background work still wait.',
+    text:
+      'When you ask in your private chat, it acts without a separate yes. Messages to groups always show you a card first. Other requests from groups, schedules and background work still wait. ' +
+      groupTools,
   },
 ];
 

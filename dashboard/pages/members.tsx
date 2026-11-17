@@ -1,8 +1,9 @@
 /**
  * Members: the people who may talk to Nocheh in your groups, and what each may do there (step 3). The list sits beside the
  * open member on wide screens; on a phone the member opens full width. Every switch here saves at once, so the page has
- * no Save bar.
+ * no Save bar; the daily cap has its own Save. What a change answers shows at once, until the list reloads with it.
  */
+import {useState} from 'react';
 import {Contact, UserPlus} from 'lucide-react';
 import {useParam} from '../lib/navigation';
 import {refreshResources} from '../lib/resource';
@@ -14,18 +15,22 @@ import {AddMember} from './members/add';
 import {MemberDetail} from './members/detail';
 import {useKnownPeople, useMembers} from './members/hooks';
 import {DailyMessages, MemberList} from './members/list';
+import {withAnswers, type MemberAnswer} from './members/model';
 
 export default function MembersPage() {
   const list = useMembers();
   const known = useKnownPeople();
   const selected = useParam('member');
   const adding = useParam('add');
-  const data = list.data;
+  const [answers, setAnswers] = useState<MemberAnswer[]>([]);
+  const data = withAnswers(list.data, answers);
+  const answered = (answer: MemberAnswer) =>
+    setAnswers(current => [...current.filter(item => item.revision > (list.data?.revision ?? -1)), answer]);
   const member = selected ? (data?.members.find(item => item.id === selected) ?? null) : null;
   return (
     <Page
       title="Members"
-      description="People who may talk to Nocheh in your groups, and what each may do there. Every change saves at once."
+      description="People who may talk to Nocheh in your groups, and what each may do there. Switches save at once; the daily cap has its own Save."
       actions={
         <Button variant="primary" disabled={!data} onClick={() => setParams({add: 'new'})}>
           <UserPlus aria-hidden /> Add member
@@ -36,11 +41,11 @@ export default function MembersPage() {
       <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className={cn('space-y-5 lg:sticky lg:top-6', selected && 'hidden lg:block')}>
           <MemberList list={data} loading={!data && !list.error} selected={selected} known={known} />
-          {data && <DailyMessages value={data.daily_messages} />}
+          {data && <DailyMessages value={data.daily_messages} onSaved={answered} />}
         </div>
         <div className={cn('min-w-0', !selected && 'hidden lg:block')}>
           {member ? (
-            <MemberDetail key={member.id} member={member} known={known} />
+            <MemberDetail key={member.id} member={member} known={known} onSaved={answered} />
           ) : (
             <Card>
               <Empty icon={Contact} title={selected && data ? 'This member isn’t here any more' : 'Choose a member'}>
@@ -58,6 +63,7 @@ export default function MembersPage() {
           known={known}
           person={adding === 'new' ? null : adding}
           onClose={() => setParams({add: null})}
+          onSaved={answered}
         />
       )}
     </Page>

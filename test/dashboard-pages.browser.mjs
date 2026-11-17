@@ -2653,10 +2653,11 @@ test('Pause this member saves at once, and Remove asks first', async () => {
   await page.close();
 });
 
-test('the daily message cap saves at once, within 1 to 10,000', async () => {
+test('the daily message cap has its own Save, within 1 to 10,000', async () => {
   const {page, problems} = await open('members');
   const posts = memberPosts(page);
-  const input = page.getByLabel('Messages each member may send a day');
+  await page.getByText('Switches save at once; the daily cap has its own Save.').waitFor();
+  const input = page.getByLabel('Times each member may ask Nocheh a day');
   assert.equal(await input.inputValue(), '200');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Daily messages'})});
   await input.fill('0');
@@ -2671,6 +2672,127 @@ test('the daily message cap saves at once, within 1 to 10,000', async () => {
     [['/members/settings', 150]],
   );
   assert.equal(await page.getByRole('region', {name: 'Save changes'}).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a new member, a saved switch and the daily cap show at once while the member list is still reloading', async () => {
+  const {page, problems} = await open('members');
+  // Every reload of the member list waits until released, so the page has only what each change answered.
+  let release;
+  const held = new Promise(resolve => (release = resolve));
+  await page.route('**/api/nocheh/members', async route => {
+    if (route.request().method() === 'GET') await held;
+    await route.continue();
+  });
+  await page.getByRole('button', {name: 'Add member'}).click();
+  const dialog = page.getByRole('dialog', {name: 'Add a member'});
+  await dialog.getByRole('radio', {name: 'By Telegram user ID'}).click();
+  await dialog.getByLabel('Telegram user ID').fill('778');
+  await dialog.getByRole('checkbox', {name: /Garden swap/}).check();
+  await dialog.getByRole('button', {name: 'Add member'}).click();
+  await page.getByRole('heading', {name: 'Telegram ID 778', level: 2}).waitFor();
+  assert.equal(await page.getByText('This member isn’t here any more').count(), 0);
+  await page
+    .getByRole('navigation', {name: 'Members'})
+    .getByRole('link', {name: /Telegram ID 778/})
+    .waitFor();
+  const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Groups', exact: true})});
+  await groups.getByRole('switch', {name: 'Telegram ID 778 in Garden swap', checked: true}).click();
+  await page.getByRole('status').filter({hasText: 'Telegram ID 778 is off in Garden swap.'}).waitFor();
+  await groups.getByRole('switch', {name: 'Telegram ID 778 in Garden swap', checked: false}).waitFor();
+  const input = page.getByLabel('Times each member may ask Nocheh a day');
+  await input.fill('120');
+  await input.press('Enter');
+  await page.getByRole('status').filter({hasText: 'Each member can talk to Nocheh 120 times a day.'}).waitFor();
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Daily messages'})});
+  await card.getByText('Each member can talk to Nocheh 120 times a day.').waitFor();
+  assert.equal(await input.inputValue(), '120');
+  // The list catches up and says the same.
+  const reloaded = page.waitForResponse(
+    response => new URL(response.url()).pathname === '/api/nocheh/members' && response.request().method() === 'GET',
+  );
+  release();
+  await reloaded;
+  await groups.getByRole('switch', {name: 'Telegram ID 778 in Garden swap', checked: false}).waitFor();
+  assert.equal(await input.inputValue(), '120');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a change whose answer was lost is applied when made again after a later change, not answered with its old receipt', async () => {
+  const {page, problems} = await open('members?member=' + MIRA);
+  const posts = memberPosts(page);
+  await page.getByRole('heading', {name: 'Mira Chen', level: 2}).waitFor();
+  // The first Pause reaches Nocheh and is applied, but its answer is lost on the way back.
+  let lose = true;
+  await page.route('**/api/nocheh/members/' + MIRA, async route => {
+    if (!lose || route.request().method() !== 'POST') return route.continue();
+    lose = false;
+    await route.fetch();
+    await route.abort('failed');
+  });
+  const pause = checked => page.getByRole('switch', {name: 'Pause this member', checked});
+  await pause(false).click();
+  await page.getByText('Failed to fetch').waitFor();
+  // Another change brings the list back: Mira is paused. She is resumed, then paused again.
+  const input = page.getByLabel('Times each member may ask Nocheh a day');
+  await input.fill('130');
+  await input.press('Enter');
+  await pause(true).click();
+  await page.getByRole('status').filter({hasText: 'Mira Chen is active again.'}).waitFor();
+  await pause(false).click();
+  await page.getByRole('status').filter({hasText: 'Mira Chen is paused.'}).waitFor();
+  const changes = posts.filter(({path}) => path === '/members/' + MIRA);
+  assert.deepEqual(
+    changes.map(({body}) => body.changes),
+    [{state: 'paused'}, {state: 'active'}, {state: 'paused'}],
+  );
+  assert.notEqual(changes[2].body.operation_id, changes[0].body.operation_id, 'the second Pause is a new change');
+  await page.reload();
+  await pause(true).waitFor();
+  // Back as she was for the tests after this one.
+  await pause(true).click();
+  await pause(false).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the owner reads where group web pages and outside tools skip the card, and that members are chosen on Members', async () => {
+  const groupTools =
+    'In a group, web pages and outside tools other than Notion run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands and Notion still wait.';
+  const {page, problems} = await open('home');
+  await page.getByText('Turn Nocheh on in a group and see who are members there.').waitFor();
+  // The preview keeps no owner freedom setting, and the Inbox has no allowed action left here.
+  await page.route('**/api/nocheh/owner-autonomy', route =>
+    route.fulfill({json: {mode: 'approval_required', revision: 1}}),
+  );
+  await page.route('**/api/nocheh/tools/actions', async route => {
+    const answer = await route.fetch();
+    await route.fulfill({response: answer, json: {...(await answer.json()), permissions: []}});
+  });
+  await page.goto(origin + '/#settings?view=assistant');
+  const freedom = page.getByRole('radiogroup', {name: 'Acting for you'});
+  for (const name of ['Ask me first', 'Do what I ask'])
+    assert.ok((await freedom.getByRole('radio', {name: new RegExp(name)}).innerText()).includes(groupTools), name);
+  await page.goto(origin + '/#inbox?view=allowed');
+  await page
+    .getByText('Except web pages and outside tools other than Notion asked for in a group', {exact: false})
+    .waitFor();
+  // A group's Allowed actions with nothing allowed names the exception; the private chat has none.
+  await page.goto(origin + '/#chats?chat=-10073');
+  const allowed = page.locator('section', {has: page.getByRole('heading', {name: 'Allowed actions'})});
+  await allowed
+    .getByText('Web pages and outside tools other than Notion run without a card when you ask here', {exact: false})
+    .waitFor();
+  await page.goto(origin + '/#chats?chat=42');
+  await allowed
+    .getByText('Nothing without asking. Each action waits for your approval in the', {exact: false})
+    .waitFor();
+  await page.goto(origin + '/#settings?view=telegram');
+  const groups = page.locator('section', {has: page.getByRole('heading', {name: 'In groups'})});
+  assert.equal(await groups.getByRole('link', {name: 'Members'}).getAttribute('href'), '#members');
+  assert.equal(await groups.getByRole('link', {name: 'Chats'}).getAttribute('href'), '#chats');
   assert.deepEqual(problems, []);
   await page.close();
 });

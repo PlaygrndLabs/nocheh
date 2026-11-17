@@ -221,8 +221,9 @@ Members are the people besides you who may talk to Nocheh in groups
 ([ADR-0259](adr/0259-members-in-groups.md)). Members are allowed by default in
 the groups they are in: a group you never switched off for a member is on for
 them, a group they join later included. Manage them on the **Members** page
-([dashboard](dashboard.md)); every control saves at once, and a change applies at
-once, with no Apply, no restart and no new guard epoch.
+([dashboard](dashboard.md)); every switch saves at once (the daily cap has its
+own Save), and a change applies at once, with no Apply, no restart and no new
+guard epoch.
 
 - **Talk to Nocheh in groups they joined**, on by default. Under it, each on by
   default and each off while talk is off: **Small jobs (no daily limit)**, **Post

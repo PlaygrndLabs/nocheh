@@ -2,7 +2,16 @@
  * Pure helpers for the Members page and a group's "Members here" card (step 3): names, group counts, what a member may do
  * in one group, and the groups an add sends. Nothing here reads a chat's or a person's id for its meaning.
  */
-import type {MemberGroup, MemberItem, MemberList, MemberPerson, MemberPresence} from '../../../src/member-wire';
+import type {
+  MemberGroup,
+  MemberItem,
+  MemberList,
+  MemberPerson,
+  MemberPresence,
+  MemberRemoved,
+  MemberResult,
+  MemberSettingsResult,
+} from '../../../src/member-wire';
 import {chatError, type IdentityGroup, type Person} from '../../lib/chats-model';
 
 type Named = {name: string | null; username: string | null; telegram_id: string | null};
@@ -87,27 +96,62 @@ export function groupSummary(member: Pick<MemberItem, 'groups'>): string {
 }
 
 /**
- * What a member may do in one group, as its "Members here" card says it: paused everywhere, talk switched off for every
- * group, or this group's switch. A group with no switch yet is on (a member is allowed by default in the groups they are
- * in), so "New here" is information only. Null when the member has no switch there and Telegram never showed them there.
+ * What a member may do in one group, as its "Members here" card says it: gone from the group by Telegram's word, paused
+ * everywhere, talk switched off for every group, or this group's switch. A group with no switch yet is on (a member is
+ * allowed by default in the groups they are in), so "New here" is information only. Null when the member has no switch
+ * there and Telegram never showed them there.
  */
 export function memberHere(member: MemberItem, chat: string): {label: string; tone: Tone; group: MemberGroup} | null {
   const group = member.groups.find(item => item.chat_id === chat);
   if (!group) return null;
+  if (group.telegram === 'left') return {label: 'Left the group', tone: 'neutral', group};
   if (member.state === 'paused') return {label: 'Paused', tone: 'warn', group};
   if (!member.permissions.talk) return {label: 'Talk switched off', tone: 'neutral', group};
   return group.on ? {label: 'Can talk here', tone: 'good', group} : {label: 'Off here', tone: 'neutral', group};
 }
 
-/** The members and the people who are not members that a group's card lists. */
+/**
+ * The members and the people who are not members that a group's card lists. A member is there when Telegram shows them in
+ * the group, or when their switch there is on and Telegram never said they left: a switched-off group Telegram never
+ * showed them in (one the lists before step 3 carried, or one left unticked on an add) is not theirs to list.
+ */
 export function inGroup(
   list: MemberList | null | undefined,
   chat: string,
 ): {members: MemberItem[]; people: MemberPerson[]} {
+  const here = (group: MemberGroup) =>
+    group.chat_id === chat && (group.telegram === 'in' || (group.on && group.telegram !== 'left'));
   return {
-    members: (list?.members ?? []).filter(member => member.groups.some(group => group.chat_id === chat)),
+    members: (list?.members ?? []).filter(member => member.groups.some(here)),
     people: (list?.people ?? []).filter(person => person.groups.some(group => group.chat_id === chat)),
   };
+}
+
+/** What the Members routes answer a change with: the member after an add or a change, a removal, or the daily cap. */
+export type MemberAnswer = MemberResult | MemberRemoved | MemberSettingsResult;
+
+/**
+ * The member list with the answers to the owner's changes that it does not show yet. An answer with a newer member
+ * revision than the list's is laid over it, oldest first, so a member just added, a switch just saved or a new daily cap
+ * shows at once, not the list from before the change while it reloads, or until the next poll when the reload fails.
+ */
+export function withAnswers(list: MemberList | null, answers: readonly MemberAnswer[]): MemberList | null {
+  if (!list) return list;
+  const newer = answers.filter(answer => answer.revision > list.revision).sort((a, b) => a.revision - b.revision);
+  return newer.reduce<MemberList>((next, answer) => {
+    if ('member' in answer) {
+      const {member} = answer;
+      return {
+        ...next,
+        members: next.members.some(item => item.id === member.id)
+          ? next.members.map(item => (item.id === member.id ? member : item))
+          : [...next.members, member],
+        people: next.people.filter(person => person.account_id !== member.account_id),
+      };
+    }
+    if ('removed' in answer) return {...next, members: next.members.filter(item => item.id !== answer.removed)};
+    return {...next, daily_messages: answer.daily_messages};
+  }, list);
 }
 
 /**

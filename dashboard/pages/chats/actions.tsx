@@ -62,7 +62,9 @@ export function AllowedActions({chat, context}: {chat: Chat; context: ChatContex
           </ul>
         ) : (
           <p className="text-sm text-muted">
-            Nothing without asking. Each action waits for your approval in the{' '}
+            {chat.kind === 'group' || chat.kind === 'topic'
+              ? 'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks. Anything else waits for your approval in the '
+              : 'Nothing without asking. Each action waits for your approval in the '}
             <a href={href('inbox')} className="font-medium text-accent-text hover:underline">
               Inbox
             </a>

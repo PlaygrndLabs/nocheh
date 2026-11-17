@@ -3,14 +3,14 @@
  * retry is never applied twice, then shows a toast; there is no Save bar.
  */
 import {ArrowLeft, UserMinus} from 'lucide-react';
-import type {MemberChanges, MemberItem, MemberPermission} from '../../../src/member-wire';
+import type {MemberChanges, MemberItem, MemberPermission, MemberRemoved, MemberResult} from '../../../src/member-wire';
 import {chatStateLabels, type Person} from '../../lib/chats-model';
 import {setParams} from '../../lib/routes';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, CardHeader, Notice, Segmented, Switch} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {ActionError, chatHref, useAction} from '../chats/shared';
-import {memberError, personMeta, personName, presenceLabel} from './model';
+import {memberError, personMeta, personName, presenceLabel, type MemberAnswer} from './model';
 
 /** The three things talking to Nocheh lets a member do, under it, in the owner's words. */
 const permissions: {key: MemberPermission; title: string; hint: string}[] = [
@@ -31,7 +31,16 @@ const permissions: {key: MemberPermission; title: string; hint: string}[] = [
   },
 ];
 
-export function MemberDetail({member, known}: {member: MemberItem; known: ReadonlyMap<string, Person>}) {
+export function MemberDetail({
+  member,
+  known,
+  onSaved,
+}: {
+  member: MemberItem;
+  known: ReadonlyMap<string, Person>;
+  /** Shows what a change answered at once, until the list reloads with it. */
+  onSaved: (answer: MemberAnswer) => void;
+}) {
   const action = useAction(memberError);
   const {confirm} = useFeedback();
   const name = personName(member, known);
@@ -39,8 +48,10 @@ export function MemberDetail({member, known}: {member: MemberItem; known: Readon
   const allowed = member.permissions;
   const paused = member.state === 'paused';
   const busy = !!action.busy;
-  const change = (key: string, changes: MemberChanges, success: string) =>
-    action.run(key, '/members/' + member.id, {changes}, {success});
+  const change = async (key: string, changes: MemberChanges, success: string) => {
+    const answer = await action.run<MemberResult>(key, '/members/' + member.id, {changes}, {success});
+    if (answer?.member) onSaved(answer);
+  };
   const remove = async () => {
     if (
       !(await confirm({
@@ -51,13 +62,15 @@ export function MemberDetail({member, known}: {member: MemberItem; known: Readon
       }))
     )
       return;
-    const removed = await action.run(
+    const removed = await action.run<MemberRemoved>(
       'remove',
       '/members/' + member.id + '/remove',
       {},
       {success: `${name} is no longer a member.`},
     );
-    if (removed) setParams({member: null});
+    if (!removed) return;
+    if (removed.removed) onSaved(removed);
+    setParams({member: null});
   };
   const added = new Date(member.added_at);
 

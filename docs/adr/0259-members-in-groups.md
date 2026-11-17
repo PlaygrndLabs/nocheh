@@ -267,7 +267,8 @@ groups. Here each effect checks the member again just before it happens:
   changes an existing row, or makes one only where Telegram shows them 'in'.
 - On the page:
   - Members sits in the sidebar after Chats.
-  - Every control saves at once as an owner command, with no Save bar.
+  - Every switch saves at once as an owner command, with no Save bar; the daily
+    cap, typed in, has its own Save.
   - Each member page has "Talk to Nocheh in groups they joined", with its three
     switches disabled while it is off, "Read and write / Read only" for tasks,
     and each group with its switch and what Telegram last said ("Seen here",
@@ -283,8 +284,9 @@ groups. Here each effect checks the member again just before it happens:
     at runtime asks Telegram who is a member.
 - The group card in Chats becomes "Members here", read only:
   - You, always.
-  - Each member, as "Can talk here", "Off here", "Paused" or "Talk switched off",
-    linking to their page.
+  - Each member Telegram shows there, or whose switch there is on while
+    Telegram never said they left, as "Can talk here", "Off here", "Paused" or
+    "Talk switched off", linking to their page.
   - "Seen here, not members", with "Make member".
   - The Chats people Save path, the group access helpers, Settings' "Who can talk
     in groups" and System's "Jobs a member may start each day" are gone.

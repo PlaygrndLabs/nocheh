@@ -201,6 +201,8 @@ export function problemText(error: unknown): string {
   if (code === 'entity_target_required' || code === 'active_entity_required')
     return 'Enter the ID of a person Nocheh already knows.';
   if (code === 'entity_kind_mismatch') return 'That ID belongs to something of a different kind.';
+  if (code === 'member_changed')
+    return 'Not sent: the member who asked was paused or removed, or a switch for them was turned off.';
   if (/changed|conflict/.test(code)) return 'This changed somewhere else. Reload to see the latest, your text is kept.';
   if (/not_found/.test(code)) return 'This no longer exists. It may have been handled already.';
   if (/pending|busy|in_progress/.test(code)) return 'Nocheh is busy with this right now. Try again in a moment.';
