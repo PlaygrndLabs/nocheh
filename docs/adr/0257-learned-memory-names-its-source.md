@@ -650,8 +650,14 @@ a recalled note names its source beside its chat).
   which never searches, so `own_file_stays_recallable` checks that recall asked
   the forwards-and-files participant, got its answer (no
   `forwards_unavailable`), and that this participant holds the file's text in
-  Honcho, not that the answer quotes it. The owner's notes reviews run one at a
-  time and hold the background slot the steps that queue or skip them share, so
+  Honcho, not that the answer quotes it. Both scenarios check that every
+  conclusion Honcho drew holding the forward's or file's private mark is that
+  participant's about itself, and the owner's question asking which block holds
+  it names the mark by its number only: what the owner types is learned about
+  the owner, so a question holding the mark puts it in the owner's block itself
+  whenever Honcho learns the question before the turn reads memory. The
+  owner's notes reviews run one at a time and hold the background slot the
+  steps that queue or skip them share, so
   every check that can wait behind them (a review, a message's notes and memory
   steps settling, an import's review steps) waits up to 40 minutes. It stops at
   once when the review it waits for is paused, or still uncertain once Nocheh

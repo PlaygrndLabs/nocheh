@@ -344,8 +344,12 @@ becomes your private memory"). One pull request of several commits
   not-allowed reply, forwarded message, member card, reminder, notes, job report, document,
   photo and voice scenarios. Since the tester's Honcho answers from the deterministic model,
   `own_file_stays_recallable` checks that recall asked the forwards participant, got its answer
-  and that this participant holds the file's text. Every check that can wait behind the owner's
-  notes reviews (a review, a message's notes and memory steps settling, an import's review steps)
+  and that this participant holds the file's text. Both scenarios check that only that
+  participant's conclusions about itself hold the private mark, and ask which block holds it
+  by its number only, since a question holding the mark is the owner's own words, learned about
+  the owner ([forward reads](test/test_forward_memory_reads.py)). Every check that can wait
+  behind the owner's notes reviews (a review, a message's notes and memory steps settling, an
+  import's review steps)
   waits up to 40 minutes, stops at once when the review it waits for was paused or stayed
   uncertain after Nocheh gave up observing it (8 looks, read from the code), and on a timeout
   names how many reviews still waited, or says that count is unknown. The
