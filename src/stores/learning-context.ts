@@ -10,6 +10,7 @@ import {ProjectRepository} from './projects.js';
 import {SelectionRepository,selectionId} from './selections.js';
 import {RECORDINGS} from './reprocessing.js';
 import {EntityRepository,type EntityContext,type KnownPeople,type WaitingCards} from './entities.js';
+import {cutEmbeddedMessages} from '../source-facts.js';
 
 export type LearningRuleInput={kind:'source';dependency:PreparedDependency}|{kind:'owner'|'owner_guard';id:string;revision:number;text:string};
 export interface PreparedLearningContext {
@@ -30,20 +31,23 @@ export interface PreparedLearningContext {
  * pin, which stays. `not_learned` takes it out too, but not as left out for its sender: Nocheh's own card, notice or
  * reminder is not learned. `admitQuoted` asks the same of the message a quote repeats part of, even one never archived
  * (another bot's, or one in a chat this review does not read); one it refuses is taken out of the message quoting it,
- * which stays. `collect` gets the ids left out (a pin's or a quote's own id when only what it carried was), the rules kept,
- * the ids of the rules left out with them, `bare_reaction` when the source is a reaction to a message that was left out,
- * `empty_pin` when the source is a pin of Nocheh's card, notice or reminder, or of Nocheh's message not archived yet, with
- * nothing else in it, and each kept rule's recorded inputs (`inputs`: the source ids of its stored dependencies, by rule
- * id). Honcho passes none and interpretations only `collect`, so they learn from everyone's messages, as before, other
- * bots' included. For every caller a pin loses Nocheh's card, notice or reminder, and Nocheh's own account's message the
- * archive does not hold as Nocheh's learned one (not archived yet, or a forward of one); a quote of Nocheh's own words is
- * left out of the message quoting it, and out of a message a pin carries (NoteSourceRepository.carried, ADR-0256,
- * ADR-0257).
+ * which stays. `admitPinnedQuote` asks the same of the message a quote inside a pinned message repeats part of; one it
+ * refuses is taken out of the pinned message, which stays. `collect` gets the ids left out (a pin's or a quote's own id
+ * when only what it carried was), the rules kept, the ids of the rules left out with them, `bare_reaction` when the
+ * source is a reaction to a message that was left out, `empty_pin` when the source is a pin of Nocheh's card, notice or
+ * reminder, or of Nocheh's message not archived yet, with nothing else in it, and each kept rule's recorded inputs
+ * (`inputs`: the source ids of its stored dependencies, by rule id). Honcho passes none and interpretations only
+ * `collect`, so they learn from everyone's messages, as before, other bots' included. For every caller a pin loses
+ * Nocheh's card, notice or reminder, and Nocheh's own account's message the archive does not hold as Nocheh's learned one
+ * (not archived yet, or a forward of one); a quote of Nocheh's own words is left out of the message quoting it, and out
+ * of a message a pin carries (NoteSourceRepository.carried, ADR-0256, ADR-0257); and every message a message embeds
+ * other than the one a pin carries is left out of it (cutEmbeddedMessages), learned from its own event instead.
  */
 export interface LearningContextOptions {
   admit?:(reference:SourceReference)=>Promise<boolean>;
   admitPinned?:(reference:SourceReference)=>Promise<boolean|'not_learned'>;
   admitQuoted?:(reference:SourceReference)=>Promise<boolean>;
+  admitPinnedQuote?:(reference:SourceReference)=>Promise<boolean>;
   collect?:{dropped:string[];versions:InterpretationVersion[];refused:string[];bare_reaction:boolean;empty_pin?:boolean;inputs:Map<string,string[]>};
 }
 export class LearningContextRepository {
@@ -101,6 +105,9 @@ export class LearningContextRepository {
         delete message.reply_to_message;delete message.external_reply;
         // A pinned message carries its own reply too, with the words of the message it answers (a poll, a contact).
         if(message.pinned_message&&typeof message.pinned_message==='object'){delete message.pinned_message.reply_to_message;delete message.pinned_message.external_reply;}
+        // Any other message it embeds goes too, whatever field holds it: the checklist a service message reports on, a
+        // giveaway's or suggested post's message, or one in a field Telegram adds later. It is learned from its own event.
+        cutEmbeddedMessages(message);
         // A quote of Nocheh's own words, learned or not, is never the sender's: it goes, and the sender's own words stay. A
         // learned message is evidence of its own; a card, notice or reminder is not learned, and Nocheh's own account's
         // message the archive does not hold as Nocheh's (not archived yet, or a forward of one) is cut as a card is.
@@ -112,11 +119,17 @@ export class LearningContextRepository {
         // A pin carries the message it pinned whole. Nocheh's own card, notice or reminder stays out of everything learned
         // from it, whoever pinned it, and so does Nocheh's own account's message the archive does not hold as Nocheh's
         // (carried: `bot`); what someone not allowed there wrote, another bot's message included, stays out of the owner's
-        // notes review only. A quote inside the pinned message goes as a quote does.
+        // notes review only. A quote inside the pinned message goes as a quote does: Nocheh's words for everyone, and in
+        // the owner's notes review a quote of what someone not allowed there wrote (admitPinnedQuote).
         const pinned:boolean|'not_learned'=!message.pinned_message?true:carried?.pinned==='unlearned'||carried?.pinned==='bot'?'not_learned':
           options.admit&&options.admitPinned?await options.admitPinned(reference):true;
         if(pinned!==true)delete message.pinned_message;
         else if(carried?.pinned_quote&&message.pinned_message&&typeof message.pinned_message==='object')delete message.pinned_message.quote;
+        // In the owner's notes review, a quote inside the pinned message goes when what it quotes is by someone not
+        // allowed there, or can't be told; the pin and the pinned message's own words stay.
+        else if(options.admit&&options.admitPinnedQuote&&message.pinned_message?.quote&&!await options.admitPinnedQuote(reference)) {
+          delete message.pinned_message.quote;limitations.push('sender_not_allowed');unquoted.push(reference.id);
+        }
         if(pinned===false){limitations.push('sender_not_allowed');unpinned.push(reference.id);}
         // The source itself, a pin of only Nocheh's card or of Nocheh's message not archived yet, leaves nothing to review.
         if(pinned==='not_learned'&&reference.id===source.id&&!texts.some(text=>text.trim())&&!derivatives.length)emptyPin=true;

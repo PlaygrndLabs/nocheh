@@ -29,7 +29,8 @@ export interface SourceFacts {
   forward_name:string|null;
   /** A quote inside a reply: of the sender's own message, or of someone else's. */
   quote:'own'|'other'|null;
-  /** The message a pin carries: the sender's own typed message, or one with someone else's words in it. */
+  /** The message a pin carries: the sender's own typed message, or one with someone else's words in it. A checklist that
+   *  may hold tasks someone else added, sent, edited or pinned, is read as 'other' too (sharedChecklist). */
   pinned:'own'|'other'|null;
   /** Text read from a file or an image the sender sent, and that file's name, unchecked. */
   file:boolean;file_name:string|null;
@@ -79,8 +80,20 @@ function telegram(payload:unknown,owner:string|null):SourceFacts {
   // An anonymous admin and a post in a channel's or group's name (sender_chat) are never the owner (ADR-0251).
   const who=channel||record(message.sender_chat)?{author:'anonymous' as const,account:null,name:text(record(message.sender_chat)?.title)}:sender(record(message.from),owner);
   const raw=who.account===null?null:String(record(message.from)?.id);
-  return {...none,...who,act,...forwarded(message),quote:quoteOf(message,raw),...pinnedOf(message,raw),
+  return {...none,...who,act,...forwarded(message),quote:quoteOf(message,raw),...pinnedOf(message,raw),...(sharedChecklist(message,act==='message')?{pinned:'other' as const}:{}),
     file_name:text(record(message.document)?.file_name)??text(record(message.audio)?.file_name)};
+}
+/**
+ * Whether a message is a checklist that may hold tasks someone else added. Telegram names no one per task, and
+ * others_can_add_tasks says only what others may do now: the sender can turn it off once others have added tasks. So a
+ * checklist others can add tasks to, and any checklist shown again (`fresh` false: an edit of it, the message a pin
+ * carries, the message a quote is from), is read as one with someone else's words in it (pinned 'other', class `pinned`,
+ * or quote 'other', class `quote`), never as the sender's own typing; only a new checklist that only its sender can add
+ * to stays theirs. Its text is still learned.
+ */
+function sharedChecklist(message:Record<string,any>|null,fresh=false):boolean {
+  const list=record(message?.checklist);
+  return !!list&&(list.others_can_add_tasks===true||!fresh);
 }
 function forwarded(message:unknown):Pick<SourceFacts,'forward'|'forward_name'> {
   const found=forwardFacts(message);
@@ -89,16 +102,17 @@ function forwarded(message:unknown):Pick<SourceFacts,'forward'|'forward_name'> {
 /**
  * Whose message a reply quotes: the sender's own only when the message it answers is theirs, by their Telegram id, and
  * is not a forward of someone else's (forwardFacts, an inline bot's message included), as a pin's message is read
- * (pinnedOf): the sender's quote of their own forward quotes whoever wrote it. A quote of a message in another chat or
- * topic (external_reply) is judged by that message alone, and is never the sender's own: Telegram shows only who first
- * sent it (its origin), not whether it was a forward or sent through an inline bot, and in a forum topic it also sets
- * reply_to_message, to the topic's first message, which the quote is not from.
+ * (pinnedOf): the sender's quote of their own forward quotes whoever wrote it, and so does a quote of their own checklist
+ * (sharedChecklist), which may hold someone else's tasks. A quote of a message in another chat or topic (external_reply)
+ * is judged by that message alone, and is never the sender's own: Telegram shows only who first sent it (its origin),
+ * not whether it was a forward or sent through an inline bot, and in a forum topic it also sets reply_to_message, to the
+ * topic's first message, which the quote is not from.
  */
 function quoteOf(message:Record<string,any>,sender:string|null):SourceFacts['quote'] {
   if(!record(message.quote))return null;
   if(record(message.external_reply))return 'other';
   const target=record(message.reply_to_message);
-  if(target&&(forwardFacts(target)?.from??'own')!=='own')return 'other';
+  if(target&&((forwardFacts(target)?.from??'own')!=='own'||sharedChecklist(target)))return 'other';
   const author=target&&!record(target.sender_chat)?record(target.from)?.id:null;
   return sender!==null&&(typeof author==='number'||typeof author==='string')&&String(author)===sender?'own':'other';
 }
@@ -106,8 +120,9 @@ function quoteOf(message:Record<string,any>,sender:string|null):SourceFacts['quo
 /**
  * What a pin carries: a pin has no words of its own, so it carries those of the message it pinned. A forward of someone
  * else's there, an inline bot's message included, is a forward the sender passed on; a message the sender did not write
- * (another person's, or a post in a chat's name) is someone else's; only the sender's own typed message stays theirs,
- * with its own quote read as any quote is. A message Telegram no longer shows (date 0) carries nothing.
+ * (another person's, or a post in a chat's name), and the sender's own checklist, which may hold someone else's tasks
+ * (sharedChecklist), is someone else's; only the sender's own typed message stays theirs, with its own quote read as any
+ * quote is. A message Telegram no longer shows (date 0) carries nothing.
  */
 function pinnedOf(message:Record<string,any>,sender:string|null):Partial<Pick<SourceFacts,'forward'|'forward_name'|'quote'|'pinned'>> {
   const pinned=record(message.pinned_message);
@@ -115,7 +130,7 @@ function pinnedOf(message:Record<string,any>,sender:string|null):Partial<Pick<So
   const found=forwardFacts(pinned);
   if(found&&found.from!=='own')return {forward:found.from,forward_name:found.rawName,pinned:'other'};
   const author=record(pinned.from)?.id;
-  if(sender===null||record(pinned.sender_chat)||!(typeof author==='number'||typeof author==='string')||String(author)!==sender)return {pinned:'other'};
+  if(sender===null||record(pinned.sender_chat)||!(typeof author==='number'||typeof author==='string')||String(author)!==sender||sharedChecklist(pinned))return {pinned:'other'};
   const quote=quoteOf(pinned,sender);
   return {pinned:'own',...(quote?{quote}:{})};
 }
@@ -144,6 +159,38 @@ export function nochehQuoted(message:unknown,bot:string|null):boolean {
   const found=record(message);if(!found||!record(found.quote))return false;
   const origin=record(record(found.external_reply)?.origin);
   return nochehWords(record(found.reply_to_message),bot)||origin?.type==='user'&&isBotAccount(origin.sender_user,bot);
+}
+
+/** Whether a value is shaped as a Telegram message: an object with a message_id and a chat, and no `type`, which every
+ *  MessageOrigin has (a channel's forward origin names its post the same way, and carries no words). */
+function messageShaped(value:unknown):boolean {
+  const found=record(value);
+  return !!found&&'message_id' in found&&'chat' in found&&typeof found.type!=='string';
+}
+/**
+ * Takes out of a Telegram message every other message it embeds, at any depth (ADR-0257): the one it replies to, a
+ * checklist a service message reports on (checklist_message), a giveaway's or suggested post's message, and any field
+ * Telegram adds later that holds a message. Such a message is someone else's, or the sender's own earlier one, and is
+ * learned from its own event when Nocheh got it, as a reply's is, never as part of this one. The message a pin carries
+ * (pinned_message) stays, with what it embeds taken out the same way; everything else the message holds stays, the
+ * sender's own data beside an embedded message included (a checklist's added tasks, the ids of tasks marked done).
+ * Code reads only the shape, never an id. Returns whether anything was taken out.
+ */
+export function cutEmbeddedMessages(message:Record<string,any>):boolean {
+  let cut=false;
+  const walk=(value:unknown,top:boolean):void=>{
+    if(Array.isArray(value)) {
+      for(let index=value.length-1;index>=0;index--)if(messageShaped(value[index])){value.splice(index,1);cut=true;}else walk(value[index],false);
+      return;
+    }
+    const found=record(value);if(!found)return;
+    for(const [key,item] of Object.entries(found)) {
+      if(top&&key==='pinned_message'){walk(item,false);continue;}
+      if(messageShaped(item)){delete found[key];cut=true;}else walk(item,false);
+    }
+  };
+  walk(message,true);
+  return cut;
 }
 
 /** A Telegram Desktop export: its author is the account the archive proved for it (authored_by), never a name. */
@@ -188,7 +235,8 @@ export function sourceFacts(input:FactsInput,owner:string|null):SourceFacts {
 
 /** Whether a message is the owner's own typing: the owner's account, a new message, edit, reaction or web chat message,
  *  not a forward of someone else's (an inline bot's included), no quote of someone else's message, no pin of someone
- *  else's message and no text read from a file or audio file. The owner's own voice, transcribed, is the owner's. */
+ *  else's message, no checklist that may hold someone else's tasks and no text read from a file or audio file. The
+ *  owner's own voice, transcribed, is the owner's. */
 export const ownerTyped=(f:SourceFacts):boolean=>f.author==='owner'&&['message','edit','reaction','browser'].includes(f.act)&&
   (f.forward===null||f.forward==='own')&&f.quote!=='other'&&f.pinned!=='other'&&!f.file&&!f.audio;
 

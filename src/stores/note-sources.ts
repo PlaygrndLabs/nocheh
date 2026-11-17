@@ -218,9 +218,9 @@ export class NoteSourceRepository {
   /**
    * Every archived message each of these pins carries: the same chat's message the pin names, from the pin's own archived
    * message as a reply's target is (pinnedSource), then each revision observed of it, as repliedTo reads one. An event
-   * that is not a pin is left out.
+   * that is not a pin is left out. The owner's notes review reads it too, to judge a quote inside a pinned message.
    */
-  private async pinnedTo(ids:readonly string[]):Promise<Map<string,string[]>> {
+  async pinnedTo(ids:readonly string[]):Promise<Map<string,string[]>> {
     const found=new Map<string,string[]>(),objects=new Map<string,string>();
     if(!ids.length)return found;
     for(const row of (await this.stores.archive.query(`SELECT o.event_id,s.platform,s.namespace,s.kind,s.external_id,e.payload FROM source_observations o

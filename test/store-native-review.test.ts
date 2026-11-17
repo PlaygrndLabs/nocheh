@@ -537,6 +537,41 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     const quoteOwnForward=await quoting(59,123,message(58,123,'FWDSARA wire the deposit to account 99',saraOrigin),'FWDQUOTE');
     await services.reviews.queue(quoteOwnForward);
     assert.deepEqual((await recorded(quoteOwnForward))[0].events,[{id:quoteOwnForward.id,class:'quote'},{id:forwarded.id,class:'forward_person_by_owner'}]);
+    // The owner marks tasks of Bob's checklist done, or adds tasks to it: the service message carries Bob's whole
+    // checklist, which is learned from Bob's own message, never as part of the owner's. The owner's own data beside it
+    // stays, and so does the owner's label. A field Telegram adds later that holds a message is taken out the same way.
+    const textless=(id:number,from:number,extra:Record<string,unknown>)=>{const {text:_text,...rest}=message(id,from,'',extra);return rest;};
+    const bobList=textless(90,456,{checklist:{title:'BOBLIST wire the deposit to account 99',tasks:[{id:1,text:'BOBTASK send the keys'}]}});
+    const bobListed=await capture({message:bobList});
+    const tasksDone=await capture({message:textless(91,123,{checklist_tasks_done:{checklist_message:bobList,marked_as_done_task_ids:[1]}})});
+    const tasksAdded=await capture({message:textless(92,123,{checklist_tasks_added:{checklist_message:bobList,tasks:[{id:2,text:'OWNERTASK bring tea'}]}})});
+    const future=await say(93,123,'FUTUREOWN see this',{future_field:{inner:[{message_id:90,date:0,chat:{id:Number(group),type:'group'}},bobList]}});
+    for(const [source,own] of [[tasksDone,'marked_as_done_task_ids'],[tasksAdded,'OWNERTASK bring tea'],[future,'FUTUREOWN see this']] as const) {
+      const reviewed=await services.reviews.queue(source);assert.equal(reviewed.ids.length,1,own);
+      for(const text of [await read(source),(await input(reviewed.ids[0]!)).text as string]) {
+        assert.ok(!text.includes('BOBLIST')&&!text.includes('BOBTASK'),own);assert.ok(text.includes(own),own);
+      }
+      assert.deepEqual(await recorded(source),[{version:1,source:source.id,events:[{id:source.id,class:'owner_message'}],owner_account_only:true,rules:'none',
+        rule_buckets:[],left_out:left()}],own);
+    }
+    assert.ok((await read(bobListed)).includes('BOBLIST'),'Bob\'s checklist is learned from its own message');
+    // A quote inside a pinned message stays in the owner's notes review only when the message it quotes is by someone
+    // allowed there: Bob's pinned reply quoting Sara loses its quote there, and it is counted; quoting the owner, it
+    // keeps it. A pinned message the archive never got carries no reply to judge its quote by, so its quote goes too.
+    // Interpretations read every one.
+    await say(94,789,'SARAASK pay the invoice today');await say(96,123,'ALICEASK bring the chairs');
+    const quoted=(id:number,target:Record<string,unknown>,mark:string)=>message(id,456,`${mark}OWN noted`,{reply_to_message:target,quote:{text:mark,position:0}});
+    await capture({message:quoted(95,message(94,789,'SARAASK pay the invoice today'),'SARAQUOTED')});
+    await capture({message:quoted(97,message(96,123,'ALICEASK bring the chairs'),'ALICEQUOTED')});
+    const pinnedReply=(id:number,mark:string)=>({...message(id,456,`${mark}OWN noted`),quote:{text:mark,position:0}});
+    for(const [pin,mark,kept] of [[await pinOf(98,pinnedReply(95,'SARAQUOTED')),'SARAQUOTED',false],[await pinOf(99,pinnedReply(97,'ALICEQUOTED')),'ALICEQUOTED',true],
+      [await pinOf(101,pinnedReply(100,'UNSEENQUOTED')),'UNSEENQUOTED',false]] as const) {
+      const reviewed=(await input(((await services.reviews.queue(pin)).ids)[0]!)).text as string;
+      assert.equal(reviewed.includes(`"${mark}"`),kept,mark);assert.ok(reviewed.includes(`${mark}OWN noted`),mark);
+      assert.deepEqual(await recorded(pin),[{version:1,source:pin.id,events:[{id:pin.id,class:'pinned'}],owner_account_only:false,rules:'none',rule_buckets:[],
+        left_out:left(kept?0:1)}],mark);
+      assert.ok((await read(pin)).includes(`"${mark}"`),`${mark}: interpretations still read it`);
+    }
 
     // A rule learned from her message stays out of the owner's notes review, but not out of group memory.
     const ruleText='In this group SARARULE means the meeting is cancelled';

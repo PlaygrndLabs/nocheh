@@ -10,7 +10,7 @@ import {ownerChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {forwardOrigin,type Forward} from '../forwarded.js';
 import {deliveredKinds} from '../send-classes.js';
-import {ownVoice} from '../source-facts.js';
+import {cutEmbeddedMessages,ownVoice} from '../source-facts.js';
 import {honchoPointer,honchoSource,honchoSources,type HonchoPart} from '../source-labels.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
@@ -64,13 +64,15 @@ function fileName(payload:any):string|null {
   const name=message?.document?.file_name??message?.audio?.file_name??files.find((file:any)=>['file','image'].includes(file?.kind))?.name;
   return typeof name==='string'?name:null;
 }
-/** A guarded copy without the quote its reply carries, nor the quote or reply inside a message it pinned. */
+/** A guarded copy without the quote its reply carries, nor the quote or reply inside a message it pinned, nor any other
+ *  message it embeds (cutEmbeddedMessages), as LearningContextRepository.prepare leaves it. */
 function unquoted(value:unknown):unknown {
   const copy=structuredClone(value) as any;
   for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(copy?.payload?.[kind]) {
     delete copy.payload[kind].quote;
     const pinned=copy.payload[kind].pinned_message;
     if(pinned&&typeof pinned==='object'){delete pinned.quote;delete pinned.reply_to_message;delete pinned.external_reply;}
+    if(copy.payload[kind]&&typeof copy.payload[kind]==='object')cutEmbeddedMessages(copy.payload[kind]);
   }
   return copy;
 }

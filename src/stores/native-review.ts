@@ -119,6 +119,7 @@ export class NativeReviewRepository {
     const options:Required<LearningContextOptions>={admit,
       admitPinned:reference=>this.pinnedSender(reference.id).then(value=>value==='not_learned'?value:value==='review'),
       admitQuoted:reference=>this.quotedSender(reference.id,admit).then(value=>value==='review'),
+      admitPinnedQuote:reference=>this.pinnedQuotedSender(reference.id,admit).then(value=>value==='review'),
       collect:{dropped:[],versions:[],refused:[],bare_reaction:false,empty_pin:false,inputs:new Map()}};
     let context;
     try{context=await this.contexts.prepare(source,binding,options);}
@@ -300,6 +301,22 @@ export class NativeReviewRepository {
     if(held.length){for(const reference of held)if(!await admit(reference))return 'sender_not_allowed';return 'review';}
     const replied=record(message.reply_to_message);
     if(external||!replied)return 'sender_not_allowed';
+    return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...replied,chat:message.chat}}});
+  }
+  /**
+   * Whether the quote inside the message an archived pin carries may go into the owner's notes, by the message that quote
+   * repeats part of (ADR-0257): the pinned message as the archive holds it is asked as any quote is (quotedSender), each
+   * revision, so its quote stays only when the message it answers is archived and admitted, or, when that one was never
+   * archived, its author as the pinned message shows it is allowed in that chat. A pinned message the archive never got
+   * is judged by the author of the message it answers, as the pin shows it, in the pin's chat; Telegram leaves that reply
+   * out of a pinned message, so such a quote, with nothing to judge it by, is not let in.
+   */
+  private async pinnedQuotedSender(id:string,admit:(reference:SourceReference)=>Promise<boolean>):Promise<'review'|'sender_not_allowed'> {
+    const held=(await this.sources.pinnedTo([id])).get(id)??[];
+    if(held.length){for(const target of held)if(await this.quotedSender(target,admit)!=='review')return 'sender_not_allowed';return 'review';}
+    const event=await this.archived(id),update=record(event?.payload),message=record(update?.message??update?.edited_message);
+    const pinned=record(message?.pinned_message),replied=record(pinned?.reply_to_message);
+    if(!event||!message||!replied||record(pinned?.external_reply))return 'sender_not_allowed';
     return notesSender(this.contexts.access.policy(),{...event,payload:{message:{...replied,chat:message.chat}}});
   }
   private async record(source:SourceReference,binding:GuardBinding,reason:NotesSkip) {
