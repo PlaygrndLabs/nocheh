@@ -18,13 +18,14 @@ import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
 import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
-import {accountIdFor,chatDirectory,chatIdFor,chatShortId,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
+import {accountIdFor,chatDirectory,chatIdFor,chatShortId,chats,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
 import {memberIdFor} from '../src/members.js';
 import type {MemberGroup,MemberGroupRef,MemberItem,MemberList,MemberPerson} from '../src/member-wire.js';
 import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from '../src/stores/member-api.js';
 import type {ChatState} from '../src/chat-wire.js';
 import {labeledPlaceholders,memberPrivateDailyLimitReply,memberReadFrame,memberReadTexts,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,sourceTexts} from '../src/prompts.js';
-import {matchesArchiveFilters,otherPrivateScopes} from '../src/archive-filters.js';
+import {matchesArchiveFilters} from '../src/archive-filters.js';
+import {archiveScopes,otherPrivate} from '../src/spaces.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
@@ -586,7 +587,8 @@ const messagesFixture=(()=>{
    const q=(url.searchParams.get('q')??'').toLowerCase(),kind=url.searchParams.get('kind')??'',scope=url.searchParams.get('scope')??'',reply=url.searchParams.get('reply')??'';
    // The members' chats split, by the real filter over the preview's directory (step 4).
    const split=url.searchParams.get('private_chats') as 'hide'|'only'|null;
-   const others=split?otherPrivateScopes():[];
+   // Storage reads these from its chat rows (otherPrivateScopes); the preview's rows are its directory.
+   const others=split?archiveScopes(chats().all().filter(chat=>otherPrivate(chat.id)).map(chat=>chat.id)):[];
    const rows=list.filter(m=>(!q||(m.text??'').toLowerCase().includes(q))&&(!scope||m.scope===scope)
     &&(!split||matchesArchiveFilters({scope:m.scope},undefined,{kind:'',scope:'',reply:'',private_chats:split,private_scopes:others}))
     &&(!kind||kind==='incoming'&&['telegram_update','browser_input'].includes(m.kind)||kind==='assistant'&&m.kind.endsWith('_delivered_message'))

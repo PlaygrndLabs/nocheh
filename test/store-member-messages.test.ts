@@ -11,7 +11,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServer} from '../src/stores/server.js';
 import {fixtureServices} from './fixture-brain.js';
-import {BOB,GP1,MEMBER_GP,MEMBER_NG,NG1_TG,OWNER,fixtureDirectory,GP_GROUP_IDS,NG_GROUP_IDS} from './fixture-groups.js';
+import {BOB,GP1,MEMBER_GP,MEMBER_NG,NG1_TG,OWNER,fixtureChats,fixtureDirectory,GP_GROUP_IDS,NG_GROUP_IDS,seedChats} from './fixture-groups.js';
 
 /*
  * Step 4: the dashboard's Messages list (GET /v1/data and /v1/search, admin only) leaves out the private chats of people
@@ -44,6 +44,7 @@ test('the Messages list keeps members\' and strangers\' private chats under thei
           from:{id:Number(from),is_bot:false,first_name:label},text}}} as Envelope;
       await s.capture.capture(value);return text;
     };
+    await seedChats(stores.control,fixtureChats([...GP_GROUP_IDS,...NG_GROUP_IDS]));
     const owner=await capture(OWNER,OWNER,'owner'),group=await capture(GP1,MEMBER_GP,'group'),ngGroup=await capture(NG1_TG,MEMBER_NG,'ng-group');
     const memberGp=await capture(MEMBER_GP,MEMBER_GP,'member-gp'),memberNg=await capture(MEMBER_NG,MEMBER_NG,'member-ng'),stranger=await capture(BOB,BOB,'stranger');
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -64,6 +65,22 @@ test('the Messages list keeps members\' and strangers\' private chats under thei
     assert.deepEqual(texts(hits),[group,ngGroup,owner].sort());
     const only=await get('/v1/search?q='+encodeURIComponent(word)+'&private_chats=only');
     assert.deepEqual(texts(Array.isArray(only)?only:only.results??only.hits??[]),[memberGp,memberNg,stranger].sort());
+    // The split is read from the chat rows in the store, so a process that has no chat directory loaded still keeps
+    // members' chats out of the default list and search.
+    const loaded=installChatsForTest({chats:[],ids:[],owner_chat:null});
+    try {
+      assert.deepEqual(await listed('private_chats=hide'),[group,ngGroup,owner].sort(),'no directory: the default list still hides them');
+      assert.deepEqual(await listed('private_chats=only'),[memberGp,memberNg,stranger].sort());
+      const blind=await get('/v1/search?q='+encodeURIComponent(word)+'&private_chats=hide');
+      assert.deepEqual(texts(Array.isArray(blind)?blind:blind.results??blind.hits??[]),[group,ngGroup,owner].sort());
+    } finally {loaded();}
+    // Search applies the split before it takes its first 200 hits: a group's hit still shows when 200 better ones are in
+    // a member's chat.
+    const crowd='Crowdmark'+run,member=String(MEMBER_GP);
+    for(let n=0;n<201;n++)await capture(member,member,`${crowd} ${crowd} ${crowd} member ${n}`);
+    const lone=await capture(GP1,MEMBER_GP,crowd+' group');
+    const found=await get('/v1/search?q='+encodeURIComponent(crowd)+'&private_chats=hide&limit=50');
+    assert.deepEqual((Array.isArray(found)?found:found.results??found.hits??[]).map((hit:any)=>hit.text),[lone]);
   } finally {
     restore();
     await new Promise<void>(resolve=>server.close(()=>resolve()));

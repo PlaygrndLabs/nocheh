@@ -18,7 +18,9 @@ const hex=(column:string)=>`${column} ~ '^[a-f0-9]{64}$'`;
  *   with no row counts as on.
  * - member_directory_state: the member revision, moved by every commit that changes what the member directory holds
  *   (bumpMemberRevision); carried_at, set once the lists in force before step 3 were carried; and the daily message cap.
- * - member_turns: the daily cap's count, one row per member turn, so a retry of the same event counts once.
+ * - member_turns: the daily cap's count, one row per member turn, so a retry of the same event counts once. On a
+ *   member's private turn, left_out holds the joined groups that turn leaves out (re-checks past the cap, step 4): every
+ *   read bound to that turn leaves them out too, and one with no list written reads nothing.
  */
 export const memberSchema=`
 CREATE TABLE IF NOT EXISTS members (
@@ -67,6 +69,7 @@ CREATE TABLE IF NOT EXISTS member_turns (
  PRIMARY KEY(member_id,event_id)
 );
 CREATE INDEX IF NOT EXISTS member_turns_day ON member_turns(member_id,day);
+ALTER TABLE member_turns ADD COLUMN IF NOT EXISTS left_out text[];
 -- chat_accounts.member_id (chat-schema.ts) links a person to their member. Added once, so a later bootstrap neither
 -- locks chat_accounts nor checks its rows again.
 DO $$BEGIN

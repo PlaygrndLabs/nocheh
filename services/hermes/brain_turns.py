@@ -147,11 +147,12 @@ class BrainTurns:
         # Turns in one conversation keep their arrival order; different chats
         # and topics run side by side, up to the capacity. A member's turns, in their own private chat and in groups, run
         # one at a time: their pass's lane names them (step 4). The owner's turns, an answer's and an ask's carry none.
-        # Always the space's lane, then the member's, then capacity: nothing holding a member's lane ever waits for a
-        # space's, so no two turns wait on each other.
+        # Always the member's lane first, then the space's, then capacity. A member's group turn that waits for their
+        # running private turn therefore holds no group, so the owner's and other members' turns there go on; Nocheh
+        # still sends a group's replies in arrival order. One order for every turn, so no two turns wait on each other.
         lane=claims.get('lane')
-        async with self._lane(scope.space or scope.chat_id):
-            async with self._lane('lane:'+lane) if lane else contextlib.nullcontext():
+        async with self._lane('lane:'+lane) if lane else contextlib.nullcontext():
+            async with self._lane(scope.space or scope.chat_id):
                 async with self.capacity:
                     if cancelled.is_set():return {'state':'cancelled'}
                     return await self._run(scope,body,progress,cancelled)

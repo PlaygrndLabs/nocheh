@@ -4,7 +4,7 @@ import {readOnlyReader,conversationScope,type AssistantPolicy} from '../src/assi
 import {installChatsForTest,servedChats} from '../src/chats.js';
 import {installMembersForTest,memberDirectory} from '../src/members.js';
 import {memberPrivate,readSet} from '../src/spaces.js';
-import {MEMBER_READ_STALE_DAYS,MEMBER_RECHECK_HOURS,MEMBER_RECHECK_LIMIT,memberRechecks,memberStatus} from '../src/stores/member-reads.js';
+import {MEMBER_READ_STALE_DAYS,MEMBER_RECHECK_HOURS,MEMBER_RECHECK_LIMIT,MEMBER_STALE_RETRY_HOURS,memberRechecks,memberStatus} from '../src/stores/member-reads.js';
 import {readsWithin} from '../src/stores/telegram-turn.js';
 import {BOB,BOB_CHAT,GP1,GP1_TOPIC,GP2,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_GP_OFF,MEMBER_GP_OFF_CHAT,MEMBER_NG,MEMBER_NG_CHAT,
   MEMBER_NG_ID,MEMBER_NG_OFF,MEMBER_NG_OFF_CHAT,NG1,NG1_TG,NG2,NG_GROUP_IDS,OWNER,fixtureDirectory,fixtureMemberDirectory,fixtureMembers} from './fixture-groups.js';
@@ -92,6 +92,22 @@ test('before a private turn the oldest groups past six hours are asked again, at
   assert.deepEqual(ask,['g13','g12','g11','g10','g09','g08','g07','g06','g05','g04'],'oldest first');
   assert.deepEqual(past,['g03','g02']);
   assert.deepEqual(memberRechecks({groups:groups.slice(0,2)},now),{ask:[],past:[]},'groups confirmed within six hours are not asked');
+  // Stale groups (past 30 days, or never confirmed as the epoch) are asked too, oldest first, but only in the places the
+  // groups it reads leave under the cap: they never push one out. They are not read, so never left out.
+  const stale=[{chat:'s1',checked_at:hours(24*31)},{chat:'s0',checked_at:new Date(0)}];
+  assert.deepEqual(memberRechecks({groups:groups.slice(0,2),stale},now),{ask:['s0','s1'],past:[]});
+  assert.deepEqual(memberRechecks({groups,stale},now),memberRechecks({groups},now),'no room left: stale groups wait');
+  const many=Array.from({length:10},(_,n)=>({chat:'s'+String(n).padStart(2,'0'),checked_at:new Date(n*1000)}));
+  assert.deepEqual(memberRechecks({groups:groups.slice(0,5),stale:many},now),
+    {ask:['g04','g03','g02','s00','s01','s02','s03','s04','s05','s06'],past:[]},'ten stale and three due groups: none left out');
+  // A stale group asked without an answer is not asked again for a day; after that it is.
+  const once=(at:number)=>memberRechecks({groups:groups.slice(0,2),stale},now,chat=>chat==='s0'?now-at:undefined).ask;
+  assert.deepEqual(once(MEMBER_STALE_RETRY_HOURS*3600000),['s1']);
+  assert.deepEqual(once(MEMBER_STALE_RETRY_HOURS*3600000+1),['s1','s0']);
+  // Groups asked lately without an answer move behind the rest, so the ones past the cap get their turn.
+  const failing=new Set(['g13','g12','g11','g10','g09','g08','g07','g06','g05','g04']);
+  assert.deepEqual(memberRechecks({groups},now,chat=>failing.has(chat)?now-60000:undefined),
+    {ask:['g03','g02','g13','g12','g11','g10','g09','g08','g07','g06'],past:['g05','g04']});
   assert.equal(MEMBER_READ_STALE_DAYS,30);
   // Telegram's answer as the bot gives it; anything else changes nothing.
   assert.equal(memberStatus({state:'done',status:'in'}),'in');assert.equal(memberStatus({state:'done',status:'left'}),'left');

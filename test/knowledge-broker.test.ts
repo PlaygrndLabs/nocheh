@@ -4,6 +4,8 @@ import type pg from 'pg';
 import {HttpError} from '../src/http.js';
 import {turnToken,type Reader} from '../src/access.js';
 import {brokerServer,scopedRoute,type TurnBinding} from '../src/security/broker.js';
+import {readSet} from '../src/spaces.js';
+import {TASK_PROJECTS_NAMED,TaskProjectRequired} from '../src/stores/tasks.js';
 
 test('knowledge broker exposes only typed routes and preserves the scoped credential',async()=>{
   const secret='synthetic-test-secret',source='a'.repeat(64),proposal='b'.repeat(64);
@@ -85,4 +87,39 @@ test('task routes reach storage only from a live owner-private or group turn and
     assert.equal(calls.length,reached,'other owner views, jobs, reviews and dashboard task routes never reach storage');
     assert.equal(scopedRoute('POST','/v1/owner/tasks/'+task+'/delete'),false);
   }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+test('a task refusal naming 50 projects with long non-Latin names reaches the turn whole',async()=>{
+  const secret='synthetic-test-secret',source='a'.repeat(64);
+  const pool={query:async(sql:string)=>({rows:sql.includes('SELECT p.revision')?[{revision:1,document:{version:1,rules:[]}}]:[],rowCount:1})} as unknown as pg.Pool;
+  const binding=async(principal:Reader):Promise<TurnBinding>=>({event_id:principal.turnEvent!,scope:principal.scope??'42',profile:'synthetic',logical_profile:'synthetic',owner:principal.scope===null,guard_epoch:1});
+  // 50 projects (storage names at most 50), each named with 200 characters of Persian or of CJK (three bytes each).
+  const projects=Array.from({length:50},(_,n)=>({id:String(n).padStart(2,'0').repeat(32),name:(n%2?'پروژه‌ی آزمایشی ':'試験用の計画').repeat(40).slice(0,200)}));
+  let refusal:Record<string,unknown>={error:'task_project_required',projects,more:true};
+  const server=brokerServer({pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),
+    storage:{binding,assertAudience:async()=>{},turnFile:async()=>{throw Error();}},fetch:async()=>Response.json(refusal,{status:400})});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try {
+    const address=server.address();assert.ok(address&&typeof address!=='string');const base='http://127.0.0.1:'+address.port;
+    const key=turnToken(secret,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
+    const list=async()=>{const response=await fetch(base+'/v1/owner/tasks?state=open',{headers:{authorization:'Bearer '+key}});return {status:response.status,body:await response.json() as any};};
+    assert.ok(Buffer.byteLength(JSON.stringify(refusal))>4096);
+    const refused=await list();
+    assert.deepEqual([refused.status,refused.body.error,refused.body.more],[400,'task_project_required',true]);
+    assert.deepEqual(refused.body.projects,projects);
+    // Without more, none is claimed; a list over 50 is not relayed.
+    refusal={error:'task_project_required',projects:projects.slice(0,3)};
+    assert.deepEqual((await list()).body,{error:'task_project_required',projects:projects.slice(0,3)});
+    refusal={error:'task_project_required',projects:[...projects,projects[0]]};
+    assert.deepEqual((await list()).body,{error:'scoped_archive_unavailable'});
+  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+test('storage names at most 50 projects in a task_project_required refusal and says when there are more',()=>{
+  const views=Array.from({length:TASK_PROJECTS_NAMED+3},(_,n)=>({project:String(n).padStart(2,'0').repeat(32),name:'Project '+n,reach:readSet({home:'-10'})}));
+  assert.equal(TASK_PROJECTS_NAMED,50);
+  const many=new TaskProjectRequired(views);
+  assert.deepEqual([many.details.projects.length,many.details.more,many.details.projects.at(-1)],[50,true,{id:views[49]!.project,name:'Project 49'}]);
+  const few=new TaskProjectRequired(views.slice(0,50));
+  assert.deepEqual([few.details.projects.length,'more' in few.details],[50,false]);
 });

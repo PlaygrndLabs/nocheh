@@ -361,11 +361,16 @@ A group counts while Nocheh is on there, the member's switch there is not off,
 and Telegram has shown them in it within the last 30 days; any message or event
 of theirs there refreshes that. Before each private turn, Nocheh asks Telegram
 (`getChatMember`) about each such group it last confirmed more than 6 hours ago,
-oldest first, at most 10. Left or removed: the group is no longer read, and the
-Members page shows they left. Still in: the check is recorded. No clear answer
-changes nothing, and groups past the 10 are left out of that turn. A group
-Telegram has not confirmed for 30 days is not read until they write there again,
-so a bot that is not an admin may lose a quiet member's group.
+and then, in the places left, about each group it has not confirmed for 30 days,
+oldest first, at most 10 in all.
+Left or removed: the group is no longer read, and the Members page shows they
+left. Still in: the check is recorded, and a group not confirmed for 30 days is
+read again. No clear answer changes nothing but moves that group behind the
+others for the next turns (a group not confirmed for 30 days is asked again after
+a day), and groups they read past the 10 are left out of that
+turn, its tool calls included. Where Telegram does not answer (a bot that is not
+an admin), a group not confirmed for 30 days is not read until they write there
+again.
 
 Tasks there are read only, one project at a time: each active project that holds
 a group they joined is one list, with the tasks set on that project and the

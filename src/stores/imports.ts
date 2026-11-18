@@ -71,16 +71,19 @@ export class ImportRepository {
     if(job&&(await this.control.query('SELECT 1 FROM import_sources WHERE job_id=$1 AND event_id=ANY($2::text[])',[job.id,ids])).rowCount!==ids.length)
       throw new HttpError(403,'import_source_denied');
     const references:SourceReference[]=[];for(const id of [...ids].sort())references.push((await this.access.archive.captured(id)).reference);
+    // A private chat that is not the owner's, and Nocheh's answer to the owner's ask about a member, are never learned:
+    // no yes is kept for them, as setConsent refuses one (step 4). They are left out of the approval.
+    const learnable:SourceReference[]=[];for(const source of references)if(!await this.access.privateHold(source))learnable.push(source);
     const operation='import-review:'+digest(canonical([batch,references]));
     return new OwnerCommands(this.control).run(principal,operation,{kind:'import_review',batch,references},async db=>{
       let changed=0;
-      for(const source of references){
+      for(const source of learnable){
         // A replay or another import cannot override a later explicit owner
         // revocation. Subsequent changes use revision-checked consent controls.
         changed+=(await db.query(`INSERT INTO learning_consent(event_id,enabled,reason,revision) VALUES($1,true,'owner',1)
           ON CONFLICT DO NOTHING`,[source.id])).rowCount??0;
       }
-      return {approved:true,accepted:references.length,newly_enabled:changed,telegram_replies:0};
+      return {approved:true,accepted:learnable.length,newly_enabled:changed,telegram_replies:0};
     });
   }
 }

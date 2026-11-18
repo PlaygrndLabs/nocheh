@@ -101,8 +101,9 @@ const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted']);
 export {machineErrors};
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
 async function refusalCode(response:Response,max=4096):Promise<string|null> {return (await refusalBody(response,max))?.code??null;}
-/** A refusal's code and, for task_project_required (D14), the lists it names: each a project id and a name, nothing else. */
-async function refusalBody(response:Response,max=4096):Promise<{code:string|null;projects?:{id:string;name:string}[]}|null> {
+/** A refusal's code and, for task_project_required (D14), the lists it names: each a project id and a name, nothing else,
+ * and whether there are more. */
+async function refusalBody(response:Response,max=4096):Promise<{code:string|null;projects?:{id:string;name:string}[];more?:true}|null> {
   const chunks=[];let size=0;
   try {
     if(response.body)for await(const part of response.body){size+=part.length;if(size>max)return null;chunks.push(Buffer.from(part));}
@@ -110,9 +111,11 @@ async function refusalBody(response:Response,max=4096):Promise<{code:string|null
     const projects=code==='task_project_required'&&Array.isArray(body.projects)&&body.projects.length<=50&&body.projects.every(item=>item&&typeof item==='object'&&
       typeof item.id==='string'&&/^[a-f0-9]{64}$/.test(item.id)&&typeof item.name==='string'&&item.name.length<=200)?
       (body.projects as {id:string;name:string}[]).map(item=>({id:item.id,name:item.name})):undefined;
-    return {code,...(projects?{projects}:{})};
+    return {code,...(projects?{projects,...(body.more===true?{more:true as const}:{})}:{})};
   }catch{return null;}
 }
+/** How much of a task refusal is read: 50 project entries with names of 200 UTF-16 units, each escaped as \uXXXX. */
+const TASK_REFUSAL_BYTES=128*1024;
 /** A refusal that names what to ask instead (TaskProjectRequired's lists, D14). */
 class DetailedRefusal extends HttpError {constructor(status:number,code:string,readonly details:Record<string,unknown>){super(status,code);}}
 async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
@@ -234,9 +237,12 @@ export function brokerServer(options:BrokerOptions) {
           // a message request, that its chat is not one Nocheh serves; a task change, why a reminder time was not saved.
           const codes=relay.startsWith('/v1/jobs/')&&response.status<500?jobErrors:exec?machineErrors:relay==='/v1/tools/propose'&&response.status<500?proposeErrors:
             relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:ask&&response.status<500?askErrors:null;
-          const refused=codes&&response.status>=400?await refusalBody(response):(await response.body?.cancel(),null),code=refused?.code??null;
+          // A task refusal may name up to 50 projects (D14): read within a bound that fits 50 names of 200 characters, each
+          // escaped in JSON at worst.
+          const refused=codes&&response.status>=400?await refusalBody(response,tasks?TASK_REFUSAL_BYTES:4096):(await response.body?.cancel(),null),code=refused?.code??null;
           // A member's private chat that did not name a project hears which lists it may choose (D14).
-          if(tasks&&code==='task_project_required'&&refused?.projects)throw new DetailedRefusal(response.status,code,{projects:refused.projects});
+          if(tasks&&code==='task_project_required'&&refused?.projects)
+            throw new DetailedRefusal(response.status,code,{projects:refused.projects,...(refused.more?{more:true}:{})});
           throw new HttpError(response.status,code&&codes!.has(code)?code:'scoped_archive_unavailable');
         }
         // A box page holds at most 600,000 characters of message texts, which stays well within 8 MiB.

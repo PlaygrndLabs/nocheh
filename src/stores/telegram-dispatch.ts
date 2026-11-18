@@ -681,22 +681,23 @@ export class TelegramDispatchRepository {
     return {reference,input};
   }
   /**
-   * A member's private turn's reader (step 4): the groups they read are asked of Telegram again first where their 'in'
-   * is older than six hours (at most ten, oldest first; the rest are left out of this turn), then storage binds the
-   * reader to the member's own chat (bindReads). Null when the chat is not, or no longer, that member's open private chat.
+   * A member's private turn's reader (step 4): the groups they joined are asked of Telegram again first where their 'in'
+   * is older than six hours or stale (at most ten, oldest first; the ones they read past the cap are left out of this
+   * turn), then storage binds the reader to the member's own chat (bindReads). The groups left out are written on the
+   * turn's member_turns row first, so every read bound to this turn later (its tools too) leaves them out the same way.
+   * Null when the chat is not, or no longer, that member's open private chat.
    */
   private async memberPrincipal(principal:Reader,member:string):Promise<Reader|null> {
     const chat=principal.scope!,reads=await memberReads(this.control,chat);
     if(!reads||reads.member!==member)return null;
     const {past,moved}=await recheckMemberGroups(this.control,this.call,reads);
     if(moved)await reloadMembers();
+    await this.control.query('UPDATE member_turns SET left_out=$3::text[] WHERE member_id=$1 AND event_id=$2',[member,principal.turnEvent,past]);
     let bound:Reader;
     try{bound=await this.access.bindReads({...principal,member});}
     catch(error){if(error instanceof HttpError&&error.code===memberChatClosed)return null;throw error;}
     if(bound.member!==member||bound.memberChat!==chat||!bound.reads||bound.reads.home!==chat)return null;
-    if(!past.length)return bound;
-    const left=(id:string)=>past.includes(chats().groupOf(id)??id);
-    return {...bound,reads:readSet({home:chat,exact:bound.reads.exact.filter(id=>!left(id)),whole:bound.reads.whole.filter(id=>!left(id)),project:bound.reads.project})};
+    return bound;
   }
   async run(id:string,authority:ExecutionAuthority):Promise<Observation> {
     if(!/^[a-f0-9]{64}$/.test(id))return observation('failed','admission');

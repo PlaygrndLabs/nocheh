@@ -105,8 +105,12 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
       payload:{message:{message_id:serial,date:1700000000,chat:{id:Number(raw),type,is_forum:false},from:{id:Number(from),first_name:'Mira'},text}}};
     const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
   };
-  const turn=async(source:{id:string},chat:string,claims:Partial<Reader>={}):Promise<Reader>=>{
+  /** A turn's reader. A member's private turn has its member_turns row with the groups it leaves out (`left`), as its
+   * dispatch writes it before binding; `null` leaves the row as it is. */
+  const turn=async(source:{id:string},chat:string,claims:Partial<Reader>={},left:string[]|null=[]):Promise<Reader>=>{
     const binding=await s.guards.state();
+    if(claims.member&&left)await stores.control.query(`INSERT INTO member_turns(member_id,event_id,day,left_out) VALUES($1,$2,current_date,$3::text[])
+      ON CONFLICT(member_id,event_id) DO UPDATE SET left_out=excluded.left_out`,[claims.member,source.id,left]);
     return {admin:false,scope:chat,space:chat,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,...claims};
   };
   try {
@@ -125,6 +129,15 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
       const bound=await s.access.bindReads(await turn(said,chat,{member}));
       assert.equal(bound.memberChat,chat);
       assert.deepEqual(readSetGroups(bound.reads!),chat===MEMBER_GP_CHAT?[GP1,GP4].sort():[NG1,NG2].sort());
+      // A group the turn left out (a re-check past the cap) is left out of every read bound to that turn, its tools' too;
+      // a turn whose dispatch wrote no list reads nothing.
+      const narrowed=await s.access.bindReads(await turn(said,chat,{member},[chat===MEMBER_GP_CHAT?GP4:NG2]));
+      assert.deepEqual(readSetGroups(narrowed.reads!),[chat===MEMBER_GP_CHAT?GP1:NG1]);
+      await stores.control.query('UPDATE member_turns SET left_out=NULL WHERE member_id=$1 AND event_id=$2',[member,said.id]);
+      await assert.rejects(s.access.bindReads(await turn(said,chat,{member},null)),{status:409,code:'member_chat_closed'},'no list written');
+      await stores.control.query('DELETE FROM member_turns WHERE member_id=$1 AND event_id=$2',[member,said.id]);
+      await assert.rejects(s.access.bindReads(await turn(said,chat,{member},null)),{status:409,code:'member_chat_closed'},'no turn row');
+      await turn(said,chat,{member});
       for(const [why,claims] of Object.entries({'another member':{member:member===MEMBER_GP_ID?MEMBER_NG_ID:MEMBER_GP_ID},'no turn':{member,turnEvent:undefined},
         'another chat\'s member':{member,scope:BOB_CHAT,space:BOB_CHAT},'the owner\'s chat':{member,scope:OWNER,space:OWNER}}))
         await assert.rejects(s.access.bindReads({...await turn(said,chat),...claims} as Reader),{status:409,code:'member_chat_closed'},why);
@@ -180,6 +193,13 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
     await assert.rejects(s.tasks.chatComment(bound,inGp1.id,{text:'Booked'}),{status:403,code:'task_read_only'});
     // An unbound member turn can't even read its own source: refused before any view.
     await assert.rejects(s.tasks.chatList(await turn(said,MEMBER_GP_CHAT,{member:MEMBER_GP_ID})),{status:403,code:'turn_source_denied'});
+    // Nor does an import review's approval keep a learning yes for a member chat: the source is left out of it.
+    for(const [raw,person] of [[MEMBER_GP,MEMBER_GP],[MEMBER_NG,MEMBER_NG]] as const) {
+      const note=await capture(raw,person,'Synthetic note to keep '+person,'private');
+      const review=await s.imports.approveLearning(owner,{approved:true,batch:key+':review:'+person,event_ids:[note.id]});
+      assert.deepEqual([review.accepted,review.newly_enabled],[0,0]);
+      assert.equal((await stores.control.query('SELECT 1 FROM learning_consent WHERE event_id=$1',[note.id])).rowCount,0);
+    }
     void GP3;
   } finally {loader?.stop();restoreMembers();restoreChats();await stores.close();await rm(root,{recursive:true,force:true});}
 });

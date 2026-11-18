@@ -657,16 +657,19 @@ async function membershipFrom(db:Db,chat:string,account:string,state:'in'|'left'
  * What Telegram answered when Nocheh asked whether an account is still in a group (getChatMember, before a member's
  * private turn, step 4): the account's row there takes that state with source 'checked' and checked_at now, so the
  * 30-day rule (src/stores/member-reads.ts) counts it as just confirmed. Only an existing row changes: a check is asked
- * only where a row says 'in'. When a member's account switches between 'in' and 'left', the member revision moves in
- * the same transaction, as for an update (membershipFrom). Returns whether it moved.
+ * only where a row says 'in'. An 'in' answer applies only to the row it was asked about, still 'in' with the checked_at
+ * read then (`seen`, as text): a leave or any other write that came while Telegram was asked wins over it. A 'left'
+ * answer always applies, as it only closes. When a member's account switches between 'in' and 'left', the member
+ * revision moves in the same transaction, as for an update (membershipFrom). Returns whether it moved.
  */
-export async function membershipChecked(control:pg.Pool,chat:string,account:string,state:'in'|'left'):Promise<boolean> {
+export async function membershipChecked(control:pg.Pool,chat:string,account:string,state:'in'|'left',seen:string|null):Promise<boolean> {
   const db=await control.connect();
   try {
     await db.query('BEGIN');
     const written=(await db.query(`WITH prior AS (SELECT state FROM chat_memberships WHERE chat_id=$1 AND account_id=$2)
       UPDATE chat_memberships SET state=$3,source='checked',checked_at=now(),since=CASE WHEN state=$3 THEN since ELSE now() END
-      WHERE chat_id=$1 AND account_id=$2 RETURNING (SELECT state FROM prior) AS prior`,[chat,account,state])).rows[0];
+      WHERE chat_id=$1 AND account_id=$2 AND ($3='left' OR state='in' AND checked_at::text IS NOT DISTINCT FROM $4::text)
+      RETURNING (SELECT state FROM prior) AS prior`,[chat,account,state,seen])).rows[0];
     let moved=false;
     if(written&&written.prior!==state&&(await db.query('SELECT 1 FROM chat_accounts WHERE id=$1 AND member_id IS NOT NULL',[account])).rowCount) {
       await bumpMemberRevision(db);moved=true;
@@ -702,6 +705,20 @@ export async function loadChatSnapshot(control:pg.Pool,policy:Pick<AssistantPoli
   finally{db.release();}
 }
 
+/**
+ * The events.scope values of every private chat that is not the owner's (step 4: members' chats and strangers'), read
+ * from the chat rows in the control store, never from this process's chat directory, so a process that has not loaded
+ * one yet still leaves them out: each such chat's id and the app ids it has had. The owner's private chat is the one the
+ * owner's Telegram id names, else the policy's owner chat, as for a directory load (loadChatSnapshot); with neither,
+ * every private chat counts as someone else's.
+ */
+export async function otherPrivateScopes(control:Db|Pick<pg.Pool,'query'>,policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):Promise<string[]> {
+  return (await control.query<{scope:string}>(`WITH owner AS (SELECT COALESCE((SELECT i.chat_id FROM chat_ids i JOIN chat_connections n ON n.id=i.connection_id
+      WHERE n.app='telegram' AND i.external_id=$1 ORDER BY i.chat_id LIMIT 1),$2::text) AS id),
+    others AS (SELECT c.id FROM chats c WHERE c.kind='private' AND c.parent_id IS NULL AND c.id IS DISTINCT FROM (SELECT id FROM owner))
+    SELECT id AS scope FROM others UNION SELECT i.external_id FROM chat_ids i JOIN others o ON o.id=i.chat_id ORDER BY 1`,
+    [policy.owner_id||null,ownerChat(policy)||null])).rows.map(row=>row.scope);
+}
 /** Every chats and chat_ids row as `db` sees them, with each connection's app. */
 async function readChatRows(db:Db):Promise<{chats:ChatRow[];ids:ChatIdRow[]}> {
   return {chats:(await db.query<ChatRow>(`SELECT c.id,n.app,c.kind,c.parent_id,c.topic_key,c.state,c.title,c.is_forum,c.account_id,c.app_type
