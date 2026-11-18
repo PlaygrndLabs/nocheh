@@ -4283,7 +4283,7 @@ class ProductScenarios(Scenarios):
                 if mark != kept:
                     # The owner's recall finds its own query in the owner's chat history (the [[recall:...]] message and
                     # the tool call naming it); that echo is the owner's words, not the member's, so it is left out.
-                    recall = re.sub(r'(?:recall:|query\W{1,12})'+re.escape(mark)+r'(?![0-9])', '', json.dumps(self.recalled(OWNER, mark), ensure_ascii=False))
+                    recall = re.sub(r'(?:recall:|query\W*)'+re.escape(mark)+r'(?![0-9])', '', json.dumps(self.recalled(OWNER, mark), ensure_ascii=False))
                     held += [{'where': 'owner_recall', 'mark': found} for found in canaries.found(recall, marks+[other])]
             self.turn(self.f.message(OWNER, 'گفتگوها [[owner:conversations]]'), OWNER)
             listing = self.newest_tool_result_text('mcp__nocheh__owner_read')
@@ -4374,7 +4374,7 @@ class ProductScenarios(Scenarios):
             _, reply = self.turn(self.f.message(OWNER, 'و بعد؟ '+self.context_probe(planted['kept'])), OWNER)
             self.gate('answer_dropped_from_the_next_turn', reply.endswith(' absent'), reply=reply[:200])
             # The owner's recall echoes its own query (see member_private_chat_stays_with_the_member); that is left out.
-            recall = re.sub(r'(?:recall:|query\W{1,12})'+re.escape(planted['said'])+r'(?![0-9])', '',
+            recall = re.sub(r'(?:recall:|query\W*)'+re.escape(planted['said'])+r'(?![0-9])', '',
                             json.dumps(self.recalled(OWNER, planted['said']), ensure_ascii=False))
             self.gate('owner_recall_never_reads_the_ask', not canaries.found(recall, [planted['said']]), excerpt=recall[:300])
         finally:
