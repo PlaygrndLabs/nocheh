@@ -154,6 +154,10 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
       // Never learned, and the owner's yes can't change that.
       assert.equal(await s.access.canLearn(said,binding),false);
       await assert.rejects(s.access.setConsent(owner,said,{enabled:true,expected_revision:0,operation_id:key+':consent:'+person}),{status:409,code:'learning_consent_member_chat'});
+      // Nor does an import review's approval keep one: the source is left out of it.
+      const review=await s.imports.approveLearning(owner,{approved:true,batch:key+':review:'+person,event_ids:[said.id]});
+      assert.deepEqual([review.accepted,review.newly_enabled],[0,0]);
+      assert.equal((await stores.control.query('SELECT 1 FROM learning_consent WHERE event_id=$1',[said.id])).rowCount,0);
       const consent=await s.access.consent(owner,said);assert.deepEqual([consent.effective,consent.consentable],[false,false]);
     }
 
