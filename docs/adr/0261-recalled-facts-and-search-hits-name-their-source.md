@@ -1,7 +1,7 @@
 # ADR-0261: Recalled facts and search hits name their source
 
 <status>
-Step 1 accepted on 2026-11-17 and step 2 on 2026-11-18; steps 3 and 4 are
+Step 1 accepted on 2026-11-17, steps 2 and 3 on 2026-11-18; step 4 is
 planned. The owner asked for
 memory to track the source of each fact, not only to keep history without its
 thread and relations, and to do it before the MVP. The design "Recalled facts
@@ -309,13 +309,95 @@ turn's own message and answer stay.
   a group never opens another group's record or reads the owner's private
   chat through a fact.
 
-## 7. Later steps (planned)
+## 7. Replies in the turn and where notes came from (step 3)
 
-- **Step 3: replies in the turn.** A turn that replies to a message carries
-  that message's text in a reply block, recent messages say what they reply
-  to, and a note written from it reads as having read it.
+- **The reply block.** When a turn's own message replies to a message its
+  reader may read, the turn's frame quotes it before the message's own text:
+  after the speaker line in a group, first in the owner's chat, and before a
+  forward's line.
+
+  ```
+  [Replying to, by=person: “Alice” · this chat · 2026-11-03 14:12 UTC] (source nocheh:event:<64 hex>)
+  <at most 200 characters of the reader's own copy of its text, on one line>
+  [End of replied-to message]
+  ```
+
+  Storage builds it (`SourceRepository.repliedTo`, `replyBlock` in
+  `telegram-dispatch.ts`) from the reply relation the message's own read
+  already returned, one batched `readable()` and one tag request, never from an
+  id in a payload. The line is at most 300 characters, its tag at most 160; a
+  message with no text reads `[A message without text]`. A reply to Nocheh
+  reads `by=nocheh` with Nocheh's own text (a card `person`, a reply about a
+  forward `forward`), so "source?" finds what it asks about. A message the
+  reader may not read, a retired one, one in another chat or a forum topic's
+  opening gives no block. It goes to Hermes as `reply:{line, text, by, id}`,
+  through the guard's `allow` with the rest of the turn; `reply_block()` in
+  `turn_process.py` takes it only when the line has the fixed shape, its `by`
+  and id are the line's own, both limits hold and the text is one line, and
+  always unframes the text, since it may be someone else's words. The owner's,
+  a group's and a private answer's turns get it (a private answer quotes what
+  its question replies to, read under the answer's own access); a command's
+  fixed reply runs no model and gets none.
+- **Recent messages say what they reply to.** A recent group message that
+  replies to another carries, on its own line after its speaker line,
+  `[In reply to, by=<by>: <tag>] (source nocheh:event:<id>)`: who · where ·
+  when, never the text. All of a turn's recent messages are looked up at once
+  (one batched read of their reply targets, then `readable()` and tags). A part
+  that is not well formed drops only itself; the speaker line keeps its own
+  check, so a long name never loses the part.
+- **A forum topic's opening is no reply.** Telegram sends every message in a
+  topic as a reply to the topic's opening message (`forum_topic_created`, or a
+  Telegram Desktop export's `topic_created` service message,
+  `telegramTopicOpening`). Such a reply gives no block, no part and no `reply`
+  read, whether the opening shows on the archived target or in the reply the
+  message embeds.
+- **Retiring a replied-to message.** The retirement plan of step 1 already
+  reads both shapes: a retired reply block becomes the withheld notice and
+  withholds the turn's tool work and the notes written from it, and a retired
+  reply part replaces only its own line. Frame words are taken out of members'
+  text, so a member's `[Replying to …` reads `(`.
+- **Notes after a reply.** A turn whose message replies to anyone's message but
+  the owner's own typing reads `reply`: its notes are `turn_read`, "after
+  reading the message it replied to (not the owner's own words)" for the model
+  and "the message it replied to" in the owner's words (`read_reply`, editable
+  in Settings › Assistant). Nocheh's own message counts too, since it may carry
+  what others said (it fails closed). Later in the session a reply block counts
+  only for a note that copies a run of 32 characters or a distinctive token from
+  its text, as other people's recent messages do; a reply part, which holds no
+  text, never counts.
+- **When a note was written.** A review's label names the day of the message it
+  is named by (another person's, a forward or a file first), in the reader's
+  zone, read for all of a lookup's reviews in one query; the day comes before
+  the place, so a label cut at 120 characters loses place words, not the day:
+  "Nocheh's notes review on 2026-11-03 of another person's message in …". A
+  turn's note records the moment it was written (`at_time`, accepted only when
+  its UTC day is the note's `at`), shown as a day in the reader's zone; a note
+  written before reads its day marked `UTC`. The owner's chat reads the
+  Settings › Tasks zone, any other reader UTC.
+- **Note refs.** Each note in a turn's evidence carries `ref`, the first 12 hex
+  of its key, when that turn's refs were kept. Hermes sends the turn's message
+  (`turn_event`) with its lookup; storage keeps, per ref, up to 10 messages the
+  note's writer read (a review's batch, first message first, or the message a
+  turn answered) in `note_lookups`, added if missing, merged for the same turn
+  and pruned after 7 days. `archive_read {note:'<ref>'}` opens them only in that
+  turn, never for a private answer: up to 5, each tagged and read-checked, an
+  unreadable one left out with no count. A ref that is not the note's own key
+  prefix is dropped by Hermes, and refs that could not be kept leave the labels
+  without refs and are counted as the `notes` memory problem.
+- **Recall.** An owner correction in `memory_recall` gains
+  `tag: the owner's correction · <place> · <day>` and `evidence` (its first 3
+  sources, tagged); the owner's native note hits gain `day` and `sources` (the
+  first 3 messages the note was written from, tagged).
+- **How to read sources, once per block.** The sentence the tool descriptions
+  carry is also the `about` of the turn's `nocheh.memory.recall` evidence entry
+  and ends the default `memory.evidence` text; it is never written into a tool
+  result.
+
+## 8. Later steps (planned)
+
 - **Step 4: dashboard.** Messages › detail shows a message's thread and what
-  was learned from it; Memory › Long-term lists facts with their sources.
+  was learned from it; Memory › Long-term lists facts with their sources; the
+  Notes page names a review's day.
 
 </decision>
 
@@ -340,6 +422,13 @@ turn's own message and answer stay.
   ids said nothing about which fact each supported and cost up to about 9,000
   tokens; 12 facts with two tagged sources each and two record ids cost
   about 2,000 to 2,400, and every fact still opens by its number.
+- **A reply block without the replied-to text, only its source.** Rejected:
+  the model would have to open every replied-to message to know what was
+  answered; since retiring that message withholds the whole block and the
+  turn's tool work, keeping 200 characters of it costs nothing in forgetting.
+- **Note refs that open in any later turn.** Not chosen: a ref is a short,
+  guessable prefix; tied to the turn whose evidence showed it and kept 7 days,
+  it opens nothing in another chat or turn, and every turn shows fresh ones.
 - **Taking a batch-only fact's first messages as its sources.** Not chosen: the
   plugin names at most 8 messages of a batch, so a retired one could be left
   out; such a fact is forgotten when any message of its session is retired.
@@ -411,4 +500,29 @@ turn's own message and answer stay.
   - Recall's prose answer is still not sourced sentence by sentence.
   - Citation coverage can be counted by the plugin, but nothing calls it until
     step 4.
+- Step 3: a turn whose message replies to another reads about 120 more tokens,
+  kept in its history until compaction, and each recent message that replies
+  to another about 45; a plain message in a forum topic reads none. Each turn
+  with recent messages adds one batched read of their reply targets, and a
+  reply one more tag request; a turn with notes keeps one `note_lookups` row.
+- What the owner loses in step 3:
+  - Retiring a message a turn replied to withholds that turn's searches, other
+    tool results and notes from later turns, not only its quoted text, in the
+    owner's chat as in groups; the answer already sent stays.
+  - A note written while replying to anyone's message but the owner's own
+    reads `turn_read`, Nocheh's own messages included; in a later turn of the
+    session, so does any note that copies from a reply block's text.
+  - The model's label of such a note in the owner's chat is cut at 120
+    characters ("…, after reading the message it replied to (not the owner's…").
+  - Review labels read in a new order, the day before the place, so a long one
+    loses place or phrase words sooner; a note written before this step reads
+    its day as `<day> UTC`.
+  - A note's ref opens only in the turn whose evidence showed it, and only for 7
+    days; refs that could not be kept leave that turn's notes without them.
+  - The Notes page shows no review day until step 4.
+  - A recent message's reply part names the message without its text; the model
+    opens it with `archive_read` to read it.
+  - An earlier group message whose row holds a reply block makes a note that
+    copies from that row read `recent` as well as `reply`: the earlier-row rule
+    reads the whole row (it errs toward more reads).
 </consequences>

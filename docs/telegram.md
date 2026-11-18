@@ -108,6 +108,20 @@ built the same way, with the time of its message, such as
 owner's question still names Bob. The assistant opens a fact, with the
 messages it came from, by its memory id and number (`archive_read
 nocheh:memory:<id> fact=3`), only in the group or chat that read it.
+A message that replies to another reaches the assistant after the message it
+replies to, named the same way and with up to 200 characters of its text:
+`[Replying to, by=person: “Bob” · this chat · 2026-11-03 14:12 UTC] (source
+nocheh:event:…)`, the text, then `[End of replied-to message]`, after the
+speaker line in a group and first in the owner's chat. A reply to one of
+Nocheh's own messages reads `by=nocheh`, so asking "source?" in reply to an
+answer lets the assistant open that answer. Each recent group message that
+replies to another names it in its own `[In reply to, by=…: …]` line, without
+its text. A message the reader may not read, a hidden one, one in another chat
+and a forum topic's opening give none. A note the assistant writes in such a
+turn says it was written after reading the message it replied to, unless you
+typed that message; the assistant can open what a note in its memory was
+written from (`archive_read note=<ref>`), only in the turn that showed it
+([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).
 In a group, a message starts a turn only when it addresses Nocheh: a reply to
 one of its messages, its @username, or one of its names opening the message
 (**Names that call Nocheh**). Other messages reach the next reply as context;
@@ -130,8 +144,8 @@ In **Messages**, open the exact captured message and choose **Hide from
 assistant** to stop future agent use and learning. This works for text, voice,
 media, edits, and assistant replies; all observed edits of one Telegram message
 share the decision. A hidden message also leaves the turns that quoted it: in a
-group turn that carried it among the recent messages (or as the message the turn
-replied to), its text becomes a notice naming its id, and that turn's searches
+group turn that carried it among the recent messages, or any turn whose message
+replied to it, its text becomes a notice naming its id, and that turn's searches
 and other tool results, and the notes written from them, are withheld and
 removed with it; the turn's own message and the answer already sent stay.
 A fact learned from it no longer opens, and a stored recall or opened fact that
