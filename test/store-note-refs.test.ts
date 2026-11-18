@@ -68,6 +68,17 @@ test('a note names its day in the reader\'s zone and its ref opens only what thi
     assert.equal(noteRef(notes.review.key),notes.review.key.slice(0,12));
     // Without a turn there are no refs, and none is kept.
     assert.ok(Object.values((await s.noteSources.lookup(body(A))).labels).every(label=>!('ref' in label)));
+    // Refs that can't be kept leave the labels without them, counted as `note_refs`, never as a note labels failure.
+    const kinds=async()=>Object.fromEntries((await stores.control.query(`SELECT kind,failed FROM memory_problem_days
+      WHERE kind IN ('notes','note_refs') AND day=(now() AT TIME ZONE 'UTC')::date`)).rows.map(row=>[row.kind,row.failed]));
+    const counted=await kinds();
+    const control=s.noteSources.stores.control as any,query=control.query;
+    control.query=(text:unknown,...rest:unknown[])=>String(text).includes('INSERT INTO note_lookups')?Promise.reject(Error('disk full')):query.call(control,text,...rest);
+    let unkept;
+    try{unkept=(await s.noteSources.lookup(body(A,bob2.id))).labels;}finally{delete control.query;if(control.query!==query)control.query=query;}
+    assert.equal(unkept[notes.timed.key]!.label,group[notes.timed.key]!.label);
+    assert.ok(Object.values(unkept).every(label=>!('ref' in label)));
+    assert.deepEqual(await kinds(),{...counted,note_refs:(counted.note_refs??0)+1});
     // The owner's turn: the owner's Tasks zone.
     const owned=(await s.noteSources.lookup(body('123',ownerPrivate.id))).labels;
     assert.equal(owned[notes.timed.key]!.label,'Nocheh\'s note from the owner\'s private chat on 2025-11-04'+answered);
@@ -87,6 +98,17 @@ test('a note names its day in the reader\'s zone and its ref opens only what thi
     // The owner's own turn opens all four, in the Tasks zone.
     const all=await s.sources.noteEntry(owner,noteRef(notes.review.key)) as any;
     assert.equal(all.sources.length,4);assert.equal(all.sources[2].tag,'“Bob” · group “GP1” · 2025-11-03 15:12 Europe/Berlin');
+    // A failed access check opens none of them, never a placeholder for a message nobody checked, and is counted.
+    const access=s.tags.access as any,readable=access.readable,count=async()=>(await stores.control.query(
+      "SELECT coalesce(sum(failed),0)::int AS failed FROM memory_problem_days WHERE kind='source_tags' AND day=(now() AT TIME ZONE 'UTC')::date")).rows[0].failed;
+    const before=await count();
+    access.readable=async()=>{throw new Error('connection reset');};
+    try {
+      const failed=await s.sources.noteEntry(general,noteRef(notes.review.key)) as any;
+      assert.deepEqual([failed.sources,failed.more],[[],undefined]);
+      assert.ok(!JSON.stringify(failed).includes(ownerPrivate.id)&&!JSON.stringify(failed).includes(bobB.id));
+    } finally {access.readable=readable;}
+    assert.equal(await count(),before+1);
     // A ref opens only in the turn whose lookup showed it, never for a private answer, and an unknown ref opens nothing.
     await assert.rejects(s.sources.noteEntry(reader(B,B,bobB.id),noteRef(notes.review.key)),{code:'note_not_found'});
     await assert.rejects(s.sources.noteEntry(reader(A,A,bob2.id),noteRef(notes.review.key)),{code:'note_not_found'});
@@ -107,12 +129,23 @@ test('a note names its day in the reader\'s zone and its ref opens only what thi
     // retired one is gone.
     binding=await s.guards.state();
     const recaller=reader(null,'123',ownerPrivate.id);
-    const tag=async(ids:string[])=>s.tags.tags(recaller,binding,[...(await s.access.archive.capturedMany(ids)).values()].map(item=>item.reference));
+    const tag=async(ids:string[])=>s.tags.checked(recaller,binding,[...(await s.access.archive.capturedMany(ids)).values()].map(item=>item.reference));
     const recalled=await s.noteSources.withRecallSources({hits:[{kind:'native_note',space:A,text:'plan',note:notes.review},
       {kind:'native_note',space:A,text:'plan',note:notes.timed}]},tag) as any;
     assert.deepEqual(recalled.hits.map((hit:any)=>hit.day),['2025-11-03','2025-11-04']);
     assert.deepEqual(recalled.hits[0].sources.map((item:any)=>item.source),[bobB,ownerPrivate,bob1].map(item=>'nocheh:event:'+item.id));
     assert.deepEqual(recalled.hits[1].sources,[{source:'nocheh:event:'+bob1.id,tag:'“Bob” · group “GP1” · 2025-11-03 15:12 Europe/Berlin',by:'person'}]);
+    // A failed check names none of them, the retired one included.
+    access.readable=async()=>{throw new Error('connection reset');};
+    try {
+      const failed=await s.noteSources.withRecallSources({hits:[{kind:'native_note',space:A,text:'plan',note:notes.review}]},tag) as any;
+      assert.deepEqual(failed.hits[0].sources,[]);
+    } finally {access.readable=readable;}
+    // A tagger that throws leaves the hits without sources and is counted.
+    const thrown=await count();
+    assert.deepEqual((await s.noteSources.withRecallSources({hits:[{kind:'native_note',space:A,text:'plan',note:notes.review}]},
+      async()=>{throw new Error('captured');}) as any).hits[0].sources,[]);
+    assert.equal(await count(),thrown+1);
   } finally {
     await stores.control.query('UPDATE owner_task_settings SET settings=$1 WHERE singleton',[JSON.stringify(zone)]).catch(()=>{});
     await Promise.all([stores.archive.end(),stores.derived.end(),stores.control.end()]);await rm(root,{recursive:true,force:true});

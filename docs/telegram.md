@@ -148,7 +148,8 @@ group turn that carried it among the recent messages, or any turn whose message
 replied to it, its text becomes a notice naming its id, and that turn's searches
 and other tool results, and the notes written from them, are withheld and
 removed with it; the turn's own message and the answer already sent stay.
-A fact learned from it no longer opens, and a stored recall or opened fact that
+A later turn in the same conversation whose note copied its text is withheld
+the same way, with that note. A fact learned from it no longer opens, and a stored recall or opened fact that
 rests on it is withheld
 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).
 **Undo hiding** restores future use. The original,

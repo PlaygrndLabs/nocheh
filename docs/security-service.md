@@ -225,12 +225,15 @@ always unframes the text; a recent message's `[In reply to …]` part is checked
 its own and a bad one drops only itself. A forum topic's opening is never a
 reply target. The `reply` read token makes a turn's notes `turn_read` when the
 replied-to message is not the owner's own typing, Nocheh's own included; earlier
-in the session only when the note copies from the block's text. A note's `ref`
-(the first 12 hex of its key) is shown only when storage kept that turn's refs in
-`note_lookups` (pruned after 7 days); `archive_read {note}` opens a ref's messages
-only for the turn whose lookup kept it, never for a private answer, each through
-the reader's read check, and Hermes drops a ref that is not the note's own key
-prefix. The sentence on reading source lines is the recall evidence entry's
+in the session only when the note copies from the block's text (a run, a
+distinctive token, or a short text held whole). A note's `ref` (the first 12 hex
+of its key) is shown only when storage kept that turn's refs in `note_lookups`
+(pruned after 7 days; a failure is counted as `note_refs`); `archive_read
+{note}` opens a ref's messages only for the turn whose lookup kept it, never for
+a private answer, each through the reader's read check before it is tagged (a
+check that fails opens none), and Hermes drops a ref that is not the note's own
+key prefix. Retiring a message also withholds a later turn of the same session
+whose note copied its text, with that note. The sentence on reading source lines is the recall evidence entry's
 `about`, once per turn, and never part of a tool result.
 
 

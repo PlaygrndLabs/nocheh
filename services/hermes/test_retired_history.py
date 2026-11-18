@@ -487,6 +487,44 @@ class RetiredHistoryReviewTests(unittest.TestCase):
             withhold_retired(database,Lookup(retired=(CAROL,),answered=()),memories)
             self.assertEqual((memories/'MEMORY.md').read_text(),'Rain on Friday')
 
+    def test_a_note_a_later_turn_copied_from_a_retired_message_goes_with_it(self):
+        # Turn 1 quotes Alice's message as the one Bob replied to and only answers; turn 2 saves what it said. Retiring it
+        # withholds turn 2's tool work and the note too (note_sources.turn_reads labels the same copy a reply read), and
+        # so for a retired turn message or recent message a later turn copied, in the same session only.
+        from .retired_history import plan
+        code='my door code is ZX99887766 call me'
+        alice='[Replying to, by=person: “Alice” · this chat · 2026-11-03 14:00 UTC] (source nocheh:event:'+REPLIED+')\n'+code+'\n[End of replied-to message]'
+        def rows(first,session='g',note='Alice door code ZX99887766'):
+            return [{'id':1,'session_id':'g','role':'user','content':first,'timestamp':1.0,'tool_calls':None},
+                    {'id':2,'session_id':'g','role':'assistant','content':'Got it.','timestamp':2.0,'tool_calls':None},
+                    {'id':3,'session_id':session,'role':'user','content':BOB_SPEAKER+'\nsave it please'+marker(QUESTION),'timestamp':3.0,'tool_calls':None},
+                    {'id':4,'session_id':session,'role':'assistant','content':'','timestamp':4.0,'tool_calls':call('memory',{'action':'add','target':'memory','content':note})},
+                    {'id':5,'session_id':session,'role':'tool','content':'{"success": true}','timestamp':5.0,'tool_calls':None},
+                    {'id':6,'session_id':session,'role':'assistant','content':'Saved.','timestamp':6.0,'tool_calls':None}]
+        quoting=BOB_SPEAKER+'\n'+alice+'\nlook at this'+marker(TURN)
+        changes=plan(rows(quoting),Lookup(retired=(REPLIED,),answered=()))[1]
+        self.assertEqual(sorted(changes),[1,4,5],'today only row 1 changed')
+        self.assertEqual(json.loads(changes[4]['tool_calls'])[0]['function'],{'name':'memory','arguments':'{}'})
+        self.assertEqual(changes[5]['content'],'[Tool result withheld; its source was retired: '+source(REPLIED)+']')
+        self.assertNotIn(6,changes,'the delivered answer stays')
+        for why,args,retired,expected in (('a paraphrase',dict(note='Alice has a door code'),(REPLIED,),[1]),
+                                          ('another session',dict(session='h'),(REPLIED,),[1]),('nothing retired',{},(),[])):
+            with self.subTest(why):self.assertEqual(sorted(plan(rows(quoting,**args),Lookup(retired=retired,answered=()))[1]),expected)
+        # A retired turn message, and a retired recent message, that a later turn copies; the answers already sent stay.
+        self.assertEqual(sorted(plan(rows(BOB_SPEAKER+'\n'+code+marker(TURN)),Lookup(retired=(TURN,),answered=()))[1]),[1,4,5])
+        withheld=plan(rows(recent((BOB,BOB_SPEAKER,code))+'\n\n'+ANN_SPEAKER+'\nok'+marker(TURN)),Lookup(retired=(BOB,),answered=()))[1]
+        self.assertEqual(sorted(withheld),[1,4,5])
+        # Stored: the note goes, the other stays.
+        with tempfile.TemporaryDirectory() as folder:
+            database=Path(folder)/'state.db';connection=sqlite3.connect(database);connection.executescript(SCHEMA)
+            for item in rows(quoting):connection.execute('INSERT INTO messages(id,session_id,role,content,tool_calls,timestamp) VALUES (?,?,?,?,?,?)',
+                                                         (item['id'],'g',item['role'],item['content'],item['tool_calls'],item['timestamp']))
+            connection.commit();connection.close()
+            memories=Path(folder)/'memories';memories.mkdir();(memories/'MEMORY.md').write_text(NOTE_DELIMITER.join(['Alice door code ZX99887766','Rain on Friday']))
+            withhold_retired(database,Lookup(retired=(REPLIED,),answered=()),memories)
+            self.assertEqual((memories/'MEMORY.md').read_text(),'Rain on Friday')
+            self.assertNotIn('ZX99887766',QuotedRetirementTests.text(QuotedRetirementTests(),database))
+
     def test_an_archive_page_reply_link_alone_does_not_cite_the_message_it_names(self):
         from .retired_history import plan
         page=json.dumps({'chat':'-100','items':[{'source':'nocheh:event:'+BOB,'type':'message','reply_to':'5','reply_source':'nocheh:event:'+REPLIED,'text':'yes'}]},separators=(',',':'))

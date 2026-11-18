@@ -1553,9 +1553,10 @@ class ProductScenarios(Scenarios):
         # A note written in a turn whose message replies to someone else's message says it was written after reading it
         # (ADR-0261 B3.5). Later in the session a reply block counts only when a note copies from it, so a note the owner
         # dictates two turns later reads as the turn's own. Bob's message is a turn of its own, and the topic is new, so no
-        # recent group message is read anywhere in this session.
+        # recent group message is read anywhere in this session. The dictated note shares no text with an earlier row: a
+        # number of six digits or more is a distinctive token the copy check counts (note_sources.TOKENS), so it has its own.
         number = str(self.f.ids())
-        mark, first, later = 'REPLYMARK'+number, 'REPLYNOTE'+number, 'DICTATED'+number
+        mark, first, later = 'REPLYMARK'+number, 'REPLYNOTE'+number, 'DICTATED'+str(self.f.ids())
         topic = self.REPLY_TOPIC
         said = self.f.message(GROUP, mark+' the boat leaves at nine', sender=MEMBER, topic=topic)
         member, _ = self.turn(said, GROUP, topic)

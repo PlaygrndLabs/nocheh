@@ -44,20 +44,21 @@ export interface Carried {pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;
  * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes and naming
  * their chats (`notes`), for Hermes's lookups before a turn or review as for recall and the Notes page, recall's ask
  * of the owner's forwards and files (`memory_read`), and building the source tags of search hits and opened originals
- * (`source_tags`, ADR-0261). /v1/status shows today's, and the owner's notice and System › Health show each as a line of
- * its own (`note_labels`, `forwards_read`, `source_tags`), apart from Hermes's lines. `done` counts the steps that worked
+ * (`source_tags`, ADR-0261), and keeping a turn's note refs (`note_refs`, ADR-0261). /v1/status shows today's, and the
+ * owner's notice and System › Health show each as a line of its own (`note_labels`, `forwards_read`, `source_tags`,
+ * `note_refs`), apart from Hermes's lines. `done` counts the steps that worked
  * after the day's first failure of that kind.
  */
 export const memoryProblemSchema=`
 CREATE TABLE IF NOT EXISTS memory_problem_days (
- day date NOT NULL,kind text NOT NULL CHECK(kind IN ('notes','memory_read','source_tags')),done integer NOT NULL DEFAULT 0,failed integer NOT NULL DEFAULT 0,
+ day date NOT NULL,kind text NOT NULL CHECK(kind IN ('notes','memory_read','source_tags','note_refs')),done integer NOT NULL DEFAULT 0,failed integer NOT NULL DEFAULT 0,
  PRIMARY KEY(day,kind)
 );
--- Source tags are counted too (ADR-0261).
+-- Source tags and note refs are counted too (ADR-0261).
 ALTER TABLE memory_problem_days DROP CONSTRAINT IF EXISTS memory_problem_days_kind_check;
-ALTER TABLE memory_problem_days ADD CONSTRAINT memory_problem_days_kind_check CHECK(kind IN ('notes','memory_read','source_tags'));
+ALTER TABLE memory_problem_days ADD CONSTRAINT memory_problem_days_kind_check CHECK(kind IN ('notes','memory_read','source_tags','note_refs'));
 `;
-export type MemoryProblemKind='notes'|'memory_read'|'source_tags';
+export type MemoryProblemKind='notes'|'memory_read'|'source_tags'|'note_refs';
 
 /**
  * What a turn's notes came from, kept for that turn alone (ADR-0261): each note's ref (the first 12 hex of its key) with
@@ -88,6 +89,8 @@ export async function countMemoryStep(control:Pick<pg.Pool,'query'>,kind:MemoryP
       ON CONFLICT(day,kind) DO UPDATE SET failed=memory_problem_days.failed+1`,[kind]);
   }catch{}
 }
+/** A guard binding that moved on is the caller's to retry, never a memory step that failed (source-tags.ts re-exports it). */
+export const bindingMoved=(error:unknown)=>error instanceof HttpError&&['guard_context_changed','guard_transition_pending'].includes(error.code);
 /** Today's counts, in the shape the provider monitor reads Hermes's own (usage.note_rows). */
 export async function memoryProblems(control:Pick<pg.Pool,'query'>):Promise<{day:string;kind:MemoryProblemKind;done:number;failed:number}[]> {
   return (await control.query(`SELECT to_char(day,'YYYY-MM-DD') AS day,kind,done,failed FROM memory_problem_days
@@ -399,8 +402,8 @@ export class NoteSourceRepository {
   /** Each note's source in the model's fixed words, in the order of `notes` (ADR-0257): no person is named, and only
    *  group and topic names Nocheh saved appear, which the request guard still checks since they are never let through
    *  beforehand. */
-  async labels(notes:readonly NoteInput[],owner=false):Promise<NoteSource[]> {
-    return (await this.labelled(notes,owner)).labels;
+  async labels(notes:readonly NoteInput[]):Promise<NoteSource[]> {
+    return (await this.labelled(notes,false)).labels;
   }
   /** labels(), with the messages each note's writer read (resolve's `sources`). `owner`: the owner reads them. */
   private async labelled(notes:readonly NoteInput[],owner:boolean):Promise<{labels:NoteSource[];sources:string[][];days:(string|null)[]}> {
@@ -437,7 +440,7 @@ export class NoteSourceRepository {
     // reads days in the owner's zone; any other, or none named, in UTC.
     const {labels,sources}=await this.labelled(notes as NoteInput[],typeof space==='string'&&chats().isOwner(space));
     // A turn's notes each get a ref that opens, in that turn alone, the messages its writer read (archive_read {note}).
-    // When they can't be kept, the labels still go out, without refs, and the failure is counted.
+    // When they can't be kept, the labels still go out, without refs, and the failure is counted as `note_refs`.
     const kept=typeof turn==='string'&&await this.keep(turn,notes as NoteInput[],sources);
     return {labels:Object.fromEntries((notes as NoteInput[]).map((note,index)=>[note.key,{...labels[index]!,...kept?{ref:noteRef(note.key)}:{}}]))};
   }
@@ -450,8 +453,9 @@ export class NoteSourceRepository {
       await this.stores.control.query(`DELETE FROM note_lookups WHERE created_at<now()-make_interval(days=>$1)`,[NOTE_LOOKUP_DAYS]);
       await this.stores.control.query(`INSERT INTO note_lookups(turn_event,notes) VALUES($1,$2::jsonb)
         ON CONFLICT(turn_event) DO UPDATE SET notes=note_lookups.notes||excluded.notes`,[turn,JSON.stringify(refs)]);
+      await countMemoryStep(this.stores.control,'note_refs',true);
       return true;
-    }catch{await this.counted(false);return false;}
+    }catch{await countMemoryStep(this.stores.control,'note_refs',false);return false;}
   }
   /**
    * The messages a note's ref opens in this turn (archive_read {note}): those the turn's lookup kept for it, while they
@@ -495,7 +499,8 @@ export class NoteSourceRepository {
    * The owner's recall (the brain's `recall` result) with each note hit's source in the model's words and each past
    * conversation hit's writer in fixed words; what Hermes recorded stays behind. Run before the hits' places are named,
    * since a note's source reads the chat of the profile it is in. Each note hit also gets its day, in the owner's zone,
-   * and with `tag` (the owner's SourceTagRepository.tags, which keeps only what the owner may read) up to
+   * and with `tag` (the owner's SourceTagRepository.checked, which checks canRead first and keeps only what the owner may
+   * read) up to
    * RECALL_NOTE_SOURCES of the messages its writer read, tagged (B3.6).
    */
   async withRecallSources(result:unknown,tag?:(ids:string[])=>Promise<ReadonlyMap<string,{source:string;tag:string;by:string}|null>>):Promise<unknown> {
@@ -512,7 +517,8 @@ export class NoteSourceRepository {
     let tagged:ReadonlyMap<string,{source:string;tag:string;by:string}|null>=new Map();
     const firstOf=(at:number)=>(found?.sources[at]??[]).slice(0,NOTE_SOURCES_SHOWN),read=[...new Set(asked.flatMap((_item,at)=>firstOf(at)))];
     if(tag&&read.length)try{tagged=await tag(read);}catch(error){
-      if(error instanceof HttpError&&['guard_context_changed','guard_transition_pending'].includes(error.code))throw error;}
+      if(bindingMoved(error))throw error;
+      await countMemoryStep(this.stores.control,'source_tags',false);}
     const sourcesOf=(at:number)=>firstOf(at).flatMap(id=>{const item=tagged.get(id);return item?[{source:item.source,tag:item.tag,by:item.by}]:[];})
       .slice(0,RECALL_NOTE_SOURCES);
     return {...value,hits:hits.map((hit,index)=>{

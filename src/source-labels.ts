@@ -80,7 +80,7 @@ export const modelSourceWords={
     job_read:', after reading {reads}',inherited:'; also from an earlier note it replaced',unknown:'source not recorded',unavailable:'source not available right now',
     no_date:'a day not recorded',utc_day:'{date} UTC'},
   reads:{message:'the message it answered (another person\'s)',forward:'a forwarded message',file:'a file',recent:'recent group messages',
-    reply:'the message it replied to (not the owner\'s own words)',
+    reply:'the message it replied to',
     archive:'messages from other chats',web:'web pages',notion:'Notion',tools:'tool servers',commands:'command results',past:'past conversations',other:'other tools'},
   places:{owner:'the owner\'s private chat',web:'the owner\'s web chat',group:'group “{name}”',unnamed_group:'a group',topic:' › topic “{name}”',
     unnamed_topic:' › a topic',unknown:'a chat Nocheh can\'t name'},
@@ -248,10 +248,11 @@ function reviewMain(origin:Extract<NoteOrigin,{by:'review'}>):LabelEvent|null {
   return all.find(event=>['person','forward','file'].includes(bucketOf(event.class)))??all.find(event=>!owned(event))??all[0]??null;
 }
 /** The day a note's label names (YYYY-MM-DD, as the reader reads days), or null: its writer's turn day, or the day of
- *  the message its review is named by. */
+ *  the message its review is named by. A turn that recorded only its UTC day has none here, since that is no day in the
+ *  reader's zone; its label still names it, marked UTC. */
 export function noteDay(origins:readonly NoteOrigin[]):string|null {
   const first=origins[0];
-  const day=first?.by==='turn'?first.date:first?.by==='review'?reviewMain(first)?.day:null;
+  const day=first?.by==='turn'?first.utc?null:first.date:first?.by==='review'?reviewMain(first)?.day:null;
   return typeof day==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(day)?day:null;
 }
 /** A label's words, and the ending that stays whole when the label is cut: how many more sources a review had, and

@@ -366,6 +366,24 @@ class TurnTests(unittest.TestCase):
                 path,last=self.turn(folder,[{'role':'user','content':content}],content=text)
                 self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
 
+    def test_a_short_replied_to_text_copied_whole_in_a_later_turn_counts(self):
+        # Most replies are shorter than a run and hold no distinctive token: one a note holds whole still counts, in the
+        # owner's chat where its block comes first; a paraphrase, a part of it, or a text too short to tell does not.
+        marker='\n\n[Archive source: nocheh:event:'+'f'*64+']'
+        said='My flight lands Tuesday at 7'
+        self.assertLess(len(said),sources.RUN)
+        row=lambda text:self.REPLIED.replace('“Bob” · this chat','“Alice” · a private chat with “Alice”')+'\n'+text+'\n[End of replied-to message]\nok'+marker
+        cases=[(row(said),'Alice: My flight lands Tuesday at 7',['reply'],'copied whole'),
+               (row(said),'alice: my flight lands tuesday at 7.',['reply'],'copied whole in another case'),
+               (row(said),'Alice arrives on Tuesday evening.',[],'paraphrased'),
+               (row(said),'Flight lands Tuesday',[],'only part of it'),
+               (row('Tuesday 7'),'Alice lands Tuesday 7',[],'too short to tell'),
+               (row(said).replace('by=person','by=owner'),'Alice: My flight lands Tuesday at 7',[],'the owner\'s own message')]
+        for content,text,expected,why in cases:
+            with self.subTest(why),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[{'role':'user','content':content}],content=text)
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
+
     def test_a_turn_origin_names_its_message_channel_day_and_reads(self):
         origin=sources.turn_origin({'event_id':EVENT,'channel':'browser'},['web','owner','past'],True,now=DAY)
         self.assertEqual(origin,{'by':'turn','event':EVENT,'channel':'browser','at':'2026-11-08','at_time':DAY,'reads':['web','past'],'complete':True})

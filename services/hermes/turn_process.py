@@ -130,7 +130,10 @@ def recent_group(value):
 
 # Whose words a source is, as a source tag's by= says (src/source-tags.ts TagBy).
 BY=('owner','person','forward','file','mixed','nocheh','shared','unknown')
-REPLY_END='[End of replied-to message]'
+# The reply lines' shapes are the ones stored history is read with (retired_history.py), so a block this frame writes is
+# always one retiring its message finds.
+from .retired_history import PART, REPLY, REPLY_END  # noqa: E402
+REPLY_BY=re.compile(r'\[(?:Replying to|In reply to), by=([a-z]+): [^\]]')
 
 
 def _one_line(value,size):
@@ -139,17 +142,17 @@ def _one_line(value,size):
             and not any(ord(c)<32 or ord(c)==127 or c in '\x85\u2028\u2029' or 0xd800<=ord(c)<=0xdfff for c in value))
 
 
-def _reply_line(value,words):
+def _reply_line(value,shape):
     """A reply line Nocheh wrote from the archive's reply relation and a source tag (ADR-0261): `[<words>, by=<by>: <tag>]
-    (source nocheh:event:<id>)`, at most 300 characters on one line, or None."""
+    (source nocheh:event:<id>)`, at most 300 characters on one line, as (by, id), or None."""
     if not _one_line(value,300):return None
-    found=re.fullmatch(r'\['+re.escape(words)+r', by=([a-z]+): .+\] \(source nocheh:event:([a-f0-9]{64})\)',value)
-    return found if found and found.group(1) in BY else None
+    found,by=shape.fullmatch(value),REPLY_BY.match(value)
+    return (by.group(1),found.group(1)) if found and by and by.group(1) in BY else None
 
 
 def reply_part(value):
     """A recent group message's reply part: who · where · when of the message it replies to, never its text, or ''."""
-    return value if _reply_line(value,'In reply to') else ''
+    return value if _reply_line(value,PART) else ''
 
 
 def reply_block(value):
@@ -157,8 +160,8 @@ def reply_block(value):
     line, at most 200 characters of its text on one line, shown unframed since they may be someone else's words, and
     the line that ends it. by= and the id must be the line's own."""
     if not isinstance(value,dict) or set(value)!={'line','text','by','id'}:return ''
-    found=_reply_line(value['line'],'Replying to')
-    if (not found or found.group(1)!=value['by'] or found.group(2)!=value['id'] or not _one_line(value['text'],200)
+    found=_reply_line(value['line'],REPLY)
+    if (found!=(value['by'],value['id']) or not _one_line(value['text'],200)
             or not value['text'].strip()):return ''
     return value['line']+'\n'+unframed(value['text'])+'\n'+REPLY_END
 

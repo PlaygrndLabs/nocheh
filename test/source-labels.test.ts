@@ -144,8 +144,12 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
   assert.equal(label([turn({place:{chat:GP1},reads:['recent','web']})]),'Nocheh\'s note from group “Family” on 2026-11-16, after reading recent group messages, web pages');
   assert.equal(label([turn({answered:'person_message'})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading the message it answered (another person\'s)');
   // A note written after reading the message the turn's message replied to (ADR-0261) is never the owner's own.
-  assert.equal(label([turn({place:{chat:GP1},reads:['reply']})]),'Nocheh\'s note from group “Family” on 2026-11-16, after reading the message it replied to (not the owner\'s own words)');
-  assert.equal(label([turn({reads:['reply']})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading the message it replied to (not the owner\'s…','cut after a whole word');
+  assert.equal(label([turn({place:{chat:GP1},reads:['reply']})]),'Nocheh\'s note from group “Family” on 2026-11-16, after reading the message it replied to');
+  assert.equal(label([turn({reads:['reply']})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading the message it replied to','whole, never cut');
+  // A member's reply in a group reads the message it answered too: the group's name goes first and the end is cut
+  // (listed in ADR-0261); the first read still says the note is not the turn's own.
+  assert.equal(label([turn({place:{chat:GP1},answered:'person_message',reads:['reply']})]),
+    'Nocheh\'s note from a group on 2026-11-16, after reading the message it answered (another person\'s), the message it…');
   assert.equal(fromToken([turn({reads:['reply']})]),'turn_read');
   assert.equal(label([turn({answered:'file_by_owner'})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading a file');
   assert.equal(label([turn({job:true})]),'Nocheh\'s note from a job or scheduled run in the owner\'s private chat on 2026-11-16');
@@ -178,7 +182,7 @@ test('a note\'s label names its day: a review its main message\'s, a turn its ow
   const label=(origins:NoteOrigin[])=>modelLabel(origins,recalled,directory);
   assert.equal(label([turn({utc:true})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16 UTC, written while answering the owner\'s own message');
   assert.equal(label([turn({place:{chat:GP1},utc:true})]),'Nocheh\'s note from group “Family” on 2026-11-16 UTC');
-  assert.equal(noteDay([turn({utc:true})]),'2026-11-16');assert.equal(noteDay([turn({date:'yesterday'})]),null);
+  assert.equal(noteDay([turn({utc:true})]),null,'a UTC day is no day in the reader\'s zone');assert.equal(noteDay([turn()]),'2026-11-16');assert.equal(noteDay([turn({date:'yesterday'})]),null);
   // A review is named by another person's message before the owner's, and its day is that message's.
   const mixed=review([[1,'owner_message'],[5,'person_message']],[1],{},GP1);
   assert.equal(label([mixed]),'Nocheh\'s notes review on 2026-11-05 of another person\'s message in group “Family”, and 1 more sources');

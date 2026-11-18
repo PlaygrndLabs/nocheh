@@ -358,13 +358,26 @@ turn's own message and answer stay.
   text, so a member's `[Replying to …` reads `(`.
 - **Notes after a reply.** A turn whose message replies to anyone's message but
   the owner's own typing reads `reply`: its notes are `turn_read`, "after
-  reading the message it replied to (not the owner's own words)" for the model
-  and "the message it replied to" in the owner's words (`read_reply`, editable
-  in Settings › Assistant). Nocheh's own message counts too, since it may carry
-  what others said (it fails closed). Later in the session a reply block counts
-  only for a note that copies a run of 32 characters or a distinctive token from
-  its text, as other people's recent messages do; a reply part, which holds no
-  text, never counts.
+  reading the message it replied to" for the model (`turn_read` already says
+  the words are not the owner's, and a label in the owner's chat stays whole)
+  and in the owner's words (`read_reply`, editable in Settings › Assistant).
+  Nocheh's own message counts too, since it may carry what others said (it
+  fails closed). Later in the session a reply block counts only for a note
+  that copies a run of 32 characters or a distinctive token from its text, as
+  other people's recent messages do, or, for a text shorter than a run but of
+  at least 12 characters, holds it whole; a reply part, which holds no text,
+  never counts.
+- **Retiring a message a later turn copied.** A note a later turn of the same
+  session wrote by copying a retired message's text (the same copy check:
+  the turn's own message, its replied-to block, a recent message or a tool
+  result that held it) is withheld with that turn's tool work, as the turn
+  that quoted it is (`plan()`, rules version `quoted2`, so profiles already
+  checked are planned again once).
+- **A note's ref opens only what passes canRead first.** `archive_read
+  {note}` and the owner's recall check access before tagging
+  (`SourceTagRepository.checked`); a check that fails opens no source and is
+  counted as `source_tags`. Refs that could not be kept are counted as
+  `note_refs`, a notice line of their own.
 - **When a note was written.** A review's label names the day of the message it
   is named by (another person's, a forward or a file first), in the reader's
   zone, read for all of a lookup's reviews in one query; the day comes before
@@ -512,8 +525,17 @@ turn's own message and answer stay.
   - A note written while replying to anyone's message but the owner's own
     reads `turn_read`, Nocheh's own messages included; in a later turn of the
     session, so does any note that copies from a reply block's text.
-  - The model's label of such a note in the owner's chat is cut at 120
-    characters ("…, after reading the message it replied to (not the owner's…").
+  - The model's label of a note a member wrote while replying in a group
+    reads two reads ("the message it answered (another person's), the message
+    it replied to") and passes 120 characters, so the group's name goes ("from
+    a group") and the end of the label is cut ("…, the message it…"); its
+    `from` is still `turn_read`.
+  - A note written before this step has no `day` in recall (its UTC day is no
+    day in the owner's zone); its label still names it, marked UTC.
+  - A note a later turn copied from a message, then retired, goes with that
+    turn's searches and other tool results, not only the note; a note that
+    only shares a distinctive token with it (a number of six digits or more)
+    goes too.
   - Review labels read in a new order, the day before the place, so a long one
     loses place or phrase words sooner; a note written before this step reads
     its day as `<day> UTC`.

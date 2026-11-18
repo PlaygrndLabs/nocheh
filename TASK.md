@@ -150,7 +150,18 @@ again; Hermes's own code is unchanged.
   occur on main), Telegram (152) and the repository's Python tests (164, 2 skipped).
   Changed from the design: a review label's day comes before its place, so a cut label keeps it;
   a private answer quotes what its question replies to; `archive_read` no longer requires `id`
-  when `note` is given.
+  when `note` is given; the model's reply read says "the message it replied to", without "(not
+  the owner's own words)", so an owner-chat label stays whole.
+  Review fixes: a replied-to text shorter than a run that a later note holds whole reads `reply`;
+  a later turn's note copied from a retired message (its turn message, replied-to block, recent
+  message or tool result) is withheld with that turn's tool work (`plan()` rules `quoted2`); a
+  note ref and owner note hits check canRead before tagging (`SourceTagRepository.checked`), so
+  a failed check opens nothing, and a failed tagger is counted; refs not kept count as
+  `note_refs`, a line of their own; recall `day` is null for a note with only a UTC day; the
+  reply frame's line shapes come from `retired_history.py`; the tester's dictated note no longer
+  shares a number with Bob's message ([Hermes](services/hermes/test_note_sources.py),
+  [retire](services/hermes/test_retired_history.py), [refs](test/store-note-refs.test.ts),
+  [monitor](services/hermes/test_monitoring.py), [health](test/dashboard-system-health.test.mjs)).
   Pending:
   - The full tester on images: the step 3 scenarios have only run against the fake.
   - A live look at a reply block and a note's ref in a group and in the owner's chat.

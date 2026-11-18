@@ -27,7 +27,7 @@ INTERNAL_KEYS = (
 
 
 # The stores' memory steps (src/stores/note-sources.ts MemoryProblemKind) and the notice line each has of its own.
-STORE_NOTE_KINDS = {'notes': 'note_labels', 'memory_read': 'forwards_read', 'source_tags': 'source_tags'}
+STORE_NOTE_KINDS = {'notes': 'note_labels', 'memory_read': 'forwards_read', 'source_tags': 'source_tags', 'note_refs': 'note_refs'}
 
 
 def internal_keys(config):
@@ -121,8 +121,8 @@ def note_problems(state, now=None, archive=None):
     """Today's notes whose source Hermes could not record or look up, and turns that could not read long-term memory
     in full (ADR-0257), with the steps that worked today. The stores count the same steps where Hermes can't see
     them, labelling notes, recall's ask of the owner's forwards and files, and the source tags of search hits and opened
-    originals (ADR-0261), in /v1/status's memory_problems. Each side keeps lines of its own (`note_labels`,
-    `forwards_read` and `source_tags` for the stores'), so a step that works on one side never marks the other side's
+    originals and keeping a turn's note refs (ADR-0261), in /v1/status's memory_problems. Each side keeps lines of its
+    own (`note_labels`, `forwards_read`, `source_tags` and `note_refs` for the stores'), so a step that works on one side never marks the other side's
     failure working again."""
     from tools.operations.provider import usage
     day=(now or datetime.now(timezone.utc)).strftime('%Y-%m-%d')

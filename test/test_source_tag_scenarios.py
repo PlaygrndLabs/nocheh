@@ -28,7 +28,7 @@ TIME, AT = '2026-11-17 10:00', '2026-11-17T10:00:00.000Z'
 # How the owner's recall names a stored row's role (recallRoleWords in src/stores/note-sources.ts), and what a note's label
 # says its turn read (modelSourceWords.reads in src/source-labels.ts).
 ROLE_WORDS = {'user': 'a message', 'assistant': 'Nocheh\'s reply', 'tool': 'a tool result'}
-READ_WORDS = {'recent': 'recent group messages', 'reply': 'the message it replied to (not the owner\'s own words)'}
+READ_WORDS = {'recent': 'recent group messages', 'reply': 'the message it replied to'}
 
 
 def provider():

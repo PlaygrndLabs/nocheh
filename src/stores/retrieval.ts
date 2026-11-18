@@ -340,8 +340,9 @@ export class SourceRepository {
     const ids=await this.tags.notes.noteSources(principal.turnEvent,ref);
     if(ids===null)throw new HttpError(404,'note_not_found');
     const captured=await this.access.archive.capturedMany(ids),references=ids.flatMap(id=>captured.has(id)?[captured.get(id)!.reference]:[]);
-    // A message the reader may not read is left out, with no count, as an unreadable reference is anywhere.
-    const tags=await this.tags.tags(principal,binding,references),readable=references.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[tag]:[];});
+    // A message the reader may not read is left out, with no count, as an unreadable reference is anywhere; canRead
+    // comes first (checked), so a check that fails opens none of them.
+    const tags=await this.tags.checked(principal,binding,references),readable=references.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[tag]:[];});
     const shown=readable.slice(0,NOTE_SOURCES_SHOWN);
     const result={note:ref,sources:shown.map(tag=>({source:tag.source,tag:tag.tag,by:tag.by})),...readable.length>shown.length?{more:readable.length-shown.length}:{}};
     await this.audience.assert(principal);await this.allowPrepared(principal,result);return result;

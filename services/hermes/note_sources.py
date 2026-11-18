@@ -37,6 +37,8 @@ LOOKUP_BATCH=50
 LOCK_SECONDS=30
 # A run of this many characters shared with an earlier note is that note's text carried forward.
 RUN=32
+# The shortest replied-to text a note copies whole that counts as copied, when it is shorter than RUN (_reply_copied).
+SHORT_COPY=12
 IDENTIFIER=re.compile(r'(?<![a-f0-9])[a-f0-9]{64}(?![a-f0-9])')
 FULL=re.compile(r'[a-f0-9]{64}')
 DAY=re.compile(r'\d{4}-\d{2}-\d{2}')
@@ -380,22 +382,30 @@ def _replied(content):
 
 def _written(ops):
     """What a run's memory operations wrote, as the copy check reads it: the runs of RUN characters and the distinctive
-    tokens of each text."""
-    runs,tokens=set(),set()
+    tokens of each text, and each text whole (_reply_copied)."""
+    runs,tokens,plains=set(),set(),[]
     for op in ops:
         if isinstance(op.get('content'),str):
-            plain=_plain(op['content']);runs|=_runs(plain);tokens|=_tokens(plain)
-    return runs,tokens
+            plain=_plain(op['content']);runs|=_runs(plain);tokens|=_tokens(plain);plains.append(plain)
+    return runs,tokens,plains
 
 
 def _copied(text,written):
     """Whether a stored message shares a run of RUN characters or a distinctive token with what a run wrote, as
     inheritance tells a note's text carried forward. A long message is read once: its runs are looked up in the
     written ones, and the written tokens are looked for in it, never the other way round."""
-    runs,tokens=written
+    runs,tokens=written[0],written[1]
     if not isinstance(text,str) or not runs and not tokens:return False
     plain=_plain(text)
     return any(token in plain for token in tokens) or any(plain[start:start+RUN] in runs for start in range(len(plain)-RUN+1))
+
+
+def _reply_copied(text,written):
+    """_copied for a replied-to block's text, which is at most 200 characters and often shorter than a run: a text of
+    at least SHORT_COPY characters that a note holds whole counts as copied too."""
+    if _copied(text,written):return True
+    plain=_plain(text) if isinstance(text,str) else ''
+    return SHORT_COPY<=len(plain)<RUN and any(plain in written_plain for written_plain in written[2])
 
 
 def turn_reads(database,session,last,body):
@@ -410,7 +420,8 @@ def turn_reads(database,session,last,body):
 
     The message the turn's own message replies to is a read too, unless the owner typed it: Nocheh's own message
     counts, since it may carry what others said. Earlier in the session such a block counts only when what the turn
-    wrote copies from its text (_replied), as other people's recent messages do."""
+    wrote copies from its text (_replied), as other people's recent messages do, or, for a text shorter than a run,
+    holds it whole (_reply_copied)."""
     from .retired_history import _columns,_read_only,_summary,memory_ops
     from .turn_process import forwarded,recent_group,reply_block
     reads=[]
@@ -442,7 +453,7 @@ def turn_reads(database,session,last,body):
             for marker,token in MARKERS:
                 if marker in content and (token!='forward' or _forwards(content)):add(token)
             if 'recent' not in reads and _others(content) and _copied(content,written):add('recent')
-            if 'reply' not in reads and any(_copied(text,written) for text in _replied(content)):add('reply')
+            if 'reply' not in reads and any(_reply_copied(text,written) for text in _replied(content)):add('reply')
         elif row['role']=='tool':
             token=tool_read(row)
             if token and token not in reads and _copied(content,written):add(token)
