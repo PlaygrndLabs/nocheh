@@ -178,14 +178,15 @@ def notice_buttons(buttons):
     return InlineKeyboardMarkup(keyboard)
 
 
-def answer_button(button, chat_id, event_id, owner):
+def answer_button(button, chat_id, event_id, served):
     """The one button a turn's reply may carry: Answer privately under the owner's answer in a group (ADR-0249).
 
-    Never in the owner's private chat. Its label is short, and its data is ``np`` and the record id Nocheh derives from
-    this very turn's question with the service token, so no other answer's button can ride on this reply."""
+    Only in a served group, as the served list has it now: never in any private chat, the owner's or a member's (step 4).
+    Its label is short, and its data is ``np`` and the record id Nocheh derives from this very turn's question with the
+    service token, so no other answer's button can ride on this reply."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if button is None: return None
-    if not isinstance(button, dict) or set(button) != {'text', 'data'} or str(chat_id) == str(owner): raise ValueError('invalid_reply')
+    if not isinstance(button, dict) or set(button) != {'text', 'data'} or served.group(served.resolve(str(chat_id))) is None: raise ValueError('invalid_reply')
     label, data = button['text'], button['data']
     if not isinstance(label, str) or not 0 < len(label) <= 40 or not label.strip() or not isinstance(data, str): raise ValueError('invalid_reply')
     record = hmac.new(secret('SERVICE_TOKEN').encode(), ('private-answer:' + str(event_id)).encode(), hashlib.sha256).hexdigest()[:32]
@@ -203,7 +204,11 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
     Hermes runs the owner's turns only there. Whether the space still
     allows delivery is asked separately, per request (check_delivery_policy). A private answer's pass names its record
     and reads as the owner's private chat, never as the owner, so its scope and space are that chat; anywhere else it is
-    refused (ADR-0249)."""
+    refused (ADR-0249). A member's pass (step 4) names that member and reads as their own private chat, which the
+    served list marks member_private: its scope and space are that chat, never a topic, never the owner's. The owner's ask
+    about a member (member_read, step 4b) reads as the owner's private chat, as an answer does. A pass names at most one
+    of these. A lane (a member id, so the brain runs one turn at a time per member) grants nothing; it is taken only on a
+    member's own pass, for that member, and on a group pass."""
     try:
         prefix,body,signature=credential.split('.')
         expected=base64.urlsafe_b64encode(hmac.new(secret('SERVICE_TOKEN').encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
@@ -213,13 +218,24 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
                 not time.time()*1000<claims['expires']<=time.time()*1000+3600000):raise ValueError()
         if claims.get('app')!={'app':'telegram','chat':str(chat_id),'topic':None if topic is None else str(topic)}:raise ValueError()
         scope,space,answer=claims.get('scope'),claims.get('space'),claims.get('answer')
+        member,member_read,lane=claims.get('member'),claims.get('member_read'),claims.get('lane')
         if not isinstance(space,str) or type(claims.get('revision')) is not int or claims['revision']<1:raise ValueError()
+        # Storage binds what a member may read on the server; a pass never carries it, under any spelling.
+        if any(key in claims for key in ('reads','member_chat','memberChat','memberRead')):raise ValueError()
+        if sum(value is not None for value in (answer,member,member_read))>1:raise ValueError()
+        if lane is not None and (not isinstance(lane,str) or not re.fullmatch(r'[a-f0-9]{64}',lane) or scope is None or
+                                 answer is not None or member_read is not None or member is not None and lane!=member):raise ValueError()
         epoch=claims.get('guard_epoch')
         # A topic first used a moment ago, or a group's new Telegram id, is only in a list read after the app recorded it.
         served=policy.current(epoch if type(epoch) is int else None,60.0,lambda served:served.binding(space)==claims['app'])
         if served.binding(space)!=claims['app']:raise ValueError()
         if answer is not None:
             if not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer) or not served.owner_chat or scope!=served.owner_chat or space!=scope:raise ValueError()
+        elif member_read is not None:
+            if not isinstance(member_read,str) or not re.fullmatch(r'[a-f0-9]{32}',member_read) or not served.owner_chat or scope!=served.owner_chat or space!=scope:raise ValueError()
+        elif member is not None:
+            if (not isinstance(member,str) or not re.fullmatch(r'[a-f0-9]{64}',member) or not isinstance(scope,str) or space!=scope or
+                    not served.member_private(scope) or served.is_owner(scope)):raise ValueError()
         elif scope is None:
             if not served.owner_chat or space!=served.owner_chat:raise ValueError()
         elif served.group(scope)!=scope or space!=scope and served.parent(space)!=scope:raise ValueError()

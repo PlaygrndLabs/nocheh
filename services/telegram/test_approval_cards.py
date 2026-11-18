@@ -278,6 +278,53 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError):await gateway.send_refusal(bad)
             self.assertEqual(len(sent),2)
 
+    async def test_a_members_daily_limit_reply_privately_is_its_own_once_a_day(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];gateway=self.gateway(Path(folder),sent)
+            ask={'event_id':'e'*64,'chat_id':'9','user_id':'9','message_id':'5','private':True,'reply':'Sorry, this is private.'}
+            cap={**ask,'event_id':'a'*64,'once':'daily_limit','reply':'That is all for today.'}
+            self.assertEqual(await gateway.send_refusal(cap),{'state':'done'})
+            self.assertEqual(await gateway.send_refusal({**cap,'event_id':'b'*64,'message_id':'6'}),{'state':'done'})
+            self.assertEqual(sent,[(9,None,'That is all for today.',None,5,[])],'one daily-limit reply a day, however often they write')
+            # The not-allowed reply keeps its own day (a member paused after hitting the cap still hears it once).
+            self.assertEqual(await gateway.send_refusal(ask),{'state':'done'})
+            self.assertEqual([row[2] for row in sent],['That is all for today.','Sorry, this is private.'])
+            day=datetime.now(timezone.utc).strftime('%Y%m%d')
+            self.assertEqual(sorted(path.name for path in gateway.receipts.glob('refusal-*.result')),
+                             ['refusal-private-9-'+day+'.result','refusal-private-daily_limit-9-'+day+'.result'])
+            self.assertEqual(await gateway.send_refusal({**cap,'chat_id':'123','user_id':'123'}),{'state':'skipped'},'the owner is never refused')
+            for bad in [{**cap,'once':'not_allowed'},{**cap,'chat_id':'10'},{**cap,'topic':'17'},{**cap,'once':'other'}]:
+                with self.assertRaises(ValueError):await gateway.send_refusal(bad)
+            self.assertEqual(len(sent),2)
+
+    async def test_a_members_status_in_a_served_group_is_asked_of_telegram_and_nothing_else(self):
+        with tempfile.TemporaryDirectory() as folder:
+            gateway=self.gateway(Path(folder),[]);asked=[];answers={}
+            async def get_chat_member(chat,user):
+                asked.append((chat,user));answer=answers[user]
+                if isinstance(answer,Exception):raise answer
+                return answer
+            gateway.bot.get_chat_member=get_chat_member
+            member=lambda status,**extra:SimpleNamespace(status=status,**extra)
+            answers.update({1:member('member'),2:member('administrator'),3:member('creator'),4:member('restricted',is_member=True),
+                            5:member('restricted',is_member=False),6:member('left'),7:member('kicked'),8:RuntimeError('timed out'),
+                            9:member('restricted'),10:member('banned')})
+            expected={1:'in',2:'in',3:'in',4:'in',5:'left',6:'left',7:'left'}
+            for user in range(1,11):
+                with self.subTest(user=user):
+                    answer=await gateway.read_member({'chat_id':'-20','user_id':str(user)})
+                    self.assertEqual(answer,{'state':'done','status':expected[user]} if user in expected else
+                                     {'state':'failed','error_code':'telegram_member_unknown'},'anything unclear is no answer')
+            self.assertEqual(asked,[(-20,user) for user in range(1,11)])
+            # Only a served group, where it is in Telegram now; never a private chat, an unknown group or a malformed ask.
+            for bad in [{'chat_id':'-30','user_id':'1'},{'chat_id':'123','user_id':'1'},{'chat_id':'9','user_id':'9'},{'chat_id':'-20','user_id':'-1'},
+                        {'chat_id':'-20','user_id':'x'},{'chat_id':'-20'},{'chat_id':'-20','user_id':'1','topic':'17'}]:
+                with self.subTest(bad=bad),self.assertRaises(ValueError):await gateway.read_member(bad)
+            self.assertEqual(len(asked),10)
+            gateway.status='stopped'
+            self.assertEqual(await gateway.read_member({'chat_id':'-20','user_id':'1'}),{'state':'not_started','error_code':'telegram_not_connected'})
+
     async def test_a_problem_notice_carries_its_buttons_and_falls_back_to_none(self):
         from telegram.error import BadRequest
         with tempfile.TemporaryDirectory() as folder:
@@ -336,7 +383,10 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             press='ngx'+'e'*32
             await gateway.send_notice({'id':'f'*64,'chat_id':'123','text':'Nocheh is on in “Bakery”.','buttons':[{'text':'No project','callback':press}],'send_class':'notice'})
             await gateway.send_notice({'id':'f'*64,'chat_id':'123','text':'“Bakery” is in no project now.','edit':True})
-            self.assertEqual(classes,['card','card_update','refusal','reminder','notice','card_update','notice','card_update'])
+            # An answer about a member goes to the owner's private chat under its own class, never learned (step 4b).
+            await gateway.send_notice({'id':'9'*64,'chat_id':'123','text':'What Mira said','send_class':'member_read'})
+            with self.assertRaises(ValueError):await gateway.send_notice({'id':'8'*64,'chat_id':'-20','text':'What Mira said','send_class':'member_read'})
+            self.assertEqual(classes,['card','card_update','refusal','reminder','notice','card_update','notice','card_update','member_read'])
             self.assertIsNone(SEND_CLASS.get(),'each route resets its class')
 
     async def test_a_group_card_carries_rows_of_its_presses_and_no_other(self):
