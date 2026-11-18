@@ -396,7 +396,7 @@ turn's own message and answer stay.
   turn, never for a private answer: up to 5, each tagged and read-checked, an
   unreadable one left out with no count. A ref that is not the note's own key
   prefix is dropped by Hermes, and refs that could not be kept leave the labels
-  without refs and are counted as the `notes` memory problem.
+  without refs and are counted as the `note_refs` memory problem.
 - **Recall.** An owner correction in `memory_recall` gains
   `tag: the owner's correction · <place> · <day>` and `evidence` (its first 3
   sources, tagged); the owner's native note hits gain `day` and `sources` (the
