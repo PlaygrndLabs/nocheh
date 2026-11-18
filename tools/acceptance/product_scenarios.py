@@ -22,6 +22,7 @@ import time
 import urllib.parse
 import zipfile
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from tools.acceptance import canaries, telegram_mock
 from tools.acceptance.github_mock import key_line
@@ -172,7 +173,8 @@ class ProductScenarios(Scenarios):
         return chat
 
     def topic_created(self, chat, topic, name):
-        """Telegram's service message for a new forum topic; it carries the topic's name."""
+        """Telegram's service message for a new forum topic; it carries the topic's name. Returns the message, which every
+        later message in the topic replies to as Telegram sends it."""
         number = self.f.ids()
         message = {'message_id': topic, 'date': int(time.time()), 'chat': {'id': chat, 'type': 'supergroup', 'title': 'Synthetic Forum '+str(chat), 'is_forum': True},
                    'from': {'id': OWNER, 'is_bot': False, 'first_name': 'Synthetic '+str(OWNER)}, 'message_thread_id': topic, 'is_topic_message': True,
@@ -180,6 +182,7 @@ class ProductScenarios(Scenarios):
         update = {'update_id': number, 'message': message}
         self.f.inject(update)
         self.captured(update)
+        return message
 
     # Setup ----------------------------------------------------------------------
 
@@ -651,6 +654,28 @@ class ProductScenarios(Scenarios):
         found = recalled()
         self.gate('recall_hit_names_its_chat', 'GROUPMARK52: the group keeps' in found and 'Synthetic Forum '+str(OTHER_GROUP) in found,
                   result=found[:400])
+        self.review_note_opens_its_batch()
+
+    def review_note_opens_its_batch(self):
+        # A note a notes review saved names the day of the message it was written from, in the reader's time zone, and its
+        # ref opens, in the turn whose evidence showed it, the messages that review read, each tagged (ADR-0261 B3.3). The
+        # member's message is the first in a new topic, so the review's batch starts with it.
+        number = str(self.f.ids())
+        mark = 'REVIEWMARK'+number
+        said = self.f.message(GROUP, 'by the way [[review-note:'+mark+' the team meets on Thursdays]]', sender=MEMBER, mention=False, topic=self.REVIEW_TOPIC)
+        event_id, _ = self.turn(said, GROUP, self.REVIEW_TOPIC, expect_reply=False)
+        self.reviewed(event_id, mark)
+        zone = self.f.app('/v1/tasks/settings').get('time_zone') or 'UTC'
+        day = datetime.fromtimestamp(said['message']['date'], timezone.utc if zone == 'UTC' else ZoneInfo(zone)).strftime('%Y-%m-%d')
+        self.turn(self.f.message(OWNER, 'Where did that come from? [[note_open:'+mark+']]'), OWNER)
+        found = [event for event in self.f.brain() if event.get('directive') == 'note_open' and event.get('argument') == mark and event['phase'] == 'final']
+        opened = found[-1] if found else {}
+        self.gate('review_label_names_its_day', opened.get('present') is True and day in str(opened.get('label')), note_label=opened.get('label'), day=day)
+        self.gate('note_has_its_ref', bool(re.fullmatch(r'[a-f0-9]{12}', str(opened.get('ref')))), ref=opened.get('ref'))
+        result = self.tool_result(opened.get('result'))
+        sources = [item for item in result.get('sources') or [] if isinstance(item, dict)]
+        self.gate('ref_opens_its_batch', 'nocheh:event:'+event_id in [item.get('source') for item in sources]
+                  and all(item.get('tag') and item.get('by') in self.TAG_BYS for item in sources), result=str(result)[:600])
 
     @staticmethod
     def recalled_notes(result, mark):
@@ -1158,12 +1183,16 @@ class ProductScenarios(Scenarios):
         # recall's opens, and the group's stored history no longer holds any of it: its recent item is withheld, the turn's
         # tool calls and results with it, the rows of the recall and the opened fact, which cite the records the fact came
         # in, and the note written in that turn is removed, while the message the turn answered keeps its own text. GUEST
-        # writes it, whose few facts a recall lists first (it lists 12, cited ones first).
+        # writes it, whose few facts a recall lists first (it lists 12, cited ones first). The owner also replies to it, so a
+        # later turn quotes it in its reply block (step 3), and saves a note holding none of its text: retiring it withholds
+        # that block and the turn's tool work, and removes that note too.
         number = str(self.f.ids())
         mark, word, note, learn, topic = 'RETIREMARK'+number, 'PINWORD'+number, 'RETIRENOTE'+number, 'LEARNMARK'+number, 45
+        reply_note = 'REPLYNOTE'+number
         place = 'Synthetic Forum '+str(GROUP)
         self.topic_chat(GROUP, topic)
-        bob = self.posted(GROUP, mark+' '+word+' my code is 4321 '+learn, GUEST, topic)
+        said = self.f.message(GROUP, mark+' '+word+' my code is 4321 '+learn, sender=GUEST, mention=False, topic=topic)
+        bob, _ = self.turn(said, GROUP, topic, expect_reply=False)
         save = json.dumps({'target': 'memory', 'operations': [{'action': 'add', 'content': note+': Bob gave a code'}]})
         self.silent_turn(self.f.message(GROUP, 'ابزار [[tool:mcp__nocheh__archive_search '+json.dumps({'query': word, 'limit': 10})
                                         + ']] [[tool:memory '+save+']] [[after:silent]]', topic=topic), GROUP, topic)
@@ -1172,7 +1201,12 @@ class ProductScenarios(Scenarios):
                   hit=found.get(bob))
         saved = self.newest_tool_result('memory')
         self.gate('turn_saved_a_note', saved.get('success') is True, result=str(saved)[:300])
+        self.silent_turn(self.f.message(GROUP, 'about this [[replied:'+number+']] '+self.note_directive(reply_note+': a code was mentioned')+' [[after:silent]]',
+                                        topic=topic, reply_to=said['message']), GROUP, topic)
+        block = self.frame(number).get('block') or {}
+        self.gate('reply_block_quoted_it', block.get('id') == bob and mark in str(block.get('text')), block=block)
         self.gate('note_kept_before', bool(self.recalled_notes(json.dumps(self.recalled(OWNER, note)), note)))
+        self.gate('reply_note_kept_before', bool(self.recalled_notes(json.dumps(self.recalled(OWNER, reply_note)), reply_note)))
         self.gate('history_holds_it_before', bool(self.session_hits(self.recalled(OWNER, mark), mark, place)))
         # The fact learned from it, read in a turn's block and opened, and listed by a recall (ADR-0261 step 2).
         self.honcho_learned(learn)
@@ -1201,6 +1235,7 @@ class ProductScenarios(Scenarios):
         _, text = self.turn(self.f.message(GROUP, 'چه گفتند؟ [[context:'+mark+']]', topic=topic), GROUP, topic)
         self.gate('next_turn_no_longer_reads_it', text.endswith(' absent'), answer=text)
         self.gate('note_removed', not self.recalled_notes(json.dumps(self.recalled(OWNER, note)), note))
+        self.gate('reply_note_removed', not self.recalled_notes(json.dumps(self.recalled(OWNER, reply_note)), reply_note))
 
     def retire(self, event_id):
         """The owner retires a message, as Messages › Hide does."""
@@ -1464,6 +1499,98 @@ class ProductScenarios(Scenarios):
         longest = max((len(line) for _, block, _ in with_facts for line in block['text'].split('\n') if line.startswith('Source [')), default=0)
         self.gate('source_lines_at_most_a_quarter', all(4*head <= size for head, size, count in heads if count >= self.FULL_BLOCK_FACTS)
                   and longest <= self.SOURCE_LINE_LIMIT, heads=heads, longest=longest)
+
+    # Replies in the turn and where notes came from (ADR-0261 step 3) ---------------------------------------------------
+
+    # The words a note's label reads for the message its turn replied to (modelSourceWords.reads.reply in
+    # src/source-labels.ts), as far as a label cut at 120 characters keeps them.
+    REPLY_READ = 'the message it replied'
+    # Topics of these scenarios, each new to the group so nothing else said there reaches their turns.
+    OPENING_TOPIC, REPLY_TOPIC, REVIEW_TOPIC = 51, 52, 53
+
+    def frame(self, argument):
+        """What the newest turn's frame said about replies, as the scripted model read it ([[replied:<argument>]],
+        installation-provider.py): its reply block ({by, tag, id, text}, or None), each recent message's reply part and the
+        recent messages' ids."""
+        found = [event for event in self.f.brain() if event.get('directive') == 'replied' and event.get('argument') == argument and event['phase'] == 'frame']
+        self.gate('frame_read', bool(found), argument=argument)
+        return found[-1]
+
+    @staticmethod
+    def note_directive(content):
+        """A memory tool directive that saves one native note."""
+        return '[[tool:memory '+json.dumps({'target': 'memory', 'operations': [{'action': 'add', 'content': content}]})+']]'
+
+    def note_sources(self, mark):
+        """Where the notes holding the mark came from, as the owner's recall labels them: [{from, label}] (ADR-0257)."""
+        return [hit.get('source') or {} for hit in self.recalled_notes(json.dumps(self.recalled(OWNER, mark)), mark)]
+
+    def topic_message_is_not_a_reply(self):
+        # Telegram sends a message in a forum topic as a reply to the topic's opening message; that is no reply (ADR-0261
+        # B3.4, H-B). A plain message in the topic gets no reply block, a recent message there no reply part, and the note
+        # its turn writes does not read as written after reading a replied-to message. A real reply in the topic gets its
+        # block, naming the member's message with its text.
+        number = str(self.f.ids())
+        mark, note, topic = 'TOPICMARK'+number, 'TOPICNOTE'+number, self.OPENING_TOPIC
+        opening = self.topic_created(GROUP, topic, 'Reply checks')
+        said = self.f.message(GROUP, mark+' the ferry leaves at noon', sender=MEMBER, mention=False, topic=topic, reply_to=opening)
+        member, _ = self.turn(said, GROUP, topic, expect_reply=False)
+        self.silent_turn(self.f.message(GROUP, 'noted [[replied:'+number+']] '+self.note_directive(note+': the topic holds plans')+' [[after:silent]]',
+                                        topic=topic, reply_to=opening), GROUP, topic)
+        plain = self.frame(number)
+        self.gate('plain_topic_message_has_no_reply_block', plain.get('block') is None, block=plain.get('block'))
+        self.gate('recent_topic_message_has_no_reply_part', member in (plain.get('recent') or []) and not plain.get('parts'),
+                  recent=plain.get('recent'), parts=plain.get('parts'))
+        self.gate('topic_note_saved', self.newest_tool_result('memory').get('success') is True)
+        sources = self.note_sources(note)
+        self.gate('topic_note_reads_no_reply', bool(sources) and all(self.REPLY_READ not in str(source.get('label')) for source in sources), sources=sources)
+        self.turn(self.f.message(GROUP, 'and this? [[replied:'+number+'r]]', topic=topic, reply_to=said['message']), GROUP, topic)
+        block = self.frame(number+'r').get('block') or {}
+        self.gate('real_reply_in_the_topic_has_its_block', block.get('id') == member and block.get('by') == 'person' and mark in str(block.get('text'))
+                  and str(block.get('tag')).startswith('“Synthetic '+str(MEMBER)+'”') and str(block.get('tag')).endswith(' UTC'), block=block)
+
+    def reply_note_reads_reply(self):
+        # A note written in a turn whose message replies to someone else's message says it was written after reading it
+        # (ADR-0261 B3.5). Later in the session a reply block counts only when a note copies from it, so a note the owner
+        # dictates two turns later reads as the turn's own. Bob's message is a turn of its own, and the topic is new, so no
+        # recent group message is read anywhere in this session.
+        number = str(self.f.ids())
+        mark, first, later = 'REPLYMARK'+number, 'REPLYNOTE'+number, 'DICTATED'+number
+        topic = self.REPLY_TOPIC
+        said = self.f.message(GROUP, mark+' the boat leaves at nine', sender=MEMBER, topic=topic)
+        member, _ = self.turn(said, GROUP, topic)
+        self.silent_turn(self.f.message(GROUP, 'noted [[replied:'+number+']] '+self.note_directive(first+': a plan was shared')+' [[after:silent]]',
+                                        topic=topic, reply_to=said['message']), GROUP, topic)
+        block = self.frame(number).get('block') or {}
+        self.gate('turn_read_the_replied_to_message', block.get('id') == member and block.get('by') == 'person' and mark in str(block.get('text')), block=block)
+        self.gate('reply_note_saved', self.newest_tool_result('memory').get('success') is True)
+        self.turn(self.f.message(GROUP, 'thanks', topic=topic), GROUP, topic)
+        self.silent_turn(self.f.message(GROUP, 'note '+self.note_directive(later+': the owner prefers tea')+' [[after:silent]]', topic=topic), GROUP, topic)
+        self.gate('dictated_note_saved', self.newest_tool_result('memory').get('success') is True)
+        sources = self.note_sources(first)
+        self.gate('note_after_a_reply_reads_it', bool(sources) and all(source.get('from') == 'turn_read' and self.REPLY_READ in str(source.get('label'))
+                                                                        for source in sources), sources=sources)
+        sources = self.note_sources(later)
+        self.gate('later_dictated_note_is_the_turns_own', bool(sources) and all(source.get('from') == 'turn' for source in sources), sources=sources)
+
+    def reply_source_question(self):
+        # The owner replies "source?" to one of Nocheh's answers (ADR-0261 B3.4): the turn's frame names that answer as
+        # Nocheh's own words (by=nocheh), with its text and its archived id, and the model opens it with archive_read by that
+        # id, getting the answer back with its source.
+        number = str(self.f.ids())
+        mark = 'FERRY'+number
+        self.turn(self.f.message(OWNER, 'When does the ferry leave? [[turn:'+mark+']]'), OWNER)
+        answer = self.f.sent()[-1]
+        answered = self.sent_as(answer, 'reply')
+        _, text = self.turn(self.f.message(OWNER, 'source? [[replied:open '+number+']]', reply_to=answer['message']), OWNER)
+        block = self.frame('open '+number).get('block') or {}
+        self.gate('reply_block_names_nochehs_answer', block.get('id') == answered and block.get('by') == 'nocheh' and mark in str(block.get('text')),
+                  block=block)
+        found = [event for event in self.f.brain() if event.get('directive') == 'replied' and event.get('argument') == 'open '+number
+                 and event['phase'] == 'final']
+        opened = self.tool_result(found[-1].get('result')) if found else {}
+        self.gate('model_opened_the_answer', opened.get('source') == 'nocheh:event:'+answered and opened.get('by') == 'nocheh' and mark in str(opened.get('text'))
+                  and text.startswith('[brain] mcp__nocheh__archive_read'), opened={key: opened.get(key) for key in ('source', 'by', 'tag', 'error')})
 
     def private_chat_stays_out_of_groups(self):
         # What the owner keeps on their private side never reaches what the model sees for a group, and no group reply
@@ -4200,6 +4327,8 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  # Facts that name their source (ADR-0261 step 2), before the retirement that forgets one.
                  'recalled_fact_opens_its_original', 'fact_about_bob_names_bob', 'recall_facts_carry_sources', 'forward_fact_names_its_origin',
                  'per_turn_memory_stays_small',
+                 # Replies in the turn and where notes came from (ADR-0261 step 3), before the retirement that withholds a reply.
+                 'topic_message_is_not_a_reply', 'reply_note_reads_reply', 'reply_source_question',
                  'retired_source_leaves_tags', 'owner_recall_session_hits_have_text',
                  'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',

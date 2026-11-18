@@ -16,6 +16,7 @@ import os
 import re
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,6 +25,10 @@ from tools.acceptance.telegram_scenarios import GROUP, OTHER_GROUP, OWNER, Faile
 from tools.paths import ROOT
 
 TIME, AT = '2026-11-17 10:00', '2026-11-17T10:00:00.000Z'
+# How the owner's recall names a stored row's role (recallRoleWords in src/stores/note-sources.ts), and what a note's label
+# says its turn read (modelSourceWords.reads in src/source-labels.ts).
+ROLE_WORDS = {'user': 'a message', 'assistant': 'Nocheh\'s reply', 'tool': 'a tool result'}
+READ_WORDS = {'recent': 'recent group messages', 'reply': 'the message it replied to (not the owner\'s own words)'}
 
 
 def provider():
@@ -55,13 +60,21 @@ class Installation(Fixture):
     Step 2 faults: `facts_unsourced` (a block of facts in prose, as before), `block_named_by_session`, `open_anywhere` (any
     group opens a record), `header_by_owner` (a fact citing the owner's message reads as the owner's), `forward_as_owner`,
     `evidence_sources_only` (recall lists messages, not facts), `uncapped` (a block past 20,000 characters),
-    `retired_fact_opens` and `fact_rows_kept` (stored rows citing a record of a retired message stay)."""
+    `retired_fact_opens` and `fact_rows_kept` (stored rows citing a record of a retired message stay).
+    Step 3 faults: `opening_is_reply` (a forum topic's opening counts as the message a topic message replies to),
+    `part_for_opening` (only in recent messages' reply parts), `no_reply_block` (a turn's frame names no replied-to message),
+    `nocheh_as_owner` (Nocheh's own message reads by=owner), `reply_not_read` (a note after a reply reads as the turn's own),
+    `reply_read_later` (an earlier reply block counts for a later note that copied nothing), `reply_span_ignored` (retirement
+    leaves a reply block in stored history), `reply_tool_work_kept` (it withholds the block but not the turn's tool work and
+    notes), `review_undated` (a review's label names no day), `ref_missing` (a note has no ref) and `ref_opens_nothing`."""
 
     def __init__(self, directory, fault=None):
         self.directory, self.next_id, self.fault = directory, 1794900000, fault
         self.events, self.messages, self.retired, self.zone = [], [], set(), 'UTC'
         self.topics = {(GROUP, TEAM_TOPIC): ('Team plans', 'observed')}
         self.history, self.notes, self.quiet, self.records = {}, [], {}, {}
+        # Nocheh's sent answers as Telegram shows them, and as the archive keeps them.
+        self.sent_rows, self.answers, self.context = [], [], {}
 
     # The fake Telegram and the owner's API ---------------------------------------------------------------------------
 
@@ -71,6 +84,17 @@ class Installation(Fixture):
 
     def brain(self):
         return self.events
+
+    def sent(self):
+        return self.sent_rows
+
+    def inject(self, update):
+        """An update no turn answers, such as a forum topic's opening message (ProductScenarios.topic_created)."""
+        self.archive(update)
+
+    def event(self, update_id):
+        event_id = hashlib.sha256(str(update_id).encode()).hexdigest()
+        return event_id if self.message_of(event_id) else None
 
     def app(self, path, body=None, allow_error=False):
         if path == '/v1/tasks/settings':
@@ -101,7 +125,9 @@ class Installation(Fixture):
         row = {'id': event_id, 'chat': message['chat']['id'], 'topic': message.get('message_thread_id'), 'number': message['message_id'],
                'sender': message['from']['id'], 'name': message['from'].get('first_name'), 'username': message['from'].get('username'),
                'text': message.get('text') or '', 'addressed': bool(message.get('entities')) or message['chat']['id'] > 0,
-               'reply_to': next((item['id'] for item in self.messages if target and item['number'] == target and item['chat'] == message['chat']['id']), None),
+               'date': message['date'], 'opening': 'forum_topic_created' in message,
+               'reply_to': next((item['id'] for item in self.messages+self.answers if target and item['number'] == target
+                                 and item['chat'] == message['chat']['id']), None),
                'outside_to': next((item['id'] for item in self.messages if outside and item['number'] == outside['message_id']
                                    and item['chat'] == outside['chat']['id']), None),
                'forward': ((message.get('forward_origin') or {}).get('chat') or {}).get('title')}
@@ -109,7 +135,19 @@ class Installation(Fixture):
         return row
 
     def message_of(self, event_id):
-        return next((item for item in self.messages if item['id'] == event_id), None)
+        return next((item for item in self.messages+self.answers if item['id'] == event_id), None)
+
+    def replied_to(self, row, part=False):
+        """The message a message replies to, as a turn's frame names it: never a forum topic's opening (ADR-0261 B3.4)."""
+        target = self.message_of(row['reply_to'])
+        if target is not None and target['opening'] and self.fault != 'opening_is_reply' and not (part and self.fault == 'part_for_opening'):
+            return None
+        return target
+
+    @staticmethod
+    def sent_id(message):
+        """The archived id of a message Nocheh sent."""
+        return hashlib.sha256(('sent'+str(message['message_id'])).encode()).hexdigest()
 
     @staticmethod
     def owner_reader(reader):
@@ -130,6 +168,10 @@ class Installation(Fixture):
 
     def tag(self, reader, row):
         owner = self.owner_reader(reader)
+        if row['sender'] == 'nocheh':
+            zone = self.zone if owner else 'UTC'
+            return {'tag': 'Nocheh\'s reply · '+self.place(reader, row['chat'], row['topic'])+' · '+TIME+' '+zone,
+                    'by': 'owner' if self.fault == 'nocheh_as_owner' else 'nocheh', 'at': AT}
         if row['sender'] == OWNER and (owner or self.fault == 'owner_word_in_groups'):
             who = 'the owner'
         else:
@@ -168,7 +210,7 @@ class Installation(Fixture):
         result.update(self.tag(reader, row), chat_id=str(row['chat']))
         if row['topic'] is not None:
             result['topic'] = self.place((None, None), row['chat'], row['topic']) if not self.owner_reader(reader) else self.place(reader, row['chat'], row['topic'])
-        target = self.message_of(row['reply_to'] or row['outside_to'])
+        target = self.replied_to(row) if row['reply_to'] else self.message_of(row['outside_to'])
         if self.readable(reader, target):
             result['reply_to'] = self.related(reader, target)
             chain, further = [], self.message_of(target['reply_to'])
@@ -273,12 +315,20 @@ class Installation(Fixture):
 
     # Stored chat history, notes and recall ------------------------------------------------------------------------------
 
-    def planned(self, session):
-        """The turns whose rows quote a retired message (retired_history.plan): the quote goes, and with it the turn's tool
-        rows and the notes it wrote."""
+    def quoted(self, session):
+        """The turns whose message quotes a retired message, as a recent item or its reply block (retired_history.plan): the
+        quote goes."""
         if self.fault == 'history_kept':
             return set()
-        return {row['turn'] for row in self.history.get(session, []) if row['role'] == 'user' and set(row['cites']) & self.retired}
+        return {row['turn'] for row in self.history.get(session, []) if row['role'] == 'user'
+                and (set(row['cites']) | ({row['reply']} if row['reply'] and self.fault != 'reply_span_ignored' else set())) & self.retired}
+
+    def planned(self, session):
+        """The turns whose tool rows and notes go with a retired quote."""
+        quoted = self.quoted(session)
+        if self.fault != 'reply_tool_work_kept':
+            return quoted
+        return {row['turn'] for row in self.history.get(session, []) if row['role'] == 'user' and row['turn'] in quoted and set(row['cites']) & self.retired}
 
     def cites_retired(self, row):
         """A stored tool row that cites a retired message, or a record of facts resting on one (retired_records, B6.2)."""
@@ -287,10 +337,10 @@ class Installation(Fixture):
 
     def bring_current(self, session):
         """What Nocheh's turn does first (retired_history.withhold_retired)."""
-        turns = set() if self.fault == 'turn_kept' else self.planned(session)
+        quoted, turns = (set(), set()) if self.fault == 'turn_kept' else (self.quoted(session), self.planned(session))
         for row in self.history.get(session, []):
-            if row['turn'] in turns and row['role'] in ('user', 'tool') or self.cites_retired(row):
-                row['text'], row['cites'] = row['own'] if row['role'] == 'user' else '[withheld]', []
+            if row['role'] == 'user' and row['turn'] in quoted or row['role'] == 'tool' and row['turn'] in turns or self.cites_retired(row):
+                row['text'], row['cites'], row['reply'] = row['own'] if row['role'] == 'user' else '[withheld]', [], None
         if self.fault != 'note_kept':
             self.notes = [note for note in self.notes if note['turn'] not in turns]
 
@@ -310,15 +360,17 @@ class Installation(Fixture):
                                   for row in map(self.message_of, fact['sources'][:2])], 'more': max(0, len(fact['sources'])-2)}
                      for n, fact in enumerate(learned, 1)][:12]
             return {'sources': [{**answer, 'facts_source': 'nocheh:memory:'+record, 'facts': facts, 'evidence_count': len(learned)}]}
-        hits = [{'kind': 'native_note', 'text': note['text'], 'place': self.place(reader, *note['session'])} for note in self.notes if query in note['text']]
+        hits = [{'kind': 'native_note', 'text': note['text'], 'place': self.place(reader, *note['session']), 'day': DAY,
+                 'source': {'from': note['from'], 'label': note['label']}} for note in self.notes if query in note['text']]
         for session, rows in self.history.items():
             # A read-only search skips the rows a profile not yet brought current would withhold (withheld_ids).
-            skipped = self.planned(session)
+            quoted, skipped = self.quoted(session), self.planned(session)
             for index, row in enumerate(rows):
                 found = row['text'].find(query)
-                if found < 0 or row['turn'] in skipped and row['role'] in ('user', 'tool') or self.cites_retired(row):
+                if found < 0 or row['turn'] in (quoted if row['role'] == 'user' else skipped) and row['role'] in ('user', 'tool') or self.cites_retired(row):
                     continue
-                hit = {'kind': 'native_session', 'place': self.place(reader, *session), 'role': row['role'],
+                # A hit names its row's role in words (recallRoleWords in src/stores/note-sources.ts).
+                hit = {'kind': 'native_session', 'place': self.place(reader, *session), 'role': ROLE_WORDS[row['role']],
                        'text': '' if self.fault == 'session_text_empty' else row['text'][max(0, found-40):max(0, found-40)+120], 'at': '2026-11-17T10:00:00+00:00'}
                 if self.fault == 'session_context':
                     hit['context'] = [item['text'] for item in rows[max(0, index-1):index+2] if item is not row]
@@ -333,9 +385,68 @@ class Installation(Fixture):
         if name == 'mcp__nocheh__memory_recall':
             return self.recall(reader, arguments['query'], sender)
         if name == 'memory':
-            self.notes += [{'text': item['content'], 'turn': turn, 'session': reader} for item in arguments['operations']]
+            self.notes += [{'text': item['content'], 'turn': turn, 'session': reader, **self.turn_note(reader, turn)} for item in arguments['operations']]
             return {'success': True}
         raise AssertionError('unexpected tool '+name)
+
+    def turn_note(self, session, turn):
+        """Where a note a turn writes came from (ADR-0257, ADR-0261 B3.5): what the turn read besides its own message, the
+        recent group messages and the message it replied to unless the owner typed it; an earlier reply block only when the
+        note copied from it, which no note here does."""
+        reads = (['recent'] if self.context.get('recent') else [])
+        if self.context.get('reply_by') not in (None, 'owner') and self.fault != 'reply_not_read':
+            reads.append('reply')
+        if self.fault == 'reply_read_later' and 'reply' not in reads and any(row['reply'] for row in self.history.get(session, [])
+                                                                             if row['role'] == 'user' and row['turn'] != turn):
+            reads.append('reply')
+        label = 'Nocheh\'s note from this chat on '+DAY+(', after reading '+', '.join(READ_WORDS[read] for read in reads) if reads else '')
+        return {'from': 'turn_read' if reads else 'turn', 'label': label, 'sources': [turn]}
+
+    def review(self, event_id, mark):
+        """The owner's notes review of a message saves the note it asks for ([[review-note:]]), labelled with the day of that
+        message (ADR-0261 B3.3)."""
+        row = self.message_of(event_id)
+        day = datetime.fromtimestamp(row['date'], timezone.utc).strftime('%Y-%m-%d')
+        text = next(found.strip() for found in BRAIN.REVIEW_NOTE.findall(row['text']) if mark in found)
+        label = 'Nocheh\'s notes review '+('' if self.fault == 'review_undated' else 'on '+day+' ')+'of another person\'s message in a group › a topic'
+        self.notes.append({'text': text, 'turn': None, 'session': (OWNER, None), 'from': 'person', 'label': label, 'sources': [event_id]})
+        return {'state': 'done', 'provenance': {}}
+
+    def open_note(self, session, mark):
+        """[[note_open:]]: the note with the mark in the evidence, opened by its ref: the messages its writer read, tagged."""
+        note = next((item for item in self.notes if mark in item['text']), None)
+        ref = None if note is None or self.fault == 'ref_missing' else hashlib.sha256(note['text'].encode()).hexdigest()[:12]
+        event = {'directive': 'note_open', 'argument': mark, 'phase': 'final', 'present': note is not None, 'source': note['from'] if note else 'absent',
+                 'label': note['label'] if note else None, 'ref': ref}
+        if ref:
+            rows = [] if self.fault == 'ref_opens_nothing' else [row for row in map(self.message_of, note['sources']) if self.readable(session, row)]
+            sources = [{'source': 'nocheh:event:'+row['id'], **{key: value for key, value in self.tag(session, row).items() if key != 'at'}} for row in rows]
+            event.update(tool='mcp__nocheh__archive_read', result=json.dumps({'note': ref, 'sources': sources[:5]}))
+        self.events.append(event)
+        return 'note_open '+mark+' '+(event['source'] if ref else 'no_ref' if note else 'absent')
+
+    def frame_of(self, session, recent, row):
+        """The frame Nocheh's code writes before a turn's own message (turn_process.py): the recent group messages, each with
+        the reply part naming what it replies to, and the block quoting the message the turn's message replies to."""
+        reply_line = lambda words, target: ('['+words+', by='+self.tag(session, target)['by']+': '+self.tag(session, target)['tag']+'] (source nocheh:event:'
+                                            + target['id']+')')
+        frame = ''
+        for item in recent:
+            target = self.replied_to(item, part=True)
+            part = reply_line('In reply to', target)+'\n' if self.readable(session, target) else ''
+            frame += '[Group message from '+str(item['name'])+'] (source nocheh:event:'+item['id']+')\n'+part+item['text']+'\n'
+        target = None if self.fault == 'no_reply_block' else self.replied_to(row)
+        if not self.readable(session, target):
+            return frame, None
+        return frame+reply_line('Replying to', target)+'\n'+' '.join(target['text'].split())[:200]+'\n[End of replied-to message]\n', target
+
+    def answered(self, chat, topic, answer):
+        """Nocheh's answer, as Telegram shows it and as the archive keeps it."""
+        number = self.ids()
+        message = {'message_id': number, 'date': 1794900000, 'chat': {'id': chat}, 'from': {'id': 999, 'is_bot': True, 'first_name': 'Nocheh'}, 'text': answer}
+        self.sent_rows.append({'message': message})
+        self.answers.append({'id': self.sent_id(message), 'chat': chat, 'topic': topic, 'number': number, 'sender': 'nocheh', 'name': None, 'username': None,
+                             'text': answer, 'addressed': False, 'date': 1794900000, 'opening': False, 'reply_to': None, 'outside_to': None, 'forward': None})
 
     def turn(self, update, chat, topic=None, expect_reply=True, **_):
         row = self.archive(update)
@@ -347,9 +458,20 @@ class Installation(Fixture):
         rows = self.history.setdefault(session, [])
         earlier = '\n'.join(item['text'] for item in rows)
         recent = self.quiet.pop(session, [])
-        block = ''.join('[Group message from '+item['name']+'] (source nocheh:event:'+item['id']+') '+item['text']+'\n' for item in recent)
-        rows.append({'role': 'user', 'turn': row['id'], 'text': block+row['text'], 'own': row['text'], 'cites': [item['id'] for item in recent]})
+        frame, target = self.frame_of(session, recent, row)
+        rows.append({'role': 'user', 'turn': row['id'], 'text': frame+row['text'], 'own': row['text'], 'cites': [item['id'] for item in recent],
+                     'reply': target['id'] if target else None})
+        self.context = {'recent': bool(recent), 'reply_by': self.tag(session, target)['by'] if target else None}
         answers = []
+        replied = next((found for found in BRAIN.DIRECTIVE.finditer(row['text']) if found[1] == 'replied'), None)
+        if replied:
+            seen = BRAIN.reply_frame(frame+row['text'])
+            self.events.append({'directive': 'replied', 'argument': (replied[2] or '').strip(), 'phase': 'frame', **seen})
+            if (replied[2] or '').startswith('open') and seen['block']:
+                result = json.dumps(self.read(session, {'id': 'nocheh:event:'+seen['block']['id']}), ensure_ascii=False)
+                self.events.append({'directive': 'replied', 'argument': replied[2].strip(), 'phase': 'final', 'tool': 'mcp__nocheh__archive_read', 'result': result})
+                rows.append({'role': 'tool', 'turn': row['id'], 'text': result, 'cites': re.findall('[a-f0-9]{64}', result)})
+                answers.append('mcp__nocheh__archive_read: '+result)
         for name, argument in BRAIN.TOOL.findall(row['text']):
             result = json.dumps(self.call(name, json.loads(argument), session, row['id'], row['sender']), ensure_ascii=False)
             self.events.append({'directive': 'tool', 'tool': name, 'phase': 'final', 'argument': argument, 'result': result})
@@ -368,8 +490,12 @@ class Installation(Fixture):
             answers.append('context '+found[2]+(' present' if found[2] in earlier else ' absent'))
         elif found and found[1] == 'turn':
             answers.append('turn '+found[2]+' absent')
+        elif found and found[1] == 'note_open':
+            answers.append(self.open_note(session, found[2]))
         answer = '[NO_REPLY]' if '[[after:silent]]' in row['text'] else '[brain] '+' '.join(answers)
         rows.append({'role': 'assistant', 'turn': row['id'], 'text': answer, 'cites': []})
+        if answer != '[NO_REPLY]':
+            self.answered(chat, topic, answer)
         return row['id'], answer
 
     def silent_turn(self, update, chat, topic=None):
@@ -389,6 +515,8 @@ class SourceTagScenarioTests(unittest.TestCase):
         scenarios.turn, scenarios.silent_turn = installation.turn, installation.silent_turn
         scenarios.topic_chat = lambda chat, topic: str(chat)+'/'+str(topic)
         scenarios.honcho_learned = lambda mark: None
+        scenarios.reviewed = installation.review
+        scenarios.delivered = lambda row: {'id': installation.sent_id(row['message']), 'payload': {'send_class': 'reply'}}
         with contextlib.redirect_stdout(io.StringIO()):
             getattr(scenarios, name)()
         return scenarios, installation
@@ -426,15 +554,20 @@ class SourceTagScenarioTests(unittest.TestCase):
     def test_retired_source_leaves_tags(self):
         scenarios, _ = self.run_scenario('retired_source_leaves_tags')
         gates = [gate['gate'] for gate in scenarios.current['gates']]
-        self.assertEqual(gates[-6:], ['history_no_longer_holds_it', 'fact_rows_leave_history', 'fact_no_longer_opens', 'recalled_fact_no_longer_opens',
-                                      'next_turn_no_longer_reads_it', 'note_removed'])
-        self.assertTrue({'turn_read_the_fact', 'fact_opened_before', 'recall_listed_the_fact', 'history_holds_the_fact_rows_before'} <= set(gates))
+        self.assertEqual(gates[-7:], ['history_no_longer_holds_it', 'fact_rows_leave_history', 'fact_no_longer_opens', 'recalled_fact_no_longer_opens',
+                                      'next_turn_no_longer_reads_it', 'note_removed', 'reply_note_removed'])
+        self.assertTrue({'turn_read_the_fact', 'fact_opened_before', 'recall_listed_the_fact', 'history_holds_the_fact_rows_before',
+                         'reply_block_quoted_it', 'reply_note_kept_before'} <= set(gates))
         self.fails('retired_source_leaves_tags', 'history_kept', 'history_no_longer_holds_it')
         self.fails('retired_source_leaves_tags', 'turn_kept', 'next_turn_no_longer_reads_it')
         self.fails('retired_source_leaves_tags', 'note_kept', 'note_removed')
         self.fails('retired_source_leaves_tags', 'fact_rows_kept', 'fact_rows_leave_history')
         self.fails('retired_source_leaves_tags', 'retired_fact_opens', 'fact_no_longer_opens')
         self.fails('retired_source_leaves_tags', 'facts_unsourced', 'turn_read_the_fact')
+        # A retired reply target (step 3): its block leaves stored history, and the tool work and note of the turn it quoted.
+        self.fails('retired_source_leaves_tags', 'no_reply_block', 'reply_block_quoted_it')
+        self.fails('retired_source_leaves_tags', 'reply_span_ignored', 'history_no_longer_holds_it')
+        self.fails('retired_source_leaves_tags', 'reply_tool_work_kept', 'reply_note_removed')
 
     def test_owner_recall_session_hits_have_text(self):
         self.run_scenario('owner_recall_session_hits_have_text')
@@ -476,6 +609,38 @@ class SourceTagScenarioTests(unittest.TestCase):
         self.fails('per_turn_memory_stays_small', 'facts_unsourced', 'each_turn_reads_facts')
         self.fails('per_turn_memory_stays_small', 'block_named_by_session', 'blocks_named_by_their_records')
 
+    # Replies in the turn and where notes came from (ADR-0261 step 3) --------------------------------------------------------
+
+    def test_topic_message_is_not_a_reply(self):
+        scenarios, _ = self.run_scenario('topic_message_is_not_a_reply')
+        gates = [gate['gate'] for gate in scenarios.current['gates']]
+        self.assertIn('real_reply_in_the_topic_has_its_block', gates)
+        self.fails('topic_message_is_not_a_reply', 'opening_is_reply', 'plain_topic_message_has_no_reply_block')
+        self.fails('topic_message_is_not_a_reply', 'part_for_opening', 'recent_topic_message_has_no_reply_part')
+        self.fails('topic_message_is_not_a_reply', 'no_reply_block', 'real_reply_in_the_topic_has_its_block')
+
+    def test_reply_note_reads_reply(self):
+        self.run_scenario('reply_note_reads_reply')
+        self.fails('reply_note_reads_reply', 'reply_not_read', 'note_after_a_reply_reads_it')
+        self.fails('reply_note_reads_reply', 'reply_read_later', 'later_dictated_note_is_the_turns_own')
+        self.fails('reply_note_reads_reply', 'no_reply_block', 'turn_read_the_replied_to_message')
+
+    def test_reply_source_question(self):
+        self.run_scenario('reply_source_question')
+        self.fails('reply_source_question', 'no_reply_block', 'reply_block_names_nochehs_answer')
+        self.fails('reply_source_question', 'nocheh_as_owner', 'reply_block_names_nochehs_answer')
+
+    def test_review_note_opens_its_batch(self):
+        # The part native_notes_reach_later_turns adds for step 3; the rest of it reads Hermes's notes the fake does not keep.
+        scenarios, _ = self.run_scenario('review_note_opens_its_batch')
+        self.assertEqual([gate['gate'] for gate in scenarios.current['gates']][-3:], ['review_label_names_its_day', 'note_has_its_ref', 'ref_opens_its_batch'])
+        self.fails('review_note_opens_its_batch', 'review_undated', 'review_label_names_its_day')
+        self.fails('review_note_opens_its_batch', 'ref_missing', 'note_has_its_ref')
+        self.fails('review_note_opens_its_batch', 'ref_opens_nothing', 'ref_opens_its_batch')
+        source = (ROOT/'tools/acceptance/product_scenarios.py').read_text()
+        self.assertIn('        self.review_note_opens_its_batch()\n\n    def review_note_opens_its_batch(self):', source,
+                      'native_notes_reach_later_turns ends with it')
+
     def test_a_fact_answering_another_peers_marked_question_cites_the_answer_then_the_question(self):
         privacy = provider().PrivacyCanary({})
         batch = (privacy.LEARN+'\n<message idx="4" peer="person_owner" target="false" time="t">Bob, is LEARNMARK12 still 4321?</message>\n'
@@ -492,9 +657,12 @@ class SourceTagScenarioTests(unittest.TestCase):
         from tools.acceptance.product_scenarios import PRODUCT_ORDER
         for name in ('search_hits_name_their_source', 'group_tags_stay_in_the_group', 'reply_thread_opens', 'topic_sharing_group_keeps_evidence',
                      'retired_source_leaves_tags', 'owner_recall_session_hits_have_text', 'recalled_fact_opens_its_original', 'fact_about_bob_names_bob',
-                     'recall_facts_carry_sources', 'forward_fact_names_its_origin', 'per_turn_memory_stays_small'):
+                     'recall_facts_carry_sources', 'forward_fact_names_its_origin', 'per_turn_memory_stays_small', 'topic_message_is_not_a_reply',
+                     'reply_note_reads_reply', 'reply_source_question'):
             self.assertIn(name, PRODUCT_ORDER)
             self.assertIn(name, TITLES)
+        # A retired reply target is checked after the reply scenarios, whose blocks it would otherwise withhold.
+        self.assertLess(PRODUCT_ORDER.index('reply_source_question'), PRODUCT_ORDER.index('retired_source_leaves_tags'))
         self.assertLess(PRODUCT_ORDER.index('owner_recall_session_hits_have_text'), PRODUCT_ORDER.index('private_chat_stays_out_of_groups'))
         # A recall lists 12 facts, cited ones first: GUEST's facts are listed while the retirement has not yet forgotten one.
         self.assertLess(PRODUCT_ORDER.index('recall_facts_carry_sources'), PRODUCT_ORDER.index('retired_source_leaves_tags'))
