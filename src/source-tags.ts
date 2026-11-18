@@ -2,7 +2,7 @@ import {fillLine} from './chat-labels.js';
 import {chats,type ChatDirectory} from './chats.js';
 import {desktopLocalTime,telegramMessage,telegramUsername} from './chats-telegram.js';
 import type {Forward} from './forwarded.js';
-import {bucketOf,type EventClass,type SourceFacts} from './source-facts.js';
+import {bucketOf,type Bucket,type EventClass,type SourceFacts} from './source-facts.js';
 import {modelPlace,modelSourceWords} from './source-labels.js';
 import {placeName} from './stores/recall-places.js';
 
@@ -22,8 +22,9 @@ export type TagBy='owner'|'person'|'forward'|'file'|'mixed'|'nocheh'|'shared'|'u
  *  message by, as an ISO time in UTC, so `archive_page {chat, from:at}` opens the conversation around it. */
 export interface Tag {source:string;tag:string;by:TagBy;at:string|null}
 /** What an opened original names beside its tag (archive_read, ADR-0261): a forward's origin in words, and the topic the
- *  message is in, as its place words. */
-export interface TagDetails {forward?:string;topic?:string}
+ *  message is in, as its place words. A tag at day precision also brings the message's day and its time of day in the
+ *  reader's zone (sourceClock), which a recalled fact's line shows. */
+export interface TagDetails {forward?:string;topic?:string;day?:string;time?:string}
 /** The longest tag, and the longest name in it. */
 export const TAG_LIMIT=160,TAG_NAME_LIMIT=40;
 const words=modelSourceWords.tags;
@@ -74,6 +75,15 @@ function zoned(instant:number,zone:string):{day:string;time:string;zone:string} 
   } catch {return zone==='UTC'?{day:new Date(instant).toISOString().slice(0,10),time:new Date(instant).toISOString().slice(11,16),zone}:zoned(instant,'UTC');}
 }
 
+/** A message's day and time of day as the reader reads them (B1.4): in the owner's Tasks zone for the owner, UTC for
+ *  anyone else; an old Desktop export's local time as written. Null without a moment. */
+export function sourceClock(moment:Moment|null,reader:Pick<TagReader,'owner'|'zone'>):{day:string;time:string}|null {
+  if(!moment)return null;
+  if('local' in moment)return {day:moment.local.slice(0,10),time:moment.local.slice(11,16)};
+  const found=zoned(moment.instant,reader.owner?reader.zone:'UTC');
+  return {day:found.day,time:found.time};
+}
+
 /** The day of an instant in a reader's zone (an IANA zone; one this server's clock does not know reads UTC), as
  *  YYYY-MM-DD: the owner's Tasks zone for the owner, UTC for anyone else. */
 export const zonedDay=(instant:number,zone:string):string=>zoned(instant,zone).day;
@@ -108,7 +118,7 @@ const namesShown=(source:TagSource,reader:TagReader)=>reader.owner||source.expor
  *  day. Anyone but the owner reads UTC and no People name, whatever is passed. */
 export interface TagReader {owner:boolean;chat:string|null;zone:string;precision:'minute'|'day'}
 
-function who(source:TagSource,reader:TagReader,size:number):string {
+function who(source:TagSource,reader:TagReader,size:number,usernames=true):string {
   const facts=source.facts;
   if(facts.author==='nocheh')return words.nocheh;
   if(facts.author==='owner'&&reader.owner)return words.owner;
@@ -118,7 +128,7 @@ function who(source:TagSource,reader:TagReader,size:number):string {
   // A person, someone code cannot tell, or the owner read by anyone else: by the name Telegram showed (Q1).
   const name=namesShown(source,reader)?tagName(source.sender.name,size):'';
   let label=name?fillLine(words.named,{name}):words.person;
-  if(username)label+=fillLine(words.username,{username});
+  if(username&&usernames)label+=fillLine(words.username,{username});
   if(reader.owner&&facts.author!=='owner'&&source.saved) {
     const saved=tagName(source.saved,size);
     if(saved&&nameKey(tagName(source.saved))!==nameKey(tagName(source.sender.name)))label+=fillLine(words.saved_as,{name:saved});
@@ -186,12 +196,13 @@ function when(source:TagSource,reader:TagReader):string {
  * One source's tag, at most TAG_LIMIT characters: `who[, what] · where · when`. Names shrink first; a tag still too long
  * is cut. `names` are recallNames' (for anyone but the owner, shownOnly). `by` is the message's bucket, unchanged.
  */
-export function sourceTag(source:TagSource,reader:TagReader,names:ReadonlyMap<string,string>,directory:ChatDirectory=chats()):Tag {
+export function sourceTag(source:TagSource,reader:TagReader,names:ReadonlyMap<string,string>,directory:ChatDirectory=chats(),
+  options:{usernames?:boolean}={}):Tag {
   const by=bucketOf(source.class),result=(tag:string):Tag=>({source:'nocheh:event:'+source.id,tag,by,at:source.at});
   let tag='';
   for(const size of [TAG_NAME_LIMIT,24,12,0]) {
     const carried=what(source,reader,size);
-    tag=[who(source,reader,size)+(carried?', '+carried:''),where(source,reader,names,size,directory),when(source,reader)].join(' · ');
+    tag=[who(source,reader,size,options.usernames!==false)+(carried?', '+carried:''),where(source,reader,names,size,directory),when(source,reader)].join(' · ');
     if(length(tag)<=TAG_LIMIT)return result(tag);
   }
   return result(shorten(tag,TAG_LIMIT));
@@ -215,3 +226,41 @@ export function sourceDetails(source:TagSource,reader:TagReader,names:ReadonlyMa
 export const sharedTag=(day:string):{tag:string;by:'shared'}=>({tag:fillLine(words.shared,{day:/^\d{4}-\d{2}-\d{2}$/.test(day)?day:words.no_time}),by:'shared'});
 /** A source the reader cannot read (`here`: no who, where, when or count), or one whose tag could not be built (`now`). */
 export const unavailableTag=(reason:'here'|'now'):{tag:string;by:'unknown'}=>({tag:reason==='here'?words.unavailable_here:words.unavailable_now,by:'unknown'});
+
+/**
+ * One message a recalled fact was learned from, as B2.2 reads it: its archived event id (null when the engine's message
+ * maps to no receipt this reader's audience holds, retired or never written), whether it was written by the peer the fact
+ * is about, and its bucket when the reader may read it. An unmapped or unreadable message has no bucket: it counts as
+ * someone else's words (`person`) and is never shown or counted.
+ */
+export interface FactCited {id:string|null;own:boolean;bucket:Bucket|null}
+/** A fact's messages in the order they are named: the observed peer's own first, in citation order, then the rest in
+ *  citation order. The engine also cites context, such as the question a "yes" answers, so the person the fact is about
+ *  comes first. */
+export const factOrder=<T extends {own:boolean}>(cited:readonly T[]):T[]=>[...cited.filter(item=>item.own),...cited.filter(item=>!item.own)];
+/**
+ * Whose words a fact rests on (B2.2), from the bucket of every message it was learned from, readable or not, by the rule
+ * notes use (fromToken): any other person's message, forward or file names that, or `mixed` for several kinds; then
+ * `nocheh` for Nocheh's own messages; and `owner` only when every message is the owner's own typing and the fact cites
+ * exactly those (ADR-0257). A fact that is not exact, such as one learned with its whole batch, is never the owner's:
+ * it reads `nocheh`, as an uncited notes review does. A fact with no message at all is `unknown`.
+ */
+export function factBy(cited:readonly {bucket:Bucket|null}[],exact:boolean):TagBy {
+  if(!cited.length)return 'unknown';
+  const buckets=new Set(cited.map(item=>item.bucket??'person'));
+  const others=(['person','forward','file'] as const).filter(bucket=>buckets.has(bucket));
+  if(others.length)return others.length>1?'mixed':others[0]!;
+  if(buckets.has('nocheh'))return 'nocheh';
+  return exact?'owner':'nocheh';
+}
+/** The message a fact's source line names (B2.2), among those the reader may read, in factOrder: the first that is
+ *  another person's message, a forward or a file, else the first that is not the owner's, else the first. Null when the
+ *  reader may read none of them. The rule labels use for a review's main event. */
+export function headerSource<T extends {bucket:Bucket|null}>(ordered:readonly T[]):T|null {
+  const open=ordered.filter(item=>item.bucket!==null);
+  return open.find(item=>['person','forward','file'].includes(item.bucket!))??open.find(item=>item.bucket!=='owner')??open[0]??null;
+}
+/** Model-written text set between code-built lines: a line that, after its leading spaces, starts with `Source` or `[`
+ *  gets a leading `(`, so it never reads as a source line or a header code wrote (the escape ADR-0222's speaker lines
+ *  use). */
+export const escapeSourceLines=(text:string):string=>text.split('\n').map(line=>/^\s*(?:Source|\[)/.test(line)?'('+line:line).join('\n');

@@ -23,6 +23,10 @@ import type {MemoryProvenanceRepository} from './memory-provenance.js';
 import {OwnerCommands} from './owner-commands.js';
 import {evidencePeerId,memoryPeerId,type EntityContext,type MemoryEntity} from './entities.js';
 import {NoteSourceRepository,countMemoryStep} from './note-sources.js';
+import {FactSourceRepository} from './fact-sources.js';
+import {bindingMoved,type SourceTagRepository} from './source-tags.js';
+import {planFactBlock,renderFactBlock,type BlockFact} from '../fact-block.js';
+import type {EngineFact} from '../memory/engine.js';
 
 /** The assistant is a peer whose messages are saved but never observed (ADR-0109). */
 export const assistantPeer='nocheh_assistant';
@@ -89,6 +93,15 @@ function fitted(text:string,size:number):string {
 /** The installation's memory space; only a fresh start, an installation reset or another engine changes it. */
 const workspaceId=(protocol:string,generation:string,revision:number)=>digest(canonical(revision===1?[protocol,generation]:[protocol,generation,revision]));
 type Current=Awaited<ReturnType<NativeMemoryRepository['current']>>;
+/** One block of long-term context a turn reads: its text, the session it came from, whether learning is still running, and
+ *  for a block of facts its record, whether every fact shown is exact, and what it could not say. */
+type ContextBlock={text:string;session:string|null;syncing:boolean;record?:string;exact?:boolean;limitations?:string[]};
+/** Facts a block shows, as the engine's own context holds them (Honcho's WORKING_REPRESENTATION_MAX_OBSERVATIONS); a
+ *  profile's, of which its most-derived half first, as Honcho's profile picks them. */
+const factCount=100,profileFactCount=50,profileDerived=25;
+/** Whose facts a block reads, within which sessions (null: the whole space), and whether as the engine's profile. */
+type FactRead={subject:string;sessions:string[]|null;profile:boolean};
+type FactList={facts:EngineFact[];limitations:string[]};
 
 /** How many messages of each learned batch a memory search hit names by source (ADR-0261): the first 3 references of each
  *  receipt; later ones keep today's fields alone. */
@@ -102,7 +115,10 @@ export const searchTagged=(found:{ids:readonly string[];from?:readonly {position
 export class NativeMemoryRepository {
   constructor(readonly contexts:LearningContextRepository,readonly derived:DerivedRepository,readonly prepared:PreparedContextRepository,
     readonly provenance:MemoryProvenanceRepository,readonly engine:MemoryEngine,readonly detect:(text:string,background?:boolean)=>Promise<unknown>,
-    readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy(),contexts.access)){}
+    readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy(),contexts.access),
+    readonly tags:SourceTagRepository|null=null){}
+  /** Where recalled facts came from (ADR-0261). */
+  private get factSources(){return new FactSourceRepository(this.control,this.contexts.access,this.sources);}
   private get protocol(){return this.engine.protocol;}
   private get control(){return this.contexts.access.stores.control;}
   private get guards(){return this.contexts.guards;}
@@ -928,7 +944,7 @@ export class NativeMemoryRepository {
     const [read,forwards]=await Promise.all([own,this.materialContext(current,source).catch(()=>null)]);
     return {...read,material:forwards};
   }
-  private async conversationContext(current:Current,audience:string,source:SourceReference) {
+  private async conversationContext(current:Current,audience:string,source:SourceReference):Promise<ContextBlock> {
     const entities=await this.contexts.entities.context(source,[]),workspace=current.row.id;
     const session=(await this.control.query('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2 AND audience=$3',[workspace,entities.session_id,audience])).rows[0];
     const written=session?(await this.control.query(`SELECT count(*) FILTER (WHERE state='done')::int AS done,count(*) FILTER (WHERE state<>'done')::int AS pending
@@ -939,24 +955,23 @@ export class NativeMemoryRepository {
     const empty={text:'',session:session?.session_id??null,syncing:written.pending>0};
     // A summary of a person across every session, such as a Honcho peer card, is never read, for any audience (ADR-0225).
     // The owner's block says what it is, since it may still hold what the owner forwarded before forwards were kept apart.
-    const owner=audience==='owner',block=owner?{block:'owner'}:{};
-    let configuration:Record<string,unknown>,summary='',representation='';
+    const owner=audience==='owner',block=owner?{block:'owner'}:{},title=owner?headers.owner:headers.speaker;
     if(session&&written.done) {
       const options={subject:known?speaker:null,limitToSession:known&&audience!=='owner',tokens:contextTokens};
-      configuration={engine:this.engine.id,workspace,audience,session:session.session_id,subject:options.subject,limit_to_session:options.limitToSession,tokens:options.tokens,...block};
-      ({summary,subject:representation}=await this.engine.context(workspace,session.session_id,options));
-    } else if(owner&&known) {
-      configuration={engine:this.engine.id,workspace,audience,peer:speaker,profile:true,...block};
-      representation=await this.engine.profile(workspace,speaker!);
-    } else return empty;
-    const text=string([summary.trim()?headers.summary+'\n'+summary:'',representation.trim()?(owner?headers.owner:headers.speaker)+'\n'+representation:'']
-      .filter(Boolean).join('\n\n'),2*1024*1024);
-    if(!text)return empty;
-    return {...empty,text:await this.guardedContext(current,audience,source,configuration,text)};
+      const configuration={engine:this.engine.id,workspace,audience,session:session.session_id,subject:options.subject,limit_to_session:options.limitToSession,tokens:options.tokens,...block};
+      const facts=options.subject?{subject:options.subject,sessions:options.limitToSession?[session.session_id]:null,profile:false}:null;
+      // The fact list is read beside the context, so the turn waits for the slower of the two.
+      const listed=this.listFacts(workspace,facts),read=await this.engine.context(workspace,session.session_id,options);
+      return this.contextBlock(current,audience,source,configuration,empty,{title,summaryTitle:headers.summary,summary:read.summary,
+        summaryMessage:read.summaryMessage,representation:read.subject,facts,listed});
+    }
+    if(owner&&known)return this.contextBlock(current,audience,source,{engine:this.engine.id,workspace,audience,peer:speaker,profile:true,...block},empty,
+      {title,summaryTitle:headers.summary,summary:'',summaryMessage:null,representation:'',facts:{subject:speaker!,sessions:null,profile:true}});
+    return empty;
   }
   /** What the owner forwarded from others and the files the owner sent, as the forwards-and-files participant holds them
    * across the whole space, with the summary of the session of forwards: the owner audience only. */
-  private async materialContext(current:Current,source:SourceReference) {
+  private async materialContext(current:Current,source:SourceReference):Promise<ContextBlock> {
     const workspace=current.row.id;
     const session=(await this.control.query('SELECT * FROM memory_sessions WHERE workspace=$1 AND key=$2 AND audience=$3',
       [workspace,materialSessionKey(this.protocol),'owner'])).rows[0];
@@ -965,34 +980,117 @@ export class NativeMemoryRepository {
     // The participant only ever writes its own records, so it is their writer (memory_receipts_live_writer).
     const known=!!(await this.control.query(`SELECT 1 FROM memory_ingestion_receipts WHERE generation=$1 AND retired_at IS NULL AND state='done'
       AND peer_id=$2 LIMIT 1`,[workspace,materialPeer])).rowCount;
-    const empty={text:'',session:session?.session_id??null,syncing:written.pending>0};
-    let configuration:Record<string,unknown>,summary='',representation='';
+    const empty={text:'',session:session?.session_id??null,syncing:written.pending>0},labels={title:headers.material,summaryTitle:headers.materialSummary};
     if(session&&written.done) {
       const options={subject:known?materialPeer:null,limitToSession:false,tokens:materialTokens};
-      configuration={engine:this.engine.id,workspace,audience:'owner',block:'material',session:session.session_id,subject:options.subject,limit_to_session:false,tokens:options.tokens};
-      ({summary,subject:representation}=await this.engine.context(workspace,session.session_id,options));
-    } else if(known) {
-      configuration={engine:this.engine.id,workspace,audience:'owner',block:'material',peer:materialPeer,profile:true};
-      representation=await this.engine.profile(workspace,materialPeer);
-    } else return empty;
-    const text=string([summary.trim()?headers.materialSummary+'\n'+summary:'',representation.trim()?headers.material+'\n'+representation:'']
-      .filter(Boolean).join('\n\n'),2*1024*1024);
-    if(!text)return empty;
-    return {...empty,text:await this.guardedContext(current,'owner',source,configuration,text)};
+      const configuration={engine:this.engine.id,workspace,audience:'owner',block:'material',session:session.session_id,subject:options.subject,limit_to_session:false,tokens:options.tokens};
+      // As many facts as the engine's own context gives (WORKING_REPRESENTATION_MAX_OBSERVATIONS, 100).
+      const facts=known?{subject:materialPeer,sessions:null,profile:false}:null;
+      const listed=this.listFacts(workspace,facts),read=await this.engine.context(workspace,session.session_id,options);
+      return this.contextBlock(current,'owner',source,configuration,empty,{...labels,summary:read.summary,summaryMessage:read.summaryMessage,
+        representation:read.subject,facts,listed});
+    }
+    if(known)return this.contextBlock(current,'owner',source,{engine:this.engine.id,workspace,audience:'owner',block:'material',peer:materialPeer,profile:true},empty,
+      {...labels,summary:'',summaryMessage:null,representation:'',facts:{subject:materialPeer,sessions:null,profile:true}});
+    return empty;
   }
-  /** One block of context, guarded once per distinct result and bounded on its own. */
-  private async guardedContext(current:Current,audience:string,source:SourceReference,configuration:Record<string,unknown>,text:string):Promise<string> {
-    const workspace=current.row.id;
+  /**
+   * One block of long-term context. An engine that lists facts gives each its source line (ADR-0261, B3.1): the facts the
+   * engine's own context would hold (the newest, within its session for a group), or for a profile the ones the engine's
+   * profile picks. An engine that cannot list them keeps its prose; so does a block whose facts or source lines could not
+   * be read, or whose fact lines the guard changed, which says so (`source_tags_unavailable`) and is counted.
+   */
+  private async contextBlock(current:Current,audience:string,source:SourceReference,configuration:Record<string,unknown>,empty:ContextBlock,
+    input:{title:string;summaryTitle:string;summary:string;summaryMessage:string|null;representation:string;facts:FactRead|null;listed?:Promise<FactList>|null}):Promise<ContextBlock> {
+    const prose=async():Promise<ContextBlock>=>{
+      const representation=input.facts?.profile?await this.engine.profile(current.row.id,input.facts.subject):input.representation;
+      const text=string([input.summary.trim()?input.summaryTitle+'\n'+input.summary:'',representation.trim()?input.title+'\n'+representation:'']
+        .filter(Boolean).join('\n\n'),2*1024*1024);
+      if(!text)return empty;
+      return {...empty,text:(await this.guardedContext(current,audience,source,configuration,text)).text};
+    };
+    if(!this.sourcesFacts(input.facts))return prose();
+    try{return {...empty,...await this.factContext(current,audience,source,configuration,{...input,facts:input.facts})};}
+    catch(error) {
+      if(bindingMoved(error)||error instanceof HttpError&&error.code==='memory_context_retired')throw error;
+      // Why, by code only: the facts could not be read, or the guard changed their lines (source_lines_changed).
+      console.warn(JSON.stringify({event:'memory_source_lines_failed',engine:this.engine.id,code:error instanceof HttpError?error.code:'memory_source_lines_error'}));
+    }
+    await countMemoryStep(this.control,'source_tags',false);
+    const fallback=await prose();
+    return fallback.text?{...fallback,limitations:['representation_has_no_exact_citations','source_tags_unavailable']}:fallback;
+  }
+  /** Whether a block's facts are read with their sources: an engine that lists facts (and, for a profile, its most
+   *  derived), with tags to name them. */
+  private sourcesFacts(read:FactRead|null):read is FactRead {
+    return !!read&&!!this.engine.facts&&!!this.tags&&!(read.profile&&!this.engine.mostDerived);
+  }
+  /** The block's facts, started early; a failure is the block's to handle, when it reads them. */
+  private listFacts(workspace:string,read:FactRead|null):Promise<FactList>|null {
+    if(!this.sourcesFacts(read))return null;
+    const listed=read.profile?this.profileFacts(workspace,read.subject):this.engine.facts!(workspace,read.subject,{sessions:read.sessions,size:factCount,cursor:null});
+    listed.catch(()=>{});return listed;
+  }
+  /** What the engine's profile of a participant holds (B3.2), rebuilt from its fact list: its 25 most-derived facts, in
+   *  its order, then the newest, up to 50. Exact unless more than 300 facts were learned more than once. */
+  private async profileFacts(workspace:string,subject:string):Promise<FactList> {
+    const [top,recent]=await Promise.all([this.engine.mostDerived!(workspace,subject,{sessions:null}),this.engine.facts!(workspace,subject,{sessions:null,size:100,cursor:null})]);
+    const chosen=top.facts.slice(0,profileDerived),ids=new Set(chosen.map(fact=>fact.id));
+    return {facts:[...chosen,...recent.facts.filter(fact=>!ids.has(fact.id)).slice(0,profileFactCount-chosen.length)],
+      limitations:[...new Set([...top.limitations,...recent.limitations,...top.complete?[]:['profile_most_derived_incomplete']])].sort()};
+  }
+  /**
+   * B3.1: the summary and each fact on a numbered line with its source message's time, under source lines code builds
+   * (B2): the engine's facts map to receipts of this reader's audience, are ordered, given `by` and a header source, and
+   * the header sources are tagged at day precision for this reader, in one request. Only the summary and fact lines are
+   * guarded. The bounded record keeps every fact's every source and its exactness, so a fact can be opened by its number
+   * and a retired source found; their digest is part of the record's configuration, so a changed source is a new record.
+   * Throws when its facts or tags cannot be read, or the guard changed the fact lines (the caller falls back to prose).
+   */
+  private async factContext(current:Current,audience:string,source:SourceReference,configuration:Record<string,unknown>,
+    input:{title:string;summaryTitle:string;summary:string;summaryMessage:string|null;facts:FactRead;listed?:Promise<FactList>|null}) {
+    const workspace=current.row.id,binding=current.binding,principal=this.principal(audience,source.id,binding);
+    const scope={audience,group:audience==='owner'?null:this.recallGroup(principal)},read=input.facts;
+    const page=await (input.listed??this.listFacts(workspace,read)!);
+    const sourced=await this.factSources.sourced(principal,binding,workspace,read.subject,page.facts,scope);
+    const summaryReference=input.summary.trim()&&input.summaryMessage?
+      (await this.factSources.receipts(workspace,[input.summaryMessage],scope)).get(input.summaryMessage)?.primary??null:null;
+    const references=[...sourced.flatMap(item=>item.header?[item.header]:[]),...summaryReference?[summaryReference]:[]];
+    const tags=references.length?await this.tags!.tags(principal,binding,references,{precision:'day',historical:true,compact:true}):new Map();
+    const facts:BlockFact[]=sourced.map(item=>{
+      const tag=item.header?tags.get(item.header.id)??null:null;
+      return {conclusion:item.fact.id,content:item.fact.content,by:item.by,exact:item.exact,batch:item.fact.exact===false,cited:item.fact.writes.length>0,
+        tag:tag?.tag??null,time:tag?.time??null,order:Date.parse(tag?.at??'')||Date.parse(item.fact.createdAt)||0,more:item.more};
+    });
+    const plan=planFactBlock({title:input.title,summaryTitle:input.summaryTitle,summary:input.summary,
+      through:summaryReference?tags.get(summaryReference.id)?.day??null:null,facts});
+    const behind=new Map(sourced.map(item=>[item.fact.id,item]));
+    const exact=plan.facts.length>0&&plan.facts.every(fact=>fact.exact);
+    const limitations=[...new Set([...exact?[]:['some_facts_cite_only_their_batch'],...page.limitations,...plan.left?['older_facts_left_out']:[]])].sort();
+    // Every source of every fact shown, in order, readable or not: what opening a fact and retiring a source read.
+    const provenance={facts:plan.facts.map(fact=>{const item=behind.get(fact.conclusion)!;
+      return {n:fact.n,conclusion:fact.conclusion,exact:fact.exact,by:fact.by,time:fact.time,sources:item.sources,more:fact.more,complete:item.complete,session:item.fact.session};}),
+      summary_through:plan.through,limitations};
+    const guarded=await this.guardedContext(current,audience,source,{...configuration,facts_digest:digest(canonical(provenance))},plan.text,provenance);
+    const text=renderFactBlock(plan,guarded.text,'nocheh:memory:'+guarded.record);
+    if(text===null)throw new HttpError(409,'source_lines_changed');
+    return {text,record:guarded.record,exact,limitations};
+  }
+  /** One block of context, guarded once per distinct result and bounded on its own. A block of facts keeps their sources
+   *  in its bounded record's provenance. */
+  private async guardedContext(current:Current,audience:string,source:SourceReference,configuration:Record<string,unknown>,text:string,
+    facts?:{limitations:string[]}&Record<string,unknown>):Promise<{text:string;record:string}> {
+    const workspace=current.row.id,limitations=facts?facts.limitations:['representation_has_no_exact_citations'];
     // Identical engine output reuses its guarded copy, so a prefetched context needs no new detection on arrival.
     const key='native-context:'+digest(canonical([configuration,digest(text)]));
     const raw=await this.derived.record({operation_id:key,source:current.row.root_reference,kind:'memory_result',content:Buffer.from(text),
-      producer:this.engine.id,producer_version:this.protocol,configuration,provenance:{limitations:['representation_has_no_exact_citations']}});
+      producer:this.engine.id,producer_version:this.protocol,configuration,provenance:{limitations}});
     const output=await this.derived.record({operation_id:key+':bounded',source:current.row.root_reference,parents:[raw],kind:'memory_context',
       content:Buffer.from(Array.from(text).slice(0,contextCharacters).join('')),producer:'nocheh',producer_version:this.protocol,
-      configuration:{max_characters:contextCharacters,workspace,audience},provenance:{limitations:['representation_has_no_exact_citations']}});
+      configuration:{max_characters:contextCharacters,workspace,audience,...facts?{facts_digest:configuration.facts_digest}:{}},provenance:facts??{limitations}});
     await this.guards.prepareContext(output,this.protocol,this.principal(audience,source.id,current.binding),this.prepared,this.detect);
     const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
-    return String(value.text??'');
+    return {text:String(value.text??''),record:output.id};
   }
   /** An owner decision, such as retiring a message, can make engine writes invalid. The engine keeps them until a
    * correction sweep at that decision's epoch or later rebuilds their sessions and the engine deletes the old ones with
@@ -1022,10 +1120,10 @@ export class NativeMemoryRepository {
       await this.current(workspace.id);await this.prepared.audience.assert(principal);
       const syncing=read.syncing||!!read.material?.syncing||current.row.state==='building';
       const failed=material&&read.material===null?['forwards_unavailable']:[],about=(name:string)=>material?{about:name}:{};
-      const sources=[...(read.text?[{source:'nocheh:memory:'+(read.session??workspace.id),kind:'memory_inference',text:read.text,exact_citations:false,
-        limitations:['representation_has_no_exact_citations',...failed],...about('owner')}]:[]),
-        ...(read.material?.text?[{source:'nocheh:memory:'+(read.material.session??materialPeer),kind:'memory_inference',text:read.material.text,exact_citations:false,
-          limitations:['representation_has_no_exact_citations'],...about('forwards_and_files')}]:[])];
+      // A block of facts is named by its record, which keeps every fact's sources (ADR-0261); prose by its session.
+      const entry=(block:ContextBlock,fallback:string,more:string[],name:string)=>({source:'nocheh:memory:'+(block.record??block.session??fallback),kind:'memory_inference',
+        text:block.text,exact_citations:block.exact??false,limitations:[...block.limitations??['representation_has_no_exact_citations'],...more],...about(name)});
+      const sources=[...(read.text?[entry(read,workspace.id,failed,'owner')]:[]),...(read.material?.text?[entry(read.material,materialPeer,[],'forwards_and_files')]:[])];
       if(!sources.length)return {sources:[],limited_memory:false,syncing,...(failed.length?{limitations:failed}:{})};
       for(const item of sources)await this.prepared.allow(principal,{text:item.text});
       return {sources,limited_memory:false,syncing};

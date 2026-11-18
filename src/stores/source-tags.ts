@@ -2,11 +2,11 @@ import type pg from 'pg';
 import type {Reader} from '../access.js';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {chats} from '../chats.js';
-import {telegramMessage,telegramSenderName} from '../chats-telegram.js';
+import {telegramMessage,telegramSenderName,telegramUsername} from '../chats-telegram.js';
 import {forwardFacts} from '../forwarded.js';
 import {HttpError} from '../http.js';
 import {sourceChat} from '../spaces.js';
-import {shownFileName,sourceDetails,sourceMoment,sourceTag,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
+import {shownFileName,sourceClock,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
 import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
 import {ownerPeopleNames} from './entities.js';
@@ -19,7 +19,9 @@ type Pools={archive:Pick<pg.Pool,'query'>;derived:Pick<pg.Pool,'query'>;control:
 /** How tags are asked for: a minute or a day; `historical` for evidence already learned, whose reaction may have changed
  *  since (canRead's own option); and `shown`, each source's payload as the caller already read it for this reader (the
  *  guarded copy's payload when the secret check is on), so nothing is read twice. */
-export interface TagOptions {precision?:'minute'|'day';historical?:boolean;shown?:ReadonlyMap<string,unknown>;details?:boolean}
+export interface TagOptions {precision?:'minute'|'day';historical?:boolean;shown?:ReadonlyMap<string,unknown>;details?:boolean;
+  /** Names a person's @username only when another sender in the request shows the same name (a recall block's headers). */
+  compact?:boolean}
 /** The one call that runs every request's tag texts through the secret check (PreparedContextRepository.prepare). */
 type Prepare=(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>)=>Promise<unknown>;
 /** A guard binding that moved on is the caller's to retry, never a tag that failed. */
@@ -108,6 +110,15 @@ export class SourceTagRepository {
     // Chat and topic names once; anyone but the owner reads only the names Telegram showed.
     const names=await recallNames(this.stores,[...new Set(sources.map(source=>source.chat).filter((chat):chat is string=>chat!==null))],{shownOnly:!owner});
     const reader:TagReader={owner,chat:owner?principal.space??ownerChat(policy):principal.space??principal.scope,zone,precision:options.precision??'minute'};
-    return sources.map(source=>({...sourceTag(source,reader,names,directory),...(options.details?sourceDetails(source,reader,names,directory):{})}));
+    // Compact: a person's @username only tells apart two senders the request shows by the same name.
+    const key=(source:TagSource)=>tagName(source.sender.name).toLocaleLowerCase().replace(/\s+/g,''),handles=new Map<string,Set<string>>();
+    if(options.compact)for(const source of sources) {
+      const name=key(source);if(!name)continue;
+      if(!handles.has(name))handles.set(name,new Set());handles.get(name)!.add(telegramUsername(source.sender.username)??'');
+    }
+    return sources.map(source=>{
+      const usernames=!options.compact||(handles.get(key(source))?.size??0)>1,clock=reader.precision==='day'?sourceClock(source.moment,reader):null;
+      return {...sourceTag(source,reader,names,directory,{usernames}),...(options.details?sourceDetails(source,reader,names,directory):{}),...(clock??{})};
+    });
   }
 }
