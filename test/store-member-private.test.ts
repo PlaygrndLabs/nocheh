@@ -36,7 +36,7 @@ test('a member\'s private chat: admission, its groups, the daily cap, its passes
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-member-private-')),key='member-private:'+Date.now();
   const policy=groupsPolicy({group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS]});
   const refusals:Record<string,any>[]=[],turns:Record<string,any>[]=[],asked:Record<string,any>[]=[];
-  let status:(input:Record<string,unknown>)=>Record<string,unknown>=()=>({state:'done',status:'in'});
+  let status:(input:Record<string,unknown>)=>Record<string,unknown>|Promise<Record<string,unknown>>=()=>({state:'done',status:'in'});
   const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='telegram.refusal'){refusals.push(input);return {state:'done'};}
@@ -96,8 +96,8 @@ test('a member\'s private chat: admission, its groups, the daily cap, its passes
     // confirmed within 30 days. MEMBER_GP: GP1 in, GP2 left, GP3 switched off, UNSERVED not served.
     for(const chat of [GP1,GP3,UNSERVED])await confirmed(MEMBER_GP_ACCOUNT,chat,1/24);
     await confirmed(MEMBER_GP_ACCOUNT,GP2,1/24,'left');
-    assert.deepEqual(await memberReads(stores.control,MEMBER_GP_CHAT).then(reads=>reads&&{...reads,groups:reads.groups.map(group=>group.chat)}),
-      {member:MEMBER_GP_ID,chat:MEMBER_GP_CHAT,groups:[GP1]});
+    assert.deepEqual(await memberReads(stores.control,MEMBER_GP_CHAT).then(reads=>reads&&{...reads,groups:reads.groups.map(group=>group.chat),stale:reads.stale.map(group=>group.chat)}),
+      {member:MEMBER_GP_ID,chat:MEMBER_GP_CHAT,groups:[GP1],stale:[]});
     await confirmed(MEMBER_GP_ACCOUNT,GP1,29);assert.deepEqual(await groupsOf(MEMBER_GP_CHAT),[GP1],'29 days: still in');
     await confirmed(MEMBER_GP_ACCOUNT,GP1,31);assert.deepEqual(await groupsOf(MEMBER_GP_CHAT),[],'31 days: left out');
     await stores.control.query('UPDATE chat_memberships SET checked_at=NULL WHERE account_id=$1 AND chat_id=$2',[MEMBER_GP_ACCOUNT,GP1]);
@@ -133,6 +133,27 @@ test('a member\'s private chat: admission, its groups, the daily cap, its passes
     status=()=>({state:'done',status:'in'});const steady=await revision();
     assert.deepEqual(await recheckMemberGroups(stores.control,call,reads),{past:[],moved:false});
     assert.deepEqual(await row(NG2),{state:'in',source:'checked',fresh:true});assert.equal(await revision(),steady);
+    // A group last confirmed more than 30 days ago is not read, but is asked again too; Telegram's 'in' brings it back.
+    await confirmed(MEMBER_NG_ACCOUNT,NG2,31);reads=(await memberReads(stores.control,MEMBER_NG_CHAT))!;
+    assert.deepEqual([reads.groups.map(group=>group.chat),reads.stale.map(group=>group.chat)],[[NG1],[NG2]]);
+    asked.splice(0);assert.deepEqual(await recheckMemberGroups(stores.control,call,reads),{past:[],moved:false});
+    assert.deepEqual(asked,[{chat_id:NG2_TG,user_id:MEMBER_NG}]);assert.deepEqual(await groupsOf(MEMBER_NG_CHAT),[NG1,NG2].sort());
+    // A leave written while Telegram was asked stays: the late 'in' answer is for a row that no longer says so.
+    await confirmed(MEMBER_NG_ACCOUNT,NG2,2);reads=(await memberReads(stores.control,MEMBER_NG_CHAT))!;
+    status=async()=>{
+      await stores.control.query(`UPDATE chat_memberships SET state='left',source='event',checked_at=now() WHERE account_id=$1 AND chat_id=$2`,[MEMBER_NG_ACCOUNT,NG2]);
+      return {state:'done',status:'in'};
+    };
+    assert.deepEqual(await recheckMemberGroups(stores.control,call,reads),{past:[],moved:false});
+    assert.deepEqual(await row(NG2),{state:'left',source:'event',fresh:true});assert.deepEqual(await groupsOf(MEMBER_NG_CHAT),[NG1]);
+    // Groups Telegram does not answer move behind the others: with room for one check, a failed one lets the next one
+    // be asked on the following turn, and the one not asked is left out of that turn.
+    await confirmed(MEMBER_NG_ACCOUNT,NG1,3);await confirmed(MEMBER_NG_ACCOUNT,NG2,2);reads=(await memberReads(stores.control,MEMBER_NG_CHAT))!;
+    status=()=>({state:'not_started'});asked.splice(0);
+    assert.deepEqual(await recheckMemberGroups(stores.control,call,reads,Date.now(),1),{past:[NG2],moved:false});
+    assert.deepEqual(await recheckMemberGroups(stores.control,call,reads,Date.now(),1),{past:[NG1],moved:false});
+    assert.deepEqual(asked.map(input=>input.chat_id),[NG1_TG,NG2_TG]);
+    await confirmed(MEMBER_NG_ACCOUNT,NG1,1/24);await confirmed(MEMBER_NG_ACCOUNT,NG2,2);status=()=>({state:'done',status:'in'});
 
     // Preparation: a member's open private chat is prepared like the owner's; private chat off, and a stranger, are not.
     const operations=storageWorkflowOperations(s,async()=>{throw Error('unexpected download');});

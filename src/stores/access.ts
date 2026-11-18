@@ -260,7 +260,12 @@ export class SourceAccessRepository {
       if(!memberClaimId.test(principal.member!)||principal.scope===owner)throw closed();
       const found=await memberReads(this.stores.control,principal.scope,owner);
       if(!found||found.member!==principal.member||found.chat!==principal.scope)throw closed();
-      return {...principal,reads:readSet({home:found.chat,whole:found.groups.map(group=>group.chat)}),memberChat:found.chat};
+      // The groups this turn leaves out (re-checks past the cap), as its dispatch wrote them; a turn with none written
+      // reads nothing.
+      const left=(await this.stores.control.query<{left_out:string[]}>('SELECT left_out FROM member_turns WHERE member_id=$1 AND event_id=$2 AND left_out IS NOT NULL',
+        [found.member,principal.turnEvent])).rows[0]?.left_out;
+      if(!left)throw closed();
+      return {...principal,reads:readSet({home:found.chat,whole:found.groups.map(group=>group.chat).filter(group=>!left.includes(group))}),memberChat:found.chat};
     }
     if(principal.scope!==owner)throw closed();
     // Only the turn of the owner's own message that asked it: its pass names that message as its turn.

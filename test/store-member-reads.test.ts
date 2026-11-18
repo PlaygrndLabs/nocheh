@@ -105,8 +105,12 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
       payload:{message:{message_id:serial,date:1700000000,chat:{id:Number(raw),type,is_forum:false},from:{id:Number(from),first_name:'Mira'},text}}};
     const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
   };
-  const turn=async(source:{id:string},chat:string,claims:Partial<Reader>={}):Promise<Reader>=>{
+  /** A turn's reader. A member's private turn has its member_turns row with the groups it leaves out (`left`), as its
+   * dispatch writes it before binding; `null` leaves the row as it is. */
+  const turn=async(source:{id:string},chat:string,claims:Partial<Reader>={},left:string[]|null=[]):Promise<Reader>=>{
     const binding=await s.guards.state();
+    if(claims.member&&left)await stores.control.query(`INSERT INTO member_turns(member_id,event_id,day,left_out) VALUES($1,$2,current_date,$3::text[])
+      ON CONFLICT(member_id,event_id) DO UPDATE SET left_out=excluded.left_out`,[claims.member,source.id,left]);
     return {admin:false,scope:chat,space:chat,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch,...claims};
   };
   try {
@@ -125,6 +129,15 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
       const bound=await s.access.bindReads(await turn(said,chat,{member}));
       assert.equal(bound.memberChat,chat);
       assert.deepEqual(readSetGroups(bound.reads!),chat===MEMBER_GP_CHAT?[GP1,GP4].sort():[NG1,NG2].sort());
+      // A group the turn left out (a re-check past the cap) is left out of every read bound to that turn, its tools' too;
+      // a turn whose dispatch wrote no list reads nothing.
+      const narrowed=await s.access.bindReads(await turn(said,chat,{member},[chat===MEMBER_GP_CHAT?GP4:NG2]));
+      assert.deepEqual(readSetGroups(narrowed.reads!),[chat===MEMBER_GP_CHAT?GP1:NG1]);
+      await stores.control.query('UPDATE member_turns SET left_out=NULL WHERE member_id=$1 AND event_id=$2',[member,said.id]);
+      await assert.rejects(s.access.bindReads(await turn(said,chat,{member},null)),{status:409,code:'member_chat_closed'},'no list written');
+      await stores.control.query('DELETE FROM member_turns WHERE member_id=$1 AND event_id=$2',[member,said.id]);
+      await assert.rejects(s.access.bindReads(await turn(said,chat,{member},null)),{status:409,code:'member_chat_closed'},'no turn row');
+      await turn(said,chat,{member});
       for(const [why,claims] of Object.entries({'another member':{member:member===MEMBER_GP_ID?MEMBER_NG_ID:MEMBER_GP_ID},'no turn':{member,turnEvent:undefined},
         'another chat\'s member':{member,scope:BOB_CHAT,space:BOB_CHAT},'the owner\'s chat':{member,scope:OWNER,space:OWNER}}))
         await assert.rejects(s.access.bindReads({...await turn(said,chat),...claims} as Reader),{status:409,code:'member_chat_closed'},why);

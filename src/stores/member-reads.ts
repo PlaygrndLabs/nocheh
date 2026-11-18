@@ -18,8 +18,10 @@ type Db=Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>;
 /** One group a member reads from their private chat, with when Telegram's newest 'in' row for one of their accounts
  * there was last confirmed (chat_memberships.checked_at). */
 export interface MemberReadGroup {readonly chat:string;readonly checked_at:Date}
-/** A member's own private chat and the groups it reads, sorted by chat id. */
-export interface MemberReads {readonly member:string;readonly chat:string;readonly groups:readonly MemberReadGroup[]}
+/** A member's own private chat and the groups it reads, sorted by chat id. `stale` holds the groups it does not read only
+ * because Telegram's newest 'in' there was confirmed longer ago than MEMBER_READ_STALE_DAYS, or never (as the epoch):
+ * asked again before a private turn like the due ones, a confirmed 'in' brings one back. */
+export interface MemberReads {readonly member:string;readonly chat:string;readonly groups:readonly MemberReadGroup[];readonly stale:readonly MemberReadGroup[]}
 /** Refused when a chat is not, or no longer, an open member private chat: 409. */
 export const memberChatClosed='member_chat_closed';
 /** A membership row older than this no longer counts as 'in' (D5): the member is left out of that group. */
@@ -58,20 +60,19 @@ export async function memberReads(db:Db,chat:string,owner:string|null=ownerChatN
   // know yet is asked of the store, which decides by its own rows.
   const known=chats().get(chat);
   if(known&&(known.kind!=='private'||known.owner))return null;
-  const rows=(await db.query<{chat:string;member:string;group:string|null;checked_at:Date|null}>(`WITH own AS (${openMemberChat}),
+  const rows=(await db.query<{chat:string;member:string;group:string|null;checked_at:Date|null;fresh:boolean|null}>(`WITH own AS (${openMemberChat}),
     accounts AS (SELECT a.id FROM chat_accounts a JOIN own ON a.member_id=own.member
       WHERE NOT EXISTS(SELECT 1 FROM chats o WHERE o.id=$2 AND o.account_id=a.id)),
     newest AS (SELECT DISTINCT ON (s.chat_id) s.chat_id,s.state,s.checked_at FROM chat_memberships s WHERE s.account_id IN (SELECT id FROM accounts)
       ORDER BY s.chat_id,s.checked_at DESC NULLS LAST,s.since DESC)
-    SELECT own.chat,own.member,n.chat_id AS group,n.checked_at FROM own LEFT JOIN newest n ON n.state='in' AND n.checked_at IS NOT NULL
-      AND n.checked_at>now()-make_interval(days=>$3::int)
+    SELECT own.chat,own.member,n.chat_id AS group,n.checked_at,n.checked_at>now()-make_interval(days=>$3::int) AS fresh FROM own LEFT JOIN newest n ON n.state='in'
       AND EXISTS(SELECT 1 FROM chats g WHERE g.id=n.chat_id AND g.kind='group' AND g.parent_id IS NULL AND g.state='active')
       AND NOT EXISTS(SELECT 1 FROM member_chats w WHERE w.member_id=own.member AND w.chat_id=n.chat_id AND NOT w.enabled)`,
     [chat,owner,MEMBER_READ_STALE_DAYS])).rows;
   if(!rows.length)return null;
-  const groups=rows.filter(row=>row.group!==null).map(row=>({chat:row.group!,checked_at:row.checked_at!}))
-    .sort((a,b)=>a.chat<b.chat?-1:a.chat>b.chat?1:0);
-  return {member:rows[0]!.member,chat:rows[0]!.chat,groups:Object.freeze(groups.map(group=>Object.freeze(group)))};
+  const sorted=(fresh:boolean)=>Object.freeze(rows.filter(row=>row.group!==null&&(row.fresh===true)===fresh)
+    .map(row=>Object.freeze({chat:row.group!,checked_at:row.checked_at??new Date(0)})).sort((a,b)=>a.chat<b.chat?-1:a.chat>b.chat?1:0));
+  return {member:rows[0]!.member,chat:rows[0]!.chat,groups:sorted(true),stale:sorted(false)};
 }
 
 /** What the owner's ask about a member reads (step 4b): the ask, the owner's message that asked it (`event`), its member
@@ -96,15 +97,23 @@ export async function memberAskReads(db:Db,ask:string,owner:string|null=ownerCha
 }
 
 /**
- * Which of a member's groups to ask Telegram about again before a private turn (D5): those confirmed longer ago than
- * MEMBER_RECHECK_HOURS, oldest first, at most MEMBER_RECHECK_LIMIT (`ask`); the rest that needed it (`past`) are left out
- * of that turn.
+ * Which of a member's groups to ask Telegram about again before a private turn (D5): those it reads that were confirmed
+ * longer ago than MEMBER_RECHECK_HOURS and the stale ones it does not read, oldest first, at most MEMBER_RECHECK_LIMIT
+ * (`ask`). A group asked lately without an answer (`tried`, when it was last asked) counts from that time, so groups
+ * Telegram does not answer move behind the others and never keep them from being asked. The groups it reads that needed
+ * a check past the cap (`past`) are left out of that turn.
  */
-export function memberRechecks(reads:Pick<MemberReads,'groups'>,now=Date.now()):{ask:string[];past:string[]} {
-  const due=reads.groups.filter(group=>now-group.checked_at.getTime()>MEMBER_RECHECK_HOURS*3600000)
-    .sort((a,b)=>a.checked_at.getTime()-b.checked_at.getTime()||(a.chat<b.chat?-1:a.chat>b.chat?1:0)).map(group=>group.chat);
-  return {ask:due.slice(0,MEMBER_RECHECK_LIMIT),past:due.slice(MEMBER_RECHECK_LIMIT)};
+export function memberRechecks(reads:Pick<MemberReads,'groups'>&Partial<Pick<MemberReads,'stale'>>,now=Date.now(),
+  tried:(chat:string)=>number|undefined=()=>undefined,limit=MEMBER_RECHECK_LIMIT):{ask:string[];past:string[]} {
+  const reading=new Set(reads.groups.map(group=>group.chat)),since=(group:MemberReadGroup)=>Math.max(group.checked_at.getTime(),tried(group.chat)??0);
+  const due=[...reads.groups.filter(group=>now-group.checked_at.getTime()>MEMBER_RECHECK_HOURS*3600000),...reads.stale??[]]
+    .sort((a,b)=>since(a)-since(b)||a.checked_at.getTime()-b.checked_at.getTime()||(a.chat<b.chat?-1:a.chat>b.chat?1:0)).map(group=>group.chat);
+  return {ask:due.slice(0,limit),past:due.slice(limit).filter(chat=>reading.has(chat))};
 }
+
+/** When each member's group was last asked about in this process without an answer (`member group` → ms), so groups
+ * Telegram does not answer rotate behind the others. Entries older than MEMBER_RECHECK_HOURS go. */
+const asked=new Map<string,number>();
 
 /** What Telegram says of a person in a group, as the bot's telegram.member_status answers: 'in' or 'left' ('kicked' and
  * a restricted person who is not a member count as left), or null for anything it cannot tell, which changes nothing. */
@@ -118,15 +127,18 @@ export function memberStatus(answer:unknown):'in'|'left'|null {
 /**
  * Before a member's private turn (D5): asks Telegram (telegram.member_status) about each group memberRechecks names, for
  * the account whose newest row there says 'in', and writes the answer (membershipChecked: source 'checked', checked_at
- * now). 'left' moves the member revision. A call that fails or an answer it cannot read changes nothing. Returns the
- * groups that needed a check past the cap (left out of this turn) and whether any membership moved.
+ * now), unless the row changed while Telegram was asked. 'left' moves the member revision. A call that fails or an
+ * answer it cannot read changes nothing but moves the group behind the others for the next turns. Returns the groups that
+ * needed a check past the cap (left out of this turn) and whether any membership moved.
  */
-export async function recheckMemberGroups(control:pg.Pool,call:RuntimeCall,reads:MemberReads,now=Date.now()):Promise<{past:string[];moved:boolean}> {
-  const {ask,past}=memberRechecks(reads,now);let moved=false;
+export async function recheckMemberGroups(control:pg.Pool,call:RuntimeCall,reads:MemberReads,now=Date.now(),limit=MEMBER_RECHECK_LIMIT):Promise<{past:string[];moved:boolean}> {
+  for(const [key,at] of asked)if(now-at>MEMBER_RECHECK_HOURS*3600000)asked.delete(key);
+  const {ask,past}=memberRechecks(reads,now,chat=>asked.get(reads.member+' '+chat),limit);let moved=false;
   const owner=chats().get(chats().ownerChat())?.account_id??null;
   for(const group of ask) {
+    asked.set(reads.member+' '+group,now);
     const target=chats().appIds(group);if(!target||target.app!=='telegram')continue;
-    const account=(await control.query<{id:string;external_id:string}>(`SELECT a.id,a.external_id FROM chat_memberships p
+    const account=(await control.query<{id:string;external_id:string;seen:string|null}>(`SELECT a.id,a.external_id,p.checked_at::text AS seen FROM chat_memberships p
       JOIN chat_accounts a ON a.id=p.account_id JOIN chat_connections n ON n.id=a.connection_id AND n.app='telegram'
       WHERE a.member_id=$1 AND ($3::text IS NULL OR a.id<>$3) AND p.chat_id=$2 AND p.state='in'
       ORDER BY p.checked_at DESC NULLS LAST,a.id LIMIT 1`,[reads.member,group,owner])).rows[0];
@@ -134,7 +146,8 @@ export async function recheckMemberGroups(control:pg.Pool,call:RuntimeCall,reads
     let state:'in'|'left'|null;
     try{state=memberStatus(await call('telegram.member_status',{chat_id:target.chat,user_id:account.external_id},10000));}catch{state=null;}
     if(state===null)continue;
-    moved=await membershipChecked(control,group,account.id,state)||moved;
+    moved=await membershipChecked(control,group,account.id,state,account.seen)||moved;
+    asked.delete(reads.member+' '+group);
   }
   return {past,moved};
 }
