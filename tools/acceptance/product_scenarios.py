@@ -3464,8 +3464,9 @@ class ProductScenarios(Scenarios):
             found = self.job_ended(title, 600)
             self.gate('running_job_ended_not_permitted', found['state'] == 'failed' and found.get('error_code') == 'job_not_permitted',
                       state=found['state'], error=found.get('error_code'))
+            # A report line starts with '[brain]'; the job's card in GROUP shows the instruction, which names the tool too.
             self.gate('no_job_report', not [sent for sent in self.new(asked) if sent['message']['chat']['id'] == GROUP
-                                            and 'mcp__nocheh__archive_search' in (sent['message'].get('text') or '')])
+                                            and '[brain] mcp__nocheh__archive_search' in (sent['message'].get('text') or '')])
             self.press(send_card, 'approve')
             edited = self.wait('card_says_not_sent', lambda: (lambda shown: shown if 'can no longer do this there' in shown['message']['text']
                                                               else None)(self.card_message(send_card)), 180)
@@ -3536,7 +3537,9 @@ class ProductScenarios(Scenarios):
                 added = self.task_tool({'action': 'add', 'title': 'Not added '+mark}, chat=GROUP, topic=TASK_TOPIC, sender=GUEST)
                 self.gate('read_only_add_refused', added.get('error') == 'not_available_in_this_chat', result=str(added)[:300])
                 listed = self.task_tool({'action': 'list'}, chat=GROUP, topic=TASK_TOPIC, sender=GUEST)
-                self.gate('read_only_still_lists', 'error' not in listed and mark not in json.dumps(listed, ensure_ascii=False), result=str(listed)[:300])
+                # The project's name carries the mark too, so only the listed tasks are searched for it.
+                self.gate('read_only_still_lists', 'error' not in listed and mark not in json.dumps(listed.get('tasks', []), ensure_ascii=False),
+                          result=str(listed)[:300])
             finally:
                 self.change_member(self.member_item(GUEST), tasks='write')
             added = self.task_tool({'action': 'add', 'title': 'Added '+mark}, chat=GROUP, topic=TASK_TOPIC, sender=GUEST)
