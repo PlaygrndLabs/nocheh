@@ -272,6 +272,64 @@ class MemberLaneTests(unittest.TestCase):
         self.assertLess(started.index('1'), started.index('2'))
         self.assertEqual(brain.lanes, {}, 'idle chats and members leave no lane behind')
 
+    def brain(self, turn, capacity=3):
+        def resolve(body, claims):
+            chat = body['scope']
+            return Scope(chat, '4567', claims.get('scope') is None, Scopes.profile(chat), chat, member=claims.get('member') or '')
+        brain = BrainTurns(self.root, self.root / 'spool', SimpleNamespace(enabled=True, resolve=resolve), 'synthetic-model', lambda: 'credentials', turn=turn, capacity=capacity)
+        brain.open();self.addCleanup(brain.stop)
+        return brain
+
+    def wait(self, brain, body):
+        for _ in range(1000):
+            state = brain.resume({'channel': 'telegram', 'event_id': body['event_id'], 'attempt': 1, 'observe_only': True})
+            if state['state'] in CLOSED:return state
+            time.sleep(.01)
+        self.fail('turn did not close')
+
+    def test_a_members_queued_group_turn_does_not_hold_the_group_while_their_private_turn_runs(self):
+        gates, started = {}, []
+        async def turn(root, scope, body, model, credentials, cancelled=None):
+            text = body['text'];started.append(text)
+            while not gates.setdefault(text, threading.Event()).is_set():await asyncio.sleep(.005)
+            return {'state': 'done', 'text': 'Reply to ' + text, 'session_id': 'nocheh-' + text}
+        brain = self.brain(turn)
+        private = turn_body(1, MEMBER_CHAT, {'member': MEMBER, 'lane': MEMBER})
+        group = turn_body(2, '-20', {'lane': MEMBER})
+        owner = turn_body(3, '-20', {})
+        other = turn_body(4, '-20', {'lane': OTHER})
+        brain.start(private)
+        for _ in range(1000):
+            if '1' in started:break
+            time.sleep(.005)
+        brain.start(group);time.sleep(.05)
+        # The member's group turn waits for their private turn, and holds the group meanwhile for nobody.
+        for body in (owner, other):
+            gates[body['text']] = threading.Event();gates[body['text']].set();brain.start(body)
+            self.assertEqual(self.wait(brain, body)['state'], 'done', 'a turn in the group does not wait for the member')
+        self.assertNotIn('2', started, "the member's group turn waits for their private turn")
+        gates['1'].set();self.assertEqual(self.wait(brain, private)['state'], 'done')
+        gates.setdefault('2', threading.Event()).set();self.assertEqual(self.wait(brain, group)['reply']['text'], 'Reply to 2')
+        self.assertEqual(brain.lanes, {}, 'idle chats and members leave no lane behind')
+
+    def test_crossed_member_and_group_turns_all_finish(self):
+        # Two members each in two groups and their own chats, the owner in both groups, in an order that crosses every lane
+        # and space, with fewer slots than turns: all finish, nothing waits on itself.
+        running, peak = [0], [0]
+        async def turn(root, scope, body, model, credentials, cancelled=None):
+            running[0] += 1;peak[0] = max(peak[0], running[0])
+            await asyncio.sleep(.01)
+            running[0] -= 1
+            return {'state': 'done', 'text': 'Reply to ' + body['text'], 'session_id': 'nocheh-' + body['text']}
+        brain = self.brain(turn, capacity=2)
+        plan = [('-20', {'lane': MEMBER}), ('-30', {'lane': OTHER}), (MEMBER_CHAT, {'member': MEMBER, 'lane': MEMBER}), ('-30', {'lane': MEMBER}),
+                ('-20', {'lane': OTHER}), ('-20', {}), (OTHER_CHAT, {'member': OTHER, 'lane': OTHER}), ('-30', {}), (OWNER, {'scope': None})]
+        bodies = [turn_body(number, chat, claims) for number, (chat, claims) in enumerate(plan * 3, 1)]
+        for body in bodies:brain.start(body)
+        self.assertEqual([self.wait(brain, body)['state'] for body in bodies], ['done'] * len(bodies))
+        self.assertLessEqual(peak[0], 2)
+        self.assertEqual(brain.lanes, {}, 'idle chats and members leave no lane behind')
+
 
 
 class MemberTurnProcessTests(unittest.IsolatedAsyncioTestCase):

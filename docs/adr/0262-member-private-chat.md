@@ -257,10 +257,15 @@ stays a destination only behind the owner's card).
 
 ## Turn order
 
-- Hermes runs a member's turns one at a time: the space's lane first, then
-  `lane:<member id>`, then capacity. A member's private pass carries their own
+- Hermes runs a member's turns one at a time: `lane:<member id>` first, then
+  the space's lane, then capacity. A member's private pass carries their own
   lane, and a group pass started by a member's message carries theirs. The
-  owner's, an answer's and an ask's passes carry none and skip the second lock.
+  owner's, an answer's and an ask's passes carry none and skip the first lock.
+- Lanes before spaces, for every turn, so no two turns wait on each other. A
+  member's group turn that waits for their running private turn holds no group
+  lock, so the owner's and other members' turns in that group go on. A later
+  turn in a group can then start before that member's earlier one; Nocheh
+  still sends the group's replies in arrival order (`earlierReply`).
 - **Owner-first priority gate: cut.** Capacity is already 3, so the owner waits
   only while three members' turns run at once, and lanes stop one member taking
   two slots.
