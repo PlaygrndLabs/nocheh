@@ -19,6 +19,12 @@ row that cites a retired source is withheld too, as are compaction summaries
 written after the earliest newly withheld row. A withheld row keeps its place
 and says which retired message or reply caused it, by archive event ID.
 
+A record of long-term memory a turn read (a recall's answer or facts, or a
+fact opened from one) rests on the messages it was learned from. Storage
+reports such a record as retired when any of them is (``retired_records``),
+so a row that cites the record is withheld as one that cites the message
+would be, and its notice names the record by its memory ID.
+
 Hermes native notes (``MEMORY.md``, ``USER.md`` and Hermes' drift backups of
 them) are a third copy. An entry is removed when it cites a retired source or
 a turn whose delivered answer is retired, or when it is exactly the text a
@@ -81,7 +87,8 @@ def service_lookup(event_ids):
         headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
     with urlopen(request,timeout=15) as response:value=json.loads(response.read(1024*1024))
     if (not isinstance(value,dict) or not isinstance(value.get('revision'),str) or not isinstance(value.get('retired'),list)
-            or not isinstance(value.get('answered'),dict) or any(not isinstance(replies,list) for replies in value['answered'].values())):
+            or not isinstance(value.get('answered'),dict) or any(not isinstance(replies,list) for replies in value['answered'].values())
+            or not isinstance(value.get('retired_records',[]),list)):
         raise RuntimeError('retired_history_unavailable')
     return value
 
@@ -111,8 +118,9 @@ def _cites(row):
     return set(IDENTIFIER.findall(REPLY_SOURCE.sub('',' '.join(str(row.get(key) or '') for key in ('content','tool_calls','api_content')))))
 
 
-def _sources(event_ids):
-    return ', '.join('nocheh:event:'+event for event in sorted(event_ids))
+def _sources(event_ids,records=frozenset()):
+    """The retired sources a notice names: archive events by their event ID, records of long-term memory by their memory ID."""
+    return ', '.join(('nocheh:memory:' if event in records else 'nocheh:event:')+event for event in sorted(event_ids))
 
 
 def _spans(content):
@@ -294,20 +302,20 @@ def plan(rows,lookup):
         if event:cited.add(event)
         if user:cited|={span[1] for span in _spans(user['content'])}
         for row in following:cited|=_cites(row)
-    retired,answered=set(),{}
+    retired,answered,records=set(),{},set()
     ordered=sorted(cited)
     for start in range(0,len(ordered),LOOKUP_BATCH):
         value=lookup(ordered[start:start+LOOKUP_BATCH])
-        retired.update(value['retired']);answered.update(value['answered'])
+        retired.update(value['retired']);answered.update(value['answered']);records.update(value.get('retired_records') or ())
     changes={}
     def withhold(row,content):
         change=_withhold(row,content)
         if change:changes[row['id']]=change
     def placeholder(row,causes,replies):
         """Name the retired messages or replies that withhold this row."""
-        if row['role']=='tool':return TOOL_WITHHELD.format(_sources(causes|replies))
+        if row['role']=='tool':return TOOL_WITHHELD.format(_sources(causes|replies,records))
         if row.get('tool_calls') and not row['content']:return ''
-        return ANSWER_WITHHELD.format(_sources(replies)) if replies else CITING_WITHHELD.format(_sources(causes))
+        return ANSWER_WITHHELD.format(_sources(replies)) if replies else CITING_WITHHELD.format(_sources(causes,records))
     for event,user,following in turns:
         quoted=set();carried=set()
         if event in retired:

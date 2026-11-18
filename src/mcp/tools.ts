@@ -177,6 +177,16 @@ async function archiveRead(args:Value,context:ToolContext) {
     // A grant and an owner-corrected entry open through their own checks; neither is open to a private answer (ADR-0261).
     const grant=id.match(/^nocheh:grant:([a-f0-9]{64})$/);
     if(grant)return text(await request(context,'/v1/memory/grants/'+grant[1]));
+    // A recalled fact, by its record and number (ADR-0261). Every answer repeats the record's id as its source, so the stored
+    // row cites the record on its own and a retired source of the fact withholds it.
+    const memory=id.match(/^nocheh:memory:([a-f0-9]{64})$/);
+    if(memory) {
+      const fact=own(args,'fact')&&args.fact!==undefined&&args.fact!==null?args.fact:null;
+      if(fact!==null&&!(Number.isSafeInteger(fact)&&Number(fact)>=1&&Number(fact)<=200))throw new Error('invalid_fact');
+      const opened=record(await request(context,'/v1/memory/facts/'+memory[1]+(fact===null?'':'/'+fact)));
+      const body=typeof opened.text==='string'?opened.text:null;
+      return text({...opened,source:id,...body===null?{}:{text:cut(body,0,2000)}});
+    }
     const learned=id.match(/^nocheh:learned:([a-f0-9]{64}):([1-9][0-9]{0,8})$/);
     if(learned){const entry=record(await request(context,'/v1/memory/learned/'+learned[1]+'/'+learned[2])),body=String(entry.text??'');
       return text({...entry,text:cut(body,0,12000),...(size(body)>12000?{truncated:true}:{})});}
@@ -460,8 +470,11 @@ export const mcpTools:readonly McpTool[]=[
     'A message also has tag, by and at, chat_id (open the conversation around it with mcp__nocheh__archive_page chat and from=at), forward (where a forward came from) and topic; '+
     'answers (the message Nocheh\'s reply answers), reply_to (the message it replies to) and chain (the messages before that, chain of them, default 1, at most 5); '+
     'and replies (count, and the first replies of them, default 3, at most 10). A message in a forum topic is no reply to the topic\'s opening. '+
-    'It also opens nocheh:shared, nocheh:filtered and nocheh:grant ids (what the owner shared) and nocheh:learned ids (an entry and its sources).',
-    inputSchema:shape({id:{type:'string'},replies:{type:'integer',minimum:0,maximum:10},chain:{type:'integer',minimum:0,maximum:5}},['id']),run:archiveRead},
+    'It also opens nocheh:shared, nocheh:filtered and nocheh:grant ids (what the owner shared) and nocheh:learned ids (an entry and its sources). '+
+    'A recalled fact opens by its memory id and number (id=nocheh:memory:<id> fact=<n>, from a memory block or memory_recall\'s facts_source): its text, '+
+    'by, at and its sources, each openable as a message; without fact, the first facts\' numbers and tags. A fact whose source was retired, or that memory '+
+    'no longer holds, is unavailable.',
+    inputSchema:shape({id:{type:'string'},fact:{type:'integer',minimum:1,maximum:200},replies:{type:'integer',minimum:0,maximum:10},chain:{type:'integer',minimum:0,maximum:5}},['id']),run:archiveRead},
   {name:'archive_page',description:'Read a conversation in time order, oldest first, one page at a time: messages, edits, reactions, replies and the text of their files and voice notes. '+
     'Use it to go through a period (from and to as YYYY-MM-DD) or a whole chat; pass next as after for the following page until complete is true. '+
     'position says how many of the chat\'s records are read through. Only the owner may name another chat, by an ID from mcp__nocheh__owner_read. '+
@@ -471,7 +484,10 @@ export const mcpTools:readonly McpTool[]=[
     'Chats that were not learned return nothing (learned is false); use mcp__nocheh__archive_search or mcp__nocheh__archive_page for them. Cite returned source references. '+
     'The first messages of each learned batch carry tag, by and at, as archive_search hits do.',
     inputSchema:shape({query:{type:'string'},limit:{type:'integer',minimum:1,maximum:10}},['query']),run:memorySearch},
-  {name:'memory_recall',description:'Recall long-term memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the conclusions memory holds, so read them with mcp__nocheh__archive_read before relying on a claim that matters.',
+  {name:'memory_recall',description:'Recall long-term memory for this audience, alongside native context and archive tools. Inferences are not original evidence: '+
+    'facts lists the facts memory read while answering (n, text, exact, by, the first sources with their tags, and more), and evidence_count how many it read. '+
+    'Open any of them, its original included, with mcp__nocheh__archive_read id=<facts_source> fact=<n> before relying on a claim that matters. '+
+    'Where facts cannot be listed, evidence_sources lists the archived messages behind them instead.',
     inputSchema:shape({query:{type:'string'},profile:{type:'string'},limit:{type:'integer',minimum:1,maximum:50}},['query']),run:memoryRecall},
   {name:'action_request',description:'Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for a card with the exact message: '+
     'a member who may post to their other groups confirms their own post to a group Telegram has seen them in, and the owner approves everything else. '+

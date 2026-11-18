@@ -107,14 +107,16 @@ export type PrunedSummaries={memory_contexts:number;memory_results:number};
  * records Honcho's output (`memory_result`) and its bounded `memory_context`
  * with a guarded copy, and uses them only in the call that records them; a
  * later identical read reuses or recreates them. A summary younger than
- * `before` is kept, so a read still in progress is never touched.
+ * `before` is kept, so a read still in progress is never touched. A block of facts
+ * is kept with its raw output (ADR-0261): the model opens its facts by the record's
+ * id from stored history, and a retired message is found through it.
  */
 export async function pruneMemorySummaries(derived:pg.ClientBase,before:Date,batch=200):Promise<PrunedSummaries> {
   if(!Number.isSafeInteger(batch)||batch<1)throw Error('invalid_retention_batch');
   await derived.query('BEGIN');
   try {
     const ids=(await derived.query(`SELECT d.id FROM derived_artifacts d WHERE d.kind='memory_context' AND d.operation_id LIKE 'native-context:%:bounded'
-      AND d.created_at<$1
+      AND d.created_at<$1 AND NOT coalesce(d.provenance->'configuration' ? 'facts_digest',false)
       AND NOT EXISTS (SELECT 1 FROM runtime_prepared_inputs p WHERE p.source_id='derived_artifacts:'||d.id) LIMIT $2 FOR UPDATE`,[before,batch])).rows.map(row=>String(row.id));
     const sources=ids.map(id=>'derived_artifacts:'+id);
     for(const table of ['guard_activations','guard_fragments','guard_revisions','guard_sources'])

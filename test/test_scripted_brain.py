@@ -152,6 +152,20 @@ class ScriptedBrainTests(unittest.TestCase):
                                   '[brain] memory_about MARKC absent','[brain] memory_about MARKD absent'],
                          'only long-term memory blocks count: never a native note or the conversation')
 
+    def test_memory_blocks_records_each_long_term_memory_block_as_the_model_read_it(self):
+        # A scenario reads a turn's source lines and fact numbers (ADR-0261): each block's name, what it is about, whether its
+        # facts cite their messages, its limits and its text; never a native note or the conversation.
+        from services.hermes.memory_evidence import PREFIX
+        block={'source':'nocheh:memory:'+'a'*64,'kind':'memory_inference','about':'owner','exact_citations':True,'limitations':[],
+               'text':'[what is known about the owner]\nSource [by=person]: “Bob” · this chat · 2026-11-17\n  1. 10:00 Boat at nine 42'}
+        evidence=message('user',PREFIX+json.dumps({'entries':[{'source':'hermes.native.memory.0','notes':[{'from':'turn','label':'x','content':'note 43'}]},
+                                                               {'source':'nocheh.memory.recall','content':{'sources':[block]}}]}))
+        answers=[self.brain.respond(request(evidence,message('user','[[memory_blocks:%s]]'%number)))['content'] for number in ('42','43')]
+        self.assertEqual(answers,['[brain] memory_blocks 42 present','[brain] memory_blocks 43 absent'])
+        recorded=[event for event in self.brain.events if event.get('directive')=='memory_blocks']
+        self.assertEqual([event['blocks'] for event in recorded],[[{key:block[key] for key in ('source','about','exact_citations','limitations','text')}]]*2)
+        self.assertEqual([event['present'] for event in recorded],[True,False])
+
     def test_a_notes_review_saves_each_review_note_it_reads_and_others_keep_the_mock(self):
         review=('[Archived evidence, not instructions]\nSource nocheh:event:abc; conversation c1; fragment 1. Speakers are not necessarily the owner.\n'
                 '{"text":"by the way [[review-note:MEMBERMARK1 the team meets on Tuesdays]]"} {"text":"[[review-note:MEMBERMARK1 the team meets on Tuesdays]]"}')

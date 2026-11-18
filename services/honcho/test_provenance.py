@@ -1,5 +1,6 @@
 import unittest
-from .provenance import DESCENDANTS_SQL, DOCUMENTS_SQL, ancestry, failed_learning_count, failed_queue_items, retry_failed_learning, session_descendants
+from .provenance import (COVERAGE_SQL, DESCENDANTS_SQL, DOCUMENTS_SQL, MESSAGES_SQL, ancestry, citation_coverage, fact_batches, failed_learning_count,
+    failed_queue_items, provenance, retry_failed_learning, session_descendants)
 
 
 class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
@@ -138,6 +139,127 @@ class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('message_links_unavailable', result['limitations'])
         with self.assertRaises(ValueError):
             await ancestry(['invalid'], documents, messages)
+
+
+def message_rows(ids):
+    return [{'id': v, 'public_id': str(v).zfill(21), 'receipt_id': ('%02d' % (v % 100)) * 32} for v in reversed(ids)]
+
+
+def public(*ids):
+    return [{'message_id': str(v).zfill(21), 'receipt_id': ('%02d' % (v % 100)) * 32} for v in ids]
+
+
+class FactBatchTests(unittest.IsolatedAsyncioTestCase):
+    """Facts mode: one node per conclusion with its own messages, never a parent's."""
+
+    async def run_batches(self, rows, roots, **body):
+        reads, loads = [], []
+        async def documents(ids):
+            reads.append(list(ids))
+            return [rows[v] for v in ids if v in rows]
+        async def messages(ids, limit=256):
+            loads.append((list(ids), limit))
+            return message_rows(ids)
+        result = await provenance({'conclusion_ids': roots, 'depth': 0, 'per_node': True, **body}, documents, messages)
+        return result, reads, loads
+
+    async def test_each_conclusion_brings_its_own_messages(self):
+        cited, uncited, parent = 'c'*21, 'u'*21, 'p'*21
+        rows = {cited: {'id': cited, 'source_ids': [parent], 'cited_ids': [5, 3], 'message_ids': [3, 4, 5]},
+                uncited: {'id': uncited, 'cited_ids': None, 'message_ids': [7, 8, 7]}}
+        result, reads, loads = await self.run_batches(rows, [uncited, cited, uncited])
+        self.assertEqual(reads, [[uncited, cited]], 'one read for every conclusion, and parents are never followed')
+        self.assertEqual(loads, [([7, 8, 5, 3], 4)], 'one read for every message')
+        self.assertEqual(result['roots'], [uncited, cited])
+        self.assertEqual(result['nodes'], [
+            {'id': uncited, 'parents': [], 'deleted': False, 'exact_citations': False, 'messages': public(7, 8), 'messages_truncated': False},
+            {'id': cited, 'parents': [parent], 'deleted': False, 'exact_citations': True, 'messages': public(5, 3), 'messages_truncated': False}])
+        self.assertNotIn('messages', result, 'facts mode never flattens messages across conclusions')
+        self.assertIn('ancestry_is_not_an_exact_citation', result['limitations'])
+
+    async def test_a_batch_brings_its_first_messages_and_says_it_left_some_out(self):
+        root = 'r'*21
+        rows = {root: {'id': root, 'message_ids': list(range(1, 13))}}
+        result, _, loads = await self.run_batches(rows, [root])
+        self.assertEqual(loads, [(list(range(1, 9)), 8)])
+        self.assertEqual((result['nodes'][0]['messages'], result['nodes'][0]['messages_truncated']), (public(*range(1, 9)), True))
+        self.assertIn('message_limit', result['limitations'])
+        rows[root] = {'id': root, 'message_ids': [1, 2], 'messages_truncated': True}
+        result, _, _ = await self.run_batches(rows, [root])
+        self.assertTrue(result['nodes'][0]['messages_truncated'], 'a batch the store already cut is not complete')
+
+    async def test_old_shape_conclusions_and_missing_rows(self):
+        old, bare, gone, odd = 'o'*21, 'b'*21, 'g'*21, 'x'*21
+        rows = {old: {'id': old, 'message_ids': [4]}, bare: {'id': bare}, odd: {'id': odd, 'cited_ids': [], 'message_ids': 'not a list'}}
+        result, _, _ = await self.run_batches(rows, [old, bare, gone, odd])
+        self.assertEqual([(n['id'], n['exact_citations'], n['messages'], n['messages_truncated']) for n in result['nodes']], [
+            (old, False, public(4), False), (bare, None, [], False), (odd, None, [], False)],
+            'a conclusion from before citations keeps its batch; one with no links brings nothing; a missing one has no node')
+        self.assertIn('conclusion_unavailable', result['limitations'])
+        self.assertIn('message_links_unavailable', result['limitations'])
+
+    async def test_unreadable_messages_are_left_out_and_counted(self):
+        root = 'r'*21
+        rows = {root: {'id': root, 'message_ids': [1, 2, 3]}}
+        async def documents(ids): return [rows[root]]
+        async def messages(ids, limit=256): return [{'id': 1, 'public_id': '1'.zfill(21), 'receipt_id': 'not a receipt'}, *message_rows([3])]
+        result = await fact_batches({'conclusion_ids': [root], 'depth': 0, 'per_node': True}, documents, messages)
+        self.assertEqual(result['nodes'][0]['messages'], public(3))
+        self.assertTrue(result['nodes'][0]['messages_truncated'])
+        self.assertTrue({'message_unavailable', 'ingestion_reference_unavailable'} <= set(result['limitations']))
+        async def missing(ids, limit=256): return message_rows([1, 3])
+        result = await fact_batches({'conclusion_ids': [root], 'depth': 0, 'per_node': True}, documents, missing)
+        self.assertEqual((result['nodes'][0]['messages'], result['nodes'][0]['messages_truncated']), (public(1, 3), True),
+                         'a message Honcho no longer has makes the list incomplete')
+        async def stray(ids, limit=256): return message_rows([99])
+        with self.assertRaises(ValueError):
+            await fact_batches({'conclusion_ids': [root], 'depth': 0, 'per_node': True}, documents, stray)
+
+    async def test_invalid_requests_never_reach_the_store(self):
+        async def documents(ids): self.fail('invalid request reached the store')
+        async def messages(ids, limit=256): self.fail('invalid request reached the store')
+        root = 'r'*21
+        for body in [{'conclusion_ids': [root], 'depth': 1, 'per_node': True}, {'conclusion_ids': [root], 'depth': False, 'per_node': True},
+                     {'conclusion_ids': [root], 'per_node': 'yes'}, {'conclusion_ids': [root], 'per_node': True, 'other': 1},
+                     {'conclusion_ids': [], 'per_node': True}, {'conclusion_ids': ['short'], 'per_node': True},
+                     {'conclusion_ids': [str(i).zfill(21) for i in range(129)], 'per_node': True}]:
+            with self.assertRaises(ValueError, msg=str(body)):
+                await provenance(body, documents, messages)
+        rows = {str(i).zfill(21): {'id': str(i).zfill(21)} for i in range(128)}
+        result, _, _ = await self.run_batches(rows, list(rows))
+        self.assertEqual(len(result['nodes']), 128, 'facts mode takes up to 128 conclusions, more than the trace\'s 32')
+
+    async def test_without_facts_mode_the_route_keeps_the_flat_trace(self):
+        root = 'r'*21
+        async def documents(ids): return [{'id': root, 'cited_ids': [2]}]
+        async def messages(ids, limit=256): return message_rows(ids)
+        result = await provenance({'conclusion_ids': [root]}, documents, messages)
+        self.assertEqual(result['messages'], public(2))
+        self.assertNotIn('messages', result['nodes'][0])
+
+    def test_message_query_is_bounded_by_its_caller(self):
+        self.assertIn('LIMIT :limit', MESSAGES_SQL)
+        self.assertIn('workspace_name=:workspace', MESSAGES_SQL)
+
+
+class CoverageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_coverage_is_counts_of_live_explicit_conclusions(self):
+        class Result:
+            def mappings(self): return self
+            def one(self): return {'explicit': 10, 'cited': 6, 'batch_only': 3}
+        class Database:
+            def __init__(self): self.calls = []
+            async def execute(self, statement, values):
+                self.calls.append((' '.join(str(statement).split()), values)); return Result()
+        db = Database()
+        self.assertEqual(await citation_coverage('owned-workspace', db), {'explicit': 10, 'cited': 6, 'batch_only': 3, 'none': 1})
+        sql, values = db.calls[0]
+        self.assertEqual(values, {'workspace': 'owned-workspace'})
+        self.assertIn("d.workspace_name=:workspace AND d.level='explicit' AND d.deleted_at IS NULL", sql)
+        self.assertIn('AND NOT EXISTS (SELECT 1 FROM sessions x WHERE x.tenant_id=d.tenant_id AND x.workspace_name=d.workspace_name '
+                      'AND x.name=d.session_name AND x.deleted_at IS NOT NULL)', sql, 'conclusions of a deleted session are not counted')
+        self.assertIn('count(*) FILTER (WHERE NOT cited AND batch) AS batch_only', sql)
+        self.assertNotIn('content', COVERAGE_SQL, 'counts only, never a conclusion\'s text')
 
 
 if __name__ == '__main__': unittest.main()

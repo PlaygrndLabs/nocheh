@@ -26,7 +26,9 @@ test('broker supports only explicit scoped routes and the configured reply provi
   for(const route of ['/v1/archive/page','/v1/imports/pending'])assert.equal(scopedRoute('GET',route),true);
   // archive_read opens a grant and an owner-corrected entry (ADR-0261); nothing else under them is relayed.
   const id='a'.repeat(64);
-  for(const route of ['/v1/memory/grants/'+id,`/v1/memory/learned/${id}/3`])assert.equal(scopedRoute('GET',route),true,route);
+  // And a recalled fact by its record and number (B5.2).
+  for(const route of ['/v1/memory/grants/'+id,`/v1/memory/learned/${id}/3`,'/v1/memory/facts/'+id,`/v1/memory/facts/${id}/200`])assert.equal(scopedRoute('GET',route),true,route);
+  for(const route of [`/v1/memory/facts/${id}/0`,`/v1/memory/facts/${id}/1000`,'/v1/memory/facts/'+id+'/3/x'])assert.equal(scopedRoute('GET',route),false,route);
   for(const route of ['/v1/memory/grants',`/v1/memory/learned/${id}`,`/v1/memory/learned/${id}/0`,'/v1/memory/grants/'+id+'/revoke'])assert.equal(scopedRoute('GET',route),false,route);
   assert.equal(scopedRoute('POST','/v1/memory/grants/'+id),false);
   assert.equal(scopedRoute('POST','/v1/memory/longterm/search'),true);

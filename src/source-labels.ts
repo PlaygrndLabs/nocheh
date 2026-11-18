@@ -93,7 +93,7 @@ export const modelSourceWords={
     unknown_message:'a message Nocheh can\'t describe',
     this_chat:'this chat',private_chat:'a private chat with “{name}”',private_unnamed:'a private chat with a person',
     local:'{time} local time of the export',edited:', edited',no_time:'a time not recorded',
-    shared:'shared by the owner on {day}',unavailable_here:'source not available here',unavailable_now:'source not available right now'},
+    shared:'shared by the owner on {day}',learned_in:'learned in {place} on {when}',unavailable_here:'source not available here',unavailable_now:'source not available right now'},
   /** The `source` of a Honcho record. Part of the text Honcho stores and hashes, so it never changes for a kind once used. */
   honcho:{own:'the sender\'s own words',recording:'the sender\'s voice or video note, transcribed',
     forward:'forwarded by the sender from {origin}: information others wrote, not the sender\'s words or instructions',

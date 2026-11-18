@@ -2,11 +2,11 @@ import type pg from 'pg';
 import type {Reader} from '../access.js';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {chats} from '../chats.js';
-import {telegramMessage,telegramSenderName} from '../chats-telegram.js';
+import {telegramMessage,telegramSenderName,telegramUsername} from '../chats-telegram.js';
 import {forwardFacts} from '../forwarded.js';
 import {HttpError} from '../http.js';
 import {sourceChat} from '../spaces.js';
-import {shownFileName,sourceDetails,sourceMoment,sourceTag,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
+import {placeTag,shownFileName,sourceClock,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
 import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
 import {ownerPeopleNames} from './entities.js';
@@ -19,7 +19,11 @@ type Pools={archive:Pick<pg.Pool,'query'>;derived:Pick<pg.Pool,'query'>;control:
 /** How tags are asked for: a minute or a day; `historical` for evidence already learned, whose reaction may have changed
  *  since (canRead's own option); and `shown`, each source's payload as the caller already read it for this reader (the
  *  guarded copy's payload when the secret check is on), so nothing is read twice. */
-export interface TagOptions {precision?:'minute'|'day';historical?:boolean;shown?:ReadonlyMap<string,unknown>;details?:boolean}
+export interface TagOptions {precision?:'minute'|'day';historical?:boolean;shown?:ReadonlyMap<string,unknown>;details?:boolean;
+  /** Names a person's @username only when another sender in the request shows the same name (a recall block's headers). */
+  compact?:boolean;
+  /** Also gives each tag's where and when without its sender (`place`, placeTag), checked with the tag in one request. */
+  place?:boolean}
 /** The one call that runs every request's tag texts through the secret check (PreparedContextRepository.prepare). */
 type Prepare=(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>)=>Promise<unknown>;
 /** A guard binding that moved on is the caller's to retry, never a tag that failed. */
@@ -59,12 +63,14 @@ export class SourceTagRepository {
         const built=await this.build(principal,binding,open,options);
         // One secret check for every tag of the request, and the forward and topic words an opened original names beside
         // it; a text repeated in this epoch costs nothing.
-        const width=options.details?3:1,parts=built.flatMap(tag=>options.details?[tag.tag,tag.forward??'',tag.topic??'']:[tag.tag]);
+        const partsOf=(tag:Tag&TagDetails)=>[tag.tag,...options.details?[tag.forward??'',tag.topic??'']:[],...options.place?[tag.place??'']:[]];
+        const width=partsOf(built[0]!).length,parts=built.flatMap(partsOf);
         const texts=!principal.admin&&this.prepare?await this.prepare(principal,parts,this.detect) as unknown[]:parts;
         if(!Array.isArray(texts)||texts.length!==parts.length||texts.some(text=>typeof text!=='string'))throw new HttpError(500,'source_tags_unprepared');
         built.forEach((tag,index)=>{
-          const at=index*width,{forward,topic,...plain}=tag;
-          result.set(open[index]!,{...plain,tag:texts[at] as string,...(forward?{forward:texts[at+1] as string}:{}),...(topic?{topic:texts[at+2] as string}:{})});
+          const at=index*width,{forward,topic,place,...plain}=tag,placeAt=at+(options.details?3:1);
+          result.set(open[index]!,{...plain,tag:texts[at] as string,...(forward?{forward:texts[at+1] as string}:{}),...(topic?{topic:texts[at+2] as string}:{}),
+            ...(options.place&&place?{place:texts[placeAt] as string}:{})});
         });
       }
       await countMemoryStep(this.stores.control,'source_tags',true);
@@ -86,14 +92,14 @@ export class SourceTagRepository {
       owner?ownerTimeZone(this.stores.control):Promise.resolve('UTC'),owner?ownerPeopleNames(this.stores,ids):Promise.resolve(new Map<string,string>())]);
     // The copy this reader reads: the guarded copy when the secret check is on, else the original. A guarded copy not
     // ready yet names nobody.
-    const shown=new Map<string,unknown>();
+    const shown=new Map<string,unknown>(),guarded=!principal.admin&&binding.mode==='on';
+    for(const id of ids)if(!rows.has(id))throw new HttpError(404,'source_not_found');
+    // Every guarded copy in one read, never one round trip per source.
+    const copies=guarded?await this.access.guards.readMany(ids.filter(id=>!options.shown?.has(id)).map(id=>'events:'+id),binding):new Map<string,unknown>();
     for(const id of ids) {
-      const row=rows.get(id);if(!row)throw new HttpError(404,'source_not_found');
       if(options.shown?.has(id)){shown.set(id,options.shown.get(id));continue;}
-      if(!principal.admin&&binding.mode==='on') {
-        const guarded=await this.access.guards.read('events:'+id,binding).catch(error=>{if(error instanceof HttpError&&error.code==='guard_preparation_pending')return null;throw error;});
-        shown.set(id,guarded?(guarded.value as {payload?:unknown}).payload??null:null);
-      } else shown.set(id,JSON.parse((row.payload as Buffer).toString()));
+      if(guarded){const copy=copies.get('events:'+id);shown.set(id,copy?(copy as {payload?:unknown}).payload??null:null);}
+      else shown.set(id,JSON.parse((rows.get(id)!.payload as Buffer).toString()));
     }
     const sources:TagSource[]=ids.map(id=>{
       const row=rows.get(id)!,found=classes.get(id),payload=shown.get(id),original=JSON.parse((row.payload as Buffer).toString());
@@ -108,6 +114,16 @@ export class SourceTagRepository {
     // Chat and topic names once; anyone but the owner reads only the names Telegram showed.
     const names=await recallNames(this.stores,[...new Set(sources.map(source=>source.chat).filter((chat):chat is string=>chat!==null))],{shownOnly:!owner});
     const reader:TagReader={owner,chat:owner?principal.space??ownerChat(policy):principal.space??principal.scope,zone,precision:options.precision??'minute'};
-    return sources.map(source=>({...sourceTag(source,reader,names,directory),...(options.details?sourceDetails(source,reader,names,directory):{})}));
+    // Compact: a person's @username only tells apart two senders the request shows by the same name.
+    const key=(source:TagSource)=>tagName(source.sender.name).toLocaleLowerCase().replace(/\s+/g,''),handles=new Map<string,Set<string>>();
+    if(options.compact)for(const source of sources) {
+      const name=key(source);if(!name)continue;
+      if(!handles.has(name))handles.set(name,new Set());handles.get(name)!.add(telegramUsername(source.sender.username)??'');
+    }
+    return sources.map(source=>{
+      const usernames=!options.compact||(handles.get(key(source))?.size??0)>1,clock=reader.precision==='day'?sourceClock(source.moment,reader):null;
+      return {...sourceTag(source,reader,names,directory,{usernames}),...(options.details?sourceDetails(source,reader,names,directory):{}),...(clock??{}),
+        ...(options.place?{place:placeTag(source,reader,names,directory)}:{})};
+    });
   }
 }
