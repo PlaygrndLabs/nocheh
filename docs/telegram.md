@@ -101,6 +101,13 @@ the owner typed (it reads `› a topic`) or the owner's time zone. Opening a
 message also shows what it replies to, the message before that and the first
 replies to it, each only where the reader may read it; a message in a forum
 topic is no reply to the topic's opening.
+Each fact of long-term memory the assistant reads sits under a source line
+built the same way, with the time of its message, such as
+`Source [by=person]: “Bob” · this chat · 2026-11-03` above
+`  3. 14:12 Bank meeting moved to 4`; a fact about Bob that rests on the
+owner's question still names Bob. The assistant opens a fact, with the
+messages it came from, by its memory id and number (`archive_read
+nocheh:memory:<id> fact=3`), only in the group or chat that read it.
 In a group, a message starts a turn only when it addresses Nocheh: a reply to
 one of its messages, its @username, or one of its names opening the message
 (**Names that call Nocheh**). Other messages reach the next reply as context;
@@ -126,7 +133,9 @@ share the decision. A hidden message also leaves the turns that quoted it: in a
 group turn that carried it among the recent messages (or as the message the turn
 replied to), its text becomes a notice naming its id, and that turn's searches
 and other tool results, and the notes written from them, are withheld and
-removed with it; the turn's own message and the answer already sent stay
+removed with it; the turn's own message and the answer already sent stay.
+A fact learned from it no longer opens, and a stored recall or opened fact that
+rests on it is withheld
 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).
 **Undo hiding** restores future use. The original,
 attachments, transcripts, and owner action history remain inspectable. A reply
