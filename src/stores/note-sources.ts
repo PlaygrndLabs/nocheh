@@ -63,10 +63,11 @@ export type MemoryProblemKind='notes'|'memory_read'|'source_tags';
  * What a turn's notes came from, kept for that turn alone (ADR-0261): each note's ref (the first 12 hex of its key) with
  * the messages it was written from, the review's batch or the message the turn answered, as Hermes's lookup before the
  * turn named them. archive_read {note} opens them within that turn, each through canRead. Rows go after seven days.
+ * No chat is kept: the reader's own access decides what a ref opens, so nothing here is a chat value to seed.
  */
 export const noteLookupSchema=`
 CREATE TABLE IF NOT EXISTS note_lookups (
- turn_event text PRIMARY KEY CHECK(turn_event ~ '^[a-f0-9]{64}$'),space text,notes jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now()
+ turn_event text PRIMARY KEY CHECK(turn_event ~ '^[a-f0-9]{64}$'),notes jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now()
 );
 `;
 /** How long a turn's note refs open. */
@@ -437,18 +438,18 @@ export class NoteSourceRepository {
     const {labels,sources}=await this.labelled(notes as NoteInput[],typeof space==='string'&&chats().isOwner(space));
     // A turn's notes each get a ref that opens, in that turn alone, the messages its writer read (archive_read {note}).
     // When they can't be kept, the labels still go out, without refs, and the failure is counted.
-    const kept=typeof turn==='string'&&await this.keep(turn,typeof space==='string'?space:null,notes as NoteInput[],sources);
+    const kept=typeof turn==='string'&&await this.keep(turn,notes as NoteInput[],sources);
     return {labels:Object.fromEntries((notes as NoteInput[]).map((note,index)=>[note.key,{...labels[index]!,...kept?{ref:noteRef(note.key)}:{}}]))};
   }
   /** Keeps a turn's note refs with the messages each opens, beside any this turn's earlier lookups kept, and drops
    *  every turn's that is older than NOTE_LOOKUP_DAYS. Whether they were kept. */
-  private async keep(turn:string,space:string|null,notes:readonly NoteInput[],sources:readonly string[][]):Promise<boolean> {
+  private async keep(turn:string,notes:readonly NoteInput[],sources:readonly string[][]):Promise<boolean> {
     const refs:Record<string,string[]>={};
     notes.forEach((note,index)=>{const ref=noteRef(note.key);refs[ref]=[...new Set([...refs[ref]??[],...sources[index]??[]])].slice(0,NOTE_SOURCES_KEPT);});
     try {
       await this.stores.control.query(`DELETE FROM note_lookups WHERE created_at<now()-make_interval(days=>$1)`,[NOTE_LOOKUP_DAYS]);
-      await this.stores.control.query(`INSERT INTO note_lookups(turn_event,space,notes) VALUES($1,$2,$3::jsonb)
-        ON CONFLICT(turn_event) DO UPDATE SET notes=note_lookups.notes||excluded.notes`,[turn,space,JSON.stringify(refs)]);
+      await this.stores.control.query(`INSERT INTO note_lookups(turn_event,notes) VALUES($1,$2::jsonb)
+        ON CONFLICT(turn_event) DO UPDATE SET notes=note_lookups.notes||excluded.notes`,[turn,JSON.stringify(refs)]);
       return true;
     }catch{await this.counted(false);return false;}
   }
