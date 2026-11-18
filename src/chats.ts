@@ -302,11 +302,16 @@ export function conversationFields(directory:ChatDirectory,id:string):Conversati
   return {kind:chat.kind,parent_space:chat.parent_id,topic_key:chat.topic_key,app_ids:base.app_ids.map(label=>({...label})),
     is_forum:base.is_forum,state:base.state,owner:chat.owner,short_id:chatShortId(id)};
 }
-/** GET /internal/chats from a directory: every served chat with its topics, and the owner's private chat. */
-export function servedChats(directory:ChatDirectory,ownerAccount:{app:ChatApp;external:string}|null):ServedChats {
+/**
+ * GET /internal/chats from a directory: every served chat with its topics, and the owner's private chat. With
+ * `memberPrivate` (the member directory's memberPrivate, which only nocheh-app holds: this module cannot import it),
+ * each member's own private chat that is open now is listed too, marked member_private, never as served (step 4).
+ */
+export function servedChats(directory:ChatDirectory,ownerAccount:{app:ChatApp;external:string}|null,memberPrivate?:(id:string)=>boolean):ServedChats {
   const owner=directory.ownerChat();
+  const member=(chat:Chat)=>!!memberPrivate&&chat.kind==='private'&&!chat.owner&&!directory.served(chat.id)&&memberPrivate(chat.id);
   return {epoch:directory.epoch,owner_chat:owner,owner_account:ownerAccount?{app:ownerAccount.app,external:ownerAccount.external}:null,
-    chats:directory.all().filter(chat=>directory.served(chat.id)||chat.id===owner||chat.parent_id!==null&&chat.parent_id===owner)
+    chats:directory.all().filter(chat=>directory.served(chat.id)||chat.id===owner||chat.parent_id!==null&&chat.parent_id===owner||member(chat))
       .map(chat=>({id:chat.id,app:chat.app,kind:chat.kind,parent_id:chat.parent_id,topic_key:chat.topic_key,state:chat.state,
-        app_ids:chat.app_ids.map(label=>({external:label.external,state:label.state}))}))};
+        app_ids:chat.app_ids.map(label=>({external:label.external,state:label.state})),...(member(chat)?{member_private:true as const}:{})}))};
 }

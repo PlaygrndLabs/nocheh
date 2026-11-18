@@ -653,6 +653,29 @@ async function membershipFrom(db:Db,chat:string,account:string,state:'in'|'left'
   await bumpMemberRevision(db);
   return true;
 }
+/**
+ * What Telegram answered when Nocheh asked whether an account is still in a group (getChatMember, before a member's
+ * private turn, step 4): the account's row there takes that state with source 'checked' and checked_at now, so the
+ * 30-day rule (src/stores/member-reads.ts) counts it as just confirmed. Only an existing row changes: a check is asked
+ * only where a row says 'in'. When a member's account switches between 'in' and 'left', the member revision moves in
+ * the same transaction, as for an update (membershipFrom). Returns whether it moved.
+ */
+export async function membershipChecked(control:pg.Pool,chat:string,account:string,state:'in'|'left'):Promise<boolean> {
+  const db=await control.connect();
+  try {
+    await db.query('BEGIN');
+    const written=(await db.query(`WITH prior AS (SELECT state FROM chat_memberships WHERE chat_id=$1 AND account_id=$2)
+      UPDATE chat_memberships SET state=$3,source='checked',checked_at=now(),since=CASE WHEN state=$3 THEN since ELSE now() END
+      WHERE chat_id=$1 AND account_id=$2 RETURNING (SELECT state FROM prior) AS prior`,[chat,account,state])).rows[0];
+    let moved=false;
+    if(written&&written.prior!==state&&(await db.query('SELECT 1 FROM chat_accounts WHERE id=$1 AND member_id IS NOT NULL',[account])).rowCount) {
+      await bumpMemberRevision(db);moved=true;
+    }
+    await db.query('COMMIT');
+    return moved;
+  } catch(error){await db.query('ROLLBACK').catch(()=>{});throw error;}
+  finally{db.release();}
+}
 /** Copies members' switches for group `from` to group `to`; where `to` already has a switch, off wins. Returns how many
  *  switches it wrote. */
 async function copySwitches(db:Db,from:string,to:string):Promise<number> {

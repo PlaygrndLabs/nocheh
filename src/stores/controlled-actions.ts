@@ -20,7 +20,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {SourceReference} from './archive.js';
 import type {OperationReference} from './operations.js';
 import {closedAs,ownerResolutions,type ControlledAuthority} from './controlled-action-schema.js';
-import {messageSender,ownerChat,ownerIds} from '../assistant-policy.js';
+import {assertActingReader,messageSender,ownerChat,ownerIds} from '../assistant-policy.js';
 import {members} from '../members.js';
 import {groupToolsLines,ownerPrompts} from '../prompts.js';
 
@@ -110,7 +110,9 @@ export class ControlledActionRepository {
   async propose(principal:Reader,value:unknown) {return afterEpoch(jobRun(principal),()=>this.proposeOnce(principal,value));}
   private async proposeOnce(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
-    if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');
+    // A private answer, a member's private chat and the owner's ask about a member only read and talk (ADR-0249, step 4):
+    // no tool runs and no card is made for them, not even the owner's.
+    assertActingReader(principal);
     const body=exact(value,['kind','arguments','summary']),raw=actionArguments(body.kind,body.arguments),note=summaryOf(body.summary);
     const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=ownerChat(this.access.policy());
     // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.
