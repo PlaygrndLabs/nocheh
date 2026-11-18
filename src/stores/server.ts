@@ -7,7 +7,7 @@ import {telegramAddress} from '../frontdoor/telegram.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
-import {archiveFilters,matchesArchiveFilters} from '../archive-filters.js';
+import {archiveFilters,matchesArchiveFilters,privateChatsParams} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
@@ -495,7 +495,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       if(path==='/v1/data') {
         const after=url.searchParams.get('after')??'',filters=archiveFilters(url.searchParams);if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
-        const candidates=(await s.stores.archive.query("SELECT e.id,e.channel,e.scope,e.source_id,e.revision,e.kind,e.origin,e.occurred_at,e.received_at,e.original_text,e.payload,(SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=e.id) AS artifact_kinds FROM events e WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1)) AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2) AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message') ORDER BY e.received_at DESC,e.id DESC LIMIT $4",[after,filters.scope,filters.kind,filters.reply?201:51])).rows;
+        const candidates=(await s.stores.archive.query("SELECT e.id,e.channel,e.scope,e.source_id,e.revision,e.kind,e.origin,e.occurred_at,e.received_at,e.original_text,e.payload,(SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=e.id) AS artifact_kinds FROM events e WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1)) AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2) AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message') AND ($5::text[] IS NULL OR (e.scope=ANY($5::text[]))=$6) ORDER BY e.received_at DESC,e.id DESC LIMIT $4",[after,filters.scope,filters.kind,filters.reply?201:51,...privateChatsParams(filters)])).rows;
         const states=candidates.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
           error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[candidates.map(row=>row.id)])).rows:[];
         const stateById=new Map(states.map(state=>[state.event_id,state]));
