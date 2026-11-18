@@ -83,6 +83,64 @@ class LeakTests(unittest.TestCase):
             canaries.found('anything', {})
 
 
+class MemberHomeTests(unittest.TestCase):
+    """A MEMBERMARK lives in its member's own private chat (step 4): it may show there and, after the owner asks about
+    that member (step 4b), in the one separate message that answers the ask, and nowhere else, the owner's chat
+    included."""
+    OTHER = 779
+    MARK = {'MEMBERMARK21': 'member private message'}
+
+    def planted(self, folder, answers=()):
+        canaries.save(folder, {'PRIVATEMARK12': 'private chat message'}, OWNER)
+        canaries.save(folder, self.MARK, OWNER, home=MEMBER)
+        if answers:
+            canaries.shown(folder, self.MARK, OWNER, answers)
+        planted = canaries.load(folder)
+        return planted, canaries.places(planted)
+
+    def test_a_member_mark_is_swept_everywhere_but_its_own_chat(self):
+        with tempfile.TemporaryDirectory() as folder:
+            planted, where = self.planted(folder)
+            self.assertEqual(where['MEMBERMARK21'], {'home': MEMBER, 'chats': {MEMBER}, 'messages': set()})
+            self.assertEqual(where['PRIVATEMARK12'], {'home': OWNER, 'chats': {OWNER}, 'messages': set()})
+            value = state(sent=[sent(MEMBER, 'You said MEMBERMARK21', 1001), sent(OWNER, 'Your note PRIVATEMARK12', 1002),
+                                sent(OWNER, 'Mira said MEMBERMARK21', 1003), sent(self.OTHER, 'MEMBERMARK21', 1004),
+                                sent(GROUP, 'MEMBERMARK21', 1005), sent(MEMBER, 'The owner said PRIVATEMARK12', 1006)])
+            found = canaries.leaks(value, planted['marks'], OWNER, where)
+            self.assertEqual(sorted((hit['chat'], hit['mark']) for hit in found),
+                             sorted([(OWNER, 'MEMBERMARK21'), (self.OTHER, 'MEMBERMARK21'), (GROUP, 'MEMBERMARK21'), (MEMBER, 'PRIVATEMARK12')]))
+
+    def test_the_answer_to_the_owners_ask_may_quote_it_but_no_later_owner_message(self):
+        with tempfile.TemporaryDirectory() as folder:
+            planted, where = self.planted(folder, answers=[1003])
+            answer, later = sent(OWNER, 'In their chat: MEMBERMARK21', 1003, edits=['In their chat: MEMBERMARK21 (edited)']), sent(OWNER, 'Earlier: MEMBERMARK21', 1004)
+            calls = [{'method': 'sendMessage', 'parameters': answer['parameters']},
+                     {'method': 'editMessageText', 'parameters': answer['edits'][0]['parameters']},
+                     {'method': 'sendMessage', 'parameters': later['parameters']}]
+            found = canaries.leaks(state(sent=[answer, later], calls=calls), planted['marks'], OWNER, where)
+            self.assertEqual([(hit['where'], hit.get('message_id')) for hit in found], [('message', 1004), ('call', None)])
+            self.assertEqual(where['MEMBERMARK21']['messages'], {(OWNER, 1003)})
+
+    def test_a_members_own_press_answer_is_theirs_and_another_members_is_a_leak(self):
+        with tempfile.TemporaryDirectory() as folder:
+            planted, where = self.planted(folder)
+            value = state(presses=[press(9, MEMBER, MEMBER), press(10, self.OTHER, self.OTHER)],
+                          answers=[{'callback_query_id': 'cb9', 'text': 'MEMBERMARK21'}, {'callback_query_id': 'cb10', 'text': 'MEMBERMARK21'}])
+            self.assertEqual(canaries.leaks(value, planted['marks'], OWNER, where), [{'where': 'answer', 'chat': self.OTHER, 'mark': 'MEMBERMARK21'}])
+
+    def test_a_mark_shown_must_be_saved_and_the_saved_places_must_be_whole(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.planted(folder)
+            with self.assertRaises(ValueError):
+                canaries.shown(folder, {'MEMBERMARK99': 'never planted'}, OWNER, [1])
+            path = Path(folder)/canaries.FILE
+            value = json.loads(path.read_text())
+            value['homes']['MEMBERMARK21'] = {'home': str(MEMBER), 'allowed': []}
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                canaries.load(folder)
+
+
 class SavedMarksTests(unittest.TestCase):
     def test_the_sweep_fails_without_saved_marks(self):
         with tempfile.TemporaryDirectory() as folder:
