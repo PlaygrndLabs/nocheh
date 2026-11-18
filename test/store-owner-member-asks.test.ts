@@ -239,6 +239,34 @@ test('an ask about a member is recorded only from the owner\'s own words, once, 
       assert.equal((await run(id)).state,'skipped');assert.equal(notices.length,before+1,'once');
       turns='done';
     }
+    // A worker that closes an open ask while its member is being removed: the ask still goes once the removal commits.
+    // The member's row is held so the removal stops before the member goes; the worker then closes the ask (it is past
+    // its time) and must wait for the removal rather than leave a closed ask without its member behind.
+    {
+      const turn=await owner({text:'What did Nils Test say about the race?'}),id=digest('race:'+turn.source.id).slice(0,32),before:number=notices.length;
+      await stores.control.query(`INSERT INTO owner_member_asks(id,owner_event,member_id,question,expires_at) VALUES($1,$2,$3,'x',now()-interval '1 second')`,
+        [id,turn.source.id,MEMBER_NG_ID]);
+      const hold=await stores.control.connect();let released=false;
+      const waiting=async(sql:string,done=()=>false)=>{
+        for(let i=0;i<400&&!done();i++) {
+          if((await stores.control.query("SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE $1",[sql+'%'])).rowCount)return;
+          await new Promise(resolve=>setTimeout(resolve,25));
+        }
+        if(!done())throw Error('not waiting: '+sql);
+      };
+      try {
+        await hold.query('BEGIN');await hold.query('SELECT 1 FROM members WHERE id=$1 FOR UPDATE',[MEMBER_NG_ID]);
+        const removing=s.members.remove({admin:true,scope:null},MEMBER_NG_ID,{operation_id:'remove-nils-'+serial});
+        await waiting('DELETE FROM members');
+        let settled=false;const closing=run(id).finally(()=>{settled=true;});
+        await waiting("UPDATE owner_member_asks SET state='expired'",()=>settled);
+        await hold.query('COMMIT');released=true;
+        await removing;
+        assert.equal((await closing).state,'skipped');
+      } finally {if(!released)await hold.query('ROLLBACK');hold.release();}
+      assert.equal(notices.length,before+1,'the owner hears once');
+      assert.equal((await stores.control.query('SELECT 1 FROM owner_member_asks WHERE id=$1',[id])).rowCount,0,'the closed ask went with its member');
+    }
     // An id that is no ask runs nothing.
     assert.equal((await run('f'.repeat(32))).state,'skipped');
     assert.equal((await run('not-an-ask')).state,'failed');

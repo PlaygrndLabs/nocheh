@@ -299,7 +299,9 @@ export class Members implements MemberRepository {
   async remove(principal:Reader,id:string,request:MemberRemoveRequest):Promise<MemberRemoved> {
     const done=await this.commands.run(principal,request.operation_id,{kind:'member_remove',id},async db=>{
       // Their closed asks go with them; an open one loses its member, so its worker closes it and tells the owner once
-      // (owner-member-asks.ts).
+      // (owner-member-asks.ts). Their asks are locked first, so a worker closing one waits for this commit and then sees
+      // it has no member and removes it; it never closes one between the delete below and the member going.
+      await db.query('SELECT id FROM owner_member_asks WHERE member_id=$1 FOR UPDATE',[id]);
       await db.query("DELETE FROM owner_member_asks WHERE member_id=$1 AND state NOT IN ('queued','running')",[id]);
       if(!(await db.query('DELETE FROM members WHERE id=$1',[id])).rowCount)throw new HttpError(404,'member_not_found');
       return {revision:await bump(db),removed:id};

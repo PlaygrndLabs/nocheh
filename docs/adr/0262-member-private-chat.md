@@ -290,7 +290,9 @@ stays a destination only behind the owner's card).
   member gets the same row.
 - `owner_member_asks` (control store, added if missing; removing a member removes
   their closed asks, and an open one keeps its row with no member until its worker
-  has closed it and told the owner once, under the stored `member_label`): `id`,
+  has closed it and told the owner once, under the stored `member_label`; the
+  removal locks the member's asks first, so a worker closing one meanwhile waits
+  for it and then removes the row): `id`,
   `owner_event`, `member_id`, `member_label`, `question` (up to 4,000
   characters), `state` (`queued`, `running`, `answered`, `failed`, `expired`),
   `error_code`, times, `expires_at` (30 minutes), `send_key`, and the worker's
