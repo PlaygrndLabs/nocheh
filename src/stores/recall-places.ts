@@ -24,8 +24,9 @@ const hidden=/[\p{Cc}\p{Cs}\p{Co}\p{Zl}\p{Zp}]|(?![\u200c-\u200f])\p{Cf}/gu;
 // Brackets, quotes and their look-alikes, so a name cannot close its own quotes or pass for Nocheh's own marks.
 const framing=/[[\]\uff3b\uff3d"\u201c-\u201f\u2033\u2036\u02ee\u275d\u275e\u301d-\u301f\uff02\u05f4]/gu;
 const tidy=(text:string,size:number)=>Array.from(text.replace(hidden,' ').replace(/\s+/g,' ').trim()).slice(0,size).join('').trim();
-/** A chat or topic name for a label: at most 64 characters, without the characters above. */
-export const placeName=(value:unknown):string=>typeof value==='string'?tidy(value.replace(framing,' '),64):'';
+/** A chat or topic name for a label: at most `size` characters (64 by default), without the characters above, on one
+ *  line. A person's name in a source tag is cleaned the same way (tagName). */
+export const placeName=(value:unknown,size=64):string=>typeof value==='string'?tidy(value.replace(framing,' '),size):'';
 
 /** The label for one hit. `names` holds each group's and topic's name by its ID, from recallNames. */
 export function recallPlace(where:RecallWhere,names:ReadonlyMap<string,string>):string {
@@ -49,8 +50,10 @@ export function recallPlace(where:RecallWhere,names:ReadonlyMap<string,string>):
  * creation, edit or reply to its first message among the group's recent messages, else from its topic row (the name the
  * owner gave it, or the one Telegram last showed).
  * A failed lookup leaves names out, so a hit is labelled by its kind and recall never fails over a name.
+ * `shownOnly` keeps only names Telegram showed, for a group member's tags (ADR-0261): a chat row's name counts only when
+ * Telegram showed it (observed or refreshed), so a topic only the owner named reads as a topic with no name.
  */
-export async function recallNames(stores:Pools,spaces:string[]):Promise<Map<string,string>> {
+export async function recallNames(stores:Pools,spaces:string[],options:{shownOnly?:boolean}={}):Promise<Map<string,string>> {
   const names=new Map<string,string>(),directory=chats();
   const known=spaces.filter(space=>directory.groupOf(space)!==null);
   const groups=[...new Set(known.map(space=>directory.groupOf(space)!))],topics=[...new Set(known.filter(space=>directory.kind(space)==='topic'))];
@@ -61,8 +64,9 @@ export async function recallNames(stores:Pools,spaces:string[]):Promise<Map<stri
   try {
     // A name the owner's refresh recorded counts only while that refresh found the chat, as before step 2b.
     for(const row of (await stores.control.query(`SELECT c.id,c.title FROM chats c LEFT JOIN chat_details d ON d.chat_id=c.id
-      WHERE c.id=ANY($1::text[]) AND c.title IS NOT NULL AND (c.title_source IS DISTINCT FROM 'refreshed' OR d.refreshed_state='available')`,
-      [[...groups,...topics]])).rows)set(String(row.id),row.title);
+      WHERE c.id=ANY($1::text[]) AND c.title IS NOT NULL AND (c.title_source IS DISTINCT FROM 'refreshed' OR d.refreshed_state='available')
+        AND (NOT $2::boolean OR c.title_source IN ('observed','refreshed'))`,
+      [[...groups,...topics],options.shownOnly===true])).rows)set(String(row.id),row.title);
   }catch{}
   try {
     // A captured message names its group as the chat list does; it wins over the chat row. The archive keeps each

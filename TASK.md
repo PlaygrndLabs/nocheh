@@ -109,6 +109,42 @@ members live in the control store and are managed on the Members page.
   bot an admin in members' groups is recommended. Your own web and tool requests in groups no
   longer show a card; ask if you want that back.
 
+Memory step 1: search hits and opened messages name their source
+([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md); owner,
+2026-11-17: track the source of each fact, not only history without its thread and relations,
+before the MVP). Built on the three recommended answers, which the owner may still change: in a
+group the owner's words are named by the owner's Telegram name with `by=owner`; the owner's own
+chats read times in the Settings › Tasks zone and every other reader reads UTC; only the owner's
+own chats read a People name, as `saved as “Brother”`.
+- Source tags: code builds `{tag, by, at}` from the archive, the reader's copy and Nocheh's
+  records; one guard `prepare` per request; a tag that cannot be built reads
+  `source not available right now` and counts as the `source_tags` memory problem on System ›
+  Health; every tag passes a batched `readable()` held equal to `canRead`
+  ([tags](test/source-tags.test.ts), [store](test/store-source-tags.test.ts),
+  [health](test/dashboard-system-health.test.mjs), [Hermes](services/hermes/test_monitoring.py)).
+- Search hits: `archive_search`, `memory_search`, `current_reactions`, shared releases and
+  grants and `archive_page` items carry tags beside every field they had; `archive_page` no
+  longer shows a numeric sender id ([search](test/store-search-tags.test.ts),
+  [MCP](test/mcp.test.ts), [sharing](test/store-sharing.test.ts)).
+- Opening a message: `archive_read` takes `replies` and `chain` and shows what a message replies
+  to, the replies to it, a forward's origin, its topic and the message Nocheh's reply answers,
+  each read-checked, within 16,000 characters; it also opens `nocheh:grant:` and
+  `nocheh:learned:` ids ([thread](test/store-archive-thread.test.ts)).
+- Retire means forget at once: a retired recent or replied-to message quoted in a stored turn is
+  withheld with that turn's tool rows and notes ([Hermes](services/hermes/test_retired_history.py));
+  owner recall's chat-history hits carry their own text, time and citations
+  ([Hermes](services/hermes/test_native_memory.py), [store](test/store-native-memory.test.ts));
+  recall evidence skips retired writes and keeps a sibling topic's in a group whose topics share
+  memory ([provenance](test/store-provenance.test.ts)).
+- Tester: `search_hits_name_their_source`, `group_tags_stay_in_the_group`, `reply_thread_opens`,
+  `topic_sharing_group_keeps_evidence`, `retired_source_leaves_tags` and
+  `owner_recall_session_hits_have_text`, each seen to fail at its gate on a fake without the fix
+  ([scenarios](test/test_source_tag_scenarios.py)).
+Full tester 2026-11-17: the six scenarios and the memory and privacy scenarios passed (15 of 15). Pending: a live look at tagged hits in a group and in
+the owner's chat. Left for later: the tester has no gate for a shared fact's
+`shared by the owner on <day>` (the store tests cover it); steps 2 (facts name their source),
+3 (replies in the turn) and 4 (dashboard thread and sources).
+
 Members step 2b-2: only the owner adds Nocheh to groups
 ([ADR-0253](docs/adr/0253-only-the-owner-adds-nocheh.md); owner, 2026-11-12, approving the
 Members design: only the owner adds Nocheh to a group, and anyone else's add leaves; 2026-11-14:
@@ -662,7 +698,7 @@ becomes your private memory"). One pull request of several commits
   labelled note, a forward and a skipped card on the owner's install after merge. Open owner
   question: whether the message of someone not allowed that the owner replies or reacts to
   should come along as labelled context for the note (built without it, as the rule says, until
-  the owner answers). Left for later: labels on search hits; a dashboard page for one message's
+  the owner answers). Left for later: labels on search hits (done by ADR-0261 step 1); a dashboard page for one message's
   learning setting; web-chat replies carry no class; no test covers Hermes counting a missing
   forwards block; a rule's recorded inputs are not checked against who is allowed there, only
   the messages it cites; an earlier read a turn restates in its own words is not counted;
@@ -1245,7 +1281,8 @@ attempts; Hermes launches a start only within 45 seconds of receiving it, the ow
 resume always opens a new workflow, and `memory pause`/`memory resume` take
 `--revision` ([ADR-0258](docs/adr/0258-a-notes-review-whose-start-was-lost-waits-again.md),
 [check](test/store-native-review.test.ts), [Hermes](services/hermes/test_review_handoff.py)).
-Pending: resuming the reviews already closed this way on a running installation.
+The owner chose to leave the four parts already closed this way unreviewed, so nothing is
+pending.
 
 Message search missing messages after a rebuild (2026-11-17): rebuilding long-term memory
 on a running installation left 46 of 909 Honcho message embeddings pending. Their first
@@ -1254,7 +1291,7 @@ workspace, so the Honcho boundary refused every call it made. The deriver now ru
 reconciler's sync steps once per workspace with it bound, in parts within the gateway's
 per-request bounds (100 rows, 128 KiB of text, less room for preparation); a call with none
 still fails closed
-([ADR-0259](docs/adr/0259-honcho-retries-each-workspace-bound.md),
+([ADR-0261](docs/adr/0261-honcho-retries-each-workspace-bound.md),
 [check](services/honcho/test_boundary.py)). Checked against the pinned Honcho API and deriver
 with PostgreSQL and pgvector and the gateway's own request bounds: before, every pending row
 stayed pending with `honcho_workspace_required`; binding alone left six long messages (157 KB)

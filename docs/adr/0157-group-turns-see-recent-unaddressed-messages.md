@@ -34,7 +34,11 @@ and is not a record of what was just said.
 <consequences>
 - A group reply knows what was said just before it, by whom and when.
 - Retiring one of those messages later withholds the turn that carried it,
-  because the stored turn cites its source.
+  because the stored turn cites its source. Amended by
+  [ADR-0261](0261-recalled-facts-and-search-hits-name-their-source.md): the
+  message's text in the turn is replaced by a notice naming its id, and that
+  turn's tool calls, tool results and notes are withheld with it, while the
+  turn's own message and its delivered answer stay.
 - Messages older than 12 hours or beyond the last 20 since the previous turn
   reach a reply only through archive search or Honcho memory.
 </consequences>

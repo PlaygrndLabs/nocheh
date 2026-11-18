@@ -156,3 +156,55 @@ export function telegramDestination(value:unknown,directory:DestinationDirectory
   const old=legacyChat(text);
   return old?directory.resolve('telegram',old.external,old.topic_key):null;
 }
+
+const fields=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
+/** The Telegram message an archived payload holds: a message, an edit or a channel post, live or as a Telegram Desktop
+ *  export wrote it (`message`); null when it holds none. */
+export const telegramMessage=(payload:unknown):Record<string,any>|null=>{
+  const found=fields(payload);return fields(found?.message??found?.edited_message??found?.channel_post??found?.edited_channel_post);};
+const shownText=(value:unknown):string|null=>typeof value==='string'&&value.trim()?value:null;
+/**
+ * Who sent a message, as Telegram showed them (ADR-0261): a Bot API sender's first and last name and public username,
+ * or the name a Telegram Desktop export wrote (`from`), which has no username. Read from those name fields alone,
+ * never from an id, so no digits from an id field ever become a name; a post in a chat's name, a bot's own delivered
+ * message and anything else name nobody. `payload` is the copy the reader reads (the guarded copy when the secret check
+ * is on). The name is returned unchecked: whoever writes it out cleans it.
+ */
+export function telegramSenderName(kind:string,payload:unknown):{name:string|null;username:string|null} {
+  const none={name:null,username:null},body=fields(payload);
+  if(!body)return none;
+  if(kind.startsWith('telegram_desktop_')){const message=fields(body.message);return {name:shownText(message?.from),username:null};}
+  if(kind!=='telegram_update')return none;
+  const reaction=fields(body.message_reaction);
+  const message=telegramMessage(body);
+  if(!reaction&&(!message||fields(message.sender_chat)||body.channel_post!==undefined||body.edited_channel_post!==undefined))return none;
+  const user=reaction?fields(reaction.user):fields(message!.from);
+  if(!user)return none;
+  const name=[shownText(user.first_name),shownText(user.last_name)].filter(Boolean).join(' ')||null;
+  return {name,username:telegramUsername(user.username)};
+}
+
+/**
+ * Whether a message is a forum topic's opening: the service message Telegram writes when a topic is created, which
+ * every message in that topic replies to. Such a "reply" only says which topic a message is in, so it is never treated
+ * as a reply (ADR-0261). Told by a field being present alone: Bot API's `forum_topic_created`, or a Telegram Desktop
+ * export's service message whose action is `topic_created`. No id is read or compared.
+ */
+export function telegramTopicOpening(message:unknown):boolean {
+  const found=fields(message);
+  if(!found)return false;
+  if(found.forum_topic_created!==undefined&&found.forum_topic_created!==null)return true;
+  return found.type==='service'&&found.action==='topic_created';
+}
+
+/**
+ * The time an old Telegram Desktop export wrote for a message when it had no Unix time (`date` without `date_unixtime`):
+ * the exporting computer's local time, with no zone, as `YYYY-MM-DD HH:MM`. Such a time is shown as written, never
+ * converted to a zone, since the export did not say which zone it was in. Null for anything else: a live message, or an
+ * export that gave Unix seconds.
+ */
+export function desktopLocalTime(kind:string,occurredAt:unknown):string|null {
+  if(!kind.startsWith('telegram_desktop_')||typeof occurredAt!=='string')return null;
+  const match=/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?$/.exec(occurredAt);
+  return match?`${match[1]} ${match[2]}`:null;
+}

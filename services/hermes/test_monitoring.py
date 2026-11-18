@@ -122,6 +122,25 @@ class MonitoringTests(unittest.TestCase):
                 'chat. The notes and what was recorded about them are kept.',
                 'Long-term memory: recall couldn’t ask your forwards and files 1 time today; it answered from the rest of your memory.'])
 
+    def test_source_tags_the_stores_could_not_build_are_a_notice_line_of_their_own(self):
+        """ADR-0261: a search hit or an opened original whose source tag could not be built read "source not available
+        right now"; the stores count it as `source_tags`, a line apart from note labels."""
+        from datetime import datetime, timezone
+        from tools.operations.provider import problems
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        stores = {'memory_problems': [{'day': '2026-10-13', 'kind': 'source_tags', 'done': 1, 'failed': 3},
+                                      {'day': '2026-10-13', 'kind': 'notes', 'done': 0, 'failed': 1}]}
+        with tempfile.TemporaryDirectory() as state:
+            rows = monitoring.note_problems(state, now, archive=stores)
+        self.assertEqual(rows, [{'day': '2026-10-13', 'kind': 'note_labels', 'failed': 1, 'ok': 0},
+                                {'day': '2026-10-13', 'kind': 'source_tags', 'failed': 3, 'ok': 1}])
+        found = [problem for problem in problems.problems({'note_problems': rows}, [], '2026-10-13') if problem['kind'] == 'source_tags']
+        self.assertEqual([problems.text(problem, 1) for problem in found], [
+            'Memory labels: labelling where facts and search results came from failed 3 times today; those showed '
+            '“source not available right now”. The messages and what was learned from them are kept.'])
+        self.assertEqual(found[0]['ok'], 1, 'tags built after the failure, so the notice can say when labelling works again')
+        self.assertIn('store_notes', problems.readable({'note_problems': rows, 'archive': stores}))
+
     def test_a_stores_step_that_works_after_its_failure_says_working_again(self):
         # ADR-0257: the stores write a step that worked only once their day holds a failure of its kind, so steady use
         # writes nothing. The merged line still clears on a step that works after the failure, and reopens on the next.

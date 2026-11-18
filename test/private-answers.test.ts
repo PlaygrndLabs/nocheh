@@ -39,7 +39,9 @@ const refused:[string,string][]=[['POST','/v1/action-requests'],['GET','/v1/tele
   ['GET','/v1/tools/actions'],['GET','/v1/tools/actions/'+hex],['POST','/v1/memory/longterm/recall'],['POST','/v1/memory/recall'],['GET','/v1/knowledge/context'],
   ['POST','/v1/knowledge/proposals'],['GET','/v1/owner/conversations'],['GET','/v1/owner/projects'],['GET','/v1/owner/telegram-identities'],['GET','/v1/entities'],
   ['GET','/v1/telegram/identities'],['GET','/v1/box/chat'],['GET','/v1/runtime'],['GET','/v1/private-answers'],['GET','/v1/graph'],['GET','/v1/data'],['POST','/v1/ingest'],
-  ['GET','/mcp'],['POST','/v1/search'],['GET','/v1/events/'+hex+'/x'],['GET','/v1/search/'],['GET','//v1/search'],['DELETE','/v1/events/'+hex]];
+  ['GET','/mcp'],['POST','/v1/search'],['GET','/v1/events/'+hex+'/x'],['GET','/v1/search/'],['GET','//v1/search'],['DELETE','/v1/events/'+hex],
+  // What archive_read opens beside messages and shares is not an answer reader's (ADR-0261).
+  ['GET','/v1/memory/grants/'+hex],['GET','/v1/memory/learned/'+hex+'/1']];
 
 test('an answer reader reaches read routes only, at storage and at the broker alike',()=>{
   for(const [method,path] of allowed)assert.equal(privateAnswerRoute(method,path),true,method+' '+path);

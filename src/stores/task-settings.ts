@@ -97,6 +97,13 @@ export function storedTaskSettings(value:unknown):TaskSettings {
   return settings;
 }
 
+/** The owner's clock: the time zone set in Settings › Tasks (UTC until the owner sets one), read once for a request
+ *  that shows the owner times, such as the owner's source tags (ADR-0261). Never shown to anyone else. */
+export async function ownerTimeZone(db:{query(text:string,values?:unknown[]):Promise<{rows:any[]}>}):Promise<string> {
+  const row=(await db.query('SELECT settings FROM owner_task_settings WHERE singleton')).rows[0];
+  return storedTaskSettings(row?.settings).time_zone;
+}
+
 export type Repeat={every:number;unit:'day'|'week'|'month'|'year';weekdays?:number[];from:'due'|'done'};
 /** How a task repeats: every N days, weeks (optionally on chosen weekdays, 0 is Sunday), months or years. */
 export function readRepeat(value:unknown):Repeat|null {

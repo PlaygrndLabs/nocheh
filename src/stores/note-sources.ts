@@ -4,6 +4,7 @@ import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
 import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.js';
 import {sourceChat} from '../spaces.js';
+import {telegramMessage} from '../chats-telegram.js';
 import {bucketOf,eventClass,heldBy,heldKey,nochehHeld,nochehPinned,nochehQuoted,quotesToTrace,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
 import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
@@ -16,8 +17,6 @@ import {recallNames} from './recall-places.js';
 type Pools={archive:Pick<pg.Pool,'query'>;derived:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>};
 const fullId=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const record=(value:unknown):Record<string,any>|null=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:null;
-/** The Telegram message an archived payload holds: a message, an edit or a channel post. */
-const telegramMessage=(payload:unknown)=>{const found=record(payload);return record(found?.message??found?.edited_message??found?.channel_post??found?.edited_channel_post);};
 /** Whether a message answers another, as the archive's reply relation is made from it: in this chat, or in another. */
 const replies=(message:Record<string,any>|null|undefined)=>!!record(message?.reply_to_message)||!!record(message?.external_reply);
 /** Whether a message answers anything at all: as replies() tells it, or as a Telegram Desktop export records its reply
@@ -41,18 +40,22 @@ export interface Carried {pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;
 
 /**
  * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes and naming
- * their chats (`notes`), for Hermes's lookups before a turn or review as for recall and the Notes page, and recall's ask
- * of the owner's forwards and files (`memory_read`). /v1/status shows today's, and the owner's notice and System › Health
- * show each as a line of its own (`note_labels`, `forwards_read`), apart from Hermes's lines. `done` counts the steps
- * that worked after the day's first failure of that kind.
+ * their chats (`notes`), for Hermes's lookups before a turn or review as for recall and the Notes page, recall's ask
+ * of the owner's forwards and files (`memory_read`), and building the source tags of search hits and opened originals
+ * (`source_tags`, ADR-0261). /v1/status shows today's, and the owner's notice and System › Health show each as a line of
+ * its own (`note_labels`, `forwards_read`, `source_tags`), apart from Hermes's lines. `done` counts the steps that worked
+ * after the day's first failure of that kind.
  */
 export const memoryProblemSchema=`
 CREATE TABLE IF NOT EXISTS memory_problem_days (
- day date NOT NULL,kind text NOT NULL CHECK(kind IN ('notes','memory_read')),done integer NOT NULL DEFAULT 0,failed integer NOT NULL DEFAULT 0,
+ day date NOT NULL,kind text NOT NULL CHECK(kind IN ('notes','memory_read','source_tags')),done integer NOT NULL DEFAULT 0,failed integer NOT NULL DEFAULT 0,
  PRIMARY KEY(day,kind)
 );
+-- Source tags are counted too (ADR-0261).
+ALTER TABLE memory_problem_days DROP CONSTRAINT IF EXISTS memory_problem_days_kind_check;
+ALTER TABLE memory_problem_days ADD CONSTRAINT memory_problem_days_kind_check CHECK(kind IN ('notes','memory_read','source_tags'));
 `;
-export type MemoryProblemKind='notes'|'memory_read';
+export type MemoryProblemKind='notes'|'memory_read'|'source_tags';
 /** Counts one step that worked or failed, today in UTC. Every failure is counted. A step that worked is counted only once
  *  today's count for its kind already holds a failure, which is all the owner's notice needs to say it works again, so
  *  the Notes page's polls, recall and each turn's lookup write nothing while nothing fails. A count that can't be

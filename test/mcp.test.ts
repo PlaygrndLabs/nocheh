@@ -9,6 +9,7 @@ import {HttpError,readJson} from '../src/http.js';
 import {brokerServer,jobErrors as relayedJobErrors} from '../src/security/broker.js';
 import {loopback,protocolVersions,serveMcp,toolSurface,turnDeadline} from '../src/mcp/server.js';
 import {inParts,jobErrors,mcpTools,memoryRoutes,timeoutFor,type ToolContext} from '../src/mcp/tools.js';
+import {sourceTagUsage} from '../src/source-tags.js';
 
 const ID='a'.repeat(64);
 type Call={method:string;path:string;body:unknown;timeout:number};
@@ -49,6 +50,13 @@ test('the data tools keep their names, closed schemas and engine-neutral words',
     new Set(['organization','project_save','project_assignment','entity_rename','entity_correct','entity_merge','entity_unmerge','sharing_rule','fact_grant','fact_revoke']));
   for(const branch of proposal.properties.proposal.oneOf){assert.equal(branch.additionalProperties,false);assert.equal('approved' in branch.properties,false);assert.equal('delegation_id' in branch.properties,false);}
   assert.match(tool('memory_recall').description,/mcp__nocheh__archive_read/);
+  // What a source tag means is said once, in the tool descriptions, never in a result (ADR-0261).
+  assert.equal(mcpTools.filter(item=>item.description.includes(sourceTagUsage)).length,1);
+  assert.ok(tool('archive_search').description.includes(sourceTagUsage));
+  assert.match(tool('archive_search').description,/tag \(who · where · when\), by \(whose words: owner, person, forward, file, mixed, nocheh, shared or unknown\)/);
+  assert.match(tool('archive_search').description,/time zone in the owner's own chats and in UTC elsewhere/);
+  assert.match(tool('memory_search').description,/carry tag, by and at/);
+  assert.match(tool('archive_page').description,/reply_source opens, with mcp__nocheh__archive_read/);
   assert.match(toolSurface(),/^[a-f0-9]{64}$/);
   // The broker relays exactly the job codes the job tool may name.
   assert.equal(relayedJobErrors,jobErrors);assert.ok(jobErrors.has('job_repo_not_allowed'));
@@ -269,13 +277,60 @@ test('an archived source keeps reaction removal and bounded current source links
   assert.equal(bounded.text.length,12000);assert.equal(bounded.truncated,true);assert.deepEqual(bounded.current_reactions,{sources:[],complete:false});
   assert.equal(bounded.artifacts.length,50);assert.deepEqual(bounded.artifacts[0],{id:'0',kind:'voice',state:'ready'});
   assert.equal(bounded.derived.length,5);assert.equal(bounded.derived[0].text.length,2000);assert.equal(bounded.derived[0].provenance,'{"model":"synthetic","n":0}');
-  assert.equal(read.calls.at(-1)!.path,'/v1/events/'+ID);
+  assert.equal(read.calls.at(-1)!.path,'/v1/events/'+ID+'?replies=3&chain=1','the thread around it is asked for, by default 3 replies and 1 earlier message');
+  assert.equal(bounded.tag,undefined,'a read without tags keeps today\'s fields alone');
   const shared=fake(()=>({fact:'synthetic'}));
   assert.deepEqual(await run('archive_read',{id:'nocheh:filtered:'+ID},shared.context),{fact:'synthetic'});assert.equal(shared.calls[0]!.path,'/v1/memory/filtered/'+ID);
   const idle=fake(()=>record);
   for(const id of ['../secrets',7,'nocheh:shared:'+'A'.repeat(64)])assert.deepEqual(await run('archive_read',{id},idle.context),{error:'archive_source_unavailable'});
   assert.equal(idle.calls.length,0);
   assert.deepEqual(await run('archive_read',{id:ID},fake(()=>new Status(404)).context),{error:'archive_source_unavailable'});
+});
+
+test('an archived message opens with its source and its thread, within 16,000 characters (ADR-0261)',async()=>{
+  const B='b'.repeat(64),C='c'.repeat(64),D='d'.repeat(64);
+  const item=(id:string,text:string)=>({source:'nocheh:event:'+id,tag:'“Bob” · this chat · 2026-11-03 14:12 UTC',by:'person',text});
+  const record:any={source:'nocheh:event:'+ID,event:{scope:'-1',origin:'live',kind:'telegram_update',text:'Booked',payload:{}},artifacts:[],derived:[],
+    tag:'“Ana” · this chat · 2026-11-03 14:15 UTC',by:'person',at:'2026-11-03T14:15:00.000Z',chat_id:'-1',topic:'group “GP1” › topic “Trips”',
+    reply_to:item(B,'x'.repeat(600)),chain:[item(C,'Earlier'),item(D,'Earliest')],answers:item(B,'Question'),
+    replies:{count:12,items:Array.from({length:12},(_,n)=>item(n.toString(16).padStart(64,'e'),'Reply '+n)),complete:false},unexpected:'never passed on'};
+  const read=fake(()=>record);
+  const opened=await run('archive_read',{id:ID,replies:2,chain:9},read.context);
+  assert.equal(read.calls[0]!.path,'/v1/events/'+ID+'?replies=2&chain=5','chain is at most 5, replies at most 10');
+  assert.deepEqual([opened.text,opened.tag,opened.by,opened.at,opened.chat_id,opened.topic],['Booked',record.tag,'person',record.at,'-1',record.topic]);
+  assert.deepEqual(opened.reply_to,{...item(B,'x'.repeat(500)),truncated:true},'what it replies to is cut to 500 characters');
+  assert.deepEqual(opened.chain.map((entry:any)=>entry.text),['Earlier','Earliest']);
+  assert.deepEqual(opened.replies,{count:12,items:[item('0'.padStart(64,'e'),'Reply 0'),item('1'.padStart(64,'e'),'Reply 1')],complete:false});
+  assert.equal(opened.unexpected,undefined);assert.equal(opened.thread_cut,undefined);
+  await run('archive_read',{id:ID,replies:-4,chain:0},read.context);
+  assert.equal(read.calls[1]!.path,'/v1/events/'+ID+'?replies=0&chain=0');
+  // Within the limit: further replies go first, then the earliest of the chain; what it showed before is never cut further.
+  record.event.text='y'.repeat(12000);record.derived=Array.from({length:2},(_,n)=>({id:String(n),kind:'transcript',content_base64:Buffer.from('z'.repeat(1500)).toString('base64'),provenance:{}}));
+  const full=await run('archive_read',{id:ID,replies:10,chain:5},read.context),length=JSON.stringify(full).length;
+  assert.ok(length<=16000,`the whole result stays within 16,000 characters (${length})`);
+  assert.equal(full.text.length,12000);assert.equal(full.derived.length,2);assert.equal(full.thread_cut,true);
+  assert.ok(full.replies.items.length<10);assert.equal(full.replies.count,12,'the count still counts every readable reply');
+  // A topic's opening: its replies are the whole topic, read with archive_page.
+  record.event.text='Trips';record.derived=[];record.replies={count:0,items:[],topic:true};delete record.reply_to;delete record.chain;
+  assert.deepEqual((await run('archive_read',{id:ID},read.context)).replies,{count:0,items:[],topic:true});
+  // An unreadable related message is never passed on in a broken shape.
+  record.answers={source:'nocheh:event:short',tag:'x',by:'person',text:'y'};
+  assert.deepEqual(await run('archive_read',{id:ID},read.context),{error:'archive_source_unavailable'});
+
+  // A grant and an owner-corrected entry open through their own routes.
+  const grant=fake(()=>({id:ID,source:'nocheh:grant:'+ID,kind:'owner_approved',text:'The checkpoint is complete.',limitations:[],tag:'shared by the owner on 2026-11-02',by:'shared'}));
+  assert.equal((await run('archive_read',{id:'nocheh:grant:'+ID},grant.context)).tag,'shared by the owner on 2026-11-02');
+  assert.equal(grant.calls[0]!.path,'/v1/memory/grants/'+ID);
+  const learned=fake(()=>({source:`nocheh:learned:${ID}:2`,text:'t'.repeat(12500),author:'owner',day:'2026-11-02',evidence:[]}));
+  const entry=await run('archive_read',{id:`nocheh:learned:${ID}:2`},learned.context);
+  assert.equal(learned.calls[0]!.path,`/v1/memory/learned/${ID}/2`);assert.equal(entry.text.length,12000);assert.equal(entry.truncated,true);
+  const idle=fake(()=>({}));
+  for(const id of ['nocheh:grant:'+ID.toUpperCase(),`nocheh:learned:${ID}:0`,`nocheh:learned:${ID}`,'nocheh:grant:'+ID+'/x'])
+    assert.deepEqual(await run('archive_read',{id},idle.context),{error:'archive_source_unavailable'},id);
+  assert.equal(idle.calls.length,0);
+  assert.deepEqual(await run('archive_read',{id:'nocheh:grant:'+ID},fake(()=>new Status(403)).context),{error:'archive_source_unavailable'},'a private answer gets none');
+  assert.match(tool('archive_read').description,/reply_to \(the message it replies to\)/);
+  assert.deepEqual(Object.keys((tool('archive_read').inputSchema as any).properties),['id','replies','chain']);
 });
 
 test('background jobs are started, listed and stopped through the bound scope',async()=>{

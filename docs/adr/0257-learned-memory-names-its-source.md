@@ -522,7 +522,9 @@ a recalled note names its source beside its chat).
 - **Learning old data again in the new form.** Needs the owner's yes; replacing
   long-term memory from saved messages does it.
 - **Labels on search hits.** A follow-up: search hits are archive messages, not
-  notes, and nothing there got worse.
+  notes, and nothing there got worse. Closed by
+  [ADR-0261](0261-recalled-facts-and-search-hits-name-their-source.md), whose
+  step 1 gives every search hit and opened message a source tag built by code.
 </alternatives>
 
 <consequences>
@@ -687,7 +689,7 @@ a recalled note names its source beside its chat).
     summary can't show this.
   - Copies sent with the sender hidden, pasted text, and hidden-user forwards of
     the owner's own messages can't be told apart (ADR-0250).
-  - Search hits carry no source.
+  - Search hits carry no source (closed by ADR-0261 step 1).
   - The legacy memory-context mode and the non-isolated mode are unlabelled, and
     in non-isolated mode a run could reach the record file. Fresh installations
     use evidence mode, isolated.

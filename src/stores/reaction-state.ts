@@ -67,6 +67,23 @@ export class ReactionStateRepository {
       WHERE reaction_states.update_id<$4 RETURNING event_id`,[row.target_id,row.actor_id,mode,sequence,reference.id,JSON.stringify(value)]);
     if(changed.rowCount)await advanceReactionEpoch(db);
   }
+  /** The events among these that are reactions a later one by the same actor (or a later count) replaced: isCurrent() is
+   * false for exactly these. Two reads for any number of events. */
+  async staleAmong(eventIds:readonly string[]):Promise<Set<string>> {
+    const wanted=[...new Set(eventIds)];
+    if(!wanted.length)return new Set();
+    const rows=(await this.archive.pool.query(`SELECT DISTINCT ON (o.event_id) o.event_id,o.operation,target.target_id,coalesce(actor.target_id,'') AS actor_id
+      FROM source_observations o
+      JOIN source_relations target ON target.event_id=o.event_id AND target.kind='reaction_to'
+      LEFT JOIN source_relations actor ON actor.event_id=o.event_id AND actor.kind='authored_by'
+      WHERE o.event_id=ANY($1::text[]) AND o.operation IN ('reaction_change','reaction_counts') ORDER BY o.event_id,target.target_id,actor.target_id`,[wanted])).rows;
+    if(!rows.length)return new Set();
+    const modes=rows.map(row=>row.operation==='reaction_counts'?'aggregate':'individual');
+    const states=new Map((await this.control.query(`SELECT s.target_id,s.actor_id,s.mode,s.event_id FROM reaction_states s
+      JOIN unnest($1::text[],$2::text[],$3::text[]) AS k(target_id,actor_id,mode) ON s.target_id=k.target_id AND s.actor_id=k.actor_id AND s.mode=k.mode`,
+      [rows.map(row=>row.target_id),rows.map(row=>row.actor_id),modes])).rows.map(row=>[`${row.target_id}\n${row.actor_id}\n${row.mode}`,row.event_id as string]));
+    return new Set(rows.filter((row,index)=>states.get(`${row.target_id}\n${row.actor_id}\n${modes[index]}`)!==row.event_id).map(row=>row.event_id as string));
+  }
   async isCurrent(reference:SourceReference):Promise<boolean> {
     const row=await this.observation(reference.id);
     if(!row||!['reaction_change','reaction_counts'].includes(row.operation))return true;

@@ -337,7 +337,8 @@ export class TelegramDispatchRepository {
    * Group messages since this chat's last turn that did not address Nocheh. They
    * never reach Hermes on their own, so a reply would not know what was just said.
    * Each is the guarded copy this conversation may read, labeled with its speaker,
-   * and cites its source so retiring it withholds the turn that carried it.
+   * and cites its source so retiring it withholds that message's text, and the tool
+   * work and notes of the turn that carried it, from Hermes' stored history.
    */
   private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<{id:string;speaker:string;text:string;forwarded?:string}[]> {
     const own=(await this.archive.pool.query('SELECT scope,received_at FROM events WHERE id=$1',[source.id])).rows[0];

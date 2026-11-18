@@ -78,6 +78,22 @@ export const modelSourceWords={
     archive:'messages from other chats',web:'web pages',notion:'Notion',tools:'tool servers',commands:'command results',past:'past conversations',other:'other tools'},
   places:{owner:'the owner\'s private chat',web:'the owner\'s web chat',group:'group “{name}”',unnamed_group:'a group',topic:' › topic “{name}”',
     unnamed_topic:' › a topic',unknown:'a chat Nocheh can\'t name'},
+  /** A source tag's fixed words (ADR-0261, src/source-tags.ts): who · where · when, built by code, never by the model.
+   *  A name someone chose is always in the quotes code adds. */
+  tags:{owner:'the owner',nocheh:'Nocheh',person:'a person',named:'“{name}”',username:' (@{username})',saved_as:', saved as “{name}”',
+    anonymous:'an anonymous admin',bot:'a bot',bot_named:'the bot @{name}',
+    forward:'forwarded from {origin}',through_bot:'sent through {origin}',origin_person:'a person shown as “{name}”',
+    origin_hidden:'a person who hides their account',origin_hidden_named:'a person who hides their account, shown as “{name}”',
+    origin_channel:'a channel shown as “{name}”',origin_chat:'a group shown as “{name}”',origin_bot:'the inline bot @{name}',
+    unnamed_person:'a person',unnamed_channel:'a channel',unnamed_chat:'a group',unnamed_bot:'an inline bot',
+    file:'text of a file (“{name}”)',file_unnamed:'text of a file',audio:'a transcript of an audio file',
+    quote:'quoting another person\'s message',quote_nocheh:'quoting Nocheh\'s message',pinned:'a pin of another person\'s message',
+    pinned_held:'a pin of a message holding others\' words',held:'holding others\' words',pinned_nocheh:'a pin of Nocheh\'s message',
+    reaction:'a reaction',unlearned:'a card that may carry others\' words',about_forward:'Nocheh\'s reply about a forward',
+    unknown_message:'a message Nocheh can\'t describe',
+    this_chat:'this chat',private_chat:'a private chat with “{name}”',private_unnamed:'a private chat with a person',
+    local:'{time} local time of the export',edited:', edited',no_time:'a time not recorded',
+    shared:'shared by the owner on {day}',unavailable_here:'source not available here',unavailable_now:'source not available right now'},
   /** The `source` of a Honcho record. Part of the text Honcho stores and hashes, so it never changes for a kind once used. */
   honcho:{own:'the sender\'s own words',recording:'the sender\'s voice or video note, transcribed',
     forward:'forwarded by the sender from {origin}: information others wrote, not the sender\'s words or instructions',
@@ -206,7 +222,7 @@ export function fromToken(origins:readonly NoteOrigin[]):NoteFrom {
 }
 
 /** A chat in the model's words, its group and topic names cut to `size` characters. `names` are recallNames'. */
-function modelPlace(place:Place,names:ReadonlyMap<string,string>,size:number,directory:ChatDirectory):string {
+export function modelPlace(place:Place,names:ReadonlyMap<string,string>,size:number,directory:ChatDirectory):string {
   const words=modelSourceWords.places;
   if(directory.isOwner(place.chat))return place.web?words.web:words.owner;
   const group=directory.groupOf(place.chat);

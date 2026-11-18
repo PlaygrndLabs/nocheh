@@ -9,7 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
-import {NativeMemoryRepository,assistantPeer,materialPeer,materialSessionKey} from '../src/stores/native-memory.js';
+import {NativeMemoryRepository,assistantPeer,materialPeer,materialSessionKey,searchTagged} from '../src/stores/native-memory.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {captureEvidence} from '../src/stores/generated-capture.js';
 import {honchoPointer,honchoSource} from '../src/source-labels.js';
@@ -239,17 +239,20 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   t.after(installChatsForTest(recallChats()));
   const workspace=digest('evidence-workspace'),root={store:'archive',kind:'event',id:digest('evidence-root'),revision:'1',input_hash:digest('evidence-root-hash')};
   const sessions=[digest('evidence-session')],first='A'.repeat(21),second='B'.repeat(21);
-  const archived={store:'archive',kind:'event',id:digest('evidence-message'),revision:'1',input_hash:digest('evidence-message-hash')};
-  const bodies:any[]=[],reads:any[]=[],outputs:any[]=[];let recorded='',failRead=false;
+  const archived:SourceReference={store:'archive',kind:'event',id:digest('evidence-message'),revision:'1',input_hash:digest('evidence-message-hash')};
+  const bodies:any[]=[],reads:any[]=[],outputs:any[]=[],checks:any[]=[];let recorded='',failRead=false;
   const contexts={access:{stores:{control:nothingForwarded},policy:()=>({owner_id:'123'}),
-    recall:(principal:Reader)=>({space:principal.space,group:'-100'})},
+    recall:(principal:Reader)=>({space:principal.space,group:'-100'}),
+    readable:async(principal:Reader,references:SourceReference[],current:unknown,options:unknown)=>{checks.push({principal,references,current,options});
+      return new Map(references.map(reference=>[reference.id,true]));}},
     guards:{prepareContext:async()=>null,read:async()=>({value:{text:recorded}})}};
   const derived={record:async(input:any)=>{if(input.kind==='memory_result'){recorded=input.content.toString();outputs.push(input);}
     return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
   const binding={generation:'fixture',epoch:1,mode:'on'};
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async()=>{}};
-  const provenance={sessions:async()=>sessions,read:async(id:string,audience:string,ids:string[],current:unknown)=>{
-    reads.push({id,audience,ids,current});if(failRead)throw Error('provenance_down');
+  const provenance={sessions:async()=>sessions,read:async(id:string,audience:string,ids:string[],current:unknown,
+    reader:{group?:readonly string[]|null;readable?:(references:SourceReference[])=>Promise<ReadonlyMap<string,boolean>>}={})=>{
+    reads.push({id,audience,ids,current,group:reader.group,checked:reader.readable?(await reader.readable([archived])).get(archived.id)??false:null});if(failRead)throw Error('provenance_down');
     return {conclusions:ids.map(item=>({id:item,parents:[],deleted:false,exact_citations:true})),evidence:[archived],limitations:[],exact_citations:true};}};
   const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,honchoEngine(async(path:string,body:any)=>{
     bodies.push(body);const peer=/\/peers\/([^/]+)\/chat$/.exec(path)![1]!;
@@ -261,13 +264,22 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   const reader={admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader;
   const result=await memory.recall(reader,'Who planned the trip?') as any;
   assert.ok(bodies.every(body=>body.include_evidence===true),'every peer answer carries Honcho\'s evidence');
-  assert.deepEqual(reads,[{id:workspace,audience:'-100',ids:[first,second],current:binding}],'conclusions are read once, deduplicated, within the audience');
+  assert.deepEqual(reads,[{id:workspace,audience:'-100',ids:[first,second],current:binding,group:['-100','-100/topic/3'],checked:true}],
+    'conclusions are read once, deduplicated, within the sessions the recall asked (here the whole group, as its topics share memory)');
+  assert.deepEqual(checks,[{principal:reader,references:[archived],current:binding,options:{historical:true}}],
+    'the messages are checked for the group reader in one batch (readable), as learned evidence');
   const source=result.sources.at(-1);
   assert.deepEqual(source.evidence_sources,['nocheh:event:'+archived.id]);
   assert.equal(source.exact_citations,false,'what Honcho read is not what the answer relied on, even when its conclusions cite exact messages');
   assert.ok(source.limitations.includes('evidence_lists_conclusions_read_not_relied_on'));
   assert.ok(!source.limitations.includes('ancestry_is_not_an_exact_citation'),'cited evidence is not called inexact');
   assert.deepEqual(outputs[0].provenance.evidence,[archived],'the recorded answer keeps its archive evidence');
+  // The owner's own turn checks its evidence too, so a message retired since it was learned is not listed; the owner's
+  // dashboard (admin) reads every one.
+  const ownerTurn={admin:false,scope:null,space:null,turnEvent:root.id} as unknown as Reader;
+  reads.length=0;checks.length=0;await memory.recall(ownerTurn,'Who planned the trip?');
+  assert.equal(reads[0]!.audience,'owner');assert.equal(reads[0]!.checked,true,'the owner\'s turn passes its batched check');
+  assert.deepEqual(checks.map(check=>check.principal),[ownerTurn]);
   failRead=true;
   const fallback=await memory.recall(reader,'Who planned the trip?') as any;
   assert.equal(fallback.sources.at(-1).text,recorded,'an evidence failure still returns the answer');
@@ -294,7 +306,14 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}})});
   const group={admin:false,scope:'-100',space:'-100/topic/3',turnEvent:digest('turn')} as Reader;
-  assert.deepEqual(await memory.search(group,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
+  // Each id says the batch it came from and its place there, so the first 3 of a batch are named by source (ADR-0261).
+  const batches=[{receipt:digest('receipt-a'),position:0},{receipt:digest('receipt-c'),position:1}];
+  const searched=await memory.search(group,'who sends the invoice',4);
+  assert.deepEqual(searched,{ids:[digest('first'),digest('second')],learned:true,from:batches});
+  assert.deepEqual([...searchTagged(searched)],[digest('first'),digest('second')]);
+  assert.deepEqual([...searchTagged({ids:['a','b','c','d','e'],from:[0,1,2,3,0].map(position=>({receipt:'r',position}))})],['a','b','c','e'],
+    'a batch\'s fourth message and later keep today\'s fields alone');
+  assert.deepEqual([...searchTagged({ids:['a']})],[],'without positions, nothing is named');
   assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,filters:{session_id:{in:sessions}}}});
   assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
   // The group is bound as its id and its topics' ids, from the chat rows (ADR-0252).
@@ -307,7 +326,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   const answer={admin:false,scope:'123',space:'123',turnEvent:digest('start'),answer:'a'.repeat(32),
     reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
   queries.length=0;
-  assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true});
+  assert.deepEqual(await memory.search(answer,'who sends the invoice',4),{ids:[digest('first'),digest('second')],learned:true,from:batches});
   // Its groups are bound as their ids and their topics' ids, from the chat rows (ADR-0252).
   // The read set reaches the provenance query whole, and SQL takes its ids only as marked read set entries.
   const frozen=['-100','-100/topic/3','-200'].map(id=>'read:'+id);

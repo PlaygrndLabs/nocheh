@@ -97,6 +97,17 @@ export class ArchiveRepository {
       sequence:String(row.capture_sequence),origin:row.origin,channel:row.channel,kind:row.kind,scope:row.scope,artifact_ids:row.artifact_ids};
   }
 
+  /** captured() for many events in one read; an id the archive does not hold is left out. */
+  async capturedMany(ids:readonly string[]):Promise<Map<string,CapturedSource>> {
+    const found=new Map<string,CapturedSource>(),wanted=[...new Set(ids)];
+    if(!wanted.length)return found;
+    for(const row of (await this.pool.query(`SELECT id,revision,payload_hash,capture_sequence,origin,channel,kind,scope,
+      ARRAY(SELECT id FROM artifacts WHERE event_id=e.id ORDER BY id) AS artifact_ids FROM events e WHERE id=ANY($1::text[])`,[wanted])).rows)
+      found.set(row.id,{reference:{store:'archive',kind:'event',id:row.id,revision:row.revision,input_hash:row.payload_hash},
+        sequence:String(row.capture_sequence),origin:row.origin,channel:row.channel,kind:row.kind,scope:row.scope,artifact_ids:row.artifact_ids});
+    return found;
+  }
+
   async verify(reference:SourceReference):Promise<CapturedSource> {
     if(reference.store!=='archive'||reference.kind!=='event')throw new HttpError(400,'invalid_source_reference');
     const source=await this.captured(reference.id);

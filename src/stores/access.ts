@@ -4,7 +4,7 @@ import {outsideChat,ownerChat,type AssistantPolicy} from '../assistant-policy.js
 import {HttpError,object,string} from '../http.js';
 import {groupSpace,inReadSet,inRecall,observedChat,parentSpace,readSetGroups,readSetOf,recallScope,servedGroup,sourceChat,type ReadSet,type RecallScope} from '../spaces.js';
 import type {StorePools} from './connections.js';
-import {ArchiveRepository,type SourceReference} from './archive.js';
+import {ArchiveRepository,type CapturedSource,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
 import {RelationshipRepository} from './relationships.js';
 import {OwnerCommands} from './owner-commands.js';
@@ -47,6 +47,54 @@ export class SourceAccessRepository {
     const allowed=space!==null&&(chats().parentOf(space)??space)===chat&&
       (answer?own?space===principal.space:inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
     await this.guards.assertCurrent(binding);return allowed;
+  }
+  /**
+   * canRead for many sources at once (ADR-0261): true exactly where canRead returns true, and false where it returns
+   * false or refuses the reference (one the archive does not hold, or that names another revision). The same checks in
+   * the same order, each batched, so a page of tags costs a few reads instead of about five per source. A guard binding
+   * that is no longer current is refused, as canRead refuses it.
+   */
+  async readable(principal:Reader,references:readonly SourceReference[],binding:GuardBinding,options:{historical?:boolean}={}):Promise<Map<string,boolean>> {
+    await this.guards.assertCurrent(binding);
+    const result=new Map<string,boolean>(),deny=(id:string)=>result.set(id,false);
+    const captured=await this.archive.capturedMany(references.filter(ref=>ref.store==='archive'&&ref.kind==='event').map(ref=>ref.id));
+    let open:{reference:SourceReference;source:CapturedSource}[]=[];
+    for(const reference of references) {
+      const source=reference.store==='archive'&&reference.kind==='event'?captured.get(reference.id):undefined;
+      if(!source||source.reference.revision!==reference.revision||source.reference.input_hash!==reference.input_hash||result.get(reference.id)===false)deny(reference.id);
+      else if(!open.some(item=>item.reference.id===reference.id))open.push({reference,source});
+    }
+    open=open.filter(item=>result.get(item.reference.id)!==false);
+    if(!principal.admin) {
+      const telegram=open.filter(item=>item.source.channel==='telegram').map(item=>item.reference.id);
+      const [retired,stale]=await Promise.all([this.retirements?.retiredAmong(telegram)??new Set<string>(),
+        !options.historical&&this.reactions?this.reactions.staleAmong(telegram):new Set<string>()]);
+      for(const id of telegram)if(retired.has(id)||stale.has(id))deny(id);
+      open=open.filter(item=>result.get(item.reference.id)!==false);
+      // What someone Nocheh doesn't serve wrote stays out of every conversation, the owner's included.
+      for(const item of open)if(outsideChat(this.policy(),item.source))deny(item.reference.id);
+      open=open.filter(item=>result.get(item.reference.id)!==false);
+    }
+    if(principal.admin||principal.scope===null){for(const item of open)result.set(item.reference.id,true);await this.guards.assertCurrent(binding);return result;}
+    const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
+    const placed:{reference:SourceReference;source:CapturedSource;chat:string;own:boolean}[]=[];
+    for(const item of open) {
+      if(!['telegram','browser'].includes(item.source.channel)||answer&&!reads){deny(item.reference.id);continue;}
+      const chat=sourceChat(item.source),own=answer&&item.reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope;
+      if(chat===null||(answer?!own&&!readSetGroups(reads!).includes(chat):chat!==principal.scope)){deny(item.reference.id);continue;}
+      placed.push({...item,chat,own});
+    }
+    const described=await this.relationships.describeMany(placed.map(item=>item.reference.id));
+    for(const item of placed) {
+      const found=described.get(item.reference.id);
+      // canRead's describe() refuses an original with no observation.
+      if(!found){deny(item.reference.id);continue;}
+      const observed=found.audience,space=observed&&observed.chat_id===item.source.scope?observedChat(item.source.channel,observed):null;
+      const allowed=space!==null&&(chats().parentOf(space)??space)===item.chat&&
+        (answer?item.own?space===principal.space:inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
+      result.set(item.reference.id,allowed);
+    }
+    await this.guards.assertCurrent(binding);return result;
   }
   async canLearn(reference:SourceReference,binding:GuardBinding,options:{historical?:boolean}={}):Promise<boolean> {
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);

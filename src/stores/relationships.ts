@@ -4,7 +4,7 @@ import {telegramMessageAudience,type ObservedAudience,type ObservedReaction} fro
 import {canonical} from '../archive.js';
 import {sourceObjectId,type SourceIdentity} from '../source-model.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
-import {inReadSet,inRecall,observedChat,type ReadSet,type RecallScope} from '../spaces.js';
+import {archiveScopes,inReadSet,inRecall,observedChat,readSetGroups,type ReadSet,type RecallScope} from '../spaces.js';
 
 /** `recall` admits the known conversations of a recall scope: its own, or every conversation of its group when the
  * group's topics share memory. `reads` admits the known conversations of a read set, for an answer reader (ADR-0249).
@@ -12,6 +12,10 @@ import {inReadSet,inRecall,observedChat,type ReadSet,type RecallScope} from '../
 export type RelationshipAudience={kind:'owner'}|{kind:'recall';scope:RecallScope}|{kind:'reads';set:ReadSet};
 const permits=(audience:RelationshipAudience,chat:string|null):boolean=>audience.kind==='owner'||chat!==null&&
   (audience.kind==='reads'?inReadSet(audience.set,chat):inRecall(audience.scope,chat));
+/** The archive scopes (every Telegram id) of the groups an audience reads, to narrow a read in SQL before permits()
+ *  decides each row; null for the owner, who reads every chat. */
+const audienceScopes=(audience:RelationshipAudience):string[]|null=>audience.kind==='owner'?null:
+  archiveScopes(audience.kind==='reads'?readSetGroups(audience.set):[audience.scope.group??audience.scope.space]);
 
 // Resolve the older adapter's unknown General projection from the immutable
 // full message. This changes neither archived bytes nor the saved descriptor.
@@ -50,17 +54,32 @@ export class RelationshipRepository {
    * that audience names (observedChat), null when it is unknown or no row names it. */
   async describe(reference:SourceReference):Promise<{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string;chat:string|null}> {
     await this.archive.verify(reference);
-    const row=(await this.pool.query(`SELECT ${observationColumns},r.object_id FROM source_observations o
+    const found=(await this.describeMany([reference.id])).get(reference.id);
+    if(!found)throw new HttpError(404,'source_projection_not_found');
+    return found;
+  }
+  /** describe() for many events in one read, for ids the caller has already verified; an event with no observation is
+   * left out. A reaction is described by the message it reacts to, as describe() does. */
+  async describeMany(ids:readonly string[]):Promise<Map<string,{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string;chat:string|null}>> {
+    const found=new Map<string,{audience:ObservedAudience|null;reaction:ObservedReaction|null;object_id:string;chat:string|null}>(),wanted=[...new Set(ids)];
+    if(!wanted.length)return found;
+    const rows=(await this.pool.query(`SELECT ${observationColumns},r.object_id,o.event_id FROM source_observations o
       JOIN source_revisions r ON r.id=o.revision_id JOIN source_objects s ON s.id=r.object_id
-      JOIN events e ON e.id=o.event_id WHERE o.event_id=$1`,[reference.id])).rows[0];
-    if(!row)throw new HttpError(404,'source_projection_not_found');
-    let audience=messageAudience(row);
-    if(['reaction_change','reaction_counts'].includes(row.operation)) {
-      const target=(await this.pool.query("SELECT target_id FROM source_relations WHERE event_id=$1 AND kind='reaction_to'",[reference.id])).rows[0];
-      const resolved=target?await this.targetAudience(target.target_id):null;
-      if(resolved&&resolved.chat_id===audience?.chat_id)audience=resolved;
+      JOIN events e ON e.id=o.event_id WHERE o.event_id=ANY($1::text[])`,[wanted])).rows;
+    const reactions=rows.filter(row=>['reaction_change','reaction_counts'].includes(row.operation)).map(row=>row.event_id);
+    const targets=new Map<string,string>();
+    if(reactions.length)for(const row of (await this.pool.query("SELECT DISTINCT ON (event_id) event_id,target_id FROM source_relations WHERE event_id=ANY($1::text[]) AND kind='reaction_to' ORDER BY event_id,target_id",
+      [reactions])).rows)targets.set(row.event_id,row.target_id);
+    for(const row of rows) {
+      let audience=messageAudience(row);
+      if(['reaction_change','reaction_counts'].includes(row.operation)) {
+        const target=targets.get(row.event_id),resolved=target?await this.targetAudience(target):null;
+        if(resolved&&resolved.chat_id===audience?.chat_id)audience=resolved;
+      }
+      found.set(row.event_id,{audience,reaction:row.metadata.reaction??null,object_id:row.object_id,
+        chat:audience&&audience.chat_id===row.scope?observedChat(row.channel,audience):null});
     }
-    return {audience,reaction:row.metadata.reaction??null,object_id:row.object_id,chat:audience&&audience.chat_id===row.scope?observedChat(row.channel,audience):null};
+    return found;
   }
 
   async observations(target:SourceIdentity,after='',limit=100):Promise<{references:SourceReference[];next:string|null}> {
@@ -78,6 +97,46 @@ export class RelationshipRepository {
       WHERE r.target_id=$1 AND r.kind IN ('reply_to','reaction_to') AND e.id>$2 ORDER BY e.id LIMIT $3`,[sourceObjectId(target),after,limit+1]);
     return {references:rows.slice(0,limit).map(r=>({store:'archive',kind:'event',id:r.id,revision:r.revision,input_hash:r.payload_hash})),
       next:rows.length>limit?rows[limit-1].id:null};
+  }
+
+  /**
+   * The messages each of these events replies to (ADR-0261): every archived copy of each reply target, oldest first, the
+   * way context() finds them, in one read. Only copies whose conversation the audience admits are kept (permits): a
+   * target outside it, external to the reader, is left out as context() leaves it out. An access check (canRead) is the
+   * caller's, as for context().
+   */
+  async replyTargets(ids:readonly string[],audience:RelationshipAudience):Promise<Map<string,SourceReference[]>> {
+    const found=new Map<string,SourceReference[]>(),wanted=[...new Set(ids)];
+    if(!wanted.length)return found;
+    const rows=(await this.pool.query(`SELECT r.event_id AS reply,e.id,e.revision,e.payload_hash FROM source_relations r
+      JOIN source_revisions v ON v.object_id=r.target_id JOIN source_observations o ON o.revision_id=v.id JOIN events e ON e.id=o.event_id
+      WHERE r.event_id=ANY($1::text[]) AND r.kind='reply_to' ORDER BY r.event_id,e.received_at,e.id`,[wanted])).rows;
+    const chats=await this.describeMany(rows.map(row=>row.id));
+    for(const row of rows) {
+      if(!permits(audience,chats.get(row.id)?.chat??null))continue;
+      const list=found.get(row.reply)??[];list.push({store:'archive',kind:'event',id:row.id,revision:row.revision,input_hash:row.payload_hash});found.set(row.reply,list);
+    }
+    return found;
+  }
+  /**
+   * The messages that reply to an object (ADR-0261), by the archive's reply relation (source_relations, its target
+   * index): each replying message once, with every copy of it the audience admits (permits), oldest first, its first
+   * copy deciding the order. Only copies in the audience's own groups are read (in SQL, so replies elsewhere never take
+   * the place of those it may see); at most `limit` of them, and `more` says there were others there. canRead is the
+   * caller's.
+   */
+  async replies(objectId:string,audience:RelationshipAudience,limit=100):Promise<{replies:{object:string;references:SourceReference[]}[];more:boolean}> {
+    if(!Number.isInteger(limit)||limit<1||limit>200)throw new HttpError(400,'invalid_relationship_page');
+    const rows=(await this.pool.query(`SELECT e.id,e.revision,e.payload_hash,v.object_id FROM source_relations r JOIN events e ON e.id=r.event_id
+      JOIN source_observations o ON o.event_id=e.id JOIN source_revisions v ON v.id=o.revision_id
+      WHERE r.target_id=$1 AND r.kind='reply_to' AND ($3::text[] IS NULL OR e.scope=ANY($3::text[])) ORDER BY e.received_at,e.id LIMIT $2`,
+      [objectId,limit+1,audienceScopes(audience)])).rows;
+    const chats=await this.describeMany(rows.slice(0,limit).map(row=>row.id)),replies=new Map<string,SourceReference[]>();
+    for(const row of rows.slice(0,limit)) {
+      if(row.object_id===objectId||!permits(audience,chats.get(row.id)?.chat??null))continue;
+      const list=replies.get(row.object_id)??[];list.push({store:'archive',kind:'event',id:row.id,revision:row.revision,input_hash:row.payload_hash});replies.set(row.object_id,list);
+    }
+    return {replies:[...replies].map(([object,references])=>({object,references})),more:rows.length>limit};
   }
 
   /** This scope filter is also intersected with the control repository's consent/access policy by callers. */

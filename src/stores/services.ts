@@ -61,6 +61,7 @@ import {ReactionStateRepository} from './reaction-state.js';
 import {KnowledgeManagementRepository} from './knowledge-management.js';
 import {OwnerSupervisionRepository} from './owner-supervision.js';
 import {NoteSourceRepository} from './note-sources.js';
+import {SourceTagRepository} from './source-tags.js';
 import {BackgroundJobRepository} from './background-jobs.js';
 import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
@@ -99,13 +100,15 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     const reference={store:'control' as const,kind:'operation' as const,id:operation.id,generation:operation.generation,input_hash:operation.input_hash};
     await operations.verify(reference);return reference;
   },options.detectorVersion);
-  const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value));
   // One reader of where messages and notes came from, for reviews, Hermes's lookups, the Notes page, recall and Honcho.
   const noteSources=new NoteSourceRepository(stores,options.policy,access);
   const projects=new ProjectRepository(stores.control,servedGroups),entities=new EntityRepository(stores,access,projects,noteSources),sharing=new SharingPolicyRepository(stores.control),learned=new LearnedMemoryRepository(stores,archive,derived,guards);
   const contexts=new LearningContextRepository(access,guards,learned,selections,projects,entities),provenance=new MemoryProvenanceRepository(stores,archive,guards,options.memoryEngine);
   // Background learning marks its checks so reply checks get detector slots first.
   const detect=async(text:string,background=false)=>(await options.runtime('guard.detect',background?{text,priority:'background'}:{text})).literals;
+  // Who · where · when for a search hit or an opened original, built by code and secret-checked together (ADR-0261).
+  const tags=new SourceTagRepository(stores,access,noteSources,(principal,value,check)=>prepared.prepare(principal,value,check),detect,options.policy);
+  const sources=new SourceRepository(access,attachments,selections,(principal,value)=>prepared.allow(principal,value),tags,learned);
   const turns=new RuntimeTurnRepository(access,prepared);
   // Nocheh's chat records (ADR-0252): what each captured Telegram original says of its chat, its topic and its people.
   const chats=new ChatRepository(stores,options.policy);
@@ -192,7 +195,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>ownerChat(options.policy())}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,
-    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??'',noteSources),noteSources,
+    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??'',noteSources),noteSources,tags,
     shared,
     detectorVersion:options.detectorVersion,detect};
 }

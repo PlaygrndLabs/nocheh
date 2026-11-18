@@ -15,6 +15,7 @@ import {OwnerCommands} from './owner-commands.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {SharingPolicyRepository,SharingRule} from './projects.js';
 import {selectionId,type SelectionRepository} from './selections.js';
+import {sharedTag,type TagBy} from '../source-tags.js';
 
 const identity=(v:unknown)=>{const id=string(v,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_sharing_identity');return id;};
 const exact=(v:unknown,keys:string[])=>{const b=object(v);if(Object.keys(b).some(k=>!keys.includes(k)))throw new HttpError(400,'unknown_sharing_field');return b;};
@@ -22,7 +23,10 @@ type Preview={id:string;request_hash:string;operation_reference:OperationReferen
   generation:string;guard_epoch:string;guard_mode:GuardBinding['mode'];input_reference:DerivativeReference;output_reference:DerivativeReference|null;state:'pending'|'ready'};
 type Inputs={rule:SharingRule;binding:GuardBinding;sources:SourceReference[];dependencies:PreparedDependency[];
   candidates:{id:string;text:string}[];query:string;content:string|null};
-type Shared={id:string;source:string;kind:'owner_approved'|'privacy_filtered_inference';text:string;limitations:string[]};
+type Shared={id:string;source:string;kind:'owner_approved'|'privacy_filtered_inference';text:string;limitations:string[];tag:string;by:TagBy};
+/** What the owner shared names only the day it was shared (ADR-0261), never the original's sender, chat or day. Shares
+ *  are read in groups, topics and private answers, which read UTC, never the owner's zone. */
+export const shareTag=(created:Date)=>sharedTag(created.toISOString().slice(0,10));
 
 /** Sharing publishes a distinct, revocable representation; it never grants source access. */
 export class SharingContentRepository {
@@ -258,7 +262,7 @@ export class SharingContentRepository {
     if(representation.revision!==row.guard_revision||representation.hash!==row.text_hash)throw new HttpError(409,'sharing_preview_changed');
     const result:Shared={id,source:'nocheh:'+(row.mode==='approved'?'shared:':'filtered:')+id,
       kind:row.mode==='approved'?'owner_approved':'privacy_filtered_inference',text:representation.text,
-      limitations:['Shared representation. Private source provenance is available to the owner only.']};
+      limitations:['Shared representation. Private source provenance is available to the owner only.'],...shareTag(row.created_at)};
     await this.prepared.allow(principal,result);await this.prepared.audience.assert(principal);return result;
   }
   private async filtered(rule:SharingRule,query:string,binding:GuardBinding):Promise<string|null> {
