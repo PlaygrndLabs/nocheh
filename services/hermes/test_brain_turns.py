@@ -323,6 +323,33 @@ class BrainTurnTests(unittest.TestCase):
             self.assertNotEqual(state['state'],'done',update)
         self.assertEqual(len(self.calls),1)
 
+    def test_an_ask_about_a_member_runs_as_the_owners_private_chat_never_as_the_owner(self):
+        # Step 4b: the ask's pass names it, reads as the owner's private chat and never as the owner, under its own attempt.
+        def signed(event,**extra):
+            claims={'scope':'123','space':'123','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
+                    'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1,**extra}
+            data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+            return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(SECRET.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        owner=lambda body,claims:Scope(body['scope'],'123',True,Scopes.profile(body['scope']),body['scope'])
+        brain=self.brain(self.replying(),resolve=owner);ask='d'*32
+        asked={'ask':ask,'member':'"Synthetic Member"'}
+        body=turn_body(90,chat='123',attempt='m1-'+ask,member_read=asked);body['archive_credential']=signed(body['event_id'],member_read=ask)
+        brain.start(body);self.assertEqual(self.wait(brain,body)['state'],'done')
+        scope=self.calls[0][0]
+        self.assertEqual((scope.chat_id,scope.space,scope.owner,scope.member_read,scope.answer),('123','123',False,ask,''))
+        # The pass and its ask come together, for the same ask, or nothing runs.
+        for update,changes,extra in ((91,{'attempt':'m1-'+ask},{'member_read':ask}),(92,{'attempt':'m1-'+ask,'member_read':asked},{}),
+                                     (93,{'attempt':'m1-'+ask,'member_read':asked},{'member_read':'e'*32})):
+            body=turn_body(update,chat='123',**changes);body['archive_credential']=signed(body['event_id'],**extra)
+            try:brain.start(body)
+            except ValueError:continue
+            self.assertNotEqual(self.wait(brain,body)['state'],'done',update)
+        # Its attempt names its ask: a plain attempt, another ask's or a continuation's is refused before anything runs.
+        for attempt in (1,'m1-'+'e'*32,'c1-'+'e'*40):
+            body=turn_body(94,chat='123',attempt=attempt,member_read=asked);body['archive_credential']=signed(body['event_id'],member_read=ask)
+            with self.subTest(attempt=attempt),self.assertRaisesRegex(ValueError,'invalid_member_read'):brain.start(body)
+        self.assertEqual(len(self.calls),1)
+
     def test_the_real_native_turn_returns_its_reply(self):
         from .assistant_gateway import native_turn
         child={'state':'done','text':f'Synthetic native answer 【nocheh:event:{CITED}】','session_id':'nocheh-native-session','timings':{'total':{'ms':9,'calls':1}}}
