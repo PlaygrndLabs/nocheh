@@ -16,6 +16,8 @@ import pg from 'pg';
 import {initialize} from './dist/src/database.js';
 import {initializeStoreDatabases,connectStores} from './dist/src/stores/connections.js';
 import {digest,ingest} from './dist/src/archive.js';
+import {ChatSeeder} from './dist/src/stores/chat-seed.js';
+import {ensureAccount,ensureConnection} from './dist/src/stores/chats.js';
 const config={host:'nocheh-db',user:'nocheh',database:'nocheh',password:'synthetic-reset-configuration-only'};
 const legacy=new pg.Pool(config);await initialize(legacy);
 await legacy.query("INSERT INTO memory_spaces(id,overrides) VALUES('-42',$1)",[JSON.stringify({mode:'isolated',sources:['123'],privacy_instructions:'Saved fixture policy'})]);
@@ -26,8 +28,16 @@ await stores.control.query("INSERT INTO projects(id,name,description,state,revis
 await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES('-42',$1,'assigned',1)",['a'.repeat(64)]);
 await stores.control.query("INSERT INTO sharing_rules(id,name,sources,destination,enabled,mode,instructions,revision) VALUES($1,'Saved share',$2,'-42',false,'approved','Saved fixture sharing policy',1)",['b'.repeat(64),JSON.stringify(['-43'])]);
 await stores.control.query("INSERT INTO runtime_profiles(id,name,owner_id,state,revision) VALUES($1,'research','123','active',1)",['profile-'+'c'.repeat(48)]);
-await stores.control.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint) VALUES('assistant',1,$1,$2)",[JSON.stringify({enabled:true,owner_id:'123',group_access:{}}),digest('configuration')]);
+await stores.control.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint) VALUES('assistant',1,$1,$2)",[JSON.stringify({enabled:true,owner_id:'123'}),digest('configuration')]);
 await stores.control.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");
+// The chats the saved values name, as the stores seed them at start (ADR-0252).
+await new ChatSeeder(stores,{owner_id:'123'}).seed();
+// A paused member with one linked account, switched off in one group (step 3), and a lower daily message cap.
+await stores.control.query("INSERT INTO members(id,state,tasks) VALUES($1,'paused','read')",['f'.repeat(64)]);
+const account=await ensureAccount(stores.control,await ensureConnection(stores.control,'telegram'),{external:'701'},'telegram');
+await stores.control.query("UPDATE chat_accounts SET member_id=$1 WHERE id=$2",['f'.repeat(64),account]);
+await stores.control.query("INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,'-42',false)",['f'.repeat(64)]);
+await stores.control.query("UPDATE member_directory_state SET daily_messages=50 WHERE singleton");
 await stores.archive.query("INSERT INTO events(id,source_key,channel,bot_id,scope,source_id,revision,origin,kind,payload,payload_hash,original_text,search_text) VALUES($1,'original-source','telegram','fixture','123','1','1','live','telegram_update',$2,$3,$4,'SOURCE-CONTENT-ORIGINAL')",
  ['d'.repeat(64),Buffer.from('{}'),digest('{}'),Buffer.from('SOURCE-CONTENT-ORIGINAL')]);
 await stores.derived.query("INSERT INTO derived_artifacts(id,kind,content,content_hash,provenance,source_revision,input_hash,producer,producer_version,configuration_hash,operation_id,operation_reference) VALUES($1,'runtime_context',$2,$3,'{}','1',$3,'fixture','1',$3,'fixture-content',$4)",
@@ -64,6 +74,12 @@ def main():
         original = results['original-only-v1']['configuration']
         assert len(original['projects']) == len(original['project_assignments']) == len(original['sharing_rules']) == len(original['runtime_profiles']) == 1
         assert original['guard_mode'] == [{'mode': 'on'}] and len(original['security_policy']) == 1
+        assert original['runtime_configuration'][0]['document'] == {'enabled': True, 'owner_id': '123'}
+        # The members (step 3): their permissions and the daily message cap.
+        assert [(row['state'], row['tasks']) for row in original['members']] == [('paused', 'read')]
+        assert original['member_accounts'] == [{'member_id': 'f' * 64, 'app': 'telegram', 'external_id': '701'}]
+        assert original['member_chats'] == [{'member_id': 'f' * 64, 'chat_id': '-42', 'enabled': False}]
+        assert original['daily_messages'] == [{'daily_messages': 50}]
         report = {'passed': True, 'project': project, 'layouts': list(results),
                   'configuration_records': {layout: {name: len(rows) for name, rows in value['configuration'].items()} for layout, value in results.items()},
                   'source_or_derivative_content_copied': False, 'network': 'internal only', 'provider_calls': 0, 'live_state_changed': False}

@@ -28,7 +28,7 @@ from .settings import Policy
 
 
 class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
-    def gateway(self,root,sent,edits=None,answers=None,groups=('-20',),access=None):
+    def gateway(self,root,sent,edits=None,answers=None,groups=('-20',)):
         def previews_off(options):
             # Every card, refusal and notice is sent and edited with link previews off; the gateway counts a refused send as not done.
             if getattr(options,'is_disabled',None) is not True:raise ValueError('link_preview_on')
@@ -42,7 +42,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
         links=lambda entities:[(entity.type,entity.offset,entity.length,entity.url) for entity in entities or []]
         async def answer_callback_query(query,text=None,url=None):answers.append((query,text)+((url,) if url is not None else ()));return True
         # The served list: the owner's chat and each group, with topic 17 of each (old-shaped ids, as before step 2b).
-        value=TelegramService(Policy.of(True,'123',list(groups),access or {},topics=[(group+'/topic/17',group,'17') for group in groups]),'123456:synthetic',root/'spool',root/'state')
+        value=TelegramService(Policy.of(True,'123',list(groups),topics=[(group+'/topic/17',group,'17') for group in groups]),'123456:synthetic',root/'spool',root/'state')
         value.status='connected';value.action_lock=asyncio.Lock()
         value.bot=SimpleNamespace(send_message=send_message,edit_message_text=edit_message_text,answer_callback_query=answer_callback_query)
         return value
@@ -184,20 +184,85 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(nested=bad),self.assertRaisesRegex(ValueError,'invalid_approval'):await gateway.send_approval({**card,'id':'f'*64,'links':bad})
             self.assertEqual(len(sent),3)
 
-    async def test_unallowed_members_who_address_nocheh_get_the_fixed_reply_once(self):
+    async def test_someone_not_allowed_who_addresses_nocheh_gets_each_fixed_reply_once_a_day_per_group(self):
+        from unittest.mock import patch
         with tempfile.TemporaryDirectory() as folder:
-            sent=[];gateway=self.gateway(Path(folder),sent,access={'-20':{'granted':['7'],'denied':['8']}})
-            # Nocheh's core sends a group refusal only for a message that addressed the bot.
-            ask={'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','topic':'17','reply':'Sorry, only allowed people.'}
+            sent=[];gateway=self.gateway(Path(folder),sent,groups=('-20','-30'))
+            # Nocheh's core sends a group refusal only for a message that addressed the bot, from someone its member directory
+            # does not let talk there: a stranger, or a member who is paused or switched off there (step 3).
+            ask={'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','topic':'17','once':'not_allowed','reply':'Sorry, only members.'}
             self.assertEqual(await gateway.send_refusal(ask),{'state':'done'})
             self.assertEqual(await gateway.send_refusal(ask),{'state':'done'})
-            self.assertEqual(sent,[(-20,17,'Sorry, only allowed people.',None,5,[])],'one fixed reply to that message, in its topic')
-            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'user_id':'7'}),{'state':'skipped'},'an allowed member is never refused')
-            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'user_id':'123'}),{'state':'skipped'})
-            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'user_id':'8'}),{'state':'done'},'a denied member is refused')
-            for bad in [{**ask,'chat_id':'-30'},{**ask,'chat_id':'123'},{**ask,'reply':''},{**ask,'reply':'x'*1001},{**ask,'event_id':'x'}]:
-                with self.assertRaises(ValueError):await gateway.send_refusal(bad)
-            self.assertEqual(len(sent),2)
+            self.assertEqual(sent,[(-20,17,'Sorry, only members.',None,5,[])],'one fixed reply, in the topic of the message that asked')
+            # The same person asking again that day, in any topic of that group, gets no second reply.
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'message_id':'6','topic':''}),{'state':'done'})
+            self.assertEqual(len(sent),1,'at most one reply a day per person and group')
+            # Each kind is its own reply; another group and another person each get theirs.
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'1'*64,'message_id':'7','once':'daily_limit','reply':'That is all for today.'}),{'state':'done'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'2'*64,'chat_id':'-30','message_id':'8'}),{'state':'done'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'3'*64,'user_id':'7','message_id':'9'}),{'state':'done'})
+            self.assertEqual([(chat,answered) for chat,_,_,_,answered,_ in sent],[(-20,5),(-20,7),(-30,8),(-20,9)],'replies to messages 5, 7, 8 and 9')
+            # The gateway never decides who is a member: anyone the core refuses gets the reply. Only the owner never does.
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'4'*64,'user_id':'123'}),{'state':'skipped'})
+            # A new UTC day answers again.
+            with patch('services.telegram.gateway.datetime') as clock:
+                from datetime import datetime,timezone
+                clock.now.return_value=datetime(2100,1,2,tzinfo=timezone.utc)
+                self.assertEqual(await gateway.send_refusal({**ask,'event_id':'5'*64,'message_id':'10'}),{'state':'done'})
+            self.assertEqual(len(sent),5)
+            for bad in [{**ask,'chat_id':'-40'},{**ask,'chat_id':'123'},{**ask,'reply':''},{**ask,'reply':'x'*1001},{**ask,'event_id':'x'},
+                        {key:value for key,value in ask.items() if key!='once'},{**ask,'once':'other'},{**ask,'once':['not_allowed']}]:
+                with self.subTest(bad=bad),self.assertRaisesRegex(ValueError,'invalid_refusal'):await gateway.send_refusal(bad)
+            self.assertEqual(len(sent),5)
+
+    async def test_only_a_fixed_reply_that_may_have_gone_out_uses_up_the_day(self):
+        try:
+            from telegram.error import TimedOut
+            from telegram.ext import ExtBot
+            from telegram.request import BaseRequest
+        except ImportError:
+            self.skipTest('needs the Telegram library')
+        from services.durable import canonical
+        from .capture import Capture, instrument_request
+
+        class Telegram(BaseRequest):
+            """Telegram at the HTTP boundary: each sendMessage takes the next queued answer."""
+            def __init__(self):self.calls,self.answers=[],[]
+            @property
+            def read_timeout(self):return 1
+            async def initialize(self):pass
+            async def shutdown(self):pass
+            async def do_request(self,url,method,request_data=None,**kwargs):
+                name,data=url.rsplit('/',1)[-1],request_data.parameters if request_data else {}
+                if name=='getMe':return 200,canonical({'ok':True,'result':{'id':123456,'is_bot':True,'first_name':'Nocheh','username':'nocheh_fixture_bot'}})
+                self.calls.append((data['chat_id'],data.get('message_thread_id'),(data.get('reply_parameters') or {}).get('message_id')))
+                answer=self.answers.pop(0) if self.answers else 'sent'
+                if isinstance(answer,Exception):raise answer
+                if answer!='sent':return 400,canonical({'ok':False,'error_code':400,'description':answer})
+                return 200,canonical({'ok':True,'result':{'message_id':40+len(self.calls),'date':1700000000,
+                                                          'chat':{'id':int(data['chat_id']),'type':'supergroup'},'text':data['text']}})
+
+        with tempfile.TemporaryDirectory() as folder:
+            root,wire=Path(folder),Telegram()
+            gateway=TelegramService(Policy.of(True,'123',['-20'],topics=[('-20/topic/17','-20','17')]),'123456:synthetic',root/'spool',root/'state')
+            # The bot journals every send, as the running service's does.
+            capture=Capture(root/'capture','123456')
+            gateway.bot=ExtBot('123456:synthetic',request=instrument_request(wire,capture),get_updates_request=Telegram())
+            gateway.status,gateway.action_lock='connected',asyncio.Lock()
+            await gateway.bot.initialize()
+            ask={'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','topic':'17','once':'not_allowed','reply':'Sorry, only members.'}
+            # Telegram refuses the reply in a closed topic: nothing reached the person, so their next message gets it.
+            wire.answers.append('Bad Request: TOPIC_CLOSED')
+            self.assertEqual(await gateway.send_refusal(ask),{'state':'suppressed','error_code':'telegram_rejected'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'message_id':'6','topic':''}),{'state':'done'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'1'*64,'message_id':'7'}),{'state':'done'})
+            self.assertEqual(wire.calls,[(-20,17,5),(-20,None,6)],'one reply went out that day, after the one Telegram refused')
+            # A send whose answer never came may have reached them: it counts, and nothing more goes that day.
+            wire.answers.append(TimedOut())
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'2'*64,'user_id':'7','message_id':'8'}),{'state':'ambiguous'})
+            self.assertEqual(await gateway.send_refusal({**ask,'event_id':'3'*64,'user_id':'7','message_id':'9'}),{'state':'ambiguous'})
+            self.assertEqual(wire.calls[2:],[(-20,17,8)])
+            await capture.sends.settle()
 
     async def test_anyone_but_the_owner_writing_privately_gets_the_private_reply_once_a_day(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -209,7 +274,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await gateway.send_refusal({**ask,'event_id':'f'*64,'chat_id':'10','user_id':'10'}),{'state':'done'})
             self.assertEqual(len(sent),2,'each person gets their own reply')
             self.assertEqual(await gateway.send_refusal({**ask,'chat_id':'123','user_id':'123'}),{'state':'skipped'},'the owner is never refused')
-            for bad in [{**ask,'chat_id':'10'},{**ask,'chat_id':'-20','user_id':'-20'},{**ask,'topic':'17'},{**ask,'reply':''}]:
+            for bad in [{**ask,'chat_id':'10'},{**ask,'chat_id':'-20','user_id':'-20'},{**ask,'topic':'17'},{**ask,'reply':''},{**ask,'once':'not_allowed'}]:
                 with self.assertRaises(ValueError):await gateway.send_refusal(bad)
             self.assertEqual(len(sent),2)
 
@@ -262,7 +327,7 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             data=lambda choice:'n'+choice+'b'*56
             await gateway.send_approval({'kind':'card','id':'b'*64,'chat_id':'123','text':'Approve?','buttons':[['Approve',data('a')],['Reject',data('d')]],'send_class':'reply'})
             await gateway.send_approval({'kind':'settle','id':'b'*64,'chat_id':'123','text':'Approved'})
-            await gateway.send_refusal({'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','reply':'Sorry.','send_class':'reply'})
+            await gateway.send_refusal({'event_id':'e'*64,'chat_id':'-20','user_id':'9','message_id':'5','reply':'Sorry.','once':'not_allowed','send_class':'reply'})
             await gateway.send_notice({'id':'c'*64,'chat_id':'123','text':'Reminder','send_class':'reminder'})
             # A class the notice route does not send falls back to a notice, and the notice still goes.
             self.assertEqual(await gateway.send_notice({'id':'d'*64,'chat_id':'123','text':'Problem','send_class':'reply'}),{'state':'done'})

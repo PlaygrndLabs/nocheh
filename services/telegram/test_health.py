@@ -30,7 +30,7 @@ class Bot:
 
 class HealthTests(unittest.IsolatedAsyncioTestCase):
     def service(self, folder, restarts):
-        service = TelegramService(Policy.of(True, '123', [], {}), '123456:secret-token', Path(folder) / 'spool', Path(folder) / 'state',
+        service = TelegramService(Policy.of(True, '123', []), '123456:secret-token', Path(folder) / 'spool', Path(folder) / 'state',
                                   lambda: restarts.append(True))
         service.capture = SimpleNamespace(polling={'last_poll_at': None, 'error_code': None})
         return service
@@ -107,7 +107,7 @@ class ServerTests(unittest.TestCase):
         from http.server import ThreadingHTTPServer
         from . import server
         with tempfile.TemporaryDirectory() as folder, patch.object(server, 'TOKEN', 't' * 32), \
-                patch.object(server, 'SERVICE', TelegramService(Policy.of(False, None, [], {}), '', Path(folder) / 'spool', Path(folder) / 'state')):
+                patch.object(server, 'SERVICE', TelegramService(Policy.of(False, None, []), '', Path(folder) / 'spool', Path(folder) / 'state')):
             httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
             threading.Thread(target=httpd.serve_forever, daemon=True).start()
             try:

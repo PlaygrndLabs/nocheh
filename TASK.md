@@ -2,6 +2,113 @@
 
 <current>
 
+Members step 3: members in groups
+([ADR-0260](docs/adr/0260-members-in-groups.md); owner, 2026-11-12, approving the Members
+design: members are allowed by default in the groups they are in, with a permission scope per
+member, no daily limit on small jobs and no approval for web pages and outside tools; the step 3
+thread, 2026-11-17: a group with no switch counts as on, no "Asked, not allowed" list, "Add by
+Telegram user ID" kept, and the owner's own web and tool requests in groups skip the card).
+One branch: a contract, five parts and their integration. `TELEGRAM_GROUP_ACCESS` is retired:
+members live in the control store and are managed on the Members page.
+- The member directory: `members`, `member_chats`, `member_directory_state` and `member_turns`,
+  and `chat_accounts.member_id`'s foreign key ([schema](test/store-member-schema.test.ts)).
+  `talks`, `may`, `reaches`, `tasks` and `accounts` answer every person check; a group with no
+  switch is on, and a decision made without a message from the group also needs Telegram's
+  newest 'in' row ([directory](test/members.test.ts)). It loads in one snapshot after every
+  commit that moves the member revision, and within the 2 s watch elsewhere; member commands
+  are owner commands with no guard epoch ([repository](test/store-members.test.ts)).
+- The gates: admission, the final reply check, the voice cut, the daily message cap
+  (`member_daily_limit`), jobs (`job_not_permitted`, a running job and its card's presser),
+  posts to other groups (`member_post_not_allowed`, the asker's own card only for a group they
+  reach, a send cancelled as `member_changed`), destinations, and web pages and outside tools
+  without a card (`group_tools`, `tool_not_permitted`, the claim's check again)
+  ([gates](test/store-member-gates.test.ts), [tools](test/store-controlled-actions.test.ts),
+  [runs](test/store-controlled-execution.test.ts), [jobs](test/store-background-jobs.test.ts)).
+  Task calls check the member again (`member_access_changed`), and read-only tasks give a
+  read-only turn ([tasks](test/store-member-tasks.test.ts)). The bot keeps no list: a paused or
+  switched-off member gets the stranger's fixed reply, once a UTC day per group, a reply Telegram
+  refused or that never left does not use up the day, and a post in a chat's own name gets
+  nothing ([dispatch](test/store-telegram-dispatch.test.ts),
+  [bot](services/telegram/test_approval_cards.py)). The owner's own group
+  requests skip the tool card behind `let ownerGroupTools=true`.
+- The carry: at the first start, the lists the last start admitted become members with exactly
+  their reach, on rows for granted groups and off rows for every other group chat Nocheh is in,
+  once, with skips counted in the `member_carry` log line; a group Nocheh is added to again later is a
+  new group, on by default ([carry](test/store-member-carry.test.ts)).
+  Reset snapshots are v3 only and carry the members
+  ([reset](test/store-reset-setup.test.ts), [acceptance](test/store-reset-acceptance.test.ts),
+  [Python](services/hermes/test_reset_configuration.py)). The runtime document is
+  `{enabled, owner_id}`, and an old `.env` line is hidden; keeping it never asks for Apply, and
+  deleting it asks for one Apply that changes nothing in the services
+  ([configuration](test/store-runtime-configuration.test.ts),
+  [settings](services/hermes/test_settings.py)). The `group-access` command, the installer's
+  checks and Hermes's person checks are gone ([scopes](services/hermes/test_scopes.py),
+  [configuration](services/hermes/test_configuration.py)). The add card's own new project moves
+  no guard epoch ([adds](test/store-chat-adds.test.ts)).
+- The dashboard: Members after Chats, with permissions, groups, pause, remove, the daily cap and
+  both add flows, every switch saving at once and the daily cap ("Times each member may ask
+  Nocheh a day") with its own Save; Chats shows a read-only "Members here"; the
+  Save path for people, Settings' group access and System's daily member jobs are gone; three new
+  editable texts ([model](test/dashboard-members-model.test.mjs),
+  [routes](test/dashboard-routes.test.mjs), [identities](test/store-member-identities.test.ts),
+  [pages](test/dashboard-pages.browser.mjs)).
+- Full tester: members are set up through the owner's Members routes, with no restart; new
+  scenarios add a member on the dashboard, switch one off in a group, pause one, read a web page
+  without a card, keep tasks read only, turn posting off, follow a member who left, run four
+  member jobs in a day, reach the daily cap, and post in a chat's own name. The three
+  fixed-reply scenarios ask as a person new to the fixture, so a second run the same UTC day
+  still sees the reply ([scenarios](tools/acceptance/product_scenarios.py),
+  [seeding](test/test_tester_members.py), [fake](services/telegram/test_telegram_http_fixture.py)).
+- Review fixes (2026-11-17): a post a member confirmed on their own card is cancelled when they
+  no longer reach its target, and the owner's card keeps the owner's word
+  ([gates](test/store-member-gates.test.ts)); a member's job stops between its report's parts
+  ([runs](test/store-background-job-runs.test.ts)); an upgrade copies switches also when the new
+  chat neither folds nor takes the old one's state ([adoption](test/store-chat-adoption.test.ts));
+  the carry writes off rows only in the groups Nocheh is in; identities list only members switched
+  on in groups Nocheh is in ([identities](test/store-member-identities.test.ts)), and the
+  management side asks Telegram once per unnamed person a read, with a refusal ending only that
+  lookup and flood control ending the group's ([directory](services/hermes/test_telegram_directory.py));
+  a reply running across a new group's own project sends on its first try
+  ([dispatch](test/store-telegram-dispatch-chats.test.ts)). The dashboard shows a saved member
+  change at once, gives a change made again a new operation ID, says why for the daily cap and
+  `member_changed`, leaves out of "Members here" a member Telegram never showed there whose switch
+  is off or who left, points Settings › Telegram to Members, and says where web pages and outside
+  tools skip the card ([model](test/dashboard-members-model.test.mjs),
+  [pages](test/dashboard-pages.browser.mjs)).
+
+  Checks on the integrated branch with the review fixes (2026-11-17): the build; node unit tests
+  (676: 431 pass, 241 skipped, and only the 4 workflow tests that also fail on main fail); the
+  chat id format gate; all 104 store test files (284 pass, 0 fail); Python Telegram (148), Hermes
+  (976, 4 skipped, with the 2 environment errors that also occur on main) and the repository's
+  Python tests (126, 2 skipped); the dashboard build, type and format checks and its tests (63 of
+  63); the browser tests (62: 59 pass, and the 3 that also fail on main).
+- Merged main 7ae9ba1 (memory source labels, ADR-0257; Honcho workspace retries, which took
+  ADR-0259, so this step's ADR is [0260](docs/adr/0260-members-in-groups.md)). The owner's notes
+  review admits the owner and the members who talk there, reactions included, and its people
+  names read the member directory; refusals go out under the `refusal` send class
+  ([policy](test/assistant.test.ts), [reviews](test/store-native-review.test.ts),
+  [labels](test/source-labels.test.ts), [bot](services/telegram/test_approval_cards.py)). The
+  docs say a message kept out of the owner's notes stays out after its sender becomes a member,
+  not after a grant ([docs](test/memory-source-docs.test.ts)).
+  Checks after the merge (2026-11-17): the build; node unit tests (735: 484 pass, 247 skipped,
+  and only the 4 workflow tests that also fail on main fail); all 105 store test files (293 pass,
+  0 fail); Python Telegram (152), Hermes (1012, 4 skipped, with the 2 environment errors that
+  also occur on main) and the repository's Python tests (143, 2 skipped); the dashboard build,
+  format check and its tests (66 of 66); the browser tests (62: 59 pass, and the 3 that also
+  fail on main).
+  Pending:
+  - The whole full tester on images. It has not run on this step, nor main's new memory
+    scenarios with members.
+  - The add card's own project moving no epoch has no tester scenario; a store test covers it.
+  - The privacy scan before a push.
+  - Live acceptance on the owner's install after merge.
+  Owner steps: apply any waiting change to who can talk in groups on 2b-2, finish any data
+  reset, take a backup, and run every service from the same revision
+  ([deploy](docs/deploy.md#upgrade-to-step-3)). Then open **Members**: everyone you allowed is a
+  member in exactly the groups they could talk in. The old `.env` line is ignored. Making the
+  bot an admin in members' groups is recommended. Your own web and tool requests in groups no
+  longer show a card; ask if you want that back.
+
 Memory step 1: search hits and opened messages name their source
 ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md); owner,
 2026-11-17: track the source of each fact, not only history without its thread and relations,
@@ -33,7 +140,7 @@ own chats read a People name, as `saved as “Brother”`.
   `topic_sharing_group_keeps_evidence`, `retired_source_leaves_tags` and
   `owner_recall_session_hits_have_text`, each seen to fail at its gate on a fake without the fix
   ([scenarios](test/test_source_tag_scenarios.py)).
-Pending: a full tester run of the six scenarios; a live look at tagged hits in a group and in
+Full tester 2026-11-17: the six scenarios and the memory and privacy scenarios passed (15 of 15). Pending: a live look at tagged hits in a group and in
 the owner's chat. Left for later: the tester has no gate for a shared fact's
 `shared by the owner on <day>` (the store tests cover it); steps 2 (facts name their source),
 3 (replies in the turn) and 4 (dashboard thread and sources).

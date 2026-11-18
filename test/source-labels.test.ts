@@ -217,37 +217,37 @@ test('owner labels: the owner\'s own lines, people and chats named as reminders 
   const event=(cls:EventClass,fields:Partial<SourceFacts>={},extra:Partial<LabelEvent>={}):LabelEvent=>({class:cls,facts:facts(fields),chat:GP1,allowed:true,...extra});
   const label=(item:LabelEvent)=>ownerEventLabel(item,words,names,keys);
   assert.equal(label(event('owner_message',{author:'owner'},{chat:OWNER})),'you in your private chat');
-  assert.equal(label(event('person_message')),`${q('Sara')}, a person you allowed in group ${q('Family')}`);
+  assert.equal(label(event('person_message')),`${q('Sara')}, a member in group ${q('Family')}`);
   assert.equal(label(event('person_message',{account:omid,name:'Omid'},{allowed:false})),`${q('Omid')}, a person not allowed there now in group ${q('Family')}`);
   assert.equal(label(event('person_message',{account:sara},{allowed:false})),`${q('Sara')}, a person not allowed there now in group ${q('Family')}`,
     'allowed in another chat, not this one');
   assert.equal(label(event('person_message',{account:null,name:null},{allowed:false})),`someone Telegram doesn't name, a person not allowed there now in group ${q('Family')}`);
-  assert.equal(label(event('person_reaction')),`a reaction by ${q('Sara')}, a person you allowed in group ${q('Family')}`);
+  assert.equal(label(event('person_reaction')),`a reaction by ${q('Sara')}, a member in group ${q('Family')}`);
   assert.equal(label(event('anonymous_post')),`an anonymous admin, or a post in a chat's name, in group ${q('Family')}`);
   const zwnj='کتاب‌ها';
   assert.equal(label(event('forward_channel_by_owner',{author:'owner',forward:'channel',forward_name:zwnj},{chat:OWNER})),
     `a message you forwarded in your private chat, from the channel ${q(zwnj)}`,'the half-space stays');
   assert.equal(label(event('forward_hidden_by_person',{forward:'hidden',forward_name:'Someone'})),
-    `a message ${q('Sara')}, a person you allowed forwarded in group ${q('Family')}, from a person who hides their account`);
+    `a message ${q('Sara')}, a member forwarded in group ${q('Family')}, from a person who hides their account`);
   assert.equal(label(event('forward_person_by_owner',{author:'owner',forward:'person',forward_name:null},{chat:OWNER})),
     'a message you forwarded in your private chat, from someone Telegram doesn\'t name');
   assert.equal(label(event('forward_bot_by_owner',{author:'owner',forward:'bot',forward_name:'made_up_bot'},{chat:OWNER})),'a message you forwarded in your private chat, from an inline bot');
   assert.equal(label(event('file_by_owner',{author:'owner',file:true,file_name:'cv‮.pdf'},{chat:OWNER})),`the file ${q('cv[U+202E].pdf')} you sent in your private chat`);
-  assert.equal(label(event('file_by_person',{file:true})),`a file ${q('Sara')}, a person you allowed sent in group ${q('Family')}`);
+  assert.equal(label(event('file_by_person',{file:true})),`a file ${q('Sara')}, a member sent in group ${q('Family')}`);
   assert.equal(label(event('quote',{author:'owner',quote:'other'},{chat:OWNER})),'a reply by you in your private chat, quoting someone else\'s message');
   assert.equal(label(event('quote_nocheh',{author:'owner',quote:'other'},{chat:OWNER})),'a reply by you in your private chat, quoting Nocheh\'s own message');
   assert.equal(label(event('pinned',{author:'owner',pinned:'other'},{chat:OWNER})),'a message by someone else that you pinned in your private chat');
-  assert.equal(label(event('pinned',{pinned:'other'})),`a message by someone else that ${q('Sara')}, a person you allowed pinned in group ${q('Family')}`);
+  assert.equal(label(event('pinned',{pinned:'other'})),`a message by someone else that ${q('Sara')}, a member pinned in group ${q('Family')}`);
   // A message holding someone else's words that is not a pin never says it was pinned.
   assert.equal(label(event('pinned',{author:'owner',pinned:'other',held:true},{chat:OWNER})),
     'a message you sent in your private chat holding someone else\'s words, such as a shared checklist or poll');
   assert.equal(label(event('pinned',{pinned:'other',held:true})),
-    `a message ${q('Sara')}, a person you allowed sent in group ${q('Family')} holding someone else's words, such as a shared checklist or poll`);
+    `a message ${q('Sara')}, a member sent in group ${q('Family')} holding someone else's words, such as a shared checklist or poll`);
   // A pin of the sender's own message holding someone else's words never says someone else wrote it.
   assert.equal(label(event('pinned',{author:'owner',pinned:'other',pinned_held:true},{chat:OWNER})),
     'a message holding someone else\'s words, such as a shared checklist or poll, that you pinned in your private chat');
   assert.equal(label(event('pinned',{pinned:'other',pinned_held:true})),
-    `a message holding someone else's words, such as a shared checklist or poll, that ${q('Sara')}, a person you allowed pinned in group ${q('Family')}`);
+    `a message holding someone else's words, such as a shared checklist or poll, that ${q('Sara')}, a member pinned in group ${q('Family')}`);
   assert.equal(label(event('pinned_nocheh',{author:'owner',pinned:'other'},{chat:OWNER})),'Nocheh\'s own message that you pinned in your private chat');
   assert.equal(modelEventPhrase('pinned_nocheh'),'the owner\'s pin of Nocheh\'s own message');
   assert.equal(label(event('nocheh_approved_post',{author:'nocheh'})),`Nocheh's post in group ${q('Family')}, sent after you approved it`);
@@ -277,7 +277,7 @@ test('owner labels: the owner\'s own lines, people and chats named as reminders 
   const crowd=provenance(Array.from({length:8},(_,i):[number,EventClass]=>[i+1,'person_message']));
   const crowdKnown=new Map(crowd.events.map((item,i)=>[item.id,event('person_message',{account:accountIdFor('telegram',String(6000+i)),name:'P'+i})] as const));
   const crowded=ownerLabel([reviewOrigin(crowd,[hex(1)],{chat:GP1},crowdKnown)],words,names,keys);
-  assert.match(crowded,/^Nocheh's notes review of .*, 3 more$/);assert.equal(crowded.split('a person you no longer allow').length-1,5);
+  assert.match(crowded,/^Nocheh's notes review of .*, 3 more$/);assert.equal(crowded.split('no longer an active member').length-1,5);
 });
 
 test('Honcho records name their part in fixed words, with names that cannot close their quotes',()=>{

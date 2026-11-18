@@ -9,6 +9,8 @@ import {covers,type ControlledActionRepository} from './controlled-actions.js';
 import {notionRunRefusal} from './notion.js';
 import {chatToolAllowed} from './chat-tools.js';
 import {ownerChat,ownerIds} from '../assistant-policy.js';
+import {freshMembers} from '../members.js';
+import {currentChats} from './chats.js';
 
 const protocol='controlled-execution-v2';
 const operation=(id:string)=>'controlled-result:'+id;
@@ -77,6 +79,9 @@ export class ControlledExecutionRepository {
     const b=input(value),authority=await hostActionAuthority(this.pool,b),db=await this.pool.connect();let held=false;
     try {
       held=await enterFamily(db,'tools',authority.owner,authority.epoch);if(!held)return {claimed:false};
+      // The member directory and the chats as of now, read before any lock is held: a member's request is checked against
+      // them below (step 3).
+      const people=await freshMembers(),directory=await currentChats();
       await db.query('BEGIN');await this.lease(db,b);
       await db.query("SELECT pg_advisory_xact_lock(hashtextextended(current_schema()||':controlled-operation',803322))");
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1 FOR UPDATE',[b.id])).rows[0];
@@ -123,7 +128,13 @@ export class ControlledExecutionRepository {
           {const result=await this.blocked(db,row,'permission_no_longer_valid');await db.query('COMMIT');this.closed(row.id);return result;}
         await db.query('COMMIT');return {claimed:false};
       }
-      const decision=await evaluate(db,this.actions.effect(row),grant?.id??'exact_owner_approval',true);
+      // What a member asked for runs only while they still talk where they asked and, under the group's tools permission,
+      // still have it: a pause, a removal or a switch turned off since stops it, approved or not (step 3).
+      if(row.asker_account&&(!people.talks(row.asker_account,row.space_id,directory)||
+        row.authority==='group_tools'&&!people.may(row.asker_account,row.space_id,'tools',directory)))
+        {const result=await this.blocked(db,row,'member_changed');await db.query('COMMIT');this.closed(row.id);return result;}
+      // Why it runs: the group's tools permission (its row's authority), a standing permission, or the owner's approval.
+      const decision=await evaluate(db,this.actions.effect(row),row.authority??grant?.id??'exact_owner_approval',true);
       if(decision.outcome!=='allow'){const result=await this.blocked(db,row,decision.rule,decision);await db.query('COMMIT');this.closed(row.id);return result;}
       // A use is counted, not a change to what it allows, so a Revoke sent with the shown revision still applies.
       if(grant)await db.query('UPDATE action_permissions SET remaining=remaining-1 WHERE id=$1',[grant.id]);
@@ -150,7 +161,7 @@ export class ControlledExecutionRepository {
         const grant=(await db.query('SELECT * FROM action_permissions WHERE id=$1 FOR SHARE',[row.permission_id])).rows[0];
         if(!grant||grant.revoked_at||grant.expires_at<=new Date()||!covers(grant,row))blocked='permission_no_longer_valid';
       }
-      const decision=await evaluate(db,this.actions.effect(row),row.permission_id??'exact_owner_approval',true);
+      const decision=await evaluate(db,this.actions.effect(row),row.permission_id??row.authority??'exact_owner_approval',true);
       if(blocked||decision.outcome!=='allow') {
         await recordEffect(db,this.actions.effect(row),'blocked',blocked?{...decision,outcome:'deny',origin:'mandatory',rule:blocked}:decision,row.source_reference,row.permission_id??undefined);
         await db.query('COMMIT');return {started:false,reason:blocked??decision.rule};

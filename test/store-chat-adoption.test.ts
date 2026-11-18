@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
-import {accountIdFor,chatIdFor,chats,installChatsForTest} from '../src/chats.js';
+import {accountIdFor,chatIdFor,chats,connectionIdFor,installChatsForTest} from '../src/chats.js';
+import {memberIdFor} from '../src/members.js';
 import {HttpError} from '../src/http.js';
 import type {RuntimeCall} from '../src/runtime.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
@@ -13,6 +14,7 @@ import {bumpChatRevision,ChatRepository,servedPolicy,startChatDirectory} from '.
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {legacyChats,OWNER,seedChats} from './fixture-groups.js';
 import {seededDirectory} from './fixture-seeded-chats.js';
+import {seedMemberAccount} from './fixture-member-grants.js';
 
 /*
  * Only the owner adds Nocheh (ADR-0253): a my_chat_member update about Nocheh in a group decides chats.state as it is
@@ -81,6 +83,12 @@ const row=async(stores:StorePools,id:string)=>(await stores.control.query(`SELEC
   FROM chats WHERE id=$1`,[id])).rows[0];
 const events=async(stores:StorePools,id:string)=>(await stores.control.query(`SELECT event_id,external_id,kind,role,account_id,member,action,state,
   due_at>created_at+interval '25 seconds' AS waits FROM chat_state_events WHERE chat_id=$1 ORDER BY created_at,event_id`,[id])).rows;
+/** Makes the person with Telegram user id `external` a member (step 3): their account, linked to a members row. */
+const makeMember=(stores:StorePools,external:number)=>seedMemberAccount(stores.control,String(external));
+/** A member's switches for `chats`, as [chat, enabled], and the member revision. */
+const switches=async(stores:StorePools,member:string,chatIds:string[])=>(await stores.control.query(
+  'SELECT chat_id,enabled FROM member_chats WHERE member_id=$1 AND chat_id=ANY($2::text[]) ORDER BY chat_id',[member,chatIds])).rows.map(item=>[item.chat_id,item.enabled]);
+const memberRevision=async(stores:StorePools)=>Number((await stores.control.query('SELECT revision FROM member_directory_state WHERE singleton')).rows[0].revision);
 const guard=async(stores:StorePools)=>{
   const result=(await stores.control.query(`SELECT (SELECT epoch FROM guard_state WHERE singleton) AS epoch,(SELECT revision FROM chat_directory_state WHERE singleton) AS revision`)).rows[0];
   return {epoch:Number(result.epoch),revision:Number(result.revision)};
@@ -88,9 +96,11 @@ const guard=async(stores:StorePools)=>{
 
 test('the owner adding Nocheh turns a group on with a card; anyone else\'s add makes it pending to leave, and no add moves the guard epoch',fixture,async()=>{
   const stores=await open(),MEMBER=7771,STRANGER=7772;
-  let policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{'-1001234567890':{granted:[String(MEMBER)],denied:[]}}};
+  let policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'adds');
   try {
+    // MEMBER is a member: the add note's member flag reads it from their account (step 3); STRANGER is not.
+    await makeMember(stores,MEMBER);
     // A group stored before step 2b keeps its Telegram value as its id: the seeder left it off.
     const legacy=h.group(9);await seedChats(stores.control,legacyChats([legacy]));
     const before=await guard(stores);
@@ -270,10 +280,12 @@ async function begin(stores:StorePools,h:ReturnType<typeof harness>,stage:Awaite
 
 test('an upgrade folds the new supergroup\'s own add into the old group, whichever upgrade message comes first, and an echo never changes the old group',fixture,async()=>{
   const stores=await open(),ALICE=7801;
-  // Alice may use Nocheh in some group: a leave after her add tells the owner, so a false second add would show.
-  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{'-1001234567890':{granted:[String(ALICE)],denied:[]}}};
+  // Alice is a member: a leave after her add tells the owner, so a false second add would show.
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'fold'),stage=await stageFor(stores,h.repository,()=>policy);
   try {
+    await makeMember(stores,ALICE);
+    const aliceMember=memberIdFor(accountIdFor('telegram',String(ALICE)));
     const cases=[[1,'old',ALICE,'seen'],[2,'new',ALICE,'on'],[3,'old',Number(OWNER),'off'],[4,'new',Number(OWNER),'off'],[5,'new',Number(OWNER),'on'],
       [6,'old',Number(OWNER),'pending'],[7,'new',ALICE,'could_not_leave'],[8,'old',Number(OWNER),'could_not_leave'],[9,'new',Number(OWNER),'removed'],
       [15,'old',Number(OWNER),'seen'],[16,'new',Number(OWNER),'seen'],[17,'old',Number(OWNER),'stale']] as const;
@@ -286,11 +298,20 @@ test('an upgrade folds the new supergroup\'s own add into the old group, whichev
       // Telegram tells Nocheh it is in the new supergroup, from whoever upgraded it, before the upgrade messages link the two ids.
       const add=await h.status(next,h.update(n*100+5),adder,'left','member');
       assert.equal((await row(stores,fresh)).state,adder===Number(OWNER)?'active':'pending');
+      // Alice's member has a switch on in the old group and off in the new one (step 3).
+      await stores.control.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$2,true),($1,$3,false)',[aliceMember,old,fresh]);
+      const revision=await memberRevision(stores);
       const toOld=()=>h.message(basic,h.update(n*100+6),{migrate_to_chat_id:Number(next)},'group');
       const fromNew=()=>h.message(next,h.update(n*100+7),{migrate_from_chat_id:Number(basic)});
       if(first==='old'){await toOld();await fromNew();}else{await fromNew();await toOld();}
       const label=JSON.stringify({n,first,adder,start});
       assert.equal((await stores.control.query('SELECT count(*) FROM chats WHERE id=$1',[fresh])).rows[0].count,'0',label+': the new row folded');
+      assert.deepEqual(await switches(stores,aliceMember,[old,fresh]),[[old,false]],label+': the switch moved to the old group, and off won');
+      assert.ok(await memberRevision(stores)>revision,label+': the member directory reloads');
+      // Capture goes on: a message under the new id is the old group's.
+      await h.message(next,h.update(n*100+8),{from:{id:6600+n}});
+      assert.deepEqual((await stores.control.query('SELECT chat_id FROM chat_memberships WHERE account_id=$1',[accountIdFor('telegram',String(6600+n))])).rows
+        .map(item=>item.chat_id),[old],label+': a message under the new id is recorded in the old group');
       assert.deepEqual((await stores.control.query('SELECT external_id,state,reason FROM chat_ids WHERE chat_id=$1 ORDER BY state',[old])).rows
         .map(item=>[item.external_id,item.state,item.reason]),[[next,'current',null],[basic,'old','migrated']],label);
       assert.deepEqual((await events(stores,old)).map(item=>item.event_id),[...startEvents,add.reference.id],label+': the add\'s event moved with it');
@@ -405,10 +426,39 @@ test('a fold never leaves a project naming no chat: once the card gave the new s
   }finally{await h.cleanup();await stores.close();}
 });
 
+test('an upgrade that neither folds nor stays apart still copies the members\' switches to the new chat, so no one switched off there talks again',fixture,async()=>{
+  const stores=await open(),policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
+  const h=harness(stores,()=>policy,'kept'),stage=await stageFor(stores,h.repository,()=>policy);
+  try {
+    const basic='-4'+String(h.base+1).slice(-9),next=h.group(1),old=chatIdFor('telegram',basic),fresh=chatIdFor('telegram',next);h.named.add(basic);
+    // The basic group is on from the owner's own add; one member is switched off there, another on (step 3).
+    await h.status(basic,h.update(1),Number(OWNER),'left','member','group');
+    const OFF=7851,ON=7852,off=memberIdFor(accountIdFor('telegram',String(OFF))),on=memberIdFor(accountIdFor('telegram',String(ON)));
+    await makeMember(stores,OFF);await makeMember(stores,ON);
+    await stores.control.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$3,false),($2,$3,true)',[off,on,old]);
+    // The new supergroup's own add comes first, and its card gives it its own project before the upgrade's messages are
+    // taken in: it may not fold, and the old group, on, does not stay apart either.
+    await h.status(next,h.update(2),Number(OWNER),'left','member');
+    await stage.settle([fresh]);
+    assert.ok((await stores.control.query('SELECT 1 FROM project_assignments WHERE space_id=$1',[fresh])).rowCount,'the card made the new chat\'s project');
+    const before=await memberRevision(stores);
+    await h.message(basic,h.update(3),{migrate_to_chat_id:Number(next)},'group');
+    await h.message(next,h.update(4),{migrate_from_chat_id:Number(basic)});
+    assert.deepEqual([(await row(stores,old)).state,(await row(stores,fresh)).state],['active','active'],'both chats stay');
+    const sorted=(rows:(string|boolean)[][])=>rows.sort((a,b)=>a[0]!<b[0]!?-1:1);
+    assert.deepEqual(await switches(stores,off,[old,fresh]),sorted([[old,false],[fresh,false]]),'the switch off follows the group');
+    assert.deepEqual(await switches(stores,on,[old,fresh]),sorted([[old,true],[fresh,true]]));
+    assert.equal(await memberRevision(stores),before+1,'the member directory reloads once; the second message copies nothing');
+  }finally{await h.cleanup();await stores.close();}
+});
+
 test('when the two stay apart, a new supergroup on only from the upgrade\'s echo takes the old group\'s Off, leave or could not leave, and a card that waits never goes; one its card said is on is never left',fixture,async()=>{
   const stores=await open(),ALICE=7841,policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const h=harness(stores,()=>policy,'apart'),stage=await stageFor(stores,h.repository,()=>policy);
   try {
+    // A member, never an adder here, switched off in each old group (step 3): when the two stay apart, the new chat
+    // takes the switch too.
+    const SWITCHED=7842,switched=memberIdFor(accountIdFor('telegram',String(SWITCHED)));await makeMember(stores,SWITCHED);
     // How the new chat stands when the upgrade messages come: `waiting`, its card made its project and its notice did not go,
     // so the row waits to send it again; `sent`, the card told the owner Nocheh is on there; `switched`, the owner then
     // turned it off and on again by the switch; `early` and `late`, its add was taken in more than ten minutes before or
@@ -439,9 +489,12 @@ test('when the two stay apart, a new supergroup on only from the upgrade\'s echo
         try{assert.deepEqual((await stage.settle([old])).map(call=>[call.operation,call.input.chat_id]),[['telegram.leave',basic]],label);}
         finally{stage.answers.leave=()=>({state:'done'});}
       }
+      await stores.control.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$2,false)',[switched,old]);
       const toOld=()=>h.message(basic,h.update(n*100+6),{migrate_to_chat_id:Number(next)},'group');
       const fromNew=()=>h.message(next,h.update(n*100+7),{migrate_from_chat_id:Number(basic)});
       if(first==='old'){await toOld();await fromNew();}else{await fromNew();await toOld();}
+      assert.deepEqual(await switches(stores,switched,[old,fresh]),[[old,false],[fresh,false]].sort((a,b)=>a[0]!<b[0]!?-1:1),
+        label+': the switch is copied whether or not the new chat takes the old one\'s state');
 
       // The two stay apart, and the project still names the new chat.
       assert.equal((await stores.control.query('SELECT chat_id FROM chat_ids WHERE external_id=$1',[next])).rows[0].chat_id,fresh,label);

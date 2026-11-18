@@ -2,9 +2,10 @@ import {randomBytes} from 'node:crypto';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {conversationScope,ownerChat,ownerIds,type OwnerIds} from '../assistant-policy.js';
+import {conversationScope,ownerChat,ownerIds,telegramAccount,type OwnerIds} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {allowedIn,servedDestination} from '../destinations.js';
+import {members} from '../members.js';
 import {parentSpace,servedGroup} from '../spaces.js';
 import {HttpError,object,string} from '../http.js';
 import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundMachine,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
@@ -36,10 +37,11 @@ CREATE TABLE IF NOT EXISTS background_settings (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  cost_limit_usd numeric NOT NULL DEFAULT 5 CHECK(cost_limit_usd>0 AND cost_limit_usd<=1000),
  minutes_limit integer NOT NULL DEFAULT 45 CHECK(minutes_limit BETWEEN 5 AND 50),
- member_daily_jobs integer NOT NULL DEFAULT 3 CHECK(member_daily_jobs BETWEEN 0 AND 100),
  revision integer NOT NULL DEFAULT 0 CHECK(revision>=0),updated_at timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO background_settings(singleton) VALUES(true) ON CONFLICT DO NOTHING;
+-- Members have no daily job count (step 3): their small jobs permission and the cost limit decide.
+ALTER TABLE background_settings DROP COLUMN IF EXISTS member_daily_jobs;
 CREATE TABLE IF NOT EXISTS background_jobs (
  id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{64}$'),source_reference jsonb NOT NULL,proposal_reference jsonb NOT NULL,guard_revision integer,
  binding jsonb NOT NULL,scope text NOT NULL,space_id text NOT NULL,target text NOT NULL,logical_profile text NOT NULL UNIQUE,
@@ -320,26 +322,26 @@ export class BackgroundJobRepository {
   async settings(){
     const row=(await this.control.query('SELECT * FROM background_settings WHERE singleton')).rows[0];
     // A value saved before the 50-minute limit reads as the limit, so it never refuses every job.
-    return {cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:Math.min(row.minutes_limit,JOB_MINUTES),member_daily_jobs:row.member_daily_jobs,box_tools:row.box_tools as boolean,
+    return {cost_limit_usd:Number(row.cost_limit_usd),minutes_limit:Math.min(row.minutes_limit,JOB_MINUTES),box_tools:row.box_tools as boolean,
       member_notice_usd:Number(row.member_notice_usd),member_pause_usd:Number(row.member_pause_usd),revision:row.revision};
   }
   /** Save the limits. The box switch and the two marks of members' daily job spend are optional: a save without them keeps
    *  them. The high mark is never below the notice mark. */
   async saveSettings(principal:Reader,input:unknown){
     admin(principal);const body=object(input);
-    if(Object.keys(body).some(key=>!['cost_limit_usd','minutes_limit','member_daily_jobs','box_tools','member_notice_usd','member_pause_usd','revision'].includes(key))||!Number.isSafeInteger(body.revision)||
+    if(Object.keys(body).some(key=>!['cost_limit_usd','minutes_limit','box_tools','member_notice_usd','member_pause_usd','revision'].includes(key))||!Number.isSafeInteger(body.revision)||
       body.box_tools!==undefined&&typeof body.box_tools!=='boolean')throw new HttpError(400,'invalid_settings');
-    const cost=Number(body.cost_limit_usd),minutes=Number(body.minutes_limit),daily=Number(body.member_daily_jobs);
-    if(!(cost>0&&cost<=1000)||!Number.isSafeInteger(minutes)||minutes<5||minutes>JOB_MINUTES||!Number.isSafeInteger(daily)||daily<0||daily>100)throw new HttpError(400,'invalid_settings');
+    const cost=Number(body.cost_limit_usd),minutes=Number(body.minutes_limit);
+    if(!(cost>0&&cost<=1000)||!Number.isSafeInteger(minutes)||minutes<5||minutes>JOB_MINUTES)throw new HttpError(400,'invalid_settings');
     const mark=(value:unknown)=>{if(value===undefined)return null;const usd=typeof value==='number'?value:NaN;
       if(!(usd>=0.01&&usd<=10000))throw new HttpError(400,'invalid_settings');return usd;};
     const notice=mark(body.member_notice_usd),high=mark(body.member_pause_usd);
     const db=await this.control.connect();
     try {
       await db.query('BEGIN');
-      const changed=await db.query(`UPDATE background_settings SET cost_limit_usd=$1,minutes_limit=$2,member_daily_jobs=$3,box_tools=coalesce($5,box_tools),
-        member_notice_usd=coalesce($6,member_notice_usd),member_pause_usd=coalesce($7,member_pause_usd),revision=revision+1,updated_at=now()
-        WHERE singleton AND revision=$4 RETURNING member_notice_usd<=member_pause_usd AS ordered`,[cost,minutes,daily,body.revision,body.box_tools??null,notice,high]);
+      const changed=await db.query(`UPDATE background_settings SET cost_limit_usd=$1,minutes_limit=$2,box_tools=coalesce($4,box_tools),
+        member_notice_usd=coalesce($5,member_notice_usd),member_pause_usd=coalesce($6,member_pause_usd),revision=revision+1,updated_at=now()
+        WHERE singleton AND revision=$3 RETURNING member_notice_usd<=member_pause_usd AS ordered`,[cost,minutes,body.revision,body.box_tools??null,notice,high]);
       if(!changed.rowCount)throw new HttpError(409,'configuration_conflict');
       // Checked on the saved row, so a mark left out keeps the high mark from going below the notice mark too.
       if(!changed.rows[0].ordered)throw new HttpError(400,'invalid_settings');
@@ -358,7 +360,7 @@ export class BackgroundJobRepository {
     const row=(await this.control.query('SELECT * FROM background_jobs WHERE id=$1',[managedEventId(id)])).rows[0];
     if(!row)throw new HttpError(404,'job_not_found');return row;
   }
-  /** A live Telegram turn by the owner or a person allowed in the group; never a job's own run. */
+  /** A live Telegram turn by the owner or a member who talks in the group; never a job's own run. */
   private async liveTurn(principal:Reader) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'job_not_permitted');
     const turn=await this.turns.binding(principal);if(turn.job)throw new HttpError(403,'job_in_a_job');
@@ -412,6 +414,8 @@ export class BackgroundJobRepository {
     // A direction override or a tag character can make a card read in another order than the job runs (ADR-0250).
     if(reordering(title)||reordering(instruction))throw new HttpError(400,'job_hidden_characters');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
+    // A member's small jobs, with no daily count: their jobs permission where they asked (step 3). The owner, first, never needs one.
+    if(requester&&!members().may(telegramAccount(requester),turn.scope,'jobs'))throw new HttpError(403,'job_not_permitted');
     // A job asked in the owner's private chat or one of its topics is the owner's chat's (ADR-0252: by its row).
     const owner=ownerChat(this.access.policy())!,space=principal.space!,scope=(parentSpace(space)??space)===owner?owner:turn.scope,box=body.box===true;
     // A machine only for the owner's own request, in their private chat or an active project's group; refused before anything is spent.
@@ -426,11 +430,6 @@ export class BackgroundJobRepository {
     // Whether the card offers Notion reads, kept with the job so its card and its runs never say more (ADR-0225).
     // Not part of the fingerprint: it only narrows, and a setting saved meanwhile must not turn a repeat into job_changed.
     const notion=privateJob({scope,requester},owner)&&await notionJobReads(this.control);
-    if(requester) {
-      const today=Number((await this.control.query(`SELECT count(*) FROM background_jobs WHERE scope=$1 AND requester=$2
-        AND state<>'rejected' AND created_at>date_trunc('day',now())`,[turn.scope,requester])).rows[0].count);
-      if(today>=settings.member_daily_jobs)throw new HttpError(409,'job_limit_reached');
-    }
     const estimate=await this.estimate(size);
     // A member's job over the owner's limit, or on a model whose cost cannot be measured, waits for the owner instead. A machine
     // job's card always goes to the owner's private chat, wherever it was asked.
@@ -526,7 +525,7 @@ export class BackgroundJobRepository {
       // From the job's own pin too, and the plan exactly as approved.
       machine:row.machine?fillTemplate(lines.machine!,{machine_name:row.machine.name,machine_login:row.machine.login,machine_address:row.machine.address}):null,
       steps:row.steps?.length?lines.steps+'\n'+numbered(row.steps.map((step:string)=>visible(step))):null,
-      checked:[lines.checked,row.requester?lines.member_limit:null].filter(Boolean).join(' ')||null};
+      checked:lines.checked||null};
     // Where it was asked, when the card is elsewhere, and what the job may do without asking are always on its card: a
     // saved card without the line, or whose line is left out for another missing value, gets it at the end. The place
     // line, at most two names of 64 characters, fits in the room CARD_LIMIT leaves below Telegram's limit.
@@ -559,11 +558,12 @@ export class BackgroundJobRepository {
       await db.query('COMMIT');return {id:row.id,state:approve?'approved':'rejected'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
-  /** Who may press a card's buttons: the owner always, the person who asked only on their own job's card. */
+  /** Who may press a card's buttons: the owner always, the member who asked only on their own job's card, and only while
+   *  they may still run it there (permitted). */
   async presser(id:string,user:string,chat:string):Promise<boolean> {
     const row=await this.row(id),owner=this.access.policy().owner_id;
     if(user===owner)return true;
-    return row.approver==='requester'&&!!row.requester&&row.requester===user&&row.scope===chat;
+    return row.approver==='requester'&&!!row.requester&&row.requester===user&&row.scope===chat&&this.permitted(row);
   }
   /** Jobs this chat can see: its own, or every job for the owner. A live turn in the owner's private chat also sees the
    *  GitHub copies a box job may read, while the box switch is on, and the machines a job may work on, while machine control
@@ -832,9 +832,11 @@ export class BackgroundJobRepository {
     if(jobPriced(jobRates(job.rates))&&Number(job.cost_usd)>=Number(job.cost_limit_usd)||bytesSpent(job))return 'cost';
     return job.started_at&&Date.now()>=jobDeadlines(job).hard?'time':null;
   }
-  /** Whether the person who asked for a job may still use Nocheh in its chat; the owner's own job always. */
+  /** Whether the member who asked for a job may still run it in its chat, decided without a live message from there
+   *  (step 3): members().reaches with the jobs permission, so a pause, a switched-off group or permission, or Telegram
+   *  saying they left stops it. The owner's own job (no requester) always. */
   permitted(job:any):boolean {
-    return !job.requester||allowedIn(this.access.policy(),job.scope,job.requester);
+    return !job.requester||allowedIn(job.scope,job.requester,'jobs');
   }
   /** The newest to-do list a run of the job kept, while what that run read may still be shown: its binding carries to `binding`. */
   private async carriedTodo(id:string,binding:GuardBinding):Promise<Todo[]|null> {
@@ -905,8 +907,10 @@ export class BackgroundJobRepository {
     // lists and moves the epoch, so the checks below would end the job without a word. A machine job's parts for the owner
     // and the group's line go on as before.
     if(!line&&targets[sent.length]!.to===row.space_id&&await unserved())return this.notServed(row);
-    // A member removed from the chat since the job ran gets nothing sent there.
-    if(!sent.length&&!this.permitted(row))return this.finish(row,'failed','job_not_permitted');
+    // A member paused, removed, switched off or gone from the chat since the job ran gets nothing more sent there: checked
+    // before every part, as a member change moves no epoch. The owner's own job, the only one with the group's line, is
+    // always permitted.
+    if(!line&&!this.permitted(row))return this.finish(row,'failed','job_not_permitted');
     const part=sent.length+1,binding=await this.guards.state(),run=line?null:await this.latest(row.id);
     // The last run wrote the report in its own epoch. Only quiet epochs, a reaction or an automatic learning revision, may
     // have passed since (ADR-0201); any other change may have withdrawn what it read.

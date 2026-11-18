@@ -13,6 +13,7 @@ import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {policySnapshot,savePolicy} from '../src/security/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {setOwnerGroupToolsForTest} from '../src/stores/controlled-actions.js';
 
 test('a card\'s Allow here and Always allow let the same site or command run in that chat without asking',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -21,7 +22,10 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-rules-')),key='rules:'+Date.now(),group='-100'+Date.now(),token=digest(key);
   const owner:Reader={admin:true,scope:null},cards:any[]=[],answers:string[]=[];
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}}});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group]});
+  // The owner asks in the group, with the switch for the owner's own web page and outside tool requests there off, so each
+  // gets its card as before step 3: a member's runs under the group's tools permission instead, which a rule comes before.
+  const ownerTools=setOwnerGroupToolsForTest(false);
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -37,9 +41,9 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     const event:Envelope={version:1,key:`telegram:${bot}:update:${payload.update_id}`,origin:'live',kind:'telegram_update',bot_id:bot,scope,source_id:String(payload.update_id),revision:'1',occurred_at:null,text:label,payload};
     const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
   };
-  // A member's request in a topic of a forum group.
+  // The owner's request in a topic of a forum group.
   const message=(label:string,topic=17)=>capture(label,{update_id:++updates,message:{message_id:100+updates,date:1700000000,
-    chat:{id:Number(group),type:'supergroup',is_forum:true},from:{id:9,first_name:'Member'},text:'Please check '+label,message_thread_id:topic,is_topic_message:true}});
+    chat:{id:Number(group),type:'supergroup',is_forum:true},from:{id:123,first_name:'Owner'},text:'Please check '+label,message_thread_id:topic,is_topic_message:true}});
   const press=(label:string,data:string,from=123)=>capture(label,{update_id:++updates,callback_query:{id:'query-'+label,from:{id:from},chat_instance:'1',data,
     message:{message_id:5,date:1700000000,chat:{id:123,type:'private'}}}},'123');
   const actor=async(source:SourceReference):Promise<Reader>=>{
@@ -74,10 +78,10 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     assert.deepEqual(choices(first.card),['na','nc','nw','nd']);
     assert.match(first.card.buttons[1][0],/Allow where asked, 12 hours/);
     // The card names the topic the rule would cover and says, last, right above the buttons, that it covers everyone there.
-    const ruleNote='\n\n👥 “Where asked” covers everyone you allowed in that chat or topic, not only the person who asked.';
+    const ruleNote='\n\n👥 “Where asked” covers you and every member who can talk in that chat or topic, not only the person who asked.';
     assert.match(first.card.text,/💬 Asked in a Telegram group › a topic\n/);assert.ok(first.card.text.endsWith(ruleNote),first.card.text);
     const command=await ask(await message('command'),'shell',{command:'printf made-up-rule'});
-    assert.deepEqual(choices(command.card),['na','nw','nd']);assert.match(command.card.text,/covers everyone you allowed/);
+    assert.deepEqual(choices(command.card),['na','nw','nd']);assert.match(command.card.text,/covers you and every member who can talk/);
     const tool=await ask(await message('tool'),'mcp',{url:'https://tools.example.com/mcp',operation:'list'});
     assert.deepEqual(choices(tool.card),['na','nd']);assert.doesNotMatch(tool.card.text,/Where asked/,'no rule, no note');
     // Only the owner sets a rule; a member's press decides nothing.
@@ -192,5 +196,5 @@ test('a card\'s Allow here and Always allow let the same site or command run in 
     const dashboard=await ask(dashboardRun,'browser',{url:'https://weather.example.com/dashboard'});
     assert.match(dashboard.card.text,/💬 Asked in a Telegram group › General\n/);assert.ok(dashboard.card.text.endsWith(ruleNote));
     assert.deepEqual(choices(dashboard.card),['na','nc','nw','nd']);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{ownerTools();await stores.close();await rm(root,{recursive:true,force:true});}
 });

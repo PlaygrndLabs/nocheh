@@ -7,7 +7,9 @@ import {accountIdFor,chatDirectory,chatIdFor,chats,connectionIdFor,installChats,
 import {isTelegramChat,legacyChat,legacyChatValue} from '../chats-telegram.js';
 import {telegramUpdateFacts,type TelegramBotStatus,type TelegramChatFacts,type TelegramPerson} from '../chats-telegram-updates.js';
 import {HttpError,object,string} from '../http.js';
+import {freshMembers} from '../members.js';
 import type {CapturedSource} from './archive.js';
+import {bumpMemberRevision} from './member-schema.js';
 import {OwnerCommands} from './owner-commands.js';
 import {writeAssignment,writeProject} from './projects.js';
 
@@ -197,17 +199,17 @@ export class ChatRepository {
    * rows again would lock them for the sweep's whole batch, clashing with live captures and the membership backfill,
    * and write an older update's names over newer ones. A failure here never fails the capture: it is rolled back alone,
    * with its mark, so a later sweep records it, and the seeder finds the chat meanwhile. Returns whether a chat or chat
-   * id was added, or a chat's state, name or kind of app chat changed, so the caller can reload the directory once the
-   * capture commits.
+   * id was added, a chat's state, name or kind of app chat changed, or a member's membership row was made or switched
+   * (step 3), so the caller can reload the directories once the capture commits (reloadChats).
    */
   async capture(db:pg.PoolClient,source:CapturedSource,transport:'capture'|'import'='capture'):Promise<boolean> {
     if(source.channel!=='telegram'||!recordedKinds.has(source.kind)||!isTelegramChat(source.scope))return false;
     await db.query('SAVEPOINT chat_records');
     try {
       const first=(await db.query('INSERT INTO chat_recorded_events(event_id) VALUES($1) ON CONFLICT DO NOTHING RETURNING event_id',[source.reference.id])).rowCount;
-      const changed=first?await this.record(db,source,transport):false;
+      const changed=first?await this.record(db,source,transport):{chats:false,members:false};
       await db.query('RELEASE SAVEPOINT chat_records');
-      return changed;
+      return changed.chats||changed.members;
     } catch(error) {
       await db.query('ROLLBACK TO SAVEPOINT chat_records');
       console.warn(JSON.stringify({event:'chat_record_failed',code:(error as {code?:string})?.code??'unknown'}));
@@ -221,11 +223,11 @@ export class ChatRepository {
    * imported chat Nocheh has no row for is the owner's own history from before: it gets the id its old stored value
    * had, as the seeder gives one, so the derivatives and owner records imported with it name it (ADR-0252).
    */
-  private async record(db:Db,source:CapturedSource,transport:'capture'|'import'):Promise<boolean> {
+  private async record(db:Db,source:CapturedSource,transport:'capture'|'import'):Promise<{chats:boolean;members:boolean}> {
     const event=(await this.stores.archive.query(`SELECT e.payload,e.received_at,e.bot_id,e.capture_sequence,(SELECT o.metadata->'audience'->>'topic_id' FROM source_observations o
       WHERE o.event_id=e.id AND o.metadata->'audience'->>'topic_state'='known' AND o.metadata->'audience'->>'chat_id'=e.scope LIMIT 1) AS topic
       FROM events e WHERE e.id=$1`,[source.reference.id])).rows[0];
-    if(!event)return false;
+    if(!event)return {chats:false,members:false};
     let payload:unknown={};try{payload=JSON.parse(Buffer.from(event.payload).toString('utf8'));}catch{}
     const bot=typeof event.bot_id==='string'&&appId.test(event.bot_id)?event.bot_id:null,imported=transport==='import';
     const facts=telegramUpdateFacts(payload,source.scope,bot),live=source.origin==='live'&&source.kind==='telegram_update';
@@ -234,14 +236,14 @@ export class ChatRepository {
     // Whether Nocheh acts on this update (adopts an add or removal, folds an upgrade): a live one taken in after adoption
     // began. One an older build took in but never recorded (startAdoption) is history: recorded, never acted on.
     const acts=live&&!imported&&(!!facts.migration||!!facts.bot_status)&&await adopting(db,String(event.capture_sequence));
-    let changed=false;
+    let changed=false,members=false;
     const at=event.received_at as Date;
     // An upgrade first, so the new id's own messages continue the same chat.
     if(live&&facts.migration)changed=await this.migrate(db,connection,facts.migration.from,facts.migration.to,acts,at)||changed;
     for(const person of facts.people)await ensureAccount(db,connection,person,'telegram',at);
     let chat=await chatOfApp(db,connection,source.scope);
     if(!chat&&facts.chat){chat=await this.create(db,connection,facts.chat,policy,at,imported);changed=true;}
-    if(!chat){if(changed)await bumpChatRevision(db);return changed;}
+    if(!chat){if(changed)await bumpChatRevision(db);return {chats:changed,members};}
     // A private chat a reset restored or an owner record brought names no person until this installation's bot hears from it.
     if(live&&!imported&&chat.kind==='private'&&chat.current)changed=await namePrivateChats(db,chat.id)>0||changed;
     const seen=facts.message?at:null;
@@ -263,10 +265,10 @@ export class ChatRepository {
     // Who is in a group: only from live updates, each applied once and in update order.
     if(order!==null&&chat.kind==='group')for(const membership of facts.memberships) {
       const account=await ensureAccount(db,connection,membership.person,'telegram',at);
-      await membershipFrom(db,chat.id,account,membership.state,membership.source,order);
+      members=await membershipFrom(db,chat.id,account,membership.state,membership.source,order)||members;
     }
     if(changed)await bumpChatRevision(db);
-    return changed;
+    return {chats:changed,members};
   }
 
   /**
@@ -309,7 +311,7 @@ export class ChatRepository {
    * minutes, with no add and no state change on record (fresh), whose own add is recorded late, after the upgrade
    * message; there the owner's add is an add. Nocheh leaving on its own makes it left; anyone removing it makes it
    * removed. Promotions, demotions and restrictions change nothing. Each add or removal writes one content-free
-   * chat_state_events row; `member` says the adder is a person the owner let use Nocheh in some group. Never the guard
+   * chat_state_events row; `member` says the adder is a member (their account is linked to one, step 3). Never the guard
    * epoch: the directory revision tells every process.
    */
   private async adopt(db:Db,chat:string,external:string,event:string,status:TelegramBotStatus,order:UpdateOrder,policy:AssistantPolicy):Promise<boolean> {
@@ -331,7 +333,7 @@ export class ChatRepository {
       updated_at=now() WHERE id=$1`,[chat,order.seq,order.bot,order.at,state]);
     if(kind==='added')await db.query(`UPDATE chats SET added_by_account_id=$2,added_by_role=$3,added_at=$4,add_event=$5 WHERE id=$1`,[chat,account,role,order.at,event]);
     if(kind) {
-      const member=role==='other'&&!!by&&Object.values(policy.group_access??{}).some(access=>access.granted.includes(by.external));
+      const member=role==='other'&&!!account&&!!(await db.query('SELECT 1 FROM chat_accounts WHERE id=$1 AND member_id IS NOT NULL',[account])).rowCount;
       // A leave or card waits 30 s, so an upgrade's two halves can fold into one chat first (migrate).
       await db.query(`INSERT INTO chat_state_events(event_id,chat_id,external_id,kind,role,account_id,member,action,state,due_at)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now()+CASE WHEN $8 IN ('card','leave') THEN interval '30 seconds' ELSE interval '0 seconds' END) ON CONFLICT DO NOTHING`,
@@ -346,14 +348,20 @@ export class ChatRepository {
    * of their own, they stay two chats, as a group upgraded before step 2b does, except in a live capture Nocheh acts on
    * (`live`; never history, see startAdoption): there the new one's updates came just before its upgrade message, and it
    * folds into the old one if only its own add ever served it (fold); if it may not, the two stay apart, and the new one
-   * still takes the upgrade's echo (apart). `at` is when Nocheh took the upgrade message in.
+   * still takes the upgrade's echo (apart). Whenever they stay two chats there, members' switches are copied to the new
+   * id (step 3). `at` is when Nocheh took the upgrade message in.
    */
   async migrate(db:Db,connection:string,from:string,to:string,live=false,at:Date=new Date()):Promise<boolean> {
     if(!isTelegramChat(from)||!isTelegramChat(to)||from===to)return false;
     const old=await chatOfApp(db,connection,from),next=await chatOfApp(db,connection,to);
     if(old&&next) {
       if(!live||old.id===next.id||old.kind!=='group'||next.kind!=='group'||!old.current||!next.current)return false;
-      return await this.fold(db,connection,old.id,next.id)||await this.apart(db,old.id,next.id,at);
+      if(await this.fold(db,connection,old.id,next.id)||await this.apart(db,old.id,next.id,at))return true;
+      // Neither: both chats stay as they are (the new one has its own project and the old one is on, for one), and the
+      // members' switches are still copied to the new id, which serves the group now, so no one switched off there
+      // talks again (step 3). True when a switch was written, so the directories reload once the capture commits.
+      if(!await copySwitches(db,old.id,next.id))return false;
+      await bumpMemberRevision(db);return true;
     }
     if(old) {
       if(old.current)await db.query(`UPDATE chat_ids SET state='old',reason='migrated',changed_at=now() WHERE connection_id=$1 AND external_id=$2 AND state='current'`,[connection,from]);
@@ -384,7 +392,9 @@ export class ChatRepository {
    * was not in (left, removed or archived), or not known to be in (off and fresh: first recorded within ten minutes of
    * the add, with no add on record, see adopt): the owner added it, so it is on, and the moved card goes. Into an old
    * chat that is off, pending or could not be left, where Nocheh still is, the add is the upgrade's echo: the stage
-   * finds the moved card or leave superseded, and the old chat's own leave goes ahead. Returns whether it folded.
+   * finds the moved card or leave superseded, and the old chat's own leave goes ahead. Members' switches for the new chat
+   * move to the old one, where a switch already there and off stays off (step 3), before the new chat goes, so a delete
+   * never has to cascade. Returns whether it folded.
    */
   private async fold(db:Db,connection:string,old:string,next:string):Promise<boolean> {
     const row=(await db.query(`SELECT n.state<>'active' OR n.added_by_role='owner' AND n.state_seq IS NOT NULL
@@ -406,6 +416,10 @@ export class ChatRepository {
     await db.query(`DELETE FROM chats WHERE id IN (${twins})`,[next,old]);
     await db.query('UPDATE chats SET parent_id=$2,updated_at=now() WHERE parent_id=$1',[next,old]);
     await db.query('UPDATE chat_state_events SET chat_id=$2,updated_at=now() WHERE chat_id=$1',[next,old]);
+    await copySwitches(db,next,old);
+    await db.query('DELETE FROM member_chats WHERE chat_id=$1',[next]);
+    // The members' switches and memberships moved: the member directory reloads.
+    await bumpMemberRevision(db);
     if(row.owner_add&&(['left','removed','archived'].includes(row.old_state)||row.old_state==='off'&&row.old_fresh))await db.query(`UPDATE chats o SET state='active',state_changed_at=now(),updated_at=now(),
       added_by_account_id=n.added_by_account_id,added_by_role=n.added_by_role,added_at=n.added_at,add_event=n.add_event,
       state_seq=n.state_seq,state_bot=n.state_bot,state_at=n.state_at FROM chats n WHERE o.id=$1 AND n.id=$2`,[old,next]);
@@ -425,7 +439,8 @@ export class ChatRepository {
    * Telegram still knows, and the old chat is left. Not once the card told the owner Nocheh is on in the new chat, as it
    * usually has by then: Nocheh would leave it with no word. The new chat stays on, and the old chat's leave stays at
    * the id Telegram no longer knows, so it never leaves the group. System changes, so an older update recorded late
-   * never undoes them. Returns whether it changed anything.
+   * never undoes them. Members' switches for the old chat are copied to the new one, where a switch already there and off
+   * stays off (step 3). Returns whether it changed anything.
    */
   private async apart(db:Db,old:string,next:string,at:Date):Promise<boolean> {
     const row=(await db.query(`SELECT o.state AS old_state,o.add_event AS old_add,n.add_event AS next_add FROM chats o,chats n
@@ -439,6 +454,8 @@ export class ChatRepository {
       WHERE event_id=$1 AND chat_id=$2 AND state='waiting'`,[row.next_add,next]);
     await db.query(`UPDATE chats n SET state=o.state,added_by_account_id=o.added_by_account_id,added_by_role=o.added_by_role,added_at=o.added_at,
       add_event=o.add_event,${systemChange} FROM chats o WHERE n.id=$1 AND o.id=$2`,[next,old]);
+    await copySwitches(db,old,next);
+    await bumpMemberRevision(db);
     if(row.old_state!=='pending')return true;
     await db.query(`UPDATE chat_state_events SET chat_id=$1,due_at=least(due_at,now()+interval '30 seconds'),updated_at=now()
       WHERE event_id=$2 AND chat_id=$3 AND action='leave' AND state='waiting'`,[next,row.old_add,old]);
@@ -540,7 +557,7 @@ export class ChatRepository {
    * and a replay changes nothing. Returns how many updates it read; 0 when it has caught up with the seeder.
    */
   async backfill(limit=500):Promise<number> {
-    const db=await this.stores.control.connect();
+    const db=await this.stores.control.connect();let members=false,read=0;
     try {
       await db.query('BEGIN');
       const state=(await db.query('SELECT archive_sequence,members_sequence FROM chat_seed_state WHERE singleton FOR UPDATE')).rows[0];
@@ -559,13 +576,16 @@ export class ChatRepository {
         const chat=await chatOfApp(db,connection,row.scope);if(chat?.kind!=='group')continue;
         const order={seq:facts.update_id,bot:typeof row.bot_id==='string'&&appId.test(row.bot_id)?row.bot_id:null,at:row.received_at as Date};
         for(const membership of facts.memberships)
-          await membershipFrom(db,chat.id,await ensureAccount(db,connection,membership.person,'telegram',order.at),membership.state,membership.source,order);
+          members=await membershipFrom(db,chat.id,await ensureAccount(db,connection,membership.person,'telegram',order.at),membership.state,membership.source,order)||members;
       }
       const next=rows.length===limit?rows.at(-1)!.capture_sequence:state.archive_sequence;
       await db.query('UPDATE chat_seed_state SET members_sequence=$1 WHERE singleton',[next]);
-      await db.query('COMMIT');return rows.length;
+      await db.query('COMMIT');read=rows.length;
     } catch(error){await db.query('ROLLBACK');throw error;}
     finally{db.release();}
+    // A member's membership row made or switched: the member directory reloads now, not at its next look.
+    if(members)await freshMembers().catch(()=>{});
+    return read;
   }
 
   /** Chat names for presentation, by Nocheh chat id; nothing is decided on them. */
@@ -615,12 +635,29 @@ function chatProject(value:unknown):ChatProject {
 export interface ChatListing {title_source:string|null;username:string|null;seen_at:Date|null;closed:boolean|null;
   refreshed:{state:string;to:string|null;at:Date}|null;added_by:'owner'|'other'|'anonymous'|'unknown'|'seeded'|null;added_at:Date|null;removed_event:boolean}
 
-/** Who is in a group, as one update says, unless a newer update already said otherwise (newerUpdate). */
-async function membershipFrom(db:Db,chat:string,account:string,state:'in'|'left',source:'message'|'event',order:UpdateOrder) {
-  await db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source,since,checked_at,seen_seq,seen_bot) VALUES($1,$2,$3,$4,$5,$5,$6,$7)
+/**
+ * Who is in a group, as one update says, unless a newer update already said otherwise (newerUpdate). When the row of a
+ * member's account is made, or switches between 'in' and 'left', the member revision moves in the same transaction
+ * (step 3): the member directory reads these rows for every decision made without a live message there (reaches).
+ * Returns whether it moved; a member's ordinary message, which only confirms 'in', moves nothing.
+ */
+async function membershipFrom(db:Db,chat:string,account:string,state:'in'|'left',source:'message'|'event',order:UpdateOrder):Promise<boolean> {
+  const written=(await db.query(`WITH prior AS (SELECT state FROM chat_memberships WHERE chat_id=$1 AND account_id=$2)
+    INSERT INTO chat_memberships(chat_id,account_id,state,source,since,checked_at,seen_seq,seen_bot) VALUES($1,$2,$3,$4,$5,$5,$6,$7)
     ON CONFLICT(chat_id,account_id) DO UPDATE SET state=excluded.state,source=excluded.source,checked_at=excluded.checked_at,seen_seq=excluded.seen_seq,
       seen_bot=excluded.seen_bot,since=CASE WHEN chat_memberships.state=excluded.state THEN chat_memberships.since ELSE excluded.since END
-    WHERE ${newerUpdate('chat_memberships','excluded',['seen_seq','seen_bot','checked_at'])}`,[chat,account,state,source,order.at,order.seq,order.bot]);
+    WHERE ${newerUpdate('chat_memberships','excluded',['seen_seq','seen_bot','checked_at'])} RETURNING (SELECT state FROM prior) AS prior`,
+    [chat,account,state,source,order.at,order.seq,order.bot])).rows[0];
+  if(!written||written.prior===state)return false;
+  if(!(await db.query('SELECT 1 FROM chat_accounts WHERE id=$1 AND member_id IS NOT NULL',[account])).rowCount)return false;
+  await bumpMemberRevision(db);
+  return true;
+}
+/** Copies members' switches for group `from` to group `to`; where `to` already has a switch, off wins. Returns how many
+ *  switches it wrote. */
+async function copySwitches(db:Db,from:string,to:string):Promise<number> {
+  return (await db.query(`INSERT INTO member_chats(member_id,chat_id,enabled) SELECT member_id,$2,enabled FROM member_chats WHERE chat_id=$1
+    ON CONFLICT(member_id,chat_id) DO UPDATE SET enabled=false,updated_at=now() WHERE member_chats.enabled AND NOT excluded.enabled`,[from,to])).rowCount??0;
 }
 
 /**
@@ -716,8 +753,12 @@ export async function startChatDirectory(control:pg.Pool,policy:()=>Pick<Assista
   loader.watch();
   return loader;
 }
-/** After a commit that added chats: this process sees them at once. Without a loader (tests) nothing happens. */
-export async function reloadChats():Promise<void> {await active?.load().catch(failed);}
+/** After a commit that added chats, or moved a member's membership or switches (step 3): this process sees them at
+ * once, the member directory too when the member revision moved. Without a loader (tests) nothing happens. */
+export async function reloadChats():Promise<void> {
+  await active?.load().catch(failed);
+  await freshMembers().catch(()=>{});
+}
 /** The directory as of now, for a reader outside this process (GET /internal/chats). */
 export async function currentChats():Promise<ChatDirectory> {return active?active.current():chats();}
 

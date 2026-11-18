@@ -10,6 +10,7 @@ import {fixtureServices} from './fixture-brain.js';
 import {claimHostWorkflow,finishHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {workflowDetail,workflowHealth} from '../src/workflows/owner.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('an unclear page read closes itself, the owner closes other unclear operations, and nothing runs again (ADR-0218)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -21,6 +22,8 @@ test('an unclear page read closes itself, the owner closes other unclear operati
     runtime:async(operation)=>{assert.equal(operation,'guard.detect');return {literals:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no provider');})});
   const a=s.controlledActions,x=s.controlledExecution,event:Envelope={version:1,key,origin:'live',kind:'telegram_update',bot_id:key,scope:group,source_id:'1',revision:'1',occurred_at:null,text:'Made-up operations',
     payload:{message:{message_id:1,chat:{id:Number(group),type:'supergroup',is_forum:false},from:{id:9},text:'Made-up operations'}}};
+  // The person who asks is one of the owner's members in the group (step 3).
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123'});
   try {
     await s.guards.reconcile();await s.guards.setMode('on');const source=(await s.capture.capture(event)).source.reference;await s.guards.prepare(source,'fixture',s.detect);
     const binding=await s.guards.state(),actor={admin:false,scope:group,space:group,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
@@ -93,5 +96,5 @@ test('an unclear page read closes itself, the owner closes other unclear operati
     const waits=await a.propose(actor,{kind:'shell',arguments:{command:'printf made-up-waiting'}});
     await assert.rejects(a.resolve(owner,{id:waits.id,fingerprint:waits.fingerprint,outcome:'dismissed'}),{code:'action_already_started_or_closed'});
     assert.equal((await a.row(waits.id)).state,'proposed');
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

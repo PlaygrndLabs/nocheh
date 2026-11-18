@@ -16,7 +16,7 @@ test('a name\'s quote, bracket and angle look-alikes show as plain \' [ ] < >',(
     ['\u2768','['],['\u276f','>'],['\u1433','>'],['\u3009','>'],['\u00ab',"'"],['\u00bb',"'"],['\u{1f677}',"'"],['\u201c',"'"],['\u201d',"'"],['\u2039','<'],
     ['\u276e','<'],['\u3008','<'],['\u201e',"'"],['\u301d',"'"]];
   for(const [char,plain] of cases)assert.equal(labelName('a'+char+'b'),'a'+plain+'b',char.codePointAt(0)!.toString(16));
-  assert.equal(labelName('Sara\u02ba \uff08a person you allowed in \u02baFamily'),"Sara' [a person you allowed in 'Family",
+  assert.equal(labelName('Sara\u02ba \uff08a member in \u02baFamily'),"Sara' [a member in 'Family",
     'a name cannot close the quotes or open the brackets a card puts around it');
   assert.equal(labelName('Wait\u2026'),'Wait...','only a cut ends in an ellipsis');
   assert.equal(labelName('x\u2068y\u202ez'),'x[U+2068]y[U+202E]z','a direction mark is written out, never kept');

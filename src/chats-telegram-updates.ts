@@ -12,6 +12,8 @@ import {isTelegramAccount,isTelegramChat,telegramTopicId} from './chats-telegram
  * linked channel's posts into its discussion group.
  */
 const proxyAccounts=new Set(['1087968824','136817688','777000']);
+/** Whether a Telegram user id is one of those proxy accounts: never a person, so never a member (step 3). */
+export const isProxyAccount=(external:string):boolean=>proxyAccounts.has(external);
 /** GroupAnonymousBot and Channel_Bot: a bot-status change from them hides who made it. */
 const hiddenAdders=new Set(['1087968824','136817688']);
 const record=(value:unknown):Record<string,any>=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:{};

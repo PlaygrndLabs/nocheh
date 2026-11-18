@@ -6,7 +6,8 @@ import {useFeedback} from '../../ui/overlay';
 import {ActionError, useAction} from './shared';
 import type {ChatContext, Permission} from './detail';
 
-export function AllowedActions({chat, context}: {chat: Chat; context: ChatContext | null}) {
+/** `group`: the chat is a group or one of its topics, never the owner's private chat or one of its topics. */
+export function AllowedActions({chat, group, context}: {chat: Chat; group: boolean; context: ChatContext | null}) {
   const action = useAction();
   const {confirm} = useFeedback();
   const now = Date.now();
@@ -32,7 +33,13 @@ export function AllowedActions({chat, context}: {chat: Chat; context: ChatContex
     <Card>
       <CardHeader
         title="Allowed actions"
-        description={chat.kind === 'topic' ? 'Permissions belong to the whole group.' : undefined}
+        description={
+          chat.kind === 'topic'
+            ? group
+              ? 'Permissions belong to the whole group.'
+              : 'Permissions belong to the whole private chat.'
+            : undefined
+        }
       />
       <CardBody className="pt-3">
         {!context ? (
@@ -62,7 +69,9 @@ export function AllowedActions({chat, context}: {chat: Chat; context: ChatContex
           </ul>
         ) : (
           <p className="text-sm text-muted">
-            Nothing without asking. Each action waits for your approval in the{' '}
+            {group
+              ? 'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, and a message for this chat asked for here goes out without one. Commands still wait for your approval in the '
+              : 'Nothing without asking. Each action waits for your approval in the '}
             <a href={href('inbox')} className="font-medium text-accent-text hover:underline">
               Inbox
             </a>

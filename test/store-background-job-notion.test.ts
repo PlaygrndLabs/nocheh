@@ -11,6 +11,7 @@ import {ownerApprovedJob} from '../src/stores/background-jobs.js';
 import {fixtureServices} from './fixture-brain.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('a job the owner approved in their private chat reads Notion under the owner\'s setting, its changes always ask, and Stop stops what has not run',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -19,7 +20,9 @@ test('a job the owner approved in their private chat reads Notion under the owne
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-notion-')),key='job-notion:'+Date.now(),group='-100555';
   const cards:Record<string,any>[]=[],owner:Reader={admin:true,scope:null};
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],topic_memory:'group' as const});
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123'});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -167,5 +170,5 @@ test('a job the owner approved in their private chat reads Notion under the owne
     await assert.rejects(notion(asked.reader,'notion-search',search),{code:'notion_owner_private_only'});
     assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM controlled_actions WHERE kind='mcp' AND space_id=$1",[group])).rows[0].n,0);
 
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

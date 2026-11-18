@@ -245,7 +245,7 @@ export class NativeReviewRepository {
       limitations:left?[...context.limitations,'rules_left_out_for_owner_label']:context.limitations};
   }
   /** Why a source's notes review should not run, or null: Nocheh's own card or notice (ADR-0256), or a source left out of
-   * the owner's notes (ADR-0257), which is recorded so a later grant doesn't bring it back in this generation. */
+   * the owner's notes (ADR-0257), which is recorded so the sender later becoming a member doesn't bring it back in this generation. */
   async unwanted(source:SourceReference):Promise<'nocheh_message'|NotesSkip|null> {
     const own=await this.contexts.access.notLearned(source);if(own)return own;
     const binding=await this.contexts.guards.state(),decision=await this.decide(source,binding);

@@ -162,7 +162,7 @@ def workspace_command(command, rest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "workspace", "workspaces", "update", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "config", "group-access", "discover-telegram", "configure-telegram", "backup", "restore", "offsite", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles", "storage"))
+    parser.add_argument("command", choices=("init", "workspace", "workspaces", "update", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "config", "discover-telegram", "configure-telegram", "backup", "restore", "offsite", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles", "storage"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
     if args.command == 'admin':
         sys.path.insert(0, str(ROOT))
@@ -249,10 +249,6 @@ def main():
             claimed = claim_folder(fresh)
     except WorkspaceError as error:
         print('nocheh: ' + str(error), file=sys.stderr); return 1
-    if args.command == 'group-access':
-        sys.path.insert(0, str(ROOT))
-        from tools.operations.security.group_access import main as group_access
-        return group_access(STATE, rest)
     if args.command=='approvals':
         sys.path.insert(0,str(ROOT))
         from tools.operations.security.approvals import main as approvals

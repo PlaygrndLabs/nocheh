@@ -92,7 +92,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         policy_check = patch('services.telegram.gateway.check_delivery_policy', side_effect=lambda _credential: self.allowed)
         policy_check.start()
         self.addCleanup(policy_check.stop)
-        self.policy = Policy.of(True, '123', ['-20'], {'-20': {'granted': ['456'], 'denied': []}}, topics=[('-20/topic/17', '-20', '17'), ('-20/topic/1', '-20', '1')])
+        self.policy = Policy.of(True, '123', ['-20'], topics=[('-20/topic/17', '-20', '17'), ('-20/topic/1', '-20', '1')])
         self.capture = Capture(self.root / 'spool', '123456')
         # Send records still being written land before the spool is removed.
         self.addAsyncCleanup(self.capture.sends.settle)

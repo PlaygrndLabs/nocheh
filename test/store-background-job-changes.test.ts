@@ -9,6 +9,7 @@ import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('a job\'s changes wait for its end, then come on as few cards as fit, each approved or rejected as a whole; Stop ends them',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -17,7 +18,9 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-changes-')),key='job-changes:'+Date.now(),group='-100555';
   const cards:Record<string,any>[]=[],notices:Record<string,any>[]=[],owner:Reader={admin:true,scope:null};
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],topic_memory:'group' as const});
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123'});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -214,5 +217,5 @@ test('a job\'s changes wait for its end, then come on as few cards as fit, each 
     assert.deepEqual((await states([held])).map(row=>[row.state,row.error_code]),[['rejected','job_stopped']]);
     assert.equal(listCards().length,shownBefore,'no card for a stopped job');
     assert.match(last('settle',stopped.id).text,/🚫 Stopped\./);
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

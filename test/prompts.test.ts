@@ -69,8 +69,8 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
     name_project:lines.name_project,name_id:lines.name_id,not_sent:lines.not_sent,reason_not_served:lines.reason_not_served,
     reason_settings_changed:lines.reason_settings_changed,schedule_not_sent:lines.schedule_not_sent,schedule_not_run:lines.schedule_not_run,
     job_report_not_sent:lines.job_report_not_sent},{group_chat:'group {name}',topic_name:'topic {name}',
-    person_chat:'private chat with {name} (a person you allowed in {group})',
-    person_chat_more:'private chat with {name} (a person you allowed in {group} and {count} more)',person_chat_other:'private chat with {name}',
+    person_chat:'private chat with {name} (a member in {group})',
+    person_chat_more:'private chat with {name} (a member in {group} and {count} more)',person_chat_other:'private chat with {name}',
     unnamed_person:'a person \u2026{id}',unknown_chat:'a chat Nocheh no longer knows',not_served:'(not served now)',name_project:'{name} of project {project}',
     name_id:'{name} (\u2026{id})',not_sent:'\u{1f6ab} Approved, but not sent: {reason}',reason_not_served:'Nocheh does not serve that chat now.',
     reason_settings_changed:'your settings changed while it ran. It runs again at its next time.',
@@ -81,8 +81,8 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
     'the chat words a card has today stay');
   assert.equal(fillTemplate(lines.not_sent,{reason:lines.reason_not_served}),'\u{1f6ab} Approved, but not sent: Nocheh does not serve that chat now.');
   assert.ok((promptKeys as readonly string[]).includes('tasks.reminder_texts'));
-  assert.deepEqual(reminderLines(undefined),{you:'you',person:'{name}, a person you allowed',person_gone:'{name}, a person you no longer allow',
-    unnamed_person:'someone you allowed',set_by:'\u{1f464} Set by {who} in {place}',written_by:'\u270f\ufe0f Last written by {who} in {place}: {fields}',
+  assert.deepEqual(reminderLines(undefined),{you:'you',person:'{name}, a member',person_gone:'{name}, no longer an active member',
+    unnamed_person:'a member',set_by:'\u{1f464} Set by {who} in {place}',written_by:'\u270f\ufe0f Last written by {who} in {place}: {fields}',
     field_title:'title',field_notes:'notes',field_due:'due day',closed_by:'\u2611\ufe0f Closed by {who} in {place}',merged:'\u{1f514} {count} reminders set in {place}',
     more_waiting:'\u23f3 {count} more reminders set in {place} are due. They come in the next message; at most one message per group every 10 minutes.',
     note_line:'\u2506 {line}',
@@ -95,7 +95,7 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
   assert.equal(promptProblem('tasks.reminder_texts','set_by: {who} was in {place}\nyou: me'),null);
   assert.equal(promptProblem('tasks.reminder_texts','more_waiting: {count} more are due.'),null,'more_waiting needs only its count');
   assert.equal(reminderLines('set_by: Hi\nyou: me').set_by,'\u{1f464} Set by {who} in {place}');assert.equal(reminderLines('set_by: Hi\nyou: me').you,'me','the other lines stay');
-  assert.equal(promptProblem('telegram.approval_texts','person_chat: private chat with {name}'),'prompt_placeholder_missing','the groups a person is allowed in are always named');
+  assert.equal(promptProblem('telegram.approval_texts','person_chat: private chat with {name}'),'prompt_placeholder_missing','the groups a member reaches are always named');
   assert.equal(approvalLines('person_chat: private chat with {name}\nsent: Sent!').person_chat,lines.person_chat);
   assert.equal(promptProblem('telegram.approval_texts','sent: Sent!\ntopic: in a topic'),null,'lines a card has today keep their freedom');
   assert.equal(promptProblem('tasks.reminder_texts',reminderTexts),null);assert.equal(promptProblem('telegram.approval_texts',approvalTexts),null);

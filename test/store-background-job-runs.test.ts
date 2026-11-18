@@ -11,6 +11,7 @@ import {jobDeadlines,ownerApprovedJob} from '../src/stores/background-jobs.js';
 import {fixtureServices} from './fixture-brain.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('a job is one run priced from its progress, stopped at its cost or time limit with a note, relaunched at most twice, and a relaunch asks for every change',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -19,7 +20,10 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-runs-')),key='job-runs:'+Date.now(),group='-100555',other='-100777';
   const cards:Record<string,any>[]=[],owner:Reader={admin:true,scope:null};let granted=['9'];
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted,denied:[]}},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],topic_memory:'group' as const});
+  // The owner's members (step 3): 9 talks in the group while `granted` holds them.
+  let people=grantMembers({[group]:{granted}},{owner:'123',groups:[other]});
+  const regrant=()=>{people();people=grantMembers({[group]:{granted}},{owner:'123',groups:[other]});};
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -88,7 +92,7 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
   const resumed=(title:string)=>`[Background job: ${title}] The job was interrupted and restarted. Your to-do list and the work so far are above; the last tool call may not have finished. Continue, and write the final report as your answer when done.`;
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
-    await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:20,revision:(await s.jobs.settings()).revision});
+    await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,revision:(await s.jobs.settings()).revision});
     await message(other,'A made-up note in the other group');noted=sent;
     const note=await message(group,'A made-up task: send the invoice');
 
@@ -158,28 +162,38 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
 
     // A member removed from the chat: the heartbeat refuses, the job fails, and nothing is sent.
     const revoked=await approved('Revoked check'),cut=await claim(revoked),requests=Number((await stores.control.query('SELECT count(*) FROM telegram_action_requests')).rows[0].count);
-    granted=[];
+    granted=[];regrant();
     await assert.rejects(beat(cut),{status:403,code:'job_not_permitted'});
     await finish(cut,'interrupted');
     assert.equal((await tick(revoked)).state,'failed');
     assert.deepEqual([(await job(revoked)).state,(await job(revoked)).error_code],['failed','job_not_permitted']);
     assert.equal(Number((await stores.control.query('SELECT count(*) FROM telegram_action_requests')).rows[0].count),requests,'nothing is sent');
     // A relaunch of a removed member's job is cancelled before it starts, and the job fails.
-    granted=['9'];
+    granted=['9'];regrant();
     const relaunched=await approved('Relaunch check');await finish(await claim(relaunched),'failed');
     assert.equal((await tick(relaunched)).state,'waiting');assert.equal((await latest(relaunched)).attempt,2);
-    granted=[];
+    granted=[];regrant();
     await s.jobs.runs.run((await latest(relaunched)).event_id,await authority());
     assert.equal((await latest(relaunched)).run_state,'cancelled');
     assert.equal((await tick(relaunched)).state,'failed');assert.equal((await job(relaunched)).error_code,'job_not_permitted');
     // A report is not sent for a member removed after the run.
-    granted=['9'];
+    granted=['9'];regrant();
     const reported=await approved('Report check'),done=await claim(reported);
     await finish(done,'done',{text:'Report: made-up task 12 is open.'});
-    granted=[];
+    granted=[];regrant();
     assert.equal((await tick(reported)).state,'failed');
     assert.deepEqual([(await job(reported)).error_code,(await reports(reported)).length],['job_not_permitted',0]);
-    granted=['9'];
+    granted=['9'];regrant();
+    // Nor the rest of one for a member removed while it is sent: a member change moves no epoch, so each part asks again.
+    const halfway=await approved('Halfway check'),parted=await claim(halfway);
+    await finish(parted,'done',{text:'Part one: made-up task 12 is open. '+'x'.repeat(7000)+'\n\nPart two: made-up task 14 is done. '+'y'.repeat(7000)});
+    assert.equal((await tick(halfway)).stage,'delivery');
+    const [opening]=await reports(halfway);assert.equal(opening?.destination,group);
+    await stores.control.query("UPDATE telegram_action_requests SET state='done' WHERE id=$1",[opening.id]);
+    granted=[];regrant();
+    assert.equal((await tick(halfway)).state,'failed');
+    assert.deepEqual([(await job(halfway)).error_code,(await reports(halfway)).length],['job_not_permitted',1],'the second part is not sent');
+    granted=['9'];regrant();
     assert.equal(Number((await stores.control.query("SELECT count(*) FROM background_jobs WHERE state IN ('running','reporting')")).rows[0].count),0,'the slots are free');
 
     // After a change that is not quiet, a relaunch starts over with the first message and no to-do list; after quiet epochs
@@ -243,5 +257,5 @@ test('a job is one run priced from its progress, stopped at its cost or time lim
     const fresh=await claim(unreached);
     assert.match(fresh.text,/^\[Background job: Unreached check\]\nYou are running a background job[^]*made-up task list/);
     assert.doesNotMatch(fresh.text,/interrupted|restarted/);
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

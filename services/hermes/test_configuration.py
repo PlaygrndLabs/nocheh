@@ -115,19 +115,28 @@ class ConfigurationTests(unittest.TestCase):
             (state/'assistant.json').write_text('{"enabled":true,"owner_id":"42","group_ids":[]}')
             self.assertEqual(initialize(state)['TELEGRAM_ENABLED'],'false')
 
-    def test_no_setting_lists_the_groups_nocheh_serves(self):
-        # Nocheh serves a group once the owner adds it there (ADR-0253): a list left in .env is no setting, limits no
-        # group's people, and reaches no service.
-        from tools.operations.installation.configuration import ROOT, group_access
+    def test_no_setting_lists_the_groups_nocheh_serves_or_who_may_talk_there(self):
+        # Nocheh serves a group once the owner adds it there (ADR-0253), and who may talk there is a member, managed on the
+        # dashboard's Members page (step 3): a list left in .env is no setting, limits nobody, and reaches no service.
+        from tools.operations.installation.configuration import ROOT, validate
         from tools.operations.installation.settings import save, view
+        retired=('TELEGRAM_GROUP_IDS','TELEGRAM_GROUP_ACCESS')
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize(state)
-            values=read_env(env_path(state));values['TELEGRAM_GROUP_IDS']='-10';write_env(env_path(state),values)
-            self.assertNotIn('TELEGRAM_GROUP_IDS',[field['key'] for field in view(state)['fields']])
-            with self.assertRaisesRegex(ValueError,'unsupported_setting'):save(state,{'TELEGRAM_GROUP_IDS':'-20'},view(state)['revision'])
-            save(state,{'TELEGRAM_GROUP_ACCESS':'{"-20":{"granted":["77"],"denied":[]}}'},view(state)['revision'])
-            self.assertEqual(group_access(load(state)),{'-20':{'granted':['77'],'denied':[]}})
-        for name in ('docker-compose.yml','.env.example'):self.assertNotIn('TELEGRAM_GROUP_IDS',(ROOT/name).read_text(),name)
+            values=read_env(env_path(state));values.update(TELEGRAM_GROUP_IDS='-10',TELEGRAM_GROUP_ACCESS='not even a list');write_env(env_path(state),values)
+            # Whatever an old line holds, the rest of the settings still check and save.
+            validate(load(state))
+            save(state,{'TELEGRAM_BOT_NAMES':'Helper'},view(state)['revision'])
+            self.assertEqual((load(state)['TELEGRAM_BOT_NAMES'],load(state)['TELEGRAM_GROUP_ACCESS']),('Helper','not even a list'))
+            for key in retired:
+                self.assertNotIn(key,[field['key'] for field in view(state)['fields']])
+                with self.assertRaisesRegex(ValueError,'unsupported_setting'):save(state,{key:'{}'},view(state)['revision'])
+        for name in ('docker-compose.yml','docker-compose.dev.yml','.env.example'):
+            for key in retired:self.assertNotIn(key,(ROOT/name).read_text(),name)
+        # No service reads the old member lists: the app's member directory is the only check.
+        readers=[path for folder in ('services/telegram','services/hermes') for path in sorted((ROOT/folder).glob('*.py')) if not path.name.startswith('test_')]
+        self.assertTrue(readers)
+        for path in readers:self.assertNotIn('TELEGRAM_GROUP_ACCESS',path.read_text(),path.name)
 
     def test_isolated_state_does_not_use_root_credentials_or_shell_overrides(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -139,49 +148,18 @@ class ConfigurationTests(unittest.TestCase):
                 self.assertEqual(compose_environment(state)['SERVICE_TOKEN'],values['SERVICE_TOKEN'])
 
     def test_environment_policy_and_explicit_empty_secret(self):
-        with patch.dict(os.environ,{'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':'-10, -20','TELEGRAM_BOT_TOKEN':'','TELEGRAM_BOT_TOKEN_FILE':'/does/not/exist'},clear=True):
-            # The owner and the served groups come from the app's served list (ADR-0252), never from the environment.
-            self.assertEqual(telegram_policy(),{'enabled':True,'group_access':{}})
+        with patch.dict(os.environ,{'TELEGRAM_ENABLED':'true','TELEGRAM_OWNER_ID':'42','TELEGRAM_GROUP_IDS':'-10, -20','TELEGRAM_BOT_TOKEN':'','TELEGRAM_BOT_TOKEN_FILE':'/does/not/exist',
+                                    'TELEGRAM_GROUP_ACCESS':'{"-10":{"granted":["77"],"denied":[]}}'},clear=True):
+            # The owner and the served groups come from the app's served list (ADR-0252), and who may talk in a group from
+            # its member directory (step 3), never from the environment.
+            self.assertEqual(telegram_policy(),{'enabled':True})
             self.assertEqual(secret('TELEGRAM_BOT_TOKEN',required=False),'')
             with self.assertRaises(ValueError): secret('TELEGRAM_BOT_TOKEN')
 
-    def test_group_access_grant_deny_revoke_and_invalid_setting(self):
-        import json
-        from tools.operations.installation.configuration import group_access, validate
-        from tools.operations.installation.settings import save, view
-        from tools.operations.security.group_access import main
-        with tempfile.TemporaryDirectory() as folder:
-            state=Path(folder);values=initialize(state)
-            save(state,{'TELEGRAM_OWNER_ID':'42'},view(state)['revision'])
-            # Any group, by any Telegram ID it has had, whether Nocheh is on there or not (ADR-0253): no list of groups.
-            output=io.StringIO()
-            with contextlib.redirect_stdout(output):
-                self.assertEqual(main(state,['grant','-10','77','--save-only']),0)
-                self.assertEqual(main(state,['grant','-1002000000001','78','--save-only']),0)
-                self.assertEqual(main(state,['deny','-10','77','--save-only']),0)
-            self.assertEqual(group_access(load(state)),{'-10':{'granted':[],'denied':['77']},'-1002000000001':{'granted':['78'],'denied':[]}})
-            output=io.StringIO()
-            with contextlib.redirect_stdout(output):self.assertEqual(main(state,['list']),0)
-            self.assertEqual([json.loads(line)['group_id'] for line in output.getvalue().splitlines()],['-10','-1002000000001'])
-            with contextlib.redirect_stdout(output):
-                self.assertEqual(main(state,['revoke','-10','77','--save-only']),0)
-                self.assertEqual(main(state,['revoke','-1002000000001','78','--save-only']),0)
-            self.assertEqual(group_access(load(state)),{})
-            for bad in (['grant','10','77'],['grant','-0','77'],['grant','-10','0'],['list','chat']):
-                with self.assertRaises(SystemExit,msg=bad),contextlib.redirect_stderr(io.StringIO()):main(state,bad)
-            # A key is checked by its shape only.
-            validate({**load(state),'TELEGRAM_GROUP_ACCESS':'{"-20":{"granted":["77"],"denied":[]}}'})
-            for bad in ('{"20":{"granted":["77"],"denied":[]}}','{"-10/topic/7":{"granted":["77"],"denied":[]}}',
-                        '{"-10":{"granted":"77","denied":[]}}'):
-                with self.assertRaisesRegex(ValueError,'TELEGRAM_GROUP_ACCESS'):
-                    validate({**load(state),'TELEGRAM_GROUP_ACCESS':bad})
-
-    def test_the_owners_id_is_never_a_person_in_a_group_and_a_saved_one_changes_only_from_the_command_line(self):
-        import json
+    def test_a_saved_owner_id_changes_only_from_the_command_line(self):
         import re
         import sys
         import tools.cli.main as cli
-        from tools.operations.installation.configuration import OWNER_CONFLICT, owner_conflict, validate
         from tools.operations.installation.settings import OWNER_FROM_CLI, save, view
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize(state)
@@ -189,19 +167,12 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual((field()['editable'],field().get('changes_from')),(True,None),'the first set is on the dashboard')
             save(state,{'TELEGRAM_OWNER_ID':'42','TELEGRAM_BOT_TOKEN':'made-up-bot-token'},view(state)['revision'])
             self.assertEqual((field()['editable'],field()['changes_from']),(False,'cli'),'once saved, the dashboard shows it read-only')
-            # Allowed or denied in a group, the owner's ID is refused in plain words.
-            for access in ('{"-10":{"granted":["42"],"denied":[]}}','{"-10":{"granted":[],"denied":["42"]}}'):
-                with self.assertRaisesRegex(ValueError,'^'+re.escape(OWNER_CONFLICT)+'$'):validate({**load(state),'TELEGRAM_GROUP_ACCESS':access})
-                with self.assertRaisesRegex(ValueError,re.escape(OWNER_CONFLICT)):save(state,{'TELEGRAM_GROUP_ACCESS':access},view(state)['revision'])
-            with self.assertRaisesRegex(ValueError,re.escape(OWNER_CONFLICT)):owner_conflict(load(state),others=['42'])
-            owner_conflict(load(state),others=['77'])
             # The dashboard's save never changes or clears a saved ID; other settings still save.
             before=env_path(state).read_bytes()
             for value in ('77',''):
                 with self.assertRaisesRegex(ValueError,'^'+re.escape(OWNER_FROM_CLI)+'$'):save(state,{'TELEGRAM_OWNER_ID':value},view(state)['revision'])
             self.assertEqual(env_path(state).read_bytes(),before)
             save(state,{'TELEGRAM_OWNER_ID':'42','TELEGRAM_BOT_NAMES':'Helper'},view(state)['revision'])
-            save(state,{'TELEGRAM_GROUP_ACCESS':'{"-10":{"granted":["77"],"denied":[]}}'},view(state)['revision'])
             self.assertEqual((load(state)['TELEGRAM_OWNER_ID'],load(state)['TELEGRAM_BOT_NAMES']),('42','Helper'))
 
             def command(*arguments):
@@ -211,23 +182,21 @@ class ConfigurationTests(unittest.TestCase):
                     try:code=cli.main()
                     except SystemExit as exit:code=exit.code
                 return code,errors.getvalue()
-            # config set changes it, but never to a person allowed in a group.
-            before=env_path(state).read_bytes()
-            with self.assertRaisesRegex(ValueError,re.escape(OWNER_CONFLICT)):command('config','set','TELEGRAM_OWNER_ID','77')
-            self.assertEqual(env_path(state).read_bytes(),before)
+            # config set changes it. An ID that is also a member's is the owner's from then on: the member directory never
+            # counts the owner's account as a member, and the Members page says so (step 3).
             self.assertEqual(command('config','set','TELEGRAM_OWNER_ID','55')[0],0)
             self.assertEqual(load(state)['TELEGRAM_OWNER_ID'],'55')
-            # configure-telegram checks before it writes anything.
+            # configure-telegram lists no group any more (ADR-0253): the owner adds Nocheh to a group from their own account.
             before=env_path(state).read_bytes()
-            code,errors=command('configure-telegram','--owner-id','77')
-            self.assertEqual(code,2);self.assertIn(OWNER_CONFLICT,errors)
-            # It lists no group any more (ADR-0253): the owner adds Nocheh to a group from their own account.
             code,errors=command('configure-telegram','--owner-id','56','--group-id','-10')
             self.assertEqual(code,2);self.assertIn(' '.join(cli.GROUP_ID_RETIRED.split()),' '.join(errors.split()))
             self.assertEqual(env_path(state).read_bytes(),before)
             self.assertEqual(command('configure-telegram','--owner-id','56')[0],0)
             self.assertEqual((load(state)['TELEGRAM_OWNER_ID'],load(state)['TELEGRAM_ENABLED']),('56','true'))
-            self.assertEqual(json.loads(load(state)['TELEGRAM_GROUP_ACCESS']),{'-10':{'granted':['77'],'denied':[]}})
+            # Members are managed on the dashboard's Members page only: the command line has no group-access command.
+            code,errors=command('group-access','list')
+            self.assertEqual(code,2);self.assertIn("invalid choice: 'group-access'",errors)
+            self.assertFalse((cli.ROOT/'tools/operations/security/group_access.py').exists())
 
     def test_apply_inside_make_dev_keeps_the_development_setup(self):
         from tools.operations.installation.configuration import compose_command, INSTALLATION_ROOT

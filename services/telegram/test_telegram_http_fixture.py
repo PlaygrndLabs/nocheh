@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from telegram import Bot
 from telegram.error import BadRequest,RetryAfter
 from telegram.request import HTTPXRequest
-from tools.acceptance.telegram_mock import ANONYMOUS_ADMIN,BOT_USER,TelegramMock,TOKEN,bot_status,press
+from tools.acceptance.telegram_mock import ANONYMOUS_ADMIN,BOT_USER,CHANNEL_BOT,TelegramMock,TOKEN,bot_status,in_chat_name,left_member,press
 
 
 class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
@@ -201,6 +201,32 @@ class TelegramHttpFixtureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.mock.state.get('left',[]),self.mock.state['updates']),([],[]))
         self.assertEqual([row['status'] for row in self.mock.state['calls'] if row['method']=='leaveChat'],[400])
         self.assertTrue(await self.bot.leave_chat(-1001234567890))
+
+    async def test_a_leave_service_message_parses_as_telegram_sends_it(self):
+        group={'id':-1001234567890,'type':'supergroup','title':'Bakery'}
+        alice,admin={'id':111,'is_bot':False,'first_name':'Alice'},{'id':222,'is_bot':False,'first_name':'Admin'}
+        self.mock.inject({'updates':[left_member(60,group,alice),left_member(70,group,alice,by=admin)]})
+        updates=await self.bot.get_updates()
+        # Left on their own, the person is also its sender; removed, the remover is.
+        self.assertEqual([(u.message.message_id,u.message.chat.id,u.message.left_chat_member.id,u.message.from_user.id) for u in updates],
+                         [(60,-1001234567890,111,111),(70,-1001234567890,111,222)])
+        self.assertTrue(all(u.message.text is None and u.message.sender_chat is None for u in updates))
+        self.assertEqual(self.mock.state['titles']['-1001234567890'],'Bakery')
+
+    async def test_posts_in_a_chats_own_name_name_no_person(self):
+        group={'id':-1001234567890,'type':'supergroup','title':'Bakery','is_forum':True}
+        channel={'id':-1009876543210,'type':'channel','title':'Bakery news'}
+        mention=[{'type':'mention','offset':0,'length':len('@'+BOT_USER['username'])}]
+        self.mock.inject({'updates':[in_chat_name(80,group,'@'+BOT_USER['username']+' hello',topic=7,entities=mention),
+                                     in_chat_name(90,group,'Fresh bread today',sender_chat=channel)]})
+        anonymous,post=await self.bot.get_updates()
+        # An anonymous admin posts as the group itself, from GroupAnonymousBot, in the topic it wrote in.
+        self.assertEqual((anonymous.message.sender_chat.id,anonymous.message.from_user.id,anonymous.message.message_thread_id,
+                          anonymous.message.is_topic_message,anonymous.message.entities[0].type),(-1001234567890,ANONYMOUS_ADMIN['id'],7,True,'mention'))
+        # A channel posts as itself, from Channel_Bot, in no topic.
+        self.assertEqual((post.message.sender_chat.id,post.message.sender_chat.type,post.message.from_user.id,post.message.from_user.is_bot,
+                          post.message.message_thread_id,post.message.text),(-1009876543210,'channel',CHANNEL_BOT['id'],True,None,'Fresh bread today'))
+        self.assertEqual(self.mock.state['unknown'],[])
 
     async def test_a_press_on_a_card_reaches_the_bot_and_is_answered_once(self):
         from telegram import InlineKeyboardButton,InlineKeyboardMarkup

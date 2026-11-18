@@ -6,6 +6,7 @@ import {approvalLines,reminderLines,taskReminder} from '../src/prompts.js';
 import {fitMessage,mergedReminder,nameKeys,noteLines,reminderText,setByLine,shownCut,unitCut,wellFormed,whoLabel,
   type Names,type ReminderRow,type Who,type Words} from '../src/task-reminder-text.js';
 import {peopleNames} from '../src/stores/people-names.js';
+import {grantMembers} from './fixture-member-grants.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,fixtureChats} from './fixture-groups.js';
 
 /** “name”, isolated, as code quotes a name. */
@@ -44,35 +45,35 @@ test('a person\'s notes are collapsed and every line is marked, so none passes f
   assert.ok(Array.from(noteLines('word '.repeat(300),mark)).length<=500);
 });
 
-test('who set a reminder: you, a person you allowed by the name Telegram shows, or someone you allowed',()=>{
+test('who set a reminder: you, a member by the name Telegram shows, or a member Nocheh cannot name',()=>{
   const all=names({...people,[twin]:{display_name:'Sara',username:null},[gone]:{display_name:'Gone',username:null},
     [omid]:{display_name:'\u0645\u0647\u0631\u200c\u0646\u0627\u0632',username:null}}),keys=nameKeys(all,[person(gone)]);
   assert.equal(whoLabel(owner,words,all,keys),'you');
-  assert.equal(whoLabel(person(sara),words,all,keys),q('Sara')+' @sara_example, a person you allowed','two people named Sara: one by @username');
-  assert.equal(whoLabel(person(twin),words,all,keys),q('Sara')+' (\u2026'+digest(canonical(['account-label-v1',twin])).slice(0,4)+'), a person you allowed',
+  assert.equal(whoLabel(person(sara),words,all,keys),q('Sara')+' @sara_example, a member','two people named Sara: one by @username');
+  assert.equal(whoLabel(person(twin),words,all,keys),q('Sara')+' (\u2026'+digest(canonical(['account-label-v1',twin])).slice(0,4)+'), a member',
     'the other, with no username or private chat, by a short id of their account');
-  assert.equal(whoLabel(person(omid),words,all,keys),q('\u0645\u0647\u0631\u200c\u0646\u0627\u0632')+', a person you allowed','a Persian half-space stays');
-  assert.equal(whoLabel(person(gone),words,all,keys),q('Gone')+', a person you no longer allow');
+  assert.equal(whoLabel(person(omid),words,all,keys),q('\u0645\u0647\u0631\u200c\u0646\u0627\u0632')+', a member','a Persian half-space stays');
+  assert.equal(whoLabel(person(gone),words,all,keys),q('Gone')+', no longer an active member');
   const blank=names({[sara]:{display_name:'\u3164',username:null}});
-  assert.equal(whoLabel(person(sara),words,blank,nameKeys(blank,[])),'someone you allowed','a blank filler is no name');
-  assert.equal(whoLabel(person(sara,'Sara'),words,blank,nameKeys(blank,[])),q('Sara')+', a person you allowed','then the name Telegram showed when it was set');
+  assert.equal(whoLabel(person(sara),words,blank,nameKeys(blank,[])),'a member','a blank filler is no name');
+  assert.equal(whoLabel(person(sara,'Sara'),words,blank,nameKeys(blank,[])),q('Sara')+', a member','then the name Telegram showed when it was set');
   const byUsername=names({[sara]:{display_name:null,username:'sara_example'}});
-  assert.equal(whoLabel(person(sara),words,byUsername,nameKeys(byUsername,[])),q('@sara_example')+', a person you allowed');
-  assert.equal(whoLabel(person(null,'Sara'),words,all,keys),'someone you allowed','a person Nocheh could not tell is never named by what they typed');
+  assert.equal(whoLabel(person(sara),words,byUsername,nameKeys(byUsername,[])),q('@sara_example')+', a member');
+  assert.equal(whoLabel(person(null,'Sara'),words,all,keys),'a member','a person Nocheh could not tell is never named by what they typed');
   // A name that reads like the owner's chat or a served group gets its short id.
   const owners=names({[sara]:{display_name:'0wner',username:null},[omid]:{display_name:'Fam\u0456ly',username:null}});
   const ownerKeys=nameKeys(owners,[]);
-  assert.match(whoLabel(person(sara),words,owners,ownerKeys),/^\u2068\u201c0wner\u201d\u2069 \(\u2026[0-9a-f]{4}\), a person you allowed$/);
+  assert.match(whoLabel(person(sara),words,owners,ownerKeys),/^\u2068\u201c0wner\u201d\u2069 \(\u2026[0-9a-f]{4}\), a member$/);
   assert.match(whoLabel(person(omid),words,owners,ownerKeys),/\(\u2026[0-9a-f]{4}\)/);
   // A person's short id is their private chat's, the one the dashboard's chat list shows.
   const bob=accountIdFor('telegram','456'),bobs=names({[bob]:{display_name:'Owner',username:null}},[bob]);
-  assert.equal(whoLabel(person(bob),words,bobs,nameKeys(bobs,[])),q('Owner')+' (\u2026'+chatShortId(BOB_CHAT)+'), a person you allowed');
+  assert.equal(whoLabel(person(bob),words,bobs,nameKeys(bobs,[])),q('Owner')+' (\u2026'+chatShortId(BOB_CHAT)+'), a member');
 });
 
 test('a {place} inside a name stays as typed and never takes a value',()=>{
   const all=names({[sara]:{display_name:'Sara {place}',username:null}});
   const line=setByLine({setter:person(sara),chat:GP1_TOPIC},words,all,nameKeys(all,[]))!;
-  assert.equal(line,'\u{1f464} Set by '+q('Sara [place]')+', a person you allowed in group '+q('Family')+' \u203a topic '+q('Plans'));
+  assert.equal(line,'\u{1f464} Set by '+q('Sara [place]')+', a member in group '+q('Family')+' \u203a topic '+q('Plans'));
   assert.equal(setByLine({setter:owner,chat:null},words,all,nameKeys(all,[])),null,'set in the private chat or the dashboard: no line');
 });
 
@@ -81,10 +82,10 @@ test('the owner\'s own reminder reads exactly as before; one written elsewhere n
   assert.equal(reminderText(reminder({title:'Book\nthe hall',notes:'Two rooms\n\n\n\nfake',due:'Fri, 4 Jan 2030',list:'Home'}),words,all),
     '\u23f0 Book\nthe hall\n\u{1f4c5} Fri, 4 Jan 2030\n\u{1f4c1} Home\n\nTwo rooms\n\nfake','unchanged when nobody else wrote it');
   const written=reminder({title:'Book\nPay now',notes:'Two rooms\n\n\n\nfake',writers:[{...person(omid),field:'title',chat:GP1},{...person(omid),field:'notes',chat:GP1}]});
-  assert.equal(reminderText(written,words,all),'\u270f\ufe0f Last written by '+q('Omid')+', a person you allowed in group '+q('Family')+': title, notes\n'+
+  assert.equal(reminderText(written,words,all),'\u270f\ufe0f Last written by '+q('Omid')+', a member in group '+q('Family')+': title, notes\n'+
     '\u23f0 Book Pay now\n\n\u2506 Two rooms\n\u2506\n\u2506 fake');
   const closed=reminder({closed:true,writers:[{...person(sara),field:'closed',chat:GP1_TOPIC}]});
-  assert.equal(reminderText(closed,words,all),'\u2611\ufe0f Closed by '+q('Sara')+', a person you allowed in group '+q('Family')+' \u203a topic '+q('Plans')+
+  assert.equal(reminderText(closed,words,all),'\u2611\ufe0f Closed by '+q('Sara')+', a member in group '+q('Family')+' \u203a topic '+q('Plans')+
     '\n\u23f0 Book the hall');
   const inGroup=reminder({chat:GP1,writers:[{...owner,field:'title',chat:GP1}]});
   assert.equal(reminderText(inGroup,words,all),'\u{1f464} Set by you in group '+q('Family')+'\n\u23f0 Book the hall','the setter writing where it set it adds no line');
@@ -95,7 +96,7 @@ test('the owner\'s own reminder reads exactly as before; one written elsewhere n
 test('the code lines are never cut: a long template is, and the message stays within 4000',()=>{
   const all=names(people),long:Words={...words,template:'{title} '+'x'.repeat(20000)+'\u{1f600}'.repeat(10)};
   const text=reminderText(reminder({chat:GP1,setter:person(sara)}),long,all);
-  assert.ok(text.length<=4000);assert.ok(text.startsWith('\u{1f464} Set by '+q('Sara')+', a person you allowed in group '+q('Family')+'\n'));
+  assert.ok(text.length<=4000);assert.ok(text.startsWith('\u{1f464} Set by '+q('Sara')+', a member in group '+q('Family')+'\n'));
   assert.ok(text.endsWith('\u2026'));assert.equal(wellFormed(text),text);
   assert.equal(fitMessage(['line'],'b'.repeat(10),4000),'line\n'+'b'.repeat(10));
   assert.equal(fitMessage(['line'],'b'.repeat(10),10),'line\nbbbb\u2026');
@@ -112,8 +113,8 @@ test('people\'s reminders due together are merged round-robin, one Set by line p
   assert.ok(taken.some(row=>row.title==='Omid task'),'one person\'s many never hold back another\'s');
   assert.ok(text.startsWith('\u{1f514} '+taken.length+' reminders set in group '+q('Family')+'\n\n'));
   assert.equal(text.split('\u{1f464} Set by '+q('Sara')).length-1,1,'one Set by line for Sara in the topic');
-  assert.equal(text.split('\u{1f464} Set by '+q('Omid')+', a person you allowed in group '+q('Family')+'\n').length-1,1);
-  assert.ok(text.includes('\u{1f464} Set by '+q('Sara')+', a person you allowed in group '+q('Family')+' \u203a topic '+q('Plans')+'\n\u23f0 Sara task 0'));
+  assert.equal(text.split('\u{1f464} Set by '+q('Omid')+', a member in group '+q('Family')+'\n').length-1,1);
+  assert.ok(text.includes('\u{1f464} Set by '+q('Sara')+', a member in group '+q('Family')+' \u203a topic '+q('Plans')+'\n\u23f0 Sara task 0'));
   assert.ok(text.endsWith('\u23f3 '+(rows.length-taken.length)+' more reminders set in group '+q('Family')+
     ' are due. They come in the next message; at most one message per group every 10 minutes.'));
   // Everything fits: no header line for the rest, and no more_waiting line.
@@ -127,20 +128,22 @@ test('people\'s reminders due together are merged round-robin, one Set by line p
   const huge=reminder({setter:person(sara,'Sara'),chat:GP1,title:'t'.repeat(300),notes:'n'.repeat(500)});
   const cut=mergedReminder([huge,...omids],words,all,GP1,0,500);
   assert.equal(cut.taken.length,1);assert.equal(cut.taken[0]!.id,huge.id);assert.ok(cut.text.length<=500,String(cut.text.length));
-  assert.ok(cut.text.startsWith('\u{1f464} Set by '+q('Sara')+', a person you allowed in group '+q('Family')+'\n\u23f0 '));
+  assert.ok(cut.text.startsWith('\u{1f464} Set by '+q('Sara')+', a member in group '+q('Family')+'\n\u23f0 '));
   assert.ok(cut.text.includes('\u2026\n\n\u23f3 1 more reminders'),cut.text);
   assert.ok(!cut.text.startsWith('\u{1f514}'),'one reminder has no header');
 });
 
-test('reminder lines and note sources read people\'s names the same way: every allowed person and these people, the first row each',async()=>{
+test('reminder lines and note sources read people\'s names the same way: every member who reaches a group and these people, the first row each',async()=>{
   const asked:unknown[][]=[];
   const db={query:async(_sql:string,values:unknown[])=>{asked.push(values);return {rows:[{id:sara,display_name:'Sara',username:'sara_example'},
     {id:sara,display_name:'Sara',username:null},{id:gone,display_name:null,username:null}]};}} as any;
-  const policy={group_access:{[GP1]:{granted:['4561'],denied:[]}}};
-  const found=await peopleNames(db,directory,policy,[{account:gone},{account:null},{account:sara}]);
-  assert.deepEqual(asked,[[[sara,gone]]],'one read, each account once');
-  assert.deepEqual([...found.people],[[sara,{display_name:'Sara',username:'sara_example'}],[gone,{display_name:null,username:null}]]);
-  assert.deepEqual([...found.allowed??[]],[[sara,[GP1]]]);assert.equal(found.directory,directory);
+  const policy={owner_id:'123'},restore=grantMembers({[GP1]:{granted:['4561']}},{owner:'123'});
+  try {
+    const found=await peopleNames(db,directory,policy,[{account:gone},{account:null},{account:sara}]);
+    assert.deepEqual(asked,[[[sara,gone]]],'one read, each account once');
+    assert.deepEqual([...found.people],[[sara,{display_name:'Sara',username:'sara_example'}],[gone,{display_name:null,username:null}]]);
+    assert.deepEqual([...found.allowed??[]],[[sara,[GP1]]]);assert.equal(found.directory,directory);
+  }finally{restore();}
   // Without a policy nobody reads as no longer allowed, and with nobody to name nothing is read.
   const none=await peopleNames(db,directory,undefined,[]);
   assert.equal(none.allowed,null);assert.equal(none.people.size,0);assert.equal(asked.length,1);

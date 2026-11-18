@@ -8,6 +8,8 @@ import {join} from 'node:path';
 import {DashboardClient,miniAppRoute,miniAppServer,verifyLaunch,ed25519,TELEGRAM_KEYS} from '../src/mini-app.js';
 import {OwnerLock,FREE_TRIES,SESSION_IDLE} from '../src/owner-lock.js';
 import {OwnerSessions,csrfFor} from '../src/dashboard-auth.js';
+import {installMembersForTest,members} from '../src/members.js';
+import {BOB,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_NG,MEMBER_NG_ID,fixtureMemberDirectory} from './fixture-groups.js';
 
 const botId='5550001',ownerId='4242';
 const {publicKey,privateKey}=generateKeyPairSync('ed25519');
@@ -185,10 +187,12 @@ test('the mini app server forwards checked owner calls to the local dashboard wi
     for(const route of ['/owner-lock','/owner-lock/password','/owner-lock/sign-out-others','/login','/mini-app/sign-in'])
       assert.equal((await fetch(base+'/api/nocheh'+route,route==='/owner-lock'?{headers}:{method:'POST',headers,body:'{"password":"taken-over-99"}'})).status,404,'the password is changed only from the dashboard');
     assert.equal(calls.length,before,'refused calls never reach the dashboard');
-    // A person allowed or denied in a group (TELEGRAM_GROUP_ACCESS) is not the owner: their launch is refused with the
-    // same fixed answer before anything is read or forwarded, even holding the owner's phone session.
-    const access={'-1001000000001':{granted:['778','779'],denied:['780']}},lockBefore=lockCalls.length;
-    for(const id of Object.values(access).flatMap(group=>[...group.granted,...group.denied])) {
+    // A member is not the owner (step 3), whatever they may do in groups, tasks write included: their launch is refused
+    // with the same fixed answer before anything is read or forwarded, even holding the owner's phone session. So is a
+    // paused member's and a stranger's.
+    const people=installMembersForTest(fixtureMemberDirectory({[MEMBER_NG_ID]:{state:'paused'}})),lockBefore=lockCalls.length;
+    assert.equal(members().tasks(MEMBER_GP_ACCOUNT),'write');
+    try{for(const id of [MEMBER_GP,MEMBER_NG,BOB]) {
       const member=launch({auth_date:fresh,user:user(id)}),asked={'x-telegram-init-data':member,'x-nocheh-mini-session':token};
       for(const [path,init] of [['/api/nocheh/tasks',{headers:asked}],['/api/nocheh/settings',{headers:asked}],['/api/nocheh/decisions',{headers:asked}],
         ['/api/nocheh/tasks',{method:'POST',headers:{...asked,'content-type':'application/json'},body:'{"title":"Read the owner\'s list"}'}],
@@ -196,8 +200,8 @@ test('the mini app server forwards checked owner calls to the local dashboard wi
         const answer=await fetch(base+path,init);
         assert.equal(answer.status,403,id+' '+path);assert.deepEqual(await answer.json(),{error:'owner_required'},id+' '+path);
       }
-    }
-    assert.deepEqual([calls.length,lockCalls.length],[before,lockBefore],'no payload, sign-in or session check for a group member');
+    }}finally{people();}
+    assert.deepEqual([calls.length,lockCalls.length],[before,lockBefore],'no payload, sign-in or session check for a member');
     assert.equal((await fetch(base+'/api/mini/sign-out',{method:'POST',headers})).status,200);
     assert.equal((await fetch(base+'/api/nocheh/tasks',{headers})).status,401,'signed out at once on this phone');
   } finally {server.close();dashboard.close();await rm(assets,{recursive:true,force:true});await rm(directory,{recursive:true,force:true});}

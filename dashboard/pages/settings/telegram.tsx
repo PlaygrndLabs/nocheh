@@ -11,7 +11,6 @@ export const telegramKeys = [
   'TELEGRAM_OWNER_ID',
   'TELEGRAM_GROUP_REPLIES',
   'TELEGRAM_BOT_NAMES',
-  'TELEGRAM_GROUP_ACCESS',
   'TELEGRAM_TOPIC_MEMORY',
   'TELEGRAM_TYPING',
   'TELEGRAM_REACTIONS',
@@ -241,11 +240,15 @@ export function TelegramSettings() {
           description={
             <>
               Add Nocheh to a group yourself in Telegram, and it is on there at once. If someone else adds it, it
-              leaves. Turn it on or off in a group, and choose who may talk to it there, in{' '}
+              leaves. Turn it on or off in a group in{' '}
               <a className="font-medium text-accent-text hover:underline" href={href('chats')}>
                 Chats
               </a>
-              .
+              , and choose who may talk to it there on the{' '}
+              <a className="font-medium text-accent-text hover:underline" href={href('members')}>
+                Members
+              </a>{' '}
+              page.
             </>
           }
           className="pb-3"
@@ -260,7 +263,7 @@ export function TelegramSettings() {
             }
             description={
               s.value('TELEGRAM_GROUP_REPLIES') === 'all'
-                ? 'It may answer any message from someone allowed to talk to it.'
+                ? 'It may answer any message from you or a member who can talk there.'
                 : 'Only when someone replies to it, mentions it, or starts a message with one of its names. Every message is still kept.'
             }
           >

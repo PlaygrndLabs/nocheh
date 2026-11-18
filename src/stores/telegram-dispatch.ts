@@ -1,9 +1,11 @@
 import {albumMembers,albumSettleMs} from './albums.js';
 import type {Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {conversationScope,ownerChat,settleTelegramChat} from '../assistant-policy.js';
+import {conversationScope,ownerChat,settleTelegramChat,telegramAccount} from '../assistant-policy.js';
 import {chats} from '../chats.js';
+import {freshMembers,members} from '../members.js';
 import {appBindingOf,telegramChat,telegramScopes,telegramTarget} from '../frontdoor/telegram.js';
+import {isProxyAccount} from '../chats-telegram-updates.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {Brain,TurnReceipt} from '../brain/brain.js';
@@ -21,7 +23,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
-import {fillTemplate,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines} from '../prompts.js';
+import {fillTemplate,memberDailyLimitReply,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines} from '../prompts.js';
 import {readSetGroups} from '../spaces.js';
 import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
@@ -354,7 +356,7 @@ export class TelegramDispatchRepository {
       // their album's turn; any other outcome is the last turn, already in Hermes' history.
       const state=states.get(row.id);
       if(!state||state.state==='suppressed'&&state.error_code==='album_member')continue;
-      if(state.state!=='suppressed'||!['not_addressed','not_allowed','conversation_not_selected'].includes(state.error_code))break;
+      if(state.state!=='suppressed'||!['not_addressed','not_allowed','conversation_not_selected','member_daily_limit'].includes(state.error_code))break;
       try {
         if(await this.access.space((await this.archive.captured(row.id)).reference)!==space)continue;
         const guarded=await this.sources.read(principal,row.id),text=typeof guarded.event.text==='string'&&guarded.event.text?guarded.event.text.slice(0,1000):'[A message without text]';
@@ -394,14 +396,17 @@ export class TelegramDispatchRepository {
     }
     return parts;
   }
-  /** Someone not allowed to use Nocheh in an active group gets the owner's fixed
-   * reply, without a model, when they address it; anyone but the owner who writes
-   * privately gets the owner's private fixed reply, at most once a day. Anyone
-   * else stays quiet, also in a group that is off or that Nocheh is leaving: the chat
-   * directory says which groups are active (ADR-0253). */
+  /** Someone who may not use Nocheh in an active group, a stranger or a member who is
+   * paused or switched off there, gets the owner's fixed reply, without a model, when
+   * they address it, at most once a UTC day per group (the bot keys it by `once`, step 3);
+   * anyone but the owner who writes privately gets the owner's private fixed reply, at
+   * most once a day. Anyone else stays quiet, also in a group that is off or that Nocheh
+   * is leaving: the chat directory says which groups are active (ADR-0253). */
   private async refuse(id:string,key:string,chat:string,payload:any) {
     const policy=this.access.policy(),message=payload?.message,sender=message?.from,personal=message?.chat?.type==='private';
     if(!policy.enabled||!message||!sender?.id||sender.is_bot===true||String(sender.id)===policy.owner_id)return;
+    // A message in a channel's or group's own name, or from a proxy account, is nobody's: no reply (step 3).
+    if(message.sender_chat!=null||isProxyAccount(String(sender.id)))return;
     const directory=chats(),group=personal?null:directory.resolve('telegram',chat);
     if(personal?String(sender.id)!==chat:!['group','supergroup'].includes(message.chat?.type)||directory.kind(group)!=='group'||!directory.served(group))return;
     const texts=await ownerPrompts(this.control),common={event_id:id,chat_id:chat,message_id:String(message.message_id),user_id:String(sender.id)};
@@ -414,10 +419,27 @@ export class TelegramDispatchRepository {
     const botId=/^telegram:(\d+):update:/.exec(key)?.[1]??'',text=typeof message.text==='string'?message.text:typeof message.caption==='string'?message.caption:null;
     try {
       if(!groupTurn(this.groupReplies,groupAddressing(payload,botId),text,await this.identity(),true))return;
-      await this.call('telegram.refusal',{...common,
-        ...(message.is_topic_message===true&&Number.isSafeInteger(message.message_thread_id)?{topic:String(message.message_thread_id)}:{}),
-        reply:texts['telegram.not_allowed']??notAllowedReply},15000);
+      await this.groupRefusal(common,message,'not_allowed',texts['telegram.not_allowed']??notAllowedReply);
     } catch {/* Best effort: the message stays archived either way. */}
+  }
+  /** The bot's fixed reply in a group, in the message's topic, sent at most once a UTC day per person, group and kind
+   *  (`once`): not allowed there, or over the member daily message cap. */
+  private async groupRefusal(common:{event_id:string;chat_id:string;message_id:string;user_id:string},message:any,once:'not_allowed'|'daily_limit',reply:string) {
+    await this.call('telegram.refusal',{...common,once,
+      ...(message.is_topic_message===true&&Number.isSafeInteger(message.message_thread_id)?{topic:String(message.message_thread_id)}:{}),reply},15000);
+  }
+  /**
+   * Counts a member's addressed turn against the daily message cap (member_turns, step 3) and says whether it goes over:
+   * every member's turns in a UTC day across all groups, at most members().dailyMessages. The event's row is written once,
+   * so a retry counts once; rows older than yesterday go as a new one is written. A member removed since this process
+   * loaded the directory has no row to count against, and is refused once it reloads.
+   */
+  private async overDailyCap(member:string,event:string):Promise<boolean> {
+    const today="(now() AT TIME ZONE 'UTC')::date";
+    await this.control.query(`DELETE FROM member_turns WHERE member_id=$1 AND day<${today}-1`,[member]);
+    await this.control.query(`INSERT INTO member_turns(member_id,event_id,day) SELECT id,$2,${today} FROM members WHERE id=$1 ON CONFLICT DO NOTHING`,[member,event]);
+    const count=Number((await this.control.query(`SELECT count(*) FROM member_turns WHERE member_id=$1 AND day=${today}`,[member])).rows[0].count);
+    return count>members().dailyMessages;
   }
   /**
    * What a turn's message and its album parts hold for the model: their text in order (an album's caption usually sits
@@ -540,11 +562,14 @@ export class TelegramDispatchRepository {
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
     return {reference,input};
   }
-  private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation|'not_addressed'> {
+  private async build(source:SourceReference,attempt:number,others:string[]=[]):Promise<{reference:DerivativeReference;input:Input}|Observation|'not_addressed'|'member_daily_limit'> {
     const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[source.id])).rows[0];
     // A refusal is final, so a chat this process has not loaded yet (recorded a moment ago) is looked up again first.
     await settleTelegramChat({channel:'telegram',scope:String(original.scope)});
-    const payload=JSON.parse(original.payload.toString()),scope=conversationScope(this.access.policy(),payload,original.scope);
+    const payload=JSON.parse(original.payload.toString());
+    let scope=conversationScope(this.access.policy(),payload,original.scope);
+    // So is a member this process has not loaded yet (added or switched on a moment ago, step 3).
+    if(!scope){await freshMembers();scope=conversationScope(this.access.policy(),payload,original.scope);}
     if(!scope) {
       await this.refuse(source.id,original.source_key,original.scope,payload);
       // Someone's own message that Nocheh may not answer them, as opposed to an
@@ -589,6 +614,15 @@ export class TelegramDispatchRepository {
       // Until the bot knows its own name and @username, a mention of either cannot be recognized; skipping the message
       // for good on that guess would lose it, so the decision waits for the bot.
       if(!groupTurn(this.groupReplies,addressing,text,identity))return identity?'not_addressed':observation('waiting','admission',0,Date.now()+10000,'prerequisite');
+      // A member's addressed turn counts against their daily message cap; the owner's never does (step 3). Over it, they get
+      // the owner's fixed reply, at most once a UTC day per group, and no turn.
+      const member=scope.user_id===this.access.policy().owner_id?null:members().memberOf(telegramAccount(scope.user_id));
+      if(member&&await this.overDailyCap(member.id,source.id)) {
+        const message=payload.message,texts=await ownerPrompts(this.control);
+        try{await this.groupRefusal({event_id:source.id,chat_id:original.scope,message_id:String(message.message_id),user_id:scope.user_id},message,'daily_limit',
+          texts['telegram.member_daily_limit']??memberDailyLimitReply);}catch{/* Best effort: the message stays archived either way. */}
+        return 'member_daily_limit';
+      }
     }
     // Command authority comes from the original owner DM, never a guarded edit.
     const reply=refusal??await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
@@ -677,10 +711,10 @@ export class TelegramDispatchRepository {
           return this.observation(await this.row(id));
         }
         const attempt=row.attempts+1,built=await this.build(captured.reference,attempt,album?.state==='leader'?album.others:[]);
-        if(built==='not_addressed'||'state' in built) {
-          if(built==='not_addressed') {
-            await db.query(`UPDATE dispatches SET state='suppressed',error_code='not_addressed',revision=revision+1,updated_at=now()
-              WHERE event_id=$1 AND state IN ('pending','failed')`,[id]);
+        if(built==='not_addressed'||built==='member_daily_limit'||'state' in built) {
+          if(built==='not_addressed'||built==='member_daily_limit') {
+            await db.query(`UPDATE dispatches SET state='suppressed',error_code=$2,revision=revision+1,updated_at=now()
+              WHERE event_id=$1 AND state IN ('pending','failed')`,[id,built]);
             return this.observation(await this.row(id));
           }
           if(built.state==='skipped')await db.query("UPDATE dispatches SET state='suppressed',error_code=$2,updated_at=now() WHERE event_id=$1",

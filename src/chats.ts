@@ -46,7 +46,7 @@ export function chatIdFor(app:ChatApp,external:string|readonly string[],topic?:s
 }
 /** The id of an app's one connection (UNIQUE(app)); it holds no bot either, so a new bot keeps the connection. */
 export const connectionIdFor=(app:ChatApp):string=>{if(!isApp(app))throw new HttpError(400,'invalid_chat_app');return sha256(canonicalList(['connection',app]));};
-/** Account ids already hashed: a send check maps every allowed person of every served group to their account. */
+/** Account ids already hashed: a send check maps every member of every served group to their account. */
 const accounts=new Map<string,string>();
 /** The id of a person or bot account in an app: the Telegram user id, or a Slack user in its team. */
 export function accountIdFor(app:ChatApp,external:string,team=''):string {

@@ -109,6 +109,11 @@ test('three-store broker binds original and scheduled turns, isolates generation
     const answering=(path:string,status:number,error:string)=>{refuse=url=>new URL(url).pathname===path?Response.json({error},{status}):null;};
     answering('/v1/action-requests',403,'destination_not_served');
     assert.deepEqual(await relayed('/v1/action-requests',{destination:'b'.repeat(64),text:'Synthetic note'}),{status:403,body:{error:'destination_not_served'}});
+    // A member's own switches (ADR-0260): their post to another group, and their web page or outside tool request.
+    answering('/v1/action-requests',403,'member_post_not_allowed');
+    assert.deepEqual(await relayed('/v1/action-requests',{destination:'b'.repeat(64),text:'Synthetic note'}),{status:403,body:{error:'member_post_not_allowed'}});
+    answering('/v1/tools/propose',403,'tool_not_permitted');
+    assert.deepEqual(await relayed('/v1/tools/propose',{kind:'browser',input:{url:'https://fixture.example'}}),{status:403,body:{error:'tool_not_permitted'}});
     answering('/v1/owner/tasks',400,'task_reminder_limit');
     assert.deepEqual(await relayed('/v1/owner/tasks',{title:'Synthetic',reminders:['2030-01-04T09:00']}),{status:400,body:{error:'task_reminder_limit'}});
     answering('/v1/owner/tasks/'+'c'.repeat(64),400,'task_reminder_past');

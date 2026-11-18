@@ -1,155 +1,121 @@
-/** "Who can talk to Nocheh" in one group: you always, everyone else by choice. */
-import {useState} from 'react';
+/**
+ * "Members here" in one group: you always, then each member Telegram shows in this group, or whose switch here is on
+ * while Telegram never said they left, read-only. Every switch lives on the Members page, so each name links there;
+ * someone seen here who isn't a member has "Make member", which opens the add flow with them (step 3).
+ */
 import {UserPlus} from 'lucide-react';
-import {useResource} from '../../lib/resource';
-import {appIds, isAllowed, isOn, validUserId, type Chat, type IdentityGroup, type Person} from '../../lib/chats-model';
-import {Badge, Button, Card, CardBody, CardHeader, Field, Input, Segmented} from '../../ui/core';
-import {Unsaved, type Telegram} from './shared';
+import {refreshResources} from '../../lib/resource';
+import {href} from '../../lib/routes';
+import {isOn, type Chat} from '../../lib/chats-model';
+import {Badge, Button, Card, CardBody, CardHeader, LoadError, LoadingRows} from '../../ui/core';
+import {addMemberHref, memberHref, useKnownPeople, useMembers} from '../members/hooks';
+import {byName, inGroup, memberHere, personMeta, personName} from '../members/model';
+import type {Telegram} from './shared';
 
-export function WhoCanTalk({group: chat, telegram}: {group: Chat; telegram: Telegram}) {
+export function MembersHere({group: chat, telegram}: {group: Chat; telegram: Telegram}) {
+  const list = useMembers();
+  const known = useKnownPeople();
   const group = chat.space_id;
-  const identities = useResource<{groups: IdentityGroup[]}>('/telegram/identities', 60000);
-  const [manual, setManual] = useState('');
-  const [manualError, setManualError] = useState('');
   const on = isOn(chat);
-  const rule = telegram.rule(chat);
-  const savedRule = telegram.savedRule(chat);
   const owner = telegram.ownerAccount;
-
-  const known = new Map<string, Person>(
-    (identities.data?.groups ?? []).flatMap(item => item.users ?? []).map(user => [user.id, user]),
-  );
-  const name = (id: string) => known.get(id)?.name || known.get(id)?.username || 'Unknown person';
-  const meta = (id: string) => {
-    const person = known.get(id);
-    return [person?.username && person.username !== person.name ? person.username : null, 'ID ' + id]
-      .filter(Boolean)
-      .join(' · ');
-  };
-  const people = [
-    ...new Set<string>([
-      // People this group's messages show, under its Nocheh id or any Telegram id it has had: someone whose only record is
-      // that they left, or a member update, is not listed unless a rule names them.
-      ...(identities.data?.groups ?? [])
-        .filter(item => item.id === group || appIds(chat).includes(item.id))
-        .flatMap(item => item.users ?? [])
-        .filter(user => user.seen !== false)
-        .map(user => user.id),
-      ...rule.granted,
-      ...rule.denied,
-      ...savedRule.granted,
-      ...savedRule.denied,
-    ]),
-  ]
-    .filter(id => id !== owner)
-    .sort((a, b) => name(a).localeCompare(name(b)) || a.localeCompare(b));
-  const allowedCount = people.filter(id => isAllowed(rule, id)).length;
-
-  const add = () => {
-    const id = manual.trim();
-    if (!validUserId(id)) return setManualError('A Telegram user ID is a number, like 123456789.');
-    if (id === owner) return setManualError('That’s you. You can always talk to Nocheh.');
-    telegram.setPerson(chat, id, true);
-    setManual('');
-    setManualError('');
-  };
+  const here = inGroup(list.data, group);
+  const members = here.members.sort(byName(known));
+  const people = here.people.sort(byName(known));
+  const talking = members.filter(member => memberHere(member, group)?.label === 'Can talk here').length;
 
   return (
     <Card>
       <CardHeader
-        title="Who can talk to Nocheh"
+        title="Members here"
         description={
           on
-            ? allowedCount
-              ? `You and ${allowedCount} ${allowedCount === 1 ? 'other person' : 'others'}.`
-              : 'Only you, so far.'
-            : undefined
+            ? talking
+              ? `You and ${talking} ${talking === 1 ? 'member' : 'members'} can talk to Nocheh here.`
+              : 'Only you can talk to Nocheh here, so far.'
+            : 'Nocheh is off in this group, so nobody talks to it here until you turn it on.'
+        }
+        action={
+          <a href={href('members')} className="text-[13px] font-medium text-accent-text hover:underline">
+            Members page
+          </a>
         }
       />
       <CardBody className="pt-3">
-        {!on ? (
-          <p className="text-sm text-muted">Turn Nocheh on in this group to choose who may talk to it.</p>
+        {list.error && !list.data ? (
+          <LoadError what="members" onRetry={() => void refreshResources()} />
+        ) : !list.data ? (
+          <LoadingRows rows={2} />
         ) : (
           <>
-            <ul className="divide-y divide-line rounded-lg border border-line">
-              {owner && (
-                <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium" dir="auto">
-                      {known.get(owner)?.name || 'You'}
-                    </p>
-                    <p className="text-xs text-muted">{meta(owner)}</p>
-                  </div>
-                  <Badge tone="good">You · always allowed</Badge>
-                </li>
-              )}
-              {people.map(id => {
-                const allowed = isAllowed(rule, id);
+            <ul aria-label="Members here" className="divide-y divide-line rounded-lg border border-line">
+              <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium" dir="auto">
+                    {(owner && known.get(owner)?.name) || 'You'}
+                  </p>
+                  {owner && <p className="text-xs text-muted">ID {owner}</p>}
+                </div>
+                <Badge tone="good">You · always</Badge>
+              </li>
+              {members.map(member => {
+                const status = memberHere(member, group)!;
+                const meta = personMeta(member, known);
                 return (
-                  <li key={id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+                  <li key={member.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-medium" dir="auto">
-                          {name(id)}
-                        </p>
-                        <Unsaved show={allowed !== isAllowed(savedRule, id)} />
-                      </div>
-                      <p className="text-xs text-muted">{meta(id)}</p>
+                      <a
+                        href={memberHref(member.id)}
+                        className="block truncate text-sm font-medium text-accent-text hover:underline"
+                        dir="auto"
+                      >
+                        {personName(member, known)}
+                      </a>
+                      {meta && <p className="text-xs text-muted">{meta}</p>}
                     </div>
-                    <Segmented
-                      size="sm"
-                      label={'Can ' + name(id) + ' talk to Nocheh'}
-                      value={allowed ? 'yes' : 'no'}
-                      disabled={!telegram.loaded || telegram.busy}
-                      options={[
-                        {value: 'no', label: 'Not allowed'},
-                        {value: 'yes', label: 'Allowed'},
-                      ]}
-                      onChange={value => telegram.setPerson(chat, id, value === 'yes')}
-                    />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {status.group.new && <Badge tone="info">New here</Badge>}
+                      <Badge tone={status.tone}>{status.label}</Badge>
+                    </div>
                   </li>
                 );
               })}
             </ul>
-            {!people.length && (
-              <p className="mt-3 text-[13px] text-muted">
-                Nobody else is known here yet. People appear once Nocheh sees them write in this group.
+            {!members.length && <p className="mt-3 text-[13px] text-muted">No members here yet.</p>}
+            {people.length > 0 && (
+              <>
+                <h3 className="mt-5 text-[13px] font-medium">Seen here, not members</h3>
+                <ul
+                  aria-label="Seen here, not members"
+                  className="mt-2 divide-y divide-line rounded-lg border border-line"
+                >
+                  {people.map(person => {
+                    const name = personName(person, known);
+                    const meta = personMeta(person, known);
+                    return (
+                      <li key={person.account_id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium" dir="auto">
+                            {name}
+                          </p>
+                          {meta && <p className="text-xs text-muted">{meta}</p>}
+                        </div>
+                        <Button asChild size="sm">
+                          <a href={addMemberHref(person.account_id)} aria-label={'Make ' + name + ' a member'}>
+                            <UserPlus aria-hidden /> Make member
+                          </a>
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
+            {!people.length && !members.length && (
+              <p className="mt-1 text-[13px] text-muted">
+                People show here once Nocheh sees them write in this group. You can also add a member by their Telegram
+                user ID on the Members page.
               </p>
             )}
-            {identities.error && (
-              <p className="mt-3 text-[13px] text-muted">
-                Names of people in this group couldn’t be loaded. You can still add someone by user ID.
-              </p>
-            )}
-            <form
-              className="mt-4 flex flex-wrap items-end gap-2"
-              onSubmit={event => {
-                event.preventDefault();
-                add();
-              }}
-            >
-              <Field
-                label="Allow someone by Telegram user ID"
-                htmlFor={'allow-' + group}
-                error={manualError}
-                className="min-w-0 flex-1 basis-56"
-              >
-                <Input
-                  id={'allow-' + group}
-                  inputMode="numeric"
-                  value={manual}
-                  placeholder="e.g. 123456789"
-                  disabled={!telegram.loaded || telegram.busy}
-                  onChange={event => {
-                    setManual(event.target.value);
-                    setManualError('');
-                  }}
-                />
-              </Field>
-              <Button type="submit" disabled={!manual.trim() || !telegram.loaded || telegram.busy}>
-                <UserPlus aria-hidden /> Allow
-              </Button>
-            </form>
           </>
         )}
       </CardBody>

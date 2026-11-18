@@ -70,7 +70,6 @@ export type MemberSpend = {
 type Limits = {
   cost_limit_usd: number;
   minutes_limit: number;
-  member_daily_jobs: number;
   member_notice_usd: number;
   member_pause_usd: number;
   box_tools: boolean;
@@ -369,14 +368,6 @@ const fields: {
     step: 5,
   },
   {
-    key: 'member_daily_jobs',
-    title: 'Jobs a member may start each day',
-    hint: 'In each group. You have no daily limit.',
-    min: 0,
-    max: 100,
-    step: 1,
-  },
-  {
     key: 'member_notice_usd',
     title: 'Member jobs: notice at (US dollars a day)',
     hint: 'When jobs members approved themselves spend this much in a UTC day, you get one Telegram notice with a Pause button. Nothing changes unless you tap it.',
@@ -425,7 +416,6 @@ export function BackgroundJobLimits() {
       const body = {
         cost_limit_usd: Number(value('cost_limit_usd')),
         minutes_limit: Number(value('minutes_limit')),
-        member_daily_jobs: Number(value('member_daily_jobs')),
         member_notice_usd: Number(value('member_notice_usd')),
         member_pause_usd: Number(value('member_pause_usd')),
         box_tools: box,

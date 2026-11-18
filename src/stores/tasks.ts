@@ -227,9 +227,10 @@ const busy=(group:string)=>`SELECT 1 FROM owner_task_reminder_batches b WHERE b.
   OR b.state IN ('sent','uncertain') AND coalesce(b.sent_at,b.created_at)>now()-interval '10 minutes')`;
 /** What a reminder can tell a person about the owner's reminders it kept (ADR-0255), model-facing. */
 const OWNER_KEPT='The owner\'s reminders stay; only the owner can remove them.';
-/** Delivery for reminders: the runtime, the owner's private chat, the assistant policy (who is allowed now) and a
- * record for System › Health of a reminder Telegram refused or never confirmed. */
-type Delivery={call:RuntimeCall;owner:()=>string|null|undefined;policy?:()=>Pick<AssistantPolicy,'group_access'>;
+/** Delivery for reminders: the runtime, the owner's private chat, the assistant policy (with it, reminder labels read
+ * who is a member now from the member directory) and a record for System › Health of a reminder Telegram refused or
+ * never confirmed. */
+type Delivery={call:RuntimeCall;owner:()=>string|null|undefined;policy?:()=>Pick<AssistantPolicy,'owner_id'>;
   record?:(send:{kind:'notice';chat:string|null;state:'failed'|'uncertain';status:number;error_code:'reminder_refused'|'reminder_unconfirmed';reference:string})=>Promise<void>};
 /** `card`: asked in the owner's private chat, so a change a project's chats would see waits for the owner's card.
  * `approved`: the card the owner approved; its change lands only in the list, and before the chats, the card named,
@@ -1389,8 +1390,8 @@ export class TaskRepository {
     }
     return found;
   }
-  /** What reminder labels read (ADR-0255): the directory, who is allowed now, and these people and every allowed person
-   * as Telegram last showed them. */
+  /** What reminder labels read (ADR-0255): the directory, the members who reach a served group now (step 3), and these
+   * people and every such member as Telegram last showed them. */
   private names(db:Pick<pg.Pool,'query'>,chats:ChatDirectory,people:Iterable<{account:string|null}>):Promise<Names> {
     return peopleNames(db,chats,this.delivery?.policy?.(),people);
   }

@@ -7,10 +7,11 @@ import type {StorageServices} from './services.js';
 import {portableDerivativeTypes} from './derivative-portability.js';
 import {portableOwnerTables} from './owner-portability.js';
 import {taskQuery} from './tasks.js';
+import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from './member-api.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
 const exact=(body:unknown,keys:string[])=>{const value=object(body);if(Object.keys(value).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_operation_field');return value;};
-export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:private-answers|owner-autonomy|notion|chat-tools|background-jobs(?:\/settings|\/member-pause|\/[a-f0-9]{64}\/stop)?|machines(?:\/(?:settings|commands)|\/[a-f0-9]{32}(?:\/(?:test|forget-host-key|remove))?)?|tasks(?:\/(?:settings|archive-finished)|\/[a-f0-9]{64}(?:\/(?:comments|delete|audience))?)?|prompts|chat-sends|chats\/state|telegram\/chats\/refresh|telegram\/topics|conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/(?:correct|history|audience)|\/[a-f0-9]{64}(?:\/(?:decide|fold|split|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
+export const ownerStoragePath=(path:string):boolean=>/^\/v1\/(?:private-answers|owner-autonomy|notion|chat-tools|background-jobs(?:\/settings|\/member-pause|\/[a-f0-9]{64}\/stop)?|machines(?:\/(?:settings|commands)|\/[a-f0-9]{32}(?:\/(?:test|forget-host-key|remove))?)?|tasks(?:\/(?:settings|archive-finished)|\/[a-f0-9]{64}(?:\/(?:comments|delete|audience))?)?|prompts|chat-sends|chats\/state|members(?:\/settings|\/[a-f0-9]{64}(?:\/remove)?)?|telegram\/chats\/refresh|telegram\/topics|conversations(?:\/context)?|decisions(?:\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64})?|organization\/delegations|knowledge\/proposals(?:\/[a-f0-9]{64}(?:\/(?:decide|undo))?)?|memory-map|memory-access\/(?:settings|requests(?:\/[a-f0-9]{64}\/decide)?|grants(?:\/[a-f0-9]{64}\/revoke)?)|entities(?:\/suggestions|\/claims\/[a-f0-9]{64}\/(?:correct|history|audience)|\/[a-f0-9]{64}(?:\/(?:decide|fold|split|merge|unmerge|rename|correct))?)?|projects(?:\/assignments|\/effective|\/[a-f0-9]{64}\/context)?|sharing\/(?:rules|preview|previews(?:\/[a-f0-9]{64}(?:\/approve)?)?|releases(?:\/[a-f0-9]{64}\/revoke)?)|learned(?:\/[a-f0-9]{64}(?:\/history|\/correct)?)?|sources\/[a-f0-9]{64}\/(?:derivatives|reprocess|prepare|learning-consent|retirement)|derivatives\/[a-f0-9]{64}(?:\/activate)?|derivation-engines|reprocessing\/[a-f0-9]{64}|guards\/(?:events|artifacts|derived_artifacts)\/[a-f0-9]{64}(?:\/history|\/revisions\/\d+)?|memory\/provenance)$/.test(path);
 
 export class OwnerStorageApi {
   constructor(readonly services:StorageServices){}
@@ -26,6 +27,14 @@ export class OwnerStorageApi {
     if(path==='/v1/telegram/chats/refresh'){if(method!=='POST')throw new HttpError(405,'method_not_allowed');return s.telegramChats.refresh(principal);}
     // The owner's switch for a group (ADR-0253): on or off at once, with its project when turned on.
     if(path==='/v1/chats/state'){if(method!=='POST')throw new HttpError(405,'method_not_allowed');return s.chats.setState(principal,input);}
+    // Members (step 3): the list, add, change, remove and the daily cap, each saved at once with no new guard epoch.
+    if(path==='/v1/members')return method==='GET'?s.members.list(principal):s.members.add(principal,memberAddRequest(input));
+    if(path==='/v1/members/settings'){if(method!=='POST')throw new HttpError(405,'method_not_allowed');return s.members.settings(principal,memberSettingsRequest(input));}
+    const member=path.match(/^\/v1\/members\/([a-f0-9]{64})(?:\/(remove))?$/);
+    if(member){
+      if(method!=='POST')throw new HttpError(405,'method_not_allowed');
+      return member[2]?s.members.remove(principal,member[1]!,memberRemoveRequest(input)):s.members.change(principal,member[1]!,memberChangeRequest(input));
+    }
     if(path==='/v1/owner-autonomy')return method==='GET'?s.ownerAutonomy.get(principal):s.ownerAutonomy.save(principal,input);
     if(path==='/v1/notion')return method==='GET'?s.notion.get(principal):s.notion.save(principal,input);
     if(path==='/v1/chat-tools')return method==='GET'?s.chatTools.get(principal,q.get('space')??'*'):s.chatTools.save(principal,input);

@@ -1,0 +1,278 @@
+/**
+ * One member: their permissions, their groups, and Pause or Remove. Each switch posts at once with an operation ID, so a
+ * retry is never applied twice, then shows a toast; there is no Save bar.
+ */
+import {ArrowLeft, UserMinus} from 'lucide-react';
+import type {MemberChanges, MemberItem, MemberPermission, MemberRemoved, MemberResult} from '../../../src/member-wire';
+import {chatStateLabels, type Person} from '../../lib/chats-model';
+import {setParams} from '../../lib/routes';
+import {cn} from '../../lib/utils';
+import {Badge, Button, Card, CardHeader, Notice, Segmented, Switch} from '../../ui/core';
+import {useFeedback} from '../../ui/overlay';
+import {ActionError, chatHref, useAction} from '../chats/shared';
+import {memberError, personMeta, personName, presenceLabel, type MemberAnswer} from './model';
+
+/** The three things talking to Nocheh lets a member do, under it, in the owner's words. */
+const permissions: {key: MemberPermission; title: string; hint: string}[] = [
+  {
+    key: 'jobs',
+    title: 'Small jobs (no daily limit)',
+    hint: 'Long work they approve themselves, within your job limits. A job over your cost limit still asks you.',
+  },
+  {
+    key: 'post',
+    title: 'Post to their other groups',
+    hint: 'They confirm each post with a card. A group Telegram hasn’t shown them in goes to your card instead.',
+  },
+  {
+    key: 'tools',
+    title: 'Web pages and outside tools (no approval)',
+    hint: 'Opens web pages and uses connected tools without asking you. Commands still ask you, Notion is never used in a group, and each chat’s tool switches still apply.',
+  },
+];
+
+export function MemberDetail({
+  member,
+  known,
+  onSaved,
+}: {
+  member: MemberItem;
+  known: ReadonlyMap<string, Person>;
+  /** Shows what a change answered at once, until the list reloads with it. */
+  onSaved: (answer: MemberAnswer) => void;
+}) {
+  const action = useAction(memberError);
+  const {confirm} = useFeedback();
+  const name = personName(member, known);
+  const meta = personMeta(member, known);
+  const allowed = member.permissions;
+  const paused = member.state === 'paused';
+  const busy = !!action.busy;
+  const change = async (key: string, changes: MemberChanges, success: string) => {
+    const answer = await action.run<MemberResult>(key, '/members/' + member.id, {changes}, {success});
+    if (answer?.member) onSaved(answer);
+  };
+  const remove = async () => {
+    if (
+      !(await confirm({
+        title: `Remove ${name} as a member?`,
+        body: 'They can’t talk to Nocheh in any of your groups any more, and their switches are deleted. Their tasks and reminders stay. You can add them again later.',
+        confirm: 'Remove',
+        danger: true,
+      }))
+    )
+      return;
+    const removed = await action.run<MemberRemoved>(
+      'remove',
+      '/members/' + member.id + '/remove',
+      {},
+      {success: `${name} is no longer a member.`},
+    );
+    if (!removed) return;
+    if (removed.removed) onSaved(removed);
+    setParams({member: null});
+  };
+  const added = new Date(member.added_at);
+
+  return (
+    <div className="space-y-4">
+      <Button variant="ghost" size="sm" className="-ml-2 lg:hidden" onClick={() => setParams({member: null})}>
+        <ArrowLeft aria-hidden /> All members
+      </Button>
+      <header className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="truncate text-lg font-semibold" dir="auto">
+            {name}
+          </h2>
+          {paused ? <Badge tone="warn">Paused</Badge> : <Badge tone="good">Active</Badge>}
+        </div>
+        <p className="mt-0.5 text-[13px] text-muted">
+          {[
+            meta,
+            Number.isNaN(added.getTime())
+              ? null
+              : 'Member since ' + added.toLocaleDateString(undefined, {dateStyle: 'medium'}),
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+      </header>
+      {member.owner_linked && (
+        <Notice tone="warn" title="This is your own Telegram account">
+          You can always talk to Nocheh, so none of these switches apply to you. Remove this member to tidy up.
+        </Notice>
+      )}
+      {paused && (
+        <Notice tone="warn" title="Paused">
+          They can’t talk to Nocheh in any group, and their jobs, posts and tool runs stop. Their switches are kept for
+          when you resume them.
+        </Notice>
+      )}
+      <Card>
+        <CardHeader title="What they can do" description="In every group that is on for them below." />
+        <div className="mt-3 border-t border-line">
+          <Row
+            id="member-talk"
+            title="Talk to Nocheh in groups they joined"
+            hint="Off, nothing below works either. Each switch keeps its own setting for when talk is back on."
+            checked={allowed.talk}
+            disabled={busy}
+            onChange={on =>
+              void change(
+                'talk',
+                {talk: on},
+                on ? `${name} can talk to Nocheh again.` : `${name} can’t talk to Nocheh now.`,
+              )
+            }
+          />
+          {permissions.map(({key, title, hint}) => (
+            <Row
+              key={key}
+              id={'member-' + key}
+              title={title}
+              hint={hint}
+              nested
+              checked={allowed[key]}
+              disabled={busy || !allowed.talk}
+              onChange={on => void change(key, {[key]: on}, `${title.replace(/ \(.*\)$/, '')}: ${on ? 'on' : 'off'}.`)}
+            />
+          ))}
+          <div className="flex flex-col gap-2 border-t border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Tasks</p>
+              <p className="text-[13px] text-muted">The tasks of the groups they talk in, and their reminders.</p>
+            </div>
+            <Segmented
+              label="Tasks"
+              value={allowed.tasks}
+              disabled={busy}
+              options={[
+                {value: 'write', label: 'Read and write'},
+                {value: 'read', label: 'Read only'},
+              ]}
+              onChange={tasks =>
+                void change(
+                  'tasks',
+                  {tasks},
+                  tasks === 'read' ? `${name} can only read tasks now.` : `${name} can read and change tasks.`,
+                )
+              }
+            />
+          </div>
+        </div>
+      </Card>
+      <Card>
+        <CardHeader
+          title="Groups"
+          description="Where they may talk to Nocheh. A group they join later is on until you switch it off. Their first message in a group is enough to talk there; posts into it from another group and their jobs there wait until Telegram has shown them in it."
+        />
+        {member.groups.length ? (
+          <ul className="mt-3 divide-y divide-line border-t border-line">
+            {member.groups.map(group => {
+              const [presence, tone] = presenceLabel(group.telegram);
+              const title = group.title?.trim() || 'Unnamed group';
+              return (
+                <li key={group.chat_id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
+                  <div className="min-w-0 flex-1">
+                    <a
+                      href={chatHref(group.chat_id)}
+                      className="block truncate text-sm font-medium hover:underline"
+                      dir="auto"
+                    >
+                      {title}
+                    </a>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge tone={tone}>{presence}</Badge>
+                      {group.new && <Badge tone="info">New here</Badge>}
+                      {group.state !== 'active' && (
+                        <span className="text-xs text-muted">Nocheh here: {chatStateLabels[group.state]}</span>
+                      )}
+                    </div>
+                  </div>
+                  <Switch
+                    checked={group.on}
+                    disabled={busy}
+                    label={`${name} in ${title}`}
+                    onChange={on =>
+                      void change(
+                        'group:' + group.chat_id,
+                        {groups: {[group.chat_id]: on}},
+                        on ? `${name} can talk in ${title}.` : `${name} is off in ${title}.`,
+                      )
+                    }
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="px-5 py-4 text-sm text-muted">No groups yet. They show once Telegram shows them in a group.</p>
+        )}
+      </Card>
+      <Card>
+        <CardHeader title="Pause or remove" />
+        <div className="mt-3 border-t border-line">
+          <Row
+            id="member-pause"
+            title="Pause this member"
+            hint="Stops everything they do, in every group: talk, jobs, posts and tool runs. Their switches are kept."
+            checked={paused}
+            disabled={busy}
+            onChange={on =>
+              void change(
+                'state',
+                {state: on ? 'paused' : 'active'},
+                on ? `${name} is paused.` : `${name} is active again.`,
+              )
+            }
+          />
+          <div className="flex flex-col gap-2 border-t border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Remove this member</p>
+              <p className="text-[13px] text-muted">Deletes them and their switches. Their tasks and reminders stay.</p>
+            </div>
+            <Button variant="danger" busy={action.busy === 'remove'} disabled={busy} onClick={() => void remove()}>
+              <UserMinus aria-hidden /> Remove
+            </Button>
+          </div>
+        </div>
+      </Card>
+      <ActionError text={action.error} />
+    </div>
+  );
+}
+
+function Row({
+  id,
+  title,
+  hint,
+  checked,
+  disabled,
+  nested,
+  onChange,
+}: {
+  id: string;
+  title: string;
+  hint: string;
+  checked: boolean;
+  disabled: boolean;
+  nested?: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-center justify-between gap-4 border-t border-line py-3 pr-5 first:border-t-0',
+        nested ? 'pl-10' : 'pl-5',
+      )}
+    >
+      <div className="min-w-0">
+        <label htmlFor={id} className="text-sm font-medium">
+          {title}
+        </label>
+        <p className="text-[13px] text-muted">{hint}</p>
+      </div>
+      <Switch id={id} label={title} checked={checked} disabled={disabled} onChange={onChange} />
+    </div>
+  );
+}
