@@ -11,11 +11,12 @@ import type {groupToolsTextLabels} from './member-wire.js';
  * learning text it sends to long-term memory. Only replacements are stored, so a text the
  * owner never changed follows the code's default.
  */
-export const promptKeys=['reply.common','reply.owner','reply.group','reply.private','memory.limited','memory.evidence','memory.notes_review','memory.source_texts',
+export const promptKeys=['reply.common','reply.owner','reply.group','reply.private','reply.member','memory.limited','memory.evidence','memory.notes_review','memory.source_texts',
   'guard.secret_check','sharing.group_filter','learning.interpret','telegram.not_allowed','telegram.not_allowed_private','telegram.approval_card','telegram.approval_action',
   'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','tasks.reminder_texts','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
-  'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds','telegram.member_daily_limit','telegram.group_tools_texts'] as const;
+  'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds','telegram.member_daily_limit','telegram.group_tools_texts',
+  'telegram.member_private_daily_limit','members.local_laws'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -26,11 +27,18 @@ export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.i
 /** Sent in a group, without a model and at most once a UTC day per person and group, to someone who addressed Nocheh but
  * may not use it there: a stranger, or a member who is paused or switched off there (step 3). */
 export const notAllowedReply='Sorry, in this group I only work with the owner and the owner\'s members.';
-/** Sent, without a model and at most once a day, to anyone but the owner who writes to Nocheh privately. */
-export const notAllowedPrivateReply='Sorry, this is a private assistant. It only works for its owner.';
+/** Sent, without a model and at most once a day, to anyone who writes to Nocheh privately and may not use it there: a
+ * stranger, or a member who is paused or has private chat off (step 4). */
+export const notAllowedPrivateReply='Sorry, this is a private assistant. It only works for its owner and the people they add.';
 /** Sent in a group, without a model and at most once a UTC day per group, to a member who addressed Nocheh after using up
  * the daily message cap the owner set on the Members page (step 3). */
 export const memberDailyLimitReply='Sorry, you have reached today\'s limit of messages to me. You can ask again tomorrow.';
+/** Sent in a member's own private chat, without a model and at most once a UTC day, when they write after using up the
+ * daily message cap, which counts their group and private turns together (step 4). */
+export const memberPrivateDailyLimitReply='Sorry, you have reached today\'s limit of messages to me, in your groups and here together. You can write again tomorrow.';
+/** The owner-only line on the Members page (step 4): reading the members' private chats with Nocheh may be limited where
+ * the owner lives. Shown to the owner only, never sent. */
+export const membersLocalLaws='Before you read your members\' private chats with Nocheh, check what your local laws allow.';
 /** What the model is told when a group's permission for web pages and outside tools lets a tool call run without a card
  * (step 3): with its answer to follow as a reply (allowed_follow_up), or without (allowed). One "name: text" line each. */
 export const groupToolsTexts=['allowed_follow_up: Allowed by this group\'s permission for web pages and outside tools; it runs now. Its answer will follow here as a reply; do not wait for it, say only that it is running.',
@@ -391,7 +399,8 @@ const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learni
   'background.job':backgroundJob,'background.resume':backgroundResume,'background.restart':backgroundRestart,'background.limit':backgroundLimit,'background.card':backgroundCard,'background.texts':backgroundTexts,
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine,
   'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts,
-  'telegram.chat_adds':chatAddTexts,'telegram.member_daily_limit':memberDailyLimitReply,'telegram.group_tools_texts':groupToolsTexts};
+  'telegram.chat_adds':chatAddTexts,'telegram.member_daily_limit':memberDailyLimitReply,'telegram.group_tools_texts':groupToolsTexts,
+  'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'members.local_laws':membersLocalLaws};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

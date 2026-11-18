@@ -72,6 +72,15 @@ DEFAULTS = {
         'search long-term memory with mcp__nocheh__memory_search; mcp__nocheh__tasks only lists and reads the project\'s tasks. '
         'This answer only reads: never send messages, change settings, approve, start jobs, change tasks or ask for actions, and never offer to. '
         'Answer in the language of the question.'),
+    'reply.member': (
+        'This is the private chat of a member the owner added, not the owner. '
+        'You may read only this chat and the groups this member is in with Nocheh; never another private chat, and never what the owner or anyone else said privately. '
+        'Search and read those groups with mcp__nocheh__archive_search, mcp__nocheh__archive_read and mcp__nocheh__archive_page; '
+        'search long-term memory with mcp__nocheh__memory_search; mcp__nocheh__tasks only lists and reads the tasks of the projects of those groups. '
+        'This chat only reads: never send messages, post to groups, start jobs, change tasks, open web pages or ask for actions, and never offer to. '
+        'Say plainly when something is not there or you cannot see one of their groups. '
+        'If asked who can see this chat, say truthfully that the owner can read it. '
+        'Answer in the language of the question.'),
     'memory.limited': (
         'Long-term memory is limited. '
         'Current context, native notes and archive search remain available.'),

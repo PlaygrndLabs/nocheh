@@ -28,7 +28,7 @@ CHAT_IDS = [{'app': 'telegram', 'external_id': '-1001', 'chat_id': '-1001', 'sta
 # A member (step 3) with one account, a switch on in one group and off in another, and the daily message cap.
 MEMBER = 'c' * 64
 MEMBERS = {'members': [{'id': MEMBER, 'state': 'active', 'group_talk': True, 'group_jobs': True, 'group_post_other': False,
-                        'group_tools': True, 'tasks': 'read'}],
+                        'group_tools': True, 'tasks': 'read', 'private_chat': False}],
            'member_accounts': [{'member_id': MEMBER, 'app': 'telegram', 'external_id': '701'}],
            'member_chats': [{'member_id': MEMBER, 'chat_id': '-1001', 'enabled': True}, {'member_id': MEMBER, 'chat_id': 'e' * 64, 'enabled': False}],
            'daily_messages': [{'daily_messages': 200}]}
@@ -224,14 +224,14 @@ class ResetConfigurationTests(unittest.TestCase):
         self.assertEqual({name: result['configuration'][name] for name in MEMBERS}, MEMBERS)
         self.assertEqual(configuration.validate(copy.deepcopy(result)), result, 'what is frozen validates again unchanged')
         sql = query.call_args.args[1]
-        self.assertIn('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks FROM members', sql)
+        self.assertIn('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat FROM members', sql)
         self.assertIn('SELECT a.member_id,n.app,a.external_id FROM chat_accounts a JOIN chat_connections n ON n.id=a.connection_id '
                       'WHERE a.member_id IS NOT NULL', sql)
         self.assertIn('SELECT member_id,chat_id,enabled FROM member_chats', sql)
         self.assertIn('SELECT daily_messages FROM member_directory_state WHERE singleton', sql)
         for content in ('display_name', 'username', 'member_turns'):self.assertNotIn(content, sql)
         for broken in ('private', 'topic', 'unknown_chat', 'stranger_switch', 'stranger_account', 'duplicate', 'no_cap', 'two_caps',
-                       'cap_low', 'cap_high', 'cap_text', 'enabled_text', 'name'):
+                       'cap_low', 'cap_high', 'cap_text', 'enabled_text', 'private_chat_text', 'name'):
             values = copy.deepcopy(self.values)
             if broken == 'private': values['member_chats'][0]['chat_id'] = '123'
             if broken == 'topic': values['member_chats'][0]['chat_id'] = '-1001/topic/7'
@@ -245,6 +245,7 @@ class ResetConfigurationTests(unittest.TestCase):
             if broken == 'cap_high': values['daily_messages'] = [{'daily_messages': 10001}]
             if broken == 'cap_text': values['daily_messages'] = [{'daily_messages': '200'}]
             if broken == 'enabled_text': values['member_chats'][0]['enabled'] = 'true'
+            if broken == 'private_chat_text': values['members'][0]['private_chat'] = 'false'
             if broken == 'name': values['member_accounts'][0]['display_name'] = 'Mira'
             with self.subTest(broken=broken), self.assertRaisesRegex(ValueError, 'fields_invalid' if broken == 'name' else 'members_invalid'):
                 configuration.snapshot(lambda *_: json.dumps(values), 'original-only-v1')

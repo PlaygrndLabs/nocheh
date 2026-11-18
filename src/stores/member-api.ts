@@ -21,7 +21,7 @@ import {DAILY_MESSAGES_MAX,DAILY_MESSAGES_MIN,memberStates,memberTaskModes,type 
  *   user ID: the account is made with ensureAccount when missing (the same refusals for the owner, a known bot or a
  *   proxy id), and its groups may be any group Nocheh is in. A group that is no group Nocheh is in is 400
  *   member_group_invalid; an account already linked to a member is 409 member_exists.
- * - change: POST /v1/members/:id (404 member_not_found). A group set to false writes or switches a row for any group
+ * - change: POST /v1/members/:id (404 member_not_found). private_chat switches "Private chat with Nocheh" (step 4). A group set to false writes or switches a row for any group
  *   Nocheh is in; set to true it switches an existing row, or makes one only where the member's newest Telegram row says
  *   'in' (409 member_group_not_seen).
  * - remove: POST /v1/members/:id/remove (404 member_not_found).
@@ -61,13 +61,14 @@ export function memberAddRequest(input:unknown):MemberAddRequest {
 /** POST /v1/members/:id: at least one change. */
 export function memberChangeRequest(input:unknown):MemberChangeRequest {
   const body=exact(input,['operation_id','changes']),raw=object(body.changes),changes:MemberChanges={};
-  if(Object.keys(raw).some(key=>!['state','talk','jobs','post','tools','tasks','groups'].includes(key)))throw new HttpError(400,'unknown_member_field');
+  if(Object.keys(raw).some(key=>!['state','talk','jobs','post','tools','tasks','private_chat','groups'].includes(key)))throw new HttpError(400,'unknown_member_field');
   if(raw.state!==undefined){if(!(memberStates as readonly unknown[]).includes(raw.state))throw new HttpError(400,'invalid_member_request');changes.state=raw.state as MemberChanges['state'] & string;}
   if(raw.talk!==undefined)changes.talk=flag(raw.talk);
   if(raw.jobs!==undefined)changes.jobs=flag(raw.jobs);
   if(raw.post!==undefined)changes.post=flag(raw.post);
   if(raw.tools!==undefined)changes.tools=flag(raw.tools);
   if(raw.tasks!==undefined){if(!(memberTaskModes as readonly unknown[]).includes(raw.tasks))throw new HttpError(400,'invalid_member_request');changes.tasks=raw.tasks as MemberChanges['tasks'] & string;}
+  if(raw.private_chat!==undefined)changes.private_chat=flag(raw.private_chat);
   if(raw.groups!==undefined)changes.groups=groupSwitches(raw.groups);
   if(!Object.keys(changes).length||changes.groups&&!Object.keys(changes.groups).length&&Object.keys(changes).length===1)throw new HttpError(400,'member_change_empty');
   return {operation_id:operation(body.operation_id),changes};

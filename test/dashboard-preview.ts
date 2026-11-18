@@ -85,11 +85,11 @@ const seenPeople:{telegram:string;name:string|null;username:string|null;presence
 const previewMember=(telegram:string,name:string|null,username:string|null,switches:[string,boolean][],presence:[string,'in'|'left'][],
  changes:Partial<Pick<PreviewMember,'state'|'permissions'|'added_at'>>={}):PreviewMember=>{const account=accountIdFor('telegram',telegram);
  return {id:memberIdFor(account),account,telegram,name,username,state:'active',added_at:'2026-11-10T09:00:00.000Z',
-  permissions:{talk:true,jobs:true,post:true,tools:true,tasks:'write'},switches:new Map(switches),presence:new Map(presence),...changes};};
+  permissions:{talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true},switches:new Map(switches),presence:new Map(presence),...changes};};
 const previewMembers:PreviewMember[]=[
  previewMember('73','Mira Chen','mira',[['-10042',true],['-10073',false]],[['-10042','in'],['-10073','in'],[UPGRADED,'in']]),
  previewMember('95',null,null,[['-10042',true]],[]),
- previewMember('84','Devon',null,[['-10073',true]],[['-10073','in']],{state:'paused',permissions:{talk:true,jobs:false,post:true,tools:true,tasks:'read'}}),
+ previewMember('84','Devon',null,[['-10073',true]],[['-10073','in']],{state:'paused',permissions:{talk:true,jobs:false,post:true,tools:true,tasks:'read',private_chat:true}}),
 ];
 let memberRevision=3,dailyMessages=200;
 const memberReceipts=new Map<string,{request:string;result:unknown}>();

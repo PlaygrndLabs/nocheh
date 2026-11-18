@@ -282,7 +282,7 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
         wait('unselected_private_not_allowed',lambda:query('nocheh_control',"SELECT count(*) FROM dispatches WHERE event_id='"+denied_id+"' AND state='suppressed' AND error_code='not_allowed' AND attempts=0")=='1')
         # Someone else writing privately gets only the owner's fixed text, without a turn.
         before=http('/fixture/telegram');new=before['sent'][sent_before:]
-        assert len(new)==1 and new[0]['message']['chat']['id']==456 and new[0]['message']['text']=='Sorry, this is a private assistant. It only works for its owner.',new
+        assert len(new)==1 and new[0]['message']['chat']['id']==456 and new[0]['message']['text']=='Sorry, this is a private assistant. It only works for its owner and the people they add.',new
         sent_before=len(before['sent'])
         assert before['unknown']==prior_unknown,before['unknown'][len(prior_unknown):]
         assert any('message_reaction' in row['parameters'].get('allowed_updates',[]) for row in before['calls'] if row['method']=='getUpdates')

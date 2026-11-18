@@ -46,7 +46,7 @@ TEAM_TOPIC, TEAM_NAME = 31, 'Team plans'
 STRANGER, STRANGER_NAME = 880, 'STRANGERNAME61'
 # Someone the owner never allowed anywhere, who adds Nocheh to a group of theirs (ADR-0253).
 ADDER = 881
-PRIVATE_NOT_ALLOWED = 'Sorry, this is a private assistant. It only works for its owner.'
+PRIVATE_NOT_ALLOWED = 'Sorry, this is a private assistant. It only works for its owner and the people they add.'
 # The made-up machine of the machine job scenarios: an SSH server on the fixture's default network, the network
 # nocheh-machines uses (deploy/acceptance/vm-fixture.Dockerfile). The tester's own image, built like its browser's.
 VM_SERVICE, VM_NAME, VM_LOGIN, VM_HOME = 'vm-fixture', 'build-vm', 'nocheh', '/home/nocheh'

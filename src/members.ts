@@ -26,8 +26,9 @@ export function memberIdFor(account:string):string {
   return sha256(`[${JSON.stringify('member')},${JSON.stringify(account)}]`);
 }
 
-/** A members row as the loader reads it. */
-export interface MemberRow {id:string;state:MemberState;group_talk:boolean;group_jobs:boolean;group_post_other:boolean;group_tools:boolean;tasks:MemberTasks}
+/** A members row as the loader reads it. private_chat is "Private chat with Nocheh" (step 4). */
+export interface MemberRow {id:string;state:MemberState;group_talk:boolean;group_jobs:boolean;group_post_other:boolean;group_tools:boolean;tasks:MemberTasks;
+  private_chat:boolean}
 /** A chat_accounts row linked to a member (member_id is not null). */
 export interface MemberAccountRow {account_id:string;member_id:string}
 /** A member_chats row: a member's switch for one group (a group chat id; a topic follows its group). */
@@ -43,10 +44,10 @@ export interface MemberSnapshot {members:readonly MemberRow[];accounts:readonly 
   presence:readonly MemberPresenceRow[];owner_account:string|null;daily_messages?:number;revision?:number}
 
 /** One member as the directory holds it: the stored permissions (the sub-permissions keep their values while talk is
- * off) and the member's accounts, sorted, never the owner's. */
+ * off), privateChat (members.private_chat, independent of talk) and the member's accounts, sorted, never the owner's. */
 export interface Member {
   readonly id:string;readonly state:MemberState;readonly talk:boolean;readonly jobs:boolean;readonly post:boolean;readonly tools:boolean;
-  readonly tasks:MemberTasks;readonly accounts:readonly string[];
+  readonly tasks:MemberTasks;readonly privateChat:boolean;readonly accounts:readonly string[];
 }
 
 /**
@@ -86,6 +87,14 @@ export interface MemberDirectory {
   reaches(account:string|null|undefined,chat:string|null|undefined,permission?:MemberPermission|null,directory?:ChatDirectory):boolean;
   /** The account's tasks permission: the member's, 'write' for the owner's account, null for anyone else. */
   tasks(account:string|null|undefined):MemberTasks|null;
+  /**
+   * Whether the account's member may talk to Nocheh in their own private chat (step 4): the account is linked to a
+   * member, never the owner's, and that member is active with private chat on. Talk in groups and the group switches do
+   * not count. False for the owner's account (the owner's chat is the owner's, never a member's), an account linked to
+   * nobody and anything else. Which chat is the member's own is the caller's check: the chat directory's private chat
+   * whose account_id is this account (memberPrivate in src/spaces.ts).
+   */
+  privateTalks(account:string|null|undefined):boolean;
   /** Every member account that reaches at least one served group, with those groups (group chat ids), sorted. Never the
    * owner's account. */
   accounts(directory?:ChatDirectory):ReadonlyMap<string,readonly string[]>;
@@ -110,7 +119,7 @@ class SnapshotMembers implements MemberDirectory {
     for(const row of snapshot.members) {
       if(!isDigest(row.id)||rows.has(row.id))throw invalid('member_id');
       if(!(memberStates as readonly string[]).includes(row.state)||!(memberTaskModes as readonly string[]).includes(row.tasks)||
-        [row.group_talk,row.group_jobs,row.group_post_other,row.group_tools].some(value=>typeof value!=='boolean'))throw invalid('member_row');
+        [row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.private_chat].some(value=>typeof value!=='boolean'))throw invalid('member_row');
       rows.set(row.id,row);links.set(row.id,[]);
     }
     const linked=new Set<string>();
@@ -133,7 +142,7 @@ class SnapshotMembers implements MemberDirectory {
     }
     for(const row of rows.values()) {
       const member:Member=Object.freeze({id:row.id,state:row.state,talk:row.group_talk,jobs:row.group_jobs,post:row.group_post_other,tools:row.group_tools,
-        tasks:row.tasks,accounts:Object.freeze([...links.get(row.id)!].sort())});
+        tasks:row.tasks,privateChat:row.private_chat,accounts:Object.freeze([...links.get(row.id)!].sort())});
       this.byId.set(row.id,member);for(const account of member.accounts)this.byAccount.set(account,member);
     }
     this.sorted=Object.freeze([...this.byId.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0));
@@ -165,6 +174,10 @@ class SnapshotMembers implements MemberDirectory {
   tasks(account:string|null|undefined):MemberTasks|null {
     if(this.owner(account))return 'write';
     return this.memberOf(account)?.tasks??null;
+  }
+  privateTalks(account:string|null|undefined):boolean {
+    const member=this.memberOf(account);
+    return !!member&&member.state==='active'&&member.privateChat===true;
   }
   accounts(directory:ChatDirectory=chats()):ReadonlyMap<string,readonly string[]> {
     const cached=this.reached.get(directory);if(cached)return cached;

@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import { HttpError, object, string } from './http.js';
-import { chats, isChatId } from './chats.js';
+import { chats, isChatId, type ChatDirectory } from './chats.js';
+import { members as memberDirectoryNow, type MemberDirectory } from './members.js';
 import { desktopTopicId, legacyChatValue, telegramTopicId } from './chats-telegram.js';
 import type { ObservedAudience } from './observed-source.js';
 
@@ -79,6 +80,29 @@ export const groupSpaces=():string[]=>chats().all().filter(chat=>chats().isGroup
 export const servedGroups=():string[]=>chats().all().filter(chat=>chat.kind==='group'&&chats().served(chat.id)).map(chat=>chat.id);
 /** Whether `id` is a group Nocheh serves (one of servedGroups()). */
 export const servedGroup=(id:string|null|undefined):boolean=>chats().kind(id)==='group'&&chats().served(id);
+/**
+ * Whether `id` is a private chat that is not the owner's, or one of its topics, as the chat directory holds it (step 4):
+ * a member's own chat with Nocheh or anyone else's. Such a chat is read only by the reader bound to it (Reader.memberChat)
+ * and by the dashboard (admin): never by an owner turn, a group or another member, and never learned from. An id with no
+ * row, a group, a group's topic and the owner's private chat are not; an unknown id fails closed on its own wherever it
+ * is read (it is outside every served chat), and null or undefined is no chat.
+ */
+export function otherPrivate(id:string|null|undefined,directory:ChatDirectory=chats()):boolean {
+  const chat=directory.get(id);if(!chat)return false;
+  const base=chat.kind==='topic'?directory.get(chat.parent_id):chat;
+  return base?.kind==='private'&&!base.owner&&!chat.owner;
+}
+/**
+ * Whether `id` is a member's own private chat with Nocheh that is open now (step 4): a private chat itself, never a
+ * topic, not the owner's, whose person (chats.account_id) is linked to a member that privateTalks admits (active, private
+ * chat on). This marks the chat for the bot's served list (/internal/chats) so a member pass is taken only there; it
+ * never makes the chat served (served() stays the owner's chat and the groups). The member directory is held in
+ * nocheh-app only: a process without one admits no chat here.
+ */
+export function memberPrivate(id:string|null|undefined,directory:ChatDirectory=chats(),people:MemberDirectory=memberDirectoryNow()):boolean {
+  const chat=directory.get(id);
+  return !!chat&&chat.kind==='private'&&!chat.owner&&chat.account_id!==null&&people.privateTalks(chat.account_id);
+}
 /** The conversations a group or topic turn recalls: its own, or, when the group's topics share
  * memory, the group's base conversation and every one of its topics. Owner turns read everything.
  * The single-conversation form that ReadSet generalizes; inRecall and recallCondition keep their

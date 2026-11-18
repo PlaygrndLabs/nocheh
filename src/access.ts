@@ -17,9 +17,44 @@ export interface Reader {readonly scope:string|null; readonly admin:boolean;read
   readonly reads?:ReadSet;
   /** The app a turn pass is bound to (ADR-0252): its chat's current app id and topic. Signed only in a turn pass and
    * checked by the front door that receives the turn; storage does not require it, so job passes carry none. */
-  readonly app?:AppBinding}
+  readonly app?:AppBinding;
+  /** The member whose own private chat this turn is in (64 hex, a members.id; step 4, ADR-0262). Signed in a turn pass,
+   * and only in one whose scope and space are a private chat that is not the owner's (otherPrivate); refused anywhere
+   * else. It never makes the pass an owner pass, and storage never trusts it alone: bindReads checks it against the
+   * chat's account on every request. */
+  readonly member?:string;
+  /** The owner's ask about a member this turn answers (32 hex, an owner_member_asks.id; step 4b). Signed in a turn pass
+   * under the claim name member_read, and only in one whose scope and space are the owner's private chat, as answer is;
+   * it never makes the pass an owner pass. */
+  readonly memberRead?:string;
+  /** The one private chat that is not the owner's which this reader may read: a member's own chat for a member reader,
+   * the asked member's chat for a memberRead reader. Set only on the server, by bindReads, for every request; never
+   * taken from a pass: a pass that names one is refused, as reads is. Every other reader reads no such chat. */
+  readonly memberChat?:string}
 /** The id of an "Answer privately" record: also the button's data after `np` and the private chat's /start parameter. */
 export const answerId=/^[a-f0-9]{32}$/;
+/** A member id (members.id) and a lane (the member id of a member's turn, step 4): 64 hex. */
+export const memberClaimId=/^[a-f0-9]{64}$/;
+/** The id of an owner's ask about a member (owner_member_asks.id, step 4b): 32 hex. */
+export const memberReadId=/^[a-f0-9]{32}$/;
+/** The bound readers: a turn that reads as someone other than the owner, its reads resolved on the server for every
+ * request (bindReads) and limited to reading (ADR-0249, ADR-0262). */
+export type BoundReader='answer'|'member'|'memberRead';
+/** The 403 code each bound reader gets for anything but reading: an answer keeps ADR-0249's, a member's private chat and
+ * the owner's ask about a member share step 4's. */
+export const boundReaderReadOnly:Readonly<Record<BoundReader,string>>={answer:'private_answer_read_only',member:'member_private_read_only',
+  memberRead:'member_private_read_only'};
+/**
+ * Which bound reader a reader is: an "Answer privately" answer, a member in their own private chat, or the owner's ask
+ * about a member; null for every other reader. A parsed pass carries at most one of the three claims. Every check that
+ * holds for any bound reader asks this, never one claim alone.
+ */
+export function boundReader(principal:Pick<Reader,'answer'|'member'|'memberRead'>):BoundReader|null {
+  if(principal.answer!==undefined)return 'answer';
+  if(principal.memberRead!==undefined)return 'memberRead';
+  if(principal.member!==undefined)return 'member';
+  return null;
+}
 const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length && timingSafeEqual(x,y);};
 export function scopeToken(secret:string,scope:string|null,expires:number,binding?:{generation:string;guard_epoch:number}):string {
   const body=Buffer.from(JSON.stringify({scope,expires,audience:'nocheh-archive',...binding})).toString('base64url');
@@ -28,8 +63,17 @@ export function scopeToken(secret:string,scope:string|null,expires:number,bindin
 /** The brain a turn's pass is for: the one plugged into the brain socket (ADR-0234). The pass names it so its effects can be told apart (ADR-0233). */
 export const defaultBrain=activeBrain;
 const brainName=/^[a-z][a-z0-9-]{0,31}$/;
-export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;brain?:string;answer?:string;app?:AppBinding}):string {
-  const body=Buffer.from(JSON.stringify({scope,expires,event_id:eventId,audience:'nocheh-assistant',brain:defaultBrain,...policy})).toString('base64url');
+/**
+ * A turn pass. `member` (a member's own private chat), `lane` (a member's turn, in a group or their private chat: the
+ * member id, for Hermes to run one turn at a time per member; storage parses it and drops it) and `memberRead` (signed
+ * as the claim member_read: the owner's ask about a member) are step 4's claims; verifiedReader says where each is
+ * allowed.
+ */
+export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;brain?:string;answer?:string;app?:AppBinding;
+  member?:string;lane?:string;memberRead?:string}):string {
+  const {memberRead,...claims}=policy??{};
+  const body=Buffer.from(JSON.stringify({scope,expires,event_id:eventId,audience:'nocheh-assistant',brain:defaultBrain,...claims,
+    ...(memberRead===undefined?{}:{member_read:memberRead})})).toString('base64url');
   return `turn.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
 }
 const appText=/^[A-Za-z0-9._:-]{1,128}$/,appTopic=/^[A-Za-z0-9._-]{1,64}$/;
@@ -43,6 +87,9 @@ export function appBinding(value:unknown):AppBinding {
 }
 /** The owner's private chat itself, never one of its topics, as the chat directory knows it. */
 const ownersPrivateChat=(id:string,missed:()=>void)=>{const chat=chats().get(id);if(!chat)missed();return chat?.kind==='private'&&chat.owner;};
+/** A private chat itself that is not the owner's (never a topic), as the chat directory knows it: where a member claim
+ * may be. */
+const othersPrivateChat=(id:string,missed:()=>void)=>{const chat=chats().get(id);if(!chat)missed();return chat?.kind==='private'&&!chat.owner;};
 export function reader(req:IncomingMessage,secret:string,now=Date.now()):Reader {return verifiedReader(req,secret,now,()=>{});}
 /**
  * reader() for a server that can wait: a signed pass naming a chat or topic this process's chat directory does not hold
@@ -86,11 +133,24 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     // chat row of the owner's (ADR-0249, ADR-0252).
     if(claims.answer!==undefined&&(prefix!=='turn'||typeof claims.answer!=='string'||!answerId.test(claims.answer)||scope===null||
       !ownersPrivateChat(scope,missed)||!('space' in policy)||policy.space!==scope))throw Error();
-    // What an answer may read comes from its record on the server, never from the pass.
-    if(claims.reads!==undefined)throw Error();
+    // A member pass reads as the member's own private chat: its scope and space are a private chat that is not the
+    // owner's (step 4). Which member's chat it is, bindReads checks on the server for every request.
+    if(claims.member!==undefined&&(prefix!=='turn'||typeof claims.member!=='string'||!memberClaimId.test(claims.member)||scope===null||
+      !othersPrivateChat(scope,missed)||!('space' in policy)||policy.space!==scope))throw Error();
+    // An ask about a member reads as the owner's private chat, never as the owner, as an answer does (step 4b).
+    if(claims.member_read!==undefined&&(prefix!=='turn'||typeof claims.member_read!=='string'||!memberReadId.test(claims.member_read)||scope===null||
+      !ownersPrivateChat(scope,missed)||!('space' in policy)||policy.space!==scope))throw Error();
+    // A pass is at most one bound reader.
+    if([claims.answer,claims.member,claims.member_read].filter(claim=>claim!==undefined).length>1)throw Error();
+    // A lane is the member id of a member's turn, for Hermes's per-member order. Checked for shape and then dropped: it
+    // never reaches a Reader and grants nothing.
+    if(claims.lane!==undefined&&(prefix!=='turn'||typeof claims.lane!=='string'||!memberClaimId.test(claims.lane)))throw Error();
+    // What an answer, a member or an ask may read comes from the server, never from the pass; a claim spelled the
+    // Reader's way is no claim and is refused rather than ignored.
+    if(claims.reads!==undefined||claims.member_chat!==undefined||claims.memberChat!==undefined||claims.memberRead!==undefined)throw Error();
     const app=claims.app===undefined?undefined:appBinding(claims.app);
     if(app!==undefined&&prefix!=='turn')throw Error();
-    return {scope,admin:false,...(prefix==='turn'?{turnEvent:claims.event_id as string}:{}),...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.brain===undefined?{}:{brain:claims.brain as string}),...(claims.answer===undefined?{}:{answer:claims.answer as string}),...(app===undefined?{}:{app})};
+    return {scope,admin:false,...(prefix==='turn'?{turnEvent:claims.event_id as string}:{}),...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.brain===undefined?{}:{brain:claims.brain as string}),...(claims.answer===undefined?{}:{answer:claims.answer as string}),...(app===undefined?{}:{app}),...(claims.member===undefined?{}:{member:claims.member as string}),...(claims.member_read===undefined?{}:{memberRead:claims.member_read as string})};
   } catch { throw new HttpError(401,'invalid_scope_token'); }
 }
 export function admin(principal:Reader):void { if (!principal.admin) throw new HttpError(403,'owner_required'); }
