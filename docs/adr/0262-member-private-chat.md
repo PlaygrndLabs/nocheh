@@ -144,21 +144,30 @@ stays a destination only behind the owner's card).
 - **Private chat reads a joined group's whole history**, as group turns do.
   Reading only from when the member joined (`read_from`) is a later step.
 - **The 30-day stale rule and the re-check.** Before each private turn, joined
-  groups whose `checked_at` is more than 6 hours old (`MEMBER_RECHECK_HOURS`) are
-  asked of Telegram with the bot op `telegram.member_status` (`getChatMember`),
-  oldest first, at most 10 (`MEMBER_RECHECK_LIMIT`). The bot asks only about a
-  served group, where it is in Telegram now.
+  groups whose `checked_at` is more than 6 hours old (`MEMBER_RECHECK_HOURS`), and
+  groups left out only because their 'in' is older than 30 days or was never
+  confirmed, are asked of Telegram with the bot op `telegram.member_status`
+  (`getChatMember`), oldest first, at most 10 (`MEMBER_RECHECK_LIMIT`). The bot
+  asks only about a served group, where it is in Telegram now. A group asked
+  without an answer counts from that attempt, so groups Telegram does not answer
+  move behind the others and never keep them from being asked.
   - `creator`, `administrator`, `member`, and `restricted` with `is_member` true
     are 'in'. `left`, `kicked`, and `restricted` with `is_member` false are
     'left'.
   - The answer is written with source `'checked'` (the `chat_memberships.source`
     CHECK gains it) and `checked_at` now. A switch between 'in' and 'left' moves
-    the member revision, and the directory reloads.
+    the member revision, and the directory reloads. An 'in' answer applies only
+    to the row it was asked about (still 'in', same `checked_at`), so a leave
+    written meanwhile stays; a 'left' answer always applies.
   - Anything Telegram does not answer plainly changes nothing.
-  - Groups that needed a check past the cap are left out of that turn's input.
+  - Groups they read that needed a check past the cap are left out of that turn.
+    The dispatch writes them on the turn's `member_turns` row (`left_out`), and
+    `bindReads` leaves them out of every read bound to that turn, its tools'
+    included; a turn with no list written reads nothing.
   - "Unknown = fail closed" is kept: a member quiet for 30 days in a group where
     Telegram does not answer (a bot that is not an admin) loses that group until
-    they write there again.
+    they write there again. Where Telegram answers 'in', the next private turn
+    brings it back.
 - Search narrows to the bound groups and the member's chat before ranking, so
   other chats' hits never crowd theirs out. `canRead` still decides each hit.
 - Long-term memory by plain search only, over the bound groups' sessions. A
@@ -204,7 +213,9 @@ stays a destination only behind the owner's card).
   them (ADR-0248). A member turn never gets `project: null`, so never every list.
 - `chatList`: `scope` must name one of the views, or the only view is used. With
   no scope and several views, 400 `task_project_required` names the views only
-  (`projects: [{id, name}]`), and the broker and the MCP tool pass that list on.
+  (`projects: [{id, name}]`, at most 50, with `more: true` when there are
+  others), and the broker, which reads that refusal within a bound that fits 50
+  names at worst, and the MCP tool pass that list on.
   With no view, 403 `task_project_required`. A named project that is not a view
   gets 403 `task_scope_denied`.
 - `chatGet`: the task's own project picks the view; no view, or a task the view
@@ -245,8 +256,10 @@ stays a destination only behind the owner's card).
     included;
   - a delivered message of send class `member_read`.
 - `setConsent` answers 409 `learning_consent_member_chat` or
-  `learning_consent_member_read`, and its GET says `consentable: false`.
-  `notLearned` ignores consent for `member_read`.
+  `learning_consent_member_read`, and its GET says `consentable: false`. An
+  import review's approval (`POST /v1/memory/reviews`) leaves both out, so no
+  owner yes is kept for them either way. `notLearned` ignores consent for
+  `member_read`.
 - The owner's notes review skips both (`sender_not_allowed`).
 - A fact whose evidence rests on either is never granted, even confirmed (409
   `memory_grant_member_chat`), never requested and never suggested. A source the
@@ -323,7 +336,9 @@ stays a destination only behind the owner's card).
 - Messages: other people's private chats are left out of the default list
   (`private_chats=hide` on `/v1/data` and `/v1/search`) and kept under **Members’
   chats** (`private_chats=only`), so they do not show when the owner shares their
-  screen.
+  screen. Storage reads which chats those are from its chat rows (private, not the
+  owner's), never from a chat directory it may not have loaded, and applies the
+  split in the query, before search takes its first 200 hits.
 - Memory › Assistant notes names a member's profile "Member · <name>" and an ask's
   "Your question about a member · <date>", listed after the owner's own chat and
   the groups.
@@ -386,14 +401,10 @@ stays a destination only behind the owner's card).
   private turn. A member who is quiet in a group for 30 days, where Telegram does
   not answer, loses that group until they write there.
 - Residuals:
-  - The 10-check cap narrows only the turn's own input. A tool call binds again and
-    can still read a group past the cap that is within the 30-day window.
-  - `/v1/search` applies `private_chats` after its first 200 hits, so matching
-    results can be missed.
   - A member with several accounts that have private chats is never asked about
     (4b reads nothing).
-  - The Messages filter hides nothing while the chat directory has not loaded.
   - An ask's Notes label has no answer date.
-  - The owner's notes review's sender check (`notesSender`) does not tell member
-    or `member_read` sends apart; `canLearn` refuses them first.
+  - The owner's notes review's sender check (`notesSender`) refuses Nocheh's
+    messages in a member's chat, but does not tell `member_read` sends apart;
+    `canLearn` and `privateHold` refuse those first.
 </consequences>
