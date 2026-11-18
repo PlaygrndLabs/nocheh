@@ -1,5 +1,5 @@
 /**
- * One member: their permissions, their groups, and Pause or Remove. Each switch posts at once with an operation ID, so a
+ * One member: their permissions, their private chat with Nocheh (step 4), their groups, and Pause or Remove. Each switch posts at once with an operation ID, so a
  * retry is never applied twice, then shows a toast; there is no Save bar.
  */
 import {ArrowLeft, UserMinus} from 'lucide-react';
@@ -56,7 +56,7 @@ export function MemberDetail({
     if (
       !(await confirm({
         title: `Remove ${name} as a member?`,
-        body: 'They can’t talk to Nocheh in any of your groups any more, and their switches are deleted. Their tasks and reminders stay. You can add them again later.',
+        body: 'They can’t talk to Nocheh in any of your groups or in their private chat with it any more, and their switches are deleted. Their tasks and reminders stay. Their private chat stays in Messages. You can add them again later.',
         confirm: 'Remove',
         danger: true,
       }))
@@ -104,8 +104,8 @@ export function MemberDetail({
       )}
       {paused && (
         <Notice tone="warn" title="Paused">
-          They can’t talk to Nocheh in any group, and their jobs, posts and tool runs stop. Their switches are kept for
-          when you resume them.
+          They can’t talk to Nocheh in any group or in their private chat with it, and their jobs, posts and tool runs
+          stop. Their switches are kept for when you resume them.
         </Notice>
       )}
       <Card>
@@ -163,6 +163,28 @@ export function MemberDetail({
       </Card>
       <Card>
         <CardHeader
+          title="Private chat"
+          description="Their own chat with Nocheh in Telegram. Group talk off doesn’t stop it."
+        />
+        <div className="mt-3 border-t border-line">
+          <Row
+            id="member-private-chat"
+            title="Private chat with Nocheh"
+            hint="They can ask Nocheh about the groups they joined and see those groups’ tasks. There it only reads: no posts, jobs, web pages or task changes. You can read the chat under Messages › Members’ chats. Off, or paused, they get one short reply a day instead."
+            checked={allowed.private_chat}
+            disabled={busy}
+            onChange={on =>
+              void change(
+                'private_chat',
+                {private_chat: on},
+                on ? `${name} can talk to Nocheh privately.` : `${name} can’t talk to Nocheh privately now.`,
+              )
+            }
+          />
+        </div>
+      </Card>
+      <Card>
+        <CardHeader
           title="Groups"
           description="Where they may talk to Nocheh. A group they join later is on until you switch it off. Their first message in a group is enough to talk there; posts into it from another group and their jobs there wait until Telegram has shown them in it."
         />
@@ -215,7 +237,7 @@ export function MemberDetail({
           <Row
             id="member-pause"
             title="Pause this member"
-            hint="Stops everything they do, in every group: talk, jobs, posts and tool runs. Their switches are kept."
+            hint="Stops everything they do, in every group and in their private chat: talk, jobs, posts and tool runs. Their switches are kept."
             checked={paused}
             disabled={busy}
             onChange={on =>
@@ -229,7 +251,9 @@ export function MemberDetail({
           <div className="flex flex-col gap-2 border-t border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <p className="text-sm font-medium">Remove this member</p>
-              <p className="text-[13px] text-muted">Deletes them and their switches. Their tasks and reminders stay.</p>
+              <p className="text-[13px] text-muted">
+                Deletes them and their switches, and their private chat stops. Their tasks, reminders and messages stay.
+              </p>
             </div>
             <Button variant="danger" busy={action.busy === 'remove'} disabled={busy} onClick={() => void remove()}>
               <UserMinus aria-hidden /> Remove

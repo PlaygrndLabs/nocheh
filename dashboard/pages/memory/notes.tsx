@@ -34,6 +34,11 @@ type Profile = {
   /** Where a private answer was asked, as its first line names it, and when it ran (ADR-0249). */
   answer_group?: string;
   answer_at?: string;
+  /** A member's own private chat with Nocheh (step 4): its scope is that chat. Never the owner's. */
+  member?: boolean;
+  /** Your question about a member, answered from their private chat in your chat (step 4b): its own profile, never
+   * carried into your conversation. */
+  member_read?: boolean;
 };
 /** One note, with where it came from in your words (ADR-0257); `from` is the fixed kind its colour is keyed on. */
 type Entry = {target: string; text: string; from: string; label: string};
@@ -67,6 +72,21 @@ const sourceLabel: Record<string, string> = {
   cron: 'Scheduled',
 };
 
+/**
+ * A member's private chat by the member's name, and your question about a member by when it ran; each is marked as
+ * what it is, never shown as your own chat or a group.
+ */
+export function memberProfileLabel(p: Profile, chatName: (scope: string) => string): string | null {
+  if (p.member_read) {
+    const day = p.answer_at ? new Date(p.answer_at) : null;
+    const date = day && !Number.isNaN(day.getTime()) ? day.toLocaleDateString() : p.profile.slice(-6);
+    return 'Your question about a member · ' + date;
+  }
+  if (!p.member) return null;
+  const name = chatName(p.scope);
+  return name && name !== 'Unknown chat' ? 'Member · ' + name : 'Member · a private chat';
+}
+
 function answerLabel(p: Profile) {
   const day = p.answer_at ? new Date(p.answer_at) : null;
   const date = day && !Number.isNaN(day.getTime()) ? ' · ' + day.toLocaleDateString() : '';
@@ -78,12 +98,20 @@ export function Notes() {
   const session = useParam('session');
   const chats = useChats();
   const profiles = useResource<{profiles: Profile[]; history_profiles?: Profile[]}>('/memory/profiles', 60000);
-  const list = profiles.data?.history_profiles ?? profiles.data?.profiles ?? [];
+  const listed = profiles.data?.history_profiles ?? profiles.data?.profiles ?? [];
+  const list = [
+    ...listed.filter(p => !p.member && !p.member_read),
+    ...listed.filter(p => p.member_read),
+    ...listed.filter(p => p.member && !p.member_read),
+  ];
   const profile = list.find(p => p.profile === chosen) ?? list[0] ?? null;
   // Each private answer has its own profile in your private chat, named by where it was asked, as its first line names
   // it, and the day it ran; one without that receipt by a short tail of its name.
+  // A member's private chat and your questions about a member are named as what they are (step 4), and listed after
+  // your own chat and the groups, so a member's chat is never the one a page opens on.
   const label = (p: Profile) =>
-    p.private_answer ? answerLabel(p) : p.owner ? 'Your private chat' : chats.name(p.scope);
+    memberProfileLabel(p, chats.name) ??
+    (p.private_answer ? answerLabel(p) : p.owner ? 'Your private chat' : chats.name(p.scope));
   const memory = useResource<MemoryView>(
     profile ? '/memory?' + new URLSearchParams({scope: profile.scope, profile: profile.profile}) : null,
     30000,
@@ -95,9 +123,11 @@ export function Notes() {
   useEffect(() => setQuery(''), [profile?.profile]);
   // A group's USER.md is what Nocheh noted about the people there, not about you.
   const title = (name: string) =>
-    name === 'USER.md' && profile && !profile.owner && !profile.private_answer
-      ? 'About people here'
-      : (noteTitle[name] ?? name);
+    name === 'USER.md' && profile?.member
+      ? 'About this member'
+      : name === 'USER.md' && profile && !profile.owner && !profile.private_answer
+        ? 'About people here'
+        : (noteTitle[name] ?? name);
   const sessions = (memory.data?.sessions ?? []).filter(s =>
     (s.title || s.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
