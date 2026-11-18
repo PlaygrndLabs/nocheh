@@ -174,9 +174,10 @@ test('step 4\'s texts are editable keys with defaults, and the members\' private
   for(const value of ['off',null,0])assert.throws(()=>memberChangeRequest({operation_id:'op',changes:{private_chat:value}}),{code:'invalid_member_request'},String(value));
 });
 
-test('a chat that is not a private chat of someone other than the owner is closed before any query, and a member chat the database does not open is closed',async()=>{
-  const none={query:async()=>{throw Error('no query for a chat that cannot be a member chat');}} as never;
-  for(const chat of [OWNER,GP1,GP1_TOPIC,NG1,'9876'])assert.equal(await memberReads(none,chat),null,chat);
+test('the owner\'s chat, a group, a topic and a member chat with no owner chat are closed without asking the store, and a member chat the store does not open is closed',async()=>{
+  const db={query:async()=>{throw Error('no query for these');}} as never;
+  for(const chat of [OWNER,GP1,GP1_TOPIC,NG1])assert.equal(await memberReads(db,chat),null,chat);
+  for(const chat of [MEMBER_GP_CHAT,MEMBER_NG_CHAT,BOB_CHAT])assert.equal(await memberReads(db,chat,null),null,chat);
   const asked:string[]=[],empty={query:async(_sql:string,params:unknown[])=>{asked.push(String(params[0]));return {rows:[]};}} as never;
   for(const chat of [MEMBER_GP_CHAT,MEMBER_NG_CHAT,BOB_CHAT])assert.equal(await memberReads(empty,chat),null,chat);
   assert.deepEqual(asked,[MEMBER_GP_CHAT,MEMBER_NG_CHAT,BOB_CHAT]);

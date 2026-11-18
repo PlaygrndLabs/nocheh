@@ -1,9 +1,9 @@
 import {createHash} from 'node:crypto';
 import {request,type IncomingMessage,type ServerResponse} from 'node:http';
 import {HttpError,readJson} from '../http.js';
-import type {Reader} from '../access.js';
+import {boundReader,type Reader} from '../access.js';
 import {mcpTools,type ToolContext,type Loopback} from './tools.js';
-import {privateAnswerTaskActions,privateAnswerTools} from '../stores/private-answers.js';
+import {boundReaderTools,privateAnswerTaskActions} from '../stores/private-answers.js';
 
 /** MCP revisions this server speaks: Streamable HTTP without sessions or server-to-client requests (ADR-0233). */
 export const protocolVersions=['2025-11-25','2025-06-18','2025-03-26'];
@@ -88,8 +88,9 @@ export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{p
       capabilities:{tools:{listChanged:false}},serverInfo}});
   }
   if(method==='ping')return rpc(res,200,{jsonrpc:'2.0',id,result:{}});
-  // An answer reader is offered and runs only the read tools, and tasks only to list and read (ADR-0249).
-  const answering=options.principal.answer!==undefined,tools=answering?mcpTools.filter(item=>privateAnswerTools.has(item.name)):mcpTools;
+  // A bound reader (an answer, a member's private chat, the owner's ask about a member) is offered and runs only its read
+  // tools, and tasks only to list and read (ADR-0249, ADR-0262).
+  const bound=boundReader(options.principal),answering=bound!==null,tools=bound!==null?mcpTools.filter(item=>boundReaderTools[bound].has(item.name)):mcpTools;
   if(method==='tools/list')return rpc(res,200,{jsonrpc:'2.0',id,result:{tools:tools.map(({name,description,inputSchema})=>({name,description,inputSchema}))}});
   if(method==='tools/call') {
     const tool=tools.find(item=>item.name===input.name);

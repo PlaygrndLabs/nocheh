@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import {createHmac} from 'node:crypto';
-import {admin,answerId,type Reader} from '../access.js';
+import {admin,answerId,boundReader,boundReaderReadOnly,type BoundReader,type Reader} from '../access.js';
 import type {AssistantPolicy} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
 import {groupSpace,readSet,servedGroups} from '../spaces.js';
@@ -334,11 +334,37 @@ const answerRoutes:readonly [string,RegExp][]=[
   ['GET',/^\/v1\/(?:search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(?:shared|filtered)\/[a-f0-9]{64}|owner\/tasks(?:\/[a-f0-9]{64})?|security\/binding|turn-files\/[a-f0-9]{64})$/],
   ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions)|anthropic\/v1\/messages)$/],
 ];
-export function privateAnswerRoute(method:string,path:string):boolean {return answerRoutes.some(([verb,route])=>verb===method&&route.test(path));}
-/** Refuses an answer reader's call to anything but a read route (privateAnswerRoute). */
+/**
+ * The routes a member's private chat may call (step 4, ADR-0262): an answer's reads, but no shared or approved context
+ * opened by its id (a member's chat is given none), and its task reads only list and read (D14). The memory context
+ * route answers it with nothing shared or granted.
+ */
+const memberRoutes:readonly [string,RegExp][]=[
+  ['GET',/^\/v1\/(?:search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|owner\/tasks(?:\/[a-f0-9]{64})?|security\/binding|turn-files\/[a-f0-9]{64})$/],
+  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions)|anthropic\/v1\/messages)$/],
+];
+/**
+ * The routes the owner's ask about a member may call (step 4b): the archive reads of that member's chat, the turn's
+ * delivery check, context preparation, its own files and, at the broker, its binding, guard preparation and model
+ * calls. No long-term memory (that chat is never learned), no tasks, no imports and no shared or granted context.
+ */
+const memberReadRoutes:readonly [string,RegExp][]=[
+  ['GET',/^\/v1\/(?:search|archive\/page|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|security\/binding|turn-files\/[a-f0-9]{64})$/],
+  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|guard|chat\/completions)|anthropic\/v1\/messages)$/],
+];
+const boundRoutes:Readonly<Record<BoundReader,readonly [string,RegExp][]>>={answer:answerRoutes,member:memberRoutes,memberRead:memberReadRoutes};
+/** Whether a bound reader of `kind` may call a route (an answer when no kind is named). */
+export function privateAnswerRoute(method:string,path:string,kind:BoundReader='answer'):boolean {return boundRoutes[kind].some(([verb,route])=>verb===method&&route.test(path));}
+/** Refuses a bound reader's call to anything but its read routes (privateAnswerRoute), with its read-only code. */
 export function assertPrivateAnswerRoute(principal:Reader,method:string|undefined,path:string):void {
-  if(principal.answer!==undefined&&!privateAnswerRoute(method??'',path))throw new HttpError(403,'private_answer_read_only');
+  const kind=boundReader(principal);
+  if(kind!==null&&!privateAnswerRoute(method??'',path,kind))throw new HttpError(403,boundReaderReadOnly[kind]);
 }
 /** The data tools an answer reader is offered and may run, each in read mode only; tasks lists and reads, never writes. */
 export const privateAnswerTools:ReadonlySet<string>=new Set(['archive_search','archive_read','archive_page','memory_search','tasks']);
 export const privateAnswerTaskActions:ReadonlySet<string>=new Set(['list','get']);
+/** The data tools each bound reader is offered and may run, each in read mode only (tasks: list and get). A member's
+ * private chat reads as an answer does, tasks included (read only, D14); the owner's ask about a member reads only the
+ * archive, which holds that member's chat. Neither gets a notes or memory-writing tool. */
+export const boundReaderTools:Readonly<Record<BoundReader,ReadonlySet<string>>>={answer:privateAnswerTools,member:privateAnswerTools,
+  memberRead:new Set(['archive_search','archive_read','archive_page'])};

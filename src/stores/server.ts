@@ -1,6 +1,6 @@
 import {createServer} from 'node:http';
 import {join} from 'node:path';
-import {admin,currentReader} from '../access.js';
+import {admin,boundReader,currentReader} from '../access.js';
 import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
 import {servedChats} from '../chats.js';
 import {telegramAddress} from '../frontdoor/telegram.js';
@@ -45,7 +45,7 @@ import {MACHINE_BODY} from './machines.js';
 import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
-import {withRecallPlaces} from './recall-places.js';
+import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
 import {memberPrivate,readSetGroups} from '../spaces.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
@@ -99,10 +99,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       return json(res,200,await s.memory.prepareRequest(body));
     }
-    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249). A
-    // pass naming a chat another process recorded a moment ago (a new topic's first turn) is read again once this
-    // process's directory has looked again, as the broker does (ADR-0252).
-    const parsed=await currentReader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
+    // A bound reader's reads (an answer's, a member's private chat's, the owner's ask about a member's) come from the store
+    // on every request, and it reaches its read routes only (ADR-0249, ADR-0262). A pass naming a chat another process
+    // recorded a moment ago (a new topic's first turn) is read again once this process's directory has looked again, as
+    // the broker does (ADR-0252).
+    const parsed=await currentReader(req,config.token),principal=boundReader(parsed)===null?parsed:await s.access.bindReads(parsed);
     assertPrivateAnswerRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
     // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
@@ -433,6 +434,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return result({sources:await s.sources.found(principal,found.ids,count,searchTagged(found)),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
     }
     if(path==='/v1/memory/context'&&req.method==='GET') {
+      // A member's private chat and the owner's ask about a member are given nothing shared or granted (step 4).
+      if(['member','memberRead'].includes(boundReader(principal)??''))return result({sources:[],filter_status:'disabled'},true);
       const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);
       return result({...existing,sources:[...existing.sources,...granted.sources]},true);
     }
@@ -448,7 +451,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const input=object(await readJson(req)),binding=await s.guards.state();
       if(!principal.admin)await s.turns.binding(principal);
       // Each hit says in words which chat it came from, never by its raw ID (ADR-0251), and each note where it came from (ADR-0257).
-      const found=await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation});
+      // An owner turn recalls the owner's own notes and those of the owner's chat and the groups Nocheh serves, never a
+      // member's private chat's or an ask about a member's (D7); the dashboard (admin) names none and reads every one.
+      const found=await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation,
+        ...(principal.admin?{}:{allowed:ownerRecallAllowed(s.access.policy())})});
       return result(await withRecallPlaces(s.stores,await s.noteSources.withRecallSources(found)));
     }
     if(path==='/v1/memory/reviews'&&req.method==='GET'){admin(principal);return json(res,200,await s.reviews.list(principal,url.searchParams.get('after')??''));}
@@ -474,8 +480,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         await s.turns.assertAudience(principal);return json(res,200,copy);
       }
       if(path==='/v1/imports/pending') {
-        // An answer reader hears only about imports into the groups of its record, not the owner's (ADR-0249).
-        if(principal.answer!==undefined)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
+        // A bound reader hears only about imports into its groups, never the owner's nor a private chat's (ADR-0249, step 4).
+        if(boundReader(principal)!==null)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
         const owner=principal.scope===null||principal.scope===ownerChat(s.access.policy());
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});
       }
@@ -537,7 +543,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     throw new HttpError(404,'not_found');
   })().catch(error=>{
     if(res.headersSent){res.destroy();return;}
-    json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'service_unavailable'});
+    // A refusal may name what to ask instead (task_project_required names the lists to choose from, D14).
+    const details=error instanceof HttpError?(error as {details?:Record<string,unknown>}).details:undefined;
+    json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'service_unavailable',...(details??{})});
   });});
   server.requestTimeout=30000;return server;
 }

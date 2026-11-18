@@ -106,7 +106,10 @@ const namesShown=(source:TagSource,reader:TagReader)=>reader.owner||source.expor
 /** Who reads a tag: the owner (the owner's private chat, web chat and the owner's own jobs) or anyone else (a group, a
  *  topic or a private answer); the reader's own chat; the owner's Tasks time zone; and whether the time is a minute or a
  *  day. Anyone but the owner reads UTC and no People name, whatever is passed. */
-export interface TagReader {owner:boolean;chat:string|null;zone:string;precision:'minute'|'day'}
+export interface TagReader {owner:boolean;chat:string|null;zone:string;precision:'minute'|'day';
+  /** The one private chat that is not the owner's this reader may read (step 4): the asked member's chat for the owner's
+   *  ask about a member, named as that member's private chat; null or absent for everyone else. */
+  member_chat?:string|null}
 
 function who(source:TagSource,reader:TagReader,size:number):string {
   const facts=source.facts;
@@ -163,6 +166,11 @@ function what(source:TagSource,reader:TagReader,size:number):string|null {
 
 function where(source:TagSource,reader:TagReader,names:ReadonlyMap<string,string>,size:number,directory:ChatDirectory):string {
   if(source.chat!==null&&source.chat===reader.chat)return words.this_chat;
+  // The owner's ask about a member reading that member's chat: whose chat it is, by the name Telegram showed for it.
+  if(reader.member_chat&&source.chat===reader.member_chat) {
+    const name=tagName(directory.get(source.chat)?.title,size);
+    return name?fillLine(modelSourceWords.places.member,{name}):modelSourceWords.places.unnamed_member;
+  }
   // The owner reading a member's private chat with Nocheh: who it is with, by the name Telegram showed for that chat.
   if(reader.owner&&source.chat!==null&&directory.kind(source.chat)==='private'&&!directory.isOwner(source.chat)) {
     const name=tagName(directory.get(source.chat)?.title,size);

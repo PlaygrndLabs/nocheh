@@ -200,7 +200,20 @@ export type TopicMemory='group'|'topic';
  */
 type Turn={source:{reference:{id:string}};project:string|null;group:string|null;reach?:ReadSet|null;readOnly?:boolean;actor?:TaskActor;
   /** The person's account (a chat_accounts id) in a group turn; null for the owner, or when it could not be told. */
-  account?:string|null};
+  account?:string|null;
+  /** A member's private chat (D14): one read-only view per active project holding one of their joined groups, each
+   *  reaching only those groups. When present, `project` null never means every list: the turn lists and reads through
+   *  these views alone, and writes nothing. */
+  views?:readonly TaskView[]};
+/** One project a member's private chat reads tasks of (D14): its id and name, and the joined groups of it the chat
+ *  reaches. */
+export type TaskView={readonly project:string;readonly name:string;readonly reach:ReadSet};
+/** 400 when a member's private chat lists tasks without naming which of several projects (D14): `projects` names the
+ *  ones it may choose, and only those. */
+export class TaskProjectRequired extends HttpError {
+  readonly details:{projects:{id:string;name:string}[]};
+  constructor(views:readonly TaskView[]){super(400,'task_project_required');this.details={projects:views.map(view=>({id:view.project,name:view.name}))};}
+}
 /**
  * Who sets a reminder or writes a task, and where (ADR-0255): the owner, or a person allowed in a group with their
  * account and the name Telegram showed; the group or topic of the turn and its group. `chat` is null for the owner in
@@ -577,11 +590,31 @@ export class TaskRepository {
    * each task only from when it joined its current audience (ADR-0248).
    */
   async chatList(principal:Reader,input:ListInput={}) {
-    const {project,reach}=await this.chatTurn(principal);
+    const turn=await this.chatTurn(principal);
+    // A member's private chat lists one project's view at a time: the one it names, or its only one (D14).
+    if(turn.views!==undefined) {
+      const named=input.scope&&input.scope!=='all'?input.scope:null;
+      const view=named?turn.views.find(item=>item.project===named):turn.views.length===1?turn.views[0]:undefined;
+      if(named&&!view)throw new HttpError(403,'task_scope_denied');
+      if(!view)throw turn.views.length?new TaskProjectRequired(turn.views):new HttpError(403,'task_project_required');
+      return this.page({...input,scope:view.project},view.project,view.reach);
+    }
+    const {project,reach}=turn;
     if(project&&input.scope&&input.scope!=='all'&&input.scope!==project)throw new HttpError(403,'task_scope_denied');
     return this.page(project?{...input,scope:project}:input,project,reach??null);
   }
-  async chatGet(principal:Reader,id:string) {const {project,reach}=await this.chatTurn(principal);return this.detail(id,project,reach??null);}
+  async chatGet(principal:Reader,id:string) {
+    const turn=await this.chatTurn(principal);
+    // A member's private chat reads a task through the view of the task's own project, and only one that view sees (D14).
+    if(turn.views!==undefined) {
+      if(!hex.test(id))throw new HttpError(400,'invalid_identity');
+      const project=(await this.control.query('SELECT project_id FROM owner_tasks WHERE id=$1',[id])).rows[0]?.project_id;
+      const view=turn.views.find(item=>item.project===project);
+      if(!view)throw new HttpError(404,'task_not_found');
+      return this.detail(id,view.project,view.reach);
+    }
+    return this.detail(id,turn.project,turn.reach??null);
+  }
   /**
    * Repeating the same request within one turn returns the task it already made. In the owner's private chat, a
    * change that a project's chats would see is held for the owner's card instead (ADR-0243). A task added in a
@@ -611,7 +644,7 @@ export class TaskRepository {
   }
   /** An "Answer privately" answer only reads its groups' tasks; it adds, changes and comments on none (ADR-0248). */
   private writable(turn:Turn):Turn {
-    if(turn.readOnly)throw new HttpError(403,'task_read_only');
+    if(turn.readOnly||turn.views!==undefined)throw new HttpError(403,'task_read_only');
     return turn;
   }
   /** A group or topic turn writes as the person who wrote there, or the owner, in that chat; the owner's private chat
