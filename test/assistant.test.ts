@@ -297,7 +297,8 @@ test('real PostgreSQL: action proposals require a bound turn; only a captured ow
 });
 
 test('real PostgreSQL: voice is archived untranscribed and never blocks dispatch; uncertain RPC reuses receipt identity, history never replies',{skip:!process.env.PGHOST},async()=>{
-  const config={...settings(),assistant:{...policy,group_access:{'-20':{granted:['456'],denied:[]}}}};
+  // 456 is a member in -20 (step 3: members, not the retired group_access lists, decide who talks in a group).
+  const config={...settings(),assistant:policy},people=grantMembers({'-20':{granted:['456']}},{owner:'123'});
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
   const admin=new pg.Pool(connection),namespace=`assistant_${Date.now()}`;
   await admin.query(`CREATE SCHEMA ${namespace}`);
@@ -353,5 +354,5 @@ test('real PostgreSQL: voice is archived untranscribed and never blocks dispatch
     await prepareArchiveFiles(pool,root,quiet.id,{owner:'inngest',epoch:1});
     assert.notEqual((await preparationStatus(pool,quiet.id)).stage,'transcription');
     assert.equal((await pool.query("SELECT kind FROM derived_artifacts WHERE event_id=$1",[quiet.id])).rows[0].kind,'extraction_status');
-  } finally {await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
+  } finally {people();await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
 });
