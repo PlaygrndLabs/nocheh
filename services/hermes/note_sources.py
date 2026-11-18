@@ -29,7 +29,7 @@ TARGETS=(('memory','MEMORY.md'),('user','USER.md'))
 # A note keeps at most this many origins, its writer first; the rest are counted, and a count reads as unknown.
 ORIGINS=10
 CITES=20
-READS=('forward','file','recent','archive','web','notion','tools','commands','past','other')
+READS=('forward','file','recent','reply','archive','web','notion','tools','commands','past','other')
 CHANNELS=('telegram','browser','scheduler','background')
 FROM=('owner','nocheh','person','forward','file','mixed','turn','turn_read','unknown','unavailable')
 UNAVAILABLE={'from':'unavailable','label':'source not available right now'}
@@ -354,6 +354,16 @@ def _others(text):
     return any(line.startswith(SPEAKER) and not line.endswith(OWNER_SPEAKER) for line in text.split('\n'))
 
 
+def _replied(content):
+    """The texts of the replied-to blocks in a stored message whose by= is not the owner's, read where plan() reads them:
+    in the frame Nocheh writes before the message's own text (retired_history._spans). The by= stands before any name,
+    so no name changes it, and a recent message's reply part holds no text, so it is never one."""
+    from .retired_history import REPLY,_spans
+    lines=content.split('\n') if isinstance(content,str) else []
+    return ['\n'.join(lines[start+1:end]) for kind,_,start,end in _spans(content)
+            if kind=='reply' and REPLY.fullmatch(lines[start]) and not lines[start].startswith('[Replying to, by=owner:')]
+
+
 def _written(ops):
     """What a run's memory operations wrote, as the copy check reads it: the runs of RUN characters and the distinctive
     tokens of each text."""
@@ -382,15 +392,20 @@ def turn_reads(database,session,last,body):
     a run of text or a distinctive token from. An earlier read the turn did not copy from leaves its notes alone, so a
     note the owner dictates later in a long session stays the turn's own; a full paraphrase escapes, as in a review.
     A forward of the sender's own earlier message in the message it answered is their own words, not a read; earlier in
-    the session only the owner's is (OWN_FORWARDS)."""
+    the session only the owner's is (OWN_FORWARDS).
+
+    The message the turn's own message replies to is a read too, unless the owner typed it: Nocheh's own message
+    counts, since it may carry what others said. Earlier in the session such a block counts only when what the turn
+    wrote copies from its text (_replied), as other people's recent messages do."""
     from .retired_history import _columns,_read_only,_summary,memory_ops
-    from .turn_process import forwarded,recent_group
+    from .turn_process import forwarded,recent_group,reply_block
     reads=[]
     def add(token):
         if token not in reads:reads.append(token)
     if forwarded(body.get('forwarded')) and body['forwarded'] not in OWN_FORWARDS:add('forward')
     if body.get('files'):add('file')
     if recent_group(body.get('recent_group')):add('recent')
+    if reply_block(body.get('reply')) and body['reply']['by']!='owner':add('reply')
     database=Path(database)
     if last is None:return reads,None,False
     if not database.is_file():return reads,[],True
@@ -413,6 +428,7 @@ def turn_reads(database,session,last,body):
             for marker,token in MARKERS:
                 if marker in content and (token!='forward' or _forwards(content)):add(token)
             if 'recent' not in reads and _others(content) and _copied(content,written):add('recent')
+            if 'reply' not in reads and any(_copied(text,written) for text in _replied(content)):add('reply')
         elif row['role']=='tool':
             token=tool_read(row)
             if token and token not in reads and _copied(content,written):add(token)

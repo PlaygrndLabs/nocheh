@@ -141,6 +141,10 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
   assert.equal(label([turn({place:{chat:GP1}})]),'Nocheh\'s note from group “Family” on 2026-11-16');
   assert.equal(label([turn({place:{chat:GP1},reads:['recent','web']})]),'Nocheh\'s note from group “Family” on 2026-11-16, after reading recent group messages, web pages');
   assert.equal(label([turn({answered:'person_message'})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading the message it answered (another person\'s)');
+  // A note written after reading the message the turn's message replied to (ADR-0261) is never the owner's own.
+  assert.equal(label([turn({place:{chat:GP1},reads:['reply']})]),'Nocheh\'s note from group “Family” on 2026-11-16, after reading the message it replied to (not the owner\'s own words)');
+  assert.equal(label([turn({reads:['reply']})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading the message it replied to (not the owner\'s…','cut after a whole word');
+  assert.equal(fromToken([turn({reads:['reply']})]),'turn_read');
   assert.equal(label([turn({answered:'file_by_owner'})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading a file');
   assert.equal(label([turn({job:true})]),'Nocheh\'s note from a job or scheduled run in the owner\'s private chat on 2026-11-16');
   assert.equal(label([turn({job:true,reads:['notion']})]),'Nocheh\'s note from a job or scheduled run in the owner\'s private chat on 2026-11-16, after reading Notion');
@@ -152,7 +156,7 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
   assert.equal(label([{by:'unavailable'}]),'source not available right now');assert.equal(label([]),'source not recorded');
   // Long names shrink and many reads are cut, and the ending about replaced notes stays.
   const long=new Map([[GP1,'F'.repeat(64)],[GP1_TOPIC,'ک'.repeat(64)]]);
-  const reads=['forward','file','recent','archive','web','notion','tools','commands','past','other'] as const;
+  const reads=['forward','file','recent','reply','archive','web','notion','tools','commands','past','other'] as const;
   const cases:NoteOrigin[][]=[[turn({place:{chat:GP1_TOPIC},reads:[...reads],answered:'person_message',job:true}),{by:'unknown'}],[turn({place:{chat:GP1_TOPIC}})],
     [review([[1,'forward_hidden_by_person'],...Array.from({length:29},(_,i):[number,EventClass]=>[i+2,'person_message'])],[1],{},GP1_TOPIC),turn()]];
   for(const origins of cases) {
@@ -264,6 +268,7 @@ test('owner labels: the owner\'s own lines, people and chats named as reminders 
   assert.equal(ownerLabel([note(provenance(Array.from({length:8},(_,i):[number,EventClass]=>[i+1,'owner_message'])),[1]),{by:'unknown'}],words,names,keys),
     'Your own messages in your private chat; also an earlier note it replaced');
   assert.equal(ownerLabel([turn({reads:['web','past']})],words,names,keys),'Nocheh\'s note from your private chat on 2026-11-16, after reading web pages, past conversations');
+  assert.equal(ownerLabel([turn({place:{chat:GP1},reads:['reply']})],words,names,keys),`Nocheh's note from group ${q('Family')} on 2026-11-16, after reading the message it replied to`);
   assert.equal(ownerLabel([turn()],words,names,keys),'Nocheh\'s note from your private chat on 2026-11-16, written while answering your own message');
   assert.equal(ownerLabel([turn({place:{chat:GP1}})],words,names,keys),`Nocheh's note from group ${q('Family')} on 2026-11-16`);
   assert.equal(ownerLabel([turn({job:true})],words,names,keys),'Nocheh\'s note from your private chat on 2026-11-16','a job that read nothing outside');

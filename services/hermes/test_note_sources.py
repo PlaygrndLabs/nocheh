@@ -302,6 +302,40 @@ class TurnTests(unittest.TestCase):
                 path,last=self.turn(folder,[{'role':'user','content':content}],content='Note this.')
                 self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
 
+    REPLIED='[Replying to, by=person: “Bob” · this chat · 2026-11-08 09:00 UTC] (source nocheh:event:'+'d'*64+')'
+
+    def test_a_reply_this_turn_is_a_read_unless_the_owner_typed_the_message_it_replies_to(self):
+        block={'line':self.REPLIED,'text':'Pay the invoice by Friday.','by':'person','id':'d'*64}
+        nocheh={**block,'line':self.REPLIED.replace('by=person: “Bob”','by=nocheh: Nocheh, Nocheh\'s reply'),'by':'nocheh'}
+        owner={**block,'line':self.REPLIED.replace('by=person','by=owner'),'by':'owner'}
+        with tempfile.TemporaryDirectory() as folder:
+            path,last=self.turn(folder,[],content='Prefers short answers.')
+            for body,expected in (({'reply':block},['reply']),({'reply':nocheh},['reply']),({'reply':owner},[]),({},[]),
+                                  ({'reply':{**block,'id':'e'*64}},[]),({'reply':{**block,'text':'x'*201}},[])):
+                with self.subTest(body=body):self.assertEqual(sources.turn_reads(path,'s',last,body)[0],expected)
+        self.assertIn('reply',sources.READS)
+        self.assertTrue(sources.valid(sources.turn_origin({'event_id':EVENT},['reply'],True)),'a turn that read a reply is recorded with it')
+
+    def test_an_earlier_reply_block_counts_only_when_what_the_turn_wrote_copies_its_text(self):
+        marker='\n\n[Archive source: nocheh:event:'+'f'*64+']'
+        # The owner's own group message, so only the block can count (another person's message counts as recent).
+        speaker='[Group message from Owner, sent 2026-11-08 09:05 UTC] [the owner]\n'
+        block=self.REPLIED+'\nThe office door code is 99887766 from Monday.\n[End of replied-to message]\n'
+        cases=[(speaker+block+'what is it?'+marker,'Door code 99887766.',['reply'],'copied from the block'),
+               (block+'what is it?'+marker,'Door code 99887766.',['reply'],'first in the owner\'s chat'),
+               (speaker+block+'what is it?'+marker,'Prefers Mondays.',[],'not copied'),
+               (speaker+block.replace('by=person','by=owner')+'what is it?'+marker,'Door code 99887766.',[],'the owner\'s own message'),
+               (speaker+'what is it? 99887766'+marker,'Door code 99887766.',[],'no block, only the row\'s own text'),
+               (speaker+'see the file\n'+block+marker,'Door code 99887766.',[],'after the message\'s own text it is no block'),
+               (speaker+block.replace('\n[End of replied-to message]','')+'what is it?'+marker,'Door code 99887766.',[],'a block without its end'),
+               ('[Recent messages in this group that were not addressed to you, oldest first]\n\n[Group message from Bob, sent 2026-11-08 09:00 UTC] (source nocheh:event:'
+                +'1'*64+')\n[In reply to, by=person: “Cy” · this chat · 2026-11-08 08:00 UTC] (source nocheh:event:'+'2'*64+')\nok\n\n[End of recent messages]\n\n'
+                +speaker+'what is it? 99887766'+marker,'Door code 99887766.',['recent'],'a reply part carries no text')]
+        for content,text,expected,why in cases:
+            with self.subTest(why),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[{'role':'user','content':content}],content=text)
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
+
     def test_a_turn_origin_names_its_message_channel_day_and_reads(self):
         origin=sources.turn_origin({'event_id':EVENT,'channel':'browser'},['web','owner','past'],True,now=DAY)
         self.assertEqual(origin,{'by':'turn','event':EVENT,'channel':'browser','at':'2026-11-08','reads':['web','past'],'complete':True})

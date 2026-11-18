@@ -20,7 +20,7 @@ import {whoLabel,type NameKeys,type Names,type Who,type Words} from './task-remi
 export type NoteFrom='owner'|'nocheh'|'person'|'forward'|'file'|'mixed'|'turn'|'turn_read'|'unknown'|'unavailable';
 /** What a turn read besides the owner's message: the message it answered when that was not the owner's own typing,
  *  then the reads Hermes recorded. */
-export const readTokens=['message','forward','file','recent','archive','web','notion','tools','commands','past','other'] as const;
+export const readTokens=['message','forward','file','recent','reply','archive','web','notion','tools','commands','past','other'] as const;
 export type ReadToken=typeof readTokens[number];
 /** A chat, by its Nocheh chat id, and whether it was the owner's web chat. */
 export interface Place {chat:string|null;web?:boolean}
@@ -75,6 +75,7 @@ export const modelSourceWords={
     job_read:', after reading {reads}',inherited:'; also from an earlier note it replaced',unknown:'source not recorded',unavailable:'source not available right now',
     no_date:'a day not recorded'},
   reads:{message:'the message it answered (another person\'s)',forward:'a forwarded message',file:'a file',recent:'recent group messages',
+    reply:'the message it replied to (not the owner\'s own words)',
     archive:'messages from other chats',web:'web pages',notion:'Notion',tools:'tool servers',commands:'command results',past:'past conversations',other:'other tools'},
   places:{owner:'the owner\'s private chat',web:'the owner\'s web chat',group:'group “{name}”',unnamed_group:'a group',topic:' › topic “{name}”',
     unnamed_topic:' › a topic',unknown:'a chat Nocheh can\'t name'},
