@@ -168,12 +168,16 @@ export function allowedSender(policy:AssistantPolicy,payload:unknown,scope:strin
 
 /**
  * Whether an archived event may go into the owner's own notes review: a live Telegram update only from an allowed
- * sender (allowedSender), and Nocheh's own messages and the owner's web chat always. Any other kind is refused, so a
- * kind added later stays out until it is named here. Group memory and replies do not ask this.
+ * sender (allowedSender), Nocheh's own messages in the owner's chat or a group, and the owner's web chat always. Nocheh's
+ * messages in anyone else's private chat (a member's, step 4) or in a chat the directory does not know are refused. Any
+ * other kind is refused, so a kind added later stays out until it is named here. Group memory and replies do not ask this.
  */
 export function notesSender(policy:AssistantPolicy,event:{channel:string;kind:string;scope:string;payload:unknown}):'review'|'sender_not_allowed' {
   if(event.channel==='telegram'&&event.kind==='telegram_update')return allowedSender(policy,event.payload,event.scope)?'review':'sender_not_allowed';
-  if(event.channel==='telegram'&&event.kind==='telegram_delivered_message')return 'review';
+  if(event.channel==='telegram'&&event.kind==='telegram_delivered_message') {
+    const directory=chats(),id=isTelegramChat(event.scope)?directory.resolve('telegram',event.scope):null;
+    return id!==null&&(id===ownerChat(policy)&&directory.kind(id)==='private'||directory.kind(id)==='group')?'review':'sender_not_allowed';
+  }
   if(event.channel==='browser'&&['browser_input','browser_delivered_message'].includes(event.kind))return 'review';
   return 'sender_not_allowed';
 }
