@@ -59,13 +59,16 @@ def prepare_profile(root,scope,model):
     configure_profile(profile, model, chat=scope.chat_id)
     from .persona import audience, materialize
     # A private answer runs in the owner's private chat but never loads that chat's own role or skills: it gets the
-    # project's, else the groups default (ADR-0249).
-    materialize(root, profile, None if scope.answer else scope.chat_id, scope.project, audience(scope))
+    # project's, else the groups default (ADR-0249). A member's private chat has no role of its own (step 4): it reads the
+    # groups default too.
+    materialize(root, profile, None if scope.answer or scope.member else scope.chat_id, scope.project, audience(scope))
     from .native_memory import save_receipt
     # The marker keeps the chat beside its space, so what a topic inherits never comes from the shape of its id (ADR-0252).
     save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'chat':scope.chat_id,'revision':scope.revision,'owner':scope.owner,
         'guard_epoch':scope.guard_epoch,'generation':scope.generation,'purpose':scope.purpose,'logical_profile':scope.logical_profile,
-        **({'answer':scope.answer} if scope.answer else {})}))
+        **({'answer':scope.answer} if scope.answer else {}),
+        # A member's own private chat (step 4): the owner's recall leaves its notes and sessions out (D7).
+        **({'member':scope.member} if scope.member else {})}))
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
@@ -100,16 +103,20 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
             try:os.fsync(directory)
             finally:os.close(directory)
         await asyncio.to_thread(save_cursor)
-        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner,bool(scope.answer))
+        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner,bool(scope.answer),bool(scope.member))
         except Exception:pass # A missing title is cosmetic; the next turn tries again.
     return result
 
 
-def session_title(message,owner,answer=False):
+def session_title(message,owner,answer=False,member=False):
     """The chat a Telegram session belongs to, as the dashboard's session list shows it. A private answer's own
-    session is named as one, so the owner's private chat keeps its own name (ADR-0249)."""
+    session is named as one, so the owner's private chat keeps its own name (ADR-0249); a member's private chat is named
+    as a member's, by the name Telegram shows for them (step 4)."""
     if answer:return 'Private answer'
     chat=message.get('chat') if isinstance(message.get('chat'),dict) else {}
+    if member:
+        name=' '.join(part.strip() for part in (chat.get('first_name'),chat.get('last_name')) if isinstance(part,str) and part.strip())
+        return (('Private chat with '+name) if name else "A member's private chat")[:90]
     title=chat.get('title') if isinstance(chat.get('title'),str) else ''
     name='Private chat' if owner else title.strip() or 'Telegram group'
     topic=topic_id(message)
@@ -123,12 +130,12 @@ def session_title(message,owner,answer=False):
     return name[:90]
 
 
-def title_session(profile,session_id,message,owner,answer=False):
+def title_session(profile,session_id,message,owner,answer=False,member=False):
     """Name a Telegram session after its chat. It is Hermes's top automatic title: it replaces a first-message
     title and stays once set, and Hermes keeps a title set by hand over it."""
     from hermes_state import SessionDB
     from .isolated_profile import database_path
-    title=session_title(message,owner,answer)
+    title=session_title(message,owner,answer,member)
     db=SessionDB(database_path(profile))
     try:
         if not db.get_session(session_id) or db.get_session_title_source(session_id) in (SessionDB.TITLE_SOURCE_LLM,SessionDB.TITLE_SOURCE_USER):return

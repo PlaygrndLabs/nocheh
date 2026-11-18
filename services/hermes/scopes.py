@@ -32,6 +32,19 @@ def verify_capability(credential,secret,scope,event_id):
         # chat, with the chat itself as its scope (ADR-0249).
         answer=claims.get('answer')
         if answer is not None and (not scope.owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):raise ValueError()
+        # A member's pass (step 4) names that member and reads as their own private chat: only for the member scope
+        # resolve() built from this very pass, never the owner, an answer or a group. The owner's ask about a member
+        # (member_read, step 4b) has no scope here yet, so its pass is refused. A pass names at most one of these, and
+        # never what storage binds on the server.
+        member=claims.get('member')
+        if (member is not None)!=bool(scope.member) or member is not None and (scope.owner or member!=scope.member or not re.fullmatch(r'[a-f0-9]{64}',member)):raise ValueError()
+        if claims.get('member_read') is not None or any(key in claims for key in ('reads','member_chat','memberChat','memberRead')):raise ValueError()
+        if answer is not None and member is not None:raise ValueError()
+        # A lane (a member id) only orders turns: one at a time per member. It is never on the owner's own pass or an
+        # answer's, and on a member's pass it is that member.
+        lane=claims.get('lane')
+        if lane is not None and (not isinstance(lane,str) or not re.fullmatch(r'[a-f0-9]{64}',lane) or claims.get('scope') is None or
+                                 answer is not None or member is not None and lane!=member):raise ValueError()
         if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner and answer is None else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
             raise ValueError()
         if claims.get('space') is not None:
@@ -65,6 +78,8 @@ class Scope:
     logical_profile: str = ''
     project: str = ''
     answer: str = ''
+    # The member whose own private chat this turn is in (step 4, ADR-0262), as its pass names them: never the owner.
+    member: str = ''
     # Where a Telegram turn's chat is in its app now, as its pass binds it: ('telegram', chat id, topic key or None).
     app: tuple = ()
 
@@ -152,8 +167,9 @@ class Scopes:
         Telegram id (now or before) and topic are that space, which is where the binding says it is now (ADR-0252). The
         owner's own turn (no scope) and a private answer (ADR-0249) are the owner writing in the owner's private chat;
         any other is a person writing in a served group, whom the app admitted (its member directory, step 3) before it
-        signed this event's pass: a bot, or a message in a chat's own name, never is. A turn this policy does not serve is
-        None; a pass that does not match its update is refused."""
+        signed this event's pass: a bot, or a message in a chat's own name, never is. A member's pass (step 4) is that
+        member writing in their own private chat, which the served list marks member_private, never the owner, with
+        `owner` False. A turn this policy does not serve is None; a pass that does not match its update is refused."""
         if not self.enabled:return None
         payload=body.get('payload') if isinstance(body.get('payload'),dict) else {}
         message=payload.get('message')
@@ -175,19 +191,28 @@ class Scopes:
         served=self.current(epoch if type(epoch) is int else None,60.0,lambda served:served.resolve(external,topic)==space)
         # A list that cannot be read is no answer: the turn fails, to be tried again, rather than be dropped as unserved.
         if not served.available:raise RuntimeError('served_chats_unavailable')
-        owner=claims.get('scope') is None or claims.get('answer') is not None
-        # A chat no longer served (the owner's chat changed, a group left the list) gets no turn.
-        if not (served.is_owner(nocheh) if owner else served.group(nocheh)==nocheh):return None
+        # Whose turn it is, by its pass: the owner (or an answer, in the owner's chat), a member in their own private chat,
+        # or someone in a served group. The owner's ask about a member (member_read, step 4b) gets no turn here yet.
+        if claims.get('member_read') is not None:return None
+        member=claims.get('member')
+        kind='member' if member is not None else 'owner' if claims.get('scope') is None or claims.get('answer') is not None else 'group'
+        if kind=='member' and (claims.get('scope')!=nocheh or claims.get('answer') is not None):raise ValueError('archive_capability_scope_mismatch')
+        # A chat no longer served (the owner's chat changed, a group left the list, a member's chat closed) gets no turn.
+        if not {'owner':served.is_owner,'member':served.member_private,'group':lambda chat:served.group(chat)==chat}[kind](nocheh):return None
         # A served one: the update is from this chat and topic, by its Telegram id now or before, and the binding is where it
-        # is now. The owner's private chat has no topics.
+        # is now. A private chat, the owner's or a member's, has no topics.
         if (served.resolve(external,topic)!=space or served.binding(space)!=app or served.chat_of(space)!=nocheh or
-                owner and space!=nocheh):
+                kind!='group' and space!=nocheh):
             raise ValueError('archive_capability_scope_mismatch')
-        if owner:
+        if kind=='owner':
             if chat.get('type')!='private' or user_id!=served.owner_user():return None
+        elif kind=='member':
+            # The person writing is the chat's own person, never the owner, and never in a chat's own name.
+            if (chat.get('type')!='private' or topic is not None or user_id!=external or user_id==served.owner_user() or
+                    served.is_owner(nocheh) or message.get('sender_chat') is not None):return None
         else:
             if chat.get('type') not in ('group','supergroup') or message.get('sender_chat') is not None:return None
         from gateway.profile_routing import match_profile_route,parse_profile_routes
         route=match_profile_route(parse_profile_routes([{'platform':'telegram','chat_id':nocheh,'profile':self.profile(nocheh),'name':nocheh}]),'telegram',chat_id=nocheh)
         if not route:raise ValueError('missing_profile_route')
-        return Scope(nocheh,user_id,owner,route.profile,space,app=('telegram',app['chat'],app['topic']))
+        return Scope(nocheh,user_id,kind=='owner',route.profile,space,app=('telegram',app['chat'],app['topic']),member=member or '')

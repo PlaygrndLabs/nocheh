@@ -51,8 +51,9 @@ def _logical(receipt):
 
 
 def _same_chat(current,other):
-    """Same chat, owner flag, installation and logical profile; reviews share the assistant profile, filtering does not."""
-    keys=('space','owner','generation')+(() if current.get('generation') else ('revision',))
+    """Same chat, owner flag, member, installation and logical profile; reviews share the assistant profile, filtering
+    does not. A member's private chat carries only that member's own conversation (step 4)."""
+    keys=('space','owner','member','generation')+(() if current.get('generation') else ('revision',))
     kind=lambda value:'filter' if value.get('purpose')=='filter' else 'assistant'
     return all(current.get(key)==other.get(key) for key in keys) and _logical(current)==_logical(other) and kind(current)==kind(other)
 

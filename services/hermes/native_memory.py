@@ -60,6 +60,25 @@ def place(profile, value):
             **({'answer_group': group} if group else {})}
 
 
+def recall_allowed(value):
+    """The places an owner turn's recall may read, as storage sends them ({'spaces': [chat ids]}), or None when the
+    request names none (the dashboard, which reads every profile). Anything malformed is refused, never read as none."""
+    if value is None: return None
+    spaces = value.get('spaces') if isinstance(value, dict) and set(value) == {'spaces'} else None
+    if not isinstance(spaces, list) or len(spaces) > 10000 or any(not isinstance(space, str) or not 0 < len(space) <= 200 for space in spaces):
+        raise ValueError('invalid_recall_allowed')
+    return frozenset(spaces)
+
+
+def recallable(profile, value, allowed):
+    """Whether an owner turn's recall may read this profile (D7): never a member's private chat's or an ask about a
+    member's; the owner's own, an owner's private answer, or a place in `allowed`. A profile with no readable receipt is
+    the owner's only by the owner marker."""
+    if isinstance(value, dict) and (value.get('member') or value.get('member_read')): return False
+    where = place(profile, value)
+    return where['owner'] or where['answer'] or where['space'] is not None and where['space'] in allowed
+
+
 def recall(root, body, retirements=None):
     from hermes_state import SessionDB
     query = body.get('query', '')
@@ -82,6 +101,13 @@ def recall(root, body, retirements=None):
             if value is None:return False
             return (body.get('guard_epoch') is None or value.get('guard_epoch')==body['guard_epoch']) and (body.get('generation') is None or value.get('generation')==body['generation'])
         profiles=[p for p in profiles if current(p)]
+    allowed = recall_allowed(body.get('allowed'))
+    if allowed is not None:
+        # An owner turn's recall (D7, step 4): storage names the places it may read and Hermes never works them out
+        # itself. A profile is kept only when its receipt names no member's private chat and no ask about a member, and
+        # it is the owner's own, one of the owner's private answers, or its place is one of those named. Anything else,
+        # a profile named by the request included, is outside it.
+        profiles=[p for p in profiles if recallable(p, metadata(p), allowed)]
     selected = body.get('profile')
     if selected:
         profiles = [p for p in profiles if p.name == selected]

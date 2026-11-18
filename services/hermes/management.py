@@ -67,7 +67,9 @@ def dispatch(root, model, policy, body):
                                    'guard_epoch':metadata.get('guard_epoch',0),'exists':True,
                                    # A private answer's own profile, in the owner's private chat but never the owner's (ADR-0249),
                                    # named by where it was asked and when, as its receipt keeps them.
-                                   **({'private_answer':True,**answer_receipt(path)} if metadata.get('answer') else {})}
+                                   **({'private_answer':True,**answer_receipt(path)} if metadata.get('answer') else {}),
+                                   # A member's own private chat (step 4): never the owner's, whatever its chat is.
+                                   **({'member':True} if metadata.get('member') else {})}
         return {'profiles':profiles,'history_profiles':list(historical.values())}
     if action == 'prompts':
         from .prompts import DEFAULTS, LIMIT

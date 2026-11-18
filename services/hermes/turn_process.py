@@ -52,9 +52,9 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             from .retired_history import service_lookup, withhold_retired
             await asyncio.to_thread(withhold_retired, database_path(profile), service_lookup, profile/'memories')
             # This parent records who wrote each note the turn adds or changes, outside the turn's reach (ADR-0257). A
-            # private answer has no memory tool, so it writes no notes.
+            # private answer has no memory tool, so it writes no notes; neither does a member's private chat (step 4).
             from . import note_sources
-            watch=None if scope.answer else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile))
+            watch=None if scope.answer or scope.member else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile))
             result=None
             try:
                 result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'])
@@ -189,8 +189,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     if isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker:
         # Who spoke and when stays out of the memory query; the model and native history see it.
         text = speaker + '\n' + (text if forward else unframed(text))
-    elif answer and not forward:
-        # A private answer's question is group text even without its speaker line.
+    elif (answer or scope.member) and not forward:
+        # A private answer's question is group text even without its speaker line; a member's own words never read as
+        # one of Nocheh's lines either (step 4).
         text = unframed(text)
     recent=recent_group(body.get('recent_group'))
     if recent:
@@ -217,6 +218,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),
                'model':model, 'memory_query':memory_query, 'session_id':session_id, 'owner':scope.owner, 'chat_id':scope.chat_id,
                'private_answer':bool(answer),
+               # A member's own private chat (step 4): read tools only, no notes, the member's reply rules.
+               'member':bool(scope.member),
                'user_id':scope.user_id, 'archive_credential':body['archive_credential'],
                **transport, 'stream':emit is not None,
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
@@ -295,7 +298,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             from .usage import note_done, note_failed
             problem=result.pop('memory_problem',None)
             if problem=='memory_read':await asyncio.to_thread(note_failed,'memory_read')
-            elif result.get('state')=='done' and not answer:await asyncio.to_thread(note_done,'memory_read')
+            elif result.get('state')=='done' and not answer and not scope.member:await asyncio.to_thread(note_done,'memory_read')
             # A job run reports Hermes's own token counts too; Nocheh prices them at the rates frozen on the job's card.
             if background:
                 from .job_progress import run_tokens

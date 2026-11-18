@@ -2,6 +2,7 @@
 
 Receipts stay content-free like every async run. The reply lives only in the run's .outcome file."""
 import asyncio
+import contextlib
 import json
 import re
 import threading
@@ -140,14 +141,24 @@ class BrainTurns:
         if answer:scope=replace(scope,owner=False)
         scope=Scopes.apply_revision(scope,claims)
         # Turns in one conversation keep their arrival order; different chats
-        # and topics run side by side, up to the capacity. Lane before capacity, always.
-        key=scope.space or scope.chat_id
-        lane=self.lanes.setdefault(key,{'lock':asyncio.Lock(),'users':0});lane['users']+=1
-        try:
-            async with lane['lock']:
+        # and topics run side by side, up to the capacity. A member's turns, in their own private chat and in groups, run
+        # one at a time: their pass's lane names them (step 4). The owner's turns, an answer's and an ask's carry none.
+        # Always the space's lane, then the member's, then capacity: nothing holding a member's lane ever waits for a
+        # space's, so no two turns wait on each other.
+        lane=claims.get('lane')
+        async with self._lane(scope.space or scope.chat_id):
+            async with self._lane('lane:'+lane) if lane else contextlib.nullcontext():
                 async with self.capacity:
                     if cancelled.is_set():return {'state':'cancelled'}
                     return await self._run(scope,body,progress,cancelled)
+
+    @contextlib.asynccontextmanager
+    async def _lane(self,key):
+        """One turn at a time under `key`, in arrival order; an idle key leaves nothing behind. Space keys are Nocheh chat
+        ids and member keys start with `lane:`, so the two never meet."""
+        lane=self.lanes.setdefault(key,{'lock':asyncio.Lock(),'users':0});lane['users']+=1
+        try:
+            async with lane['lock']:yield
         finally:
             lane['users']-=1
             if not lane['users'] and self.lanes.get(key) is lane:del self.lanes[key]

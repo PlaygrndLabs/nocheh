@@ -60,11 +60,12 @@ class Policy:
         return cls(enabled == 'true')
 
     @classmethod
-    def of(cls, enabled, owner, groups, topics=(), old=None):
+    def of(cls, enabled, owner, groups, topics=(), old=None, members=()):
         """Tests only: a fixed served list where the owner's chat and each group keep their Telegram id as their chat id,
-        as chats stored before step 2b do; `groups` may also hold (chat id, Telegram id) pairs."""
+        as chats stored before step 2b do; `groups` may also hold (chat id, Telegram id) pairs, and `members` lists members'
+        own private chats that are open now (step 4) the same way."""
         from services.chats import Served
-        return cls(enabled, Served.of(owner, groups=groups, topics=topics, old=old))
+        return cls(enabled, Served.of(owner, groups=groups, topics=topics, old=old, members=members))
 
     def current(self, epoch=None, max_age=5.0, holds=None):
         """The served list as the app has it now: read again when older than `max_age` seconds, when a pass carries a

@@ -1,7 +1,8 @@
 """The chats Nocheh serves, as the app tells the Python services (ADR-0252).
 
 GET {ARCHIVE_URL}/internal/chats, behind the service token, lists every served chat with its topics and the owner's
-private chat, by their Nocheh chat ids, each with its ids in its app (the current one and older ones, such as a group's
+private chat (and each member's own private chat that is open now, marked `member_private` and never served, step 4),
+by their Nocheh chat ids, each with its ids in its app (the current one and older ones, such as a group's
 id before Telegram upgraded it), and the owner's account in the app. A service asks this list what a chat is, whether it
 is served and where it is in Telegram now; it never reads a chat's kind, parent or topic from the shape of an id, and it
 never compares a Nocheh chat id with a Telegram id. A list that cannot be read serves nothing (ADR-0242, fail closed).
@@ -46,9 +47,13 @@ class Served:
             row = {'id': _text(chat.get('id')), 'app': _text(chat.get('app'), 32), 'kind': chat.get('kind'),
                    'parent_id': None if chat.get('parent_id') is None else _text(chat.get('parent_id')),
                    'topic_key': None if chat.get('topic_key') is None else _text(chat.get('topic_key')), 'state': chat.get('state'),
-                   'app_ids': []}
+                   'app_ids': [], 'member_private': chat.get('member_private', False)}
             if row['kind'] not in KINDS or row['state'] not in STATES or (row['kind'] == 'topic') != (row['parent_id'] is not None) or \
                     (row['kind'] == 'topic') != (row['topic_key'] is not None) or row['id'] in self.chats: raise ValueError('invalid_served_chats')
+            # A member's own private chat that is open now (step 4, ADR-0262): listed only so a member's pass is taken there,
+            # never served and never the owner's. Anything else carrying the mark is a list this service cannot trust.
+            if row['member_private'] is not False and (row['member_private'] is not True or row['kind'] != 'private' or
+                                                       row['state'] == 'active' or row['id'] == self.owner_chat): raise ValueError('invalid_served_chats')
             ids = chat.get('app_ids', [])
             # A topic has no app ids of its own: it is its chat's, with its key.
             if not isinstance(ids, list) or row['kind'] == 'topic' and ids: raise ValueError('invalid_served_chats')
@@ -76,10 +81,11 @@ class Served:
         return served
 
     @classmethod
-    def of(cls, owner_chat=None, owner_account=None, groups=(), topics=(), old=None, epoch=0, app='telegram'):
+    def of(cls, owner_chat=None, owner_account=None, groups=(), topics=(), old=None, epoch=0, app='telegram', members=()):
         """A list for tests and policy files: `owner_chat` and each of `groups` is a chat whose Nocheh id is its own app id
         (as a chat stored before step 2b keeps); `topics` holds (topic id, parent id, key); `old` maps a chat to its older
-        app ids; `groups` may also hold (chat id, current app id) pairs for a chat first seen after step 2b."""
+        app ids; `groups` may also hold (chat id, current app id) pairs for a chat first seen after step 2b. `members` holds
+        members' own private chats that are open now, the same way (step 4): listed with their mark, never served."""
         chats, old = [], old or {}
         if owner_chat is not None:
             chats.append({'id': owner_chat, 'app': app, 'kind': 'private', 'parent_id': None, 'topic_key': None, 'state': 'active',
@@ -88,6 +94,10 @@ class Served:
             chat, current = group if isinstance(group, tuple) else (group, group)
             chats.append({'id': chat, 'app': app, 'kind': 'group', 'parent_id': None, 'topic_key': None, 'state': 'active',
                           'app_ids': [{'external': current, 'state': 'current'}, *({'external': value, 'state': 'old'} for value in old.get(chat, ()))]})
+        for member in members:
+            chat, current = member if isinstance(member, tuple) else (member, member)
+            chats.append({'id': chat, 'app': app, 'kind': 'private', 'parent_id': None, 'topic_key': None, 'state': 'off',
+                          'app_ids': [{'external': current, 'state': 'current'}], 'member_private': True})
         for topic, parent, key in topics:
             chats.append({'id': topic, 'app': app, 'kind': 'topic', 'parent_id': parent, 'topic_key': str(key), 'state': 'active', 'app_ids': []})
         account = owner_account if owner_account is not None else owner_chat
@@ -121,6 +131,14 @@ class Served:
     def is_owner(self, chat_id):
         """The owner's private chat, or one of its topics."""
         return self.owner_chat is not None and self.chat_of(chat_id) == self.owner_chat
+
+    def member_private(self, chat_id):
+        """A member's own private chat that is open now, as the app marks it (step 4): never a topic, never the owner's
+        chat and never served. Who the member is and what they may read are the app's alone; this only says that a
+        member's pass may be taken here."""
+        row = self.chat(chat_id)
+        return bool(row) and row['member_private'] is True and row['kind'] == 'private' and row['state'] != 'active' and \
+            row['id'] != self.owner_chat
 
     def group(self, chat_id):
         """A served group, or a topic of one: its group's id, else None."""

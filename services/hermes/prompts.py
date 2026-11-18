@@ -142,6 +142,9 @@ def text(prompts, key):
     return DEFAULTS[key]
 
 
-def reply(prompts, owner, private=False):
-    """The reply rules for every chat, then the owner's private chat's, a private answer's or a group's."""
-    return text(prompts, 'reply.common') + ' ' + text(prompts, 'reply.owner' if owner else 'reply.private' if private else 'reply.group')
+def reply(prompts, owner, private=False, member=False):
+    """The reply rules for every chat, then the owner's private chat's, a member's own private chat's (step 4), a
+    private answer's or a group's. A member's chat is never the owner's: asking for both reads as neither."""
+    if member and (owner or private): raise ValueError('invalid_member_turn')
+    return text(prompts, 'reply.common') + ' ' + text(prompts, 'reply.owner' if owner else 'reply.member' if member else
+                                                      'reply.private' if private else 'reply.group')
