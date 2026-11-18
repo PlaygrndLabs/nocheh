@@ -244,8 +244,12 @@ const askNotes:Record<string,string>={
   member_not_found:'No member has that name. Ask the owner which member they mean, by the name Telegram shows for them.',
   member_name_ambiguous:'More than one member has that name. Ask the owner to name the member by their @username.',
   member_chat_closed:'That member\'s private chat with Nocheh cannot be read now: they are paused, removed, have private chat off, or never wrote to Nocheh.',
+  member_chat_several:'That member wrote to Nocheh from more than one Telegram account, and an ask reads only one private chat, so they '+
+    'cannot be asked about yet. Tell the owner so; nothing was asked.',
   member_ask_limit:'One message can ask about at most three members.',
 };
+/** The refusals the broker passes on to the ask tool (askNotes); any other stays opaque. */
+export const askErrors=new Set(Object.keys(askNotes));
 async function askMemberChat(args:Value,context:ToolContext) {
   if(Object.keys(args).some(key=>!['member','question'].includes(key))||typeof args.member!=='string'||!args.member.trim()||args.member.length>200||
     typeof args.question!=='string'||!args.question.trim()||args.question.length>4000)return text({error:'invalid_member_ask'});

@@ -21,10 +21,12 @@ import {peopleNames} from './people-names.js';
  * carried into the owner's ongoing conversation.
  *
  * In the control store after the member tables (member-schema.ts). Created only if missing, so the control bootstrap
- * runs again as a no-op. Removing a member removes their asks.
+ * runs again as a no-op. Removing a member removes their closed asks (MemberRepository.remove); an open one loses its
+ * member (member_id cleared), so its worker closes it, tells the owner once, and then removes it too.
  * - id: the ask's id, 32 hex, also the memberRead claim.
  * - owner_event: the owner's message that asked (an event id).
- * - member_id: the member asked about.
+ * - member_id: the member asked about; null once that member was removed.
+ * - member_label: how the answer named the member when asked, for the owner's notice after the member was removed.
  * - question: the owner's question as the owner's turn put it.
  * - state: queued, running, answered, failed or expired; error_code says why it failed.
  * - created_at, started_at, answered_at, expires_at: when it was asked, its turn started, its answer went out, and the
@@ -42,7 +44,7 @@ export const ownerMemberAskSchema=`
 CREATE TABLE IF NOT EXISTS owner_member_asks (
  id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{32}$'),
  owner_event text NOT NULL CHECK(owner_event ~ '^[a-f0-9]{64}$'),
- member_id text NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+ member_id text REFERENCES members(id) ON DELETE SET NULL,
  question text NOT NULL CHECK(length(btrim(question))>0 AND length(question)<=${OWNER_MEMBER_ASK_QUESTION_LIMIT}),
  state text NOT NULL DEFAULT 'queued' CHECK(state IN (${ownerMemberAskStates.map(state=>`'${state}'`).join(',')})),
  error_code text CHECK(error_code IS NULL OR error_code ~ '^[a-z][a-z0-9_]{0,63}$'),
@@ -64,6 +66,7 @@ ALTER TABLE owner_member_asks ADD COLUMN IF NOT EXISTS input_reference jsonb;
 ALTER TABLE owner_member_asks ADD COLUMN IF NOT EXISTS binding jsonb;
 ALTER TABLE owner_member_asks ADD COLUMN IF NOT EXISTS next_attempt timestamptz NOT NULL DEFAULT now();
 ALTER TABLE owner_member_asks ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE owner_member_asks ADD COLUMN IF NOT EXISTS member_label text CHECK(member_label IS NULL OR length(member_label) BETWEEN 1 AND 300);
 `;
 /** How long an ask may wait for its turn: past this it expires and is never answered. */
 export const OWNER_MEMBER_ASK_MINUTES=30;
@@ -72,7 +75,7 @@ export const OWNER_MEMBER_ASKS_PER_MESSAGE=3;
 /** The workflow job that answers an ask, in the telegram family: `ask:<id>`. */
 export const ownerMemberAskJob=(id:string)=>'ask:'+id;
 
-export interface OwnerMemberAsk {id:string;owner_event:string;member_id:string;question:string;state:OwnerMemberAskState;error_code:string|null;
+export interface OwnerMemberAsk {id:string;owner_event:string;member_id:string|null;member_label:string|null;question:string;state:OwnerMemberAskState;error_code:string|null;
   created_at:Date;started_at:Date|null;answered_at:Date|null;expires_at:Date;send_key:string|null;attempts:number;
   input_reference:unknown;binding:unknown;next_attempt:Date;updated_at:Date}
 
@@ -169,9 +172,12 @@ export class OwnerMemberAskRepository {
     if('refused' in guard)throw new HttpError(guard.refused==='member_not_found'?404:guard.refused==='member_name_ambiguous'?409:403,guard.refused);
     const member=members.get(guard.member.id)!;
     // Their own private chat with Nocheh must be open now, and be the only one: a member paused, removed or with private
-    // chat off, or one Nocheh has no private chat with, is not asked about.
+    // chat off, or one Nocheh has no private chat with, is not asked about. A member who wrote to Nocheh from more than
+    // one Telegram account is not asked about either (an ask reads one chat), and the owner is told so.
     const own=chats().all().filter(chat=>chat.kind==='private'&&chat.account_id!==null&&member.accounts.includes(chat.account_id));
-    if(member.state!=='active'||!member.privateChat||own.length!==1||!memberPrivate(own[0]!.id))throw new HttpError(409,'member_chat_closed');
+    if(member.state!=='active'||!member.privateChat||!own.length)throw new HttpError(409,'member_chat_closed');
+    if(own.length>1)throw new HttpError(409,'member_chat_several');
+    if(!memberPrivate(own[0]!.id))throw new HttpError(409,'member_chat_closed');
     const db=await this.control.connect();
     try {
       await db.query('BEGIN');
@@ -181,8 +187,9 @@ export class OwnerMemberAskRepository {
       if(!row) {
         const count=Number((await db.query('SELECT count(*) FROM owner_member_asks WHERE owner_event=$1',[source.reference.id])).rows[0].count);
         if(count>=OWNER_MEMBER_ASKS_PER_MESSAGE)throw new HttpError(409,'member_ask_limit');
-        row=(await db.query<OwnerMemberAsk>(`INSERT INTO owner_member_asks(id,owner_event,member_id,question,expires_at)
-          VALUES($1,$2,$3,$4,now()+make_interval(mins=>$5)) RETURNING *`,[randomBytes(16).toString('hex'),source.reference.id,member.id,question,OWNER_MEMBER_ASK_MINUTES])).rows[0]!;
+        row=(await db.query<OwnerMemberAsk>(`INSERT INTO owner_member_asks(id,owner_event,member_id,member_label,question,expires_at)
+          VALUES($1,$2,$3,$4,$5,now()+make_interval(mins=>$6)) RETURNING *`,
+          [randomBytes(16).toString('hex'),source.reference.id,member.id,guard.member.label.slice(0,300),question,OWNER_MEMBER_ASK_MINUTES])).rows[0]!;
         await requestWorkflow(db,'telegram',ownerMemberAskJob(row.id));
       }
       await db.query('COMMIT');

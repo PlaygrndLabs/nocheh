@@ -397,9 +397,11 @@ later turns cannot read it, or its words when you reply quoting it.
 Only your own message, not a forward, and only when its own text names the
 member, can ask; a name two members share is refused, and one message asks
 about at most three members. A member who is paused, removed, has private chat
-off or never wrote to Nocheh cannot be asked about. An ask waits up to 30
-minutes; when the chat closes meanwhile, or no answer comes after a second try,
-you get one short notice instead.
+off or never wrote to Nocheh cannot be asked about, and neither can a member who
+wrote to Nocheh from more than one Telegram account; Nocheh tells you which. The
+ask runs even when Nocheh chose not to answer your asking message. An ask waits
+up to 30 minutes; when the chat closes meanwhile, the time runs out, or no answer
+comes after a second try, you get one short notice instead.
 
 ## Send records
 

@@ -298,6 +298,9 @@ export class Members implements MemberRepository {
    * rows stay. Tasks and reminders name people by account, so they stay as they are. */
   async remove(principal:Reader,id:string,request:MemberRemoveRequest):Promise<MemberRemoved> {
     const done=await this.commands.run(principal,request.operation_id,{kind:'member_remove',id},async db=>{
+      // Their closed asks go with them; an open one loses its member, so its worker closes it and tells the owner once
+      // (owner-member-asks.ts).
+      await db.query("DELETE FROM owner_member_asks WHERE member_id=$1 AND state NOT IN ('queued','running')",[id]);
       if(!(await db.query('DELETE FROM members WHERE id=$1',[id])).rowCount)throw new HttpError(404,'member_not_found');
       return {revision:await bump(db),removed:id};
     },{epoch:false});

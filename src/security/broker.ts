@@ -17,7 +17,7 @@ import {RuntimeTurnRepository} from '../stores/turns.js';
 import {assertPrivateAnswerRoute} from '../stores/private-answers.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
-import {actionErrors,jobErrors,taskErrors} from '../mcp/tools.js';
+import {actionErrors,askErrors,jobErrors,taskErrors} from '../mcp/tools.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {longFetch} from '../long-fetch.js';
 
@@ -37,7 +37,7 @@ export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prep
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered|grants)\/[a-f0-9]{64}|memory\/learned\/[a-f0-9]{64}\/[1-9][0-9]{0,8}|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions(?:\/[a-f0-9]{64})?|telegram\/destinations)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|member-asks|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
@@ -211,7 +211,9 @@ export function brokerServer(options:BrokerOptions) {
       if(copy||scopedRoute(req.method??'',relay)) {
         // Only the box route reads whole texts; no other read can ask for them.
         if(!copy&&url.searchParams.has('full'))url.searchParams.delete('full');
-        const tasks=/^\/v1\/owner\/tasks(?:\/|$)/.test(relay),knowledge=relay.startsWith('/v1/knowledge/')||relay.startsWith('/v1/owner/');
+        // The owner's ask about a member (step 4b) is the owner's live private turn's too, read as the owner's memory.
+        const tasks=/^\/v1\/owner\/tasks(?:\/|$)/.test(relay),ask=relay==='/v1/member-asks';
+        const knowledge=relay.startsWith('/v1/knowledge/')||relay.startsWith('/v1/owner/')||ask;
         // Fixed scoped routes keep runtime tools away from owner credentials.
         // Storage independently verifies a current live owner-private turn.
         if(knowledge&&!tasks&&(!binding.owner||binding.job||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');
@@ -231,7 +233,7 @@ export function brokerServer(options:BrokerOptions) {
           // why it did not run, also when the machine could not be reached; a proposal, that the owner turned its tool off here;
           // a message request, that its chat is not one Nocheh serves; a task change, why a reminder time was not saved.
           const codes=relay.startsWith('/v1/jobs/')&&response.status<500?jobErrors:exec?machineErrors:relay==='/v1/tools/propose'&&response.status<500?proposeErrors:
-            relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:null;
+            relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:ask&&response.status<500?askErrors:null;
           const refused=codes&&response.status>=400?await refusalBody(response):(await response.body?.cancel(),null),code=refused?.code??null;
           // A member's private chat that did not name a project hears which lists it may choose (D14).
           if(tasks&&code==='task_project_required'&&refused?.projects)throw new DetailedRefusal(response.status,code,{projects:refused.projects});

@@ -366,8 +366,11 @@ class ServiceTests(unittest.TestCase):
             classes.append(gateway.route_class.__wrapped__(value, allowed, default)); return classes[-1]
         recorded.__wrapped__ = gateway.route_class
         ask = 'f' * 32
+        # The worker's own key (askSendKey in src/stores/owner-member-ask-turns.ts): the asking message's source key with a
+        # continuation named by the ask.
         body = self.turn(35, text='What Mira said')
-        event = body['event_id']
+        source, event = body['dispatch_key'], body['event_id']
+        body = {**body, 'dispatch_key': source + ':continuation:' + digest('member-ask:' + ask)}
         with patch.object(gateway, 'route_class', recorded):
             self.assertEqual(self.service.reply({**body, 'archive_credential': credential(event, OWNER, OWNER, member_read=ask, app=binding(OWNER))})['state'], 'done')
             self.assertEqual(classes, ['member_read'], 'an ask\'s answer is never sent as an ordinary reply')
@@ -378,7 +381,9 @@ class ServiceTests(unittest.TestCase):
                        'a malformed ask': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'archive_credential': credential(event, OWNER, OWNER, member_read='F' * 32, app=binding(OWNER))},
                        'in a group': {**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, member_read=ask, app=binding(GROUP))},
                        'the class without its pass': {**group, 'send_class': 'member_read'},
-                       'the class on the owner\'s own pass': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'send_class': 'member_read'}}
+                       'the class on the owner\'s own pass': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'send_class': 'member_read'},
+                       'a key not of the asking message': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'dispatch_key': 'member-ask:' + ask,
+                                                           'archive_credential': credential(event, OWNER, OWNER, member_read=ask, app=binding(OWNER))}}
             for why, change in refused.items():
                 with self.subTest(why), self.assertRaises(ValueError):
                     self.service.reply(change)

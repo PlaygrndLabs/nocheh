@@ -4,7 +4,8 @@ import type {Reader} from '../src/access.js';
 import {telegramDeliveryAllowed} from '../src/assistant-policy.js';
 import {fillTemplate,memberReadFrame,memberReadLines,memberReadTexts,promptKeys} from '../src/prompts.js';
 import {readSet} from '../src/spaces.js';
-import {askAttempt,askSendKey} from '../src/stores/owner-member-ask-turns.js';
+import {askAttempt,askingEnded,askSendKey} from '../src/stores/owner-member-ask-turns.js';
+import {digest} from '../src/archive.js';
 import {askGuard,forwardedMessage,namesIn,ownerMemberAskJob,type AskableMember} from '../src/stores/owner-member-asks.js';
 import {runtimeProfile} from '../src/stores/runtime-profile.js';
 import {GP1,OWNER,groupsPolicy} from './fixture-groups.js';
@@ -61,7 +62,23 @@ test('an ask has its own job, attempt and send key, never a message turn\'s',()=
   assert.equal(ownerMemberAskJob(ask),'ask:'+ask);
   assert.equal(askAttempt(ask,1),'m1-'+ask);
   assert.match(askAttempt(ask,2),/^m[1-9]\d{0,2}-[a-f0-9]{32}$/,'services/hermes/assistant_gateway.py takes this shape only with its ask');
-  assert.equal(askSendKey(ask),'member-ask:'+ask);
+  // The bot sends a reply only under its asking message's own source key, or that key with a continuation, and only when
+  // that key's digest is the turn's event (services/telegram/gateway.py reply()). The answer goes under the latter, named
+  // by the ask, so it is never the asking turn's own send.
+  const source='telegram:123456:update:42',key=askSendKey(source,ask);
+  const bot=/^(telegram:123456:update:(\d{1,19}))(?::continuation:[a-f0-9]{64})?$/.exec(key);
+  assert.ok(bot,'the shape the bot accepts');
+  assert.equal(digest(bot[1]!),digest(source),'it answers the asking message');
+  assert.equal(key,source+':continuation:'+digest('member-ask:'+ask));
+  assert.notEqual(key,source);assert.notEqual(askSendKey(source,'e'.repeat(32)),key,'each ask its own');
+  assert.ok(key.length<=256,'the row keeps it (send_key)');
+});
+
+test('an ask runs after its asking turn replied, chose silence or sent a reply Telegram did not confirm',()=>{
+  for(const ended of [{state:'done'},{state:'ambiguous',error_code:'delivery_unconfirmed'},{state:'suppressed',error_code:'intentional_silence'}])
+    assert.equal(askingEnded(ended),true,JSON.stringify(ended));
+  for(const other of [{state:'cancelled',error_code:'owner_cancelled'},{state:'suppressed',error_code:'approval_button'},{state:'failed'},{state:'pending'}])
+    assert.equal(askingEnded(other),false,JSON.stringify(other));
 });
 
 test('each ask runs in its own runtime profile, the one Hermes derives from the same claims',()=>{

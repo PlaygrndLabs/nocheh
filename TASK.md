@@ -52,9 +52,9 @@ only). One branch: a contract, six parts and their integration.
   - The privacy scan before a push, and live acceptance on the owner's install after merge.
   Left for later: the 10-check cap narrows only the turn's input, so a tool call can still read a
   group past the cap within 30 days; `/v1/search` applies `private_chats` after its first 200
-  hits; a member with several accounts that have private chats is never asked about; the
-  Messages filter hides nothing while the chat directory has not loaded; an ask's Notes label has
-  no answer date; `notesSender` does not tell member or `member_read` sends apart (`canLearn`
+  hits; a member with several accounts that have private chats is not asked about (the owner is
+  told so); the Messages filter hides nothing while the chat directory has not loaded;
+  `notesSender` does not tell member or `member_read` sends apart (`canLearn`
   refuses them first); reading a group only from when the member joined (`read_from`); member
   saved notes; an own role per member chat; members' own **Answer privately**.
   Owner steps: take a backup and rebuild and run every image from the same revision
