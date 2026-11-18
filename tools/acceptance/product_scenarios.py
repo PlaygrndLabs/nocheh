@@ -4276,9 +4276,14 @@ class ProductScenarios(Scenarios):
                 _, reply = self.turn(self.f.message(OWNER, 'چه می‌بینی؟ '+self.context_probe(mark)), OWNER)
                 if reply.endswith(' present'):
                     held.append({'where': 'owner_context', 'mark': mark})
+            # Checked before the owner's recall below names the marks in the owner's own messages (which Honcho rightly
+            # keeps); `kept` and `other`, which no owner message names, are checked again at the end.
+            places = self.owner_side_holds_none(marks+[other])
             for mark in marks:
                 if mark != kept:
-                    recall = json.dumps(self.recalled(OWNER, mark), ensure_ascii=False)
+                    # The owner's recall finds its own query in the owner's chat history (the [[recall:...]] message and
+                    # the tool call naming it); that echo is the owner's words, not the member's, so it is left out.
+                    recall = re.sub(r'(?:recall:|query\W{1,12})'+re.escape(mark)+r'(?![0-9])', '', json.dumps(self.recalled(OWNER, mark), ensure_ascii=False))
                     held += [{'where': 'owner_recall', 'mark': found} for found in canaries.found(recall, marks+[other])]
             self.turn(self.f.message(OWNER, 'گفتگوها [[owner:conversations]]'), OWNER)
             listing = self.newest_tool_result_text('mcp__nocheh__owner_read')
@@ -4286,7 +4291,9 @@ class ProductScenarios(Scenarios):
             # Learning, memory and what the owner reviews.
             receipts = self.f.query('nocheh_control', "SELECT count(*) FROM memory_ingestion_receipts WHERE source_reference->>'id'='"+said_event+"'")
             self.gate('never_written_to_long_term_memory', receipts == '0', receipts=receipts)
-            places = self.owner_side_holds_none(marks+[other])
+            later = self.owner_side_holds_none([kept, other])
+            for name, found in later.items():
+                places[name] = sorted(set(places.get(name, []))|set(found))
             self.current['observed'] = {'held': held, 'places': places}
             self.gate('member_marks_never_left_the_members_side', not held, held=held[:10])
             self.gate('owner_side_places_hold_none', not places, places=places)
@@ -4366,8 +4373,10 @@ class ProductScenarios(Scenarios):
                       found=canaries.found(text+'\n'+search, {planted['other'], group_mark}))
             _, reply = self.turn(self.f.message(OWNER, 'و بعد؟ '+self.context_probe(planted['kept'])), OWNER)
             self.gate('answer_dropped_from_the_next_turn', reply.endswith(' absent'), reply=reply[:200])
-            recall = json.dumps(self.recalled(OWNER, planted['said']), ensure_ascii=False)
-            self.gate('owner_recall_never_reads_the_ask', planted['said'] not in recall, excerpt=recall[:300])
+            # The owner's recall echoes its own query (see member_private_chat_stays_with_the_member); that is left out.
+            recall = re.sub(r'(?:recall:|query\W{1,12})'+re.escape(planted['said'])+r'(?![0-9])', '',
+                            json.dumps(self.recalled(OWNER, planted['said']), ensure_ascii=False))
+            self.gate('owner_recall_never_reads_the_ask', not canaries.found(recall, [planted['said']]), excerpt=recall[:300])
         finally:
             for item in (planted or {}).get('items', []):
                 self.remove_member(item)
