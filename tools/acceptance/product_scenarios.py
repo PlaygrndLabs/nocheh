@@ -1151,15 +1151,19 @@ class ProductScenarios(Scenarios):
                   limitations=[item.get('limitations') for item in answers])
 
     def retired_source_leaves_tags(self):
-        # Retire = forget at once (ADR-0261 step 1). Bob's message is a recent item of a group turn that searched for it
-        # and saved a note. Once it is retired: search no longer finds it, opening it answers unavailable, and the turn's
-        # stored history no longer holds it: its recent item is withheld, the turn's tool calls and results with it, and
-        # the note written in that turn is removed, while the message the turn answered keeps its own text.
+        # Retire = forget at once (ADR-0261). A member's message is a recent item of a group turn that searched for it and
+        # saved a note, and is learned as a fact about its writer (LEARNMARK, installation-provider.py PrivacyCanary): their
+        # next turn reads that fact in its memory block and opens it by its number, and their recall lists it. Once the
+        # message is retired: search no longer finds it, opening it answers unavailable, neither the turn's fact nor the
+        # recall's opens, and the group's stored history no longer holds any of it: its recent item is withheld, the turn's
+        # tool calls and results with it, the rows of the recall and the opened fact, which cite the records the fact came
+        # in, and the note written in that turn is removed, while the message the turn answered keeps its own text. GUEST
+        # writes it, whose few facts a recall lists first (it lists 12, cited ones first).
         number = str(self.f.ids())
-        mark, word, note, topic = 'RETIREMARK'+number, 'PINWORD'+number, 'RETIRENOTE'+number, 45
+        mark, word, note, learn, topic = 'RETIREMARK'+number, 'PINWORD'+number, 'RETIRENOTE'+number, 'LEARNMARK'+number, 45
         place = 'Synthetic Forum '+str(GROUP)
         self.topic_chat(GROUP, topic)
-        bob = self.posted(GROUP, mark+' '+word+' my code is 4321', MEMBER, topic)
+        bob = self.posted(GROUP, mark+' '+word+' my code is 4321 '+learn, GUEST, topic)
         save = json.dumps({'target': 'memory', 'operations': [{'action': 'add', 'content': note+': Bob gave a code'}]})
         self.silent_turn(self.f.message(GROUP, 'ابزار [[tool:mcp__nocheh__archive_search '+json.dumps({'query': word, 'limit': 10})
                                         + ']] [[tool:memory '+save+']] [[after:silent]]', topic=topic), GROUP, topic)
@@ -1170,13 +1174,30 @@ class ProductScenarios(Scenarios):
         self.gate('turn_saved_a_note', saved.get('success') is True, result=str(saved)[:300])
         self.gate('note_kept_before', bool(self.recalled_notes(json.dumps(self.recalled(OWNER, note)), note)))
         self.gate('history_holds_it_before', bool(self.session_hits(self.recalled(OWNER, mark), mark, place)))
+        # The fact learned from it, read in a turn's block and opened, and listed by a recall (ADR-0261 step 2).
+        self.honcho_learned(learn)
+        blocks, _ = self.memory_blocks(GROUP, number, GUEST, topic)
+        block, fact = self.fact_with(blocks, learn)
+        self.gate('turn_read_the_fact', fact is not None and bool(self.MEMORY_ID.match(str(block.get('source')))), blocks=self.block_heads(blocks))
+        opened = self.tool_call('mcp__nocheh__archive_read', {'id': block['source'], 'fact': fact['n']}, GROUP, topic, GUEST)
+        self.gate('fact_opened_before', learn in str(opened.get('text')) and self.fact_sources(opened)[:1] == ['nocheh:event:'+bob], opened=opened)
+        recall = self.recalled(GROUP, 'what code did I give '+number, sender=GUEST, topic=topic)
+        answer, listed = self.listed_fact(recall, bob)
+        self.gate('recall_listed_the_fact', listed is not None and bool(self.MEMORY_ID.match(str(answer.get('facts_source')))),
+                  facts=[(item.get('n'), self.fact_sources(item)) for item in answer.get('facts') or [] if isinstance(item, dict)][:12])
+        self.gate('history_holds_the_fact_rows_before', bool(self.tool_hits(self.recalled(OWNER, learn), learn, place)))
         self.retire(bob)
         self.gate('search_no_longer_finds_it', bob not in self.hits_by_event(self.tool_call('mcp__nocheh__archive_search', {'query': word}, OWNER)))
         self.gate('opening_it_is_unavailable', self.tool_call('mcp__nocheh__archive_read', {'id': 'nocheh:event:'+bob}, OWNER) == self.UNAVAILABLE)
         # Recall skips what the group's history would withhold even before its next turn; asked first, since that turn's
         # own question names the mark.
         self.gate('history_no_longer_holds_it', not self.session_hits(self.recalled(OWNER, mark), mark, place))
-        # The group's next turn brings its stored history and notes current before the model reads them.
+        self.gate('fact_rows_leave_history', not self.tool_hits(self.recalled(OWNER, learn), learn, place))
+        # The group's next turns bring its stored history and notes current before the model reads them.
+        self.gate('fact_no_longer_opens', self.tool_call('mcp__nocheh__archive_read', {'id': block['source'], 'fact': fact['n']}, GROUP, topic, GUEST)
+                  == self.UNAVAILABLE)
+        self.gate('recalled_fact_no_longer_opens', self.tool_call('mcp__nocheh__archive_read', {'id': answer['facts_source'], 'fact': listed['n']},
+                                                                    GROUP, topic, GUEST) == self.UNAVAILABLE)
         _, text = self.turn(self.f.message(GROUP, 'چه گفتند؟ [[context:'+mark+']]', topic=topic), GROUP, topic)
         self.gate('next_turn_no_longer_reads_it', text.endswith(' absent'), answer=text)
         self.gate('note_removed', not self.recalled_notes(json.dumps(self.recalled(OWNER, note)), note))
@@ -1203,6 +1224,234 @@ class ProductScenarios(Scenarios):
         self.gate('each_hit_says_when', all(isinstance(hit.get('at'), str) and hit['at'] for hit in hits))
         self.gate('each_hit_is_a_short_snippet', all(len(hit['text']) <= 120 for hit in hits))
         self.gate('no_neighbour_text', neighbour not in json.dumps(hits, ensure_ascii=False) and not any('context' in hit for hit in hits))
+
+    # Facts that name their source (ADR-0261 step 2) -----------------------------------------------------------------
+
+    MEMORY_ID = re.compile(r'^nocheh:memory:[a-f0-9]{64}$')
+    # A fact's line in a turn's memory block: its number and the time of the message it came from (src/fact-block.ts).
+    FACT_LINE = re.compile(r'^  ([0-9]+)\. ([0-9]{2}:[0-9]{2}|--:--) (.*)$')
+    # A block's longest text and the most facts it lists, as Honcho's own context holds them (src/fact-block.ts, B3.1).
+    FACT_BLOCK_LIMIT, FACT_BLOCK_FACTS = 20000, 100
+
+    def memory_blocks(self, chat, number, sender=OWNER, topic=None, extra=None):
+        """The long-term memory blocks of `sender`'s next turn in `chat` as the model read them ([[memory_blocks:]],
+        installation-provider.py), and how long the turn took in seconds. The question names a mark by its number only, so
+        Honcho never learns the mark from it."""
+        started = time.monotonic()
+        self.turn(self.f.message(chat, 'What do you know? [[memory_blocks:'+number+']]', sender=sender, topic=topic, extra=extra), chat, topic)
+        seconds = round(time.monotonic()-started, 1)
+        found = [event for event in self.f.brain() if event.get('directive') == 'memory_blocks' and event.get('argument') == number
+                 and event['phase'] == 'final']
+        return (found[-1].get('blocks') or []) if found else [], seconds
+
+    @classmethod
+    def block_facts(cls, block):
+        """A block's facts as the model reads them, each with its number, time, text and the source line code wrote above it."""
+        facts, header = [], None
+        for line in str((block or {}).get('text') or '').split('\n'):
+            if line.startswith('Source ['):
+                header = line
+                continue
+            found = cls.FACT_LINE.match(line)
+            if found and header is not None:
+                facts.append({'n': int(found[1]), 'time': found[2], 'text': found[3], 'header': header})
+        return facts
+
+    @classmethod
+    def fact_with(cls, blocks, text):
+        """The block and the fact whose line holds `text`, or (None, None)."""
+        for block in blocks:
+            for fact in cls.block_facts(block):
+                if text in fact['text']:
+                    return block, fact
+        return None, None
+
+    @classmethod
+    def block_heads(cls, blocks):
+        """What a failed gate shows of a turn's blocks: each one's name, what it is about, its limits and first lines."""
+        return [{'source': block.get('source'), 'about': block.get('about'), 'limitations': block.get('limitations'),
+                 'lines': str(block.get('text') or '').split('\n')[:8]} for block in blocks]
+
+    @staticmethod
+    def fact_sources(item):
+        """The source ids an opened or listed fact names, in order."""
+        return [source.get('source') for source in (item or {}).get('sources') or [] if isinstance(source, dict)]
+
+    @staticmethod
+    def recall_answer(result):
+        """memory_recall's answer that lists the facts it read ({} when none does: an engine that cannot list facts, or a
+        failed read of them, lists evidence_sources instead)."""
+        answers = [item for item in result.get('sources') or [] if isinstance(item, dict) and item.get('kind') == 'memory_inference'
+                   and isinstance(item.get('facts'), list)] if isinstance(result, dict) else []
+        return answers[0] if answers else {}
+
+    @classmethod
+    def listed_fact(cls, result, event_id):
+        """memory_recall's answer that lists its facts, and its fact that names this message among its sources, or None."""
+        answer = cls.recall_answer(result)
+        return answer, next((fact for fact in answer.get('facts') or [] if isinstance(fact, dict) and 'nocheh:event:'+event_id in cls.fact_sources(fact)), None)
+
+    def tool_hits(self, result, mark, place):
+        """The owner's recall hits from stored chat history in a chat whose place names `place`, from tool rows holding the mark."""
+        return [hit for hit in self.session_hits(result, mark, place) if hit.get('role') == 'tool']
+
+    def opened_fact(self, record, n, chat, topic=None, sender=OWNER):
+        """archive_read of fact `n` of a memory record, as `sender` in `chat`."""
+        return self.tool_call('mcp__nocheh__archive_read', {'id': record, 'fact': n}, chat, topic, sender)
+
+    def recalled_fact_opens_its_original(self):
+        # Each long-term memory fact a turn reads sits under a source line Nocheh's code builds from the messages it was
+        # learned from, with the time of that message, and opens with archive_read by its block's record and number
+        # (ADR-0261 step 2): its text as the turn read it, whose words they are and the message itself, which opens with
+        # its thread. Bob states it in GP1 as a reply in a chain; LEARNMARK makes the fixture's learning keep it as a
+        # conclusion about Bob that cites his message (installation-provider.py PrivacyCanary). GP2 cannot open the record.
+        number = str(self.f.ids())
+        mark = 'LEARNMARK'+number
+        bob = {'from': {'id': MEMBER, 'is_bot': False, 'first_name': 'Bob', 'username': 'bob_synthetic'}}
+        updates = {'first': self.f.message(GROUP, 'Shall we sail on Saturday?', sender=GUEST, mention=False, topic=TEAM_TOPIC)}
+        updates['stated'] = self.f.message(GROUP, 'my boat leaves at nine '+mark, sender=MEMBER, mention=False, topic=TEAM_TOPIC,
+                                           reply_to=updates['first']['message'], extra=bob)
+        updates['after'] = self.f.message(GROUP, 'See you at the pier', sender=GUEST, mention=False, topic=TEAM_TOPIC, reply_to=updates['stated']['message'])
+        ids = {name: self.turn(update, GROUP, TEAM_TOPIC, expect_reply=False)[0] for name, update in updates.items()}
+        self.honcho_learned(mark)
+        blocks, _ = self.memory_blocks(GROUP, number, MEMBER, TEAM_TOPIC, bob)
+        block, fact = self.fact_with(blocks, mark)
+        self.current['observed'] = {'block': (block or {}).get('source'), 'fact': fact}
+        self.gate('fact_reaches_the_turn', fact is not None, blocks=self.block_heads(blocks))
+        self.gate('fact_line_has_its_time', re.fullmatch(r'[0-9]{2}:[0-9]{2}', fact['time']) is not None, fact=fact)
+        self.gate('source_line_names_bob', fact['header'].startswith('Source [by=person]: “Bob”') and ' · this chat · ' in fact['header']
+                  and re.search(r' · [0-9]{4}-[0-9]{2}-[0-9]{2}$', fact['header']) is not None, header=fact['header'])
+        record = str(block.get('source') or '')
+        self.gate('block_named_by_its_record', bool(self.MEMORY_ID.match(record)) and 'archive_read id='+record+' fact=<n>' in block['text']
+                  and 'source_tags_unavailable' not in (block.get('limitations') or []), source=record, limitations=block.get('limitations'))
+        opened = self.opened_fact(record, fact['n'], GROUP, TEAM_TOPIC, MEMBER)
+        self.gate('fact_opens_by_its_number', opened.get('source') == record and opened.get('fact') == fact['n'] and mark in str(opened.get('text'))
+                  and opened.get('by') == 'person' and self.fact_sources(opened)[:1] == ['nocheh:event:'+ids['stated']], opened=opened)
+        original = self.tool_call('mcp__nocheh__archive_read', {'id': 'nocheh:event:'+ids['stated']}, GROUP, TEAM_TOPIC, MEMBER)
+        self.gate('original_opens_with_its_thread', (original.get('reply_to') or {}).get('source') == 'nocheh:event:'+ids['first']
+                  and 'nocheh:event:'+ids['after'] in self.fact_sources({'sources': (original.get('replies') or {}).get('items')}),
+                  reply_to=original.get('reply_to'), replies=original.get('replies'))
+        self.gate('other_group_cannot_open_it', self.opened_fact(record, fact['n'], OTHER_GROUP, sender=MEMBER) == self.UNAVAILABLE)
+
+    def fact_about_bob_names_bob(self):
+        # A fact about Bob that rests on the owner's question too names Bob (ADR-0261 B2.2, H1): the observed person's own
+        # message comes first, so its source line names Bob with by=person, never the owner whose question it answers. The
+        # owner asks in GP1 and Bob answers "yes"; the fixture's learning then writes a conclusion about Bob that cites
+        # both, his answer first (installation-provider.py PrivacyCanary). In GP1 the owner's question reads by the owner's
+        # Telegram name with by=owner.
+        number = str(self.f.ids())
+        mark = 'LEARNMARK'+number
+        learned = 'answered a question about '+mark
+        bob = {'from': {'id': MEMBER, 'is_bot': False, 'first_name': 'Bob', 'username': 'bob_synthetic'}}
+        question = self.f.message(GROUP, 'Bob, is '+mark+' still 4321?', mention=False, topic=TEAM_TOPIC)
+        answer = self.f.message(GROUP, 'yes', sender=MEMBER, mention=False, topic=TEAM_TOPIC, reply_to=question['message'], extra=bob)
+        ids = {name: self.turn(update, GROUP, TEAM_TOPIC, expect_reply=False)[0] for name, update in (('question', question), ('answer', answer))}
+        self.honcho_learned(learned)
+        blocks, _ = self.memory_blocks(GROUP, number, MEMBER, TEAM_TOPIC, bob)
+        block, fact = self.fact_with(blocks, learned)
+        self.current['observed'] = {'fact': fact}
+        self.gate('fact_about_bob_reaches_his_turn', fact is not None, blocks=self.block_heads(blocks))
+        self.gate('source_line_names_bob_not_the_owner', fact['header'].startswith('Source [by=person]: “Bob”') and 'not exact' not in fact['header'],
+                  header=fact['header'])
+        opened = self.opened_fact(block['source'], fact['n'], GROUP, TEAM_TOPIC, MEMBER)
+        sources = [source for source in opened.get('sources') or [] if isinstance(source, dict)]
+        self.gate('opened_fact_names_bob_first_then_the_question', self.fact_sources(opened)[:2] == ['nocheh:event:'+ids['answer'], 'nocheh:event:'+ids['question']]
+                  and opened.get('by') == 'person' and opened.get('exact') is True, opened=opened)
+        self.gate('question_reads_by_the_owners_telegram_name', sources[1].get('by') == 'owner' and str(sources[1].get('tag')).startswith('“Synthetic '+str(OWNER)+'”')
+                  and 'the owner' not in str(sources[1].get('tag')), source=sources[1])
+
+    def recall_facts_carry_sources(self):
+        # memory_recall names its answer and its facts by their records and lists the facts it read: whether each cites its
+        # messages, whose words they are and its first sources, tagged (ADR-0261 B3.6). Cited facts come first. Every fact it
+        # read opens by its number through facts_source, the last one too, and none past it; the owner opens it too, GP2 never.
+        # GUEST, here “Dana”, states three facts in GP1 and asks about them; GUEST's few facts are listed first.
+        number = str(self.f.ids())
+        marks = ['LEARNMARK'+number+str(index) for index in range(3)]
+        dana = {'from': {'id': GUEST, 'is_bot': False, 'first_name': 'Dana'}}
+        events = ['nocheh:event:'+self.posted(GROUP, 'my boat '+str(index)+' leaves at nine '+mark, GUEST, TEAM_TOPIC, extra=dana)
+                  for index, mark in enumerate(marks)]
+        for mark in marks:
+            self.honcho_learned(mark)
+        result = self.recalled(GROUP, 'when does my boat leave '+number, sender=GUEST, topic=TEAM_TOPIC)
+        answer = self.recall_answer(result)
+        facts = [fact for fact in answer.get('facts') or [] if isinstance(fact, dict)]
+        self.current['observed'] = {'source': answer.get('source'), 'facts_source': answer.get('facts_source'), 'count': answer.get('evidence_count'),
+                                    'facts': [(fact.get('n'), fact.get('exact'), fact.get('by'), self.fact_sources(fact)) for fact in facts]}
+        record = str(answer.get('facts_source') or '')
+        count = answer.get('evidence_count')
+        self.gate('recall_names_its_answer_and_facts', bool(self.MEMORY_ID.match(str(answer.get('source')))) and bool(self.MEMORY_ID.match(record))
+                  and answer['source'] != record and 'evidence_sources' not in answer, answer={key: answer.get(key) for key in ('source', 'facts_source', 'limitations')})
+        self.gate('recall_lists_at_most_12_of_what_it_read', 0 < len(facts) <= 12 and isinstance(count, int) and count >= len(facts), count=count, listed=len(facts))
+        exact = [fact.get('exact') is True for fact in facts]
+        self.gate('cited_facts_come_first', exact == sorted(exact, reverse=True), exact=exact)
+        ours = [fact for fact in facts if set(self.fact_sources(fact)) & set(events)]
+        tag = str(((ours or [{}])[0].get('sources') or [{}])[0].get('tag'))
+        self.gate('danas_fact_is_exact_and_tagged', bool(ours) and ours[0].get('exact') is True and ours[0].get('by') == 'person'
+                  and tag.startswith('“Dana” · this chat · ') and tag.endswith(' UTC'), fact=(ours or [None])[0])
+        opened = self.opened_fact(record, ours[0]['n'], GROUP, TEAM_TOPIC, GUEST)
+        listed = str(ours[0].get('text') or '').removesuffix('…')
+        self.gate('listed_fact_opens_by_facts_source', opened.get('source') == record and opened.get('fact') == ours[0]['n'] and bool(listed)
+                  and str(opened.get('text') or '').startswith(listed) and self.fact_sources(opened)[:1] == self.fact_sources(ours[0])[:1], opened=opened)
+        last = self.opened_fact(record, count, GROUP, TEAM_TOPIC, GUEST)
+        self.gate('last_stored_fact_opens', last.get('source') == record and last.get('fact') == count, opened=last)
+        if count < 200:
+            self.gate('no_fact_past_the_last', self.opened_fact(record, count+1, GROUP, TEAM_TOPIC, GUEST) == self.UNAVAILABLE)
+        owner = self.opened_fact(record, ours[0]['n'], OWNER)
+        self.gate('owner_opens_the_groups_fact', owner.get('fact') == ours[0]['n'] and self.fact_sources(owner)[:1] == self.fact_sources(ours[0])[:1], opened=owner)
+        self.gate('other_group_cannot_open_it', self.opened_fact(record, ours[0]['n'], OTHER_GROUP, sender=MEMBER) == self.UNAVAILABLE)
+
+    def forward_fact_names_its_origin(self):
+        # A fact learned from a channel post the owner forwarded sits in the owner's forwards-and-files block under a source
+        # line that names where it was forwarded from, with by=forward, and that block lists up to 100 facts as Honcho's
+        # own context did (ADR-0261 B3.1, M2). The mark is a private mark, so the fixture's learning keeps it as a
+        # conclusion (installation-provider.py PrivacyCanary), and the last sweep checks it never left the owner's chat.
+        number = str(self.f.ids())
+        mark, channel = 'PRIVATEMARK'+number, 'Synthetic Air '+number
+        canaries.save(self.f.directory, {mark: 'forwarded channel post'}, OWNER)
+        origin = {'forward_origin': {'type': 'channel', 'chat': {'id': -1001900000000, 'type': 'channel', 'title': channel},
+                                     'message_id': 7, 'date': int(time.time())-600}}
+        event_id, _ = self.turn(self.f.message(OWNER, 'The airline moved the flight to 07:25 '+mark, extra=origin), OWNER)
+        self.honcho_learned(mark)
+        blocks, _ = self.memory_blocks(OWNER, number)
+        block, fact = self.fact_with(blocks, mark)
+        self.current['observed'] = {'about': (block or {}).get('about'), 'fact': fact}
+        self.gate('fact_in_the_forwards_and_files_block', fact is not None and block.get('about') == 'forwards_and_files', blocks=self.block_heads(blocks))
+        self.gate('source_line_names_the_channel', fact['header'].startswith('Source [by=forward]: ') and 'forwarded from a channel shown as “'+channel+'”' in fact['header']
+                  and ' · this chat · ' in fact['header'], header=fact['header'])
+        self.gate('forwards_block_within_its_caps', len(self.block_facts(block)) <= self.FACT_BLOCK_FACTS and len(block['text']) <= self.FACT_BLOCK_LIMIT,
+                  facts=len(self.block_facts(block)), characters=len(block['text']))
+        opened = self.opened_fact(block['source'], fact['n'], OWNER)
+        self.gate('forward_fact_opens_with_its_message', opened.get('by') == 'forward' and self.fact_sources(opened)[:1] == ['nocheh:event:'+event_id], opened=opened)
+
+    def per_turn_memory_stays_small(self):
+        # A turn's long-term memory stays within its caps with every fact under a source line (ADR-0261 B3.1, B10): each block
+        # within 20,000 characters and 100 facts, its facts numbered from 1, each with a time, its source lines at most a
+        # quarter of it, and every block named by its record with no fallback to prose. How long an owner turn and a group
+        # turn take is reported, the first and four more (the later ones read tags the guard already knows).
+        number = str(self.f.ids())
+        mark = 'LEARNMARK'+number
+        self.turn(self.f.message(OWNER, 'my locker is number 12 '+mark), OWNER)
+        self.posted(GROUP, 'my locker is number 14 '+mark, MEMBER, TEAM_TOPIC)
+        self.honcho_learned(mark)
+        timings, read = {}, []
+        for name, chat, sender, topic in (('owner', OWNER, OWNER, None), ('group', GROUP, MEMBER, TEAM_TOPIC)):
+            took = []
+            for _ in range(5):
+                blocks, seconds = self.memory_blocks(chat, number, sender, topic)
+                took.append(seconds)
+                read.append((name, blocks))
+            ordered = sorted(took)
+            timings[name] = {'first_seconds': took[0], 'p50_seconds': ordered[len(ordered)//2], 'p95_seconds': ordered[-1]}
+        self.current['observed'] = {'timings': timings}
+        with_facts = [(name, block, self.block_facts(block)) for name, blocks in read for block in blocks if self.block_facts(block)]
+        self.gate('each_turn_reads_facts', {name for name, _, _ in with_facts} == {'owner', 'group'}, blocks=[(name, self.block_heads(blocks)) for name, blocks in read[:1]+read[5:6]])
+        self.gate('blocks_named_by_their_records', all(self.MEMORY_ID.match(str(block.get('source'))) and 'source_tags_unavailable' not in (block.get('limitations') or [])
+                                                       for _, block, _ in with_facts), blocks=[self.block_heads([block]) for _, block, _ in with_facts[:2]])
+        self.gate('blocks_within_their_caps', all(len(block['text']) <= self.FACT_BLOCK_LIMIT and len(facts) <= self.FACT_BLOCK_FACTS for _, block, facts in with_facts),
+                  sizes=[(len(block['text']), len(facts)) for _, block, facts in with_facts])
+        self.gate('facts_numbered_with_times', all([fact['n'] for fact in facts] == list(range(1, len(facts)+1)) for _, _, facts in with_facts))
+        heads = [(sum(len(line)+1 for line in block['text'].split('\n') if line.startswith('Source [')), len(block['text'])) for _, block, _ in with_facts]
+        self.gate('source_lines_at_most_a_quarter', all(4*head <= size for head, size in heads), heads=heads)
 
     def private_chat_stays_out_of_groups(self):
         # What the owner keeps on their private side never reaches what the model sees for a group, and no group reply
@@ -3936,6 +4185,9 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'not_allowed_group_text_stays_out_of_owner_notes', 'display_name_cannot_borrow', 'forward_kept_apart_and_labelled', 'own_file_stays_recallable',
                  # Source tags on search hits and opened messages (ADR-0261).
                  'search_hits_name_their_source', 'group_tags_stay_in_the_group', 'reply_thread_opens', 'topic_sharing_group_keeps_evidence',
+                 # Facts that name their source (ADR-0261 step 2), before the retirement that forgets one.
+                 'recalled_fact_opens_its_original', 'fact_about_bob_names_bob', 'recall_facts_carry_sources', 'forward_fact_names_its_origin',
+                 'per_turn_memory_stays_small',
                  'retired_source_leaves_tags', 'owner_recall_session_hits_have_text',
                  'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',
