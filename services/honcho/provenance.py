@@ -130,6 +130,107 @@ async def ancestry(roots, load_documents, load_messages, max_nodes=128, max_dept
     return {'roots': roots, 'nodes': nodes, 'messages': references, 'limitations': sorted(limitations), 'exact_citations': exact}
 
 
+BATCH_MESSAGES = 8
+
+
+async def fact_batches(body, load_documents, load_messages, max_roots=128, per_node=BATCH_MESSAGES):
+    """Facts mode: the messages behind each named conclusion, one node per conclusion, parents never followed.
+
+    Honcho's own conclusion list already names the messages a conclusion cites, so Nocheh asks here only for
+    conclusions without citations. Each node brings the first few messages of the batch it was learned from,
+    which is never an exact citation; a conclusion that does cite brings its citations instead. ``messages_truncated``
+    says when a node had more messages than it brings."""
+    if (not isinstance(body, dict) or set(body) - {'conclusion_ids', 'depth', 'per_node'}
+            or body.get('per_node') is not True or body.get('depth', 0) != 0 or isinstance(body.get('depth', 0), bool)):
+        raise ValueError('invalid_provenance_request')
+    roots = body.get('conclusion_ids')
+    if (not isinstance(roots, list) or not 1 <= len(roots) <= max_roots
+            or any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in roots)):
+        raise ValueError('invalid_provenance_request')
+    roots = list(dict.fromkeys(roots))
+    rows, limitations = {}, set()
+    for row in await load_documents(roots):
+        if row.get('id') not in roots:
+            raise ValueError('provenance_identity_mismatch')
+        rows[row['id']] = row
+    wanted, picked = {}, {}
+    for identifier in roots:
+        row = rows.get(identifier)
+        if row is None:
+            limitations.add('conclusion_unavailable')
+            continue
+        exact = isinstance(row.get('cited_ids'), list) and bool(row['cited_ids'])
+        ids = row['cited_ids'] if exact else row.get('message_ids') or []
+        if not isinstance(ids, list):
+            ids = []
+            limitations.add('message_links_unavailable')
+        valid = list(dict.fromkeys(v for v in ids if isinstance(v, int) and not isinstance(v, bool) and v > 0))
+        truncated = len(valid) > per_node or bool(row.get('citations_truncated' if exact else 'messages_truncated'))
+        picked[identifier] = (exact, valid[:per_node], truncated)
+        for value in valid[:per_node]:
+            wanted[value] = None
+    found = {}
+    for row in (await load_messages(list(wanted), len(wanted)) if wanted else []):
+        if row.get('id') not in wanted:
+            raise ValueError('provenance_message_mismatch')
+        found[row['id']] = row
+    nodes = []
+    for identifier in roots:
+        if identifier not in picked:
+            continue
+        exact, ids, truncated = picked[identifier]
+        references = []
+        for value in ids:
+            row = found.get(value)
+            if row is None:
+                limitations.add('message_unavailable')
+                truncated = True
+                continue
+            public_id, receipt = row.get('public_id'), row.get('receipt_id')
+            if isinstance(public_id, str) and NATIVE_ID.fullmatch(public_id) and isinstance(receipt, str) and re.fullmatch(r'[a-f0-9]{64}', receipt):
+                references.append({'message_id': public_id, 'receipt_id': receipt})
+            else:
+                limitations.add('ingestion_reference_unavailable')
+                truncated = True
+        if truncated:
+            limitations.add('message_limit')
+        if references and not exact:
+            limitations.add('ancestry_is_not_an_exact_citation')
+        if not references:
+            limitations.add('message_links_unavailable')
+        parents = rows[identifier].get('source_ids') or []
+        nodes.append({'id': identifier, 'parents': [v for v in parents if isinstance(v, str) and NATIVE_ID.fullmatch(v)] if isinstance(parents, list) else [],
+                      'deleted': bool(rows[identifier].get('deleted')), 'exact_citations': exact if references else None,
+                      'messages': references, 'messages_truncated': truncated})
+    return {'roots': roots, 'nodes': nodes, 'limitations': sorted(limitations)}
+
+
+async def provenance(body, load_documents, load_messages):
+    """The provenance route: facts mode when the body asks for it, else the owner's flat ancestry trace."""
+    if isinstance(body, dict) and 'per_node' in body:
+        return await fact_batches(body, load_documents, load_messages)
+    return await ancestry(body.get('conclusion_ids') if isinstance(body, dict) else None, load_documents, load_messages)
+
+
+# How many of a workspace's live explicit conclusions cite their messages, know only their learning batch, or neither.
+COVERAGE_SQL = '''SELECT count(*) AS explicit,
+    count(*) FILTER (WHERE cited) AS cited,
+    count(*) FILTER (WHERE NOT cited AND batch) AS batch_only
+    FROM (SELECT EXISTS (SELECT 1 FROM conclusion_source_messages s WHERE s.tenant_id=d.tenant_id AND s.conclusion_id=d.id) AS cited,
+        (jsonb_typeof(d.internal_metadata->'message_ids')='array' AND jsonb_array_length(d.internal_metadata->'message_ids')>0) AS batch
+        FROM documents d WHERE d.workspace_name=:workspace AND d.level='explicit' AND d.deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM sessions x WHERE x.tenant_id=d.tenant_id AND x.workspace_name=d.workspace_name
+            AND x.name=d.session_name AND x.deleted_at IS NOT NULL)) c'''
+
+
+async def citation_coverage(workspace_id, db):
+    """Counts only; never a conclusion's text or ids."""
+    from sqlalchemy import text
+    row = (await db.execute(text(COVERAGE_SQL), {'workspace': workspace_id})).mappings().one()
+    explicit, cited, batch_only = int(row['explicit']), int(row['cited']), int(row['batch_only'])
+    return {'explicit': explicit, 'cited': cited, 'batch_only': batch_only, 'none': explicit - cited - batch_only}
+
+
 # Scope every ancestor independently. Return neither conclusion text nor vectors. Parent links live in Honcho's
 # document_sources table and cited messages in conclusion_source_messages, each in its recorded order.
 DOCUMENTS_SQL = '''SELECT d.id, d.deleted_at IS NOT NULL AS deleted,
@@ -143,6 +244,10 @@ DOCUMENTS_SQL = '''SELECT d.id, d.deleted_at IS NOT NULL AS deleted,
     EXISTS (SELECT 1 FROM conclusion_source_messages WHERE tenant_id=d.tenant_id AND conclusion_id=d.id OFFSET 256) AS citations_truncated,
     CASE WHEN jsonb_typeof(d.internal_metadata->'message_ids')='array' THEN jsonb_array_length(d.internal_metadata->'message_ids')>256 ELSE false END AS messages_truncated
     FROM documents d WHERE d.workspace_name=:workspace AND d.id=ANY(:ids) LIMIT 128'''
+
+
+MESSAGES_SQL = '''SELECT id,public_id,metadata->>'nocheh_receipt' AS receipt_id
+    FROM messages WHERE workspace_name=:workspace AND id=ANY(:ids) LIMIT :limit'''
 
 
 SESSION_ID = re.compile(r'^[a-f0-9]{64}$')
@@ -210,16 +315,18 @@ def install(app):
             result = await db.execute(text(DOCUMENTS_SQL), {'workspace': workspace_id, 'ids': ids})
             return [dict(row) for row in result.mappings()]
 
-        async def messages(ids):
-            result = await db.execute(text('''SELECT id,public_id,metadata->>'nocheh_receipt' AS receipt_id
-                FROM messages WHERE workspace_name=:workspace AND id=ANY(:ids) LIMIT 256'''),
-                {'workspace': workspace_id, 'ids': ids})
+        async def messages(ids, limit=256):
+            result = await db.execute(text(MESSAGES_SQL), {'workspace': workspace_id, 'ids': ids, 'limit': limit})
             return [dict(row) for row in result.mappings()]
 
         try:
-            return await ancestry(body.get('conclusion_ids'), documents, messages)
+            return await provenance(body, documents, messages)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from None
+
+    @router.get('/citation-coverage')
+    async def coverage(workspace_id: str, db: AsyncSession = read_db):
+        return await citation_coverage(workspace_id, db)
 
     @router.post('/session-descendants')
     async def descendants(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):

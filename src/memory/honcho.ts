@@ -1,8 +1,8 @@
 import {canonical} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {longFetch} from '../long-fetch.js';
-import {engineInvalid,engineRejected,engineUnavailable,type EngineTrace,type EngineWrite,type EngineWriteInput,type ForgetStep,
-  type MemoryEngine,type ParticipantRole} from './engine.js';
+import {engineId,engineInvalid,engineRejected,engineUnavailable,type EngineCoverage,type EngineFact,type EngineFactPage,type EngineTrace,
+  type EngineWrite,type EngineWriteInput,type ForgetStep,type MemoryEngine,type ParticipantRole} from './engine.js';
 
 /** GET without a body, POST with one. DELETE treats an already absent resource as deleted. */
 export type HonchoCall=(path:string,body?:unknown,method?:'DELETE')=>Promise<any>;
@@ -40,6 +40,32 @@ const writes=(items:unknown):EngineWrite[]=>{
   if(!Array.isArray(items))throw engineInvalid();
   return items.map((item:any)=>({id:item?.id,content:item?.content,receipt:item?.metadata?.nocheh_receipt}));
 };
+/** Honcho names at most this many cited messages per fact here; more would be a broken answer, not a fact. */
+const factWrites=256;
+/** Nocheh's Honcho plugin brings this many messages of an uncited fact's learning batch (services/honcho/provenance.py). */
+export const factBatchWrites=8;
+/** Conclusion ids per plugin call in facts mode, and per id-filtered list page. */
+const batchRoots=128,listIds=100;
+/** Honcho's `created_at` as a key that sorts in time order to the microsecond, whatever fraction it prints. */
+const instant=(value:unknown)=>{
+  const match=typeof value==='string'?/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d{1,6}))?(Z|[+-]\d\d:\d\d)$/.exec(value):null;
+  const seconds=match?Date.parse(match[1]!+match[3]!):NaN;
+  return Number.isFinite(seconds)?String(seconds/1000).padStart(12,'0')+(match![2]??'').padEnd(6,'0'):null;
+};
+type Listed={fact:EngineFact;key:string;uncited:boolean};
+/** One conclusion from Honcho's stock list, checked against what was asked: a fact about someone else, from a session
+ * the read was not limited to, or of a derived level is a broken answer, never something to show. */
+function listed(item:any,participant:string,sessions:Set<string>|null):Listed {
+  const cited=item?.source_message_ids,key=instant(item?.created_at);
+  if(!nativeId(item?.id)||typeof item.content!=='string'||item.content.length>65535||item.observer_id!==participant||item.observed_id!==participant||
+    item.level!=='explicit'||!(item.session_id===null||engineId(item.session_id))||(sessions&&!sessions.has(item.session_id))||
+    !Number.isSafeInteger(item.times_derived)||item.times_derived<1||key===null||
+    !(cited===null||cited===undefined||Array.isArray(cited)&&cited.every(nativeId)))throw engineInvalid();
+  const writes=[...new Set<string>(cited??[])];
+  return {key,uncited:!writes.length,fact:{id:item.id,content:item.content,session:item.session_id,writes:writes.slice(0,factWrites),
+    exact:writes.length?true:null,complete:writes.length<=factWrites,derived:item.times_derived,createdAt:item.created_at}};
+}
+
 /** Honcho peers observe per session: a writer's own words are learned, a subject is learned about, the assistant never. */
 const observation:Record<ParticipantRole,{observe_me:boolean;observe_others:boolean}>={
   writer:{observe_me:true,observe_others:false},subject:{observe_me:false,observe_others:true},silent:{observe_me:false,observe_others:false}};
@@ -95,7 +121,8 @@ export class HonchoEngine implements MemoryEngine {
     if(options.limitToSession)query.set('limit_to_session','true');
     const result=await this.call(this.base(space)+'/sessions/'+session+'/context?'+query);
     return {summary:typeof result?.summary?.content==='string'?result.summary.content as string:'',
-      subject:typeof result?.peer_representation==='string'?result.peer_representation as string:''};
+      subject:typeof result?.peer_representation==='string'?result.peer_representation as string:'',
+      summaryMessage:typeof result?.summary?.content==='string'&&nativeId(result.summary.message_id)?result.summary.message_id as string:null};
   }
   async profile(space:string,participant:string) {
     return string((await this.call(this.base(space)+'/peers/'+participant+'/representation',{include_most_frequent:true,max_conclusions:50}))?.representation,2*1024*1024);
@@ -143,6 +170,87 @@ export class HonchoEngine implements MemoryEngine {
       throw new HttpError(502,'invalid_honcho_provenance');
     return {facts:result.nodes.map((n:any)=>({id:n.id,parents:n.parents,deleted:n.deleted===true,exactCitations:n.exact_citations as boolean|null})),
       writes:result.messages.map((m:any)=>({id:m.message_id,receipt:m.receipt_id})),limitations:result.limitations};
+  }
+
+  /** Honcho's stock conclusion list for what a peer learned about itself, a cursor page at a time (no count query). */
+  private async list(space:string,participant:string,sessions:string[]|null,size:number,cursor:string,extra:Record<string,unknown>={}) {
+    if(!engineId(participant)||sessions?.some(session=>!engineId(session)))throw new HttpError(400,'invalid_fact_request');
+    const page=await this.call(this.base(space)+'/conclusions/list?'+new URLSearchParams({size:String(size),cursor}),
+      {filters:{observer_id:participant,observed_id:participant,level:'explicit',...(sessions?{session_id:{in:sessions}}:{}),...extra}});
+    // A server without cursor pages answers a plain page, which would end a walk early without saying so.
+    if(!page||!Array.isArray(page.items)||page.items.length>size||
+      !(page.next_page===null||typeof page.next_page==='string'&&page.next_page.length>0&&page.next_page.length<=2048))throw engineInvalid();
+    const allowed=sessions&&new Set(sessions);
+    return {items:page.items.map((item:any)=>listed(item,participant,allowed)) as Listed[],next:page.next_page as string|null};
+  }
+  /** Honcho's list names the messages a fact cites. For a fact without citations, Nocheh's plugin names a few messages
+   * of the batch it was learned from, which is never exact. Facts it cannot answer for keep no writes, and say why. */
+  private async batches(space:string,items:Listed[]) {
+    const limitations=new Set<string>(),uncited=items.filter(item=>item.uncited).map(item=>item.fact);
+    for(let start=0;start<uncited.length;start+=batchRoots) {
+      const chunk=uncited.slice(start,start+batchRoots),ids=chunk.map(fact=>fact.id);
+      let result:any;
+      try{result=await this.call(this.base(space)+'/nocheh/provenance',{conclusion_ids:ids,depth:0,per_node:true});}
+      catch{limitations.add('fact_batches_unavailable');for(const fact of chunk)fact.complete=false;continue;}
+      // An older plugin answers the flat trace without per-fact messages: it cannot say which batch is whose.
+      if(Array.isArray(result?.nodes)&&result.nodes.some((node:any)=>node&&!('messages' in node))) {
+        limitations.add('fact_batches_unsupported');for(const fact of chunk)fact.complete=false;continue;
+      }
+      if(!result||canonical(result.roots)!==canonical(ids)||!Array.isArray(result.nodes)||result.nodes.length>ids.length||
+        !Array.isArray(result.limitations)||result.limitations.length>20||result.limitations.some((v:unknown)=>typeof v!=='string'||!/^[a-z_]{1,100}$/.test(v))||
+        result.nodes.some((node:any)=>!ids.includes(node?.id)||![true,false,null].includes(node.exact_citations)||typeof node.messages_truncated!=='boolean'||
+          !Array.isArray(node.messages)||node.messages.length>factBatchWrites||node.messages.some((m:any)=>!nativeId(m?.message_id)||!receiptId(m?.receipt_id))||
+          (node.exact_citations===null)!==(node.messages.length===0))) {
+        limitations.add('fact_batches_invalid');for(const fact of chunk)fact.complete=false;continue;
+      }
+      for(const value of result.limitations)limitations.add(value);
+      const nodes=new Map<string,any>(result.nodes.map((node:any)=>[node.id,node]));
+      for(const fact of chunk) {
+        const node=nodes.get(fact.id);
+        if(!node){fact.complete=false;continue;}
+        fact.writes=[...new Set<string>(node.messages.map((m:any)=>m.message_id))];fact.exact=node.exact_citations;fact.complete=!node.messages_truncated;
+      }
+    }
+    return [...limitations].sort();
+  }
+  async facts(space:string,participant:string,options:{sessions:string[]|null;size:number;cursor:string|null}):Promise<EngineFactPage> {
+    if(!Number.isSafeInteger(options.size)||options.size<1||options.size>100||
+      options.cursor!==null&&(typeof options.cursor!=='string'||!options.cursor||options.cursor.length>2048))throw new HttpError(400,'invalid_fact_request');
+    if(options.sessions&&!options.sessions.length)return {facts:[],next:null,limitations:[]};
+    const page=await this.list(space,participant,options.sessions,options.size,options.cursor??'');
+    return {facts:page.items.map(item=>item.fact),next:page.next,limitations:await this.batches(space,page.items)};
+  }
+  async factsById(space:string,participant:string,ids:string[],options:{sessions:string[]|null}) {
+    if(!Array.isArray(ids)||ids.length>256||ids.some(id=>!nativeId(id)))throw new HttpError(400,'invalid_fact_request');
+    const wanted=[...new Set(ids)],found=new Map<string,Listed>();
+    if(!(options.sessions&&!options.sessions.length))for(let start=0;start<wanted.length;start+=listIds) {
+      const chunk=wanted.slice(start,start+listIds),page=await this.list(space,participant,options.sessions,listIds,'',{id:{in:chunk}});
+      if(page.next!==null||page.items.some(item=>!chunk.includes(item.fact.id)))throw engineInvalid();
+      for(const item of page.items)found.set(item.fact.id,item);
+    }
+    const items=wanted.flatMap(id=>found.get(id)??[]);
+    return {facts:items.map(item=>item.fact),limitations:await this.batches(space,items)};
+  }
+  async factExists(space:string,participant:string,id:string) {
+    if(!nativeId(id))throw new HttpError(400,'invalid_fact_request');
+    const page=await this.list(space,participant,null,1,'',{id:{in:[id]}});
+    return page.items.some(item=>item.fact.id===id);
+  }
+  /** Honcho's profile takes its most-derived half by `times_derived desc, created_at desc, id`
+   * (H:src/crud/representation.py), so the same order is rebuilt here from three pages of the stock list. */
+  async mostDerived(space:string,participant:string,options:{sessions:string[]|null}) {
+    if(options.sessions&&!options.sessions.length)return {facts:[],complete:true,limitations:[]};
+    const items:Listed[]=[];let cursor='',pages=0;
+    do{const page=await this.list(space,participant,options.sessions,100,cursor,{times_derived:{gte:2}});items.push(...page.items);cursor=page.next??'';pages++;}
+    while(cursor&&pages<3);
+    items.sort((a,b)=>b.fact.derived-a.fact.derived||(a.key<b.key?1:a.key>b.key?-1:0)||(a.fact.id<b.fact.id?-1:a.fact.id>b.fact.id?1:0));
+    return {facts:items.map(item=>item.fact),complete:!cursor,limitations:await this.batches(space,items)};
+  }
+  async citationCoverage(space:string):Promise<EngineCoverage> {
+    const found=await this.call(this.base(space)+'/nocheh/citation-coverage');
+    const counts=[found?.explicit,found?.cited,found?.batch_only,found?.none];
+    if(counts.some(v=>!Number.isSafeInteger(v)||v<0)||found.explicit!==found.cited+found.batch_only+found.none)throw engineInvalid();
+    return {explicit:found.explicit,cited:found.cited,batchOnly:found.batch_only,none:found.none};
   }
 }
 export const honchoEngine=(call:HonchoCall)=>new HonchoEngine(call);
