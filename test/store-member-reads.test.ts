@@ -154,10 +154,6 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
       // Never learned, and the owner's yes can't change that.
       assert.equal(await s.access.canLearn(said,binding),false);
       await assert.rejects(s.access.setConsent(owner,said,{enabled:true,expected_revision:0,operation_id:key+':consent:'+person}),{status:409,code:'learning_consent_member_chat'});
-      // Nor does an import review's approval keep one: the source is left out of it.
-      const review=await s.imports.approveLearning(owner,{approved:true,batch:key+':review:'+person,event_ids:[said.id]});
-      assert.deepEqual([review.accepted,review.newly_enabled],[0,0]);
-      assert.equal((await stores.control.query('SELECT 1 FROM learning_consent WHERE event_id=$1',[said.id])).rowCount,0);
       const consent=await s.access.consent(owner,said);assert.deepEqual([consent.effective,consent.consentable],[false,false]);
     }
 
@@ -197,6 +193,13 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
     await assert.rejects(s.tasks.chatComment(bound,inGp1.id,{text:'Booked'}),{status:403,code:'task_read_only'});
     // An unbound member turn can't even read its own source: refused before any view.
     await assert.rejects(s.tasks.chatList(await turn(said,MEMBER_GP_CHAT,{member:MEMBER_GP_ID})),{status:403,code:'turn_source_denied'});
+    // Nor does an import review's approval keep a learning yes for a member chat: the source is left out of it.
+    for(const [raw,person] of [[MEMBER_GP,MEMBER_GP],[MEMBER_NG,MEMBER_NG]] as const) {
+      const note=await capture(raw,person,'Synthetic note to keep '+person,'private');
+      const review=await s.imports.approveLearning(owner,{approved:true,batch:key+':review:'+person,event_ids:[note.id]});
+      assert.deepEqual([review.accepted,review.newly_enabled],[0,0]);
+      assert.equal((await stores.control.query('SELECT 1 FROM learning_consent WHERE event_id=$1',[note.id])).rowCount,0);
+    }
     void GP3;
   } finally {loader?.stop();restoreMembers();restoreChats();await stores.close();await rm(root,{recursive:true,force:true});}
 });

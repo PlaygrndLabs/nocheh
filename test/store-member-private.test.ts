@@ -188,8 +188,9 @@ test('a member\'s private chat: admission, its groups, the daily cap, its passes
     assert.deepEqual({scope:mine.claims!.scope,space:mine.claims!.space,member:mine.claims!.member,lane:mine.claims!.lane,project:mine.claims!.project,
       answer:mine.claims!.answer,member_read:mine.claims!.member_read},
       {scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT,member:MEMBER_NG_ID,lane:MEMBER_NG_ID,project:undefined,answer:undefined,member_read:undefined});
-    // In the old-shaped family too, with no group they read at all.
-    assert.deepEqual([(await dispatch(MEMBER_GP,MEMBER_GP,'anything for me?')).claims?.member,await groupsOf(MEMBER_GP_CHAT)],[MEMBER_GP_ID,[]]);
+    // In the old-shaped family too. GP1, never confirmed so not read, is asked as well, and Telegram's 'in' brings it back.
+    assert.deepEqual(await groupsOf(MEMBER_GP_CHAT),[]);
+    assert.deepEqual([(await dispatch(MEMBER_GP,MEMBER_GP,'anything for me?')).claims?.member,await groupsOf(MEMBER_GP_CHAT)],[MEMBER_GP_ID,[GP1]]);
     // Their group turns carry their lane but never a member claim; the owner's carry neither.
     const group=await dispatch(NG1_TG,MEMBER_NG,'Nocheh, what is open?','supergroup');
     assert.deepEqual([group.turn,group.claims!.scope,group.claims!.lane,group.claims!.member],[true,NG1,MEMBER_NG_ID,undefined]);
