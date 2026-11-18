@@ -158,7 +158,9 @@ The model fixture's scripted brain acts only on an explicit directive in
 the current user turn of a request that offers Nocheh tools: `[[search:q]]`,
 `[[recall:q]]`, `[[owner:view]]` and `[[action:destination|text]]` request that real tool and
 answer from its actual result; `[[context:marker]]` reports whether a marker
-appears anywhere in the request except the current turn, `[[notes:marker]]`
+appears anywhere in the request except the current turn (`[[context_split:left|right]]`
+looks for `leftright`, so a probe of a member's mark from the owner's chat never
+names the mark whole, neither in the owner's message nor in the answer), `[[notes:marker]]`
 whether it is in the Hermes native notes the model sees; `[[long:n]]`,
 `[[silent]]` and `[[empty-once:key]]` produce long, `[NO_REPLY]` and one blank
 answer. `[[turn:marker]]` reports whether a marker appears in the current turn
@@ -304,8 +306,9 @@ an unpruned ask profile, which never show in a group's read, another member's
 chat, the owner's turns, Honcho, long-term memory, Inbox suggestions, grants,
 sharing previews or learned facts, while the member's own search finds them
 (`member_private_chat_stays_with_the_member`); the owner asking about that member,
-answered in a separate message that quotes only that member's chat and is then
-gone from the owner's next turn and recall (`owner_asks_about_a_member`); a member's
+answered in a separate message, after the asking turn's own reply, that quotes
+only that member's chat and is then gone from the owner's next turn and recall
+(`owner_asks_about_a_member`); a member's
 chat refused as a sharing rule's source (`member_chat_is_never_a_sharing_source`);
 and the re-check: a member removed while Nocheh missed the service message is no
 longer read there, one still in is read and the check recorded, no answer changes
