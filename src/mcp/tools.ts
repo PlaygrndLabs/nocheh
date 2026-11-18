@@ -308,8 +308,8 @@ async function tasks(args:Value,context:ToolContext) {
     if(typeof refused==='string'&&taskErrors.has(refused))return text({error:refused,note:TASK_NOTES[refused]});
     // A member's private chat reads one project's list at a time: the refusal names the lists to choose (D14).
     const body=error instanceof Refused&&error.body&&typeof error.body==='object'?error.body as Value:null;
-    if(refused==='task_project_required'&&Array.isArray(body?.projects))return text({error:refused,projects:body!.projects,
-      note:'Ask again with scope set to one of these project ids.'});
+    if(refused==='task_project_required'&&Array.isArray(body?.projects))return text({error:refused,projects:body!.projects,...(body!.more===true?{more:true}:{}),
+      note:body!.more===true?'Ask again with scope set to one of these project ids; there are more projects than these.':'Ask again with scope set to one of these project ids.'});
     // The broker keeps storage error text private; the status still tells the next step.
     return text({error:error instanceof Refused?({400:'invalid_task_request',403:'not_available_in_this_chat',404:'task_not_found',409:'task_changed_list_again'} as Record<number,string>)[error.status]??'tasks_unavailable':'tasks_unavailable'});
   }

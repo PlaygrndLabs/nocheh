@@ -208,11 +208,16 @@ type Turn={source:{reference:{id:string}};project:string|null;group:string|null;
 /** One project a member's private chat reads tasks of (D14): its id and name, and the joined groups of it the chat
  *  reaches. */
 export type TaskView={readonly project:string;readonly name:string;readonly reach:ReadSet};
+/** At most this many projects are named in one task_project_required refusal; `more` says there are others. */
+export const TASK_PROJECTS_NAMED=50;
 /** 400 when a member's private chat lists tasks without naming which of several projects (D14): `projects` names the
- *  ones it may choose, and only those. */
+ *  ones it may choose, and only those, at most TASK_PROJECTS_NAMED (`more: true` when it may choose others too). */
 export class TaskProjectRequired extends HttpError {
-  readonly details:{projects:{id:string;name:string}[]};
-  constructor(views:readonly TaskView[]){super(400,'task_project_required');this.details={projects:views.map(view=>({id:view.project,name:view.name}))};}
+  readonly details:{projects:{id:string;name:string}[];more?:true};
+  constructor(views:readonly TaskView[]){
+    super(400,'task_project_required');
+    this.details={projects:views.slice(0,TASK_PROJECTS_NAMED).map(view=>({id:view.project,name:view.name})),...(views.length>TASK_PROJECTS_NAMED?{more:true as const}:{})};
+  }
 }
 /**
  * Who sets a reminder or writes a task, and where (ADR-0255): the owner, or a person allowed in a group with their
