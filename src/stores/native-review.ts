@@ -259,6 +259,9 @@ export class NativeReviewRepository {
    * installation generation, so allowing the person later doesn't review their old messages one model run each.
    */
   private async decide(source:SourceReference,binding:GuardBinding):Promise<'review'|NotesSkip> {
+    // Never a private chat that is not the owner's (a member's updates and Nocheh's replies there), nor Nocheh's answer to
+    // the owner's ask about a member, whatever the owner said (step 4).
+    if(await this.contexts.access.privateHold(source).catch(error=>{if(error instanceof HttpError)return 'member_chat';throw error;}))return 'sender_not_allowed';
     const row=(await this.control.query(`SELECT (SELECT enabled FROM learning_consent WHERE event_id=$1) AS consent,
       (SELECT reason FROM native_review_skips WHERE event_id=$1 AND generation=$2) AS skipped`,[source.id,binding.generation])).rows[0];
     if(row.consent===true) {

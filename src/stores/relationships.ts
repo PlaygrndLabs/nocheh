@@ -5,17 +5,20 @@ import {canonical} from '../archive.js';
 import {sourceObjectId,type SourceIdentity} from '../source-model.js';
 import {ArchiveRepository,type SourceReference} from './archive.js';
 import {archiveScopes,inReadSet,inRecall,observedChat,readSetGroups,type ReadSet,type RecallScope} from '../spaces.js';
+import {chats} from '../chats.js';
 
 /** `recall` admits the known conversations of a recall scope: its own, or every conversation of its group when the
  * group's topics share memory. `reads` admits the known conversations of a read set, for an answer reader (ADR-0249).
  * A conversation is the Nocheh chat or topic an original's observed audience names (ADR-0252). */
-export type RelationshipAudience={kind:'owner'}|{kind:'recall';scope:RecallScope}|{kind:'reads';set:ReadSet};
+export type RelationshipAudience={kind:'owner'}|{kind:'recall';scope:RecallScope}|{kind:'reads';set:ReadSet;chat?:string};
+/** `chat` (step 4): the one private chat a member's reads, or the owner's ask about a member, also admit, with its topics. */
+const inBoundChat=(audience:{chat?:string},chat:string)=>audience.chat!==undefined&&(chat===audience.chat||chats().parentOf(chat)===audience.chat);
 const permits=(audience:RelationshipAudience,chat:string|null):boolean=>audience.kind==='owner'||chat!==null&&
-  (audience.kind==='reads'?inReadSet(audience.set,chat):inRecall(audience.scope,chat));
+  (audience.kind==='reads'?inReadSet(audience.set,chat)||inBoundChat(audience,chat):inRecall(audience.scope,chat));
 /** The archive scopes (every Telegram id) of the groups an audience reads, to narrow a read in SQL before permits()
  *  decides each row; null for the owner, who reads every chat. */
 const audienceScopes=(audience:RelationshipAudience):string[]|null=>audience.kind==='owner'?null:
-  archiveScopes(audience.kind==='reads'?readSetGroups(audience.set):[audience.scope.group??audience.scope.space]);
+  archiveScopes(audience.kind==='reads'?[...readSetGroups(audience.set),...(audience.chat?[audience.chat]:[])]:[audience.scope.group??audience.scope.space]);
 
 // Resolve the older adapter's unknown General projection from the immutable
 // full message. This changes neither archived bytes nor the saved descriptor.

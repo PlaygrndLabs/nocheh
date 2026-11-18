@@ -2,7 +2,7 @@ import {createServer,type IncomingMessage,type ServerResponse} from 'node:http';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
-import {currentReader,assertAudience,type Reader} from '../access.js';
+import {boundReader,currentReader,assertAudience,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,json,readJson,object} from '../http.js';
 import {manifest,fingerprint,type Effect,type Decision} from './contract.js';
@@ -100,13 +100,21 @@ const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted']);
 /** What a machine command may be told, as services/hermes/machine_box.py names it: a refusal or a failure on the machine's side. */
 export {machineErrors};
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
-async function refusalCode(response:Response,max=4096):Promise<string|null> {
+async function refusalCode(response:Response,max=4096):Promise<string|null> {return (await refusalBody(response,max))?.code??null;}
+/** A refusal's code and, for task_project_required (D14), the lists it names: each a project id and a name, nothing else. */
+async function refusalBody(response:Response,max=4096):Promise<{code:string|null;projects?:{id:string;name:string}[]}|null> {
   const chunks=[];let size=0;
   try {
     if(response.body)for await(const part of response.body){size+=part.length;if(size>max)return null;chunks.push(Buffer.from(part));}
-    const code=object(JSON.parse(Buffer.concat(chunks).toString())).error;return typeof code==='string'?code:null;
+    const body=object(JSON.parse(Buffer.concat(chunks).toString())),code=typeof body.error==='string'?body.error:null;
+    const projects=code==='task_project_required'&&Array.isArray(body.projects)&&body.projects.length<=50&&body.projects.every(item=>item&&typeof item==='object'&&
+      typeof item.id==='string'&&/^[a-f0-9]{64}$/.test(item.id)&&typeof item.name==='string'&&item.name.length<=200)?
+      (body.projects as {id:string;name:string}[]).map(item=>({id:item.id,name:item.name})):undefined;
+    return {code,...(projects?{projects}:{})};
   }catch{return null;}
 }
+/** A refusal that names what to ask instead (TaskProjectRequired's lists, D14). */
+class DetailedRefusal extends HttpError {constructor(status:number,code:string,readonly details:Record<string,unknown>){super(status,code);}}
 async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
   if(!response.ok){await response.body?.cancel();throw new HttpError(response.status>=400&&response.status<500?response.status:503,'security_upstream_unavailable');}
   const chunks=[];let size=0;
@@ -126,6 +134,7 @@ export function brokerServer(options:BrokerOptions) {
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
     if(res.headersSent){res.destroy();return;}
     json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'security_service_unavailable',
+      ...(error instanceof DetailedRefusal?error.details:{}),
       ...(error instanceof ProviderFailure&&Number.isInteger(error.providerStatus)&&error.providerStatus>=100&&error.providerStatus<=599?{provider_status:error.providerStatus}:{})});
   });});
   async function handle(req:IncomingMessage,res:ServerResponse) {
@@ -139,11 +148,12 @@ export function brokerServer(options:BrokerOptions) {
       if(!box||!authorization.startsWith('Bearer ')||!boxTokenValid(authorization.slice(7)))throw new HttpError(403,'box_token_required');
       await options.assertReady?.();return json(res,200,await box.live());
     }
-    // An answer reader is bound to its record on every call, or refused without one, and reaches read routes only (ADR-0249).
-    // A pass for a topic the app recorded a moment ago is read once this service's chat directory has looked again (ADR-0252).
-    const parsed=await currentReader(req,options.token);
-    if(parsed.answer!==undefined&&!options.storage?.bindReads)throw new HttpError(409,'private_answer_closed');
-    const principal=parsed.answer!==undefined?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
+    // A bound reader (an answer, a member's private chat, the owner's ask about a member) is bound to its record on every
+    // call, or refused without one, and reaches its read routes only (ADR-0249, ADR-0262). A pass for a topic the app
+    // recorded a moment ago is read once this service's chat directory has looked again (ADR-0252).
+    const parsed=await currentReader(req,options.token),bound=boundReader(parsed);
+    if(bound!==null&&!options.storage?.bindReads)throw new HttpError(409,bound==='answer'?'private_answer_closed':'member_chat_closed');
+    const principal=bound!==null?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
     assertPrivateAnswerRoute(principal,req.method,path);
     await afterPending(job,async()=>options.assertReady?.());
     // Nocheh's data tools: each call comes back to this broker's own routes with the turn's pass, so it meets every check below (ADR-0233).
@@ -222,7 +232,9 @@ export function brokerServer(options:BrokerOptions) {
           // a message request, that its chat is not one Nocheh serves; a task change, why a reminder time was not saved.
           const codes=relay.startsWith('/v1/jobs/')&&response.status<500?jobErrors:exec?machineErrors:relay==='/v1/tools/propose'&&response.status<500?proposeErrors:
             relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:null;
-          const code=codes&&response.status>=400?await refusalCode(response):(await response.body?.cancel(),null);
+          const refused=codes&&response.status>=400?await refusalBody(response):(await response.body?.cancel(),null),code=refused?.code??null;
+          // A member's private chat that did not name a project hears which lists it may choose (D14).
+          if(tasks&&code==='task_project_required'&&refused?.projects)throw new DetailedRefusal(response.status,code,{projects:refused.projects});
           throw new HttpError(response.status,code&&codes!.has(code)?code:'scoped_archive_unavailable');
         }
         // A box page holds at most 600,000 characters of message texts, which stays well within 8 MiB.

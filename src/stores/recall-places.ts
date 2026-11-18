@@ -8,6 +8,7 @@
 import type pg from 'pg';
 import {chats} from '../chats.js';
 import {graphGroupLabel} from '../graph-labels.js';
+import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 
 type Pools={archive:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>};
 /** What Hermes says about the profile a hit is in. */
@@ -118,4 +119,18 @@ export async function withRecallPlaces(stores:Pools,result:unknown):Promise<unkn
     const {space,owner,answer,answer_group,...rest}=hit;
     return {profile:rest.profile,place:recallPlace({space,owner,answer,answer_group},names),...rest};
   })};
+}
+
+/**
+ * The profiles an owner turn's recall of Hermes's own notes may read (D7, step 4): the owner's own, and those whose
+ * place is the owner's private chat or one of its topics, or a group Nocheh serves or one of its topics. Hermes keeps a
+ * profile only when its space.json names neither a member nor an ask about a member and it is the owner's, its space
+ * is one of these, or it is one of the owner's private answers; it never works the list out itself. The dashboard
+ * (admin) passes none and reads every profile.
+ */
+export function ownerRecallAllowed(policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):{spaces:string[]} {
+  const directory=chats(),owner=ownerChat(policy),home=owner!==null&&directory.isOwner(owner)?owner:null;
+  const spaces=directory.all().filter(chat=>chat.id===home||chat.parent_id!==null&&chat.parent_id===home||
+    directory.isGroup(chat.id)&&directory.served(chat.id)).map(chat=>chat.id);
+  return {spaces:[...new Set(spaces)].sort()};
 }

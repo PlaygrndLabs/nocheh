@@ -1,4 +1,4 @@
-import {admin,type Reader} from '../access.js';
+import {admin,boundReader,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inReadSet,inRecall,type RecallScope} from '../spaces.js';
@@ -207,9 +207,10 @@ export class LearnedMemoryRepository {
     const row=(await this.stores.derived.query(`SELECT e.*,v.author,v.retired,v.evidence,v.dependencies,v.derived_id FROM learned_entries e
       JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[id])).rows[0];
     if(!row||row.retired||row.imported&&!principal.admin)throw new HttpError(404,'learned_memory_not_found');
-    if(!principal.admin&&principal.answer!==undefined) {
-      // An answer reader reads what was learned in the groups frozen in its record and in its project, when that project
-      // is still active (ADR-0249); without its record, nothing.
+    if(!principal.admin&&boundReader(principal)!==null) {
+      // A bound reader reads what was learned in its bound groups and, for an answer, in its record's project when that
+      // project is still active (ADR-0249); without its binding, nothing. A member's own private chat and an asked
+      // member's chat are never learned from, so nothing learned is in them (step 4).
       const reads=principal.reads;
       if(!reads||row.scope_kind==='conversation'&&!inReadSet(reads,row.scope_id))throw new HttpError(404,'learned_memory_not_found');
       if(row.scope_kind==='project'&&(reads.project!==row.scope_id||
