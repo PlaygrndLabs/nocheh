@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {Reader} from '../access.js';
+import {boundReader,type Reader} from '../access.js';
 import {reactionObservation} from '../reaction-observation.js';
 import {sourceTagUsage} from '../source-tags.js';
 
@@ -77,6 +77,7 @@ async function request(context:ToolContext,path:string,body?:unknown,timeoutMs?:
 
 /** History still being imported says so, so an answer about it is not taken as complete. */
 async function importStatus(context:ToolContext):Promise<string|null> {
+  if(boundReader(context.principal)==='memberRead')return null;
   try {
     const pending=list(record(await request(context,'/v1/imports/pending')).imports??[]);
     const whole=(value:unknown)=>{const number=Number(value);if(value===null||typeof value==='boolean'||!Number.isFinite(number))throw new Error('invalid_number');return Math.trunc(number);};
@@ -95,7 +96,8 @@ async function search(args:Value,context:ToolContext) {
     const status=await importStatus(context);
     const rows=list(await request(context,'/v1/search'+query({q:words,limit:count})));
     const {space,scope}=context.principal;
-    const shared=space&&scope!==null?record(await request(context,memoryRoutes.shared+query({q:words}))):{sources:[]};
+    // An ask about a member reads only that member's chat: no shared facts, which the bound routes refuse anyway.
+    const shared=space&&scope!==null&&boundReader(context.principal)!=='memberRead'?record(await request(context,memoryRoutes.shared+query({q:words}))):{sources:[]};
     return text({sources:[...rows,...list(shared.sources)],filter_status:shared.filter_status??null,...(status?{import_status:status}:{})});
   }catch{return text({error:'archive_search_unavailable'});}
 }

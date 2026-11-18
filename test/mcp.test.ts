@@ -236,6 +236,11 @@ test('search says when history is still importing, and adds shared facts only fo
   assert.equal(owner.calls.length,2,'the owner reads the whole archive, without shared facts');
   // A failed status check never blocks the search itself.
   assert.deepEqual((await run('archive_search',{query:'Friday'},fake(call=>call.path.includes('pending')?new Status(503):[]).context)).sources,[]);
+  // An ask about a member searches only the bound member chat: no import status, no shared facts.
+  pending=[{messages:40000,ready_percent:42}];
+  const ask=fake(answer,{scope:'1',admin:false,space:'1',memberRead:'c'.repeat(32)});
+  assert.deepEqual(await run('archive_search',{query:'Friday'},ask.context),{sources:[{id:'nocheh:source:'+ID}],filter_status:null});
+  assert.deepEqual(ask.calls.map(call=>call.path),['/v1/search?q=Friday&limit=5']);
 });
 
 test('a chat is read page by page and found by meaning through the bound scope',async()=>{
