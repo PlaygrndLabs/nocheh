@@ -1232,6 +1232,11 @@ class ProductScenarios(Scenarios):
     FACT_LINE = re.compile(r'^  ([0-9]+)\. ([0-9]{2}:[0-9]{2}|--:--) (.*)$')
     # A block's longest text and the most facts it lists, as Honcho's own context holds them (src/fact-block.ts, B3.1).
     FACT_BLOCK_LIMIT, FACT_BLOCK_FACTS = 20000, 100
+    # A block full enough for its source lines' share to be measured, and the longest source line: its fixed words and a
+    # 160-character tag (TAG_LIMIT in src/source-tags.ts).
+    FULL_BLOCK_FACTS, SOURCE_LINE_LIMIT = 50, 240
+    # How a recall hit names a tool result's row (recallRoleWords in src/stores/note-sources.ts).
+    TOOL_ROW = 'a tool result'
 
     def memory_blocks(self, chat, number, sender=OWNER, topic=None, extra=None):
         """The long-term memory blocks of `sender`'s next turn in `chat` as the model read them ([[memory_blocks:]],
@@ -1293,7 +1298,8 @@ class ProductScenarios(Scenarios):
 
     def tool_hits(self, result, mark, place):
         """The owner's recall hits from stored chat history in a chat whose place names `place`, from tool rows holding the mark."""
-        return [hit for hit in self.session_hits(result, mark, place) if hit.get('role') == 'tool']
+        # A hit names its row's role in words (recallRoleWords in src/stores/note-sources.ts), never Hermes's own role name.
+        return [hit for hit in self.session_hits(result, mark, place) if hit.get('role') == self.TOOL_ROW]
 
     def opened_fact(self, record, n, chat, topic=None, sender=OWNER):
         """archive_read of fact `n` of a memory record, as `sender` in `chat`."""
@@ -1450,8 +1456,14 @@ class ProductScenarios(Scenarios):
         self.gate('blocks_within_their_caps', all(len(block['text']) <= self.FACT_BLOCK_LIMIT and len(facts) <= self.FACT_BLOCK_FACTS for _, block, facts in with_facts),
                   sizes=[(len(block['text']), len(facts)) for _, block, facts in with_facts])
         self.gate('facts_numbered_with_times', all([fact['n'] for fact in facts] == list(range(1, len(facts)+1)) for _, _, facts in with_facts))
-        heads = [(sum(len(line)+1 for line in block['text'].split('\n') if line.startswith('Source [')), len(block['text'])) for _, block, _ in with_facts]
-        self.gate('source_lines_at_most_a_quarter', all(4*head <= size for head, size in heads), heads=heads)
+        # Source lines take at most a quarter of a block once it holds enough facts for that share to mean anything (B10, held
+        # for a full block by test/fact-sources.test.ts). The fixture's mock deriver writes two short facts per message, each
+        # message its own place and day, so a block of a few facts is mostly its source lines; each line still stays short.
+        heads = [(sum(len(line)+1 for line in block['text'].split('\n') if line.startswith('Source [')), len(block['text']), len(facts))
+                 for _, block, facts in with_facts]
+        longest = max((len(line) for _, block, _ in with_facts for line in block['text'].split('\n') if line.startswith('Source [')), default=0)
+        self.gate('source_lines_at_most_a_quarter', all(4*head <= size for head, size, count in heads if count >= self.FULL_BLOCK_FACTS)
+                  and longest <= self.SOURCE_LINE_LIMIT, heads=heads, longest=longest)
 
     def private_chat_stays_out_of_groups(self):
         # What the owner keeps on their private side never reaches what the model sees for a group, and no group reply
