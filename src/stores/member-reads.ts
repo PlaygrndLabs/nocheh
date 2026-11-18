@@ -30,6 +30,8 @@ export const MEMBER_READ_STALE_DAYS=30;
 export const MEMBER_RECHECK_HOURS=6;
 /** At most this many groups are asked again before one private turn; the rest that needed it are left out of it. */
 export const MEMBER_RECHECK_LIMIT=10;
+/** A stale group (one a member does not read) asked about without an answer is not asked again for this long. */
+export const MEMBER_STALE_RETRY_HOURS=24;
 
 /** The owner's private chat as this process's chat directory holds it; null when it holds none, which closes every
  * member chat (a chat that might be the owner's is never a member's). */
@@ -97,22 +99,25 @@ export async function memberAskReads(db:Db,ask:string,owner:string|null=ownerCha
 }
 
 /**
- * Which of a member's groups to ask Telegram about again before a private turn (D5): those it reads that were confirmed
- * longer ago than MEMBER_RECHECK_HOURS and the stale ones it does not read, oldest first, at most MEMBER_RECHECK_LIMIT
- * (`ask`). A group asked lately without an answer (`tried`, when it was last asked) counts from that time, so groups
- * Telegram does not answer move behind the others and never keep them from being asked. The groups it reads that needed
- * a check past the cap (`past`) are left out of that turn.
+ * Which of a member's groups to ask Telegram about again before a private turn (D5), at most MEMBER_RECHECK_LIMIT
+ * (`ask`): first those it reads that were confirmed longer ago than MEMBER_RECHECK_HOURS, oldest first; then, only in the
+ * places left, the stale ones it does not read, oldest first, so a stale group never pushes out a group it reads. A group
+ * asked lately without an answer (`tried`, when it was last asked) counts from that time, so groups Telegram does not
+ * answer move behind the others and never keep them from being asked; a stale one is not asked again for
+ * MEMBER_STALE_RETRY_HOURS. The groups it reads that needed a check past the cap (`past`) are left out of that turn.
  */
 export function memberRechecks(reads:Pick<MemberReads,'groups'>&Partial<Pick<MemberReads,'stale'>>,now=Date.now(),
   tried:(chat:string)=>number|undefined=()=>undefined,limit=MEMBER_RECHECK_LIMIT):{ask:string[];past:string[]} {
-  const reading=new Set(reads.groups.map(group=>group.chat)),since=(group:MemberReadGroup)=>Math.max(group.checked_at.getTime(),tried(group.chat)??0);
-  const due=[...reads.groups.filter(group=>now-group.checked_at.getTime()>MEMBER_RECHECK_HOURS*3600000),...reads.stale??[]]
+  const since=(group:MemberReadGroup)=>Math.max(group.checked_at.getTime(),tried(group.chat)??0);
+  const order=(groups:readonly MemberReadGroup[])=>[...groups]
     .sort((a,b)=>since(a)-since(b)||a.checked_at.getTime()-b.checked_at.getTime()||(a.chat<b.chat?-1:a.chat>b.chat?1:0)).map(group=>group.chat);
-  return {ask:due.slice(0,limit),past:due.slice(limit).filter(chat=>reading.has(chat))};
+  const due=order(reads.groups.filter(group=>now-group.checked_at.getTime()>MEMBER_RECHECK_HOURS*3600000));
+  const stale=order((reads.stale??[]).filter(group=>!(now-(tried(group.chat)??-Infinity)<=MEMBER_STALE_RETRY_HOURS*3600000)));
+  return {ask:[...due,...stale].slice(0,limit),past:due.slice(limit)};
 }
 
 /** When each member's group was last asked about in this process without an answer (`member group` → ms), so groups
- * Telegram does not answer rotate behind the others. Entries older than MEMBER_RECHECK_HOURS go. */
+ * Telegram does not answer rotate behind the others. Entries older than MEMBER_STALE_RETRY_HOURS go. */
 const asked=new Map<string,number>();
 
 /** What Telegram says of a person in a group, as the bot's telegram.member_status answers: 'in' or 'left' ('kicked' and
@@ -132,7 +137,7 @@ export function memberStatus(answer:unknown):'in'|'left'|null {
  * needed a check past the cap (left out of this turn) and whether any membership moved.
  */
 export async function recheckMemberGroups(control:pg.Pool,call:RuntimeCall,reads:MemberReads,now=Date.now(),limit=MEMBER_RECHECK_LIMIT):Promise<{past:string[];moved:boolean}> {
-  for(const [key,at] of asked)if(now-at>MEMBER_RECHECK_HOURS*3600000)asked.delete(key);
+  for(const [key,at] of asked)if(now-at>MEMBER_STALE_RETRY_HOURS*3600000)asked.delete(key);
   const {ask,past}=memberRechecks(reads,now,chat=>asked.get(reads.member+' '+chat),limit);let moved=false;
   const owner=chats().get(chats().ownerChat())?.account_id??null;
   for(const group of ask) {

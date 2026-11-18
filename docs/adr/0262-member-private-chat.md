@@ -147,10 +147,13 @@ stays a destination only behind the owner's card).
   groups whose `checked_at` is more than 6 hours old (`MEMBER_RECHECK_HOURS`), and
   groups left out only because their 'in' is older than 30 days or was never
   confirmed, are asked of Telegram with the bot op `telegram.member_status`
-  (`getChatMember`), oldest first, at most 10 (`MEMBER_RECHECK_LIMIT`). The bot
-  asks only about a served group, where it is in Telegram now. A group asked
-  without an answer counts from that attempt, so groups Telegram does not answer
-  move behind the others and never keep them from being asked.
+  (`getChatMember`), at most 10 (`MEMBER_RECHECK_LIMIT`): first the groups they
+  read, oldest first, then the not-read ones in the places left, oldest first, so
+  a group they do not read never pushes out one they read. The bot asks only
+  about a served group, where it is in Telegram now. A group asked without an
+  answer counts from that attempt, so groups Telegram does not answer move behind
+  the others and never keep them from being asked; a not-read one is not asked
+  again for 24 hours (`MEMBER_STALE_RETRY_HOURS`).
   - `creator`, `administrator`, `member`, and `restricted` with `is_member` true
     are 'in'. `left`, `kicked`, and `restricted` with `is_member` false are
     'left'.
