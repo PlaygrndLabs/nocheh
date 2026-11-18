@@ -110,7 +110,9 @@ def forwarded(value):
 
 
 def recent_group(value):
-    """The recent unaddressed group messages block, or '' when the input is absent or malformed."""
+    """The recent unaddressed group messages block, or '' when the input is absent or malformed. A message that replies
+    to another carries its reply part, which names that message without its text, on its own line after the speaker
+    line; a malformed one drops only itself (reply_part)."""
     if not isinstance(value,list) or not 0<len(value)<=20:return ''
     lines=['[Recent messages in this group that were not addressed to you, oldest first]']
     for item in value:
@@ -120,9 +122,45 @@ def recent_group(value):
                 or not isinstance(item.get('id'),str) or not re.fullmatch(r'[a-f0-9]{64}',item['id'])):return ''
         forward=forwarded(item.get('forwarded'))
         if 'forwarded' in item and not forward:return ''
-        lines.append(speaker+' (source nocheh:event:'+item['id']+')\n'+(forward+'\n' if forward else '')+unframed(item['text']))
+        reply=reply_part(item.get('reply'))
+        lines.append(speaker+' (source nocheh:event:'+item['id']+')\n'+(reply+'\n' if reply else '')+(forward+'\n' if forward else '')+unframed(item['text']))
     lines.append('[End of recent messages]')
     return '\n\n'.join(lines)
+
+
+# Whose words a source is, as a source tag's by= says (src/source-tags.ts TagBy).
+BY=('owner','person','forward','file','mixed','nocheh','shared','unknown')
+REPLY_END='[End of replied-to message]'
+
+
+def _one_line(value,size):
+    """Whether a value is text of at most `size` characters on one line, with nothing that could end it or hide in it."""
+    return (isinstance(value,str) and len(value)<=size
+            and not any(ord(c)<32 or ord(c)==127 or c in '\x85\u2028\u2029' or 0xd800<=ord(c)<=0xdfff for c in value))
+
+
+def _reply_line(value,words):
+    """A reply line Nocheh wrote from the archive's reply relation and a source tag (ADR-0261): `[<words>, by=<by>: <tag>]
+    (source nocheh:event:<id>)`, at most 300 characters on one line, or None."""
+    if not _one_line(value,300):return None
+    found=re.fullmatch(r'\['+re.escape(words)+r', by=([a-z]+): .+\] \(source nocheh:event:([a-f0-9]{64})\)',value)
+    return found if found and found.group(1) in BY else None
+
+
+def reply_part(value):
+    """A recent group message's reply part: who · where · when of the message it replies to, never its text, or ''."""
+    return value if _reply_line(value,'In reply to') else ''
+
+
+def reply_block(value):
+    """The block naming the message the turn's own message replies to (ADR-0261), or '' when absent or malformed: its
+    line, at most 200 characters of its text on one line, shown unframed since they may be someone else's words, and
+    the line that ends it. by= and the id must be the line's own."""
+    if not isinstance(value,dict) or set(value)!={'line','text','by','id'}:return ''
+    found=_reply_line(value['line'],'Replying to')
+    if (not found or found.group(1)!=value['by'] or found.group(2)!=value['id'] or not _one_line(value['text'],200)
+            or not value['text'].strip()):return ''
+    return value['line']+'\n'+unframed(value['text'])+'\n'+REPLY_END
 
 
 def private_answer(value):
@@ -182,16 +220,22 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # belongs in agent provenance, not in the semantic memory query/cache key.
     memory_query=text[:2000]
     speaker=body.get('speaker')
+    group=isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker
     forward=forwarded(body.get('forwarded'))
     if forward:
         # Where a forwarded message came from goes before its text, which cannot write that line itself.
         text = forward + '\n' + unframed(text)
-    if isinstance(speaker,str) and speaker.startswith('[Group message from ') and speaker.endswith(']') and len(speaker)<=200 and '\n' not in speaker:
-        # Who spoke and when stays out of the memory query; the model and native history see it.
-        text = speaker + '\n' + (text if forward else unframed(text))
-    elif answer and not forward:
-        # A private answer's question is group text even without its speaker line.
+    elif group or answer:
+        # Group text, a private answer's question too even without its speaker line, cannot write a frame line.
         text = unframed(text)
+    reply=reply_block(body.get('reply'))
+    if reply:
+        # The message this one replies to, named and quoted, before its text: after the speaker line in a group, first in
+        # the owner's chat, where retiring that message finds it in stored history (retired_history.py).
+        text = reply + '\n' + text
+    if group:
+        # Who spoke and when stays out of the memory query; the model and native history see it.
+        text = speaker + '\n' + text
     recent=recent_group(body.get('recent_group'))
     if recent:
         # Group messages since the last turn that did not address Nocheh never reached Hermes on their own.
