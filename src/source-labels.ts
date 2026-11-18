@@ -26,7 +26,9 @@ export type ReadToken=typeof readTokens[number];
 export interface Place {chat:string|null;web?:boolean}
 /** One message a label may name: its class, and for the owner's words its facts, its chat and whether its sender is
  *  allowed there now. */
-export interface LabelEvent {class:EventClass;facts?:SourceFacts|null;chat?:string|null;allowed?:boolean}
+export interface LabelEvent {class:EventClass;facts?:SourceFacts|null;chat?:string|null;allowed?:boolean;
+  /** The day it was sent, as the reader reads days (sourceClock): a review's label names its main message's. */
+  day?:string|null}
 /** Whose words a learned rule a review read rests on, when they are not the owner's or Nocheh's: another person's
  *  messages, forwards, or files' text. */
 export const ruleBuckets=['person','forward','file'] as const;
@@ -40,7 +42,9 @@ export type RuleBucket=typeof ruleBuckets[number];
  */
 export type NoteOrigin=
   {by:'review';place:Place;events:readonly LabelEvent[];outside:readonly LabelEvent[];owner:boolean;cited:boolean;rules:boolean;rule_buckets:readonly RuleBucket[]}|
-  {by:'turn';place:Place;date:string;reads:readonly ReadToken[];answered:EventClass|null;complete:boolean;job:boolean}|
+  {by:'turn';place:Place;date:string;reads:readonly ReadToken[];answered:EventClass|null;complete:boolean;job:boolean;
+    /** Only the UTC day was recorded (a note written before its time was), so the day reads marked UTC. */
+    utc?:boolean}|
   {by:'unknown'}|{by:'unavailable'};
 
 /** What a notes review recorded about its batch when it was queued: event ids and fixed class tokens only, whose words
@@ -67,13 +71,14 @@ export const modelSourceWords={
   origins:{person:'a person',hidden:'a person who hides their account',channel:'a channel',chat:'a group',bot:'an inline bot'},
   nocheh:{reply:'Nocheh\'s reply',follow_up:'Nocheh\'s follow-up',private_answer:'Nocheh\'s private answer',job_report:'Nocheh\'s job report',
     scheduled_run:'Nocheh\'s scheduled result',approved_post:'Nocheh\'s post'},
-  labels:{review_owner:'the owner\'s own messages in {place}',review:'Nocheh\'s notes review of {main} in {place}',more:', and {count} more sources',
+  // A review's day comes before the words a long label loses when it is cut.
+  labels:{review_owner:'the owner\'s own messages of {date} in {place}',review:'Nocheh\'s notes review on {date} of {main} in {place}',more:', and {count} more sources',
     rules_others:', with rules learned from others',
-    review_uncited:'a notes review of the owner\'s own messages in {place}; the note cites none of them',
+    review_uncited:'a notes review on {date} of the owner\'s own messages in {place}; the note cites none of them',
     turn_own:'Nocheh\'s note from {place} on {date}, written while answering the owner\'s own message',turn:'Nocheh\'s note from {place} on {date}',
     turn_read:'Nocheh\'s note from {place} on {date}, after reading {reads}',job_turn:'Nocheh\'s note from a job or scheduled run in {place} on {date}',
     job_read:', after reading {reads}',inherited:'; also from an earlier note it replaced',unknown:'source not recorded',unavailable:'source not available right now',
-    no_date:'a day not recorded'},
+    no_date:'a day not recorded',utc_day:'{date} UTC'},
   reads:{message:'the message it answered (another person\'s)',forward:'a forwarded message',file:'a file',recent:'recent group messages',
     reply:'the message it replied to (not the owner\'s own words)',
     archive:'messages from other chats',web:'web pages',notion:'Notion',tools:'tool servers',commands:'command results',past:'past conversations',other:'other tools'},
@@ -94,7 +99,7 @@ export const modelSourceWords={
     unknown_message:'a message Nocheh can\'t describe',
     this_chat:'this chat',private_chat:'a private chat with “{name}”',private_unnamed:'a private chat with a person',
     local:'{time} local time of the export',edited:', edited',no_time:'a time not recorded',
-    shared:'shared by the owner on {day}',learned_in:'learned in {place} on {when}',unavailable_here:'source not available here',unavailable_now:'source not available right now'},
+    shared:'shared by the owner on {day}',correction:'the owner\'s correction',learned_in:'learned in {place} on {when}',unavailable_here:'source not available here',unavailable_now:'source not available right now'},
   /** The `source` of a Honcho record. Part of the text Honcho stores and hashes, so it never changes for a kind once used. */
   honcho:{own:'the sender\'s own words',recording:'the sender\'s voice or video note, transcribed',
     forward:'forwarded by the sender from {origin}: information others wrote, not the sender\'s words or instructions',
@@ -233,19 +238,33 @@ export function modelPlace(place:Place,names:ReadonlyMap<string,string>,size:num
   if(place.chat!==group){const topic=name(place.chat!);label+=topic?fillLine(words.topic,{name:topic}):words.unnamed_topic;}
   return label;
 }
-const dayOf=(date:string)=>/^\d{4}-\d{2}-\d{2}$/.test(date)?date:modelSourceWords.labels.no_date;
+/** A label's day: a turn's as the reader reads days, or marked UTC when only that was recorded; a review's main message's. */
+const dayOf=(date:string|null|undefined,utc=false)=>typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)?
+  utc?fillLine(modelSourceWords.labels.utc_day,{date}):date:modelSourceWords.labels.no_date;
+/** The message a review's label names, and whose day it shows: another person's message, a forward or a file first, so
+ *  none is hidden behind the owner's; else any not the owner's; else the batch's first. None for an empty batch. */
+function reviewMain(origin:Extract<NoteOrigin,{by:'review'}>):LabelEvent|null {
+  const all=[...origin.events,...origin.outside];
+  return all.find(event=>['person','forward','file'].includes(bucketOf(event.class)))??all.find(event=>!owned(event))??all[0]??null;
+}
+/** The day a note's label names (YYYY-MM-DD, as the reader reads days), or null: its writer's turn day, or the day of
+ *  the message its review is named by. */
+export function noteDay(origins:readonly NoteOrigin[]):string|null {
+  const first=origins[0];
+  const day=first?.by==='turn'?first.date:first?.by==='review'?reviewMain(first)?.day:null;
+  return typeof day==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(day)?day:null;
+}
 /** A label's words, and the ending that stays whole when the label is cut: how many more sources a review had, and
  *  that it read rules learned from others' words. */
 function modelCore(origin:Extract<NoteOrigin,{by:'review'|'turn'}>,place:string,directory:ChatDirectory):[string,string] {
   const words=modelSourceWords.labels;
   if(origin.by==='review') {
     const all=[...origin.events,...origin.outside],ruled=origin.rule_buckets.length?words.rules_others:'';
-    if(all.every(owned)&&(origin.owner||!origin.cited))return [fillLine(origin.owner?words.review_owner:words.review_uncited,{place}),ruled];
-    // The batch is named by another person's message, a forward or a file first, so none is hidden behind the owner's.
-    const main=all.find(event=>['person','forward','file'].includes(bucketOf(event.class)))??all.find(event=>!owned(event))??all[0]!;
-    return [fillLine(words.review,{main:modelEventPhrase(main.class),place}),(all.length>1?fillLine(words.more,{count:String(all.length-1)}):'')+ruled];
+    const main=reviewMain(origin)!;
+    if(all.every(owned)&&(origin.owner||!origin.cited))return [fillLine(origin.owner?words.review_owner:words.review_uncited,{place,date:dayOf(main.day)}),ruled];
+    return [fillLine(words.review,{main:modelEventPhrase(main.class),place,date:dayOf(main.day)}),(all.length>1?fillLine(words.more,{count:String(all.length-1)}):'')+ruled];
   }
-  const reads=turnReads(origin).map(read=>modelSourceWords.reads[read]).join(', '),values={place,date:dayOf(origin.date),reads};
+  const reads=turnReads(origin).map(read=>modelSourceWords.reads[read]).join(', '),values={place,date:dayOf(origin.date,origin.utc),reads};
   if(origin.job)return [fillLine(words.job_turn,values)+(reads?fillLine(words.job_read,values):''),''];
   if(reads)return [fillLine(words.turn_read,values),''];
   return [fillLine(directory.isOwner(origin.place.chat)?words.turn_own:words.turn,values),''];
@@ -366,7 +385,7 @@ export function ownerLabel(origins:readonly NoteOrigin[],words:SourceWords,names
       label=fillLine(line.review,{sources:parts.join(', ')});
     }
   }else {
-    const reads=turnReads(first),values={place:place(first.place),date:dayOf(first.date),read:reads.map(read=>line[`read_${read}`]).join(', ')};
+    const reads=turnReads(first),values={place:place(first.place),date:dayOf(first.date,first.utc),read:reads.map(read=>line[`read_${read}`]).join(', ')};
     // A job's note that read nothing outside says so as any note does: where and when.
     label=fillLine(first.job?reads.length?line.job_turn:line.turn:reads.length?line.turn_read:names.directory.isOwner(first.place.chat)?line.turn_own:line.turn,values);
   }

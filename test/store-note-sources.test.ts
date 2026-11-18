@@ -219,18 +219,21 @@ test('each note\'s source is labelled from what was recorded about it, never fro
       note('unknown',[{by:'unknown'}])];
     const labels=await sources.labels(notes),of=(name:string)=>labels[notes.findIndex(item=>item.key===digest(`${run}:note:${name}`))]!;
     assert.equal(labels.length,notes.length);
-    assert.deepEqual(of('own'),{from:'owner',label:'the owner\'s own messages in the owner\'s private chat'});
-    assert.deepEqual(of('uncited'),{from:'nocheh',label:'a notes review of the owner\'s own messages in the owner\'s private chat; the note cites none of them'});
+    // Saved without Telegram's time, so a review's day is the day each was saved.
+    const saved=((await stores.archive.query('SELECT received_at FROM events WHERE id=$1',[typed])).rows[0].received_at as Date).toISOString().slice(0,10);
+    assert.deepEqual(of('own'),{from:'owner',label:`the owner's own messages of ${saved} in the owner's private chat`});
+    assert.deepEqual(of('uncited'),{from:'nocheh',label:`a notes review on ${saved} of the owner's own messages in the owner's private chat; the note cites none of them`});
     // A note citing someone else's message, or more messages than were sent, is never the owner's.
     assert.equal(of('outside').from,'forward');assert.notEqual(of('too-many').from,'owner');
-    assert.equal(of('mixed').from,'forward');assert.match(of('mixed').label,/^Nocheh's notes review of /);
+    assert.equal(of('mixed').from,'forward');assert.ok(of('mixed').label.startsWith(`Nocheh's notes review on ${saved} of a message another person forwarded `),of('mixed').label);
     // A review with no records, or whose row is gone, is not recorded; another origin only lowers trust.
     assert.notEqual(of('blank').from,'owner');assert.deepEqual(of('gone'),{from:'unknown',label:modelSourceWords.labels.unknown});
     assert.equal(of('replaced').from,'forward');assert.ok(of('replaced').label.endsWith(modelSourceWords.labels.inherited));
     assert.notEqual(of('dropped').from,'owner');
-    // A turn's note is never the owner's own, even while answering the owner's message.
-    assert.deepEqual(of('turn-own'),{from:'turn',label:'Nocheh\'s note from the owner\'s private chat on 2026-11-08, written while answering the owner\'s own message'});
-    assert.deepEqual(of('turn-read'),{from:'turn_read',label:'Nocheh\'s note from the owner\'s private chat on 2026-11-08, after reading web pages'});
+    // A turn's note is never the owner's own, even while answering the owner's message. One that recorded only its UTC
+    // day, as notes did before their moment was kept, says so.
+    assert.deepEqual(of('turn-own'),{from:'turn',label:'Nocheh\'s note from the owner\'s private chat on 2026-11-08 UTC, written while answering the owner\'s own message'});
+    assert.deepEqual(of('turn-read'),{from:'turn_read',label:'Nocheh\'s note from the owner\'s private chat on 2026-11-08 UTC, after reading web pages'});
     assert.equal(of('turn-forward').from,'turn_read');assert.match(of('turn-forward').label,/after reading a forwarded message$/);
     assert.equal(of('turn-cut').from,'turn_read');assert.equal(of('job').from,'turn_read');assert.match(of('job').label,/^Nocheh's note from a job or scheduled run/);
     assert.deepEqual(of('unknown'),{from:'unknown',label:modelSourceWords.labels.unknown});
@@ -255,7 +258,7 @@ test('each note\'s source is labelled from what was recorded about it, never fro
     const recalled=await sources.withRecallSources({hits:[{profile:'p',space:OWNER,kind:'native_note',text:'Lisbon',note:sent[0]},
       {profile:'p',space:OWNER,kind:'native_note',text:'Lisbon again'},{profile:'p',kind:'native_session',text:'Lisbon?',role:'assistant'},
       {profile:'p',kind:'native_session',text:'Lisbon!',role:'user'}],truncated:false}) as any;
-    assert.deepEqual(recalled.hits.map((hit:any)=>hit.source??hit.role),[{from:'owner',label:'the owner\'s own messages in the owner\'s private chat'},
+    assert.deepEqual(recalled.hits.map((hit:any)=>hit.source??hit.role),[{from:'owner',label:`the owner's own messages of ${saved} in the owner's private chat`},
       {from:'unknown',label:modelSourceWords.labels.unknown},recallRoleWords.assistant,recallRoleWords.message]);
     assert.ok(recalled.hits.every((hit:any)=>!('note' in hit)));
     // The same note's key in two profiles: each hit and each entry keeps its own source.

@@ -54,7 +54,7 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             # This parent records who wrote each note the turn adds or changes, outside the turn's reach (ADR-0257). A
             # private answer has no memory tool, so it writes no notes.
             from . import note_sources
-            watch=None if scope.answer else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile))
+            watch=None if scope.answer else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile), body.get('event_id'))
             result=None
             try:
                 result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'])

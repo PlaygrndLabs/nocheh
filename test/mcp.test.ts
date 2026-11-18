@@ -330,7 +330,24 @@ test('an archived message opens with its source and its thread, within 16,000 ch
   assert.equal(idle.calls.length,0);
   assert.deepEqual(await run('archive_read',{id:'nocheh:grant:'+ID},fake(()=>new Status(403)).context),{error:'archive_source_unavailable'},'a private answer gets none');
   assert.match(tool('archive_read').description,/reply_to \(the message it replies to\)/);
-  assert.deepEqual(Object.keys((tool('archive_read').inputSchema as any).properties),['id','fact','replies','chain']);
+  assert.deepEqual(Object.keys((tool('archive_read').inputSchema as any).properties),['id','fact','note','replies','chain']);
+});
+
+test('archive_read opens a note in this turn\'s evidence by its ref: up to 5 tagged messages, never a broken one (ADR-0261)',async()=>{
+  const ref='0123456789ab',source='nocheh:event:'+'b'.repeat(64);
+  const many=Array.from({length:7},()=>({source,tag:'“Bob” · this chat · 2026-11-03 UTC',by:'person',text:'not passed on'}));
+  const noted=fake(()=>({note:ref,sources:many,more:2}));
+  assert.deepEqual(await run('archive_read',{note:ref},noted.context),{note:ref,sources:Array(5).fill({source,tag:'“Bob” · this chat · 2026-11-03 UTC',by:'person'}),more:2});
+  assert.equal(noted.calls[0]!.path,'/v1/memory/notes/'+ref);
+  // A ref is 12 hex, and a source not a full message id is never passed on.
+  const idle=fake(()=>({}));
+  for(const note of ['0123456789AB','0123456789a','0123456789abc',12,'../x'])
+    assert.deepEqual(await run('archive_read',{note},idle.context),{error:'archive_source_unavailable'},String(note));
+  assert.equal(idle.calls.length,0);
+  assert.deepEqual(await run('archive_read',{note:ref},fake(()=>({sources:[{source:'nocheh:event:short',tag:'x',by:'person'}]})).context),{error:'archive_source_unavailable'});
+  assert.deepEqual(await run('archive_read',{note:ref},fake(()=>new Status(404)).context),{error:'archive_source_unavailable'},'a ref this turn never had');
+  assert.match(tool('archive_read').description,/note=<ref>/);
+  assert.match(tool('memory_recall').description,/An owner correction has tag .* and evidence/);
 });
 
 test('background jobs are started, listed and stopped through the bound scope',async()=>{

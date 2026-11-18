@@ -170,6 +170,15 @@ function related(value:unknown,limit:number) {
 }
 async function archiveRead(args:Value,context:ToolContext) {
   try {
+    // A note in this turn's evidence, by its ref: the messages it was written from, each tagged (ADR-0261).
+    const note=own(args,'note')&&args.note!==undefined&&args.note!==null?args.note:null;
+    if(note!==null) {
+      if(typeof note!=='string'||!/^[a-f0-9]{12}$/.test(note))throw new Error('invalid_note');
+      const opened=record(await request(context,'/v1/memory/notes/'+note));
+      return text({note,sources:list(opened.sources).slice(0,5).map(value=>{const item=record(value),source=String(item.source??'');
+        if(!/^nocheh:event:[a-f0-9]{64}$/.test(source))throw new Error('invalid_note_source');
+        return {source,tag:String(item.tag??''),by:String(item.by??'unknown')};}),...Number.isSafeInteger(opened.more)&&Number(opened.more)>0?{more:opened.more}:{}});
+    }
     const id=own(args,'id')?args.id:'';
     if(typeof id!=='string')throw new Error('invalid_source');
     const shared=id.match(/^nocheh:(shared|filtered):([a-f0-9]{64})$/);
@@ -473,8 +482,10 @@ export const mcpTools:readonly McpTool[]=[
     'It also opens nocheh:shared, nocheh:filtered and nocheh:grant ids (what the owner shared) and nocheh:learned ids (an entry and its sources). '+
     'A recalled fact opens by its memory id and number (id=nocheh:memory:<id> fact=<n>, from a memory block or memory_recall\'s facts_source): its text, '+
     'by, at and its sources, each openable as a message; without fact, the first facts\' numbers and tags. A fact whose source was retired, or that memory '+
-    'no longer holds, is unavailable.',
-    inputSchema:shape({id:{type:'string'},fact:{type:'integer',minimum:1,maximum:200},replies:{type:'integer',minimum:0,maximum:10},chain:{type:'integer',minimum:0,maximum:5}},['id']),run:archiveRead},
+    'no longer holds, is unavailable. A native note in this turn\'s memory evidence opens by its ref (note=<ref>, in place of id): the messages it was written from, '+
+    'up to 5, each with tag and by and openable as a message; a ref opens only in the turn whose evidence showed it.',
+    inputSchema:shape({id:{type:'string'},fact:{type:'integer',minimum:1,maximum:200},note:{type:'string',pattern:'^[a-f0-9]{12}$'},
+      replies:{type:'integer',minimum:0,maximum:10},chain:{type:'integer',minimum:0,maximum:5}}),run:archiveRead},
   {name:'archive_page',description:'Read a conversation in time order, oldest first, one page at a time: messages, edits, reactions, replies and the text of their files and voice notes. '+
     'Use it to go through a period (from and to as YYYY-MM-DD) or a whole chat; pass next as after for the following page until complete is true. '+
     'position says how many of the chat\'s records are read through. Only the owner may name another chat, by an ID from mcp__nocheh__owner_read. '+
@@ -487,7 +498,8 @@ export const mcpTools:readonly McpTool[]=[
   {name:'memory_recall',description:'Recall long-term memory for this audience, alongside native context and archive tools. Inferences are not original evidence: '+
     'facts lists the facts memory read while answering (n, text, exact, by, the first sources with their tags, and more), and evidence_count how many it read. '+
     'Open any of them, its original included, with mcp__nocheh__archive_read id=<facts_source> fact=<n> before relying on a claim that matters. '+
-    'Where facts cannot be listed, evidence_sources lists the archived messages behind them instead.',
+    'Where facts cannot be listed, evidence_sources lists the archived messages behind them instead. An owner correction has tag (where and when the owner '+
+    'made it) and evidence (its first sources, tagged); for the owner, a native note hit has day and sources (the first messages it was written from, tagged).',
     inputSchema:shape({query:{type:'string'},profile:{type:'string'},limit:{type:'integer',minimum:1,maximum:50}},['query']),run:memoryRecall},
   {name:'action_request',description:'Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for a card with the exact message: '+
     'a member who may post to their other groups confirms their own post to a group Telegram has seen them in, and the owner approves everything else. '+

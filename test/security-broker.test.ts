@@ -27,7 +27,11 @@ test('broker supports only explicit scoped routes and the configured reply provi
   // archive_read opens a grant and an owner-corrected entry (ADR-0261); nothing else under them is relayed.
   const id='a'.repeat(64);
   // And a recalled fact by its record and number (B5.2).
-  for(const route of ['/v1/memory/grants/'+id,`/v1/memory/learned/${id}/3`,'/v1/memory/facts/'+id,`/v1/memory/facts/${id}/200`])assert.equal(scopedRoute('GET',route),true,route);
+  for(const route of ['/v1/memory/grants/'+id,`/v1/memory/learned/${id}/3`,'/v1/memory/facts/'+id,`/v1/memory/facts/${id}/200`,'/v1/memory/notes/'+id.slice(0,12)])
+    assert.equal(scopedRoute('GET',route),true,route);
+  // A note's ref is 12 hex and nothing more (ADR-0261).
+  for(const route of ['/v1/memory/notes/'+id,'/v1/memory/notes/'+id.slice(0,11),'/v1/memory/notes/'+id.slice(0,12).toUpperCase(),'/v1/memory/notes'])
+    assert.equal(scopedRoute('GET',route),false,route);
   for(const route of [`/v1/memory/facts/${id}/0`,`/v1/memory/facts/${id}/1000`,'/v1/memory/facts/'+id+'/3/x'])assert.equal(scopedRoute('GET',route),false,route);
   for(const route of ['/v1/memory/grants',`/v1/memory/learned/${id}`,`/v1/memory/learned/${id}/0`,'/v1/memory/grants/'+id+'/revoke'])assert.equal(scopedRoute('GET',route),false,route);
   assert.equal(scopedRoute('POST','/v1/memory/grants/'+id),false);

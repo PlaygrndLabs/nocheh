@@ -26,7 +26,7 @@ import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
 import {unavailableTag,zonedDay,type Tag,type TagDetails} from '../source-tags.js';
 import {bindingMoved,ownerReader,type SourceTagRepository,type TagOptions} from './source-tags.js';
-import {countMemoryStep} from './note-sources.js';
+import {NOTE_SOURCES_SHOWN,countMemoryStep} from './note-sources.js';
 import {bucketOf,sourceFacts} from '../source-facts.js';
 import {telegramMessage,telegramTopicOpening} from '../chats-telegram.js';
 import {repliesElsewhere} from '../observed-source.js';
@@ -324,6 +324,26 @@ export class SourceRepository {
       day:created?zonedDay(created.getTime(),zone):null,
       evidence:evidence.map(item=>{const tag=tags.get(item.id)??{...unavailableTag('here')};return {source:'nocheh:event:'+item.id,tag:tag.tag,by:tag.by};}),
       ...((version.evidence?.length??0)>LEARNED_EVIDENCE?{more:version.evidence.length-LEARNED_EVIDENCE}:{})};
+    await this.audience.assert(principal);await this.allowPrepared(principal,result);return result;
+  }
+
+  /**
+   * What a note in this turn's evidence was written from, by its ref (archive_read {note}, ADR-0261): the messages the
+   * turn's own lookup kept for it (a review's batch, or the message a turn answered), each through canRead, at most
+   * NOTE_SOURCES_SHOWN of them, tagged. A ref opens only in the turn whose evidence showed it, and not after seven days;
+   * it opens nothing for a private answer, which has no notes.
+   */
+  async noteEntry(principal:Reader,ref:string){return afterEpoch(jobRun(principal),()=>this.noteOnce(principal,ref));}
+  private async noteOnce(principal:Reader,ref:string) {
+    if(principal.admin||!principal.turnEvent||principal.answer!==undefined||!this.tags)throw new HttpError(403,'scoped_turn_required');
+    const binding=await this.audience.assert(principal);
+    const ids=await this.tags.notes.noteSources(principal.turnEvent,ref);
+    if(ids===null)throw new HttpError(404,'note_not_found');
+    const captured=await this.access.archive.capturedMany(ids),references=ids.flatMap(id=>captured.has(id)?[captured.get(id)!.reference]:[]);
+    // A message the reader may not read is left out, with no count, as an unreadable reference is anywhere.
+    const tags=await this.tags.tags(principal,binding,references),readable=references.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[tag]:[];});
+    const shown=readable.slice(0,NOTE_SOURCES_SHOWN);
+    const result={note:ref,sources:shown.map(tag=>({source:tag.source,tag:tag.tag,by:tag.by})),...readable.length>shown.length?{more:readable.length-shown.length}:{}};
     await this.audience.assert(principal);await this.allowPrepared(principal,result);return result;
   }
 

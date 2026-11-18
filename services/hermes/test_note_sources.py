@@ -167,6 +167,36 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(labels[key('memory','First.')],sources.UNAVAILABLE);self.assertEqual(labels[key('memory','Second.')],sources.UNAVAILABLE)
             self.assertEqual(labels[key('memory','Third.')],{'from':'owner','label':'the owner\'s own messages'})
 
+    def test_a_turns_lookup_names_its_message_and_keeps_each_notes_own_ref(self):
+        # In a turn each note's label carries its ref, which opens in that turn the messages it was written from
+        # (archive_read {note}); a ref that is not the note's own, or not 12 hex, is never shown.
+        with tempfile.TemporaryDirectory() as folder:
+            write(folder,['First.','Second.','Third.','Fourth.'])
+            found=sources.entries(folder);sent=[]
+            first,second,third,fourth=(key('memory',text) for text in ('First.','Second.','Third.','Fourth.'))
+            def post(body):
+                sent.append(body)
+                return {first:{'from':'turn','label':'a','ref':first[:12]},second:{'from':'turn','label':'b','ref':third[:12]},
+                        third:{'from':'turn','label':'c','ref':third[:12].upper()},fourth:{'from':'turn','label':'d'}}
+            labels=sources.lookup(folder,found,'chat-family',post,turn_event=EVENT)
+            self.assertEqual(sent[0]['turn_event'],EVENT)
+            self.assertEqual(labels[first],{'from':'turn','label':'a','ref':first[:12]})
+            self.assertEqual(labels[second],{'from':'turn','label':'b'},'another note\'s ref')
+            self.assertEqual(labels[third],sources.UNAVAILABLE,'a ref that is not 12 hex fails the label')
+            self.assertEqual(labels[fourth],{'from':'turn','label':'d'})
+            sent.clear();sources.lookup(folder,found,'chat-family',post,turn_event='not-an-id');sources.lookup(folder,found,'chat-family',post)
+            self.assertTrue(all('turn_event' not in body for body in sent),'only a full message id is sent')
+            watched=[]
+            with patch.object(sources,'lookup',lambda *args,**kw:watched.append(kw.get('turn_event')) or {}):
+                sources.before(folder,'chat-family',None,EVENT);sources.before(folder,'chat-family')
+            self.assertEqual(watched,[EVENT,None])
+
+    def test_a_ref_is_twelve_hex_or_the_label_is_not_well_formed(self):
+        label={'from':'turn','label':'Nocheh\'s note'}
+        self.assertTrue(sources.label_ok(label));self.assertTrue(sources.label_ok({**label,'ref':'0123456789ab'}))
+        for ref in ('0123456789AB','0123456789a','0123456789abc',None,12,'nocheh:event:x'):
+            self.assertFalse(sources.label_ok({**label,'ref':ref}),repr(ref))
+
     def test_a_note_citing_many_messages_says_it_cites_more(self):
         cites=[('%02x'%i)*32 for i in range(25)]
         value=sources.note({},'memory',' '.join('nocheh:event:'+cite for cite in cites))
@@ -338,10 +368,26 @@ class TurnTests(unittest.TestCase):
 
     def test_a_turn_origin_names_its_message_channel_day_and_reads(self):
         origin=sources.turn_origin({'event_id':EVENT,'channel':'browser'},['web','owner','past'],True,now=DAY)
-        self.assertEqual(origin,{'by':'turn','event':EVENT,'channel':'browser','at':'2026-11-08','reads':['web','past'],'complete':True})
+        self.assertEqual(origin,{'by':'turn','event':EVENT,'channel':'browser','at':'2026-11-08','at_time':DAY,'reads':['web','past'],'complete':True})
         self.assertTrue(sources.valid(origin))
         self.assertEqual(sources.turn_origin({'event_id':'not-an-id'},[],True),{'by':'unknown'})
         self.assertEqual(sources.turn_origin({'event_id':EVENT,'channel':'email'},[],True),{'by':'unknown'})
+
+    def test_a_turn_keeps_its_moment_with_its_utc_day_and_a_record_without_one_stays_valid(self):
+        # Storage shows the moment as a day in the reader's zone; a record written before it keeps its UTC day alone.
+        late=DAY+23*3600+30*60
+        origin=sources.turn_origin({'event_id':EVENT},[],True,now=late)
+        self.assertEqual((origin['at'],origin['at_time']),('2026-11-08',late));self.assertTrue(sources.valid(origin))
+        old={name:value for name,value in origin.items() if name!='at_time'}
+        self.assertTrue(sources.valid(old),'a record written before keeps its day')
+        for moment in (DAY+86400,DAY-1,str(DAY),1.5*DAY,True,-1,10**12):
+            self.assertFalse(sources.valid({**origin,'at_time':moment}),repr(moment))
+        self.assertFalse(sources.valid({'by':'review','review':REVIEW,'at_time':DAY}))
+        with tempfile.TemporaryDirectory() as folder:
+            write(folder,['A note.'])
+            sources.record(folder,{'memory':[],'user':[]},sources.entries(folder),origin)
+            self.assertEqual(stored(folder)['entries'][key('memory','A note.')]['origins'],[origin])
+            self.assertIn(key('memory','A note.'),sources.load(folder),'a timed record reads back')
 
     def test_after_a_turn_its_new_note_is_recorded_and_a_failed_turn_is_incomplete(self):
         for result,complete in (({'state':'done'},True),({'state':'failed'},False),(None,False)):

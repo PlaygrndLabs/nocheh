@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {accountIdFor,chatDirectory} from '../src/chats.js';
 import {approvalLines,reminderLines,sourceLines} from '../src/prompts.js';
 import {eventClass,eventClasses,sourceFacts,type EventClass,type SourceFacts} from '../src/source-facts.js';
-import {MODEL_LABEL_LIMIT,REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,evidenceMarker,fromToken,honchoPointer,honchoSource,honchoSources,legendIntro,modelEventPhrase,modelLabel,ownerEventLabel,
+import {MODEL_LABEL_LIMIT,REVIEW_BODY_SLICE,REVIEW_FRAGMENT_LIMIT,evidenceMarker,fromToken,honchoPointer,honchoSource,honchoSources,legendIntro,modelEventPhrase,modelLabel,noteDay,ownerEventLabel,
   ownerLabel,provenanceOf,reviewBody,reviewFragment,reviewLegend,reviewOrigin,reviewOwner,type LabelEvent,type NoteOrigin,type ReviewProvenance,
   type SourceWords} from '../src/source-labels.js';
 import {nameKeys,type Names} from '../src/task-reminder-text.js';
@@ -22,8 +22,10 @@ const recalled=new Map([[GP1,'Family'],[GP1_TOPIC,'Plans']]);
 const provenance=(events:[number,EventClass][],extra:Partial<ReviewProvenance>={}):ReviewProvenance=>({version:1,source:hex(events[0]?.[0]??1),
   events:events.map(([id,cls])=>({id:hex(id),class:cls})),owner_account_only:events.every(([,cls])=>cls.startsWith('owner_')),rules:'none',rule_buckets:[],
   left_out:{sender_not_allowed:0,rule_sender_not_allowed:0,rules_left_out_for_owner_label:0,quote_not_traced:0},...extra});
+/** Each batch message's day as resolve() reads it: message n on 2026-11-n. */
+const dayOf=(id:number)=>`2026-11-${String(id).padStart(2,'0')}`;
 const review=(events:[number,EventClass][],cites:number[],extra:Partial<ReviewProvenance>={},place=OWNER)=>
-  reviewOrigin(provenance(events,extra),cites.map(hex),{chat:place});
+  reviewOrigin(provenance(events,extra),cites.map(hex),{chat:place},new Map(events.map(([id,cls])=>[hex(id),{class:cls,day:dayOf(id)}])));
 /** A batch holds at most 30 messages: the 30 classes with the longest words, each once, in their order. */
 const longest=new Set([...eventClasses].sort((a,b)=>modelEventPhrase(b).length-modelEventPhrase(a).length).slice(0,30));
 const thirtyClasses=eventClasses.filter(cls=>longest.has(cls)).map((cls,i)=>[i+1,cls] as [number,EventClass]);
@@ -117,25 +119,25 @@ test('a display name of "Owner", "you" or "Nocheh" never makes a note the owner\
 
 test('model labels: fixed words, no person names, at most 120 characters',()=>{
   const label=(origins:NoteOrigin[],map:ReadonlyMap<string,string>=recalled)=>modelLabel(origins,map,directory);
-  assert.equal(label([review([[1,'owner_message']],[1])]),'the owner\'s own messages in the owner\'s private chat');
-  assert.equal(label([review([[1,'owner_message']],[])]),'a notes review of the owner\'s own messages in the owner\'s private chat; the note cites none of them');
-  assert.equal(label([review([[1,'owner_message'],[2,'nocheh_reply']],[1])]),'Nocheh\'s notes review of Nocheh\'s reply in the owner\'s private chat, and 1 more sources');
+  assert.equal(label([review([[1,'owner_message']],[1])]),'the owner\'s own messages of 2026-11-01 in the owner\'s private chat');
+  assert.equal(label([review([[1,'owner_message']],[])]),'a notes review on 2026-11-01 of the owner\'s own messages in the owner\'s private chat; the note cites none of them');
+  assert.equal(label([review([[1,'owner_message'],[2,'nocheh_reply']],[1])]),'Nocheh\'s notes review on 2026-11-02 of Nocheh\'s reply in the owner\'s private chat, and 1 more sources');
   assert.equal(label([review([[1,'owner_message'],[2,'nocheh_reply'],[3,'person_message']],[1],{},GP1_TOPIC)]),
-    'Nocheh\'s notes review of another person\'s message in group “Family” › topic “Plans”, and 2 more sources');
+    'Nocheh\'s notes review on 2026-11-03 of another person\'s message in group “Family” › topic “Plans”, and 2 more sources');
   assert.equal(label([review([[1,'owner_message'],[2,'nocheh_reply'],[3,'forward_channel_by_owner']],[1],{},GP1_TOPIC)]),
-    'Nocheh\'s notes review of a message the owner forwarded from a channel in a group › a topic, and 2 more sources','names go before words are cut');
+    'Nocheh\'s notes review on 2026-11-03 of a message the owner forwarded from a channel in a group › a…, and 2 more sources','names go before words are cut');
   // A long phrase loses its place's names first, then is cut, and how many more sources stays whole.
   const hidden=label([review([[1,'owner_message'],[2,'nocheh_reply'],[3,'forward_hidden_by_owner']],[1],{},GP1_TOPIC)]);
-  assert.equal(hidden,'Nocheh\'s notes review of a message the owner forwarded from a person who hides their account in a…, and 2 more sources');
-  assert.equal(label([review([[1,'person_message']],[1],{},GP1)]),'Nocheh\'s notes review of another person\'s message in group “Family”');
-  assert.equal(label([review([[1,'person_message']],[1],{},GP1)],new Map()),'Nocheh\'s notes review of another person\'s message in a group','no name known');
-  assert.equal(label([review([[1,'owner_message']],[1],{rules:'others'})]),'Nocheh\'s notes review of the owner\'s own message in the owner\'s private chat');
+  assert.equal(hidden,'Nocheh\'s notes review on 2026-11-03 of a message the owner forwarded from a person who hides their…, and 2 more sources');
+  assert.equal(label([review([[1,'person_message']],[1],{},GP1)]),'Nocheh\'s notes review on 2026-11-01 of another person\'s message in group “Family”');
+  assert.equal(label([review([[1,'person_message']],[1],{},GP1)],new Map()),'Nocheh\'s notes review on 2026-11-01 of another person\'s message in a group','no name known');
+  assert.equal(label([review([[1,'owner_message']],[1],{rules:'others'})]),'Nocheh\'s notes review on 2026-11-01 of the owner\'s own message in the owner\'s private chat');
   assert.equal(label([review([[1,'owner_message']],[1],{rules:'others',rule_buckets:['person']})]),
-    'Nocheh\'s notes review of the owner\'s own message in the owner\'s private chat, with rules learned from others');
+    'Nocheh\'s notes review on 2026-11-01 of the owner\'s own message in the owner\'s private…, with rules learned from others');
   assert.equal(label([review([[1,'owner_message'],[2,'nocheh_reply'],[3,'forward_hidden_by_owner']],[1],{rules:'others',rule_buckets:['person']},GP1_TOPIC)]),
-    'Nocheh\'s notes review of a message the owner forwarded from a…, and 2 more sources, with rules learned from others',
+    'Nocheh\'s notes review on 2026-11-03 of a message the owner…, and 2 more sources, with rules learned from others',
     'the ending about others\' rules stays whole when the label is cut');
-  assert.equal(label([review([[1,'owner_message'],[2,'pinned']],[1])]),'Nocheh\'s notes review of a pin or message holding another person\'s words in the owner\'s private chat, and 1 more sources');
+  assert.equal(label([review([[1,'owner_message'],[2,'pinned']],[1])]),'Nocheh\'s notes review on 2026-11-02 of a pin or message holding another person\'s words in the…, and 1 more sources');
   assert.equal(label([turn()]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, written while answering the owner\'s own message');
   assert.equal(label([turn({place:{chat:OWNER,web:true}})]),'Nocheh\'s note from the owner\'s web chat on 2026-11-16, written while answering the owner\'s own message');
   assert.equal(label([turn({place:{chat:GP1}})]),'Nocheh\'s note from group “Family” on 2026-11-16');
@@ -168,8 +170,22 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
   assert.match(label(cases[1]!,long),/^Nocheh's note from group “F+…” › topic “ک+…” on 2026-11-16$/u);
   // Names come only from recallNames, never a person: no class's phrase names anyone.
   for(const cls of eventClasses)assert.doesNotMatch(modelEventPhrase(cls),/Sara|Omid|\{/,cls);
-  assert.equal(label([review([[1,'person_message']],[1],{},GP1)],new Map([[GP1,'Fa"mi[ly]‮']])),'Nocheh\'s notes review of another person\'s message in group “Fa mi ly”',
+  assert.equal(label([review([[1,'person_message']],[1],{},GP1)],new Map([[GP1,'Fa"mi[ly]‮']])),'Nocheh\'s notes review on 2026-11-01 of another person\'s message in group “Fa mi ly”',
     'a name cannot close its quotes');
+});
+
+test('a note\'s label names its day: a review its main message\'s, a turn its own as the reader reads days, a turn that recorded only its UTC day marked so (ADR-0261)',()=>{
+  const label=(origins:NoteOrigin[])=>modelLabel(origins,recalled,directory);
+  assert.equal(label([turn({utc:true})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16 UTC, written while answering the owner\'s own message');
+  assert.equal(label([turn({place:{chat:GP1},utc:true})]),'Nocheh\'s note from group “Family” on 2026-11-16 UTC');
+  assert.equal(noteDay([turn({utc:true})]),'2026-11-16');assert.equal(noteDay([turn({date:'yesterday'})]),null);
+  // A review is named by another person's message before the owner's, and its day is that message's.
+  const mixed=review([[1,'owner_message'],[5,'person_message']],[1],{},GP1);
+  assert.equal(label([mixed]),'Nocheh\'s notes review on 2026-11-05 of another person\'s message in group “Family”, and 1 more sources');
+  assert.equal(noteDay([mixed]),'2026-11-05');assert.equal(noteDay([review([[3,'owner_message'],[4,'owner_message']],[3])]),'2026-11-03');
+  // A day not known reads so, never as another message's.
+  assert.equal(label([reviewOrigin(provenance([[1,'person_message']]),[hex(1)],{chat:GP1})]),'Nocheh\'s notes review on a day not recorded of another person\'s message in group “Family”');
+  assert.equal(noteDay([reviewOrigin(provenance([[1,'person_message']]),[hex(1)],{chat:GP1})]),null);assert.equal(noteDay([{by:'unknown'}]),null);
 });
 
 test('the review legend is one JSON object of fixed words and full ids, folded to fit',()=>{

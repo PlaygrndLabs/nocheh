@@ -6,7 +6,7 @@ import {telegramMessage,telegramSenderName,telegramUsername} from '../chats-tele
 import {forwardFacts} from '../forwarded.js';
 import {HttpError} from '../http.js';
 import {sourceChat} from '../spaces.js';
-import {placeTag,shownFileName,sourceClock,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
+import {correctionTag,placeTag,shownFileName,sourceClock,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
 import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
 import {ownerPeopleNames} from './entities.js';
@@ -81,6 +81,30 @@ export class SourceTagRepository {
       const failed=unavailableTag('now');
       for(const id of ids)result.set(id,readable&&readable.get(id)!==true?null:{source:'nocheh:event:'+id,tag:failed.tag,by:failed.by,at:null});
       return result;
+    }
+  }
+
+  /**
+   * Owner corrections' tags (B3.6), in the order given: each conversation it corrects as this reader names chats, and the
+   * day it was made in this reader's zone, all through one secret check. One that can't be built reads "source not
+   * available right now", counted as a `source_tags` problem.
+   */
+  async corrections(principal:Reader,items:readonly {chat:string|null;made:Date|null}[]):Promise<string[]> {
+    if(!items.length)return [];
+    try {
+      const owner=ownerReader(principal),policy=this.policy();
+      const [zone,names]=await Promise.all([owner?ownerTimeZone(this.stores.control):Promise.resolve('UTC'),
+        recallNames(this.stores,[...new Set(items.map(item=>item.chat).filter((chat):chat is string=>chat!==null))],{shownOnly:!owner})]);
+      const reader:TagReader={owner,chat:owner?principal.space??ownerChat(policy):principal.space??principal.scope,zone,precision:'day'};
+      const parts=items.map(item=>correctionTag(item.chat,item.made,reader,names));
+      const texts=!principal.admin&&this.prepare?await this.prepare(principal,parts,this.detect) as unknown[]:parts;
+      if(!Array.isArray(texts)||texts.length!==parts.length||texts.some(text=>typeof text!=='string'))throw new HttpError(500,'source_tags_unprepared');
+      await countMemoryStep(this.stores.control,'source_tags',true);
+      return texts as string[];
+    } catch(error) {
+      if(bindingMoved(error))throw error;
+      await countMemoryStep(this.stores.control,'source_tags',false);
+      return items.map(()=>unavailableTag('now').tag);
     }
   }
 

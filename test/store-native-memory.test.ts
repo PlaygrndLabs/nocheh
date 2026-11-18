@@ -581,6 +581,11 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const correctedRecall=await services.memory.recall(fresh,'What does checkmark mean?');
     assert.equal(correctedRecall.sources[0]?.kind,'owner_corrected_interpretation');
     assert.match(correctedRecall.sources[0]!.text,/Checkmark means reviewed, not done\./);
+    // It names where and when the owner made it, in UTC for a group, and its source, tagged (B3.6).
+    const corrected=correctedRecall.sources[0] as any,today=new Date().toISOString().slice(0,10);
+    assert.ok([`the owner's correction · this chat · ${today}`,`the owner's correction · this chat · ${new Date(Date.now()-60000).toISOString().slice(0,10)}`].includes(corrected.tag),corrected.tag);
+    assert.deepEqual(corrected.evidence.map((item:any)=>item.source),['nocheh:event:'+source.id]);
+    assert.ok(corrected.evidence[0].tag&&!/not available/.test(corrected.evidence[0].tag),corrected.evidence[0].tag);
     assert.equal(JSON.stringify(await services.memory.recall(fresh,'What does another symbol mean?')).includes('owner_corrected_interpretation'),false,
       'an unrelated question cannot receive the correction');
     // Answering a suggestion card or renaming a person makes no write invalid, so neither holds Honcho (ADR-0223).

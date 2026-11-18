@@ -107,6 +107,13 @@ class MemoryEvidenceTests(unittest.TestCase):
                                  [{'source':'nocheh.memory.recall','content':limited}])
             finally:restore()
 
+    def test_a_note_shows_its_own_ref_and_no_other(self):
+        name=key('memory','A note.')
+        found=evidence.sources({name:{'from':'turn','label':'x','ref':name[:12]},key('memory','B'):{'from':'turn','label':'y','ref':name[:12]},
+                                key('memory','C'):{'from':'turn','label':'z','ref':'nope'}})
+        self.assertEqual(found,{name:{'from':'turn','label':'x','ref':name[:12]},key('memory','B'):{'from':'turn','label':'y'}})
+        self.assertIn('archive_read note=<ref>',evidence.ABOUT)
+
     def test_anthropic_evidence_comes_before_the_conversation_and_holds_through_a_turn(self):
         # The model sees the evidence where the OpenAI-compatible route puts it, before the
         # conversation and the current request. Within a turn it does not change, so each
