@@ -39,14 +39,31 @@ only). One branch: a contract, six parts and their integration.
   member private chat scenarios ([scenarios](tools/acceptance/product_scenarios.py),
   [fake](test/test_telegram_mock_members.py), [seeding](test/test_tester_member_private.py),
   [sweep](test/test_canary_sweep.py)).
+- Review fixes: Hermes takes a member's lane before the space's lane, so a member's group turn
+  waiting on their private turn holds no group and the owner's turns there go on; stale groups are
+  re-checked in the places the readable ones leave, groups past the cap are left out of tool reads
+  too (`member_turns.left_out`), and a late 'in' never undoes a newer leave; the ask's answer goes
+  under the asking message's continuation key, a refused reply fails once, a silent or unconfirmed
+  asking turn still runs the ask, any other end tells the owner once, an ask that expires while it
+  runs says so, a removed member's open ask tells the owner once, several accounts give
+  `member_chat_several`, the broker relays `/v1/member-asks`, and ask jobs offer no Cancel or
+  Retry; an ask's Notes label has its date; a task refusal names at most 50 projects (`more`);
+  `private_chats` splits in SQL from the store's chat rows; an import review keeps no learning yes
+  for member chats; `notesSender` refuses Nocheh's messages in member chats; the tester's 4b,
+  context probes and re-check searches pass against correct code
+  ([lanes](services/hermes/test_member_private.py), [rechecks](test/member-admission.test.ts),
+  [private](test/store-member-private.test.ts), [reads](test/store-member-reads.test.ts),
+  [asks](test/store-owner-member-asks.test.ts), [broker](test/store-security-broker.test.ts),
+  [tasks](test/knowledge-broker.test.ts), [list](test/store-member-messages.test.ts),
+  [notes](services/hermes/test_turn_process.py), [tester](test/test_tester_member_private.py)).
 
-  Checks on the integrated branch (2026-11-18): the build; node unit tests (799: 537 pass, 258
-  skipped, and only the 4 workflow tests that also fail on main fail); all 112 store test files
-  (304 pass, 0 fail); the controlled-actions, managed-runs, sharing and workflow-operations
-  store suites fail at the same lines as on main; Python Telegram (157), Hermes (1044, with the 2
-  environment errors that also occur on main) and the repository's Python tests (167); the
-  dashboard build, format check and its tests (72 of 72); the browser tests (67: 64 pass, and the
-  3 that also fail on main).
+  Checks on the integrated branch with the review fixes (2026-11-18): the build; node unit
+  tests (802: 540 pass, 258 skipped, and only the 4 workflow tests that also fail on main fail);
+  all 112 store test files (304 pass, 0 fail); the controlled-actions, managed-runs, sharing and
+  workflow-operations suites on the store fixture fail as on main; Python Telegram (157), Hermes
+  (1047, with the 2 environment errors that also occur on main) and the repository's Python tests
+  (172, 2 skipped); the dashboard build, format check and its tests (72 of 72); the browser tests
+  (67: 64 pass, and the 3 that also fail on main).
   Pending:
   - The whole full tester on images, with the canary sweep. It has not run on this step.
   - The privacy scan before a push, and live acceptance on the owner's install after merge.

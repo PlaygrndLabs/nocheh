@@ -306,14 +306,16 @@ an unpruned ask profile, which never show in a group's read, another member's
 chat, the owner's turns, Honcho, long-term memory, Inbox suggestions, grants,
 sharing previews or learned facts, while the member's own search finds them
 (`member_private_chat_stays_with_the_member`); the owner asking about that member,
-answered in a separate message, after the asking turn's own reply, that quotes
+answered in a separate message, after the asking turn's own reply (that turn
+ends done with the ask tool's result), that quotes
 only that member's chat and is then gone from the owner's next turn and recall
 (`owner_asks_about_a_member`); a member's
 chat refused as a sharing rule's source (`member_chat_is_never_a_sharing_source`);
 and the re-check: a member removed while Nocheh missed the service message is no
 longer read there, one still in is read and the check recorded, no answer changes
 nothing within 30 days, and past 30 days the group is not read
-(`member_private_chat_rechecks_old_presence`). The sweep
+(`member_private_chat_rechecks_old_presence`; its searches send no reply, so a
+later search finds a group's mark only in the group). The sweep
 `private_canaries_never_left_the_owner` also checks that a member's marks never
 left that member's chat, except in the answer to the owner's ask. Before an add that expects a line, the tester moves earlier
 sent leave notes about other groups out of the last 24 hours, so earlier runs on

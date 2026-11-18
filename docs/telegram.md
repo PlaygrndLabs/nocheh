@@ -380,7 +380,10 @@ names the lists to choose from. A group in no project has no tasks there.
 What the member may read is checked again on every read and tool call, so a
 pause, a removal, private chat off, or a group left or switched off applies to
 the next one, and a reply built on more than the member may now read is not
-sent. The member's turns run one at a time, in groups and privately alike.
+sent. The member's turns run one at a time, in groups and privately alike. A
+member's group turn that waits for their private turn holds up no one else in
+that group: your turns and other members' there go on, and the group's replies
+still come in arrival order.
 
 Nothing in a member's private chat, or in any private chat that is not yours,
 is learned, sent to long-term memory, granted, suggested or shown to your own
@@ -405,8 +408,11 @@ about at most three members. A member who is paused, removed, has private chat
 off or never wrote to Nocheh cannot be asked about, and neither can a member who
 wrote to Nocheh from more than one Telegram account; Nocheh tells you which. The
 ask runs even when Nocheh chose not to answer your asking message. An ask waits
-up to 30 minutes; when the chat closes meanwhile, the time runs out, or no answer
-comes after a second try, you get one short notice instead.
+up to 30 minutes; when the chat closes meanwhile, the member is removed, the time
+runs out, your asking turn fails, or no answer comes after a second try, you get
+one short notice instead, once. Its answer replies to your asking message. An ask
+shows under System › Background work with **Retry now** and **Cancel task**
+turned off: it closes on its own.
 
 ## Send records
 
