@@ -13,6 +13,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {chatDirectory,chatIdFor,installChatsForTest} from '../src/chats.js';
 import {NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureChats} from './fixture-groups.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('a member\'s job cap is to the cent; members\' daily job spend gets one notice, pauses at the high mark, and a pause only holds jobs members approved',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -23,7 +24,9 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
   // The reply model's made-up rates in USD per million tokens.
   const rates={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0};
   const cards:Record<string,any>[]=[],notices:Record<string,any>[]=[];let updates=0,oldGateway=false,offline=false;
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9','8'],denied:[]}},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],topic_memory:'group' as const});
+  // The owner's members (step 3): 9 and 8 talk in the group.
+  const people=grantMembers({[group]:{granted:['9','8']}},{owner:'123'});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -77,7 +80,7 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     // A member's cap is half again over the estimate to the cent: a $0.50 limit gives a small job $0.50, not a whole dollar.
     let settings=await s.jobs.settings();
     assert.deepEqual([settings.member_notice_usd,settings.member_pause_usd],[20,100]);
-    settings=await s.jobs.saveSettings(owner,{cost_limit_usd:0.5,minutes_limit:45,member_daily_jobs:20,revision:settings.revision});
+    settings=await s.jobs.saveSettings(owner,{cost_limit_usd:0.5,minutes_limit:45,revision:settings.revision});
     assert.deepEqual([settings.member_notice_usd,settings.member_pause_usd],[20,100],'a save without the marks keeps them');
     const small=await s.jobs.start(await actor((await message('small')).id),{title:'Small',instruction:'Read the made-up notes.'});
     const estimate=(small.estimate as any).cost_usd as number;
@@ -254,13 +257,14 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     assert.equal((await paused()).notice_sent,true);
     await s.jobs.members.retryUnsent();assert.equal(notices.length,before+1,'nothing more while every notice went');
   } finally {
+    people();
     await s.jobs.members.setPaused(false).catch(()=>{});
     await stores.close();await rm(root,{recursive:true,force:true});
   }
 });
 
 // Members' job spend on chats first seen after step 2b (ADR-0252): the owner's private chat has a digest id apart from
-// the owner's account, and the member asks in NG2, a group Telegram upgraded, whose access list names it by its old id.
+// the owner's account, and the member asks in NG2, a group Telegram upgraded, first seen under its old Telegram id.
 test('a member spend notice names a digest group by its chat, goes to the owner\'s private chat where it is in Telegram, and only the owner\'s press there resumes',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
@@ -276,7 +280,9 @@ test('a member spend notice names a digest group by its chat, goes to the owner\
   installChatsForTest(full);
   const rates={input:2,output:10,cache_read:0.2,cache_write:2.5,request:0},ALICE=9;
   const cards:Record<string,any>[]=[],notices:Record<string,any>[]=[];let updates=0;
-  const policy=():AssistantPolicy=>({enabled:true,owner_id:OWNER,owner_chat:own,group_ids:[...NG_GROUP_IDS],group_access:{[NG2_OLD_TG]:{granted:[String(ALICE)],denied:[]}},topic_memory:'group'});
+  const policy=():AssistantPolicy=>({enabled:true,owner_id:OWNER,owner_chat:own,group_ids:[...NG_GROUP_IDS],topic_memory:'group'});
+  // Alice is a member who talks in NG2, the upgraded group (step 3).
+  const people=grantMembers({[NG2]:{granted:[String(ALICE)]}},{owner:OWNER});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -312,7 +318,7 @@ test('a member spend notice names a digest group by its chat, goes to the owner\
     // An earlier test's pause and notice are put away first: the resume edits its notice, which is not this test's.
     await s.jobs.members.setPaused(false);notices.length=0;
     let settings=await s.jobs.settings();
-    settings=await s.jobs.saveSettings(owner,{...settings,cost_limit_usd:5,minutes_limit:45,member_daily_jobs:20,member_notice_usd:1,member_pause_usd:1000});
+    settings=await s.jobs.saveSettings(owner,{...settings,cost_limit_usd:5,minutes_limit:45,member_notice_usd:1,member_pause_usd:1000});
     const job=await s.jobs.start(await actor((await message('own')).id),{title:'Own read',instruction:'Read the made-up receipts.'});
     await s.actionCommands.offer('background',job);
     assert.equal(last('card').chat_id,NG2_TG,'the card goes where the group is in Telegram now');
@@ -353,6 +359,7 @@ test('a member spend notice names a digest group by its chat, goes to the owner\
     await stores.control.query("UPDATE managed_runs SET state='cancelled' WHERE event_id=$1",[current.event_id]);
     assert.equal((await tick(job.id)).state,'cancelled');
   } finally {
+    people();
     await s.jobs.members.setPaused(false).catch(()=>{});
     await stores.close();await rm(root,{recursive:true,force:true});
   }

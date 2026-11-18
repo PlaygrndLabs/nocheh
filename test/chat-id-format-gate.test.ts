@@ -28,11 +28,11 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   // Part D: dashboard, docs and the full tester. Every site is gone: pages read the directory fields on /v1/conversations
   // (dashboard/lib/chats-model.ts), and the tester finds chats by their Telegram ids.
   // The Telegram adapter's legitimate reads of Telegram's own formats
-  ['dashboard/lib/chats-model.ts','adapter',1,'validUserId: a Telegram user id typed for group access'],
+  ['dashboard/lib/chats-model.ts','adapter',1,'validUserId: a Telegram user id typed to add a member by ID'],
   ['dashboard/lib/messages-format.ts','adapter',1,'a Desktop export matched to its group by the -100 id'],
   ['services/telegram/gateway.py','adapter',2,'raw Telegram chat, user and message ids at the front door'],
   ['services/telegram/server.py','adapter',1,'a refresh names a raw Telegram chat'],
-  ['src/assistant-policy.ts','adapter',3,'TELEGRAM_OWNER_ID and TELEGRAM_GROUP_ACCESS keys and user ids'],
+  ['src/assistant-policy.ts','adapter',1,'TELEGRAM_OWNER_ID'],
   ['src/conversation-page.ts','adapter',1,'Telegram ids inside an original\'s payload'],
   ['src/mini-app.ts','adapter',2,'the Telegram user id checked against TELEGRAM_OWNER_ID'],
   ['src/observed-source.ts','adapter',3,'archive intake: Desktop export and live scopes are Telegram ids'],
@@ -40,13 +40,12 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   ['src/stores/chat-sends.ts','adapter',1,'a send record\'s chat is the app\'s own chat id'],
   ['src/stores/runtime-configuration.ts','adapter',1,'the policy document holds the raw Telegram owner id'],
   ['tools/cli/main.py','adapter',1,'configure-telegram owner id'],
-  ['tools/operations/archive/telegram_directory.py','adapter',2,'Telegram group and user ids typed by the owner'],
-  ['tools/operations/installation/configuration.py','adapter',3,'installer checks of TELEGRAM_OWNER_ID and TELEGRAM_GROUP_ACCESS'],
+  ['tools/operations/archive/telegram_directory.py','adapter',2,'Telegram group and user ids Telegram and the identities list give'],
+  ['tools/operations/installation/configuration.py','adapter',1,'installer check of TELEGRAM_OWNER_ID'],
   ['tools/operations/installation/mini_app.py','adapter',1,'the bot id in the bot token'],
-  ['tools/operations/security/group_access.py','adapter',1,'a Telegram user id typed by the owner'],
   ['services/hermes/preference_transfer.py','legacy',1,'a legacy-layout reset, or a preferences snapshot from before step 2b: its topic spaces read once'],
   ['src/honcho.ts','legacy',1,'legacy layout audience by sign'],
-  ['tools/acceptance/reset_configuration.py','legacy',1,'chat values of the legacy layout and of a version 1 reset snapshot, read once to convert them'],
+  ['tools/acceptance/reset_configuration.py','legacy',1,'chat values of the legacy layout, read once to convert them'],
   ['tools/operations/installation/store_recovery.py','unrelated',1,'a PostgreSQL sequence value'],
 ];
 /** Whole files that are the adapter: Telegram's formats live here. */

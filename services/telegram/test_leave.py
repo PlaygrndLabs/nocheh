@@ -76,7 +76,7 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
 
     def service(self, root, policy=None):
         # The served list: the owner's chat and one served group, which had OLD as its id before an upgrade.
-        value = TelegramService(policy or Policy.of(True, OWNER, [GROUP], {}, old={GROUP: [OLD]}), '123456:synthetic', root / 'spool', root / 'state')
+        value = TelegramService(policy or Policy.of(True, OWNER, [GROUP], old={GROUP: [OLD]}), '123456:synthetic', root / 'spool', root / 'state')
         value.status, value.action_lock, value.bot = 'connected', asyncio.Lock(), Bot()
         return value
 
@@ -112,7 +112,7 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(bad), self.assertRaisesRegex(ValueError, 'invalid_leave'):
                     await service.leave_chat(bad)
             # The owner's chat is never left, whatever id it has.
-            owner = self.service(Path(folder), Policy.of(True, '-777', [], {}))
+            owner = self.service(Path(folder), Policy.of(True, '-777', []))
             with self.assertRaisesRegex(ValueError, 'leave_chat_not_allowed'):
                 await owner.leave_chat({'id': ID, 'chat_id': '-777'})
             self.assertEqual(service.bot.calls + owner.bot.calls, [])
@@ -183,7 +183,7 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             service.status = 'starting'
             self.assertEqual(await service.leave_chat({'id': ID, 'chat_id': STRANGER}), {'state': 'not_started', 'error_code': 'telegram_not_connected'})
             failing = ServedList('http://app.test', 's' * 32, opener=lambda *_args, **_kw: (_ for _ in ()).throw(OSError('down')))
-            unread = self.service(Path(folder), Policy(True, {}, failing))
+            unread = self.service(Path(folder), Policy(True, failing))
             self.assertEqual(await unread.leave_chat({'id': ID, 'chat_id': STRANGER}), {'state': 'not_started', 'error_code': 'served_list_unavailable'},
                              'a list that cannot be read proves nothing is served')
             self.assertEqual(service.bot.calls + unread.bot.calls, [])
@@ -198,7 +198,7 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             reads.append(request.full_url)
             return Listing(before if len(reads) == 1 else after)
         with tempfile.TemporaryDirectory() as folder:
-            service = self.service(Path(folder), Policy(True, {}, ServedList('http://app.test', 's' * 32, opener=opener, clock=lambda: now[0])))
+            service = self.service(Path(folder), Policy(True, ServedList('http://app.test', 's' * 32, opener=opener, clock=lambda: now[0])))
             self.assertEqual(await service.leave_chat({'id': 'b' * 64, 'chat_id': OTHER}), {'state': 'done'})
             now[0] = 2.0
             with self.assertRaisesRegex(ValueError, 'leave_chat_not_allowed'):
@@ -222,7 +222,7 @@ class LeaveTests(unittest.IsolatedAsyncioTestCase):
             service.action_lock.release()
             return await leaving
         with tempfile.TemporaryDirectory() as folder:
-            service = self.service(Path(folder), Policy(True, {}, ServedList('http://app.test', 's' * 32, opener=opener, clock=lambda: now[0])))
+            service = self.service(Path(folder), Policy(True, ServedList('http://app.test', 's' * 32, opener=opener, clock=lambda: now[0])))
             service.action_lock = Gate()
             with self.assertRaisesRegex(ValueError, 'leave_chat_not_allowed'):
                 await waiting({'id': ID, 'chat_id': STRANGER}, Served.of(OWNER, groups=[STRANGER]))

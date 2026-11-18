@@ -14,6 +14,8 @@ import {BOB,BOB_CHAT,GP1,GP3,OWNER,P1,P2,fixtureChats,fixtureDirectory,seedChats
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {setOwnerGroupToolsForTest} from '../src/stores/controlled-actions.js';
+import {grantMembers,type GroupGrants} from './fixture-member-grants.js';
 
 test('allowed members post freely in their own group; everything else waits for the owner\'s button in their private chat',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -26,8 +28,9 @@ test('allowed members post freely in their own group; everything else waits for 
   let topicMemory:'group'|'topic'='group';
   // When set, the next card edit waits for it, after calling reached.
   let hold:Promise<void>|null=null,reached=()=>{};
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other,closed,forum],
-    group_access:{[group]:{granted:['9'],denied:[]},[other]:{granted:['9'],denied:[]},[closed]:{granted:[],denied:['9']}},topic_memory:topicMemory});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other,closed,forum],topic_memory:topicMemory});
+  // The owner's members (step 3): 9 talks in the group and the other group, and is switched off in the closed one.
+  const people=grantMembers({[group]:{granted:['9']},[other]:{granted:['9']},[closed]:{granted:[],denied:['9']}},{owner:'123',groups:[forum]});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -191,12 +194,18 @@ test('allowed members post freely in their own group; everything else waits for 
     // A controlled operation from a group is never approved by the request; its card also goes to the owner.
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
     // A card that offers a chat rule names the topic too, and says above its buttons that the rule covers everyone there.
-    const note='\n\n👥 “Where asked” covers everyone you allowed in that chat or topic, not only the person who asked.';
+    const note='\n\n👥 “Where asked” covers you and every member who can talk in that chat or topic, not only the person who asked.';
     assert.equal(last('card').chat_id,'123');assert.equal(last('card').text,'⚙️ Run a command\n💬 Asked in a Telegram group › General\n\nprintf ok'+note);
     assert.deepEqual(last('card').links,[{type:'bold',offset:3,length:13},{type:'pre',offset:last('card').text.indexOf('printf ok'),length:9}],'the name is bold, the command is code');assert.match(tool.message,/asked the owner/);
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
-    // The asker's summary leads the card and the exact fields fold under it; a command stays open in code (ADR-0224).
-    await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'browser',arguments:{url:'https://example.test/made-up'},summary:'Read the made-up page.'}));
+    // A member's web page read runs under the group's tools permission, with no card (step 3).
+    const toolCards=cards.length,memberRead=await s.controlledActions.propose(await actor(plain.id,group),{kind:'browser',arguments:{url:'https://example.test/member'}});
+    assert.equal(memberRead.state,'approved');assert.equal(cards.length,toolCards,'no card');
+    // The asker's summary leads the card and the exact fields fold under it; a command stays open in code (ADR-0224). The
+    // owner's own page read gets its card while the switch for those is off.
+    const ownerTools=setOwnerGroupToolsForTest(false);
+    try{await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(ownerTurn.id,group),{kind:'browser',arguments:{url:'https://example.test/made-up'},summary:'Read the made-up page.'}));}
+    finally{ownerTools();}
     // A web address is all a page read sends, so it shows open under the summary, which says it is the AI's (ADR-0250).
     const opened=last('card');
     assert.equal(opened.text,'⚙️ Open a web page · example.test\n📝 AI says: Read the made-up page.\n💬 Asked in a Telegram group › General\n\nhttps://example.test/made-up'+note);
@@ -235,18 +244,18 @@ test('allowed members post freely in their own group; everything else waits for 
     assert.equal((await s.guards.state()).epoch,before+1);
     assert.equal(await s.actionCommands.callback(await press('after-reaction','na'+operation.id.slice(0,40)+operation.fingerprint.slice(0,16))),true);
     assert.equal((await s.controlledActions.inspect(owner,operation.id)).state,'approved');assert.match(last('settle').text,/\n\n✅ Approved\.$/);
-    // Someone not allowed in the group gets the owner's fixed reply, with no turn.
+    // Someone not allowed in the group gets the owner's fixed reply, with no turn, at most once a day there (`once`).
     const stranger=await message('stranger-ask',{text:'Nocheh, what is the plan?',message_thread_id:17,is_topic_message:true},8,++updates);
     await s.preparation.run(stranger.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     assert.equal((await s.telegram.run(stranger.id,await epoch('telegram'))).state,'skipped');
     // Nocheh decided the message addressed the bot, so the bot gets only what it sends.
     assert.deepEqual({...refusals.at(-1),event_id:undefined},{event_id:undefined,chat_id:group,message_id:refusals.at(-1)!.message_id,topic:'17',user_id:'8',
-      reply:'Sorry, I only work with people the owner has allowed in this group.'});
-    await stores.control.query(`UPDATE owner_prompts SET texts='{"telegram.not_allowed":"Only allowed people, please."}'::jsonb WHERE singleton`);
+      once:'not_allowed',reply:'Sorry, in this group I only work with the owner and the owner\'s members.'});
+    await stores.control.query(`UPDATE owner_prompts SET texts='{"telegram.not_allowed":"Only members, please."}'::jsonb WHERE singleton`);
     const edited=await message('stranger-again',{text:'Nocheh?'},8,++updates);
     await s.preparation.run(edited.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     await s.telegram.run(edited.id,await epoch('telegram'));
-    assert.equal(refusals.at(-1)!.reply,'Only allowed people, please.','the owner\'s own wording is used');
+    assert.equal(refusals.at(-1)!.reply,'Only members, please.','the owner\'s own wording is used');
     const allowed=refusals.length,member=await message('member-chat',{text:'Hello all'},9,++updates);
     await s.preparation.run(member.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     await s.telegram.run(member.id,await epoch('telegram')).catch(()=>{});
@@ -268,8 +277,8 @@ test('allowed members post freely in their own group; everything else waits for 
 
     // Once an approved operation ends, its card says how, with a reason only from fixed codes in the owner's wording.
     await stores.control.query(`UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton`,[JSON.stringify({'telegram.approval_texts':'reason_sign_in: Sign in to Notion again in the dashboard.'})]);
-    const approvedTool=async(label:string,request:Record<string,unknown>={kind:'shell',arguments:{command:'printf '+label}})=>{
-      const asked=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message(label)).id,group),request));
+    const approvedTool=async(label:string,request:Record<string,unknown>={kind:'shell',arguments:{command:'printf '+label}},from=9)=>{
+      const asked=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor((await message(label,{},from)).id,group),request));
       assert.equal(await s.actionCommands.callback(await press(label+'-approve','na'+asked.id.slice(0,40)+asked.fingerprint.slice(0,16))),true);
       return {...asked,card:cards.find(card=>card.kind==='card'&&card.id===asked.id)!.text as string};
     };
@@ -305,11 +314,13 @@ test('allowed members post freely in their own group; everything else waits for 
     // The owner's word on it edits the card; a page read that started and got no answer closes itself (ADR-0218).
     await s.controlledActions.resolve(owner,{id:unsure.id,fingerprint:unsure.fingerprint,outcome:'ran'});await s.actionCommands.settle('controlled',unsure.id);
     assert.equal(await ending(unsure.id,'You marked that it ran.'),unsure.card+'\n\n✅ Approved. You marked that it ran.');
-    const read=await approvedTool('made-up-read',{kind:'browser',arguments:{url:'https://example.com/made-up-read'}});
+    // A page read with a card: the owner's own, while the switch for those is off (a member's runs with no card, step 3).
+    const ownerReads=setOwnerGroupToolsForTest(false);
+    const read=await approvedTool('made-up-read',{kind:'browser',arguments:{url:'https://example.com/made-up-read'}},123);
     await ran(read.id,'ambiguous',{error:'execution_outcome_unconfirmed'});
     const readLine='⚠️ Approved, but the page did not answer. A read changes nothing, so you can ask again.';
     assert.equal(await ending(read.id,readLine),read.card+'\n\n'+readLine);
-    const unstarted=await approvedTool('made-up-unstarted-read',{kind:'browser',arguments:{url:'https://example.com/made-up-unstarted'}});
+    const unstarted=await approvedTool('made-up-unstarted-read',{kind:'browser',arguments:{url:'https://example.com/made-up-unstarted'}},123);ownerReads();
     await ran(unstarted.id,'ambiguous',{error:'execution_outcome_unconfirmed'},false);
     assert.equal(await ending(unstarted.id,'🚫 It did not run: see the dashboard Inbox.'),unstarted.card+'\n\n🚫 It did not run: see the dashboard Inbox.',
       'a read that never started did not run, so it is not called unanswered');
@@ -350,7 +361,7 @@ test('allowed members post freely in their own group; everything else waits for 
     const lease=await claimHostWorkflow(stores.control,{workflow_id:row.id,dispatch:row.dispatch,family:'tools',run_id:'fixture-'+row.id});
     assert.equal((await s.controlledExecution.claim({id:outdated.id,actor:'wf-'+row.id,workflow_id:row.id,workflow_token:lease.token})).claimed,false);
     assert.equal(await ending(outdated.id,notRun),cards.find(card=>card.kind==='card'&&card.id===outdated.id)!.text+'\n\n'+notRun);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('a send to a person\'s private chat names it in fixed words and quotes only names; a chat Nocheh stopped serving gets nothing and its card says why',
@@ -363,8 +374,10 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
   // is known, and served only while the owner allows him in a served group (ADR-0254).
   const restore=installChatsForTest(fixtureDirectory([GP1,GP3]));
   const owner:Reader={admin:true,scope:null},cards:Record<string,any>[]=[],executed:Record<string,any>[]=[];let updates=0,sent=100;
-  let access:Record<string,{granted:string[];denied:string[]}>={[GP1]:{granted:[BOB],denied:[]}};
-  const policy=()=>({enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1,GP3],group_access:access,topic_memory:'group' as const});
+  // The owner's members (step 3): Bob reaches GP1; a test changes them as the owner would.
+  let people=grantMembers({[GP1]:{granted:[BOB]}},{owner:OWNER,groups:[GP3]});
+  const members=(grants:GroupGrants)=>{people();people=grantMembers(grants,{owner:OWNER,groups:[GP1,GP3]});};
+  const policy=()=>({enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[GP1,GP3],topic_memory:'group' as const});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -400,7 +413,7 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     const hello=await send('hello',BOB_CHAT,'Hello Bob');
     assert.equal(hello.state,'proposed','a person\'s private chat always waits for the owner\'s card');
     const helloCard=last('card');
-    assert.deepEqual([helloCard.id,helloCard.chat_id,helloCard.text],[hello.id,OWNER,`📨 Send to private chat with ${bob} (a person you allowed in group ${gp1})\n\nHello Bob`]);
+    assert.deepEqual([helloCard.id,helloCard.chat_id,helloCard.text],[hello.id,OWNER,`📨 Send to private chat with ${bob} (a member in group ${gp1})\n\nHello Bob`]);
     assert.deepEqual(helloCard.links.map((link:any)=>link.type),['bold','bold']);
     assert.equal(await s.actionCommands.callback(await ownerPress('hello-approve',button('a',hello))),true);
     assert.equal(last('answer').text,'✅ Approved.');
@@ -408,14 +421,14 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     assert.deepEqual([executed.at(-1)!.chat_id,executed.at(-1)!.destination,executed.at(-1)!.text],[BOB,BOB_CHAT,'Hello Bob'],'sent to Bob\'s private chat in Telegram');
     assert.equal(last('settle').text,helloCard.text+'\n\n✅ Approved and sent.');
     // Allowed in two served groups: the first is named, with how many more.
-    access={[GP1]:{granted:[BOB],denied:[]},[GP3]:{granted:[BOB],denied:[]}};
+    members({[GP1]:{granted:[BOB]},[GP3]:{granted:[BOB]}});
     await send('twice',BOB_CHAT,'Hello again');
-    assert.equal(last('card').text,`📨 Send to private chat with ${bob} (a person you allowed in group ${gp1} and 1 more)\n\nHello again`);
+    assert.equal(last('card').text,`📨 Send to private chat with ${bob} (a member in group ${gp1} and 1 more)\n\nHello again`);
     // A served group renamed to read like Bob: his name gets his chat's short id, and the group's gets its project on the
     // owner's card, but only its short id on a card in a group.
     await stores.control.query("UPDATE chats SET title='Bob' WHERE id=$1",[GP3]);
     await send('twin',BOB_CHAT,'Hello twin');
-    assert.equal(last('card').text,`📨 Send to private chat with ${bob} (…${chatShortId(BOB_CHAT)}) (a person you allowed in group ${gp1} and 1 more)\n\nHello twin`);
+    assert.equal(last('card').text,`📨 Send to private chat with ${bob} (…${chatShortId(BOB_CHAT)}) (a member in group ${gp1} and 1 more)\n\nHello twin`);
     const twinGroup=await send('twin-group',GP3,'For the twin group');
     assert.equal(last('card').text,`📨 Send to group ${bob} of project ⁨“P1”⁩\n\nFor the twin group`);
     const asked=await capture('bob-asks',said('Post it in the other group',Number(BOB),{id:Number(GP1),type:'supergroup'}),GP1);
@@ -444,23 +457,23 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     installChatsForTest({...untitled,chats:untitled.chats.map(chat=>chat.id===BOB_CHAT?{...chat,title:null}:chat)});
     await stores.control.query('UPDATE chat_accounts SET display_name=$2,username=NULL WHERE id=$1',[account,'Sara" (x']);
     await send('display-name',BOB_CHAT,'Hello Sara');
-    assert.equal(last('card').text,`📨 Send to private chat with ⁨“Sara' [x”⁩ (a person you allowed in group ${gp1} and 1 more)\n\nHello Sara`);
+    assert.equal(last('card').text,`📨 Send to private chat with ⁨“Sara' [x”⁩ (a member in group ${gp1} and 1 more)\n\nHello Sara`);
     await stores.control.query('UPDATE chat_accounts SET display_name=$2,username=$3 WHERE id=$1',[account,'ㅤ','sara_example']);
     await send('username',BOB_CHAT,'Hello username');
     const linkedCard=last('card');
-    assert.equal(linkedCard.text,`📨 Send to private chat with ⁨“@sara_example”⁩ (a person you allowed in group ${gp1} and 1 more)\n\nHello username`);
+    assert.equal(linkedCard.text,`📨 Send to private chat with ⁨“@sara_example”⁩ (a member in group ${gp1} and 1 more)\n\nHello username`);
     assert.deepEqual(linkedCard.links[0],{offset:linkedCard.text.indexOf('⁨“@'),length:17,url:'https://t.me/sara_example'});
     await stores.control.query('UPDATE chat_accounts SET display_name=NULL,username=NULL WHERE id=$1',[account]);
     await send('nameless',BOB_CHAT,'Hello nobody');
-    assert.equal(last('card').text,`📨 Send to private chat with a person …${chatShortId(BOB_CHAT)} (a person you allowed in group ${gp1} and 1 more)\n\nHello nobody`);
+    assert.equal(last('card').text,`📨 Send to private chat with a person …${chatShortId(BOB_CHAT)} (a member in group ${gp1} and 1 more)\n\nHello nobody`);
     installChatsForTest(fixtureDirectory([GP1,GP3]));
     // The message shows what a reader would not see, written out.
     await send('hidden',BOB_CHAT,'Hi \u{e0041}');
     assert.ok(last('card').text.endsWith('\n\nHi [U+E0041]'),last('card').text);
     // A card too long with the owner's long person line names Bob alone; one too long even so waits in the Inbox.
-    access={[GP1]:{granted:[BOB],denied:[]}};
+    members({[GP1]:{granted:[BOB]}});
     await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',
-      [JSON.stringify({'telegram.approval_texts':'person_chat: private chat with {name}, a person you allowed in {group}'+', who may read this'.repeat(20)})]);
+      [JSON.stringify({'telegram.approval_texts':'person_chat: private chat with {name}, a member in {group}'+', who may read this'.repeat(20)})]);
     const long='x'.repeat(3500),compact=await send('compact',BOB_CHAT,long);
     assert.deepEqual([last('card').id,last('card').text],[compact.id,`📨 Send to private chat with ${bob}\n\n${long}`]);
     // A name that reads like another's keeps its short id there: the compact line drops only the groups.
@@ -474,15 +487,15 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     // Approved, then the owner stopped allowing Bob before it went out: nothing is sent, and the card says why.
     const late=await send('late',BOB_CHAT,'Bye Bob');
     assert.equal(await s.actionCommands.callback(await ownerPress('late-approve',button('a',late))),true);
-    access={};const sends=executed.length;
+    members({});const sends=executed.length;
     assert.equal((await storageWorkflowOperations(s,async()=>({})).actions!(late.id,await epoch('actions'))).state,'cancelled');
     assert.equal(executed.length,sends,'nothing reaches a chat Nocheh stopped serving');
     assert.deepEqual([last('settle').id,last('settle').text],[late.id,`📨 Send to private chat with ${bob}\n\nBye Bob\n\n${notServed}`]);
     // Approved after a settings change that still serves his chat: the press, /approve and the card say something it used
     // changed, the send is closed with its approval kept, and nothing goes out.
-    access={[GP1]:{granted:[BOB],denied:[]}};
+    members({[GP1]:{granted:[BOB]}});
     const moved=await send('moved',BOB_CHAT,'Before a change'),movedTyped=await send('moved-typed',BOB_CHAT,'Typed before a change');
-    access={[GP1]:{granted:[BOB],denied:[]},[GP3]:{granted:[BOB],denied:[]}};
+    members({[GP1]:{granted:[BOB]},[GP3]:{granted:[BOB]}});
     const before=(await s.guards.state()).epoch;await s.configuration.configure(policy(),'on');
     assert.ok((await s.guards.state()).epoch>before,'the settings change moved the epoch');
     const changedSend='🚫 Approved, but not sent: something it used changed after it was asked. Ask again if you still want it.',movedSends=executed.length;
@@ -490,14 +503,14 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     assert.equal(last('answer').text,changedSend);
     assert.deepEqual([(await s.telegramActions.inspect(owner,moved.id)).state,(await s.telegramActions.inspect(owner,moved.id)).error_code],['cancelled','action_context_changed']);
     assert.deepEqual([last('settle').id,last('settle').text],
-      [moved.id,`📨 Send to private chat with ${bob} (a person you allowed in group ${gp1} and 1 more)\n\nBefore a change\n\n${changedSend}`]);
+      [moved.id,`📨 Send to private chat with ${bob} (a member in group ${gp1} and 1 more)\n\nBefore a change\n\n${changedSend}`]);
     assert.equal(await s.actionCommands.controlReply(await capture('moved-command',said('/approve '+movedTyped.id),OWNER)),changedSend);
     assert.equal((await s.telegramActions.inspect(owner,movedTyped.id)).state,'cancelled');
     assert.equal(executed.length,movedSends,'nothing is sent after the change');
     // Approved after he was no longer allowed: the press and /approve both say it was not sent, and why.
-    access={[GP1]:{granted:[BOB],denied:[]}};
+    members({[GP1]:{granted:[BOB]}});
     const gone=await send('gone',BOB_CHAT,'Too late'),typed=await send('typed',BOB_CHAT,'By command');
-    access={};
+    members({});
     assert.equal(await s.actionCommands.callback(await ownerPress('gone-approve',button('a',gone))),true);
     assert.equal(last('answer').text,notServed);
     assert.deepEqual([(await s.telegramActions.inspect(owner,gone.id)).state,(await s.telegramActions.inspect(owner,gone.id)).error_code],['cancelled','destination_not_served']);
@@ -514,7 +527,7 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     assert.equal(last('settle').text,'📨 Send to group ⁨“GP3”⁩ (not served now)\n\nFor the twin group\n\n❌ Rejected. Nothing was sent.');
     // A card Bob reviews in GP1 settles there, where it was posted, also once its destination is no longer served or he
     // may no longer post there; only his press needs him to be allowed now (ADR-0254).
-    installChatsForTest(fixtureDirectory([GP1,GP3]));access={[GP1]:{granted:[BOB],denied:[]},[GP3]:{granted:[BOB],denied:[]}};
+    installChatsForTest(fixtureDirectory([GP1,GP3]));members({[GP1]:{granted:[BOB]},[GP3]:{granted:[BOB]}});
     const bobAsks=async(label:string,text:string)=>s.actionCommands.offer('telegram',await s.telegramActions.request(
       await actor((await capture(label,said('Post it in GP3',Number(BOB),{id:Number(GP1),type:'supergroup'}),GP1)).id,GP1,GP1),{destination:GP3,text}));
     const groupPress=(label:string,data:string,from:string)=>capture(label,{update_id:++updates,callback_query:{id:'query-'+label,from:{id:Number(from)},chat_instance:'1',data,
@@ -530,7 +543,7 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
       'settled in GP1, with no "Asked in" line and no project, as it was posted');
     installChatsForTest(fixtureDirectory([GP1,GP3]));
     const waiting=await bobAsks('waiting','Waits in GP1');assert.equal(last('card').chat_id,GP1);
-    access={[GP1]:{granted:[BOB],denied:[]}};
+    members({[GP1]:{granted:[BOB]}});
     assert.equal(await s.actionCommands.callback(await groupPress('waiting-bob',button('a',waiting),BOB)),true);
     assert.equal(last('answer').text,'Only the owner can approve or reject this.');
     assert.equal((await s.telegramActions.inspect(owner,waiting.id)).state,'proposed','his press decides nothing once he may not post there');
@@ -538,10 +551,10 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     assert.deepEqual([last('settle').id,last('settle').chat_id,last('settle').text],[waiting.id,GP1,`📨 Send to group ${gp3}\n\nWaits in GP1\n\n❌ Rejected. Nothing was sent.`],
       'the owner\'s Reject settles the card in GP1');
     // His press on a card posted in the owner's private chat never decides it from GP1, even once he may review it.
-    access={[GP1]:{granted:[BOB],denied:[]}};
+    members({[GP1]:{granted:[BOB]}});
     const ownerCard=await bobAsks('owner-card','Asked while not allowed in GP3');assert.equal(last('card').chat_id,OWNER);
-    access={[GP1]:{granted:[BOB],denied:[]},[GP3]:{granted:[BOB],denied:[]}};
+    members({[GP1]:{granted:[BOB]},[GP3]:{granted:[BOB]}});
     assert.equal(await s.actionCommands.callback(await groupPress('owner-card-bob',button('a',ownerCard),BOB)),true);
     assert.equal((await s.telegramActions.inspect(owner,ownerCard.id)).state,'proposed');
-  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

@@ -70,9 +70,10 @@ class Scope:
 
 
 class Scopes:
-    """Who Nocheh's brain serves (ADR-0252). Whether it is on and each group's member access come from its environment;
-    the owner, the owner's private chat and the served groups come from the app's served list (services/chats.py), by
-    their Nocheh chat ids and their Telegram ids now and before. A turn's chat, space and app binding come from its
+    """Who Nocheh's brain serves (ADR-0252). Whether it is on comes from its environment; the owner, the owner's private
+    chat and the served groups come from the app's served list (services/chats.py), by their Nocheh chat ids and their
+    Telegram ids now and before. Who else may talk in a served group is the app's member directory alone (step 3): the
+    app admits the sender and signs the turn's pass for this event. A turn's chat, space and app binding come from its
     signed pass, and its profile is built for that chat per request. A list that cannot be read serves nothing. A policy
     names no chat: an owner or groups in a policy file are not read (ADR-0253); a test gives its list as `served`."""
     def __init__(self, value, served=None):
@@ -80,13 +81,6 @@ class Scopes:
         from services.chats import Fixed,Served,ServedList
         self.enabled=value['enabled']
         if self.enabled and isinstance(served,Served) and not served.owner_chat:raise ValueError('owner_required')
-        self.group_access=value.get('group_access',{})
-        # Keyed by any Telegram id a group has had; a key that names no served group grants nothing.
-        if not isinstance(self.group_access,dict) or len(self.group_access)>100:raise ValueError('invalid_group_access')
-        for group,entry in self.group_access.items():
-            if not isinstance(group,str) or not 0<len(group)<=32 or not isinstance(entry,dict) or set(entry)!={'granted','denied'}:raise ValueError('invalid_group_access')
-            for users in entry.values():
-                if not isinstance(users,list) or len(users)>1000 or any(not telegram_user(user) for user in users):raise ValueError('invalid_group_access')
         from .environment import secret
         self.served=Fixed(served) if isinstance(served,Served) else served or ServedList(None,lambda:secret('SERVICE_TOKEN'))
 
@@ -95,12 +89,6 @@ class Scopes:
         newer guard epoch than it was read at, or when it does not hold what `holds` asks for (a topic or Telegram id the
         app recorded since)."""
         return self.served.get(epoch,max_age,holds)
-
-    def access(self,served,group,user):
-        """Whether `user` may talk to Nocheh in the served group `group` (a Nocheh chat id): granted and not denied, under any
-        Telegram id the group has had, so an upgrade keeps who may talk there."""
-        entries=[self.group_access.get(external,{}) for external in served.app_ids(group)]
-        return any(user in entry.get('granted',[]) for entry in entries) and not any(user in entry.get('denied',[]) for entry in entries)
 
     @classmethod
     def load(cls,path):
@@ -163,8 +151,9 @@ class Scopes:
         The pass's app binding must name this update's chat and topic, and the served list must agree: the update's
         Telegram id (now or before) and topic are that space, which is where the binding says it is now (ADR-0252). The
         owner's own turn (no scope) and a private answer (ADR-0249) are the owner writing in the owner's private chat;
-        any other is a served group's member with access. A turn this policy does not serve is None; a pass that does not
-        match its update is refused."""
+        any other is a person writing in a served group, whom the app admitted (its member directory, step 3) before it
+        signed this event's pass: a bot, or a message in a chat's own name, never is. A turn this policy does not serve is
+        None; a pass that does not match its update is refused."""
         if not self.enabled:return None
         payload=body.get('payload') if isinstance(body.get('payload'),dict) else {}
         message=payload.get('message')
@@ -197,14 +186,8 @@ class Scopes:
         if owner:
             if chat.get('type')!='private' or user_id!=served.owner_user():return None
         else:
-            if chat.get('type') not in ('group','supergroup'):return None
-            if user_id!=served.owner_user() and not self.access(served,nocheh,user_id):return None
+            if chat.get('type') not in ('group','supergroup') or message.get('sender_chat') is not None:return None
         from gateway.profile_routing import match_profile_route,parse_profile_routes
         route=match_profile_route(parse_profile_routes([{'platform':'telegram','chat_id':nocheh,'profile':self.profile(nocheh),'name':nocheh}]),'telegram',chat_id=nocheh)
         if not route:raise ValueError('missing_profile_route')
         return Scope(nocheh,user_id,owner,route.profile,space,app=('telegram',app['chat'],app['topic']))
-
-
-def telegram_user(value):
-    """A Telegram user id as the Bot API writes it: a positive number with no leading zero."""
-    return isinstance(value,str) and value.isascii() and value.isdigit() and 0<len(value)<=19 and value[0]!='0'

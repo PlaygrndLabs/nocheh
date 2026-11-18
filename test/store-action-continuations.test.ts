@@ -15,6 +15,7 @@ import type {SourceReference} from '../src/stores/archive.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {workflowDetail} from '../src/workflows/owner.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('an approved operation\'s answer comes back to the chat that asked, after its first reply',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -27,7 +28,10 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
   let started:Record<string,unknown>={state:'done'},observed:Record<string,unknown>={state:'running'},denied:string[]=[],delivery='done';
   // Nocheh's bot sends what the brain returns; only its send can end uncertain.
   const sends:any[]=[],frontDoor=fixtureTelegram((operation,input)=>sends.push({operation,...input}));
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied}}});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group]});
+  // The owner's members (step 3): 9 talks in the group unless `denied` switches them off there.
+  let people=grantMembers({[group]:{granted:['9'],denied}},{owner:'123'});
+  const regrant=()=>{people();people=grantMembers({[group]:{granted:['9'],denied}},{owner:'123'});};
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
@@ -256,10 +260,10 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     await stores.control.query(`UPDATE owner_prompts SET texts='{}'::jsonb WHERE singleton`);
     // A member removed from the group, or a retired request, gets no follow-up; a running one is cancelled.
     const removedAsk=await message('removed'),removed=await operation(removedAsk,'printf made-up-removed');await asking(removedAsk,'done');await decide(removed,'na');await ran(removed.id);
-    denied=['9'];before=starts.length;
+    denied=['9'];regrant();before=starts.length;
     assert.equal((await follow(removed.id)).state,'skipped');
     assert.deepEqual(pick(await row(removed.id),'state','error_code'),{state:'suppressed',error_code:'conversation_not_selected'});assert.equal(starts.length,before);
-    denied=[];
+    denied=[];regrant();
     const hiddenAsk=await message('hidden'),hidden=await operation(hiddenAsk,'printf made-up-hidden');await asking(hiddenAsk,'done');await decide(hidden,'na');await ran(hidden.id);
     await s.retirements.set(owner,hiddenAsk.id,{retired:true,expected_revision:0,operation_id:key+':hide'});
     assert.equal((await follow(hidden.id)).state,'cancelled');
@@ -269,5 +273,5 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     await due(refused.id);observed={state:'cancelled'};assert.equal((await follow(refused.id)).state,'cancelled');
     assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM action_continuations WHERE event_id=ANY($1::text[]) AND state='running'",
       [[asked,failing,unsure,together,chatty,mine,refusedAsk,slow,lost,pair,order,stop,retry,free,worded,removedAsk,hiddenAsk].map(source=>source.id)])).rows[0].n,0);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

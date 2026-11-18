@@ -46,7 +46,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 | --- | --- | --- |
 | Capture and outages | Fsync before acknowledgment; duplicate updates, revisions and control-store failure lose no originals | `test_capture.py`, `test_telegram_http_fixture.py`, `archive.test.ts`, `stores.test.ts` |
 | Native Telegram delivery | Persian/emoji and long replies retain routing; replay adds no send; rate-limit waits and bounded retries preserve receipts; Markdown rejection and lost replies retain the audience; a send never transmitted, for example during a polling reconnect, retries under a fresh attempt while a transmitted request with a lost response stays uncertain | `test_telegram_simulation.py`, `test_capture.py`, `test_gateway.py`, `store-telegram-dispatch.test.ts` |
-| Access and topics | Owner/private, granted/denied participants, General and named topics remain distinct; stale capabilities fail closed | `test_scopes.py`, `assistant.test.ts`, `store-retrieval.test.ts` |
+| Access and topics | Owner/private, members who talk or are paused or switched off, strangers, General and named topics remain distinct; stale capabilities fail closed | `test_scopes.py`, `assistant.test.ts`, `store-retrieval.test.ts`, `members.test.ts`, `store-members.test.ts` |
 | Files and voice | Original bytes and hashes survive download failures; voice notes are transcribed before their reply, or archived with a status without a key | `store-preparation.test.ts`, `store-reprocessing.test.ts`, `store-voice-transcription.test.ts`, `worker.test.ts` |
 | Guarding | Literal masking preserves other content; owner edits survive; stale representation has no original fallback; bounded concurrent publication drains failed work and checkpoints more than 500 small fragments in separate batches | `store-guards.test.ts`, `store-prepared-context.test.ts`, `test_boundary.py` |
 | Retirement and edits | Retired sources/reactions leave future retrieval; pending delivery stops; originals and confirmed sends remain | `store-source-retirement.test.ts`, `test_exact_predecessor.py` |
@@ -141,8 +141,8 @@ owner-private archive search, model context and Honcho recall against group
 and other-group isolation, literal guarding, exact Telegram approvals and
 denials with stale fingerprints and repeated decisions, `current` destinations,
 the owner freedom setting, which still shows a card for each post to a group,
-a fixed reply to a participant not allowed, replies only when addressed in a group,
-unselected and granted/revoked participants, retirement, a voice note
+a fixed reply to someone who may not talk in a group, replies only when addressed in a group,
+unselected groups and members, retirement, a voice note
 transcribed before its reply that does not hold the next message, a photo read by the vision tool, an ordinary file with a caption, an owner-private schedule that fires on its
 own cadence and waits for exact review before one delivery, deleted topics,
 polling 5xx (measured after the adapter restarts polling), lost send responses,
@@ -251,10 +251,10 @@ owner adds at the same time and no other scenario posts in, is found upgraded by
 owner's refresh instead (the fixture answers its old id with
 `migrate_to_chat_id`): the refresh moves it onto the new id at once, keeps the
 old one, asks again under the new id and sends nothing.
-Product scenarios cover allowed members, addressing by name, unaddressed
-messages shown once to the next reply, the fixed reply for people not allowed,
+Product scenarios cover members, addressing by name, unaddressed
+messages shown once to the next reply, the fixed reply for people who may not talk there,
 approval cards with Approve and Reject in private chat, same-group posts,
-member cards in their own group, owner review when the member is not allowed
+member cards in their own group, owner review when the member is switched off
 in the destination, owner group-to-own-private-chat, group-to-group cards,
 hide and unhide carrying the conversation, reactions keeping the group name,
 learning reaching Honcho, Inbox person cards (one per new name, none for the
@@ -272,7 +272,20 @@ admin; a member's second add the same day leaves with no second line; a leave
 Telegram refuses stays silent as Couldn’t leave; a removal from a group that is
 on tells the owner once; the owner's add is on at once, with one card whose
 buttons each work; and a group that is off is turned on and off through
-`/v1/chats/state`. Before an add that expects a line, the tester moves earlier
+`/v1/chats/state`. Members ([ADR-0260](adr/0260-members-in-groups.md)): the tester
+sets them up through the owner's Members routes behind the dashboard proxy,
+adding each by Telegram user ID and sending only the switches that differ, and
+the member scenarios check that no container restarted. They cover the owner
+adding a member on the dashboard, who then talks at once; a member switched off
+in one group and a paused member, who get the same fixed reply as a stranger,
+once a day per group (these, and the stranger's fixed reply and a member added
+by ID and then switched off, each ask as a person new to the fixture, so a second
+run on the same UTC day still sees the reply); a member's web page read without a
+card; read-only tasks; posting to other groups turned off
+(`member_post_not_allowed`); a member who
+left a group and is no longer reached there; four member jobs in one day, with
+no daily count; a member over a low daily message cap, who gets the limit reply
+once; and posts made in a chat's own name, which get nothing. Before an add that expects a line, the tester moves earlier
 sent leave notes about other groups out of the last 24 hours, so earlier runs on
 a kept fixture never fill the cap on all lines; the group's own notes stay, so
 its own cap still holds. Dashboard calls sign

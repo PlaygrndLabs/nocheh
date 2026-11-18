@@ -32,7 +32,7 @@ function ReplyMode({telegram}: {telegram: Telegram}) {
   return (
     <p className="text-[13px] text-muted">
       {telegram.replies === 'all'
-        ? 'Answers every message from people allowed here.'
+        ? 'Answers every message from you and the members who can talk here.'
         : `Answers only when called: a reply to it, its @username, or a message starting with ${names}.`}{' '}
       <a href={telegramSettingsHref} className="font-medium text-accent-text hover:underline">
         Change in Settings › Telegram
@@ -100,7 +100,7 @@ export function NochehHere({chat, parent, telegram}: {chat: Chat; parent: Chat |
  * A group's switch, which turns Nocheh on or off there at once (ADR-0253). Turning it on in a group with no project
  * answer first asks which project it joins: one of yours, a new one named after the group, or none; in a group already
  * in a project, it first names that project's other groups and its task list. Turning it off asks first: Nocheh stays
- * in the group, silent, and the people you allowed are kept. Only a group Nocheh is in has a switch; any other says
+ * in the group, silent, and its members keep their switches. Only a group Nocheh is in has a switch; any other says
  * where Nocheh stands.
  */
 function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string | null; telegram: Telegram}) {
@@ -131,7 +131,7 @@ function GroupPresence({chat, problem, telegram}: {chat: Chat; problem: string |
       !next &&
       !(await confirm({
         title: `Turn Nocheh off in “${name}”?`,
-        body: 'It stays in the group, silent. People you allowed are kept.',
+        body: 'It stays in the group, silent. Its members keep their switches.',
         confirm: 'Turn off',
         danger: true,
       }))

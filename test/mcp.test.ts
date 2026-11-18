@@ -291,7 +291,7 @@ test('background jobs are started, listed and stopped through the bound scope',a
     ['/v1/jobs/status',{title:'ignored'}],['/v1/jobs/stop',{id:'b'.repeat(64)}],
     ['/v1/jobs/start',{title:'t',instruction:'i',box:true,repo:'example-org/widgets'}],
     ...Array(4).fill(['/v1/jobs/start',{title:'t',instruction:'i',box:true}]),['/v1/jobs/status',{}]]);
-  for(const code of ['job_limit_reached','job_too_long','job_not_found','job_not_permitted','job_in_a_job','job_repo_not_allowed'])
+  for(const code of ['job_too_long','job_not_found','job_not_permitted','job_in_a_job','job_repo_not_allowed'])
     assert.deepEqual(await run('background_job',{action:'start',title:'t',instruction:'i'},fake(()=>new Status(409,{error:code})).context),{error:code});
   assert.deepEqual(await run('background_job',{action:'status'},fake(()=>new Status(503,{error:'private storage detail'})).context),{error:'background_jobs_unavailable'});
   assert.deepEqual(await run('background_job',{action:'status'},fake(()=>new Status(403,{error:'private storage detail'})).context),{error:'job_not_permitted'});

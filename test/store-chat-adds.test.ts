@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
-import {chatIdFor,chatShortId,chats} from '../src/chats.js';
+import {accountIdFor,chatIdFor,chatShortId,chats,connectionIdFor} from '../src/chats.js';
+import {memberIdFor} from '../src/members.js';
 import {HttpError} from '../src/http.js';
 import type {RuntimeCall} from '../src/runtime.js';
 import {ActionCommandRepository} from '../src/stores/action-commands.js';
@@ -13,18 +14,17 @@ import {ChatAdds,chatAddData} from '../src/stores/chat-adds.js';
 import {ChatRepository,servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {legacyChats,OWNER,seedChats} from './fixture-groups.js';
+import {seedMemberAccount} from './fixture-member-grants.js';
 
 /*
  * The stage after someone adds Nocheh to a group or removes it (ADR-0253): it leaves a group someone else added it to,
- * tells the owner only of adds by a person they allowed or a hidden adder, under caps, gives a group the owner added its
+ * tells the owner only of adds by a member (step 3) or a hidden adder, under caps, gives a group the owner added its
  * own project with a card, answers the card's buttons, and tells the owner when Nocheh was removed from a group it was
  * on in. Telegram is a recorder here. Both chat id families: groups first seen now have digest ids, and a group stored
  * before step 2b keeps its Telegram value as its id. Every group here is new to this test.
  */
 const fixture={skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000};
 const BOT='777',ANONYMOUS=1087968824,MEMBER=7901,STRANGER=7902,ALICE=7903;
-/** A group key of TELEGRAM_GROUP_ACCESS where the owner allowed MEMBER. */
-const ACCESS='-1001234567890';
 const owner={admin:true,scope:null};
 async function open():Promise<StorePools> {
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
@@ -36,12 +36,19 @@ type Call={operation:string;input:any};
 
 /** One test's captures, its Telegram recorder and its stage. */
 async function harness(stores:StorePools,label:string) {
-  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],group_access:{[ACCESS]:{granted:[String(MEMBER)],denied:[]}}};
+  const policy:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[]};
   const base=Date.now(),repository=new ChatRepository(stores,()=>policy),archive=new ArchiveRepository(stores.archive);
   const coordinator=new CaptureCoordinator(archive,stores.control,undefined,repository);
   // The owner's private chat as the shared fixture has it: seeded with its old-shaped id, unless a capture made it first.
   if(!(await stores.control.query('SELECT 1 FROM chat_ids WHERE external_id=$1',[OWNER])).rowCount)await seedChats(stores.control,legacyChats([OWNER],{owner:OWNER}));
+  // MEMBER is a member: their account is linked to one (step 3). STRANGER and ALICE are not.
+  const memberAccount=accountIdFor('telegram',String(MEMBER));
+  await stores.control.query('INSERT INTO chat_accounts(id,connection_id,external_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[memberAccount,connectionIdFor('telegram'),String(MEMBER)]);
+  await stores.control.query('INSERT INTO members(id) VALUES($1) ON CONFLICT DO NOTHING',[memberIdFor(memberAccount)]);
+  await stores.control.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1',[memberAccount,memberIdFor(memberAccount)]);
   await startChatDirectory(stores.control,()=>policy);
+  // MEMBER is one of the owner's members (step 3).
+  await seedMemberAccount(stores.control,String(MEMBER));
   // Notes sent before this test are out of its 24 hours, so the caps count this test's own, and rows another test left
   // waiting are not this test's to settle.
   await stores.control.query(`UPDATE chat_state_events SET updated_at=updated_at-interval '2 days' WHERE notice='sent'`);
@@ -313,7 +320,11 @@ test('the owner\'s add gets its own project and a card, in one owner command; th
 
     const before=await h.epoch();
     await h.due();await h.adds.settle();
-    assert.equal(await h.epoch(),before+3,'one owner command for each card\'s project');
+    // Each card's own project is one owner command that moves no guard epoch (step 3), so a reply running in the group
+    // meanwhile still sends on its first try.
+    assert.equal(await h.epoch(),before,'a card\'s own project moves no guard epoch');
+    assert.deepEqual((await stores.control.query(`SELECT count(*)::int AS n,bool_or(holds_memory) AS memory FROM owner_commands WHERE id=ANY($1::text[])`,
+      [[freshAdd,legacyAdd,thirdAdd].map(event=>'chat-add-project:'+event)])).rows[0],{n:3,memory:false},'one owner command for each card\'s project');
     const auto=(event:string)=>digest('project:chat-add-project:'+event);
     for(const [chatId,event,value] of [[freshId,freshAdd,fresh],[legacy,legacyAdd,legacy],[thirdId,thirdAdd,third]] as const) {
       assert.deepEqual((await stores.control.query('SELECT name,state FROM projects WHERE id=$1',[auto(event)])).rows[0],{name:h.title(value),state:'active'});

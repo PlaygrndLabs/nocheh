@@ -17,7 +17,8 @@ import {CaptureCoordinator} from '../src/stores/capture.js';
 import {SourcePortabilityRepository} from '../src/stores/source-portability.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {installChatsForTest} from '../src/chats.js';
-import {BOB,GP1,GP_GROUP_IDS,NG1_TG,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureDirectory,policyDirectory} from './fixture-groups.js';
+import {BOB,GP1,GP_GROUP_IDS,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureDirectory,policyDirectory} from './fixture-groups.js';
+import {grantMembers,type GrantOptions,type GroupGrants} from './fixture-member-grants.js';
 
 test('voice notes go to the runtime transcriber; a busy provider is retried and other failures become a status', async () => {
   const calls:Record<string,unknown>[]=[];let answer:Record<string,unknown>={state:'done',text:'Synthetic note about the garden club'};
@@ -117,7 +118,7 @@ test('voice notes saved before a transcription key are transcribed once one is a
   } finally {await stores.archive.end();await stores.derived.end();await stores.control.end();await rm(root,{recursive:true,force:true});}
 });
 
-test('a live recording from someone not allowed is transcribed up to 15 minutes; the owner\'s, allowed people\'s, imported and restored ones in full',
+test('a live recording from someone not allowed is transcribed up to 15 minutes; the owner\'s, members\', imported and restored ones in full',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const admin=new pg.Pool(config);
@@ -127,7 +128,10 @@ test('a live recording from someone not allowed is transcribed up to 15 minutes;
   const stores=connectStores(config,passwords),archive=new ArchiveRepository(stores.archive),derived=new DerivedRepository(stores.derived,archive);
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),capture=new CaptureCoordinator(archive,stores.control);
   const root=await mkdtemp(join(tmpdir(),'nocheh-voice-limit-')),attachments=new AttachmentRepository(stores,archive,root),key='voice-limit:'+Date.now();
-  const served:AssistantPolicy={enabled:true,owner_id:'123',group_ids:['-20'],group_access:{'-20':{granted:['456'],denied:[]}}};
+  const served:AssistantPolicy={enabled:true,owner_id:'123',group_ids:['-20']};
+  // The owner's members (step 3): 456 talks in the group; a test changes them as the owner would.
+  let people=grantMembers({'-20':{granted:['456']}},{owner:'123'});
+  const members=(grants:GroupGrants,options:GrantOptions={})=>{people();people=grantMembers(grants,{owner:'123',...options});};
   // The chats these notes come from, as the seeder makes their rows for values stored before step 2b (ADR-0252).
   installChatsForTest(policyDirectory(served));
   let policy=served,configured=true,busy=false;const asked:Record<string,unknown>[]=[];
@@ -174,7 +178,7 @@ test('a live recording from someone not allowed is transcribed up to 15 minutes;
     assert.deepEqual(anonymous.configuration,cut,'an anonymous admin, who may be the owner but cannot be told apart');
     const channel=await live({chat:group,from:{id:1000002,is_bot:true,first_name:'Channel'},sender_chat:{id:-1005,type:'channel',title:'Synthetic Channel'}});
     assert.deepEqual(channel.configuration,cut,'a post in a channel\'s name');
-    for(const [label,message,update] of [['the owner in the group',{chat:group,from:person(123)},'message'],['an allowed person',{chat:group,from:person(456)},'message'],
+    for(const [label,message,update] of [['the owner in the group',{chat:group,from:person(123)},'message'],['a member',{chat:group,from:person(456)},'message'],
       ['the owner\'s edited message',{chat:group,from:person(123),edit_date:2},'edited_message'],
       ['the owner in private',{chat:{id:123,type:'private'},from:person(123)},'message']] as const) {
       const found=await live(message,update);
@@ -193,15 +197,15 @@ test('a live recording from someone not allowed is transcribed up to 15 minutes;
     await portability.import(owner,{event:original,artifacts:[{source_ref:message.voice.file_id,kind:'voice',metadata:message.voice}]});
     await attachments.commit(digest(id+':'+message.voice.file_id),bytes);
     assert.deepEqual((await prepare(id)).configuration,{},'a live recording restored from an export, never captured here');
-    // A provider that is busy fails the first try; a grant before the next try changes nothing about that transcription.
+    // A provider that is busy fails the first try; a new member before the next try changes nothing about that transcription.
     busy=true;
     const retried=(await capture.capture(voice({chat:group,from:person(789)}))).source;
     await assert.rejects(preparation.run(retried.reference.id,fetch,'fixture',async()=>[],authority),{code:'transcription_unavailable'});
-    policy={...served,group_access:{'-20':{granted:['456','789'],denied:[]}}};busy=false;
+    members({'-20':{granted:['456','789']}});busy=false;
     const again=await prepare(retried.reference.id);
     assert.deepEqual(again.configuration,cut);assert.deepEqual(again.runtime,[900],'the next try asks for the same part, without an identity conflict');
     // Voice notes archived while no provider was chosen get the same rule when they are transcribed later.
-    policy=served;configured=false;
+    members({'-20':{granted:['456']}});configured=false;
     const waiting=[await capture.capture(voice({chat:group,from:person(789)})),await capture.capture(voice({chat:group,from:person(456)}))].map(found=>found.source);
     for(const source of waiting) {
       assert.equal((await preparation.run(source.reference.id,fetch,'fixture',async()=>[],authority)).state,'completed');
@@ -210,7 +214,7 @@ test('a live recording from someone not allowed is transcribed up to 15 minutes;
     configured=true;
     await preparation.transcribeArchived(async()=>configured,500);
     assert.deepEqual(await configuration(waiting[0]!.artifact_ids[0]!,'voice'),cut,'someone not allowed');
-    assert.deepEqual(await configuration(waiting[1]!.artifact_ids[0]!,'voice'),{},'an allowed person');
+    assert.deepEqual(await configuration(waiting[1]!.artifact_ids[0]!,'voice'),{},'a member');
     asked.length=0;
     const job=digest('reprocess:voice:'+waiting[0]!.artifact_ids[0]!+':'+digest('runtime-voice:1'));
     assert.ok(await reprocessing.run(job,'fixture',async()=>[],authority));
@@ -223,22 +227,22 @@ test('a live recording from someone not allowed is transcribed up to 15 minutes;
     assert.equal((await stores.derived.query('SELECT convert_from(content,\'UTF8\') AS text FROM derived_artifacts WHERE id=$1',[reading.id])).rows[0].text,
       'Synthetic note: bring the folding chairs');
 
-    // The same rule in the chat the directory finds (ADR-0252): a person allowed in NG2 under the Telegram id it had
-    // before Telegram upgraded it is read whole under its new id too; someone not allowed there, a person allowed only
-    // in another group, and anyone in a group the directory has no row for, even one the policy lists, are cut.
+    // The same rule in the chat the directory finds (ADR-0252): a member in NG2, the group Telegram upgraded, is read
+    // whole under its old and its new id; someone not a member, a member switched off in that group, and anyone in a
+    // group the directory has no row for, even one the policy lists, are cut.
     const stray='-1009999999999';
     installChatsForTest(fixtureDirectory([...GP_GROUP_IDS,...NG_GROUP_IDS]));
-    policy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS,stray],
-      group_access:{[NG2_OLD_TG]:{granted:[BOB],denied:[]},[GP1]:{granted:[BOB],denied:[]},[stray]:{granted:[BOB],denied:[]}}};
+    policy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS,stray]};
+    members({[NG2]:{granted:[BOB]},[GP1]:{granted:[BOB]}},{owner:OWNER,groups:[NG1]});
     const team=(chat:string)=>({id:Number(chat),type:'supergroup',title:'Synthetic Team'});
     const cases:[string,string,number,Record<string,unknown>][]=[
-      ['an allowed person in an upgraded group, under its new id',NG2_TG,Number(BOB),{}],
-      ['an allowed person in an upgraded group, under its old id',NG2_OLD_TG,Number(BOB),{}],
-      ['an allowed person in an old-shaped group',GP1,Number(BOB),{}],
-      ['someone not allowed in an upgraded group',NG2_TG,789,cut],
-      ['a person allowed only in other groups, in a digest group',NG1_TG,Number(BOB),cut],
+      ['a member in an upgraded group, under its new id',NG2_TG,Number(BOB),{}],
+      ['a member in an upgraded group, under its old id',NG2_OLD_TG,Number(BOB),{}],
+      ['a member in an old-shaped group',GP1,Number(BOB),{}],
+      ['someone not a member, in an upgraded group',NG2_TG,789,cut],
+      ['a member switched off in a digest group',NG1_TG,Number(BOB),cut],
       ['a group the directory does not know',stray,Number(BOB),cut],
       ['the owner, wherever they write',stray,Number(OWNER),{}]];
     for(const [label,chat,from,expected] of cases)assert.deepEqual((await live({chat:team(chat),from:person(from)})).configuration,expected,label);
-  } finally {await stores.archive.end();await stores.derived.end();await stores.control.end();await rm(root,{recursive:true,force:true});}
+  } finally {people();await stores.archive.end();await stores.derived.end();await stores.control.end();await rm(root,{recursive:true,force:true});}
 });

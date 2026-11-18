@@ -17,6 +17,7 @@ import {requestWorkflow} from '../src/workflows/store.js';
 import {observedSource} from '../src/observed-source.js';
 import {HttpError} from '../src/http.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('guarded representations cannot change Telegram routing or embed unobserved reply snapshots',()=>{
   const original={update_id:1,message:{message_id:2,date:3,chat:{id:-4,type:'supergroup',is_forum:true},from:{id:5,is_bot:false},message_thread_id:6,is_topic_message:true}};
@@ -66,7 +67,9 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-')),base=Date.now(),key='dispatch:'+base,group='-'+base,token=digest(key);
-  const policy={enabled:true,owner_id:'123',group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}}},calls:{operation:string;input:any}[]=[],native=new Map<string,any>(),journals=new Map<string,any[]>();
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123'});
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},calls:{operation:string;input:any}[]=[],native=new Map<string,any>(),journals=new Map<string,any[]>();
   let serial=base,mode='done',lostControl=false,timingShape:'valid'|'malformed'='valid',delivery='done',botState='connected';const query=stores.control.query.bind(stores.control);
   // Nocheh's bot: what it was asked to show and send, and how a send ends.
   const sends:{operation:string;input:any}[]=[],bot=fixtureTelegram((operation,input)=>sends.push({operation,input}));
@@ -259,7 +262,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const columns=(await stores.control.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='dispatches'")).rows.map(r=>r.column_name);
     assert.ok(!columns.some(name=>['text','content','payload','transcripts'].includes(name)));
     assert.equal((await stores.archive.query("SELECT count(*)::int AS n FROM events WHERE kind IN ('runtime_context','runtime_result')")).rows[0].n,0);
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('conversation messages start in Telegram update order while an earlier message has not started',
@@ -437,7 +440,7 @@ test('a group turn sees the unaddressed group messages since the last turn, neve
     await say('Who wants lunch?',stranger);assert.equal(sends.filter(item=>item.operation==='telegram.refusal').length,0,'unaddressed: no refusal');
     await say('Nocheh, who are you?',stranger);
     const refusals=sends.filter(item=>item.operation==='telegram.refusal');assert.equal(refusals.length,1);
-    assert.deepEqual(Object.keys(refusals[0]!.input).sort(),['chat_id','event_id','message_id','reply','user_id'],'the bot gets only what it sends');
+    assert.deepEqual(Object.keys(refusals[0]!.input).sort(),['chat_id','event_id','message_id','once','reply','user_id'],'the bot gets only what it sends, and how often');
     assert.equal(started.length,6,'a refused message runs no turn');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });

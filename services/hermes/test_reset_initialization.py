@@ -10,6 +10,7 @@ from unittest.mock import patch
 from services.hermes import preference_transfer
 from tools.operations.installation import configuration
 from tools.acceptance import reset_baseline
+from tools.acceptance import reset_configuration
 from tools.acceptance import reset_boundary
 from tools.acceptance import reset_initialization
 from tools.acceptance import reset_inventory
@@ -142,8 +143,8 @@ class ResetInitializationTests(unittest.TestCase):
                 'configuration_sha256': hashlib.sha256(reset_protocol.canonical(loaded)).hexdigest(),
                 'state_anchor': {'device': metadata.st_dev, 'inode': metadata.st_ino, 'kind': 'directory'}}}
         self.generation = str(uuid.uuid4()); self.reset_id = self.preflight['id']
-        self.policy = {'enabled': False, 'owner_id': '42', 'group_ids': []}
-        snapshot = {'format': 'nocheh-reset-configuration-v1', 'layout': 'original-only-v1', 'configuration': {
+        self.policy = {'enabled': False, 'owner_id': '42'}
+        snapshot = {'format': reset_configuration.FORMAT, 'layout': 'original-only-v1', 'configuration': {
             'security_policy': [{'document': {'version': 1, 'rules': []}}],
             'installation_generation': [{'generation': str(uuid.uuid4())}], 'guard_mode': [{'mode': 'on'}],
             'runtime_configuration': [{'name': 'assistant', 'document': self.policy}], 'projects': [],
@@ -151,7 +152,8 @@ class ResetInitializationTests(unittest.TestCase):
             'memory_access_settings': [{'destination': '*', 'suggestions': 'related', 'notify_owner': True,
                                         'auto_followup': True, 'request_ttl_seconds': 86400,
                                         'default_grant_mode': 'one_time'}],
-            'chat_tool_settings': [], 'runtime_profiles': []}}
+            'chat_tool_settings': [], 'runtime_profiles': [], 'chats': [], 'chat_ids': [],
+            'members': [], 'member_accounts': [], 'member_chats': [], 'daily_messages': [{'daily_messages': 200}]}}
         preferences = preference_transfer.capture(self.state / 'hermes',
                                                   SimpleNamespace(owner='42', groups=[]), [])
         self.artifacts = {'receipt': {'format': 'fixture'},
@@ -166,7 +168,7 @@ class ResetInitializationTests(unittest.TestCase):
         self.preflight['installation']['storage_layout'] = 'legacy'
         self.preflight['installation']['configuration_sha256'] = hashlib.sha256(
             reset_protocol.canonical(loaded)).hexdigest()
-        snapshot = {'format': 'nocheh-reset-configuration-v1', 'layout': 'legacy', 'configuration': {
+        snapshot = {'format': reset_configuration.FORMAT, 'layout': 'legacy', 'configuration': {
             'security_policy': [{'document': {'version': 1, 'rules': []}}],
             'memory_spaces': [{'id': '-10', 'overrides': {'mode': 'filtered', 'sources': ['42']}}]}}
         self.artifacts['configuration'] = {'snapshot_sha256': reset_protocol.fingerprint(snapshot),

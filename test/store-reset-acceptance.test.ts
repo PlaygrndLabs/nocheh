@@ -43,7 +43,7 @@ function stores(eventTime=fresh) {
   }};
   const control={query:async(sql:string,params:any[]=[])=>{
     if(sql.startsWith('SELECT generation::text'))return {rows:[{generation:'22222222-2222-4222-8222-222222222222'}]};
-    if(sql.includes('FROM runtime_configuration c'))return {rows:[{document:{enabled:true,owner_id:'123',group_access:{}}}]};
+    if(sql.includes('FROM runtime_configuration c'))return {rows:[{document:{enabled:true,owner_id:'123'}}]};
     // The dedicated group is one Nocheh serves: an active group's Telegram ids (chats.state, ADR-0253).
     if(sql.includes('FROM chats c JOIN chat_ids i'))return {rows:[{external_id:'-100'}]};
     if(sql.includes('FROM dispatches'))return {rows:[{state:params[0]===ids.silence?'suppressed':'done',
@@ -121,7 +121,7 @@ test('fresh reset acceptance queries the three real isolated PostgreSQL stores',
     }
 
     await control.query('INSERT INTO installation(singleton,generation) VALUES(true,$1)',[e.generation]);
-    const policy={enabled:true,owner_id:'123',group_access:{}};
+    const policy={enabled:true,owner_id:'123'};
     await control.query("INSERT INTO runtime_configuration_versions(name,revision,document,fingerprint,created_at) VALUES('assistant',1,$1,$2,$3)",[policy,digest(JSON.stringify(policy)),when]);
     await control.query("INSERT INTO runtime_configuration(name,revision) VALUES('assistant',1)");
     // The owner added Nocheh to the dedicated group: it is on (ADR-0253).

@@ -41,7 +41,7 @@ export function SharingView({telegram}: {telegram: Telegram}) {
       <Card>
         <CardHeader
           title="Sharing rules"
-          description="A group answer uses only that group. A rule is your one exception: it lets a group use facts from others, and everyone allowed there sees what it lets in. Only you make rules."
+          description="A group answer uses only that group. A rule is your one exception: it lets a group use facts from others, and you and every member there see what it lets in. Only you make rules."
           action={
             <Button variant="primary" onClick={() => setEditing('new')}>
               <Plus aria-hidden /> New rule

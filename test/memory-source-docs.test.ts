@@ -51,3 +51,15 @@ test('the docs say an own forward earlier in a session is skipped only in the ow
     assert.match(others,/\bcounts as a forward read\b/);assert.match(others,/\bgroup\b/);assert.match(others,/private answer/);
   }
 });
+
+test('the docs say a message kept out of the owner\'s notes stays out after its sender becomes a member, in member words',{skip},()=>{
+  // decide (src/stores/native-review.ts) reads native_review_skips before the sender; step 3 has members, no grants (ADR-0259).
+  const sentence=(path:string,words:RegExp)=>{
+    const text=plain(read(path)),at=text.search(words);assert.ok(at>=0,`${path} says ${words}`);
+    return text.slice(text.lastIndexOf('. ',at)+2,text.indexOf('. ',at));
+  };
+  for(const [path,words] of [['docs/telegram.md',/stays out even if/],['SPECS.md',/does not add their earlier messages/]] as const) {
+    const said=sentence(path,words);
+    assert.match(said,/\bmember\b/,`${path}: ${said}`);assert.doesNotMatch(said,/\bgrant|\ballow/i,`${path}: ${said}`);
+  }
+});

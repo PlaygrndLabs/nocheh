@@ -18,7 +18,7 @@ DEFAULTS = {
     'NOCHEH_CONFIG_VERSION': '1', 'NOCHEH_WORKSPACE': workspaces.DEFAULT, 'NOCHEH_PORT': '8780', 'NOCHEH_MODEL': 'claude-sonnet-5-5',
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
-    'TELEGRAM_GROUP_ACCESS': '{}', 'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true',
+    'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true',
     'TELEGRAM_PROBLEM_NOTICES': 'true', 'NOCHEH_DASHBOARD_URL': '',
     'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
@@ -37,9 +37,6 @@ DEFAULTS = {
     **TRANSCRIPTION_DEFAULTS,
     **provider_routes.DEFAULTS,
 }
-# A key of TELEGRAM_GROUP_ACCESS, checked by its shape only: which groups Nocheh serves is each chat's state in the
-# app (ADR-0253), never a setting.
-TELEGRAM_GROUP = re.compile(r'-[1-9]\d{0,18}')
 
 
 def env_path(state):
@@ -179,48 +176,6 @@ def load(state):
     return values
 
 
-OWNER_CONFLICT = 'Your Telegram user ID is also set as a person in a group. Remove them there first.'
-
-
-def owner_conflict(values, others=()):
-    """The owner's Telegram user ID is never a person allowed or denied in a group (ADR-0244): the owner's private chat reads
-    everything, so the same ID listed as someone else would mix the two. `others` takes more IDs that must not be the owner's."""
-    owner = values.get('TELEGRAM_OWNER_ID', '')
-    if not owner: return
-    try: access = json.loads(values.get('TELEGRAM_GROUP_ACCESS', '{}'))
-    except (TypeError, ValueError): return  # group_access() refuses a value it cannot read.
-    listed = {str(user) for user in others}
-    for entry in (access.values() if isinstance(access, dict) else ()):
-        for users in (entry.values() if isinstance(entry, dict) else ()):
-            if isinstance(users, list): listed.update(user for user in users if isinstance(user, str))
-    if owner in listed: raise ValueError(OWNER_CONFLICT)
-
-
-def group_access(values):
-    """Who may talk to Nocheh in each group, by any Telegram ID the group has had, whether Nocheh is on there or not:
-    people kept for a group that is off stay for when it is on again."""
-    try:
-        access = json.loads(values.get('TELEGRAM_GROUP_ACCESS', '{}'))
-    except (TypeError, ValueError):
-        raise ValueError('Invalid TELEGRAM_GROUP_ACCESS') from None
-    owner = values.get('TELEGRAM_OWNER_ID', '')
-    if not isinstance(access, dict) or len(access) > 100:
-        raise ValueError('Invalid TELEGRAM_GROUP_ACCESS')
-    result = {}
-    for group, entry in access.items():
-        if not TELEGRAM_GROUP.fullmatch(group) or not isinstance(entry, dict) or set(entry) != {'granted', 'denied'}:
-            raise ValueError('Invalid TELEGRAM_GROUP_ACCESS')
-        normalized = {}
-        for decision in ('granted', 'denied'):
-            users = entry[decision]
-            if (not isinstance(users, list) or len(users) > 1000 or
-                    any(not isinstance(user, str) or not re.fullmatch(r'[1-9]\d{0,18}', user) or user == owner for user in users)):
-                raise ValueError('Invalid TELEGRAM_GROUP_ACCESS')
-            normalized[decision] = sorted(set(users))
-        result[group] = normalized
-    return result
-
-
 def validate_backups(values):
     if values.get('NOCHEH_BACKUP_SCHEDULE','daily') not in ('daily','off'):raise ValueError('NOCHEH_BACKUP_SCHEDULE must be daily or off')
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',str(values.get('NOCHEH_BACKUP_TIME','04:00'))):raise ValueError('NOCHEH_BACKUP_TIME must be a time such as 04:00')
@@ -265,7 +220,6 @@ def validate(values):
     if values['TELEGRAM_ENABLED'] not in ('true', 'false'): raise ValueError('TELEGRAM_ENABLED must be true or false')
     owner = values['TELEGRAM_OWNER_ID']
     if owner and not re.fullmatch(r'[1-9]\d{0,18}', owner): raise ValueError('TELEGRAM_OWNER_ID must be a numeric user ID')
-    owner_conflict(values); group_access(values)
     if values.get('TELEGRAM_GROUP_REPLIES','addressed') not in ('addressed','all'):raise ValueError('TELEGRAM_GROUP_REPLIES must be addressed or all')
     if values.get('TELEGRAM_TOPIC_MEMORY','group') not in ('group','topic'):raise ValueError('TELEGRAM_TOPIC_MEMORY must be group or topic')
     if values.get('TELEGRAM_TYPING','true') not in ('true','false'):raise ValueError('TELEGRAM_TYPING must be true or false')

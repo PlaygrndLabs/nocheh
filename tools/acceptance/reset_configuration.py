@@ -9,15 +9,17 @@ import json
 import re
 import uuid
 
-from tools.operations.installation import configuration
 from tools.acceptance import reset_protocol, reset_quiescence
 
-# Version 2 (ADR-0252) carries the chats and their app ids, so every value names the same chat after the reset. A
-# version 1 snapshot, taken before step 2b, still validates and restores: its values name chats in the old way.
-FORMAT = 'nocheh-reset-configuration-v2'
-FORMATS = ('nocheh-reset-configuration-v1', FORMAT)
-CHAT_TABLES = ('chats', 'chat_ids')
+# Version 3 (step 3) carries the chats and their app ids (ADR-0252), so every value names the same chat after the reset,
+# and the members: their permissions, the accounts linked to them, their group switches and the daily message cap. It is
+# the only version: a snapshot taken by an older version (v1, v2) is refused (development mode), as the stores refuse it
+# (src/stores/reset-setup.ts).
+FORMAT = 'nocheh-reset-configuration-v3'
+FORMATS = (FORMAT,)
 ROW_LIMIT = 10000
+# The member daily message cap's bounds and default (src/member-wire.ts).
+DAILY_MESSAGES = (1, 10000, 200)
 LEGACY_PRIVACY = ('Do not disclose personal relationships, health, finances, identity details, credentials, '
                   'private plans, or information about other people. Release only relevant non-personal '
                   'knowledge. When uncertain, omit it.')
@@ -65,11 +67,19 @@ ORIGINAL = {
     'chat_ids': ("SELECT n.app,i.external_id,i.chat_id,i.state,i.reason FROM chat_ids i "
                  "JOIN chat_connections n ON n.id=i.connection_id ORDER BY n.app,i.external_id",
                  ('app', 'external_id', 'chat_id', 'state', 'reason')),
+    # The members (step 3): their permissions, each account linked to one by its app id (the restore makes the same
+    # account and links it), their group switches and the daily message cap. Never a name or what anyone wrote.
+    'members': ('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks FROM members ORDER BY id',
+                ('id', 'state', 'group_talk', 'group_jobs', 'group_post_other', 'group_tools', 'tasks')),
+    'member_accounts': ('SELECT a.member_id,n.app,a.external_id FROM chat_accounts a JOIN chat_connections n ON n.id=a.connection_id '
+                        'WHERE a.member_id IS NOT NULL ORDER BY n.app,a.external_id', ('member_id', 'app', 'external_id')),
+    'member_chats': ('SELECT member_id,chat_id,enabled FROM member_chats ORDER BY member_id,chat_id', ('member_id', 'chat_id', 'enabled')),
+    'daily_messages': ('SELECT daily_messages FROM member_directory_state WHERE singleton', ('daily_messages',)),
 }
 
 
-# Chat values stored before step 2b, in the legacy layout or a version 1 snapshot: a Telegram chat id, or it and one
-# of its topics. They are read once here, to convert them; the stores read them only in their seeder (ADR-0252).
+# Chat values stored before step 2b, in the legacy layout: a Telegram chat id, or it and one of its topics. They are read
+# once here, to convert them; the stores read them only in their seeder (ADR-0252).
 LEGACY_SPACE = re.compile(r'(-?[1-9][0-9]{0,18})(?:/topic/([1-9][0-9]{0,15}))?')
 
 
@@ -127,17 +137,29 @@ def _chats(values):
     return known
 
 
-def catalog(layout, format=FORMAT):
+def _members(values, chats):
+    """The snapshot's members, checked as the stores check them: each account and switch belongs to one of its members,
+    each switch names one of its groups, and there is one daily message cap within its bounds."""
+    members = {row['id'] for row in values['members']}
+    low, high, _ = DAILY_MESSAGES
+    caps = values['daily_messages']
+    if (len(members) != len(values['members']) or
+            any(row['member_id'] not in members for row in [*values['member_accounts'], *values['member_chats']]) or
+            any(chats.kind(row['chat_id']) != 'group' or not isinstance(row['enabled'], bool) for row in values['member_chats']) or
+            len(caps) != 1 or type(caps[0]['daily_messages']) is not int or not low <= caps[0]['daily_messages'] <= high):
+        raise ValueError('reset_configuration_members_invalid')
+
+
+def catalog(layout):
     if layout not in ('legacy', 'original-only-v1'):
         raise ValueError('reset_configuration_layout_invalid')
-    tables = {**COMMON, **(LEGACY if layout == 'legacy' else ORIGINAL)}
-    return {name: value for name, value in tables.items() if format == FORMAT or name not in CHAT_TABLES}
+    return {**COMMON, **(LEGACY if layout == 'legacy' else ORIGINAL)}
 
 
 def validate(snapshot):
     if not isinstance(snapshot, dict) or set(snapshot) != {'format', 'layout', 'configuration'} or snapshot['format'] not in FORMATS:
         raise ValueError('reset_configuration_invalid')
-    expected = catalog(snapshot['layout'], snapshot['format'])
+    expected = catalog(snapshot['layout'])
     values = snapshot['configuration']
     if not isinstance(values, dict) or set(values) != set(expected):
         raise ValueError('reset_configuration_fields_invalid')
@@ -163,15 +185,14 @@ def validate(snapshot):
             raise ValueError('reset_guard_configuration_missing')
         # An unrecognized setup area must acquire an explicit transfer before
         # reset; silently dropping it would violate setup preservation.
+        # The runtime document is whether Nocheh is on and the owner's account: one that still lists groups or who may
+        # talk in them is from before step 3, whose stores have not started at this version yet.
         runtime = values['runtime_configuration']
-        if len(runtime) > 1 or any(row['name'] != 'assistant' or not isinstance(row['document'], dict) for row in runtime):
+        if len(runtime) > 1 or any(row['name'] != 'assistant' or not isinstance(row['document'], dict) or
+                                   set(row['document']) != {'enabled', 'owner_id'} for row in runtime):
             raise ValueError('reset_runtime_configuration_requires_transfer')
-        if snapshot['format'] == FORMAT:
-            chats = _chats(values)
-        else:
-            chats = Chats(legacy_chats([row['space_id'] for row in values['project_assignments']] +
-                                       [space for row in values['sharing_rules'] if isinstance(row['sources'], list)
-                                        for space in [*row['sources'], row['destination']]])[0])
+        chats = _chats(values)
+        _members(values, chats)
         # A private chat never joins a project or a sharing rule (ADR-0242). The restore refuses such a row, so a
         # reset stops here, before anything is erased, until the owner removes the private chat from it.
         if any(not isinstance(row['sources'], list) for row in values['sharing_rules']):
@@ -194,8 +215,8 @@ def snapshot(query, layout):
     There are no archive/derived reads, old configuration revisions, event
     grants, pending effects, prepared contexts or released sharing content.
     """
-    # The chats tables are there once the stores started at this version (ADR-0252); before that the read fails, and
-    # the reset stops before anything is erased.
+    # The chats and member tables are there once the stores started at this version (ADR-0252, step 3); before that the
+    # read fails, and the reset stops before anything is erased.
     fields = []
     for name, (sql, _) in catalog(layout).items():
         fields.append("'" + name + "', (SELECT COALESCE(jsonb_agg(to_jsonb(t)), '[]'::jsonb) FROM (" +
@@ -263,16 +284,17 @@ def original_only(snapshot_value, values, preferences, reset_id):
         return source
     try:
         uuid.UUID(reset_id)
-        # The groups Nocheh is on in are the ones the preserved preferences name (ADR-0253); the setup names none.
+        # The groups Nocheh is on in are the ones the preserved preferences name (ADR-0253); the setup names none. Who
+        # else may talk in them was a list in the legacy setup: it is not carried, and the owner adds them as members
+        # after the reset (step 3, development mode).
         owner, groups, profiles = preferences['owner'], preferences['groups'], preferences['profiles']
         if (not isinstance(groups, list) or groups != sorted(set(groups)) or
-                any(not isinstance(group, str) or not configuration.TELEGRAM_GROUP.fullmatch(group) for group in groups) or
+                any(not legacy_group_space(group) or '/' in group for group in groups) or
                 owner != values['TELEGRAM_OWNER_ID'] or not isinstance(profiles, list)):
             raise ValueError
         runtime_profiles = [{'id': row['id'], 'name': row['name'], 'owner_id': owner}
                             for row in profiles if row.get('name') is not None]
-        assistant = {'enabled': values['TELEGRAM_ENABLED'] == 'true', 'owner_id': owner,
-                     'group_access': configuration.group_access(values)}
+        assistant = {'enabled': values['TELEGRAM_ENABLED'] == 'true', 'owner_id': owner}
     except (KeyError, TypeError, AttributeError, ValueError):
         raise ValueError('reset_legacy_configuration_invalid') from None
     converted = {'format': FORMAT, 'layout': 'original-only-v1', 'configuration': {
@@ -287,7 +309,8 @@ def original_only(snapshot_value, values, preferences, reset_id):
                                     'auto_followup': False, 'request_ttl_seconds': 86400,
                                     'default_grant_mode': 'one_time'}],
         'chat_tool_settings': [],
-        'runtime_profiles': sorted(runtime_profiles, key=lambda row: row['id'])}}
+        'runtime_profiles': sorted(runtime_profiles, key=lambda row: row['id']),
+        'members': [], 'member_accounts': [], 'member_chats': [], 'daily_messages': [{'daily_messages': DAILY_MESSAGES[2]}]}}
     # Each chat the converted setup names keeps its old value as its id (ADR-0252).
     rules = converted['configuration']['sharing_rules']
     converted['configuration']['chats'], converted['configuration']['chat_ids'] = legacy_chats(

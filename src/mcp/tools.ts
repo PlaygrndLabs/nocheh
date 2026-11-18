@@ -12,10 +12,11 @@ type Value=Record<string,unknown>;
 /** Today's memory routes, in one place. The memory engine's own names stay behind Nocheh; no tool name or text shows them. */
 export const memoryRoutes={recall:'/v1/memory/longterm/recall',search:'/v1/memory/longterm/search',notes:'/v1/memory/recall',shared:'/v1/memory/context'} as const;
 /** What a job request may be told to correct; any other refusal stays opaque. The broker relays exactly these. */
-export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_limit_reached','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
+export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
   'job_machine_not_allowed','job_machine_not_found','job_card_too_long','job_hidden_characters']);
-/** What a message request may be told: the chat is not one Nocheh serves (ADR-0254). The broker relays exactly these. */
-export const actionErrors=new Set(['destination_not_served']);
+/** What a message request may be told: the chat is not one Nocheh serves (ADR-0254), or the member who asked may not post
+ * to their other groups (ADR-0260). The broker relays exactly these. */
+export const actionErrors=new Set(['destination_not_served','member_post_not_allowed']);
 /** What a task change may be told about its reminders, so the person can be asked for another time (ADR-0255). The broker
  * relays exactly these. */
 export const taskErrors=new Set(['task_reminder_past','task_reminder_limit','invalid_task_reminders','invalid_task_reminder']);
@@ -145,7 +146,7 @@ async function backgroundJob(args:Value,context:ToolContext) {
     if(body.machine&&!context.isolated)return text({error:'isolated_runtime_required'});
     return text(await request(context,'/v1/jobs/'+action,body));
   }catch(error) {
-    // Storage says what to correct, such as a member's daily limit; other failures stay opaque.
+    // Storage says what to correct, such as a machine name; other failures stay opaque.
     if(error instanceof Refused) {
       const refused=code(error);
       const named=typeof refused==='string'&&jobErrors.has(refused)?refused:({400:'invalid_job_request',403:'job_not_permitted',404:'job_not_found'} as Record<number,string>)[error.status]??'background_jobs_unavailable';
@@ -178,13 +179,19 @@ async function archiveRead(args:Value,context:ToolContext) {
 
 // An unknown chat and one Nocheh does not serve answer alike: the note names the remedies, not the chat.
 const NOT_SERVED={error:'destination_not_served',note:'Nothing was sent and no card was made: Nocheh posts only in the owner\'s private chat and its topics, '+
-  'the owner\'s selected groups and their topics, and the private chats of people the owner allowed in those groups. Tell the person who asked, in one '+
-  'short sentence, that this chat is not one Nocheh serves. The owner can select a group on the dashboard Chats page, or allow a person in a selected group there.'};
+  'the owner\'s selected groups and their topics, and the private chats of the owner\'s members in those groups. Tell the person who asked, in one '+
+  'short sentence, that this chat is not one Nocheh serves. The owner can select a group on the dashboard Chats page, or make a person a member on the Members page.'};
+// A member whose posts to their other groups the owner turned off (step 3).
+const POST_NOT_ALLOWED={error:'member_post_not_allowed',note:'Nothing was sent and no card was made: the owner has not let the member who asked post to '+
+  'their other groups. Tell them so in one short sentence; a message to this same group still works.'};
+// A member whose web pages and outside tools the owner turned off (step 3).
+const TOOL_NOT_PERMITTED={error:'tool_not_permitted',note:'Nothing ran and no card was made: the owner has not let the member who asked use web pages '+
+  'and outside tools. Tell them so in one short sentence.'};
 async function actionRequest(args:Value,context:ToolContext) {
   try {
     if(!own(args,'destination')||!own(args,'text'))throw new Error('invalid_action_request');
     return text(await request(context,'/v1/action-requests',{destination:args.destination,text:args.text}));
-  }catch(error){return text(code(error)==='destination_not_served'?NOT_SERVED:{error:'action_request_unavailable'});}
+  }catch(error){return text(code(error)==='destination_not_served'?NOT_SERVED:code(error)==='member_post_not_allowed'?POST_NOT_ALLOWED:{error:'action_request_unavailable'});}
 }
 
 async function destinations(_args:Value,context:ToolContext) {
@@ -302,7 +309,8 @@ async function controlled(kind:'shell'|'browser'|'mcp',args:Value,context:ToolCo
     return value?inParts(value):text(proposed);
   }catch(error) {
     // The store keeps its error text private; the status still says whether asking again can help.
-    if(error instanceof Refused)return text(error.status===400?{error:'invalid_action_request'}:error.status===403?(code(error)==='tool_disabled_by_owner'?DISABLED:{error:'not_allowed_here'}):UNAVAILABLE);
+    if(error instanceof Refused)return text(error.status===400?{error:'invalid_action_request'}:error.status===403?(code(error)==='tool_disabled_by_owner'?DISABLED:
+      code(error)==='tool_not_permitted'?TOOL_NOT_PERMITTED:{error:'not_allowed_here'}):UNAVAILABLE);
     return text(timedOut(error)?TIMED_OUT:UNAVAILABLE);
   }
 }
@@ -419,9 +427,10 @@ export const mcpTools:readonly McpTool[]=[
     inputSchema:shape({query:{type:'string'},limit:{type:'integer',minimum:1,maximum:10}},['query']),run:memorySearch},
   {name:'memory_recall',description:'Recall long-term memory for this audience, alongside native context and archive tools. Inferences are not original evidence: evidence_sources lists archived messages behind the conclusions memory holds, so read them with mcp__nocheh__archive_read before relying on a claim that matters.',
     inputSchema:shape({query:{type:'string'},profile:{type:'string'},limit:{type:'integer',minimum:1,maximum:50}},['query']),run:memoryRecall},
-  {name:'action_request',description:'Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for the owner to approve the exact message. '+
+  {name:'action_request',description:'Propose an external Telegram message. In a group, a message to that same group is posted without approval; a message to another chat waits for a card with the exact message: '+
+    'a member who may post to their other groups confirms their own post to a group Telegram has seen them in, and the owner approves everything else. '+
     'From the owner\'s private chat, a message for any group or topic always waits for the owner\'s card, whatever the freedom setting. The result says which. '+
-    'It posts only in the owner\'s private chat and topics, the owner\'s selected groups and their topics, and the private chats of people the owner allowed in those groups; '+
+    'It posts only in the owner\'s private chat and topics, the owner\'s selected groups and their topics, and the private chats of the owner\'s members in those groups; '+
     'a person\'s private chat always waits for the owner\'s card.',
     inputSchema:shape({destination:{type:'string',description:'Use current for this conversation including its topic, or a chat id from owner_read (a topic has its own chat id). The server resolves current from the authenticated source turn.'},text:{type:'string',maxLength:3500}},['destination','text']),run:actionRequest},
   {name:'background_job',description:'Background jobs: work too big for one reply runs in a session of its own and reports back here. '+
@@ -443,13 +452,13 @@ export const mcpTools:readonly McpTool[]=[
         'Your terminal and file tools then run on that machine.'},
       steps:{type:'array',minItems:1,maxItems:12,items:{type:'string',maxLength:200},
         description:'With start and machine: the plan, one short step per item, in order. The owner approves exactly this plan.'}},['action']),run:backgroundJob},
-  {name:'telegram_destinations',description:'In a group: list the groups, with names and exact IDs, where the person asking is allowed to use Nocheh. Use an exact ID from here as an action destination; a message to another group waits for the owner\'s approval.',
+  {name:'telegram_destinations',description:'In a group: list the groups, with names and exact IDs, the person asking may post to through Nocheh: this group, and for the owner or a member who may post to their other groups, those groups. Use an exact ID from here as an action destination; a message to another group waits for a card.',
     inputSchema:shape({}),run:destinations},
   {name:'shell',description:'Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval, a standing permission or a rule the owner set for this chat is required; when one already allows it, this call returns its result.',
     inputSchema:shape({command:{type:'string',maxLength:16000},summary:SUMMARY},['command']),run:(args,context)=>controlled('shell',args,context)},
-  {name:'browser',description:'Propose reading one public HTTPS page. An HTML page renders offline without scripts or secondary requests; a JSON or plain-text answer, such as a weather service\'s, comes back as text. No logins, clicks or form submissions. When the owner already allows the site here, this call returns the page.',
+  {name:'browser',description:'Propose reading one public HTTPS page. An HTML page renders offline without scripts or secondary requests; a JSON or plain-text answer, such as a weather service\'s, comes back as text. No logins, clicks or form submissions. When the owner already allows the site here, or a group\'s permission for web pages and outside tools lets it run, this call returns the page.',
     inputSchema:shape({url:{type:'string'},summary:SUMMARY},['url']),run:(args,context)=>controlled('browser',args,context)},
-  {name:'mcp',description:'Propose an MCP operation at a public HTTPS endpoint supporting 2025-11-25 JSON responses. Set operation=list to discover tools; for call supply tool and input. No ambient authentication, local processes, sampling or server-initiated capabilities.',
+  {name:'mcp',description:'Propose an MCP operation at a public HTTPS endpoint supporting 2025-11-25 JSON responses. Set operation=list to discover tools; for call supply tool and input. No ambient authentication, local processes, sampling or server-initiated capabilities. In a group, the group\'s permission for web pages and outside tools can let it run without a card.',
     inputSchema:shape({url:{type:'string'},operation:{type:'string',enum:['list','call']},tool:{type:'string'},input:{type:'object'},summary:SUMMARY},['url']),run:(args,context)=>controlled('mcp',args,context)},
   {name:'owner_read',description:'Read the owner\'s own directory: known Telegram conversations with names and IDs (conversations, '+
     'telegram-identities), one conversation\'s context (conversation-context with space), people, projects, project-assignments and the '+

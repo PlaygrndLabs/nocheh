@@ -13,6 +13,7 @@ import {privateAnswerId,type PrivateAnswer} from '../src/stores/private-answers.
 import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
 import {GP1,GP2,GP3,GP4,OWNER,P1,P2,groupsPolicy,seedChats,seedGroups} from './fixture-groups.js';
 import {accountIdFor} from '../src/chats.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 // The Answer privately button end to end in storage (ADR-0249): offered under the owner's own answer in a group whose
 // project serves another group, tapped by the owner only, then answered in the owner's private chat after /start.
@@ -23,7 +24,9 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-private-button-')),base=Date.now(),token=digest('private-button:'+base);
   await seedChats(stores.control);
-  const policy=groupsPolicy({group_access:{[GP1]:{granted:['9'],denied:[]}}});
+  const policy=groupsPolicy();
+  // The owner's members (step 3): 9 talks in GP1 only.
+  const people=grantMembers({[GP1]:{granted:['9']}},{owner:policy.owner_id,groups:[GP2,GP3,GP4]});
   const started:any[]=[],replies:any[]=[],answers:any[]=[],refusals:any[]=[],notices:any[]=[];let serial=base,link=true;
   // What the next brain turn returns, when not an ordinary done reply; a running turn is observed done later.
   let next:Record<string,unknown>|null=null;
@@ -201,5 +204,5 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
     // The owner reads the record per project.
     const listed=(await services.privateAnswers.list({admin:true,scope:null},{project:P1})).answers.map(answer=>answer.id);
     for(const each of [id,untapped,moved,late,busy,quiet])assert.ok(listed.includes(each));
-  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally{people();await stores.close();await rm(root,{recursive:true,force:true});}
 });

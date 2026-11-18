@@ -16,6 +16,7 @@ import {machineJob,machineTokenSet} from '../src/stores/machines.js';
 import {storageServer} from '../src/stores/server.js';
 import {fixtureServices} from './fixture-brain.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 const sha=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const frame=(type:string,payload:Buffer)=>{const head=Buffer.alloc(5);head.write(type,0,'latin1');head.writeUInt32BE(payload.length,1);return Buffer.concat([head,payload]);};
@@ -74,7 +75,9 @@ test('only the owner\'s own request in their private chat or an active project\'
   });
   await new Promise<void>(resolve=>fake.listen(0,'127.0.0.1',resolve));
   process.env.NOCHEH_MACHINES_URL='http://127.0.0.1:'+(fake.address() as {port:number}).port;process.env.NOCHEH_MACHINE_TOKEN=machineToken;
-  const policy={enabled:true,owner_id:'123',group_ids:[project,other],group_access:{[project]:{granted:['9'],denied:[]}},topic_memory:'group' as const};
+  const policy={enabled:true,owner_id:'123',group_ids:[project,other],topic_memory:'group' as const};
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[project]:{granted:['9']}},{owner:'123',groups:[other]});
   const approvals:any[]=[];
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,
     runtime:async(operation,input)=>{
@@ -558,6 +561,7 @@ test('only the owner\'s own request in their private chat or an active project\'
       assert.equal((await route('GET','/v1/machines/commands?'+query)).status,400,query);
     await assert.rejects(s.machines.commands({admin:false,scope:null},{}),{status:403});
   } finally {
+    people();
     for(const [name,value] of [['NOCHEH_MACHINE_TOKEN',previous.token],['NOCHEH_MACHINES_URL',previous.url]] as const)if(value===undefined)delete process.env[name];else process.env[name]=value;
     broker.closeAllConnections();await new Promise<void>(resolve=>broker.close(()=>resolve()));
     archive.closeAllConnections();await new Promise<void>(resolve=>archive.close(()=>resolve()));

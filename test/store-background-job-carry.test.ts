@@ -20,6 +20,7 @@ import {storageServer} from '../src/stores/server.js';
 import {fixtureServices} from './fixture-brain.js';
 import type {Settings} from '../src/config.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('a running job run carries across reaction and learning epochs, any other change still ends it, and a relaunch keeps a binding that carries',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -28,7 +29,9 @@ test('a running job run carries across reaction and learning epochs, any other c
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-job-carry-')),key='job-carry:'+Date.now(),group='-100555',other='-100777';
   const owner:Reader={admin:true,scope:null},token=digest(key);
-  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['9'],denied:[]}},topic_memory:'group' as const});
+  const policy=()=>({enabled:true,owner_id:'123',group_ids:[group,other],topic_memory:'group' as const});
+  // The owner's members (step 3): 9 talks in the group.
+  const people=grantMembers({[group]:{granted:['9']}},{owner:'123',groups:[other]});
   // The runs Hermes is running: claimed and not yet finished.
   const native=new Set<string>();
   /** Work that runs once, inside the next secret check, as if it committed while a request was being checked. */
@@ -133,7 +136,7 @@ test('a running job run carries across reaction and learning epochs, any other c
   };
   try {
     await s.guards.reconcile();await s.guards.setMode('on');await s.configuration.configure(policy(),'on');
-    await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,member_daily_jobs:20,revision:(await s.jobs.settings()).revision});
+    await s.jobs.saveSettings(owner,{cost_limit_usd:5,minutes_limit:45,revision:(await s.jobs.settings()).revision});
     const note=await message(other,'A made-up note in the other group');noted=sent;
     /** What the learning engine does with one learned entry: stage a version under the current binding, then publish it. A
      *  revision of the entry starts a quiet epoch; its publication stays pending until it is finished. */
@@ -331,6 +334,7 @@ test('a running job run carries across reaction and learning epochs, any other c
       {code:'audience_context_changed'},'a reply\'s credential');
     await assert.rejects(s.prepared.audience.assert(two.principal),{code:'audience_context_changed'},'nor a job run\'s once it ended');
   } finally {
+    people();
     if(previousRoute===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previousRoute;
     broker.closeAllConnections();await new Promise<void>(resolve=>broker.close(()=>resolve()));
     app.closeAllConnections();await new Promise<void>(resolve=>app.close(()=>resolve()));

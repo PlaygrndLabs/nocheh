@@ -4,7 +4,8 @@ import {digest} from '../src/archive.js';
 import {chatDirectory,chatIdFor,type ChatIdRow,type ChatRow,type ChatSnapshot} from '../src/chats.js';
 import type {ChatListing} from '../src/stores/chats.js';
 import {OwnerSupervisionRepository,type OwnerSupervisionDependencies} from '../src/stores/owner-supervision.js';
-import {installChatsForTest} from '../src/chats.js';
+import {accountIdFor,installChatsForTest} from '../src/chats.js';
+import {memberIdFor} from '../src/members.js';
 import {legacyDirectory} from './fixture-groups.js';
 
 // The chats these tests name, as the seeder makes their rows (ADR-0252): what a topic is comes from its row.
@@ -88,14 +89,29 @@ test('exact memory decision exposes changed fact revision as stale without recon
   assert.equal(queries.length,4);
 });
 
+/** One member of `chat` as the store's rows say: Telegram saw them 'in' there, with no switch (new here). */
+const memberRows=(chat:string)=>{
+  const account=accountIdFor('telegram','73'),id=memberIdFor(account);
+  return (sql:string)=>{
+    if(sql.includes('FROM member_directory_state'))return [{revision:3,daily_messages:200}];
+    if(sql.includes('FROM chats c LEFT JOIN chat_details'))return [{id:chat,kind:'group',title:'Synthetic group',app_type:'supergroup',state:'active',username:null,external_id:null}];
+    if(sql.includes('FROM members'))return [{id,state:'active',group_talk:true,group_jobs:true,group_post_other:false,group_tools:true,tasks:'write',added_at:new Date(date)}];
+    if(sql.includes('FROM chat_accounts a')&&sql.includes('a.member_id IS NOT NULL')&&!sql.includes('chat_memberships'))
+      return [{id:account,member_id:id,external_id:'73',display_name:'Synthetic Member',username:null}];
+    if(sql.includes('FROM chat_memberships m JOIN chat_accounts a'))return [{member_id:id,chat_id:chat,state:'in'}];
+    return null;
+  };
+};
+
 test('unknown conversation context does not inherit a parent sharing grant or equate connection with available memory',async()=>{
-  // A topic Nocheh knows only by its record: its group's access is keyed by the group's Telegram id.
-  const external='-1002000000001',parent=chatIdFor('telegram',external),space=chatIdFor('telegram',external,'99');
+  // A topic Nocheh knows only by its record: who may talk there is the group's members.
+  const external='-1002000000001',parent=chatIdFor('telegram',external),space=chatIdFor('telegram',external,'99'),members=memberRows(parent);
   const snapshot:ChatSnapshot={chats:[group(parent,null,'active'),topic(space,parent,'99')],ids:[current(parent,external)],owner_chat:null};
   const run=async(id:string)=>{
     const {value}=repository((store,sql,params)=>{
       if(store==='archive')return [];
-      if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_access:{[external]:{granted:['73'],denied:['91']}}},revision:2}];
+      const member=members(sql);if(member)return member;
+      if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42'},revision:2}];
       if(sql.includes('SELECT space_id FROM project_assignments'))return [];
       if(sql.includes('WHERE destination=$1')||sql.includes('p.destination=$1')||sql.includes('a.space_id=$1')||sql.includes('WHERE scopes ?'))assert.equal(params[0],id);
       if(sql.includes('destination=ANY'))assert.ok((params[0] as string[]).includes(id));
@@ -106,29 +122,30 @@ test('unknown conversation context does not inherit a parent sharing grant or eq
   };
   const context=await run(space);
   assert.equal(context.conversation.name,null);assert.equal(context.conversation.kind,'topic');assert.equal(context.conversation.parent_space,parent);
-  assert.equal(context.addressing.group_enabled,true);assert.deepEqual(context.addressing.granted,['73']);
+  assert.equal(context.addressing.group_enabled,true);
+  assert.deepEqual(context.addressing.members,[{id:memberIdFor(accountIdFor('telegram','73')),account_id:accountIdFor('telegram','73'),name:'Synthetic Member',
+    username:null,telegram_id:'73',state:'active',talk:true,on:true,telegram:'in',new:true}],'a topic shows its group\'s members');
   assert.deepEqual(context.knowledge_access.sharing_rules,[]);assert.deepEqual(context.knowledge_access.fact_grants,[]);
   assert.equal(context.memory.connection.attached,true);assert.equal(context.memory.availability,'limited');
   assert.equal(context.memory.syncing,false);assert.equal(context.organization.effective.project,null);
   // A value no chat record names is unknown: it borrows nothing from a group its text looks like.
   const unknown=await run(external+'/topic/99');
-  assert.equal(unknown.conversation.kind,'unknown');assert.equal(unknown.addressing.group_enabled,false);assert.deepEqual(unknown.addressing.granted,[]);
+  assert.equal(unknown.conversation.kind,'unknown');assert.equal(unknown.addressing.group_enabled,false);assert.deepEqual(unknown.addressing.members,[]);
   assert.equal(unknown.knowledge_access.owner_access,false);
 });
 
-test('a group Telegram upgraded shows the access lists under both its ids joined, deny winning, as the turn gate applies them',async()=>{
-  const before='-2000000000002',after='-1002000000002',chat=chatIdFor('telegram',before);
+test('a group Telegram upgraded shows its members by its Nocheh id, whatever Telegram id it has now',async()=>{
+  const before='-2000000000002',after='-1002000000002',chat=chatIdFor('telegram',before),members=memberRows(chat);
   const snapshot:ChatSnapshot={chats:[group(chat,null,'active')],ids:[{app:'telegram',external_id:before,chat_id:chat,state:'old'},current(chat,after)],owner_chat:null};
-  // Alice was let in before the upgrade; Bob was let in before it and turned away after it.
-  const access={[before]:{granted:['301','302'],denied:[]},[after]:{granted:[],denied:['302']}};
   const {value}=repository((store,sql)=>{
     if(store==='archive')return [];
-    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42',group_access:access},revision:2}];
+    const member=members(sql);if(member)return member;
+    if(sql.includes('runtime_configuration'))return [{document:{enabled:true,owner_id:'42'},revision:2}];
     if(sql.includes('security_policy'))return [{revision:1,document:{version:1,rules:[]}}];
     return [];
   },snapshot);
   const context=await value.context(owner,chat);
-  assert.deepEqual([context.addressing.granted,context.addressing.denied],[['301','302'],['302']]);
+  assert.deepEqual(context.addressing.members.map(member=>[member.telegram_id,member.on,member.telegram,member.new]),[['73',true,'in',true]]);
   assert.equal(context.addressing.group_enabled,true);
 });
 

@@ -1,6 +1,5 @@
 """Explicit runtime environment values; optional _FILE convention for secret managers."""
 import os
-import json
 from pathlib import Path
 
 
@@ -14,11 +13,11 @@ def secret(name, required=True):
 
 
 def telegram_policy():
-    """Whether Telegram is on and each group's member access. The owner, the owner's private chat and the served groups
-    come from the app's served list (ADR-0252), never from here."""
+    """Whether Telegram is on. The owner, the owner's private chat and the served groups come from the app's served list
+    (ADR-0252), and who else may talk in a group from the app's member directory (step 3), never from here."""
     enabled = os.environ.get('TELEGRAM_ENABLED', 'false')
     if enabled not in ('true', 'false'): raise ValueError('Invalid TELEGRAM_ENABLED')
-    return {'enabled': enabled == 'true', 'group_access': json.loads(os.environ.get('TELEGRAM_GROUP_ACCESS', '{}'))}
+    return {'enabled': enabled == 'true'}
 
 
 def parallel(name, default, high=8):

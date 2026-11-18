@@ -236,8 +236,7 @@ def _chats(configuration, owner, groups):
 
 def _served(configuration):
     """The groups Nocheh is on in (ADR-0253), by their current Telegram ids, from the configuration snapshot's chat
-    records. A snapshot without them (the legacy layout, or one taken before step 2b) names none, so its groups come
-    back off."""
+    records. A snapshot without them (the legacy layout) names none, so its groups come back off."""
     rows, ids = configuration.get('chats'), configuration.get('chat_ids')
     if rows is None or ids is None:
         return []
@@ -248,8 +247,8 @@ def _served(configuration):
 def _policy(values, snapshot):
     configuration.validate(values)
     # Which groups Nocheh is on in is the chats' state, not the setup (ADR-0253); the stored setup is the rest.
-    document = {'enabled': values['TELEGRAM_ENABLED'] == 'true', 'owner_id': values['TELEGRAM_OWNER_ID'] or None,
-                'group_access': configuration.group_access(values)}
+    # Who may talk in a group is members (step 3), which the snapshot carries in their own tables.
+    document = {'enabled': values['TELEGRAM_ENABLED'] == 'true', 'owner_id': values['TELEGRAM_OWNER_ID'] or None}
     groups = _served(snapshot['configuration'])
     policy = SimpleNamespace(owner=document['owner_id'], groups=groups,
                              chats=_chats(snapshot['configuration'], document['owner_id'], groups))

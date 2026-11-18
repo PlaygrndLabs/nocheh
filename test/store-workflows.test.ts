@@ -15,6 +15,7 @@ import {observation} from '../src/workflows/pipeline.js';
 import {requestWorkflow,retireSupersededSourceWorkflows,type WorkflowFamily} from '../src/workflows/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {captureEvidence} from '../src/stores/generated-capture.js';
+import {grantMembers} from './fixture-member-grants.js';
 
 test('storage workflow admission leaves pool capacity for nested publications',async()=>{
   let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let calls=0;
@@ -144,9 +145,10 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-workflow-')),key='workflows:'+Date.now(),group='-'+Date.now(),owner='123';
   let sends=0,reviews=0,reasoning=0,engines=0,loseReply=true,sequence=0,targetIds:string[]=[],duringObserve:(()=>Promise<void>)|undefined;
   const remote=new Map<string,any[]>(),runtimeCalls:string[]=[];let reviewRunning=false,reviewObservations=0;
-  // Person 9 is allowed in the group, so what they say also goes into the owner's notes; person 10 is not (ADR-0257).
+  // Person 9 is a member who talks in the group, so what they say also goes into the owner's notes; person 10 is not (ADR-0257).
+  const people=grantMembers({[group]:{granted:['9']}},{owner});
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),
-    policy:()=>({enabled:true,owner_id:owner,group_ids:[group],group_access:{[group]:{granted:['9'],denied:[]}}}),
+    policy:()=>({enabled:true,owner_id:owner,group_ids:[group]}),
     runtime:async(operation,input)=>{
       runtimeCalls.push(operation);
       if(operation==='guard.detect')return {literals:[]};
@@ -311,7 +313,7 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
     assert.equal((await advance('honcho','source:'+stranger.id)).state,'completed');
     assert.equal((await stores.control.query("SELECT count(*)::int AS count FROM memory_ingestion_receipts WHERE source_reference->>'id'=$1 AND state='done'",[stranger.id])).rows[0].count,1,
       'group memory learns it');
-  }finally {await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
+  }finally {people();await stores.control.query('UPDATE memory_engine_connection SET attached=false,verified=false WHERE singleton');await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('Nocheh\'s own card is kept but never learned, and stays context for the owner\'s reply to it',

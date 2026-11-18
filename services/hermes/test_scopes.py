@@ -40,8 +40,7 @@ def turn(update,scopes,scope=None,**changes):
 
 class ScopeTests(unittest.TestCase):
     def setUp(self):
-        self.scopes=Scopes({'enabled':True,'group_access':{'-30':{'granted':['456'],'denied':[]}}},
-                           Served.of('123',groups=['-20','-30'],topics=[['-20/topic/42','-20','42']]))
+        self.scopes=Scopes({'enabled':True},Served.of('123',groups=['-20','-30'],topics=[['-20/topic/42','-20','42']]))
 
     def update(self,chat,user,kind='group'):
         return {'update_id':1,'message':{'message_id':1,'chat':{'id':chat,'type':kind},'from':{'id':user,'is_bot':False}}}
@@ -50,12 +49,23 @@ class ScopeTests(unittest.TestCase):
         scopes=scopes or self.scopes
         return scopes.resolve(*turn(update,scopes,scope,**changes))
 
-    def test_group_access_defaults_to_owner_and_denies_override_grants(self):
-        self.assertIsNone(self.resolve(self.update(-20,456),'-20'))
-        self.assertIsNotNone(self.resolve(self.update(-30,456),'-30'))
-        denied=Scopes({'enabled':True,'group_access':{'-30':{'granted':['456'],'denied':['456']}}},Served.of('123',groups=['-30']))
-        self.assertIsNone(self.resolve(self.update(-30,456),'-30',denied))
-        self.assertIsNotNone(self.resolve(self.update(-30,123),'-30',denied))
+    def test_a_group_turn_admits_the_person_the_app_admitted(self):
+        # Who may talk in a served group is the app's member directory (step 3): it admitted this sender and signed this
+        # event's pass, so a person's turn there is served, whoever they are. A bot, or a message in a chat's own name, never is.
+        self.assertIsNotNone(self.resolve(self.update(-20,456),'-20'))
+        self.assertEqual(self.resolve(self.update(-30,456),'-30').user_id,'456')
+        owner=self.resolve(self.update(-30,123),'-30')
+        self.assertEqual((owner.user_id,owner.owner),('123',False),'the owner in a group is the group, as before')
+        bot=self.update(-30,456);bot['message']['from']['is_bot']=True
+        self.assertIsNone(self.resolve(bot,'-30'))
+        anonymous=self.update(-30,1087968824);anonymous['message']['sender_chat']={'id':-30,'type':'supergroup'}
+        self.assertIsNone(self.resolve(anonymous,'-30'))
+        # Unchanged: only the owner is served privately, and a group the list does not serve gets no turn.
+        self.assertIsNone(self.resolve(self.update(456,456,'private'),'456'))
+        self.assertIsNone(self.resolve(self.update(-99,456),'-99'))
+        # A policy file's old member list grants and denies nothing.
+        listed=Scopes({'enabled':True,'group_access':{'-30':{'granted':[],'denied':['456']}}},Served.of('123',groups=['-30']))
+        self.assertIsNotNone(self.resolve(self.update(-30,456),'-30',listed))
 
     def test_native_profile_routes_and_capability_must_agree(self):
         a=self.resolve(self.update(-20,123),'-20');b=self.resolve(self.update(-30,456),'-30')
@@ -105,7 +115,7 @@ class ScopeTests(unittest.TestCase):
         from services.durable import digest
         served=Served.of('123',groups=[('-20','-1007'),('b'*64,'-1009')],old={'-20':['-20']},
                          topics=[('-20/topic/42','-20','42'),('c'*64,'b'*64,'5')])
-        scopes=Scopes({'enabled':True,'group_access':{}},served)
+        scopes=Scopes({'enabled':True},served)
         old=self.resolve(self.update(-20,123),'-20')
         self.assertEqual(old.profile,'nocheh-'+hashlib.sha256(b'-20').hexdigest()[:24])
         upgraded=self.resolve(self.update(-1007,123,'supergroup'),'-1007',scopes)
@@ -133,12 +143,12 @@ class ScopeTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.resolve(topic,'-20')
         with self.assertRaises(ValueError):self.resolve(self.update(123,123,'private'),'123',space='-20/topic/42')
         # A chat the list no longer serves is not answered.
-        self.assertIsNone(self.resolve(update,'-20',Scopes({'enabled':True,'group_access':{}},Served.of('123',groups=['-30']))))
+        self.assertIsNone(self.resolve(update,'-20',Scopes({'enabled':True},Served.of('123',groups=['-30']))))
 
     def test_a_served_list_that_cannot_be_read_serves_nothing(self):
         from services.chats import ServedList
         def refused(request,timeout):raise OSError('synthetic outage')
-        scopes=Scopes({'enabled':True,'group_access':{}},ServedList('http://127.0.0.1:9','synthetic-token',refused))
+        scopes=Scopes({'enabled':True},ServedList('http://127.0.0.1:9','synthetic-token',refused))
         with self.assertRaisesRegex(RuntimeError,'served_chats_unavailable'):self.resolve(self.update(-20,123),'-20',scopes)
         self.assertEqual(scopes.current().groups(),[])
         # The environment names no owner or group any more: they come from the app's served list.
@@ -165,7 +175,7 @@ class ScopeTests(unittest.TestCase):
             reads.append(request.full_url);served=lists[min(len(reads)-1,1)]
             return Response({'epoch':served.epoch,'owner_chat':served.owner_chat,'owner_account':served.owner_account,
                              'chats':[{key:value for key,value in row.items()} for row in served.chats.values()]})
-        scopes=Scopes({'enabled':True,'group_access':{}},ServedList('http://app.test','synthetic-token',opener,clock=lambda:now[0]))
+        scopes=Scopes({'enabled':True},ServedList('http://app.test','synthetic-token',opener,clock=lambda:now[0]))
         self.assertEqual(self.resolve(self.update(-20,123),'-20',scopes).space,'-20')
         self.assertEqual(len(reads),1)
         message=self.update(-20,123,'supergroup');message['message'].update(message_thread_id=77,is_topic_message=True)

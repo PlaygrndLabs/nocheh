@@ -46,8 +46,8 @@ export type ChatAddRow={event_id:string;chat_id:string;kind:'added'|'removed';ro
   member:boolean;action:'card'|'leave'|'tell'|'none';outcome:string|null;attempts:number;project_id:string|null;offered:string[];notice:string;created_at:Date};
 type Outcome='carded'|'answered'|'left'|'could_not_leave'|'told'|'superseded';
 
-/** The note after a leave: only for an add by a person the owner allowed somewhere, or by someone who hid who they were.
- *  Strangers get the content-free record alone. */
+/** The note after a leave: only for an add by a member (their account is linked to one, step 3), or by someone who hid
+ *  who they were. Strangers get the content-free record alone. */
 export function noteLine(row:Pick<ChatAddRow,'role'|'member'>,outcome:string|null):'left_member'|'left_anonymous'|'could_not_leave'|null {
   if(!row.member&&row.role!=='anonymous')return null;
   if(outcome==='left')return row.role==='anonymous'?'left_anonymous':'left_member';
@@ -200,7 +200,9 @@ export class ChatAdds {
         await writeProject(db,{id:project,name:cardName(now.title,200)??'Group',description:'',state:'active',expected_revision:0});
         await writeAssignment(db,{space_id:row.chat_id,project_id:project,mode:'assigned',expected_revision:0});
         return {outcome:'carded' as Outcome,project_id:project};
-      });
+      // A new project holding only this group changes no one's reach, so it moves no guard epoch: a reply already running
+      // in the group still sends on its first try (step 3). A Move to press keeps the epoch move.
+      },{epoch:false});
       if(made.outcome!=='carded'||!made.project_id){await this.finish(row,{outcome:made.outcome});return;}
       const offered=(await this.control.query(`SELECT id FROM projects WHERE state='active' AND id<>$1 ORDER BY updated_at DESC,id LIMIT ${OFFERED}`,[made.project_id])).rows.map(item=>item.id as string);
       await this.keep(row,{outcome:'carded',project_id:made.project_id,offered});

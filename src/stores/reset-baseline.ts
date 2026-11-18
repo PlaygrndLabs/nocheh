@@ -3,7 +3,7 @@ import {canonical,digest} from '../archive.js';
 import {families} from '../workflows/store.js';
 import type {StorePools} from './connections.js';
 import {storeSchemas} from './schema.js';
-import {admittedDocument,chatRows,resetSetupSnapshot,restoredChats,setupRows} from './reset-setup.js';
+import {admittedDocument,chatRows,memberRows,resetSetupSnapshot,restoredChats,setupRows,sortedMembers} from './reset-setup.js';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const exact=(value:unknown,keys:string[])=>{
@@ -74,15 +74,16 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
     throw Error('reset_baseline_request_invalid');
   if(!Array.isArray(request.profile_commands))throw Error('reset_baseline_request_invalid');
   const configuration=snapshot.configuration,profileCount=configuration.runtime_profiles.length;
-  // A version 2 snapshot's chats and app ids, with one connection for each app they name (ADR-0252).
-  const chatApps=new Set([...configuration.chats??[],...configuration.chat_ids??[]].map(row=>row.app));
+  // The snapshot's chats and app ids, with one connection for each app they or the member accounts name (ADR-0252, step 3).
+  const chatApps=new Set([...configuration.chats,...configuration.chat_ids,...configuration.member_accounts].map(row=>row.app));
   const [archive,derived,control]=await Promise.all([counts(stores.archive,'archive'),counts(stores.derived,'derived'),counts(stores.control,'control')]);
   only(archive,{});only(derived,{});
   only(control,{...defaults(storeSchemas.control),installation:1,security_policy:1,security_policy_versions:[1,2],runtime_configuration:1,runtime_configuration_versions:1,
     workflow_owners:families.length,projects:configuration.projects.length,
     project_assignments:configuration.project_assignments.length,sharing_rules:configuration.sharing_rules.length,
     memory_access_settings:configuration.memory_access_settings.length,chat_tool_settings:configuration.chat_tool_settings.length,
-    chats:configuration.chats?.length??0,chat_ids:configuration.chat_ids?.length??0,chat_connections:chatApps.size,
+    chats:configuration.chats.length,chat_ids:configuration.chat_ids.length,chat_connections:chatApps.size,
+    members:configuration.members.length,member_chats:configuration.member_chats.length,chat_accounts:configuration.member_accounts.length,
     runtime_profiles:profileCount,owner_commands:profileCount,workflow_registry:profileCount*2,workflow_outbox:profileCount*2});
   const installed=(await stores.control.query('SELECT generation::text AS generation FROM installation WHERE singleton')).rows;
   if(!same(installed,[{generation}]))throw Error('reset_baseline_generation_changed');
@@ -108,7 +109,8 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
   const saved={...await setupRows(stores.control),
     runtime_profiles:(await stores.control.query("SELECT id,name,owner_id FROM runtime_profiles WHERE state='active' ORDER BY id")).rows};
   for(const [name,rows] of Object.entries(saved))if(!same(rows,(configuration as any)[name]))throw Error('reset_baseline_setup_changed');
-  if(!same(await chatRows(stores.control),restoredChats(configuration)))throw Error('reset_baseline_setup_changed');
+  if(!same(await chatRows(stores.control),restoredChats(configuration))||!same(await memberRows(stores.control),sortedMembers(configuration)))
+    throw Error('reset_baseline_setup_changed');
   const commands=request.profile_commands as any[];
   const owner=configuration.runtime_configuration[0]!.document.owner_id;
   const ownerCommands=(await stores.control.query("SELECT id,request_hash,result,epoch::int AS epoch FROM owner_commands ORDER BY id")).rows;

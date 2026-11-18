@@ -1,6 +1,5 @@
-/** Pure helpers for the Chats page: chat names, the chat tree and the Telegram access settings. */
+/** Pure helpers for the Chats page: chat names, the chat tree, chat states and plain words for errors. */
 import type {ChatApp, ChatAppLabel, ChatKind, ChatState} from '../../src/chat-wire';
-import {participantAllowed, switchDecision, type ParticipantRule} from './group-access';
 import {sourceDate} from './messages-format';
 
 export type Chat = {
@@ -40,23 +39,23 @@ export type Chat = {
   removed_event?: boolean;
 };
 export type Directory = {items: Chat[]; next_cursor: string | null; total?: number};
-/** A person Nocheh saw in a group: whether they are in it now, and whether the group's own messages show them (they wrote
- * there, or a message there says they joined). Someone known only from leaving or a member update has `seen` false. */
+/** A person Nocheh saw in a group: whether they are in it now (null when Telegram never said), whether the group's own
+ * messages show them (they wrote there, or a message there says they joined), and whether they are a member. Someone known
+ * only from leaving or a member update has `seen` false; so has a member Telegram never showed there. */
 export type Person = {
   id: string;
   name?: string | null;
   username?: string | null;
-  state?: 'in' | 'left';
+  state?: 'in' | 'left' | null;
   seen?: boolean;
+  member?: boolean;
 };
 /** A group people were seen in: its Nocheh chat id and its current Telegram id. */
 export type IdentityGroup = {id: string; external?: string | null; name?: string | null; users?: Person[]};
-export type AccessRule = {granted: string[]; denied: string[]};
-export type AccessMap = Record<string, AccessRule>;
 /** Looks a chat up by its Nocheh id in the chat directory; null when no chat has that id. */
 export type FindChat = (space: string | null | undefined) => Chat | null;
 
-/** A Telegram user ID, typed by the owner for group access. Not a chat id. */
+/** A Telegram user ID, typed by the owner to add a member by it. Not a chat id; the server checks it again. */
 export const validUserId = (text: string) => /^[1-9]\d{0,18}$/.test(text.trim());
 
 /** A chat known only by its id, for links to chats outside the loaded list. Nothing is read from the id. */
@@ -199,76 +198,6 @@ export function chatStateText(chat: Chat): string {
       return 'Nocheh doesn’t answer here.';
   }
 }
-/**
- * The TELEGRAM_GROUP_ACCESS key a group's people are kept under: whichever of its Telegram ids already holds people,
- * in the draft and then in the saved settings, so a group Telegram upgraded keeps them under its earlier id; else its
- * current id. Null for a chat with no Telegram id.
- */
-export function accessKey(access: AccessMap, chat: Chat | null | undefined, saved: AccessMap = {}): string | null {
-  const own = appIds(chat);
-  return own.find(id => access[id]) ?? own.find(id => saved[id]) ?? currentAppId(chat);
-}
-
-export function parseAccess(text: string): AccessMap {
-  try {
-    const value = JSON.parse(text || '{}');
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    const result: AccessMap = {};
-    for (const [group, rule] of Object.entries(value as Record<string, any>))
-      result[group] = {
-        granted: Array.isArray(rule?.granted) ? rule.granted.map(String) : [],
-        denied: Array.isArray(rule?.denied) ? rule.denied.map(String) : [],
-      };
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-const canonicalAccess = (map: AccessMap) =>
-  JSON.stringify(
-    Object.keys(map)
-      .sort()
-      .filter(group => map[group]!.granted.length || map[group]!.denied.length)
-      .map(group => [group, [...map[group]!.granted].sort(), [...map[group]!.denied].sort()]),
-  );
-
-/** Groups with no decisions are dropped; the saved text is kept when nothing really changed. */
-export function serializeAccess(map: AccessMap, savedText: string): string {
-  if (canonicalAccess(map) === canonicalAccess(parseAccess(savedText))) return savedText;
-  const clean: AccessMap = {};
-  for (const group of Object.keys(map).sort()) {
-    const rule = map[group]!;
-    if (rule.granted.length || rule.denied.length)
-      clean[group] = {granted: [...new Set(rule.granted)].sort(), denied: [...new Set(rule.denied)].sort()};
-  }
-  return Object.keys(clean).length ? JSON.stringify(clean) : '{}';
-}
-
-export const emptyRule = (): AccessRule => ({granted: [], denied: []});
-export const isAllowed = (rule: ParticipantRule, id: string) => participantAllowed(rule, id);
-
-/** Allows or stops one person, restoring the saved decision when the switch goes back. */
-export function withPersonDecision(
-  access: AccessMap,
-  saved: AccessMap,
-  group: string,
-  id: string,
-  allow: boolean,
-): AccessMap {
-  const current = access[group] ?? emptyRule();
-  const decision = switchDecision(saved[group], current, id, allow);
-  if (!decision) return access;
-  const granted = current.granted.filter(item => item !== id);
-  const denied = current.denied.filter(item => item !== id);
-  if (decision === 'grant') granted.push(id);
-  if (decision === 'deny') denied.push(id);
-  const next = {...access};
-  if (granted.length || denied.length) next[group] = {granted, denied};
-  else delete next[group];
-  return next;
-}
-
 export type ChatTree = {
   privates: Chat[];
   groups: {group: Chat; topics: Chat[]}[];

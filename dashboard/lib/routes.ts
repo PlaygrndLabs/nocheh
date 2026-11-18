@@ -8,6 +8,7 @@ export const pageIds = [
   'inbox',
   'tasks',
   'chats',
+  'members',
   'messages',
   'memory',
   'usage',

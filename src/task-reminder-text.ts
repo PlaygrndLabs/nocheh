@@ -59,8 +59,8 @@ export interface Who {by:'owner'|'person';account:string|null;name:string|null}
 export interface Writer extends Who {field:'title'|'notes'|'due'|'closed';chat:string}
 /** What Telegram last told of an account: its name and public username. */
 export interface Person {display_name:string|null;username:string|null}
-/** What labels read: the chat directory, the people allowed in a served group now (null when not known, so nobody
- * reads as no longer allowed), and each account as Telegram last showed it. */
+/** What labels read: the chat directory, the members who reach a served group now (null when not known, so nobody
+ * reads as no longer a member), and each account as Telegram last showed it. */
 export interface Names {directory:ChatDirectory;allowed:ReadonlyMap<string,readonly string[]>|null;people:ReadonlyMap<string,Person>}
 /** The owner's words: the reminder lines, the one set of chat words (the approval texts) and the reminder template. */
 export interface Words {lines:Record<ReminderText,string>;places:PlaceWords;template:string}
@@ -68,7 +68,7 @@ export interface Words {lines:Record<ReminderText,string>;places:PlaceWords;temp
  * dashboard, the API or a card); `due` is the due day in words, `list` the project's name. */
 export interface ReminderRow {id:string;at:number;setter:Who;chat:string|null;title:string;notes:string;due:string|null;list:string|null;
   closed:boolean;writers:readonly Writer[]}
-/** Name keys by who holds them: people allowed now and in the message, the owner's chat and the served groups and topics. */
+/** Name keys by who holds them: members now and people in the message, the owner's chat and the served groups and topics. */
 export type NameKeys=ReadonlyMap<string,ReadonlySet<string>>;
 
 /** A person's name as labels show it: the name Telegram shows now, then the one it showed when they set the reminder,
@@ -84,7 +84,7 @@ const whoKey=(who:Who)=>who.by==='owner'?'owner':who.account?'account:'+who.acco
  * the same turns the merge takes them in. */
 export const whoKeySql=(alias:string)=>`CASE WHEN ${alias}set_by='owner' THEN 'owner' WHEN ${alias}set_by_account_id IS NOT NULL
   THEN 'account:'||${alias}set_by_account_id ELSE 'name:'||coalesce(${alias}set_by_name,'') END`;
-/** The keys of every name a person's name must not read like: the people allowed now and those in this message, the
+/** The keys of every name a person's name must not read like: the members now and the people in this message, the
  * owner's chat and every served group and topic. */
 export function nameKeys(names:Names,people:Iterable<Who>):NameKeys {
   const keys=new Map<string,Set<string>>(),add=(name:string|null,holder:string)=>{

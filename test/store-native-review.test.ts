@@ -14,6 +14,7 @@ import {NativeReviewRepository,nativeAttemptLimit,nativeReconcileLimit,requestSt
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
+import {grantMembers} from './fixture-member-grants.js';
 import {captureEvidence} from '../src/stores/generated-capture.js';
 import {evidenceMarker,legendIntro,reviewBody} from '../src/source-labels.js';
 import {requestWorkflow} from '../src/workflows/store.js';
@@ -399,8 +400,9 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-senders-')),key='review-senders:'+Date.now();
   const group='-'+Date.now(),unserved='-'+(Date.now()+7),other='-'+(Date.now()+11),owner:Reader={admin:true,scope:null},bot=1000+Date.now()%1000;
-  // Alice (123) owns Nocheh, Bob (456) is allowed in the group and in another one, and Sara (789) is not.
-  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['456'],denied:[]},[other]:{granted:['456'],denied:[]}}};
+  // Alice (123) owns Nocheh, Bob (456) is a member who talks in the group and in another one, and Sara (789) is no member.
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other]};
+  let people=grantMembers({[group]:{granted:['456']},[other]:{granted:['456']}},{owner:'123'});
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:'synthetic-review-service-credential-only',policy:()=>policy,
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('no notes review runs in this test');},
     memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
@@ -831,10 +833,10 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     assert.ok(toBobInput.text.includes('BOBIBAN')&&toBobInput.text.includes('BOBRULE'));assert.ok(!toBobInput.text.includes('rules_left_out_for_owner_label'));
     assert.deepEqual((await recorded(nochehToBob))[0].rule_buckets,['person']);
 
-    // Bob is denied: his review still waiting is withdrawn, under a later epoch or under the current one.
+    // Bob is switched off in the group: his review still waiting is withdrawn, under a later epoch or under the current one.
     const [staleReview]=(await services.reviews.queue(await say(9,456,'Bob: first'))).ids;
     const current=await say(10,456,'Bob: second'),[currentReview]=(await services.reviews.queue(current)).ids;
-    policy.group_access={[group]:{granted:['456'],denied:['456']}};
+    people();people=grantMembers({[other]:{granted:['456']}},{owner:'123',groups:[group]});
     const nativeRun=await operations.memory_review!('native:'+currentReview,authority);
     assert.deepEqual([nativeRun.state,nativeRun.waiting_reason],['skipped','sender_not_allowed']);
     assert.deepEqual(await jobs(current),[]);assert.equal(await skipped(current),'sender_not_allowed');
@@ -846,15 +848,15 @@ test('people not allowed there stay out of the owner\'s notes, with the rules, q
     await stores.control.query("UPDATE workflow_registry SET state='completed',created_at=now()-interval '1 hour' WHERE family='memory_review' AND job_id=$1",['source:'+staleSource.id]);
     const steps=await strandedSteps();await requestStrandedSources(stores.control,new Date(Date.now()-60000));assert.equal(await strandedSteps(),steps);
 
-    // Allowing Sara later doesn't bring her old messages into the notes; the owner's yes on one does, in a served group only.
-    policy.group_access={[group]:{granted:['789'],denied:[]}};await bump();
+    // Making Sara a member later doesn't bring her old messages into the notes; the owner's yes on one does, in a served group only.
+    people();people=grantMembers({[group]:{granted:['789']}},{owner:'123'});await bump();
     assert.deepEqual((await services.reviews.queue(sara)).ids,[]);assert.deepEqual(await jobs(sara),[]);
     await services.access.setConsent(owner,sara,{enabled:true,expected_revision:0,operation_id:key+':consent'});
     assert.equal(((await services.reviews.queue(sara)).ids).length,1,'the owner\'s yes reviews it');
     const elsewhere=await say(1,789,'Sara elsewhere',{},unserved);
     await services.access.setConsent(owner,elsewhere,{enabled:true,expected_revision:0,operation_id:key+':consent-elsewhere'});
     assert.deepEqual((await services.reviews.queue(elsewhere)).ids,[],'never in a chat Nocheh does not serve');assert.equal(await skipped(elsewhere),'sender_not_allowed');
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
 test('a quote answering a message in another chat is never judged by this chat\'s message with the same id',
@@ -863,10 +865,11 @@ test('a quote answering a message in another chat is never judged by this chat\'
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-elsewhere-')),key='review-elsewhere:'+Date.now();
-  // Two supergroups, each one a Telegram Desktop export can be mapped to. Alice (123) owns Nocheh, Bob (456) is allowed in
-  // both and Sara (789) in neither.
+  // Two supergroups, each one a Telegram Desktop export can be mapped to. Alice (123) owns Nocheh, Bob (456) is a member
+  // who talks in both and Sara (789) is no member.
   const here=String(Date.now()),there=String(Date.now()+13),group='-100'+here,other='-100'+there,bot=1000+Date.now()%1000;
-  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other],group_access:{[group]:{granted:['456'],denied:[]},[other]:{granted:['456'],denied:[]}}};
+  const policy:AssistantPolicy={enabled:true,owner_id:'123',group_ids:[group,other]};
+  const people=grantMembers({[group]:{granted:['456']},[other]:{granted:['456']}},{owner:'123'});
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:'synthetic-review-service-credential-only',policy:()=>policy,
     runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('no notes review runs in this test');},
     memoryEngine:honchoEngine(async()=>{throw Error('no provider calls');})});
@@ -932,5 +935,5 @@ test('a quote answering a message in another chat is never judged by this chat\'
       assert.deepEqual(await recorded(pin),[left(0,1)],mark);
       assert.ok((await read(pin)).includes(`"${mark}TEXT"`),mark);
     }
-  } finally {await stores.close();await rm(root,{recursive:true,force:true});}
+  } finally {people();await stores.close();await rm(root,{recursive:true,force:true});}
 });
