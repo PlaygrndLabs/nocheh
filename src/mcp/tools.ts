@@ -235,6 +235,30 @@ async function destinations(_args:Value,context:ToolContext) {
   catch{return text({error:'destinations_unavailable',note:'Available only in a group conversation.'});}
 }
 
+/** What an ask about a member may be told (step 4b): each code with what to say to the owner. Any other refusal is opaque. */
+const askNotes:Record<string,string>={
+  owner_private_turn_required:'Only the owner can ask this, in their own private chat.',
+  member_ask_not_owner:'Only the owner\'s own message in their private chat can ask about a member\'s chat.',
+  member_ask_forwarded:'A forwarded message cannot ask about a member\'s chat; the owner must ask in their own words.',
+  member_ask_not_named:'The owner\'s own message must name the member, by the name Telegram shows for them; nothing was asked.',
+  member_not_found:'No member has that name. Ask the owner which member they mean, by the name Telegram shows for them.',
+  member_name_ambiguous:'More than one member has that name. Ask the owner to name the member by their @username.',
+  member_chat_closed:'That member\'s private chat with Nocheh cannot be read now: they are paused, removed, have private chat off, or never wrote to Nocheh.',
+  member_ask_limit:'One message can ask about at most three members.',
+};
+async function askMemberChat(args:Value,context:ToolContext) {
+  if(Object.keys(args).some(key=>!['member','question'].includes(key))||typeof args.member!=='string'||!args.member.trim()||args.member.length>200||
+    typeof args.question!=='string'||!args.question.trim()||args.question.length>4000)return text({error:'invalid_member_ask'});
+  try {
+    const queued=record(await request(context,'/v1/member-asks',{member:args.member,question:args.question}));
+    return text({queued:true,id:queued.id,member:queued.member,note:'The answer comes from that member\'s private chat as a separate message in this chat '+
+      'after this turn ends, and is not kept in this conversation. Do not answer it yourself: say only, in one short sentence, that the answer is coming.'});
+  }catch(error){
+    const refused=code(error);
+    return text(typeof refused==='string'&&askNotes[refused]?{error:refused,note:askNotes[refused]}:{error:'member_ask_unavailable'});
+  }
+}
+
 const ownerViews=['conversations','conversation-context','telegram-identities','people','projects','project-assignments','memory-map'];
 async function ownerRead(args:Value,context:ToolContext) {
   try {
@@ -510,6 +534,11 @@ export const mcpTools:readonly McpTool[]=[
     inputSchema:shape({url:{type:'string'},summary:SUMMARY},['url']),run:(args,context)=>controlled('browser',args,context)},
   {name:'mcp',description:'Propose an MCP operation at a public HTTPS endpoint supporting 2025-11-25 JSON responses. Set operation=list to discover tools; for call supply tool and input. No ambient authentication, local processes, sampling or server-initiated capabilities. In a group, the group\'s permission for web pages and outside tools can let it run without a card.',
     inputSchema:shape({url:{type:'string'},operation:{type:'string',enum:['list','call']},tool:{type:'string'},input:{type:'object'},summary:SUMMARY},['url']),run:(args,context)=>controlled('mcp',args,context)},
+  {name:'ask_member_chat',description:'Only in the owner\'s private chat, when the owner\'s own message names a member and asks what they said to Nocheh '+
+    'in their own private chat with Nocheh. Nocheh answers in a separate message in this chat after this turn, read from that member\'s private chat only; '+
+    'the answer is not kept in this conversation. member is the member\'s name as the owner wrote it (the name Telegram shows for them, or their '+
+    '@username); question is what the owner asks about that chat, in the owner\'s words.',
+    inputSchema:shape({member:{type:'string',maxLength:200},question:{type:'string',maxLength:4000}},['member','question']),run:askMemberChat},
   {name:'owner_read',description:'Read the owner\'s own directory: known Telegram conversations with names and IDs (conversations, '+
     'telegram-identities), one conversation\'s context (conversation-context with space), people, projects, project-assignments and the '+
     'memory-map. Available only in the owner\'s private conversation. Use exact IDs from here as action destinations.',

@@ -25,6 +25,10 @@ JOB_BOX_TOOLS=(JOB_TOOLS-{'memory','mcp__nocheh__shell','mcp__nocheh__browser'})
 JOB_MACHINE_TOOLS=JOB_BOX_TOOLS-{'execute_code'}
 
 
+# The Hermes profile of the owner's ask d*32 about a member at generation 1111..., epoch 5, in the owner's chat 123.
+MEMBER_READ_PROFILE='nocheh-4c79eaf776a2c61788142716'
+
+
 def turn(update,scopes,scope=None,**changes):
     """A Telegram turn as storage sends it to Hermes, with the claims of its pass (ADR-0252): the chat and space by their
     Nocheh ids, and where the chat is in Telegram now. The owner's own turn in a private chat has no scope claim."""
@@ -309,6 +313,46 @@ class ScopeTests(unittest.TestCase):
         # Without a record, the owner's own pass is unchanged.
         plain={key:value for key,value in claims.items() if key!='answer'}
         self.assertNotIn('answer',verify_capability(signed({**plain,'scope':None}),secret,owner,event))
+
+    def test_an_ask_about_a_member_has_its_own_profile_never_carried_and_its_pass_only_in_the_owners_chat(self):
+        # Step 4b: the owner's ask about a member reads as the owner's private chat, never as the owner, in a profile of its own.
+        from dataclasses import replace
+        claims={'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1}
+        asker=replace(self.resolve(self.update(123,123,'private'),'123'),owner=False,space='123')
+        asked=Scopes.apply_revision(asker,{**claims,'member_read':'d'*32})
+        # test/owner-member-asks.test.ts pins the same name for runtimeProfile with the same claims.
+        self.assertEqual(asked.profile,MEMBER_READ_PROFILE)
+        self.assertEqual((asked.member_read,asked.answer),('d'*32,''))
+        profiles={asked.profile,Scopes.apply_revision(asker,{**claims,'member_read':'e'*32}).profile,Scopes.apply_revision(asker,{**claims,'answer':'d'*32}).profile,
+                  Scopes.apply_revision(asker,claims).profile,Scopes.apply_revision(replace(asker,owner=True),claims).profile}
+        self.assertEqual(len(profiles),5,"never another ask's, an answer's, a plain scoped one or the owner's")
+        for invalid in ({**claims,'member_read':'D'*32},{**claims,'member_read':'d'*31},{**claims,'member_read':None},{'revision':1,'member_read':'d'*32},
+                        {**claims,'member_read':'d'*32,'answer':'a'*32}):
+            with self.subTest(claims=invalid),self.assertRaises(ValueError):Scopes.apply_revision(asker,invalid)
+        with self.assertRaisesRegex(ValueError,'invalid_member_read'):Scopes.apply_revision(replace(asker,owner=True),{**claims,'member_read':'d'*32})
+        # Nothing is carried into it, its receipt marks it, and it loads no chat's own role.
+        with tempfile.TemporaryDirectory() as folder,patch('services.hermes.profile_history.carry',return_value=0) as carry,\
+                patch('services.hermes.persona.materialize') as materialize:
+            profile=prepare_profile(Path(folder),asked,'synthetic')
+            carry.assert_not_called()
+            self.assertIsNone(materialize.call_args.args[2])
+            receipt=json.loads((profile/'space.json').read_text())
+            self.assertEqual((receipt['member_read'],receipt['owner'],receipt['space']),('d'*32,False,'123'))
+        # Its pass: in the owner's chat, with that chat as its scope; never the owner's (none), a group's or with an answer.
+        secret='synthetic-service-token';event='a'*64
+        owner=self.resolve(self.update(123,123,'private'),'123');group=self.resolve(self.update(-20,123),'-20')
+        def signed(claims):
+            data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+            return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        passed={'scope':'123','space':'123','app':{'app':'telegram','chat':'123','topic':None},'event_id':event,'expires':time.time()*1000+600000,
+                'audience':'nocheh-assistant',**claims,'member_read':'d'*32}
+        self.assertEqual(verify_capability(signed(passed),secret,owner,event)['member_read'],'d'*32)
+        for bad,scope in (({**passed,'scope':None},owner),({**passed,'member_read':'D'*32},owner),({**passed,'member_read':5},owner),
+                          ({**passed,'answer':'a'*32},owner),({**passed,'scope':'-20','space':'-20'},group)):
+            with self.subTest(claims=bad),self.assertRaises(ValueError):verify_capability(signed(bad),secret,scope,event)
+        # resolve() takes it as the owner writing in the owner's private chat, as an answer.
+        body,claims=turn(self.update(123,123,'private'),self.scopes,'123',claim_scope='123',claim_member_read='d'*32)
+        self.assertTrue(self.scopes.resolve(body,claims).owner)
 
     def test_native_tool_definitions_are_an_explicit_safe_allowlist(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override

@@ -138,7 +138,11 @@ class BrainTurns:
         # role and read tools only (ADR-0249). Its pass and its framed question must come together.
         answer=claims.get('answer') is not None
         if answer!=isinstance(body.get('private_answer'),dict):raise ValueError('invalid_private_answer')
-        if answer:scope=replace(scope,owner=False)
+        # The owner's ask about a member (step 4b) is the same: never the owner, its pass and its ask come together.
+        member_read=claims.get('member_read')
+        ask=body.get('member_read')
+        if (member_read is not None)!=isinstance(ask,dict) or member_read is not None and ask.get('ask')!=member_read:raise ValueError('invalid_member_read')
+        if answer or member_read is not None:scope=replace(scope,owner=False)
         scope=Scopes.apply_revision(scope,claims)
         # Turns in one conversation keep their arrival order; different chats
         # and topics run side by side, up to the capacity. A member's turns, in their own private chat and in groups, run

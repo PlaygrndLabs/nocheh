@@ -52,9 +52,10 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             from .retired_history import service_lookup, withhold_retired
             await asyncio.to_thread(withhold_retired, database_path(profile), service_lookup, profile/'memories')
             # This parent records who wrote each note the turn adds or changes, outside the turn's reach (ADR-0257). A
-            # private answer has no memory tool, so it writes no notes; neither does a member's private chat (step 4).
+            # private answer, or the owner's ask about a member (step 4b), has no memory tool, so it writes no notes; neither
+            # does a member's private chat (step 4).
             from . import note_sources
-            watch=None if scope.answer or scope.member else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile))
+            watch=None if scope.answer or scope.member or scope.member_read else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile))
             result=None
             try:
                 result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'])
@@ -137,6 +138,15 @@ def private_answer(value):
     return value
 
 
+def member_read(value):
+    """The owner's ask about a member (step 4b): its ask, as its pass names it, and the member as Nocheh's own frame
+    names them. Its frame is already the turn's text. Anything else is refused."""
+    if (not isinstance(value,dict) or set(value)!={'ask','member'} or not isinstance(value['ask'],str) or not re.fullmatch(r'[a-f0-9]{32}',value['ask'])
+            or not isinstance(value['member'],str) or not 0<len(value['member'].strip())<=300
+            or any(ord(c)<32 or ord(c)==127 for c in value['member'])):raise ValueError('invalid_member_read')
+    return value
+
+
 def answer_receipt(profile,answer):
     """Keep where a private answer was asked, as its first line names it, and when it ran, in the answer's own profile,
     so the owner's notes can tell answers apart (ADR-0249). The same name is already in the profile's conversation, and
@@ -168,6 +178,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     answer = private_answer(body.get('private_answer')) if scope.answer else None
     if answer is None and body.get('private_answer') is not None: raise ValueError('invalid_private_answer')
     if answer: answer_receipt(profile, answer)
+    # The owner's ask about a member: its pass and its ask come together, and it is never a private answer too.
+    asked = member_read(body.get('member_read')) if scope.member_read else None
+    if (asked is None) != (body.get('member_read') is None) or asked and (answer or asked['ask'] != scope.member_read): raise ValueError('invalid_member_read')
     if background is not None and background['hard_deadline'] <= time.time():
         return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
     text = body.get('text') or ''
@@ -217,7 +230,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     transport = credentials.runtime()
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),
                'model':model, 'memory_query':memory_query, 'session_id':session_id, 'owner':scope.owner, 'chat_id':scope.chat_id,
-               'private_answer':bool(answer),
+               'private_answer':bool(answer), 'member_read':bool(asked),
                # A member's own private chat (step 4): read tools only, no notes, the member's reply rules.
                'member':bool(scope.member),
                'user_id':scope.user_id, 'archive_credential':body['archive_credential'],
@@ -298,7 +311,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             from .usage import note_done, note_failed
             problem=result.pop('memory_problem',None)
             if problem=='memory_read':await asyncio.to_thread(note_failed,'memory_read')
-            elif result.get('state')=='done' and not answer and not scope.member:await asyncio.to_thread(note_done,'memory_read')
+            elif result.get('state')=='done' and not answer and not asked and not scope.member:await asyncio.to_thread(note_done,'memory_read')
             # A job run reports Hermes's own token counts too; Nocheh prices them at the rates frozen on the job's card.
             if background:
                 from .job_progress import run_tokens

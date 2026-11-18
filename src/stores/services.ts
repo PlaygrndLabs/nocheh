@@ -67,6 +67,8 @@ import {BackgroundJobRepository} from './background-jobs.js';
 import {MachineRepository} from './machines.js';
 import {ChatSendRepository} from './chat-sends.js';
 import {PrivateAnswerRepository} from './private-answers.js';
+import {OwnerMemberAskRepository} from './owner-member-asks.js';
+import {OwnerMemberAskTurns} from './owner-member-ask-turns.js';
 import {ChatRepository} from './chats.js';
 import {ChatAdds} from './chat-adds.js';
 import {accountIdFor,chats as chatDirectory} from '../chats.js';
@@ -133,6 +135,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect,noteSources);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
+  // The owner's asks about a member (step 4b): recorded only from a live owner-private turn, answered by their own worker.
+  const memberAsks=new OwnerMemberAskRepository(stores.control,stores.archive,options.policy,principal=>knowledge.ownerTurn(principal));
   // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
   // Who wrote the message a group turn answers: the owner, or a member, by their Telegram name, with their account (a
   // chat_accounts id; null for the owner), which a reminder they set keeps (ADR-0255). A member is checked again here, at
@@ -220,6 +224,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     privateAnswers,
     telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env),privateAnswers),
     continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
+    memberAsks,memberAskTurns:new OwnerMemberAskTurns(memberAsks,archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>ownerChat(options.policy())}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,

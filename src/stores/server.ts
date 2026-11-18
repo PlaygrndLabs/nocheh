@@ -191,6 +191,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&entityRead)return json(res,200,await s.entities.inspect(principal,entityRead[1]!));
     // Runtime knowledge tools have their own bound owner-turn checks. They never proxy arbitrary owner routes.
     if(req.method==='GET'&&path==='/v1/knowledge/context')return json(res,200,await s.knowledge.inspect(principal,Object.fromEntries(url.searchParams)));
+    // The owner asks about a member's private chat with Nocheh (step 4b): only from the owner's own live turn, which the
+    // repository checks first; the answer comes later as a separate message.
+    if(req.method==='POST'&&path==='/v1/member-asks')return json(res,200,await s.memberAsks.ask(principal,await readJson(req,16*1024)));
     if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
     const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
     if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));

@@ -179,6 +179,20 @@ class ProfileHistoryTests(unittest.TestCase):
         self.assertFalse(third.exists())
         self.assertTrue(owner.exists() and group.exists())
 
+    def test_an_ask_about_a_members_profile_is_removed_once_nothing_can_run_in_it(self):
+        # Step 4b: each ask is its own profile that no later turn opens; it goes as a private answer's does.
+        import time
+        from .assistant_gateway import prepare_profile
+        from .profile_history import ANSWER_IDLE_SECONDS, prune_answers
+        from .scopes import Scope, Scopes
+        claims={'generation':GENERATION,'guard_epoch':5,'revision':1,'member_read':'d'*32}
+        asked=prepare_profile(self.root,Scopes.apply_revision(Scope('123','123',False,'unused','123'),claims),'subscription-model')
+        owner=self.profile(5);self.converse(owner)
+        self.assertEqual(prune_answers(owner,now=time.time()+ANSWER_IDLE_SECONDS-60),[])
+        self.assertEqual(prune_answers(owner,now=time.time()+ANSWER_IDLE_SECONDS+60),[asked.name])
+        self.assertFalse(asked.exists())
+        self.assertTrue(owner.exists() and self.replay(owner),"the owner's own profile and conversation stay")
+
 
 if __name__=='__main__':
     unittest.main()

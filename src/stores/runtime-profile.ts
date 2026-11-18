@@ -8,9 +8,10 @@ export const defaultLogicalProfile=(principal:Reader)=>'nocheh-'+digest(principa
 export const namedProfile=(principal:Reader)=>principal.logical_profile&&principal.logical_profile!==defaultLogicalProfile(principal)?principal.logical_profile:undefined;
 /** The Hermes profile a turn runs in. Scopes.apply_revision (services/hermes/scopes.py) derives the same name from the same
  * claims. A private answer's record is part of it, so each answer is its own conversation and never sees another
- * answer's groups (ADR-0249). */
+ * answer's groups (ADR-0249). So is the owner's ask about a member (step 4b): each ask is a conversation of its own that
+ * no later turn carries or opens. */
 export function runtimeProfile(principal:Reader,binding:GuardBinding) {
   return 'nocheh-'+digest(canonical([binding.generation,principal.space,principal.scope===null?'owner':'scoped',
     binding.epoch,principal.purpose==='filter'?'filter':'assistant',...(namedProfile(principal)?[namedProfile(principal)]:[]),
-    ...(principal.answer!==undefined?['answer:'+principal.answer]:[])])).slice(0,24);
+    ...(principal.answer!==undefined?['answer:'+principal.answer]:[]),...(principal.memberRead!==undefined?['member_read:'+principal.memberRead]:[])])).slice(0,24);
 }

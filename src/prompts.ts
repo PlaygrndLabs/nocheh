@@ -16,12 +16,12 @@ export const promptKeys=['reply.common','reply.owner','reply.group','reply.priva
   'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','tasks.reminder_texts','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
   'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds','telegram.member_daily_limit','telegram.group_tools_texts',
-  'telegram.member_private_daily_limit','members.local_laws'] as const;
+  'telegram.member_private_daily_limit','members.local_laws','reply.member_read','telegram.member_read','telegram.member_read_texts'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
+  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'telegram.member_read':['{member}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
   'background.job':['{instruction}'],'background.card':['{instruction}'],'background.machine':['{steps}']};
 
 /** Sent in a group, without a model and at most once a UTC day per person and group, to someone who addressed Nocheh but
@@ -39,6 +39,24 @@ export const memberPrivateDailyLimitReply='Sorry, you have reached today\'s limi
 /** The owner-only line on the Members page (step 4): reading the members' private chats with Nocheh may be limited where
  * the owner lives. Shown to the owner only, never sent. */
 export const membersLocalLaws='Before you read your members\' private chats with Nocheh, check what your local laws allow.';
+/** The first line of the owner's ask about a member (step 4b), before the owner's question, as the turn that answers it
+ * reads it: {member} is the member, by the name Telegram shows for them. The answer reads only that member's own private
+ * chat with Nocheh and goes to the owner's private chat as a separate message that is then dropped. */
+export const memberReadFrame='[The owner asks about a member] The owner asks, in their own private chat, about what {member} said in their private chat '+
+  'with Nocheh. Answer the question below only from that chat, which you read with mcp__nocheh__archive_search, mcp__nocheh__archive_read and '+
+  'mcp__nocheh__archive_page, and say plainly when something is not there. This answer only reads: it cannot send anything elsewhere, change '+
+  'anything or remember anything. The owner\'s question:';
+/** The owner's ask about a member (step 4b), one "name: text" line each, no model: the first line of the separate message
+ * that answers it, naming the member's chat as its source (source), and the short notices when it cannot be answered:
+ * that chat is closed now (closed, the member paused, removed or with private chat off) or no answer came (failed). */
+export const memberReadTexts=['source: 🔒 From {member}’s private chat with Nocheh:',
+  'closed: 🔒 I can’t read {member}’s private chat with Nocheh now, so your question about it was not answered.',
+  'failed: 🔒 Your question about {member}’s private chat with Nocheh could not be answered. Ask again in a moment.'].join('\n');
+export type MemberReadText='source'|'closed'|'failed';
+/** The owner's lines for an ask about a member over their defaults; a line that drops {member} reads as its default. */
+export function memberReadLines(text:string|undefined):Record<MemberReadText,string> {
+  return checkedLines('telegram.member_read_texts',memberReadTexts,text) as Record<MemberReadText,string>;
+}
 /** What the model is told when a group's permission for web pages and outside tools lets a tool call run without a card
  * (step 3): with its answer to follow as a reply (allowed_follow_up), or without (allowed). One "name: text" line each. */
 export const groupToolsTexts=['allowed_follow_up: Allowed by this group\'s permission for web pages and outside tools; it runs now. Its answer will follow here as a reply; do not wait for it, say only that it is running.',
@@ -188,6 +206,7 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
     nocheh_private_answer:['{place}'],nocheh_job_report:['{place}'],nocheh_scheduled_run:['{place}'],nocheh_approved_post:['{place}'],nocheh_unlearned:['{place}'],
     review_owner:['{place}'],review:['{sources}'],rules:['{place}'],rules_others:['{place}'],turn_own:['{place}','{date}'],turn:['{place}','{date}'],turn_read:['{place}','{date}','{read}'],
     job_turn:['{place}','{date}','{read}'],more:['{count}']},
+  'telegram.member_read_texts':{source:['{member}'],closed:['{member}'],failed:['{member}']},
 };
 /** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
  *  Object property ('constructor', '__proto__') is just a line; a text with no such lines is not read at all. */
@@ -400,7 +419,8 @@ const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learni
   'background.box':backgroundBox,'background.repo':backgroundRepo,'background.machine':backgroundMachine,
   'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts,
   'telegram.chat_adds':chatAddTexts,'telegram.member_daily_limit':memberDailyLimitReply,'telegram.group_tools_texts':groupToolsTexts,
-  'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'members.local_laws':membersLocalLaws};
+  'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'members.local_laws':membersLocalLaws,
+  'telegram.member_read':memberReadFrame,'telegram.member_read_texts':memberReadTexts};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (
