@@ -29,9 +29,18 @@ const askingWaitMs=600000;
 const closedCodes=new Set(['member_chat_closed','source_retired','conversation_not_selected']);
 /** The answer turn's attempt: never an integer, so it never meets the owner's own turns of the same message. */
 export const askAttempt=(id:string,attempts:number)=>'m'+attempts+'-'+id;
-/** The dispatch key the answer is sent under; the row keeps it. */
-export const askSendKey=(id:string)=>'member-ask:'+id;
+/**
+ * The dispatch key the answer is sent under, and the row keeps: the asking message's own source key with a continuation
+ * named by the ask, the one shape besides a turn's own key the bot sends a reply under (services/telegram/gateway.py). It
+ * answers that very message, and its sends are never the asking turn's own.
+ */
+export const askSendKey=(sourceKey:string,id:string)=>sourceKey+':continuation:'+digest('member-ask:'+id);
 /** The claims a turn pass carries, unchecked: only to make sure a pass signed for an ask names that very ask. */
+/** Whether the owner's asking turn ended as an ask runs after: its reply went out, it chose silence, or Telegram did not
+ * confirm its reply (the owner may have seen it). */
+export function askingEnded(dispatch:{state:string;error_code?:string|null}):boolean {
+  return dispatch.state==='done'||dispatch.state==='ambiguous'||dispatch.state==='suppressed'&&dispatch.error_code==='intentional_silence';
+}
 function passClaims(credential:string):Record<string,unknown> {
   try{return JSON.parse(Buffer.from(credential.split('.')[1]??'','base64url').toString());}catch{return {};}
 }
@@ -55,12 +64,36 @@ export class OwnerMemberAskTurns {
     return observation(states[row.state]!,row.attempts>0?'assistant':'admission',row.attempts,row.next_attempt.getTime(),
       row.state==='running'?'receipt_pending':row.state==='queued'?'prerequisite':null);
   }
-  private async row(id:string):Promise<OwnerMemberAsk> {return (await this.asks.row(id))!;}
+  private async row(id:string):Promise<OwnerMemberAsk|null> {return this.asks.row(id);}
+  /** The ask's observation now; one that is gone runs nothing more. */
+  private async observed(id:string):Promise<Observation> {
+    const row=await this.row(id);
+    return row?this.observation(row):observation('skipped','admission');
+  }
+  /** The observation of an ask that just closed. An ask about a member removed meanwhile (its member_id cleared) is
+   * removed now: it closed and the owner was told, and a removed member's asks are not kept. */
+  private async closedNow(id:string):Promise<Observation> {
+    const observed=await this.observed(id);
+    await this.control.query(`DELETE FROM owner_member_asks WHERE id=$1 AND member_id IS NULL AND state NOT IN ('queued','running')`,[id]);
+    return observed;
+  }
   /** Closes an open ask for good with `code`, and tells the owner once when it will not be answered. */
   private async fail(row:OwnerMemberAsk,code:string,tell:'closed'|'failed'|null):Promise<Observation> {
     const {rowCount}=await this.control.query(`UPDATE owner_member_asks SET state='failed',error_code=$2,updated_at=now() WHERE id=$1 AND state IN ('queued','running')`,[row.id,code]);
     if(rowCount&&tell)await this.notice(row,tell);
-    return this.observation(await this.row(row.id));
+    return this.closedNow(row.id);
+  }
+  /** An ask past its time is never answered, and the owner hears it once. */
+  private async expire(row:OwnerMemberAsk):Promise<Observation> {
+    const {rowCount}=await this.control.query(`UPDATE owner_member_asks SET state='expired',updated_at=now() WHERE id=$1 AND state IN ('queued','running')`,[row.id]);
+    if(rowCount)await this.notice(row,'failed');
+    return this.closedNow(row.id);
+  }
+  /** The ask's reader could not be bound (memberAskReads): an ask past its time expired, which is not the member's chat
+   * closing, so the owner hears it was not answered; otherwise the chat closed and the owner hears that. */
+  private async closed(row:OwnerMemberAsk,code:string):Promise<Observation> {
+    if((await this.control.query('SELECT 1 FROM owner_member_asks WHERE id=$1 AND expires_at<=now()',[row.id])).rowCount)return this.expire(row);
+    return this.fail(row,code,'closed');
   }
   private async notice(row:OwnerMemberAsk,kind:'closed'|'failed'):Promise<void> {
     const policy=this.access.policy(),owner=ownerChat(policy);
@@ -70,10 +103,11 @@ export class OwnerMemberAskTurns {
     try{await this.call('telegram.notice',{id:digest('member-ask-closed:'+row.id),...telegramTarget(owner),text:fillTemplate(texts[kind],{member:await this.label(row)})},30000);}
     catch{/* A notice is best effort; the record says why. */}
   }
-  /** The member as the answer names them: the name Telegram shows for them now, quoted. */
+  /** The member as the answer names them: the name Telegram shows for them now, else the one they had when asked (a
+   * member removed since), quoted. */
   private async label(row:OwnerMemberAsk):Promise<string> {
     const {people}=await this.asks.askable();
-    return quotedName(people.find(person=>person.id===row.member_id)?.label??'a member');
+    return quotedName(people.find(person=>person.id===row.member_id)?.label??row.member_label??'a member');
   }
   /**
    * The ask's reader bound for this request: the owner's private chat as its scope and space, the ask as its memberRead,
@@ -102,10 +136,11 @@ export class OwnerMemberAskTurns {
   }
   /** A turn that ended without an answer runs once more, or fails for good and the owner hears it. */
   private async retry(row:OwnerMemberAsk,code:string):Promise<Observation> {
-    if(row.attempts>=maxAttempts||closedCodes.has(code))return this.fail(row,code,closedCodes.has(code)?'closed':'failed');
+    if(closedCodes.has(code))return this.closed(row,code);
+    if(row.attempts>=maxAttempts)return this.fail(row,code,'failed');
     await this.control.query(`UPDATE owner_member_asks SET state='queued',error_code=NULL,next_attempt=now()+interval '5 seconds',updated_at=now()
       WHERE id=$1 AND state='running'`,[row.id]);
-    return this.observation(await this.row(row.id));
+    return this.observed(row.id);
   }
   /** The brain closed the turn: a done answer goes out as one separate member_read message, under its source line. */
   private async settle(row:OwnerMemberAsk,input:TurnInput,receipt:TurnReceipt):Promise<Observation> {
@@ -115,7 +150,7 @@ export class OwnerMemberAskTurns {
       if(!(error instanceof HttpError)||![409,403].includes(error.status))throw error;
       // Never sent once the ask or its chat closed: the reply is withdrawn and the owner hears why.
       await cancelReply(this.call,row.owner_event,attempt);
-      return this.fail(row,closedCodes.has(error.code)?error.code:'member_chat_closed','closed');
+      return this.closed(row,closedCodes.has(error.code)?error.code:'member_chat_closed');
     }
     if(state!=='done'||!receipt.reply?.text?.trim()) {
       await finishPresence(this.call,replyTarget(input,attempt,credential),unansweredFinish(state));
@@ -123,19 +158,21 @@ export class OwnerMemberAskTurns {
     }
     const texts=memberReadLines((await ownerPrompts(this.control))['telegram.member_read_texts']);
     const text=fillTemplate(texts.source,{member:String((input.body.member_read as {member?:unknown})?.member??'')})+'\n\n'+receipt.reply.text;
-    const sent=await sendReply(this.call,replyTarget(input,attempt,credential),askSendKey(row.id),{...receipt.reply,text},
-      {notify:true,presence:true,sendClass:'member_read'});
+    const target=replyTarget(input,attempt,credential),key=askSendKey(String(input.body.source_key),row.id);
+    const sent=await sendReply(this.call,target,key,{...receipt.reply,text},{notify:true,presence:true,sendClass:'member_read',refused:true});
     if(!sent||!closedTurnStates.has(String(sent.state))) {
       await this.control.query(`UPDATE owner_member_asks SET next_attempt=now()+interval '1 second',updated_at=now() WHERE id=$1`,[row.id]);
       return observation('running','delivery',row.attempts,Date.now()+1000,'receipt_pending');
     }
     if(sent.state==='done') {
       await this.control.query(`UPDATE owner_member_asks SET state='answered',answered_at=now(),send_key=$2,updated_at=now() WHERE id=$1 AND state='running'`,
-        [row.id,askSendKey(row.id)]);
-      return this.observation(await this.row(row.id));
+        [row.id,key]);
+      return this.closedNow(row.id);
     }
-    // An uncertain send is never repeated; a refused one is not answered.
-    return this.fail(row,sent.state==='ambiguous'?'delivery_unconfirmed':'telegram_rejected',sent.state==='ambiguous'?null:'failed');
+    // An uncertain send is never repeated; a refused one is not answered, and a request the bot refuses as it is (nothing
+    // sent) is not asked again every second until the ask expires.
+    if(sent.error_code==='reply_refused')await finishPresence(this.call,target,'failed');
+    return this.fail(row,sent.state==='ambiguous'?'delivery_unconfirmed':sent.error_code==='reply_refused'?'reply_refused':'telegram_rejected',sent.state==='ambiguous'?null:'failed');
   }
   async run(id:string,authority:ExecutionAuthority):Promise<Observation> {
     if(!memberReadId.test(id))return observation('failed','admission');
@@ -160,7 +197,7 @@ export class OwnerMemberAskTurns {
           // The ask or its chat closed while the turn ran: it is stopped and never answered.
           try{await this.brain.cancelTurn({channel:'telegram',event_id:row.owner_event,attempt});}catch{/* Its reply is withdrawn below. */}
           await cancelReply(this.call,row.owner_event,attempt);
-          return this.fail(row,closedCodes.has(error.code)?error.code:'member_chat_closed','closed');
+          return this.closed(row,closedCodes.has(error.code)?error.code:'member_chat_closed');
         }
         if(!['not_found','queued'].includes(String(observed.state))) {
           await showPresence(this.call,replyTarget(input,attempt,credential));
@@ -170,31 +207,31 @@ export class OwnerMemberAskTurns {
       } else {
         if(!this.access.policy().enabled)return observation('waiting','admission',0,Date.now()+60000,'owner_paused');
         const age=Date.now()-row.created_at.getTime();
-        if((await db.query('SELECT 1 FROM owner_member_asks WHERE id=$1 AND expires_at<=now()',[id])).rowCount) {
-          await db.query(`UPDATE owner_member_asks SET state='expired',updated_at=now() WHERE id=$1 AND state IN ('queued','running')`,[id]);
-          await this.notice(row,'failed');
-          return this.observation(await this.row(id));
-        }
-        // The asking turn's own reply goes first; one that never ended well asked nothing the owner saw.
-        const asking=(await db.query('SELECT state FROM dispatches WHERE event_id=$1',[row.owner_event])).rows[0];
+        if((await db.query('SELECT 1 FROM owner_member_asks WHERE id=$1 AND expires_at<=now()',[id])).rowCount)return this.expire(row);
+        // The asking turn's own reply goes first. The owner did ask, so the ask also runs after that turn's intentional
+        // silence or a reply Telegram did not confirm. A turn that never ends in time, or ends any other way but
+        // withdrawn, leaves the owner told once that the ask was not answered; a withdrawn one (cancelled) asked nothing.
+        const asking=(await db.query('SELECT state,error_code FROM dispatches WHERE event_id=$1',[row.owner_event])).rows[0];
         if(!asking||!terminalTurnStates.has(asking.state)) {
           if(age<askingWaitMs)return observation('waiting','admission',0,Date.now()+5000,'prerequisite');
-          return this.fail(row,'asking_turn_not_done',null);
+          return this.fail(row,'asking_turn_not_done','failed');
         }
-        if(asking.state!=='done')return this.fail(row,'asking_turn_not_done',null);
+        if(!askingEnded(asking))return this.fail(row,'asking_turn_not_done',asking.state==='cancelled'?null:'failed');
         const captured=await this.archive.captured(row.owner_event);
         if(await this.access.retirements?.isRetired(captured.reference))return this.fail(row,'source_retired',null);
         const owner=ownerChat(this.access.policy());
         if(!owner)return this.fail(row,'conversation_not_selected',null);
         // Running from here: storage binds the ask's reader only while its row runs (memberAskReads).
         await db.query(`UPDATE owner_member_asks SET state='running',started_at=coalesce(started_at,now()),updated_at=now() WHERE id=$1 AND state='queued'`,[id]);
-        row=await this.row(id);
+        const started=await this.row(id);
+        if(!started)return observation('skipped','admission');
+        row=started;
         const binding=await this.guards.state();
         let principal:Reader;
         try {
           principal=await this.bound({admin:false,scope:owner,space:owner,turnEvent:row.owner_event,memberRead:id,
             generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch});
-        }catch(error){if(error instanceof HttpError&&error.status===409)return this.fail(row,'member_chat_closed','closed');throw error;}
+        }catch(error){if(error instanceof HttpError&&error.status===409)return this.closed(row,'member_chat_closed');throw error;}
         await this.turns.binding(principal);
         const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[row.owner_event])).rows[0];
         const payload=JSON.parse(original.payload.toString()),label=await this.label(row),prompts=await ownerPrompts(this.control);
@@ -219,12 +256,14 @@ export class OwnerMemberAskTurns {
             [id,attempts,reference,binding]);
           await db.query('COMMIT');
         }catch(error){await db.query('ROLLBACK');throw error;}
-        row=await this.row(id);
+        const recorded=await this.row(id);
+        if(!recorded)return observation('skipped','admission');
+        row=recorded;
         if(row.state!=='running')return this.observation(row);
       }
       try{credential??=await this.credential(input);}catch(error){
         if(!(error instanceof HttpError)||![409,403].includes(error.status))throw error;
-        return this.fail(row,closedCodes.has(error.code)?error.code:'member_chat_closed','closed');
+        return this.closed(row,closedCodes.has(error.code)?error.code:'member_chat_closed');
       }
       const attempt=askAttempt(id,row.attempts);
       if(!await botReady(this.call))return observation('running','admission',row.attempts,Date.now()+10000,'receipt_pending');

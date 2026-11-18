@@ -228,8 +228,11 @@ test('step 4 adds private chat to every member, a checked membership source and 
     await db.query(`UPDATE chat_memberships SET source='checked' WHERE account_id=$1 AND chat_id=$2`,[MEMBER_GP_ACCOUNT,GP1]);
     const widened=(await db.query(`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname='chat_memberships_source_check'`)).rows;
     assert.equal(widened.length,1);assert.match(widened[0].def,/'checked'/);
-    // A member removed takes their asks.
+    // A removed member's ask keeps its row with no member, so its worker can close it and tell the owner, under the name
+    // it keeps (MemberRepository.remove deletes the closed ones first).
+    await db.query("UPDATE owner_member_asks SET member_label='Mira Test' WHERE id=$1",['5'.repeat(32)]);
+    await assert.rejects(db.query("UPDATE owner_member_asks SET member_label='' WHERE id=$1",['5'.repeat(32)]),{code:'23514'},'a label is a name');
     await db.query('DELETE FROM members WHERE id=$1',[MEMBER_GP_ID]);
-    assert.equal((await db.query('SELECT count(*) FROM owner_member_asks WHERE member_id=$1',[MEMBER_GP_ID])).rows[0].count,'0');
+    assert.deepEqual((await db.query('SELECT member_id,member_label FROM owner_member_asks WHERE id=$1',['5'.repeat(32)])).rows,[{member_id:null,member_label:'Mira Test'}]);
   } finally{await stores.close();}
 });

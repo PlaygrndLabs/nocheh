@@ -119,10 +119,14 @@ class ManagementTests(unittest.TestCase):
                                ('nocheh-'+'e5'*12,{'space':'123','owner':True})):
                 path=root/'profiles'/name;path.mkdir(parents=True)
                 (path/'space.json').write_text(json.dumps({'revision':1,'guard_epoch':1,'owner':False,**extra}))
+                # The ask's receipt dates it, as a private answer's does; a group name in it is never shown for an ask.
+                if 'member_read' in extra:(path/'answer.json').write_text(json.dumps({'at':'2026-11-12T10:00:00+00:00','group':'“Injected”'}))
             listing={p['profile']:p for p in dispatch(root,'test',policy,{'action':'profiles'})['history_profiles']}
             member,ask,owner=(listing['nocheh-'+part*12] for part in ('c3','d4','e5'))
             self.assertEqual((member.get('member'),member.get('member_read'),member['owner']),(True,None,False))
             self.assertEqual((ask.get('member'),ask.get('member_read'),ask['owner']),(None,True,False))
+            self.assertEqual((ask.get('answer_at'),ask.get('answer_group'),ask.get('private_answer')),('2026-11-12T10:00:00+00:00',None,None))
+            self.assertNotIn('answer_at',member)
             self.assertEqual((owner.get('member'),owner.get('member_read')),(None,None))
 
     def test_preferences_use_revision_and_policy(self):

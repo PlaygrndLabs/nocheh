@@ -159,6 +159,16 @@ def answer_receipt(profile,answer):
     save_receipt(path,json.dumps({'group':answer['group'].strip(),'at':datetime.now(timezone.utc).isoformat(timespec='seconds')}))
 
 
+def ask_receipt(profile):
+    """Keep when the owner's ask about a member ran in its own profile, like a private answer's receipt, so the owner's
+    notes date it (step 4b). It names no member: only the time."""
+    from datetime import datetime,timezone
+    from .native_memory import save_receipt
+    path=Path(profile)/'answer.json'
+    if path.is_symlink():raise ValueError('profile_path_denied')
+    save_receipt(path,json.dumps({'at':datetime.now(timezone.utc).isoformat(timespec='seconds')}))
+
+
 def job_run(limits):
     """A background job run's limits from its context, checked: its box and machine flags, never both, and its soft
     and hard deadlines (epoch seconds)."""
@@ -181,6 +191,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # The owner's ask about a member: its pass and its ask come together, and it is never a private answer too.
     asked = member_read(body.get('member_read')) if scope.member_read else None
     if (asked is None) != (body.get('member_read') is None) or asked and (answer or asked['ask'] != scope.member_read): raise ValueError('invalid_member_read')
+    if asked: ask_receipt(profile)
     if background is not None and background['hard_deadline'] <= time.time():
         return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
     text = body.get('text') or ''

@@ -269,7 +269,10 @@ stays a destination only behind the owner's card).
 
 - `ask_member_chat {member, question}` is an MCP tool whose route,
   `POST /v1/member-asks`, checks the owner's live private turn first
-  (`knowledge.ownerTurn`). The ask guard (D12) records a row only when the asking
+  (`knowledge.ownerTurn`). In isolated Hermes execution the security broker
+  relays it only for the owner's live private turn (else
+  `owner_private_turn_required`) and passes on only the refusals the tool
+  explains. The ask guard (D12) records a row only when the asking
   message is:
   - the owner's own Telegram message in the owner's private chat
     (`conversationScope` says owner; not in a chat's own name);
@@ -280,27 +283,42 @@ stays a destination only behind the owner's card).
     or a tool's output records nothing. A name two members share is refused
     (`member_name_ambiguous`).
 - The member must be active with private chat on and exactly one open private
-  chat, else 409 `member_chat_closed`. One owner message asks about at most three
+  chat, else 409 `member_chat_closed`. A member who wrote to Nocheh from more than
+  one account is refused with 409 `member_chat_several`, which the tool tells the
+  owner (an ask reads one chat). One owner message asks about at most three
   members (`member_ask_limit`); the same message asking again about the same
   member gets the same row.
 - `owner_member_asks` (control store, added if missing; removing a member removes
-  their asks): `id`, `owner_event`, `member_id`, `question` (up to 4,000
+  their closed asks, and an open one keeps its row with no member until its worker
+  has closed it and told the owner once, under the stored `member_label`; the
+  removal locks the member's asks first, so a worker closing one meanwhile waits
+  for it and then removes the row): `id`,
+  `owner_event`, `member_id`, `member_label`, `question` (up to 4,000
   characters), `state` (`queued`, `running`, `answered`, `failed`, `expired`),
   `error_code`, times, `expires_at` (30 minutes), `send_key`, and the worker's
   attempts, input and binding. Reset snapshots never carry asks.
 - The worker (`src/stores/owner-member-ask-turns.ts`, workflow job `ask:<id>` in
   the telegram family, modelled on action continuations):
-  - It waits for the asking turn's own reply, up to 10 minutes.
+  - It waits for the asking turn's own reply, up to 10 minutes. The owner did
+    ask, so it also runs after an asking turn that chose silence or whose reply
+    Telegram did not confirm. Any other end, or no end in time, tells the owner
+    once (`failed`); a withdrawn (cancelled) asking turn asked nothing.
   - It then runs one read-only turn under a pass naming the ask, on the asking
     message with attempt `m<n>-<ask id>`. The turn reads only `telegram.member_read`
     (the editable first line) and the owner's question, under the
     `reply.member_read` rules.
   - The answer goes to the owner's private chat as one separate message of send
     class `member_read`, whose first line comes from `telegram.member_read_texts`
-    (`source`) and names the member's chat.
+    (`source`) and names the member's chat. It is sent under the asking message's
+    source key plus `:continuation:` and the digest of `member-ask:<id>`, the one
+    other key shape the bot replies under, and the row keeps that `send_key`.
   - A turn that ends without an answer runs once more. When the chat closed, the
     ask expired or no answer came, the owner gets one short notice (`closed` or
-    `failed`) instead. An uncertain send is never repeated.
+    `failed`) instead; an ask whose time runs out while it runs gets `failed`, not
+    `closed`. An uncertain send is never repeated, and a reply the bot refuses as
+    malformed fails the ask (`reply_refused`) instead of being sent again.
+  - The Workflows page offers no Cancel or Retry for an `ask:<id>` job: the ask
+    closes on its own and tells the owner.
 - **Never carried.** Hermes never carries an ask's profile into the owner's
   conversation or carries anything into it, prunes it like an answer's once
   nothing can run in it, and the owner's recall never reads it (D7).
@@ -320,8 +338,8 @@ stays a destination only behind the owner's card).
   chats** (`private_chats=only`), so they do not show when the owner shares their
   screen.
 - Memory › Assistant notes names a member's profile "Member · <name>" and an ask's
-  "Your question about a member · <date>", listed after the owner's own chat and
-  the groups.
+  "Your question about a member · <date>" (when it ran, from the receipt its turn
+  keeps, as a private answer's), listed after the owner's own chat and the groups.
 - New editable texts: `reply.member`, `reply.member_read`,
   `telegram.member_private_daily_limit`, `members.local_laws`,
   `telegram.member_read` (with `{member}`) and `telegram.member_read_texts`
@@ -385,10 +403,9 @@ stays a destination only behind the owner's card).
     can still read a group past the cap that is within the 30-day window.
   - `/v1/search` applies `private_chats` after its first 200 hits, so matching
     results can be missed.
-  - A member with several accounts that have private chats is never asked about
-    (4b reads nothing).
+  - A member with several accounts that have private chats is not asked about;
+    the owner is told so (`member_chat_several`).
   - The Messages filter hides nothing while the chat directory has not loaded.
-  - An ask's Notes label has no answer date.
   - The owner's notes review's sender check (`notesSender`) does not tell member
     or `member_read` sends apart; `canLearn` refuses them first.
 </consequences>

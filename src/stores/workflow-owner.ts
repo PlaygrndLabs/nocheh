@@ -6,6 +6,8 @@ import {hash} from '../workflows/store.js';
 import {workflowDetail,workflowView} from '../workflows/owner.js';
 
 /** All relations in this view are control metadata. Source references are links, never SQL joins to content.
+ *  The owner's ask about a member (`ask:<id>`, step 4b) closes on its own and tells the owner, so the page offers no
+ *  Cancel or Retry for it: neither would reach its record (owner_member_asks).
  *  An unclear operation or send that was closed (ADR-0218) counts as done when the owner said it ran, else as skipped. */
 export const storageWorkflowOwnerSchema=`
 CREATE OR REPLACE VIEW workflow_observations AS
@@ -38,8 +40,8 @@ WHEN d.event_id IS NOT NULL THEN CASE d.state WHEN 'done' THEN 'completed' WHEN 
  WHEN j.state='ambiguous' OR h.state='uncertain' THEN 'receipt_pending' ELSE w.waiting_reason END AS waiting_reason,
  i.total,i.completed,i.duplicates,i.learning_after,
  m.job_id AS native_job_id,m.logical_profile AS native_profile,
- (w.family='organization' AND (w.job_id LIKE 'learning:%' OR coalesce(k.state IN ('queued','waiting','review'),false)) OR w.family IN ('telegram','actions') OR w.family='imports' AND coalesce(i.state='queued',false) OR w.family IN ('browser','schedules') AND coalesce(m.state='captured',false) OR w.family='tools' AND t.id IS NOT NULL OR w.family='memory_review' AND w.job_id LIKE 'native:%' AND coalesce(j.attempts,0)=0) AS domain_controllable,
- (w.family='organization' AND (coalesce(k.state IN ('failed','queued','waiting'),false) OR k.id IS NULL AND NOT EXISTS(SELECT 1 FROM knowledge_proposals linked WHERE linked.source_job_id=substring(w.job_id FROM 10) AND linked.state NOT IN ('failed','queued','waiting'))) OR w.family IN ('telegram','preparation','actions','memory_review','honcho') OR w.family='imports' AND coalesce(i.state='queued',false) OR w.family IN ('browser','schedules') AND coalesce(m.state='captured',false) OR w.family='tools' AND t.id IS NOT NULL) AS retry_supported,
+ (w.family='organization' AND (w.job_id LIKE 'learning:%' OR coalesce(k.state IN ('queued','waiting','review'),false)) OR w.family IN ('telegram','actions') AND w.job_id NOT LIKE 'ask:%' OR w.family='imports' AND coalesce(i.state='queued',false) OR w.family IN ('browser','schedules') AND coalesce(m.state='captured',false) OR w.family='tools' AND t.id IS NOT NULL OR w.family='memory_review' AND w.job_id LIKE 'native:%' AND coalesce(j.attempts,0)=0) AS domain_controllable,
+ (w.family='organization' AND (coalesce(k.state IN ('failed','queued','waiting'),false) OR k.id IS NULL AND NOT EXISTS(SELECT 1 FROM knowledge_proposals linked WHERE linked.source_job_id=substring(w.job_id FROM 10) AND linked.state NOT IN ('failed','queued','waiting'))) OR w.family IN ('telegram','preparation','actions','memory_review','honcho') AND w.job_id NOT LIKE 'ask:%' OR w.family='imports' AND coalesce(i.state='queued',false) OR w.family IN ('browser','schedules') AND coalesce(m.state='captured',false) OR w.family='tools' AND t.id IS NOT NULL) AS retry_supported,
  EXISTS(SELECT 1 FROM workflow_receipts r WHERE r.workflow_id=w.id AND r.state IN ('started','ambiguous','done')) AS receipt_blocked
 FROM workflow_registry w JOIN workflow_owners o USING(family)
 LEFT JOIN knowledge_proposals k ON w.family='organization' AND w.job_id='proposal:'||k.id
