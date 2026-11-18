@@ -174,8 +174,9 @@ test('step 4\'s texts are editable keys with defaults, and the members\' private
   for(const value of ['off',null,0])assert.throws(()=>memberChangeRequest({operation_id:'op',changes:{private_chat:value}}),{code:'invalid_member_request'},String(value));
 });
 
-test('until the member reads are written, every member chat is closed',async()=>{
-  const db={query:async()=>{throw Error('no query until part B writes it');}} as never;
-  for(const chat of [MEMBER_GP_CHAT,MEMBER_NG_CHAT,BOB_CHAT,OWNER,GP1])assert.equal(await memberReads(db,chat),null,chat);
+test('the owner\'s chat, a group and a member chat with no owner chat are closed without asking the store',async()=>{
+  const db={query:async()=>{throw Error('no query for these');}} as never;
+  for(const chat of [OWNER,GP1])assert.equal(await memberReads(db,chat),null,chat);
+  for(const chat of [MEMBER_GP_CHAT,MEMBER_NG_CHAT,BOB_CHAT])assert.equal(await memberReads(db,chat,null),null,chat);
   assert.equal(memberChatClosed,'member_chat_closed');
 });
