@@ -1138,8 +1138,15 @@ class ProductScenarios(Scenarios):
         self.honcho_learned(mark)
         result = self.recalled(GROUP, 'when does my boat leave '+number, sender=MEMBER, topic=11)
         answers = [item for item in result.get('sources') or [] if isinstance(item, dict) and item.get('kind') == 'memory_inference']
+        # Each fact recall read names its first sources (ADR-0261 B3.6); an engine that cannot list facts lists the archived
+        # messages instead (evidence_sources), as before.
         evidence = [value for item in answers for value in item.get('evidence_sources') or []]
+        evidence += [source.get('source') for item in answers for fact in item.get('facts') or [] if isinstance(fact, dict)
+                     for source in fact.get('sources') or [] if isinstance(source, dict)]
         self.gate('recall_answers_in_the_sibling_topic', bool(answers), result=str(result)[:400])
+        self.gate('recall_names_its_records', all(str(item.get('source', '')).startswith('nocheh:memory:') and len(item['source']) == 78
+                                                    and ('facts' not in item or str(item.get('facts_source', '')).startswith('nocheh:memory:')) for item in answers),
+                  sources=[(item.get('source'), item.get('facts_source')) for item in answers])
         self.gate('sibling_topic_evidence_kept', 'nocheh:event:'+event_id in evidence, evidence=evidence[:20],
                   limitations=[item.get('limitations') for item in answers])
 

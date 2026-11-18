@@ -30,7 +30,7 @@ export interface FactBlockPlan {title:string;summaryTitle:string;summary:string;
 const chars=(text:string)=>Array.from(text).length;
 /** A fact on one line: the engine may write newlines into it. */
 const oneLine=(text:string)=>text.replace(/\s*[\r\n\u2028\u2029\u0085]+\s*/g,' ').trim();
-const lineHead=(fact:PlannedFact)=>`${fact.n}. ${fact.time??factBlockWords.no_time}`;
+const lineHead=(fact:Pick<PlannedFact,'n'|'time'>)=>`${fact.n}. ${fact.time??factBlockWords.no_time}`;
 const groupKey=(fact:BlockFact)=>`${fact.by}\u0000${fact.exact?1:0}\u0000${fact.batch?1:0}\u0000${fact.tag??''}`;
 function sourceLine(fact:BlockFact):string {
   const tag=fact.tag??factBlockWords.unavailable;
@@ -103,4 +103,30 @@ export function renderFactBlock(plan:FactBlockPlan,guarded:string,id:string):str
   if(!summary.trim()&&!count)return '';
   // A guard that lengthened a line can push the block past its limit; it is cut there, as every block was before.
   return Array.from(rendered(plan,summary,plan.facts,lines,id)).slice(0,FACT_BLOCK_LIMIT).join('');
+}
+
+/** How many facts a recall stores (B3.6): every one its answers read, up to this many, each openable by its number. */
+export const RECALL_FACT_LIMIT=200;
+/** The longest fact line a recall's facts record keeps. */
+const RECALL_LINE_LIMIT=2000;
+/** A recall's facts record (B3.6): one `n. fact` line per fact, numbered from 1, each on one line. */
+export const recallFactText=(facts:readonly {n:number;content:string}[]):string=>
+  facts.map(fact=>`${fact.n}. ${Array.from(oneLine(fact.content)).slice(0,RECALL_LINE_LIMIT).join('')}`).join('\n');
+/**
+ * Fact `n`'s text from a record's guarded copy (B5.2), or null when the guard changed the lines: a per-turn block's facts
+ * are its last lines, `n. HH:MM fact` (`time` given, null for a fact with none); a recall's are all its lines, `n. fact`.
+ * `count` is how many facts the record stores; the line must still start with its own number (and time).
+ */
+export function guardedFactLine(guarded:string,count:number,n:number,time?:string|null):string|null {
+  const all=guarded.split('\n');
+  if(n<1||n>count||all.length<count)return null;
+  const line=all[all.length-count+n-1]!,head=time===undefined?`${n}.`:lineHead({n,time});
+  return line===head?'':line.startsWith(head+' ')?line.slice(head.length+1):null;
+}
+/** Every fact's text from a recall's guarded facts record, in order, or null when the guard changed their lines. */
+export function recallFactTexts(guarded:string,count:number):string[]|null {
+  if(guarded.split('\n').length!==count)return null;
+  const texts:string[]=[];
+  for(let n=1;n<=count;n++){const text=guardedFactLine(guarded,count,n);if(text===null)return null;texts.push(text);}
+  return texts;
 }

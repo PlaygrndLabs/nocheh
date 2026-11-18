@@ -226,7 +226,8 @@ test('a group turn reads its speaker\'s facts in its session, each under a sourc
     {n:1,conclusion:honchoFact(1,null).id,exact:true,by:'person',time:'14:00',sources:[a],more:0,complete:true,session:fixture.session},
     {n:2,conclusion:honchoFact(2,null).id,exact:true,by:'person',time:'14:01',sources:[b,c],more:1,complete:true,session:fixture.session}]);
   assert.equal(bounded.provenance.summary_through,'2026-11-05');
-  assert.equal(bounded.configuration.facts_digest,digest(canonical({facts:bounded.provenance.facts,summary_through:'2026-11-05',limitations:[]})));
+  assert.equal(bounded.provenance.subject,'person_speaker','whose facts the block holds, so one opens by its number (B5.2)');
+  assert.equal(bounded.configuration.facts_digest,digest(canonical({facts:bounded.provenance.facts,subject:'person_speaker',summary_through:'2026-11-05',limitations:[]})));
   assert.deepEqual(fixture.tagged,[[ref(b),ref(a),ref(c)]],'one tag request for every header source and the summary\'s last message');
   assert.equal(read.text,['[conversation summary, through 2026-11-05]','Summary','','[what is known about the speaker]',
     `[To open a fact's original: archive_read id=nocheh:memory:${read.record} fact=<n>. Times are when the source message was sent.]`,

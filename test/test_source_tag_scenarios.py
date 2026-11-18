@@ -183,8 +183,11 @@ class Installation(Fixture):
         if not self.owner_reader(reader):
             learned = [row for row in self.messages if 'LEARNMARK' in row['text'] and row['chat'] == reader[0]
                        and (self.fault != 'evidence_dropped' or row['topic'] == reader[1])]
-            return {'sources': [{'source': 'nocheh:memory:w', 'kind': 'memory_inference', 'text': 'A boat leaves at nine.',
-                                 'evidence_sources': ['nocheh:event:'+row['id'] for row in learned], 'limitations': []}]}
+            # As storage answers (ADR-0261 B3.6): the answer and its facts named by their records, each fact with its first sources.
+            facts = [{'n': n, 'text': 'A boat leaves at nine.', 'exact': True, 'by': 'person', 'more': 0,
+                      'sources': [{'source': 'nocheh:event:'+row['id'], 'tag': '“Ann” · this chat', 'by': 'person'}]} for n, row in enumerate(learned, 1)]
+            return {'sources': [{'source': 'nocheh:memory:'+('w' if self.fault == 'space_named' else 'a'*64), 'facts_source': 'nocheh:memory:'+'b'*64, 'kind': 'memory_inference',
+                                 'text': 'A boat leaves at nine.', 'facts': facts, 'evidence_count': len(facts), 'limitations': []}]}
         hits = [{'kind': 'native_note', 'text': note['text'], 'place': self.place(reader, *note['session'])} for note in self.notes if query in note['text']]
         for session, rows in self.history.items():
             # A read-only search skips the rows a profile not yet brought current would withhold (withheld_ids).
@@ -292,6 +295,7 @@ class SourceTagScenarioTests(unittest.TestCase):
     def test_topic_sharing_group_keeps_evidence(self):
         self.run_scenario('topic_sharing_group_keeps_evidence')
         self.fails('topic_sharing_group_keeps_evidence', 'evidence_dropped', 'sibling_topic_evidence_kept')
+        self.fails('topic_sharing_group_keeps_evidence', 'space_named', 'recall_names_its_records')
 
     def test_retired_source_leaves_tags(self):
         scenarios, _ = self.run_scenario('retired_source_leaves_tags')

@@ -14,7 +14,7 @@ import {ownVoice} from '../source-facts.js';
 import {honchoPointer,honchoSource,honchoSources,type HonchoPart} from '../source-labels.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow,type ExecutionAuthority} from '../workflows/store.js';
 import type {SourceReference} from './archive.js';
-import type {DerivedRepository} from './derived.js';
+import type {DerivativeReference,DerivedRepository} from './derived.js';
 import {jobRun,type GuardBinding} from './guards.js';
 import type {PreparedDependency} from './learned.js';
 import type {LearningContextRepository,PreparedLearningContext} from './learning-context.js';
@@ -23,9 +23,11 @@ import type {MemoryProvenanceRepository} from './memory-provenance.js';
 import {OwnerCommands} from './owner-commands.js';
 import {evidencePeerId,memoryPeerId,type EntityContext,type MemoryEntity} from './entities.js';
 import {NoteSourceRepository,countMemoryStep} from './note-sources.js';
-import {FactSourceRepository} from './fact-sources.js';
+import {FactSourceRepository,type FactAudience,type SourcedFact} from './fact-sources.js';
 import {bindingMoved,type SourceTagRepository} from './source-tags.js';
-import {planFactBlock,renderFactBlock,type BlockFact} from '../fact-block.js';
+import {RECALL_FACT_LIMIT,guardedFactLine,planFactBlock,recallFactText,recallFactTexts,renderFactBlock,type BlockFact} from '../fact-block.js';
+import {headerSource,type TagBy} from '../source-tags.js';
+import {bucketOf} from '../source-facts.js';
 import type {EngineFact} from '../memory/engine.js';
 
 /** The assistant is a peer whose messages are saved but never observed (ADR-0109). */
@@ -102,6 +104,21 @@ const factCount=100,profileFactCount=50,profileDerived=25;
 /** Whose facts a block reads, within which sessions (null: the whole space), and whether as the engine's profile. */
 type FactRead={subject:string;sessions:string[]|null;profile:boolean};
 type FactList={facts:EngineFact[];limitations:string[]};
+/** How many of a recall's facts its result lists (B3.6), how long each text is there, and how many of each one's sources
+ *  it names; every fact stays in the facts record and opens by its number. */
+const recallFactsListed=12,recallFactChars=240,recallFactSources=2;
+/** What archive_read shows of an opened fact (B5.2): its sources named, and the facts a record lists without a number. */
+const openedSources=10,openedListed=20,openedText=2000;
+/** One fact as a recall result lists it (B3.6). */
+type RecallFact={n:number;text?:string;exact:boolean;by:TagBy;sources:{source:string;tag:string;by:string}[];more:number};
+/** A fact as a record of facts stores it (B3.1, B3.6): every source, in order, so it opens by its number and a retired source
+ *  is found. `peer` names whose fact it is in a recall's record; a per-turn block names its one `subject`. */
+type StoredFact={n:number;conclusion:string;peer?:string;exact:boolean;by:TagBy;time?:string|null;sources:string[];more:number;complete:boolean;session:string|null};
+const cutText=(text:string,size:number)=>{const chars=Array.from(text);return chars.length<=size?text:chars.slice(0,size-1).join('').trimEnd()+'…';};
+const factUnavailable=()=>new HttpError(404,'memory_fact_unavailable');
+/** A fact's readable sources with the one its source line names first (headerSource), the rest in their order. */
+const shownFirst=(item:Pick<SourcedFact,'header'|'readable'>):SourceReference[]=>
+  item.header?[item.header,...item.readable.filter(reference=>reference.id!==item.header!.id)]:[...item.readable];
 
 /** How many messages of each learned batch a memory search hit names by source (ADR-0261): the first 3 references of each
  *  receipt; later ones keep today's fields alone. */
@@ -1070,7 +1087,7 @@ export class NativeMemoryRepository {
     // Every source of every fact shown, in order, readable or not: what opening a fact and retiring a source read.
     const provenance={facts:plan.facts.map(fact=>{const item=behind.get(fact.conclusion)!;
       return {n:fact.n,conclusion:fact.conclusion,exact:fact.exact,by:fact.by,time:fact.time,sources:item.sources,more:fact.more,complete:item.complete,session:item.fact.session};}),
-      summary_through:plan.through,limitations};
+      subject:read.subject,summary_through:plan.through,limitations};
     const guarded=await this.guardedContext(current,audience,source,{...configuration,facts_digest:digest(canonical(provenance))},plan.text,provenance);
     const text=renderFactBlock(plan,guarded.text,'nocheh:memory:'+guarded.record);
     if(text===null)throw new HttpError(409,'source_lines_changed');
@@ -1237,11 +1254,145 @@ export class NativeMemoryRepository {
         provenance:{partial:connected.partial,evidence:evidence.references,limitations}});
       await this.current(id);await this.guards.prepareContext(output,this.protocol,actor,this.prepared,this.detect);
       const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
+      // The facts the answers read, each with its sources (B3.6): listed, and every one stored in a record of its own.
+      const facts=await this.recallFacts(current,principal,actor,{audience,group},sessions,
+        included.map(({item,response})=>({peer:item.peer,evidence:response.evidence})),root,output,requestId);
       await this.current(id);await this.prepared.audience.assert(principal);await this.prepared.allow(principal,value);
-      return {sources:[...corrections,{source:'nocheh:memory:'+id,kind:'memory_inference',text:value.text,exact_citations:false,
-        evidence_sources:evidence.references.map(reference=>'nocheh:event:'+reference.id),limitations}],partial:connected.partial,
+      // The answer is named by its record and the facts by theirs, so a stored tool row cites both and a retired source
+      // withholds it (B6.2). An engine that cannot list facts, or a failed read of them, lists the archived messages instead.
+      // Both record ids come first, before the long answer, so even a cut copy of the row names them.
+      const listed=facts&&!facts.failed,record=listed&&facts.record?{facts_source:'nocheh:memory:'+facts.record}:{};
+      const named=listed?{facts:facts.listed,evidence_count:facts.count}:{evidence_sources:evidence.references.map(reference=>'nocheh:event:'+reference.id)};
+      return {sources:[...corrections,{source:'nocheh:memory:'+output.id,...record,kind:'memory_inference',text:value.text,exact_citations:false,
+        ...named,limitations:[...limitations,...facts?.limitations??[]]}],partial:connected.partial,
         limited_memory:!current.row.last_ready_at&&current.row.state!=='ready',syncing};
     } catch(error){await this.prepared.audience.assert(principal);return corrections.length?{...limited,sources:corrections}:limited;}
+  }
+  /**
+   * B3.6: the facts a recall's answers read, as the engine holds them now (within the sessions the recall asked), each with
+   * every archived message of this reader's audience it came from (B2). Every fact, up to RECALL_FACT_LIMIT, is stored in a
+   * record of its own, its text one numbered line each, guarded and read back as the answer is; `fact=n` opens any of them
+   * and a retired source of any of them is found. The first 12 are listed, cited ones first and then in the engine's
+   * order, each with its first two readable sources tagged. A guard that changed the lines drops the texts
+   * (fact_text_unavailable, counted), never the record.
+   * Null for an engine that cannot list facts; a failed read says so (recall_facts_unavailable, counted). Either way the
+   * caller lists the archived messages instead, as before.
+   */
+  private async recallFacts(current:Current,principal:Reader,actor:Reader,scope:FactAudience,sessions:string[]|null,
+    asked:readonly {peer:string;evidence:readonly string[]}[],root:Awaited<ReturnType<PreparedContextRepository['root']>>,answer:DerivativeReference,requestId:string):
+    Promise<{record:string|null;listed:RecallFact[];count:number;limitations:string[];failed?:true}|null> {
+    if(!this.engine.factsById||!this.tags)return null;
+    const id=current.row.id,binding=current.binding;
+    try {
+      let left=RECALL_FACT_LIMIT;
+      const wanted=asked.map(({peer,evidence})=>{const ids=[...new Set(evidence)].filter(engineId).slice(0,left);left-=ids.length;return {peer,ids};})
+        .filter(item=>item.ids.length);
+      const over=asked.reduce((total,item)=>total+new Set(item.evidence.filter(engineId)).size,0)>RECALL_FACT_LIMIT?['recall_fact_limit']:[];
+      if(!wanted.length)return {record:null,listed:[],count:0,limitations:over};
+      const read=await Promise.all(wanted.map(item=>this.engine.factsById!(id,item.peer,item.ids,{sessions})));
+      const sourced=await Promise.all(wanted.map((item,index)=>this.factSources.sourced(principal,binding,id,item.peer,read[index]!.facts,scope)));
+      const all=sourced.flatMap((list,index)=>list.map(item=>({peer:wanted[index]!.peer,item})));
+      // Facts that cite their messages first, then the engine's order; numbered as stored.
+      const ordered=[...all.filter(({item})=>item.fact.exact===true),...all.filter(({item})=>item.fact.exact!==true)].map((entry,index)=>({...entry,n:index+1}));
+      const limitations=[...new Set([...read.flatMap(page=>page.limitations),...over,
+        ...ordered.some(({item})=>!item.exact)?['some_facts_cite_only_their_batch']:[]])].sort();
+      if(!ordered.length)return {record:null,listed:[],count:0,limitations};
+      const stored:StoredFact[]=ordered.map(({n,peer,item})=>({n,conclusion:item.fact.id,peer,exact:item.exact,by:item.by,sources:item.sources,more:item.more,
+        complete:item.complete,session:item.fact.session}));
+      const record=await this.derived.record({operation_id:'native-recall-facts:'+requestId,source:root,parents:[answer],kind:'memory_result',
+        content:Buffer.from(recallFactText(ordered.map(({n,item})=>({n,content:item.fact.content})))),producer:this.engine.id,producer_version:this.protocol,
+        configuration:{workspace:id,audience:scope.audience,facts:'recall'},provenance:{facts:stored,limitations}});
+      await this.current(id);await this.guards.prepareContext(record,this.protocol,actor,this.prepared,this.detect);
+      const value=(await this.guards.read('derived_artifacts:'+record.id,binding)).value as {text:string};
+      const texts=recallFactTexts(String(value.text??''),ordered.length);
+      if(!texts)await countMemoryStep(this.control,'source_tags',false);
+      const listed=ordered.slice(0,recallFactsListed),named=listed.map(({item})=>shownFirst(item).slice(0,recallFactSources));
+      const tags=await this.tags.tags(principal,binding,named.flat(),{historical:true});
+      const facts:RecallFact[]=listed.map(({n,item},index)=>({n,...texts?{text:cutText(texts[n-1]!,recallFactChars)}:{},exact:item.exact,by:item.by,
+        sources:named[index]!.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[{source:tag.source,tag:tag.tag,by:tag.by}]:[];}),
+        more:Math.max(0,item.readable.length-named[index]!.length)}));
+      if(texts)await this.prepared.allow(principal,facts.map(fact=>fact.text??''));
+      if(texts)await countMemoryStep(this.control,'source_tags',true);
+      return {record:record.id,listed:facts,count:ordered.length,limitations:texts?limitations:[...limitations,'fact_text_unavailable'].sort()};
+    } catch(error) {
+      if(bindingMoved(error))throw error;
+      console.warn(JSON.stringify({event:'memory_recall_facts_failed',engine:this.engine.id,code:error instanceof HttpError?error.code:'memory_recall_facts_error'}));
+      await countMemoryStep(this.control,'source_tags',false);
+      return {record:null,listed:[],count:0,limitations:['recall_facts_unavailable'],failed:true};
+    }
+  }
+  /**
+   * archive_read nocheh:memory:<record> (B5.2): fact `n` of a record of facts a turn or a recall read, or without `n` the
+   * first 20 facts' numbers and source tags. It opens only a per-turn block or a recall's facts record (never another
+   * record), of this reader's audience (the owner reads any) and of the current memory space, and never for a private
+   * answer. A fact opens only while nothing corrects memory, while the engine still holds it (a correction deletes the
+   * facts it replaces), and while none of its stored sources is retired, nor, for a fact that names only some of its
+   * messages, any message of its session (B6.3). The text is the fact's line of the record's guarded copy, read with
+   * the current binding, never the engine's raw fact; its sources are those this reader may read, the one its source
+   * line names first, tagged. Every result repeats the record's id as `source`, so a stored row cites it on its own.
+   */
+  async openFact(principal:Reader,recordId:string,n:number|null) {
+    if(!/^[a-f0-9]{64}$/.test(recordId)||n!==null&&!(Number.isSafeInteger(n)&&n>=1&&n<=RECALL_FACT_LIMIT))throw factUnavailable();
+    if(principal.answer!==undefined)throw factUnavailable();
+    const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding),retirements=this.contexts.access.retirements;
+    if(!workspace||!this.tags||!this.engine.factExists||!this.engine.factsById||!retirements)throw factUnavailable();
+    const current=await this.current(workspace.id),audience=principal.admin?'owner':this.principalAudience(principal);
+    const row=(await this.derived.pool.query(`SELECT id,kind,content_hash,provenance FROM derived_artifacts WHERE id=$1
+      AND kind IN ('memory_context','memory_result')`,[recordId])).rows[0];
+    const provenance=row?.provenance??{},configuration=provenance.configuration??{};
+    const facts:StoredFact[]=Array.isArray(provenance.facts)?provenance.facts:[];
+    if(!row||!facts.length||configuration.workspace!==current.row.id||audience!=='owner'&&configuration.audience!==audience)throw factUnavailable();
+    // Whose fact it is: a recall's record names each one's participant, a per-turn block its one subject.
+    const peerOf=(fact:StoredFact)=>typeof fact.peer==='string'?fact.peer:typeof provenance.subject==='string'?provenance.subject:null;
+    const valid=(fact:StoredFact)=>Number.isSafeInteger(fact?.n)&&engineId(fact.conclusion)&&Array.isArray(fact.sources)&&
+      fact.sources.every(id=>typeof id==='string'&&/^[a-f0-9]{64}$/.test(id))&&engineId(peerOf(fact));
+    const chosen=n===null?facts.slice(0,openedListed):facts.filter(fact=>fact?.n===n);
+    if(!chosen.length||!chosen.every(valid))throw factUnavailable();
+    if(await this.correcting(current))throw factUnavailable();
+    const [retired,sessions]=await Promise.all([retirements.retiredAmong(chosen.flatMap(fact=>fact.sources)),
+      retirements.retiredSessions(chosen.filter(fact=>fact.complete!==true&&typeof fact.session==='string').map(fact=>fact.session!))]);
+    const forgotten=(fact:StoredFact)=>fact.sources.some(id=>retired.has(id))||fact.complete!==true&&typeof fact.session==='string'&&sessions.has(fact.session);
+    const actor=principal.admin?current.principal:principal,space=current.row.id;
+    // The sources this reader may read, as learned (historical), the one each fact's source line names first.
+    const captured=await this.contexts.access.archive.capturedMany(chosen.flatMap(fact=>fact.sources));
+    const references=[...captured.values()].map(source=>source.reference);
+    const open=references.length?await this.contexts.access.readable(principal,references,current.binding,{historical:true}):new Map<string,boolean>();
+    const readableIds=[...new Set(chosen.flatMap(fact=>fact.sources))].filter(id=>open.get(id)===true);
+    const classes=readableIds.length?await this.sources.classesFor(readableIds):new Map();
+    const shown=(fact:StoredFact)=>{
+      const ordered=fact.sources.filter(id=>open.get(id)===true).map(id=>({id,bucket:bucketOf(classes.get(id)?.class??'unknown')}));
+      const header=headerSource(ordered);
+      return (header?[header,...ordered.filter(item=>item.id!==header.id)]:ordered).map(item=>captured.get(item.id)!.reference);
+    };
+    if(n===null) {
+      // The first facts and the source each one's line names; one still held by the engine and with no retired source.
+      const peers=[...new Set(chosen.map(fact=>peerOf(fact)!))];
+      const held=new Set((await Promise.all(peers.map(peer=>this.engine.factsById!(space,peer,chosen.filter(fact=>peerOf(fact)===peer).map(fact=>fact.conclusion),{sessions:null}))))
+        .flatMap(page=>page.facts.map(fact=>fact.id)));
+      const heads=chosen.map(fact=>forgotten(fact)||!held.has(fact.conclusion)?null:shown(fact)[0]??null);
+      const tags=await this.tags.tags(principal,current.binding,heads.filter((head):head is SourceReference=>head!==null),{historical:true});
+      await this.current(space);await this.prepared.audience.assert(principal);
+      return {source:'nocheh:memory:'+recordId,count:facts.length,facts:chosen.map((fact,index)=>{
+        const forgottenHere=forgotten(fact)||!held.has(fact.conclusion),tag=heads[index]?tags.get(heads[index]!.id):null;
+        return forgottenHere?{n:fact.n,unavailable:true}:{n:fact.n,by:fact.by,...tag?{tag:tag.tag}:{tag:null}};
+      })};
+    }
+    const fact=chosen[0]!;
+    if(forgotten(fact)||!await this.engine.factExists(space,peerOf(fact)!,fact.conclusion))throw factUnavailable();
+    // The record's guarded copy, prepared and read under the current binding, as recall reads its answer.
+    await this.guards.prepareContext({store:'derived',kind:'artifact',id:row.id,input_hash:row.content_hash},this.protocol,actor,this.prepared,this.detect);
+    const value=(await this.guards.read('derived_artifacts:'+row.id,current.binding)).value as {text?:unknown};
+    const line=guardedFactLine(String(value.text??''),facts.length,fact.n,row.kind==='memory_context'?fact.time??null:undefined);
+    if(line===null)await countMemoryStep(this.control,'source_tags',false);
+    const named=shown(fact),listed=named.slice(0,openedSources);
+    const tags=await this.tags.tags(principal,current.binding,listed,{historical:true});
+    const sources=listed.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[{source:tag.source,tag:tag.tag,by:tag.by}]:[];});
+    const text=line===null?null:cutText(line,openedText);
+    if(text!==null)await this.prepared.allow(principal,text);
+    await this.current(space);await this.prepared.audience.assert(principal);
+    return {source:'nocheh:memory:'+recordId,fact:fact.n,...text!==null?{text}:{},exact:fact.exact===true,by:fact.by,
+      at:listed.length?tags.get(listed[0]!.id)?.at??null:null,sources,more:Math.max(0,named.length-sources.length),
+      ...text===null?{limitations:['fact_text_unavailable']}:{}};
   }
   /** Whether the forwards-and-files participant wrote something done in these sessions (null: the whole space) that rests
    * on a message other than this turn's own, so a question is never answered from itself alone. */
