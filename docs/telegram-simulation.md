@@ -46,7 +46,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 | --- | --- | --- |
 | Capture and outages | Fsync before acknowledgment; duplicate updates, revisions and control-store failure lose no originals | `test_capture.py`, `test_telegram_http_fixture.py`, `archive.test.ts`, `stores.test.ts` |
 | Native Telegram delivery | Persian/emoji and long replies retain routing; replay adds no send; rate-limit waits and bounded retries preserve receipts; Markdown rejection and lost replies retain the audience; a send never transmitted, for example during a polling reconnect, retries under a fresh attempt while a transmitted request with a lost response stays uncertain | `test_telegram_simulation.py`, `test_capture.py`, `test_gateway.py`, `store-telegram-dispatch.test.ts` |
-| Access and topics | Owner/private, members who talk or are paused or switched off, strangers, General and named topics remain distinct; stale capabilities fail closed | `test_scopes.py`, `assistant.test.ts`, `store-retrieval.test.ts`, `members.test.ts`, `store-members.test.ts` |
+| Access and topics | Owner/private, members who talk or are paused or switched off, members' private chats and the owner's ask about one, strangers, General and named topics remain distinct; stale capabilities fail closed | `test_scopes.py`, `assistant.test.ts`, `store-retrieval.test.ts`, `members.test.ts`, `store-members.test.ts` |
 | Files and voice | Original bytes and hashes survive download failures; voice notes are transcribed before their reply, or archived with a status without a key | `store-preparation.test.ts`, `store-reprocessing.test.ts`, `store-voice-transcription.test.ts`, `worker.test.ts` |
 | Guarding | Literal masking preserves other content; owner edits survive; stale representation has no original fallback; bounded concurrent publication drains failed work and checkpoints more than 500 small fragments in separate batches | `store-guards.test.ts`, `store-prepared-context.test.ts`, `test_boundary.py` |
 | Retirement and edits | Retired sources/reactions leave future retrieval; pending delivery stops; originals and confirmed sends remain | `store-source-retirement.test.ts`, `test_exact_predecessor.py` |
@@ -285,7 +285,34 @@ card; read-only tasks; posting to other groups turned off
 (`member_post_not_allowed`); a member who
 left a group and is no longer reached there; four member jobs in one day, with
 no daily count; a member over a low daily message cap, who gets the limit reply
-once; and posts made in a chat's own name, which get nothing. Before an add that expects a line, the tester moves earlier
+once; and posts made in a chat's own name, which get nothing. Member private chat ([ADR-0262](adr/0262-member-private-chat.md)): the fake
+Telegram answers `getChatMember` from what it has shown of each person in each
+group. The scenarios cover a member in groups of two projects and a group of
+none, who reads all three privately and nothing else, lists tasks one project at
+a time (asked without one, the tool names the two lists), cannot open a task of a
+group they never joined or the owner's, and cannot add one or post to a group
+(`member_private_chat_reads_joined_groups`); group talk off, which leaves private
+chat on (`member_private_chat_with_group_talk_off`); a paused member and one with
+private chat off, who get the fixed private reply once a UTC day and are answered
+again at once when switched back on
+(`member_private_chat_off_or_paused_gets_fixed_reply`); the daily cap shared with
+group turns, with the private limit reply
+(`member_private_over_the_daily_cap`); the owner and a member never running as each
+other's profile (`owner_and_member_never_swap_profiles`); MEMBERMARKs in a
+member's message, Nocheh's reply, a note planted in the member's profile and in
+an unpruned ask profile, which never show in a group's read, another member's
+chat, the owner's turns, Honcho, long-term memory, Inbox suggestions, grants,
+sharing previews or learned facts, while the member's own search finds them
+(`member_private_chat_stays_with_the_member`); the owner asking about that member,
+answered in a separate message that quotes only that member's chat and is then
+gone from the owner's next turn and recall (`owner_asks_about_a_member`); a member's
+chat refused as a sharing rule's source (`member_chat_is_never_a_sharing_source`);
+and the re-check: a member removed while Nocheh missed the service message is no
+longer read there, one still in is read and the check recorded, no answer changes
+nothing within 30 days, and past 30 days the group is not read
+(`member_private_chat_rechecks_old_presence`). The sweep
+`private_canaries_never_left_the_owner` also checks that a member's marks never
+left that member's chat, except in the answer to the owner's ask. Before an add that expects a line, the tester moves earlier
 sent leave notes about other groups out of the last 24 hours, so earlier runs on
 a kept fixture never fill the cap on all lines; the group's own notes stay, so
 its own cap still holds. Dashboard calls sign
