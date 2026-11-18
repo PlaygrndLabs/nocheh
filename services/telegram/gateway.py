@@ -596,9 +596,8 @@ class TelegramService:
         A read, never a send: nothing is journaled. Anything Telegram does not answer plainly is no answer
         (`failed`), and the app then changes nothing."""
         chat,user=str(body.get('chat_id') or ''),str(body.get('user_id') or '')
-        # A group, supergroup or channel has a negative id, a person a positive one.
-        if not CHAT.fullmatch(chat) or int(chat)>=0 or not re.fullmatch(r'[1-9]\d{0,18}',user) or set(body)-{'chat_id','user_id'}:
-            raise ValueError('invalid_member_status')
+        # Which chat it is the served list says, below; the person is a raw Telegram user id.
+        if not chat or not re.fullmatch(r'[1-9]\d{0,18}',user) or set(body)-{'chat_id','user_id'}:raise ValueError('invalid_member_status')
         served=await asyncio.to_thread(self.policy.current,None,5.0,lambda served:served.group(served.resolve(chat)) is not None)
         group=served.group(served.resolve(chat))
         if group is None or served.address(group)[0]!=chat:raise ValueError('member_status_chat_not_allowed')
