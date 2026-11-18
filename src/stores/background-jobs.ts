@@ -2,7 +2,7 @@ import {randomBytes} from 'node:crypto';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
-import {conversationScope,ownerChat,ownerIds,telegramAccount,type OwnerIds} from '../assistant-policy.js';
+import {assertActingReader,conversationScope,ownerChat,ownerIds,telegramAccount,type OwnerIds} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {allowedIn,servedDestination} from '../destinations.js';
 import {members} from '../members.js';
@@ -370,7 +370,8 @@ export class BackgroundJobRepository {
     if(original.origin!=='live'||original.channel!=='telegram'||intake?.transport==='import'||intake?.state==='pending')throw new HttpError(403,'job_not_permitted');
     const payload=JSON.parse((await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0].payload.toString());
     const sender=conversationScope(this.access.policy(),payload,original.scope);
-    if(!sender)throw new HttpError(403,'job_not_permitted');
+    // A member's own private chat starts no job (step 4): it only reads and talks.
+    if(!sender||sender.member!==undefined)throw new HttpError(403,'job_not_permitted');
     return {turn,binding,source:source as SourceReference,requester:sender.owner||sender.user_id===this.access.policy().owner_id?null:sender.user_id};
   }
   private period(body:Record<string,unknown>){
@@ -403,8 +404,8 @@ export class BackgroundJobRepository {
   /** Ask to start a job: count and price what it reads, then record the proposal its card shows.
    * Nothing runs until whoever approves it presses Approve. */
   async start(principal:Reader,input:unknown) {
-    // A private answer only reads and talks (ADR-0249).
-    if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');
+    // A private answer, a member's private chat and the owner's ask about a member only read and talk (ADR-0249, step 4).
+    assertActingReader(principal);
     const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box','repo','machine','steps'].includes(key))||
       body.box!==undefined&&typeof body.box!=='boolean'||body.repo!==undefined&&(typeof body.repo!=='string'||!body.repo||body.repo.length>140)||
       body.machine!==undefined&&(typeof body.machine!=='string'||!body.machine.trim()||body.machine.length>40)||(body.machine===undefined)!==(body.steps===undefined))

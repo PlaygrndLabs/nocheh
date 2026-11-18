@@ -9,7 +9,7 @@ import type {GuardBinding} from './guards.js';
 import {nativeReconcileLimit} from './native-review.js';
 import {terminalLearningCodes} from './learning-engine.js';
 import {advanceReactionEpoch} from './reaction-state.js';
-import {outsideChat,ownerChat,settleTelegramChat} from '../assistant-policy.js';
+import {outsideChat,ownerChat,preparedMemberChat,settleTelegramChat} from '../assistant-policy.js';
 
 const waiting=(stage='admission',reason='prerequisite',delay=30000)=>observation('waiting',stage,0,Date.now()+delay,reason);
 const superseded=new Set(['native_review_missing','learning_job_missing','guard_context_changed','audience_context_changed','memory_context_retired','memory_refresh_required','learned_memory_not_found','memory_receipt_retired','memory_receipt_missing']);
@@ -179,7 +179,8 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       // Someone Nocheh doesn't serve costs no download and no model call. Skipping is final, so a chat this process has
       // not loaded yet (one recorded a moment ago) is looked up again first.
       const captured=await s.archive.captured(job);await settleTelegramChat(captured);
-      if(outsideChat(s.access.policy(),captured))return observation('skipped','admission',0,Date.now(),'not_allowed');
+      // A member's own private chat that is open now is prepared too (step 4); it stays outside every other reader.
+      if(outsideChat(s.access.policy(),captured)&&!await preparedMemberChat(s.access.policy(),captured))return observation('skipped','admission',0,Date.now(),'not_allowed');
       const before=await s.preparation.status(job);if(before.state==='completed'||before.state==='failed'||before.next_attempt>Date.now()+30000)return before;
       return s.preparation.run(job,async ref=>Buffer.from(string((await call('source.file',{file_id:ref})).bytes_base64,70*1024*1024),'base64'),s.detectorVersion,s.detect,authority);
     },

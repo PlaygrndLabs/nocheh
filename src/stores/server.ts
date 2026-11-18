@@ -46,7 +46,7 @@ import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
 import {withRecallPlaces} from './recall-places.js';
-import {readSetGroups} from '../spaces.js';
+import {memberPrivate,readSetGroups} from '../spaces.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -64,9 +64,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(req.method==='GET'&&path==='/internal/chats') {
       // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
-      // chat apart from the owner's account.
-      authorize(req,config.token);const owner=s.access.policy().owner_id;
-      return json(res,200,servedChats(await currentChats(),owner?{app:'telegram',external:owner}:null));
+      // chat apart from the owner's account; and each member's own private chat that is open now, marked member_private
+      // so the bot takes a member pass only there (step 4). A member change moves no epoch: the bot reads this list
+      // again when it is old or misses a chat, and storage checks every member pass again anyway.
+      authorize(req,config.token);const owner=s.access.policy().owner_id,directory=await currentChats();
+      return json(res,200,servedChats(directory,owner?{app:'telegram',external:owner}:null,id=>memberPrivate(id,directory)));
     }
     if(req.method==='POST'&&path==='/internal/chats/leave') {
       // The bot asks right before Nocheh leaves a group (ADR-0253): is it still pending from this add?

@@ -4,7 +4,7 @@ import { HttpError } from './http.js';
  * filter from the Hermes service, and the front door calls of Nocheh's own Telegram bot (ADR-0235). Turns and the brain's
  * own state go through the brain socket instead (ADR-0234). */
 export const runtimeOperations = ['source.file', 'guard.detect', 'action.execute', 'memory.filter','telegram.chat','telegram.approval',
-  'telegram.refusal','telegram.notice','telegram.status','telegram.identity','telegram.presence','telegram.reply','telegram.leave',
+  'telegram.refusal','telegram.notice','telegram.status','telegram.identity','telegram.presence','telegram.reply','telegram.leave','telegram.member_status',
   'usage.price','file.extract','voice.transcribe','image.read'] as const;
 export type RuntimeOperation = typeof runtimeOperations[number];
 export type RuntimeCall = (operation: RuntimeOperation, input: Record<string, unknown>, timeout?: number) => Promise<Record<string, unknown>>;

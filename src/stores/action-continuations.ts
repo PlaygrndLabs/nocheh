@@ -227,7 +227,8 @@ export class ActionContinuationRepository {
         const original=(await this.archive.pool.query('SELECT source_key,payload,scope FROM events WHERE id=$1',[row.event_id])).rows[0];
         const payload=JSON.parse(original.payload.toString());let scope:ReturnType<typeof conversationScope>=null;
         try{scope=conversationScope(this.access.policy(),payload,original.scope);}catch(error){if(!(error instanceof HttpError)||error.code!=='source_scope_mismatch')throw error;}
-        if(!scope)return this.close(id,'suppressed','conversation_not_selected');
+        // A member's own private chat never continues an action: it starts none (step 4).
+        if(!scope||scope.member!==undefined)return this.close(id,'suppressed','conversation_not_selected');
         if(ownerRejected(action,scope.owner))return this.close(id,'skipped','owner_rejected');
         // The asking turn's own reply goes first, then an earlier follow-up not yet ended (claimed, running, or failed with
         // a retry left), then a receipt that may still arrive, then siblings still running or awaiting a late receipt, so

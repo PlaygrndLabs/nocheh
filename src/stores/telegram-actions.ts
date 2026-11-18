@@ -4,7 +4,7 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {conversationScope,ownerChat,telegramAccount} from '../assistant-policy.js';
+import {assertActingReader,conversationScope,ownerChat,readOnlyReader,telegramAccount} from '../assistant-policy.js';
 import {chats,type ChatDirectory} from '../chats.js';
 import {freshMembers,members} from '../members.js';
 import {telegramDestination} from '../chats-telegram.js';
@@ -119,8 +119,9 @@ export class TelegramActionRepository {
   }
   async request(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
-    // A private answer only reads and talks; its own private chat is not a group it may post in (ADR-0249).
-    if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');
+    // A private answer, a member in their own private chat and the owner's ask about a member only read and talk; their
+    // private chat is not a group they may post in (ADR-0249, step 4).
+    assertActingReader(principal);
     const turn=await this.turns.binding(principal),binding=await this.guards.state(),source=await this.prepared.root(principal,binding),input=object(value);
     if(Object.keys(input).some(key=>!['destination','text'].includes(key)))throw new HttpError(400,'invalid_action');
     let channel:string|undefined,requester:string|null=null;
@@ -168,7 +169,7 @@ export class TelegramActionRepository {
   private async requester(event:string,scope:string):Promise<string|null> {
     const row=(await this.stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
     const sender=row?conversationScope(this.access.policy(),JSON.parse(row.payload.toString()),scope):null;
-    return sender&&!sender.owner?sender.user_id:null;
+    return sender&&!sender.owner&&sender.member===undefined?sender.user_id:null;
   }
   /** Groups this person may post to through Nocheh, by their chat ids: the owner every served group, first; a member the
    * group they asked in (`asked`, a group or topic) while they talk there, and, while they may post from there, every other
@@ -218,7 +219,7 @@ export class TelegramActionRepository {
   }
   /** The groups a live group turn's writer may post to (allowedGroups), with their known names, for exact destinations. */
   async destinations(principal:Reader) {
-    if(principal.admin||!principal.scope||principal.answer!==undefined||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'group_turn_required');
+    if(principal.admin||!principal.scope||readOnlyReader(principal)!==null||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'group_turn_required');
     const turn=await this.turns.binding(principal);if(turn.owner||turn.job)throw new HttpError(403,'group_turn_required');
     const source=await this.prepared.root(principal,await this.guards.state());
     if(source.store!=='archive')throw new HttpError(403,'external_effect_requires_live_turn');

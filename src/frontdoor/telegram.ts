@@ -64,6 +64,9 @@ export function telegramAdapter(options: Options): RuntimeAdapter {
     'telegram.reply': '/internal/telegram/reply',
     // Nocheh leaving a group someone else added it to (ADR-0253): {id, chat_id}, once by id.
     'telegram.leave': '/internal/telegram/leave',
+    // Whether a person is still in a group, asked of Telegram (getChatMember) before a member's private turn (step 4):
+    // {chat_id, user_id} -> {state:'done', status:'in'|'left'}; anything else changes nothing.
+    'telegram.member_status': '/internal/telegram/member_status',
   };
   return {
     id: 'telegram',
