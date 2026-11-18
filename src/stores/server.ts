@@ -7,7 +7,7 @@ import {telegramAddress} from '../frontdoor/telegram.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
-import {archiveFilters,matchesArchiveFilters,privateChatsParams} from '../archive-filters.js';
+import {archiveFilters,matchesArchiveFilters,privateChatsParams,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
@@ -37,7 +37,7 @@ import {memoryProblems} from './note-sources.js';
 import {searchTagged} from './native-memory.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
-import {currentChats} from './chats.js';
+import {currentChats,otherPrivateScopes} from './chats.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
@@ -341,6 +341,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(control&&req.method==='POST')return json(res,200,await controlStorageWorkflow(s.stores.control,principal,control[1]!,control[2]!,await readJson(req)));
       if(path==='/v1/workflows/migrations'||path.startsWith('/v1/workflows/migrations/'))throw new HttpError(409,'legacy_migration_not_applicable');
     }
+    // The private-chat split of the Messages list and search (step 4), resolved from the chat rows in the store.
+    const privateScopes=async(filters:ArchiveFilters):Promise<ArchiveFilters>=>filters.private_chats?
+      {...filters,private_scopes:await otherPrivateScopes(s.stores.control,s.access.policy())}:filters;
     const result=async(value:unknown,prepared=false)=>{
       if(!principal.admin){if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
       return json(res,200,value);
@@ -471,7 +474,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const mode=url.searchParams.get('mode')??'text';
         if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);
         if(mode!=='text')throw new HttpError(400,'invalid_search_mode');
-        return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
+        return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),await privateScopes(archiveFilters(url.searchParams))),true);
       }
       if(path==='/v1/archive/page')return result(await s.sources.page(principal,{chat:url.searchParams.get('chat')??'',from:url.searchParams.get('from')??'',
         to:url.searchParams.get('to')??'',after:url.searchParams.get('after')??'',count:limit(url.searchParams.get('limit'),30,50)}),true);
@@ -505,7 +508,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99].scope:null});
       }
       if(path==='/v1/data') {
-        const after=url.searchParams.get('after')??'',filters=archiveFilters(url.searchParams);if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
+        const after=url.searchParams.get('after')??'',filters=await privateScopes(archiveFilters(url.searchParams));if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
         const candidates=(await s.stores.archive.query("SELECT e.id,e.channel,e.scope,e.source_id,e.revision,e.kind,e.origin,e.occurred_at,e.received_at,e.original_text,e.payload,(SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=e.id) AS artifact_kinds FROM events e WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1)) AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2) AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message') AND ($5::text[] IS NULL OR (e.scope=ANY($5::text[]))=$6) ORDER BY e.received_at DESC,e.id DESC LIMIT $4",[after,filters.scope,filters.kind,filters.reply?201:51,...privateChatsParams(filters)])).rows;
         const states=candidates.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
           error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[candidates.map(row=>row.id)])).rows:[];

@@ -1,6 +1,6 @@
 import {admin,boundReader,type Reader} from '../access.js';
 import {HttpError,string} from '../http.js';
-import {matchesArchiveFilters,type ArchiveFilters} from '../archive-filters.js';
+import {matchesArchiveFilters,privateChatsParams,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
@@ -365,16 +365,20 @@ export class SourceRepository {
     // A member's private chat and the owner's ask about a member search only the chats they may read (the bound groups and
     // that member's chat, step 4), so other chats' hits never crowd theirs out of the first 200; canRead still decides each.
     const narrowed=binding?this.boundScopes(principal):null;
-    const among=narrowed&&binding?.mode==='on'?(await this.stores.archive.query(`SELECT id FROM events WHERE scope=ANY($2::text[])
-      AND to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1) ORDER BY id LIMIT 5000`,[query,narrowed])).rows.map(row=>row.id as string):null;
+    // The private-chat split (step 4) is applied in the query too, so other chats' hits never crowd the asked ones out of
+    // the first 200; matchesArchiveFilters still checks each hit.
+    const split=privateChatsParams(filters);
+    const among=(narrowed||split[0])&&binding?.mode==='on'?(await this.stores.archive.query(`SELECT id FROM events WHERE ($2::text[] IS NULL OR scope=ANY($2::text[]))
+      AND ($3::text[] IS NULL OR (scope=ANY($3::text[]))=$4) AND to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1) ORDER BY id LIMIT 5000`,
+      [query,narrowed,...split])).rows.map(row=>row.id as string):null;
     const rows=await (binding?.mode==='on'?this.stores.derived.query(`SELECT s.event_id AS id,r.content FROM guard_sources s
       JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision
       WHERE s.kind='events' AND s.state='ready' AND to_tsvector('simple',r.search_text) @@ plainto_tsquery('simple',$1)
         AND ($2::text[] IS NULL OR s.event_id=ANY($2::text[]))
       ORDER BY ts_rank(to_tsvector('simple',r.search_text),plainto_tsquery('simple',$1)) DESC,s.id LIMIT 200`,[query,among]):
       this.stores.archive.query(`SELECT id FROM events WHERE to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
-        AND ($2::text[] IS NULL OR scope=ANY($2::text[]))
-        ORDER BY ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) DESC,id LIMIT 200`,[query,narrowed]));
+        AND ($2::text[] IS NULL OR scope=ANY($2::text[])) AND ($3::text[] IS NULL OR (scope=ANY($3::text[]))=$4)
+        ORDER BY ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) DESC,id LIMIT 200`,[query,narrowed,...split]));
     const stateRows=principal.admin&&rows.rows.length?(await this.stores.control.query('SELECT event_id,state FROM dispatches WHERE event_id=ANY($1::text[])',[rows.rows.map(row=>row.id)])).rows:[];
     const states=new Map(stateRows.map(row=>[row.event_id,row.state]));
     const reviews=principal.admin?await actionReviews(this.stores.control,rows.rows.map(row=>row.id),'separated'):new Map();

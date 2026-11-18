@@ -705,6 +705,20 @@ export async function loadChatSnapshot(control:pg.Pool,policy:Pick<AssistantPoli
   finally{db.release();}
 }
 
+/**
+ * The events.scope values of every private chat that is not the owner's (step 4: members' chats and strangers'), read
+ * from the chat rows in the control store, never from this process's chat directory, so a process that has not loaded
+ * one yet still leaves them out: each such chat's id and the app ids it has had. The owner's private chat is the one the
+ * owner's Telegram id names, else the policy's owner chat, as for a directory load (loadChatSnapshot); with neither,
+ * every private chat counts as someone else's.
+ */
+export async function otherPrivateScopes(control:Db|Pick<pg.Pool,'query'>,policy:Pick<AssistantPolicy,'owner_id'|'owner_chat'>):Promise<string[]> {
+  return (await control.query<{scope:string}>(`WITH owner AS (SELECT COALESCE((SELECT i.chat_id FROM chat_ids i JOIN chat_connections n ON n.id=i.connection_id
+      WHERE n.app='telegram' AND i.external_id=$1 ORDER BY i.chat_id LIMIT 1),$2::text) AS id),
+    others AS (SELECT c.id FROM chats c WHERE c.kind='private' AND c.parent_id IS NULL AND c.id IS DISTINCT FROM (SELECT id FROM owner))
+    SELECT id AS scope FROM others UNION SELECT i.external_id FROM chat_ids i JOIN others o ON o.id=i.chat_id ORDER BY 1`,
+    [policy.owner_id||null,ownerChat(policy)||null])).rows.map(row=>row.scope);
+}
 /** Every chats and chat_ids row as `db` sees them, with each connection's app. */
 async function readChatRows(db:Db):Promise<{chats:ChatRow[];ids:ChatIdRow[]}> {
   return {chats:(await db.query<ChatRow>(`SELECT c.id,n.app,c.kind,c.parent_id,c.topic_key,c.state,c.title,c.is_forum,c.account_id,c.app_type
