@@ -158,8 +158,8 @@ export async function seedChats(db:Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'que
  * - MEMBER_GP: GP1 and GP2 switched on, GP3 switched off. Telegram last saw them 'in' GP1 and GP3, 'left' GP2, and 'in'
  *   UNSERVED. GP4 has no row and no Telegram row: they talk there (no row counts as on) but do not reach it.
  * - MEMBER_NG: NG1 switched on; NG2 has no row. Telegram saw them 'in' both, so NG2 is "New here" and reached.
- * - MEMBER_GP_OFF: GP4 switched on and MEMBER_NG_OFF: NG2 switched on, both added by Telegram user ID and never seen in a
- *   group, so they talk there but reach no group (no Telegram row), and accounts() never lists them.
+ * - MEMBER_GP_OFF and MEMBER_NG_OFF: no switch rows and never seen in a group (no Telegram row), so they reach no group,
+ *   no group lists them, and accounts() never lists them.
  * BOB stays a stranger; the owner is never a member.
  */
 export const OWNER_ACCOUNT=accountIdFor('telegram',OWNER),BOB_ACCOUNT=accountIdFor('telegram',BOB);
@@ -179,7 +179,7 @@ export function fixtureMembers(changes:Readonly<Record<string,Partial<Omit<Membe
     accounts:[{account_id:MEMBER_GP_ACCOUNT,member_id:MEMBER_GP_ID},{account_id:MEMBER_NG_ACCOUNT,member_id:MEMBER_NG_ID},
       {account_id:MEMBER_GP_OFF_ACCOUNT,member_id:MEMBER_GP_OFF_ID},{account_id:MEMBER_NG_OFF_ACCOUNT,member_id:MEMBER_NG_OFF_ID}],
     chats:[{member_id:MEMBER_GP_ID,chat_id:GP1,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP2,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP3,enabled:false},
-      {member_id:MEMBER_NG_ID,chat_id:NG1,enabled:true},{member_id:MEMBER_GP_OFF_ID,chat_id:GP4,enabled:true},{member_id:MEMBER_NG_OFF_ID,chat_id:NG2,enabled:true}],
+      {member_id:MEMBER_NG_ID,chat_id:NG1,enabled:true}],
     presence:[{account_id:MEMBER_GP_ACCOUNT,chat_id:GP1,state:'in'},{account_id:MEMBER_GP_ACCOUNT,chat_id:GP2,state:'left'},
       {account_id:MEMBER_GP_ACCOUNT,chat_id:GP3,state:'in'},{account_id:MEMBER_GP_ACCOUNT,chat_id:UNSERVED,state:'in'},
       {account_id:MEMBER_NG_ACCOUNT,chat_id:NG1,state:'in'},{account_id:MEMBER_NG_ACCOUNT,chat_id:NG2,state:'in'}],
