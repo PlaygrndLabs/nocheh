@@ -23,7 +23,8 @@ import {memberIdFor} from '../src/members.js';
 import type {MemberGroup,MemberGroupRef,MemberItem,MemberList,MemberPerson} from '../src/member-wire.js';
 import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from '../src/stores/member-api.js';
 import type {ChatState} from '../src/chat-wire.js';
-import {labeledPlaceholders,promptProblem,promptSchema,reminderTexts,sourceTexts} from '../src/prompts.js';
+import {labeledPlaceholders,memberPrivateDailyLimitReply,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,sourceTexts} from '../src/prompts.js';
+import {matchesArchiveFilters,otherPrivateScopes} from '../src/archive-filters.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
@@ -143,13 +144,13 @@ function memberRoute(route:string,body:unknown):unknown {
  const request=memberChangeRequest(body);
  return memberCommand(request.operation_id,{id:one[1],...request},()=>{
   const member=previewMembers[at];if(!member)throw new HttpError(404,'member_not_found');
-  const {state,talk,jobs,post,tools,tasks,groups}=request.changes;
+  const {state,talk,jobs,post,tools,tasks,private_chat,groups}=request.changes;
   for(const [chat,on] of Object.entries(groups??{})){
    if(!joined(chat))throw new HttpError(400,'member_group_invalid');
    if(on&&!member.switches.has(chat)&&member.presence.get(chat)!=='in')throw new HttpError(409,'member_group_not_seen');
   }
   if(state)member.state=state;
-  Object.assign(member.permissions,Object.fromEntries(Object.entries({talk,jobs,post,tools,tasks}).filter(([,value])=>value!==undefined)));
+  Object.assign(member.permissions,Object.fromEntries(Object.entries({talk,jobs,post,tools,tasks,private_chat}).filter(([,value])=>value!==undefined)));
   for(const [chat,on] of Object.entries(groups??{}))member.switches.set(chat,on);
   memberRevision++;return {revision:memberRevision,member:memberItem(member)};
  });
@@ -266,7 +267,10 @@ const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpre
     'memory.evidence':'Memory evidence is supplied as source-labelled data.','memory.notes_review':'Maintain useful private memory.',
     'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.','images.read':'Write out the text in this image, then describe it.',
     'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.','tasks.reminder_texts':reminderTexts,'memory.source_texts':sourceTexts,
-    'telegram.member_daily_limit':'Sorry, that is all for today. Ask again tomorrow.','telegram.group_tools_texts':'allowed_follow_up: Allowed by this group; it runs now and its answer follows.\nallowed: Allowed by this group; it runs now.'} as Record<string,string>};
+    'telegram.member_daily_limit':'Sorry, that is all for today. Ask again tomorrow.','telegram.group_tools_texts':'allowed_follow_up: Allowed by this group; it runs now and its answer follows.\nallowed: Allowed by this group; it runs now.',
+    // Step 4: a member's private chat, its daily-limit and not-allowed replies, and the owner-only local laws line.
+    'reply.member':'This is the private chat of a member the owner added. It only reads. If asked who can see this chat, say the owner can read it.',
+    'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'telegram.not_allowed_private':notAllowedPrivateReply,'members.local_laws':membersLocalLaws} as Record<string,string>};
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
@@ -519,7 +523,7 @@ function inboxRecord(kind:string,recordId:string):any{
 /** Messages page fixture: synthetic kept messages, the assistant's copies, hiding, versions and imports. */
 const messagesFixture=(()=>{
  const hex=(n:string)=>n.repeat(32),ago=(minutes:number)=>new Date(Date.now()-minutes*60000).toISOString();
- const ids={tour:hex('e1'),tourReply:hex('e2'),forecast:hex('e3'),packing:hex('e4'),booking:hex('e5'),rejected:hex('e6'),archivedVoice:hex('e7'),photo:hex('e8'),reaction:hex('e9'),browser:hex('ea'),browserReply:hex('eb')};
+ const ids={tour:hex('e1'),tourReply:hex('e2'),forecast:hex('e3'),packing:hex('e4'),booking:hex('e5'),rejected:hex('e6'),archivedVoice:hex('e7'),photo:hex('e8'),reaction:hex('e9'),browser:hex('ea'),browserReply:hex('eb'),memberAsk:hex('ec'),memberReply:hex('ed')};
  const photoFile=hex('f1'),archivedVoiceFile=hex('f2'),transcriptVersion=hex('d1'),olderTranscript=hex('d2'),archivedStatus=hex('d3');
  const owner={id:42,first_name:'Owner'},mira={id:73,first_name:'Mira',last_name:'Chen'};
  type Message={id:string;scope:string;kind:string;text:string|null;minutes:number;payload:any;state?:string;error?:string;attempts?:number;retired?:boolean;action?:any;replies?:string[];artifacts?:any[];derived?:any[];transcript?:string};
@@ -540,6 +544,9 @@ const messagesFixture=(()=>{
   {id:ids.reaction,scope:'-10042',kind:'telegram_update',text:null,minutes:2100,payload:{message_reaction:{chat:{id:-10042},message_id:70,user:mira,new_reaction:[{type:'emoji',emoji:'👍'}]}}},
   {id:ids.browser,scope:'42',kind:'browser_input',text:'Summarize what we planned for the trip.',minutes:3000,payload:{text:'Summarize what we planned for the trip.'},replies:[ids.browserReply]},
   {id:ids.browserReply,scope:'42',kind:'browser_delivered_message',text:'Friday: aurora tour at 21:30. Saturday: ridge hike if the sky is clear.',minutes:2999,payload:{text:'Friday: aurora tour at 21:30. Saturday: ridge hike if the sky is clear.'}},
+  // Step 4: Mira, a member, asks Nocheh in her own private chat; Messages keeps it under "Members' chats".
+  {id:ids.memberAsk,scope:'73',kind:'telegram_update',text:'Which night did the Aurora planning group pick for the tour?',minutes:20,payload:{message:{message_id:31,from:mira,chat:{id:73,type:'private'},text:'Which night did the Aurora planning group pick for the tour?'}},state:'done',replies:[ids.memberReply]},
+  {id:ids.memberReply,scope:'73',kind:'telegram_delivered_message',text:'Aurora planning picked Friday, with the 21:30 tour.',minutes:19,payload:{message:{message_id:32,from:{id:1,first_name:'Nocheh',is_bot:true},chat:{id:73,type:'private'},text:'Aurora planning picked Friday, with the 21:30 tour.'}}},
  ];
  const byId=new Map(list.map(m=>[m.id,m]));
  const contentTypes=(m:Message)=>m.kind==='telegram_update'&&m.payload.message_reaction?['reaction']:[...new Set([...(m.payload.message?.photo?['photo']:[]),...(m.artifacts??[]).map(a=>a.kind)])];
@@ -575,7 +582,11 @@ const messagesFixture=(()=>{
   const method=req.method;
   if(method==='GET'&&(route==='/data'||route==='/search')){
    const q=(url.searchParams.get('q')??'').toLowerCase(),kind=url.searchParams.get('kind')??'',scope=url.searchParams.get('scope')??'',reply=url.searchParams.get('reply')??'';
+   // The members' chats split, by the real filter over the preview's directory (step 4).
+   const split=url.searchParams.get('private_chats') as 'hide'|'only'|null;
+   const others=split?otherPrivateScopes():[];
    const rows=list.filter(m=>(!q||(m.text??'').toLowerCase().includes(q))&&(!scope||m.scope===scope)
+    &&(!split||matchesArchiveFilters({scope:m.scope},undefined,{kind:'',scope:'',reply:'',private_chats:split,private_scopes:others}))
     &&(!kind||kind==='incoming'&&['telegram_update','browser_input'].includes(m.kind)||kind==='assistant'&&m.kind.endsWith('_delivered_message'))
     &&(!reply||m.kind==='telegram_update'&&!m.payload.message_reaction&&(reply==='approval_pending'?m.action?.state==='proposed':reply==='not_started'?!m.state:m.state===reply))).map(row);
    json(res,200,route==='/search'?rows:{records:rows,next:null});return true;
@@ -741,7 +752,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/profiles'){const current=[{owner:true,scope:'42',profile},{owner:false,scope:'-10042',profile:'fixture-group'}];
    // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
    return json(res,200,{profiles:current,history_profiles:[...current,{owner:false,scope:'42',profile:'nocheh-'+'a1'.repeat(12),private_answer:true,
-    answer_group:'“Aurora planning” › Iceland planning',answer_at:'2026-11-12T10:00:00+00:00'},{owner:false,scope:'42',profile:'nocheh-'+'b2'.repeat(12),private_answer:true}]});}
+    answer_group:'“Aurora planning” › Iceland planning',answer_at:'2026-11-12T10:00:00+00:00'},{owner:false,scope:'42',profile:'nocheh-'+'b2'.repeat(12),private_answer:true},
+    // Step 4: Mira's own private chat, and the owner's question about a member (4b), each its own profile.
+    {owner:false,scope:'73',profile:'nocheh-'+'c3'.repeat(12),member:true},{owner:false,scope:'42',profile:'nocheh-'+'d4'.repeat(12),member_read:true,answer_at:'2026-11-14T09:00:00+00:00'}]});}
   if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy.\n§\nAlice is planning a trip to Iceland.\n§\nThe lunch poll now offers tacos on Friday.',citations:[],
     // Each note with where it came from, in the owner's words (ADR-0257).
     entries:[{target:'memory',text:'Synthetic memory: interested in astronomy.',from:'owner',label:'Your own messages in your private chat'},

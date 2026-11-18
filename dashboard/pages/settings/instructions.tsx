@@ -36,6 +36,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Added after the rules above when Nocheh answers a group question in the asker’s private chat, after a tap on Answer privately. Such an answer only reads.',
   },
   {
+    key: 'reply.member',
+    title: 'Members’ private chats',
+    hint: 'Added after the rules above when Nocheh replies to a member in their own private chat with it. There it only reads the groups they joined and their own chat, and shows those groups’ tasks without changing them. Keep the line that says you can read the chat: Nocheh never tells a member their chat is private from you.',
+  },
+  {
     key: 'memory.evidence',
     title: 'Using remembered facts',
     hint: 'Explains the remembered facts that come with each message.',
@@ -71,9 +76,19 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Sent in a group, as a reply, when a member asks Nocheh something after using up the daily messages you set on the Members page. At most once a UTC day in each group. No model is used.',
   },
   {
+    key: 'telegram.member_private_daily_limit',
+    title: 'Reply to a member past the daily limit, in private',
+    hint: 'Sent in a member’s private chat with Nocheh when they write after using up the daily messages you set on the Members page, which count their group and private messages together. At most once a UTC day. No model is used.',
+  },
+  {
     key: 'telegram.not_allowed_private',
-    title: 'Reply to strangers in private',
-    hint: 'Sent when anyone but you writes to Nocheh in a private chat, at most once a day per person. No model is used.',
+    title: 'Reply to people who may not talk in private',
+    hint: 'Sent when someone who may not talk to Nocheh privately writes to it in a private chat: someone who isn’t a member, or a member who is paused or has their private chat switched off. At most once a day per person. No model is used.',
+  },
+  {
+    key: 'members.local_laws',
+    title: 'Local laws line on the Members page',
+    hint: 'Shown only to you, at the top of the Members page: a reminder to check what your local laws allow before you read your members’ private chats with Nocheh. Never sent to anyone.',
   },
   {
     key: 'telegram.approval_card',
