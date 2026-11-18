@@ -17,7 +17,7 @@ import {GP1,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_GP_OFF_
   OWNER,fixtureChats,fixtureDirectory,seedChats,seedMembers} from './fixture-groups.js';
 
 // Step 4b (ADR-0262): the owner asks, in their own private chat, what a member said in their own private chat with Nocheh.
-test('an ask about a member is recorded only from the owner\'s own words, once, and is answered only while the member\'s chat is bound',
+test('an ask about a member is recorded only from the owner\'s own words, once, and is answered once, apart, only while the member\'s chat is open',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -26,11 +26,12 @@ test('an ask about a member is recorded only from the owner\'s own words, once, 
   const served=[...GP_GROUP_IDS,...NG_GROUP_IDS],policy={enabled:true,owner_id:OWNER,owner_chat:OWNER,group_ids:served};
   const restoreChats=installChatsForTest(fixtureDirectory(served));
   const restoreMembers=installMembersForTest({members:[],accounts:[],chats:[],presence:[],owner_account:null});
-  const notices:any[]=[],starts:any[]=[],frontDoor=fixtureTelegram();
+  const notices:any[]=[],starts:any[]=[],replies:any[]=[],frontDoor=fixtureTelegram((operation,input)=>{if(operation==='telegram.reply'&&!input.cancel&&!input.observe_only)replies.push(input);});
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>policy,
     runtime:async(operation,input)=>{
       if(operation==='guard.detect')return {literals:[]};
-      if(operation==='run.start'||operation==='run.resume'){starts.push(operation);return {state:'running'};}
+      if(operation==='run.start'){starts.push(input);return {state:'done',reply:{text:'She said the trip is on Friday.',session_id:'ask-session'}};}
+      if(operation==='run.resume')return {state:'not_found'};
       if(operation==='telegram.notice'){notices.push(input);return {state:'done'};}
       throw Error('runtime_not_expected '+operation);
     },
@@ -106,17 +107,40 @@ test('an ask about a member is recorded only from the owner\'s own words, once, 
     assert.equal((await s.memberAsks.row(queued.id))!.state,'queued');
     await stores.control.query(`INSERT INTO dispatches(event_id,source_reference,state,attempts) VALUES($1,$2,'done',1)
       ON CONFLICT(event_id) DO UPDATE SET state=excluded.state`,[asked.source.id,asked.source]);
-    // Storage binds an ask's reader to the member's chat only where that binding is wired; without it the ask fails closed:
-    // no turn starts, nothing is read, and the owner hears once that it was not answered.
+    // A member whose private chat closed after the ask was recorded is not read: no turn starts, nothing is read, and the
+    // owner hears once that it was not answered.
+    await stores.control.query('UPDATE members SET private_chat=false WHERE id=$1',[MEMBER_GP_ID]);
     const closed=await run(queued.id);
     assert.equal(closed.state,'failed');
     const row=(await s.memberAsks.row(queued.id))!;
     assert.deepEqual([row.state,row.error_code],['failed','member_chat_closed']);
-    assert.deepEqual(starts,[],'no turn ran');
+    assert.equal(starts.length,0,'no turn ran');
     assert.equal(notices.length,1);
     assert.match(notices[0].text,/Mira Test/);assert.match(notices[0].text,/can’t read/);
     assert.equal((await run(queued.id)).state,'failed','a closed ask stays closed');
     assert.equal(notices.length,1,'the owner hears it once');
+    await stores.control.query('UPDATE members SET private_chat=true WHERE id=$1',[MEMBER_GP_ID]);
+
+    // An open chat is read: one read-only turn under a pass that names the ask and no lane, reading as the owner's chat
+    // and never as the owner; its answer goes to the owner's chat once, as a separate member_read message that names its
+    // source first.
+    const again=await owner({text:'What did Mira Test say about the bus?'});
+    const open=await s.memberAsks.ask(again.principal,{member:'Mira Test',question:'What did she say about the bus?'});
+    await stores.control.query(`INSERT INTO dispatches(event_id,source_reference,state,attempts) VALUES($1,$2,'done',1)
+      ON CONFLICT(event_id) DO UPDATE SET state=excluded.state`,[again.source.id,again.source]);
+    assert.equal((await run(open.id)).state,'completed');
+    const answered=(await s.memberAsks.row(open.id))!;
+    assert.deepEqual([answered.state,answered.send_key],['answered','member-ask:'+open.id]);
+    assert.equal(starts.length,1,'one turn');
+    const started=starts[0],claims=JSON.parse(Buffer.from(String(started.archive_credential).split('.')[1]!,'base64url').toString());
+    assert.deepEqual([claims.member_read,claims.scope,claims.space,claims.lane,claims.member,claims.answer],[open.id,OWNER,OWNER,undefined,undefined,undefined]);
+    assert.deepEqual([started.member_read.ask,started.chat],[open.id,OWNER]);
+    assert.equal(replies.length,1);
+    assert.equal(replies[0]!.send_class,'member_read');
+    assert.match(replies[0]!.text,/^🔒 From \u2068“Mira Test”\u2069’s private chat with Nocheh:\n\nShe said the trip is on Friday\.$/);
+    assert.equal(notices.length,1,'no notice for an answered ask');
+    assert.equal((await run(open.id)).state,'completed','an answered ask is not answered again');
+    assert.equal(replies.length,1);
 
     // An ask past its time expires unanswered, and the owner hears it.
     const late=await owner({text:'What did Mira Test say?'});

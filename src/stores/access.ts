@@ -25,6 +25,10 @@ export function boundChat(principal:Reader):string|null {
   const kind=boundReader(principal);
   return (kind==='member'||kind==='memberRead')&&typeof principal.memberChat==='string'&&principal.memberChat?principal.memberChat:null;
 }
+/** Whether a bound reader of this kind reads its own turn's message in the owner's private chat: an answer its /start
+ * (ADR-0249), and the owner's ask about a member the owner's own question that asked it (step 4b). A member reads their
+ * own chat whole, through boundChat. */
+const ownTurn=(kind:ReturnType<typeof boundReader>)=>kind==='answer'||kind==='memberRead';
 /** Why an original can never be learned, nor made learnable by the owner's yes (step 4): it is in a private chat that is
  * not the owner's (`member_chat`, a member's or anyone else's, any kind, imports included), or it is Nocheh's answer to
  * the owner's ask about a member (`member_read`). Null for anything else. */
@@ -59,14 +63,14 @@ export class SourceAccessRepository {
     if(!['telegram','browser'].includes(source.channel))return false;
     // A bound reader reads what bindReads resolved for this request (ADR-0249, ADR-0262): an answer the groups frozen in
     // its record and of its own private chat only its own turn's message (the /start that opened it); a member their
-    // joined groups and all of their own private chat; the owner's ask about a member only that member's chat. Nothing
-    // without its binding.
+    // joined groups and all of their own private chat; the owner's ask about a member that member's chat and the owner's
+    // own question that asked it. Nothing without its binding.
     const kind=boundReader(principal),reads=kind?principal.reads:undefined,mine=boundChat(principal);
     if(kind&&!reads)return false;
     // An original belongs to the chat its raw scope names through chat_ids (current or old id), and to the topic its
     // observed audience names through that chat's topic rows; an id with no row reads nothing (ADR-0252).
     const chat=sourceChat(source);
-    const own=kind==='answer'&&reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope,inMine=mine!==null&&chat===mine;
+    const own=ownTurn(kind)&&reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope,inMine=mine!==null&&chat===mine;
     if(chat===null||(kind?!own&&!inMine&&!readSetGroups(reads!).includes(chat):chat!==principal.scope))return false;
     const observed=(await this.relationships.describe(reference)).audience;
     const space=observed&&observed.chat_id===source.scope?observedChat(source.channel,observed):null;
@@ -158,7 +162,7 @@ export class SourceAccessRepository {
     const placed:{reference:SourceReference;source:CapturedSource;chat:string;own:boolean;inMine:boolean}[]=[];
     for(const item of open) {
       if(!['telegram','browser'].includes(item.source.channel)||kind&&!reads){deny(item.reference.id);continue;}
-      const chat=sourceChat(item.source),own=kind==='answer'&&item.reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope,
+      const chat=sourceChat(item.source),own=ownTurn(kind)&&item.reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope,
         inMine=mine!==null&&chat===mine;
       if(chat===null||(kind?!own&&!inMine&&!readSetGroups(reads!).includes(chat):chat!==principal.scope)){deny(item.reference.id);continue;}
       placed.push({...item,chat,own,inMine});
@@ -259,8 +263,9 @@ export class SourceAccessRepository {
       return {...principal,reads:readSet({home:found.chat,whole:found.groups.map(group=>group.chat)}),memberChat:found.chat};
     }
     if(principal.scope!==owner)throw closed();
+    // Only the turn of the owner's own message that asked it: its pass names that message as its turn.
     const found=await memberAskReads(this.stores.control,principal.memberRead!,owner);
-    if(!found)throw closed();
+    if(!found||found.event!==principal.turnEvent)throw closed();
     return {...principal,reads:readSet({home:owner}),memberChat:found.chat};
   }
   async space(reference:SourceReference):Promise<string|null> {

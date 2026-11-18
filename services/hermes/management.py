@@ -69,7 +69,9 @@ def dispatch(root, model, policy, body):
                                    # named by where it was asked and when, as its receipt keeps them.
                                    **({'private_answer':True,**answer_receipt(path)} if metadata.get('answer') else {}),
                                    # A member's own private chat (step 4): never the owner's, whatever its chat is.
-                                   **({'member':True} if metadata.get('member') else {})}
+                                   **({'member':True} if metadata.get('member') else {}),
+                                   # The owner's ask about a member (step 4b): never the owner's own chat either.
+                                   **({'member_read':True} if metadata.get('member_read') else {})}
         return {'profiles':profiles,'history_profiles':list(historical.values())}
     if action == 'prompts':
         from .prompts import DEFAULTS, LIMIT

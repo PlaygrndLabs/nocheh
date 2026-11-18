@@ -76,8 +76,12 @@ class MemberScopeTests(unittest.TestCase):
         self.assertIsNone(self.resolve(update(-20, 4567, 'group'), '-20', scope='-20', member=MEMBER), 'a group')
         self.assertIsNone(self.resolve(update(4567, 4567), MEMBER_CHAT, scope=MEMBER_CHAT), 'a plain pass: the chat is never served')
         self.assertIsNone(self.resolve(update(4567, 4567), MEMBER_CHAT, scope=None), 'as the owner: not the owner writing')
-        # The owner's ask about a member is part 4b's: no turn here yet.
-        self.assertIsNone(self.resolve(update(123, 123), OWNER, scope=OWNER, member_read='a' * 32))
+        # The owner's ask about a member (4b) is the owner writing in the owner's own chat, never a member's turn; a pass
+        # that names both, or an ask in a member's chat, is refused.
+        asked = self.resolve(update(123, 123), OWNER, scope=OWNER, member_read='a' * 32)
+        self.assertEqual((asked.chat_id, asked.member), (OWNER, ''))
+        self.assertIsNone(self.resolve(update(4567, 4567), MEMBER_CHAT, scope=MEMBER_CHAT, member_read='a' * 32), "an ask in a member's chat")
+        with self.assertRaises(ValueError):self.resolve(update(4567, 4567), MEMBER_CHAT, scope=MEMBER_CHAT, member=MEMBER, member_read='a' * 32)
         for claims in ({'scope': None, 'member': MEMBER}, {'scope': MEMBER_CHAT, 'member': MEMBER, 'answer': 'a' * 32}):
             with self.subTest(claims=claims), self.assertRaises(ValueError):
                 self.resolve(update(4567, 4567), MEMBER_CHAT, **claims)
@@ -153,6 +157,10 @@ class MemberScopeTests(unittest.TestCase):
         self.assertTrue(_same_chat(mine, {**mine, 'guard_epoch': 5}))
         self.assertFalse(_same_chat(mine, {**mine, 'member': OTHER}), "never another member's conversation")
         self.assertFalse(_same_chat(mine, {key: value for key, value in mine.items() if key != 'member'}), 'nor an unmarked one')
+        # The owner's ask about a member (4b) reads as the owner's chat but is never the owner's conversation, nor another ask's.
+        owner = {'space': OWNER, 'owner': False, 'generation': GENERATION, 'guard_epoch': 6}
+        self.assertFalse(_same_chat(owner, {**owner, 'member_read': 'a' * 32}), 'an ask is no one else\'s conversation')
+        self.assertFalse(_same_chat({**owner, 'member_read': 'a' * 32}, {**owner, 'member_read': 'b' * 32}), 'nor another ask\'s')
 
     def test_a_member_turn_reads_only_answers_tools_with_the_member_rules(self):
         removed, allowed = turn_tools(False, False, member=True)

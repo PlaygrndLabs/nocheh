@@ -77,7 +77,7 @@ test('a member chat reads the served groups the member joined and has on, confir
     const ask='a'.repeat(32),event=digest('fixture:ask:1');
     await db.query(`INSERT INTO owner_member_asks(id,owner_event,member_id,question,state,expires_at) VALUES($1,$2,$3,'What did they say?','running',now()+interval '1 hour')`,
       [ask,event,MEMBER_NG_ID]);
-    assert.deepEqual(await memberAskReads(db,ask,OWNER),{ask,member:MEMBER_NG_ID,chat:MEMBER_NG_CHAT});
+    assert.deepEqual(await memberAskReads(db,ask,OWNER),{ask,event,member:MEMBER_NG_ID,chat:MEMBER_NG_CHAT});
     for(const change of ["state='queued'","expires_at=now()-interval '1 minute'"]) {
       await db.query(`UPDATE owner_member_asks SET ${change} WHERE id=$1`,[ask]);
       assert.equal(await memberAskReads(db,ask,OWNER),null,change);
@@ -142,6 +142,25 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
       assert.equal(await s.access.canLearn(said,binding),false);
       await assert.rejects(s.access.setConsent(owner,said,{enabled:true,expected_revision:0,operation_id:key+':consent:'+person}),{status:409,code:'learning_consent_member_chat'});
       const consent=await s.access.consent(owner,said);assert.deepEqual([consent.effective,consent.consentable],[false,false]);
+    }
+
+    // The owner's ask about a member (4b): bound to that member's chat, it reads that chat and the owner's own question
+    // that asked it; never another member's chat, a group, or anything else in the owner's chat.
+    {
+      const question=await capture(OWNER,OWNER,'What did Mira say?','private'),earlier=await capture(OWNER,OWNER,'Synthetic owner note','private');
+      const mira=await capture(MEMBER_GP,MEMBER_GP,'Synthetic note from Mira','private'),nils=await capture(MEMBER_NG,MEMBER_NG,'Synthetic note from Nils','private');
+      const inGroup=await capture(GP1,MEMBER_GP,'Synthetic group note','supergroup'),ask='9'.repeat(32);
+      await stores.control.query(`INSERT INTO owner_member_asks(id,owner_event,member_id,question,state,started_at,expires_at)
+        VALUES($1,$2,$3,'What did Mira say?','running',now(),now()+interval '1 hour')`,[ask,question.id,MEMBER_GP_ID]);
+      const asked=await s.access.bindReads(await turn(question,OWNER,{memberRead:ask}));
+      assert.deepEqual([asked.memberChat,readSetGroups(asked.reads!)],[MEMBER_GP_CHAT,[]]);
+      for(const [why,source,allowed] of [['the member\'s chat',mira,true],['the owner\'s question',question,true],['another member\'s chat',nils,false],
+        ['a group',inGroup,false],['the owner\'s chat otherwise',earlier,false]] as const)
+        assert.equal(await s.access.canRead(asked,source,binding),allowed,why);
+      // Only the turn of the message that asked it.
+      await assert.rejects(s.access.bindReads(await turn(earlier,OWNER,{memberRead:ask})),{status:409,code:'member_chat_closed'},'another turn');
+      await stores.control.query(`UPDATE owner_member_asks SET state='answered',answered_at=now() WHERE id=$1`,[ask]);
+      await assert.rejects(s.access.bindReads(await turn(question,OWNER,{memberRead:ask})),{status:409,code:'member_chat_closed'},'an answered ask reads nothing');
     }
 
     // Tasks (D14): a list in each of P1 and P2, and one in GP2, which MEMBER_GP left.

@@ -74,8 +74,9 @@ export async function memberReads(db:Db,chat:string,owner:string|null=ownerChatN
   return {member:rows[0]!.member,chat:rows[0]!.chat,groups:Object.freeze(groups.map(group=>Object.freeze(group)))};
 }
 
-/** What the owner's ask about a member reads (step 4b): the ask, its member and that member's own private chat. */
-export interface MemberAskReads {readonly ask:string;readonly member:string;readonly chat:string}
+/** What the owner's ask about a member reads (step 4b): the ask, the owner's message that asked it (`event`), its member
+ * and that member's own private chat. */
+export interface MemberAskReads {readonly ask:string;readonly event:string;readonly member:string;readonly chat:string}
 /**
  * The reads of the owner's ask `ask` when it is running and inside its time: the asked member's own private chat, open
  * now as memberReads opens it (the member active with private chat on). A member with no such chat, or with more than
@@ -83,7 +84,7 @@ export interface MemberAskReads {readonly ask:string;readonly member:string;read
  */
 export async function memberAskReads(db:Db,ask:string,owner:string|null=ownerChatNow()):Promise<MemberAskReads|null> {
   if(typeof ask!=='string'||!/^[a-f0-9]{32}$/.test(ask)||owner===null)return null;
-  const rows=(await db.query<{chat:string;member:string}>(`SELECT c.id AS chat,m.id AS member FROM owner_member_asks k JOIN members m ON m.id=k.member_id
+  const rows=(await db.query<{chat:string;member:string;event:string}>(`SELECT c.id AS chat,m.id AS member,k.owner_event AS event FROM owner_member_asks k JOIN members m ON m.id=k.member_id
     JOIN chat_accounts a ON a.member_id=m.id JOIN chats c ON c.account_id=a.id
     WHERE k.id=$1 AND k.state='running' AND k.expires_at>now() AND m.state='active' AND m.private_chat
       AND c.kind='private' AND c.parent_id IS NULL AND c.id<>$2 AND NOT EXISTS(SELECT 1 FROM chats o WHERE o.id=$2 AND o.account_id=a.id)
@@ -91,7 +92,7 @@ export async function memberAskReads(db:Db,ask:string,owner:string|null=ownerCha
   if(rows.length!==1)return null;
   const known=chats().get(rows[0]!.chat);
   if(known&&(known.kind!=='private'||known.owner))return null;
-  return {ask,member:rows[0]!.member,chat:rows[0]!.chat};
+  return {ask,event:rows[0]!.event,member:rows[0]!.member,chat:rows[0]!.chat};
 }
 
 /**

@@ -23,7 +23,7 @@ import {memberIdFor} from '../src/members.js';
 import type {MemberGroup,MemberGroupRef,MemberItem,MemberList,MemberPerson} from '../src/member-wire.js';
 import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from '../src/stores/member-api.js';
 import type {ChatState} from '../src/chat-wire.js';
-import {labeledPlaceholders,memberPrivateDailyLimitReply,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,sourceTexts} from '../src/prompts.js';
+import {labeledPlaceholders,memberPrivateDailyLimitReply,memberReadFrame,memberReadTexts,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,sourceTexts} from '../src/prompts.js';
 import {matchesArchiveFilters,otherPrivateScopes} from '../src/archive-filters.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
@@ -270,7 +270,9 @@ const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpre
     'telegram.member_daily_limit':'Sorry, that is all for today. Ask again tomorrow.','telegram.group_tools_texts':'allowed_follow_up: Allowed by this group; it runs now and its answer follows.\nallowed: Allowed by this group; it runs now.',
     // Step 4: a member's private chat, its daily-limit and not-allowed replies, and the owner-only local laws line.
     'reply.member':'This is the private chat of a member the owner added. It only reads. If asked who can see this chat, say the owner can read it.',
-    'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'telegram.not_allowed_private':notAllowedPrivateReply,'members.local_laws':membersLocalLaws} as Record<string,string>};
+    'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'telegram.not_allowed_private':notAllowedPrivateReply,'members.local_laws':membersLocalLaws,
+    'reply.member_read':'This answers the owner\'s question about what a member said in their own private chat with Nocheh. It only reads that chat.',
+    'telegram.member_read':memberReadFrame,'telegram.member_read_texts':memberReadTexts} as Record<string,string>};
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},

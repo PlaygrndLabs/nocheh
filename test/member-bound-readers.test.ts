@@ -40,8 +40,6 @@ const answerOnly:readonly [string,string][]=[
   ['src/stores/audience.ts',"if(answer!==undefined&&(!principal.reads"],
   ['src/stores/audience.ts','const project=answer!==undefined?'],
   ['src/stores/audience.ts','...(answer!==undefined?{answer}:{})'],
-  // The delivery check: an answer goes only to the owner's own private chat.
-  ['src/assistant-policy.ts','if(principal.answer!==undefined)return !!selected&&selected.owner'],
   // The answer's own runtime profile key.
   ['src/stores/runtime-profile.ts',"...(principal.answer!==undefined?['answer:'+principal.answer]:[])"],
   // The answer record's bookkeeping in dispatch.
@@ -52,25 +50,13 @@ const answerOnly:readonly [string,string][]=[
   // The answer's own binder (bindReads hands it only an answer reader).
   ['src/stores/private-answers.ts','if(principal.answer===undefined)return principal;'],
 ];
-/**
- * The effect and turn sites part A switches to boundReader in the same change (D9): allowed while they still ask the
- * answer claim, and gone once they do. The integration empties this list.
- */
-const switchedByPartA:readonly [string,string][]=[
-  ['src/assistant-policy.ts',"if(principal.answer!==undefined&&(source.channel!=='telegram'"],
-  ['src/stores/telegram-turn.ts','if(input.principal.answer!==undefined) {'],
-  ['src/stores/telegram-actions.ts',"if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');"],
-  ['src/stores/telegram-actions.ts','||principal.answer!==undefined||principal.purpose'],
-  ['src/stores/controlled-actions.ts',"if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');"],
-  ['src/stores/background-jobs.ts',"if(principal.answer!==undefined)throw new HttpError(403,'private_answer_read_only');"],
-];
 
 test('only the answer-only sites ask the answer claim; every other bound-reader check asks boundReader (D2)',()=>{
   const found:[string,string][]=[];
   for(const file of sources())for(const line of readFileSync(servicesFile(file),'utf8').split('\n'))
     if(/answer[!=]==undefined/.test(line))found.push([file,line]);
   const matches=(sites:readonly [string,string][],[file,line]:[string,string])=>sites.some(([at,piece])=>at===file&&line.includes(piece));
-  const stray=found.filter(site=>!matches(answerOnly,site)&&!matches(switchedByPartA,site));
+  const stray=found.filter(site=>!matches(answerOnly,site));
   assert.deepEqual(stray.map(([file,line])=>file+': '+line.trim()),[],'a site that must ask boundReader still asks the answer claim');
   // Each answer-only site is still there, so the list cannot go stale unnoticed.
   for(const [file,piece] of answerOnly)assert.ok(found.some(([at,line])=>at===file&&line.includes(piece)),`${file}: ${piece}`);

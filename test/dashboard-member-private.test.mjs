@@ -62,3 +62,11 @@ test('the local laws line is the owner’s text, else the built-in one, and noth
   );
   assert.equal(localLawsLine({texts: {}, defaults: {}}), null);
 });
+
+test('every member and ask text the owner can edit is listed on Settings › Assistant', async () => {
+  const {readFileSync} = await import('node:fs');
+  const page = readFileSync('dashboard/pages/settings/instructions.tsx', 'utf8');
+  for (const key of ['reply.member', 'telegram.member_private_daily_limit', 'telegram.not_allowed_private', 'members.local_laws',
+    'reply.member_read', 'telegram.member_read', 'telegram.member_read_texts'])
+    assert.ok(page.includes(`key: '${key}'`), key);
+});
