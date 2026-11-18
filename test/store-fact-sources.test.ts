@@ -113,7 +113,9 @@ test('recalled facts name their sources per turn: the reader\'s receipts, its zo
       {session_id:keys.owner,speaker:{id:'owner',kind:'person'},project:null,mentioned_projects:[],mentioned_people:[]}:
       {session_id:keys.group,speaker:{id:'bob',kind:'person'},project:null,mentioned_projects:[],mentioned_people:[]}) as any;
     const records=async()=>new Set((await stores.derived.query("SELECT operation_id FROM derived_artifacts WHERE provenance->'configuration'->>'workspace'=$1",[workspace])).rows.map(row=>row.operation_id));
-    const bounded=async(id:string)=>(await stores.derived.query('SELECT provenance,configuration_hash FROM derived_artifacts WHERE id=$1',[id])).rows[0];
+    const row=async(id:string)=>(await stores.derived.query('SELECT provenance,configuration_hash FROM derived_artifacts WHERE id=$1',[id])).rows[0];
+    // A block's facts live on its raw parent, which the guard never reads (M1).
+    const bounded=async(id:string)=>row((await row(id)).provenance.parents[0].id);
 
     // A group turn: its speaker's facts in its own session, by Telegram's names, in UTC.
     summaryMessage=remote(tea);
@@ -122,11 +124,13 @@ test('recalled facts name their sources per turn: the reader\'s receipts, its zo
     assert.match(groupText,/^\[conversation summary, through 2025-11-03\]\nSummary of /,'the summary names the day of its last message');
     assert.match(groupText,/\nSource \[by=person\]: “Bob” · this chat · 2025-11-03\n {2}\d\. 14:13 Bob's PIN is still 4321 \(\+1 source\)\n/,
       'the fact about Bob names Bob, his time in UTC, and counts the owner\'s question it also cites');
-    assert.match(groupText,/\nSource \[by=person\] \(not exact; learned with other messages\): “Bob” · this chat · 2025-11-03\n {2}\d\. 14:13 Bob answers questions\n/);
+    // Learned with its batch, of which Honcho keeps only Bob's "yes": where and when, never Bob as its sender (H1).
+    assert.match(groupText,/\nSource \[by=person\] \(not exact; learned with other messages\): learned in this chat on 2025-11-03\n {2}\d\. 14:13 Bob answers questions\n/);
     assert.match(groupText,/\nSource \[by=person\] \(not exact; some of its messages are not available here\): not available here\n {2}\d\. --:-- Bob took something back\n {2}\d\. --:-- Bob knows the bank time/,
       'a retired message and one of the owner\'s private chat are never shown');
     for(const never of ['Europe/Berlin','the owner','15:13','Meeting with the bank','(@bob_gp)','(@sam_owner)'])assert.ok(!groupText.includes(never),'a group never reads '+never);
     const groupRecord=await bounded(group.record);
+    assert.equal((await row(group.record)).provenance.facts,undefined,'the guarded record carries no source id');
     const facts=Object.fromEntries(groupRecord.provenance.facts.map((fact:any)=>[fact.conclusion,fact]));
     assert.deepEqual([facts[pin].sources,facts[pin].by,facts[pin].exact,facts[pin].complete,facts[pin].more],[[answer.id,question.id],'person',true,true,1]);
     assert.ok(!JSON.stringify(groupRecord.provenance).includes(own.id),'the group\'s record holds no id of the owner\'s private chat');
@@ -137,7 +141,7 @@ test('recalled facts name their sources per turn: the reader\'s receipts, its zo
     summaryMessage=null;
     const owner=await (s.memory as any).sessionContext(current,'owner',own,true);
     assert.match(owner.text,/\nSource \[by=owner\]: the owner · this chat · 2025-11-03\n {2}1\. 15:12 The owner meets the bank at 3$/);
-    assert.equal(owner.exact,true);assert.deepEqual(owner.limitations,[]);
+    assert.equal(owner.exact,false);assert.deepEqual(owner.limitations,['summary_has_no_exact_citations'],'every fact is exact, but Honcho\'s summary cites nothing');
     assert.match(owner.material.text,/\nSource \[by=forward\]: the owner, forwarded from a channel shown as “Air X” · this chat · 2025-11-05\n {2}1\. 15:12 The flight moved to 07:25$/);
 
     // The same facts again reuse their records; a changed source is a new record, never a conflict (no 409).

@@ -208,17 +208,23 @@ export class HonchoEngine implements MemoryEngine {
       for(const fact of chunk) {
         const node=nodes.get(fact.id);
         if(!node){fact.complete=false;continue;}
-        fact.writes=[...new Set<string>(node.messages.map((m:any)=>m.message_id))];fact.exact=node.exact_citations;fact.complete=!node.messages_truncated;
+        // Complete only for a whole citation list: a batch holds only the observed peer's messages, never the others' the
+        // fact may rest on (H:src/deriver/deriver.py), and a fact with no message named says nothing of where it came from.
+        fact.writes=[...new Set<string>(node.messages.map((m:any)=>m.message_id))];fact.exact=node.exact_citations;
+        fact.complete=node.exact_citations===true&&!node.messages_truncated&&node.messages.length>0;
       }
     }
     return [...limitations].sort();
   }
-  async facts(space:string,participant:string,options:{sessions:string[]|null;size:number;cursor:string|null}):Promise<EngineFactPage> {
+  async factBatches(space:string,facts:EngineFact[]):Promise<string[]> {
+    return this.batches(space,facts.map(fact=>({fact,key:'',uncited:fact.exact===null&&!fact.writes.length})));
+  }
+  async facts(space:string,participant:string,options:{sessions:string[]|null;size:number;cursor:string|null;batches?:boolean}):Promise<EngineFactPage> {
     if(!Number.isSafeInteger(options.size)||options.size<1||options.size>100||
       options.cursor!==null&&(typeof options.cursor!=='string'||!options.cursor||options.cursor.length>2048))throw new HttpError(400,'invalid_fact_request');
     if(options.sessions&&!options.sessions.length)return {facts:[],next:null,limitations:[]};
     const page=await this.list(space,participant,options.sessions,options.size,options.cursor??'');
-    return {facts:page.items.map(item=>item.fact),next:page.next,limitations:await this.batches(space,page.items)};
+    return {facts:page.items.map(item=>item.fact),next:page.next,limitations:options.batches===false?[]:await this.batches(space,page.items)};
   }
   async factsById(space:string,participant:string,ids:string[],options:{sessions:string[]|null}) {
     if(!Array.isArray(ids)||ids.length>256||ids.some(id=>!nativeId(id)))throw new HttpError(400,'invalid_fact_request');
@@ -238,13 +244,13 @@ export class HonchoEngine implements MemoryEngine {
   }
   /** Honcho's profile takes its most-derived half by `times_derived desc, created_at desc, id`
    * (H:src/crud/representation.py), so the same order is rebuilt here from three pages of the stock list. */
-  async mostDerived(space:string,participant:string,options:{sessions:string[]|null}) {
+  async mostDerived(space:string,participant:string,options:{sessions:string[]|null;batches?:boolean}) {
     if(options.sessions&&!options.sessions.length)return {facts:[],complete:true,limitations:[]};
     const items:Listed[]=[];let cursor='',pages=0;
     do{const page=await this.list(space,participant,options.sessions,100,cursor,{times_derived:{gte:2}});items.push(...page.items);cursor=page.next??'';pages++;}
     while(cursor&&pages<3);
     items.sort((a,b)=>b.fact.derived-a.fact.derived||(a.key<b.key?1:a.key>b.key?-1:0)||(a.fact.id<b.fact.id?-1:a.fact.id>b.fact.id?1:0));
-    return {facts:items.map(item=>item.fact),complete:!cursor,limitations:await this.batches(space,items)};
+    return {facts:items.map(item=>item.fact),complete:!cursor,limitations:options.batches===false?[]:await this.batches(space,items)};
   }
   async citationCoverage(space:string):Promise<EngineCoverage> {
     const found=await this.call(this.base(space)+'/nocheh/citation-coverage');

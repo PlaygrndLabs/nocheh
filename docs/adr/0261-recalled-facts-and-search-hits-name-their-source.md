@@ -210,7 +210,8 @@ turn's own message and answer stay.
   `messages_truncated`); such a fact is never exact, and a failed or old
   plugin leaves it with no messages (`fact_batches_unavailable`,
   `fact_batches_unsupported`, `fact_batches_invalid`) without failing the read.
-  `GET /citation-coverage` counts how many live facts cite their messages.
+  `GET /citation-coverage` and `citationCoverage()` can count how many live
+  facts cite their messages; nothing calls them until step 4.
   No Honcho code or setting changes, and nothing is learned again.
 - **From fact to message.** One query maps a fact's messages to Nocheh's
   receipts that are done, not retired and in the reader's audience (the
@@ -222,11 +223,22 @@ turn's own message and answer stay.
   come first, then the rest in citation order. `by` follows ADR-0257's groups
   over every source, readable or not: `person`, `forward` or `file` when one of
   them is there, `mixed` for more than one, else `nocheh`, and `owner` only
-  when every source is the owner's own typing and the fact cites them; a batch
-  that would read `owner` reads `nocheh`. The source line names the first
+  when every source is the owner's own typing and the fact cites them. A fact
+  that is not exact also rests on messages Nocheh cannot see: Honcho's deriver
+  reads every peer's messages of a batch but keeps only the observed peer's as
+  its batch (`H:src/deriver/deriver.py`), and a cut citation list leaves some
+  out. Those count as another person's words, so such a fact reads `person`
+  (or `mixed` with a forward or a file), never `owner` or `nocheh`. A cited
+  list is exact only when it is whole. The source line names the first
   readable source that is a person's, a forward or a file, else the first not
   the owner's, else the first: a fact about Bob that cites the owner's question
   and Bob's "yes" reads `Source [by=person]: “Bob” · this chat · 2026-11-03`.
+  A fact that is not exact and names only the observed peer's own messages
+  names no sender, only where and when: in GP1, an uncited fact about the
+  owner learned from Bob's "Alex owes me 500" and the owner's "ok" reads
+  `Source [by=person] (not exact; learned with other messages): learned in “GP1” on 2026-11-05`,
+  in the block, in `memory_recall` (its sources with `by=unknown`) and when
+  opened.
 - **A turn's block.** Each block of long-term memory a turn reads (a group's
   speaker within the turn's session; the owner across the space; the owner's
   forwards and files, 100 facts each, as Honcho's own context held) lists its
@@ -239,30 +251,39 @@ turn's own message and answer stay.
   The summary's header names the day of the last message it covers. Only the
   summary and the fact lines go through the guard; every line must come back
   starting with its own number and time, and a model line that reads like a
-  source line or header gets a leading `(`. The block keeps the 20,000-character
+  source line, header or fact line gets a leading `(` (after its invisible
+  characters and markdown marks, in any case, or with `[by=` anywhere). The
+  block keeps the 20,000-character
   limit, the oldest facts left out first with `[N older facts left out]`.
 - **The block's record.** The block is named by its bounded record,
-  `nocheh:memory:<id>`, which keeps every fact's conclusion, exactness, `by`,
-  time, every source in order, how many it did not show, whether Honcho named
-  all of its messages (`complete`) and its session. The record's configuration
-  holds a digest of that, so a changed source makes a new record and the same
-  facts reuse theirs. `exact_citations` is true only when every fact shown is
-  exact (`some_facts_cite_only_their_batch` otherwise). Prefetch builds the
+  `nocheh:memory:<id>`, whose raw parent (Honcho's output, which the guard
+  never reads) keeps every fact's conclusion, exactness, `by`, time, every
+  source in order, how many it did not show, whether Honcho named all of its
+  messages (`complete`: only a whole citation list; a batch never is) and its
+  session; only the block's text is checked for secrets on the turn path. The
+  record's configuration holds a digest of that, so a changed source makes a
+  new record and the same facts reuse theirs. History retention never prunes
+  a block of facts. `exact_citations` is true only when every fact shown is
+  exact and no summary is shown (`some_facts_cite_only_their_batch`,
+  `summary_has_no_exact_citations` otherwise). Prefetch builds the
   same block. When the owner's turn has no learned session to read, the
   owner's profile is rebuilt from the same list as Honcho picks it: its 25
-  most-derived facts, then the newest, up to 50.
+  most-derived facts, then the newest, up to 50; the plugin is asked only
+  about the 50 chosen. A plugin that cannot give batches is counted as a
+  `source_tags` problem as well as named in the block.
 - **Prose when facts can't be named.** An engine without `facts`, a fact list
-  or a tag that could not be read, or a guard that moved a fact line gives the
-  block as before, in prose named by its session, with
-  `source_tags_unavailable`; the failure is counted as `source_tags`.
+  or a tag request that could not be read, or a guard that moved a fact line
+  gives the block as before, in prose named by its session, with
+  `source_tags_unavailable`; the failure is counted once as `source_tags`.
 - **`memory_recall`.** Its answer is named by its own record
   (`nocheh:memory:<answer id>`, no longer the workspace id), and its facts by a
   second record (`facts_source`). It lists `facts`: at most 12, cited ones
   first, each with `n`, its text (at most 240 characters), `exact`, `by`, its
   first two readable sources tagged and how many more, and `evidence_count`.
-  Every fact the answers read, up to 200, is stored in the facts record with
-  all its sources, read within the sessions the recall asked; its texts are
-  guarded and line-checked (`fact_text_unavailable` drops the texts, never the
+  Every fact the answers read, up to 200, is stored with all its sources on an
+  unguarded record whose child, the facts record, holds only their texts,
+  read within the sessions the recall asked; its texts are guarded and
+  line-checked (`fact_text_unavailable` drops the texts, never the
   record). `evidence_sources` stays only where facts can't be listed
   (`recall_facts_unavailable`, counted).
 - **Opening a fact.** `archive_read` takes `nocheh:memory:<id>` with `fact`
@@ -274,10 +295,12 @@ turn's own message and answer stay.
   block or a recall's facts record, of the reader's own audience (the owner
   reads any) in the current memory space, and never for a private answer.
 - **Retire = forget, for facts.** A fact does not open while a correction is
-  running, once Honcho no longer holds it, or once any of its stored sources
-  is retired. A fact whose stored sources may be incomplete (Honcho named only
-  part of its batch, or a cited message did not map) counts as retired when
-  any message of its Honcho session is. Storage's retired route reports a
+  running, once Honcho no longer holds it, or once its record rests on a
+  retired message, by the same rule the retired route uses, so no fact of a
+  withheld record opens. A fact whose stored sources may be incomplete (any
+  fact learned with its batch, a cut citation list, or a cited message that
+  did not map) counts as retired when any message of its Honcho session is.
+  Storage's retired route reports a
   record of facts or a recall's answer as retired when any of its evidence is,
   and lists it in `retired_records`; Hermes's retirement plan then withholds
   every stored row that cites it (a recall, an opened fact) and names the
@@ -315,8 +338,8 @@ turn's own message and answer stay.
   own rule.
 - **Listing every evidence message in `memory_recall`.** Replaced: up to 256
   ids said nothing about which fact each supported and cost up to about 9,000
-  tokens; 12 facts with their first sources and two record ids cost about
-  1,100, and every fact still opens by its number.
+  tokens; 12 facts with two tagged sources each and two record ids cost
+  about 2,000 to 2,400, and every fact still opens by its number.
 - **Taking a batch-only fact's first messages as its sources.** Not chosen: the
   plugin names at most 8 messages of a batch, so a retired one could be left
   out; such a fact is forgotten when any message of its session is retired.
@@ -348,10 +371,15 @@ turn's own message and answer stay.
 - A failed tag is counted as `source_tags`; the read still answers.
 - Step 2: a turn's memory reads its facts with their sources, a few hundred
   tokens more for a full owner block and about the same for a group; a recall
-  is smaller than before. Each block adds one fact list beside the context
-  read, one receipts query, one batched read check and one tag request, and the
-  plugin only for uncited facts. Each recall keeps one more derived record,
-  and a block a new pair whenever its facts or their sources change.
+  with 12 facts listed costs about 2,000 to 2,400 tokens, less than the 256
+  evidence ids it replaces could (about 9,000) but more than a recall that
+  read few; it is replayed from history until compaction. Each block adds one
+  fact list beside the context read, one receipts query, one batched read
+  check and one tag request (its guarded copies read in one query), and the
+  plugin only for uncited facts; the guard checks only the block's text, not
+  its source ids. Each recall keeps two more derived records, and a block a
+  new pair whenever its facts or their sources change, kept by history
+  retention.
 - What the owner loses in step 2:
   - Nocheh picks a turn's facts with Honcho's newest-first rule; facts tied at
     the 100th place may differ. The owner's profile is exact unless more than
@@ -368,7 +396,19 @@ turn's own message and answer stay.
   - A fact a correction deleted no longer opens by its number, and none opens
     while a correction runs; the model recalls again.
   - Retiring one message forgets every fact of its Honcho session whose stored
-    sources may be incomplete.
+    sources may be incomplete, which is every fact learned with its batch.
+  - Retirement works record by record: one retired message withholds every
+    stored row that cites a record holding any fact resting on it (up to 100
+    facts of a turn's block, 200 of a recall), the rows of facts that did not
+    rest on it too, and no fact of that record opens again. In the owner's
+    private chat one retired learned message withholds every stored recall
+    whose facts record holds a batch fact from that chat.
+  - A batch fact names no sender: its source line says only where and when.
+  - After a fresh start deletes the old memory space's receipts, a record from
+    that space can no longer apply the session rule; its facts no longer open
+    (another memory space), but a stored row citing it is withheld only for a
+    retired message it names.
   - Recall's prose answer is still not sourced sentence by sentence.
-  - Citation coverage is counted by the plugin but not yet shown (step 4).
+  - Citation coverage can be counted by the plugin, but nothing calls it until
+    step 4.
 </consequences>

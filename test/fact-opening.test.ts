@@ -8,6 +8,7 @@ import {mcpTools} from '../src/mcp/tools.js';
 import {privateAnswerRoute} from '../src/stores/private-answers.js';
 import {scopedRoute} from '../src/security/broker.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
+import {factRecords} from '../src/stores/fact-sources.js';
 import {installChatsForTest} from '../src/chats.js';
 import {legacyDirectory} from './fixture-groups.js';
 
@@ -56,8 +57,12 @@ function recallFixture(state:{conclusions:Conclusion[];evidence:string[];guard?:
     }
     throw Error('unexpected_control_query '+sql);
   }};
-  const retirements={retiredAmong:async(ids:readonly string[])=>new Set(ids.filter(id=>state.retired?.includes(id))),
-    retiredSessions:async(sessions:readonly string[])=>new Set(sessions.filter(id=>state.retiredSessions?.includes(id)))};
+  // The retired route's rule, record by record (SourceRetirementRepository.retiredRecords), over the fixture's records.
+  const retirements={retiredRecords:async(ids:readonly string[])=>{
+    const found=await factRecords(derived.pool as any,ids);
+    return new Set([...found.values()].filter(record=>record.facts.some(fact=>fact.sources.some(id=>state.retired?.includes(id))||
+      fact.complete!==true&&typeof fact.session==='string'&&state.retiredSessions?.includes(fact.session))).map(record=>record.id));
+  }};
   const access={stores:{control},policy:()=>({owner_id:'123'}),recall:(principal:Reader)=>({space:principal.space,group:GP1}),retirements,
     archive:{captured:async()=>({reference:root}),capturedMany:async(ids:readonly string[])=>new Map(ids.map(id=>[id,{reference:ref(id)}]))},
     readable:async(_p:Reader,refs:any[],_b:unknown,options:any)=>{assert.equal(options.historical,true);return new Map(refs.map(r=>[r.id,!state.unreadable?.includes(r.id)]));}};
@@ -66,18 +71,21 @@ function recallFixture(state:{conclusions:Conclusion[];evidence:string[];guard?:
     read:async(id:string)=>({value:{text:guarded.get(id.slice('derived_artifacts:'.length))??''}})}};
   const derived={record:async(input:any)=>{
     const id=digest(input.operation_id),content=String(input.content);
-    records.set(id,{id,kind:input.kind,content,content_hash:digest(content),provenance:{...input.provenance,configuration:input.configuration}});
+    records.set(id,{id,kind:input.kind,content,content_hash:digest(content),
+      provenance:{...input.provenance,...input.parents?{parents:input.parents}:{},configuration:input.configuration}});
     return {store:'derived',kind:'artifact',id,input_hash:digest(content)};
   },pool:{query:async(sql:string,values:any[])=>{
-    assert.match(sql,/kind IN \('memory_context','memory_result'\)/,'only a block or a recall\'s records open');
-    const found=records.get(values[0]);return {rows:found&&['memory_context','memory_result'].includes(found.kind)?[found]:[]};
+    assert.match(sql,/kind IN \('memory_context','memory_result'\)|kind='memory_result'/,'only a block or a recall\'s records open');
+    const kinds=sql.includes("kind='memory_result'")?['memory_result']:['memory_context','memory_result'];
+    return {rows:(values[0] as string[]).flatMap(id=>{const found=records.get(id);return found&&kinds.includes(found.kind)?[found]:[];})};
   }}};
   const binding={generation:'g',epoch:1,mode:'on'};
   const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,root:async()=>root,allow:async(_p:unknown,value:unknown)=>{allowed.push(value);}};
   const provenance={sessions:async()=>groupSessions,read:async()=>({conclusions:[],evidence:[],limitations:[],exact_citations:true})};
   const notes={classesFor:async(ids:readonly string[])=>new Map(ids.map(id=>[id,{class:id===hex('question')?'owner_message':'person_message',facts:{}}]))};
   const tags={tags:async(_p:Reader,_b:unknown,refs:any[],options:any)=>{tagged.push(refs.map(r=>r.id));assert.equal(options.historical,true);
-    return new Map(refs.map(r=>[r.id,{source:'nocheh:event:'+r.id,tag:'“Bob” · this chat · 2026-11-03 14:12',by:'person',at:'2026-11-03T14:12:00.000Z'}]));}};
+    return new Map(refs.map(r=>[r.id,{source:'nocheh:event:'+r.id,tag:'“Bob” · this chat · 2026-11-03 14:12',by:'person',at:'2026-11-03T14:12:00.000Z',
+      ...options.place?{place:'learned in this chat on 2026-11-03 14:12'}:{}}]));}};
   const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,engine,async()=>[],notes as any,tags as any);
   const current={row:{id:workspace,root_reference:root,state:'ready',last_ready_at:new Date()},binding,principal:{}};
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],current:async()=>current,
@@ -98,9 +106,12 @@ test('a recall lists the facts its answer read with their sources, cited first, 
   const result=await fixture.memory.recall(fixture.reader,'What is Bob\'s PIN?') as any,source=result.sources.at(-1);
   const output=[...fixture.records.values()].find(record=>record.kind==='memory_result'&&record.content.startsWith('[related through'))!;
   const facts=[...fixture.records.values()].find(record=>Array.isArray(record.provenance.facts))!;
+  const text=[...fixture.records.values()].find(record=>record.provenance.configuration?.facts==='recall')!;
   assert.deepEqual(Object.keys(source).slice(0,2),['source','facts_source'],'both record ids come before the answer\'s text');
   assert.equal(source.source,'nocheh:memory:'+output.id,'the answer is named by its own record, not the memory space');
-  assert.equal(source.facts_source,'nocheh:memory:'+facts.id);
+  assert.equal(source.facts_source,'nocheh:memory:'+text.id,'the record the model reads is the guarded text');
+  // Only the text lines are guarded: every source id stays on its unguarded parent (M1).
+  assert.deepEqual([text.provenance.facts,text.provenance.parents[0].id,text.content],[undefined,facts.id,facts.content]);
   assert.ok(!('evidence_sources' in source),'the facts list replaces the archived-message list');
   assert.deepEqual(fixture.lists.at(-1),{observer_id:BOB,observed_id:BOB,level:'explicit',id:{in:[batch.id,pin.id,likes.id,elsewhere.id]},session_id:{in:fixture.groupSessions}},
     'the facts are read by id, within the sessions the group\'s recall asked');
@@ -109,6 +120,8 @@ test('a recall lists the facts its answer read with their sources, cited first, 
     [1,'Fact pinfact second line',true,'person',0],[2,'Fact teafact second line',false,'person',0],[3,'Fact batchfact second line',false,'person',0]],
     'cited facts first, then the engine\'s order; a fact with an unreadable source is not exact');
   assert.deepEqual(source.facts[0].sources.map((item:any)=>item.source),['nocheh:event:'+answer,'nocheh:event:'+question],'Bob\'s own message first, then the question it answers');
+  // A batch fact names where and when it was learned, never Bob as its sender (H1).
+  assert.deepEqual(source.facts[2].sources,[{source:'nocheh:event:'+answer,tag:'learned in this chat on 2026-11-03 14:12',by:'unknown'}]);
   assert.deepEqual(fixture.tagged,[[answer,question,tea,answer]],'one tag request, for the listed sources only, never an unreadable one');
   assert.equal(facts.content,'1. Fact pinfact second line\n2. Fact teafact second line\n3. Fact batchfact second line');
   assert.deepEqual(facts.provenance.facts.map((fact:any)=>[fact.n,fact.conclusion,fact.peer,fact.sources,fact.complete]),[
@@ -118,6 +131,7 @@ test('a recall lists the facts its answer read with their sources, cited first, 
   assert.deepEqual([facts.provenance.configuration.audience,facts.provenance.configuration.workspace],[GP1,fixture.workspace]);
   assert.ok(source.limitations.includes('some_facts_cite_only_their_batch'));
   assert.ok(fixture.allowed.some(value=>JSON.stringify(value).includes('Fact pinfact second line')),'the guarded fact texts may be quoted');
+  assert.deepEqual(fixture.problems,[],'the tag request counts itself; a recall never counts it twice');
 
   // A guard that changes the lines drops the texts, never the record, and says so; it is counted.
   const changed=recallFixture({conclusions:[pin],evidence:[pin.id],receipts:{[nid('answer')]:[answer],[nid('question')]:[question]},guard:text=>text.replace('1. ','1) ')});
@@ -157,7 +171,8 @@ test('a fact opens from its record\'s guarded copy, only while it stands: its au
     sources:[answer,question,unlisted].map(id=>({source:'nocheh:event:'+id,tag:'“Bob” · this chat · 2026-11-03 14:12',by:'person'})),more:0},
     'its text from the guarded copy, its sources as this reader may read them, the one its line names first');
   const listed=await fixture.memory.openFact(fixture.reader,record,null) as any;
-  assert.deepEqual(listed,{source:source.facts_source,count:2,facts:[{n:1,by:'person',tag:'“Bob” · this chat · 2026-11-03 14:12'},{n:2,by:'person',tag:'“Bob” · this chat · 2026-11-03 14:12'}]});
+  assert.deepEqual(listed,{source:source.facts_source,count:2,facts:[{n:1,by:'person',tag:'“Bob” · this chat · 2026-11-03 14:12'},{n:2,by:'person',tag:'learned in this chat on 2026-11-03 14:12'}]},
+    'a batch fact names where and when it was learned, never its sender');
 
   const refused=async(reader:Reader,n:number|null,why:string)=>assert.rejects(fixture.memory.openFact(reader,record,n),{code:'memory_fact_unavailable'},why);
   await refused({admin:false,scope:'-200',space:'-200',turnEvent:hex('root')} as Reader,1,'another group never opens GP1\'s record');
@@ -165,14 +180,15 @@ test('a fact opens from its record\'s guarded copy, only while it stands: its au
   await refused(fixture.reader,3,'a number beyond the stored facts');
   const owner=await fixture.memory.openFact({admin:false,scope:null,turnEvent:hex('root')} as unknown as Reader,record,1) as any;
   assert.equal(owner.fact,1,'the owner opens any audience\'s record');
-  // A source that no row lists, retired: the fact is forgotten at once, listed as unavailable; the other fact still opens.
+  // A source that no row lists, retired: the fact is forgotten at once. The retired route withholds every row citing the
+  // record, so no fact of it opens either, whatever the order of later retirements (LOW 3).
   state.retired=[unlisted];await refused(fixture.reader,1,'a retired source, listed or not');
-  assert.deepEqual((await fixture.memory.openFact(fixture.reader,record,null) as any).facts[0],{n:1,unavailable:true});
-  assert.equal((await fixture.memory.openFact(fixture.reader,record,2) as any).fact,2,'a fact in an untouched session still opens');
+  assert.deepEqual((await fixture.memory.openFact(fixture.reader,record,null) as any).facts,[{n:1,unavailable:true},{n:2,unavailable:true}]);
+  await refused(fixture.reader,2,'another fact of a record the retired route forgets');
   state.retired=[];
   // A fact that names only part of its batch: any retired message of its session counts.
   state.retiredSessions=[hex('session-b')];await refused(fixture.reader,2,'an incomplete fact in a session with a retired message');
-  assert.equal((await fixture.memory.openFact(fixture.reader,record,1) as any).fact,1);
+  await refused(fixture.reader,1,'and the record with it');
   state.retiredSessions=[];
   state.correcting=true;await refused(fixture.reader,1,'while a correction is pending');state.correcting=false;
   // The engine deleted the fact (a correction rebuilt its session): it no longer opens.
@@ -181,6 +197,8 @@ test('a fact opens from its record\'s guarded copy, only while it stands: its au
   // A record of another kind, or of another memory space, never opens.
   const input=[...fixture.records.values()].find(item=>item.kind==='runtime_context')!;
   await assert.rejects(fixture.memory.openFact(fixture.reader,input.id,1),{code:'memory_fact_unavailable'});
+  // The raw record that keeps the sources is never opened by its own id.
+  await assert.rejects(fixture.memory.openFact(fixture.reader,fixture.records.get(record)!.provenance.parents[0].id,2),{code:'memory_fact_unavailable'});
   fixture.records.get(record)!.provenance.configuration.workspace=hex('older-space');await refused(fixture.reader,2,'a record of an earlier memory space');
 });
 

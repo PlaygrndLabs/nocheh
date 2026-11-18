@@ -25,7 +25,8 @@ export type ForgetStep={done:boolean;removed:number};
 export type EngineTrace={facts:{id:string;parents:string[];deleted:boolean;exactCitations:boolean|null}[];writes:{id:string;receipt:string}[];limitations:string[]};
 /** One fact as the engine stores it, with the writes it came from as the engine's write ids (`EngineWrite.id`).
  * `exact` is true when the engine cited those writes, in citation order; false when they are only part of the
- * batch it learned the fact from; null when no write is known. `complete` is false when `writes` leaves some out.
+ * batch it learned the fact from; null when no write is known. `complete` only when `writes` are every write it cites
+ * (a batch never is: it leaves out the other peers' writes the fact may rest on).
  * `derived` counts how often the engine learned the fact again; `createdAt` is when the engine stored it. */
 export type EngineFact={id:string;content:string;session:string|null;writes:string[];exact:boolean|null;complete:boolean;
   derived:number;createdAt:string};
@@ -90,13 +91,16 @@ export type MemoryEngine={
   // Facts with the writes they came from; absent when the engine cannot list them. Each reads only what a participant
   // learned about itself, and a list of sessions limits it to facts learned in them.
   /** Facts newest first, a page at a time: `cursor` is null for the first page, then the page's `next`. */
-  facts?(space:string,participant:string,options:{sessions:string[]|null;size:number;cursor:string|null}):Promise<EngineFactPage>;
+  facts?(space:string,participant:string,options:{sessions:string[]|null;size:number;cursor:string|null;batches?:boolean}):Promise<EngineFactPage>;
+  /** The batch writes of listed facts that cite none, for a list read with `batches:false`, once the facts are chosen.
+   *  Fills them in place and gives the limitations. */
+  factBatches?(space:string,facts:EngineFact[]):Promise<string[]>;
   /** The named facts that still exist, in the order named. */
   factsById?(space:string,participant:string,ids:string[],options:{sessions:string[]|null}):Promise<{facts:EngineFact[];limitations:string[]}>;
   /** Whether a fact still exists; a correction deletes the facts it replaces. */
   factExists?(space:string,participant:string,id:string):Promise<boolean>;
   /** Facts learned more than once, most often first and then newest. `complete` is false when there were more than it reads. */
-  mostDerived?(space:string,participant:string,options:{sessions:string[]|null}):Promise<{facts:EngineFact[];complete:boolean;limitations:string[]}>;
+  mostDerived?(space:string,participant:string,options:{sessions:string[]|null;batches?:boolean}):Promise<{facts:EngineFact[];complete:boolean;limitations:string[]}>;
   /** Counts only, for the owner's dashboard. */
   citationCoverage?(space:string):Promise<EngineCoverage>;
 };

@@ -24,7 +24,9 @@ export interface Tag {source:string;tag:string;by:TagBy;at:string|null}
 /** What an opened original names beside its tag (archive_read, ADR-0261): a forward's origin in words, and the topic the
  *  message is in, as its place words. A tag at day precision also brings the message's day and its time of day in the
  *  reader's zone (sourceClock), which a recalled fact's line shows. */
-export interface TagDetails {forward?:string;topic?:string;day?:string;time?:string}
+export interface TagDetails {forward?:string;topic?:string;day?:string;time?:string;
+  /** Where and when alone (placeTag), when asked for: what a fact that is not exact names in place of its sender. */
+  place?:string}
 /** The longest tag, and the longest name in it. */
 export const TAG_LIMIT=160,TAG_NAME_LIMIT=40;
 const words=modelSourceWords.tags;
@@ -193,6 +195,20 @@ function when(source:TagSource,reader:TagReader):string {
 }
 
 /**
+ * Where and when a message was, with no sender: `learned in <where> on <when>`, for a fact that is not exact and names
+ * only the messages of the person it is about (B2.2). Honcho learns such a fact with every peer's messages in its prompt
+ * but stores only that person's, so naming them as its sender would put words in their mouth. Names shrink first.
+ */
+export function placeTag(source:TagSource,reader:TagReader,names:ReadonlyMap<string,string>,directory:ChatDirectory=chats()):string {
+  let tag='';
+  for(const size of [TAG_NAME_LIMIT,24,12,0]) {
+    tag=fillLine(words.learned_in,{place:where(source,reader,names,size,directory),when:when(source,reader)});
+    if(length(tag)<=TAG_LIMIT)return tag;
+  }
+  return shorten(tag,TAG_LIMIT);
+}
+
+/**
  * One source's tag, at most TAG_LIMIT characters: `who[, what] · where · when`. Names shrink first; a tag still too long
  * is cut. `names` are recallNames' (for anyone but the owner, shownOnly). `by` is the message's bucket, unchanged.
  */
@@ -242,17 +258,23 @@ export const factOrder=<T extends {own:boolean}>(cited:readonly T[]):T[]=>[...ci
  * Whose words a fact rests on (B2.2), from the bucket of every message it was learned from, readable or not, by the rule
  * notes use (fromToken): any other person's message, forward or file names that, or `mixed` for several kinds; then
  * `nocheh` for Nocheh's own messages; and `owner` only when every message is the owner's own typing and the fact cites
- * exactly those (ADR-0257). A fact that is not exact, such as one learned with its whole batch, is never the owner's:
- * it reads `nocheh`, as an uncited notes review does. A fact with no message at all is `unknown`.
+ * exactly those (ADR-0257). A fact that is not exact also rests on messages Nocheh cannot see: Honcho's prompt holds every
+ * peer's messages of the batch but stores only the observed peer's, and a cut citation list leaves some out. Those count
+ * as someone else's words (`person`), so such a fact is never `owner` or `nocheh`. A fact with no message is `unknown`.
  */
 export function factBy(cited:readonly {bucket:Bucket|null}[],exact:boolean):TagBy {
   if(!cited.length)return 'unknown';
   const buckets=new Set(cited.map(item=>item.bucket??'person'));
+  if(!exact)buckets.add('person');
   const others=(['person','forward','file'] as const).filter(bucket=>buckets.has(bucket));
   if(others.length)return others.length>1?'mixed':others[0]!;
   if(buckets.has('nocheh'))return 'nocheh';
-  return exact?'owner':'nocheh';
+  return 'owner';
 }
+/** Whether a fact's source line names only where and when (placeTag): it is not exact and every message it names is the
+ *  observed peer's own, so naming their sender would say they wrote what the fact may rest on. */
+export const factPlaceOnly=<T extends {id:string|null;own:boolean}>(ordered:readonly T[],exact:boolean):boolean=>
+  !exact&&ordered.some(item=>item.id!==null)&&ordered.every(item=>item.id===null||item.own);
 /** The message a fact's source line names (B2.2), among those the reader may read, in factOrder: the first that is
  *  another person's message, a forward or a file, else the first that is not the owner's, else the first. Null when the
  *  reader may read none of them. The rule labels use for a review's main event. */
@@ -260,7 +282,13 @@ export function headerSource<T extends {bucket:Bucket|null}>(ordered:readonly T[
   const open=ordered.filter(item=>item.bucket!==null);
   return open.find(item=>['person','forward','file'].includes(item.bucket!))??open.find(item=>item.bucket!=='owner')??open[0]??null;
 }
-/** Model-written text set between code-built lines: a line that, after its leading spaces, starts with `Source` or `[`
- *  gets a leading `(`, so it never reads as a source line or a header code wrote (the escape ADR-0222's speaker lines
- *  use). */
-export const escapeSourceLines=(text:string):string=>text.split('\n').map(line=>/^\s*(?:Source|\[)/.test(line)?'('+line:line).join('\n');
+/** Format characters (zero-width and direction marks among them), which a line can start with and still look plain. */
+const invisible=/[\p{Cf}]/gu;
+/** Model-written text set between code-built lines: a line that, after its spaces, invisible characters and markdown
+ *  marks, starts with `source` or `[` in any case, carries `[by=`, or looks like a fact line (`n. HH:MM ` or `n. --:-- `)
+ *  gets a leading `(`, so it never reads as a source line, a header or a fact code wrote (the escape ADR-0222's speaker
+ *  lines use). */
+export const escapeSourceLines=(text:string):string=>text.split('\n').map(line=>{
+  const bare=line.replace(invisible,''),plain=bare.replace(/^[\s\-*>#_+~`|]+/,'');
+  return /^(?:source|\[)/i.test(plain)||/\[\s*by\s*=/i.test(bare)||/^\s*\d+\.\s+(?:\d\d:\d\d|--:--)(?:\s|$)/.test(plain)?'('+line:line;
+}).join('\n');

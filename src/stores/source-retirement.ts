@@ -3,6 +3,7 @@ import {admin} from '../access.js';
 import {HttpError,object,string} from '../http.js';
 import type {StorePools} from './connections.js';
 import type {ArchiveRepository,SourceReference} from './archive.js';
+import {factRecords} from './fact-sources.js';
 import {OwnerCommands} from './owner-commands.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 
@@ -119,12 +120,14 @@ export class SourceRetirementRepository {
   async retiredRecords(ids:readonly string[]):Promise<Set<string>> {
     if(!ids.length)return new Set();
     const hex=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
-    const records=(await this.stores.derived.query(`SELECT id,provenance FROM derived_artifacts WHERE id=ANY($1::text[])
-      AND kind IN ('memory_context','memory_result')`,[[...new Set(ids)]])).rows.map(row=>{
-      const provenance=row.provenance??{},facts=Array.isArray(provenance.facts)?provenance.facts:[];
+    // A recall's answer names its evidence itself; a record of facts keeps them on its unguarded parent (factRecords).
+    const [rows,facts]=await Promise.all([this.stores.derived.query(`SELECT id,provenance FROM derived_artifacts WHERE id=ANY($1::text[])
+      AND kind IN ('memory_context','memory_result')`,[[...new Set(ids)]]),factRecords(this.stores.derived,ids)]);
+    const records=rows.rows.map(row=>{
+      const provenance=row.provenance??{},stored=facts.get(row.id)?.facts??[];
       const evidence=[...Array.isArray(provenance.evidence)?provenance.evidence.map((item:any)=>item?.id):[],
-        ...facts.flatMap((fact:any)=>Array.isArray(fact?.sources)?fact.sources:[])].filter(hex);
-      const sessions=facts.filter((fact:any)=>fact?.complete!==true&&typeof fact?.session==='string').map((fact:any)=>fact.session as string);
+        ...stored.flatMap((fact:any)=>Array.isArray(fact?.sources)?fact.sources:[])].filter(hex);
+      const sessions=stored.filter((fact:any)=>fact?.complete!==true&&typeof fact?.session==='string').map((fact:any)=>fact.session as string);
       return {id:row.id as string,evidence,sessions};
     }).filter(record=>record.evidence.length||record.sessions.length);
     if(!records.length)return new Set();

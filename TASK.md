@@ -117,19 +117,23 @@ and nothing is learned again.
 - Engine: `facts()`, `factsById()`, `factExists()`, `mostDerived()`, `citationCoverage()` and
   the summary's message, on Honcho's stock conclusion list, refusing an answer about another
   participant, session or level; Nocheh's Honcho plugin gives uncited facts their batch (at most
-  8 messages, `messages_truncated`) and counts citation coverage
-  ([engine](test/memory-engine.test.ts), [plugin](services/honcho/test_provenance.py)).
+  8 messages, `messages_truncated`, never complete) and can count citation coverage (called
+  from step 4) ([engine](test/memory-engine.test.ts), [plugin](services/honcho/test_provenance.py)).
 - Sources: one receipts query for the reader's audience, the fact's own person first, `by`
-  `owner` only for exact all-owner facts, the source line on a person's, forward's or file's
-  message first ([rules](test/fact-sources.test.ts)).
+  `owner` only for exact, whole all-owner facts; a fact that is not exact rests on messages
+  Honcho never names, so it reads `person` and, when it names only its own person's messages,
+  `learned in <where> on <when>` with no sender; the source line on a person's, forward's or
+  file's message first ([rules](test/fact-sources.test.ts)).
 - A turn's memory: up to 100 facts a block as `n. HH:MM fact` under code-built source lines,
   only model text guarded and every line checked, within 20,000 characters, named by its record,
-  which keeps every source; prose with `source_tags_unavailable`, counted, when facts can't be
-  named; the owner's profile rebuilt with Honcho's own pick
+  whose unguarded parent keeps every source (never pruned); prose with `source_tags_unavailable`,
+  counted once, when facts or tags can't be read; exact only without a summary; a failed plugin
+  counted; the owner's profile rebuilt with Honcho's own pick
   ([unit](test/fact-sources.test.ts), [store](test/store-fact-sources.test.ts)).
 - `memory_recall`: answer and facts named by their records, 12 facts listed with two tagged
   sources each, up to 200 stored; `archive_read nocheh:memory:<id> fact=<n>` opens a fact for its
-  own audience and refuses while correcting, after its conclusion is gone or a source is retired;
+  own audience and refuses while correcting, after its conclusion is gone, or for any fact of a
+  record the retired route reports;
   the retired route lists `retired_records` and Hermes withholds rows citing them
   ([unit](test/fact-opening.test.ts), [store](test/store-fact-opening.test.ts),
   [Hermes](services/hermes/test_retired_history.py)).

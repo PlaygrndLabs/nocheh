@@ -23,10 +23,10 @@ import type {MemoryProvenanceRepository} from './memory-provenance.js';
 import {OwnerCommands} from './owner-commands.js';
 import {evidencePeerId,memoryPeerId,type EntityContext,type MemoryEntity} from './entities.js';
 import {NoteSourceRepository,countMemoryStep} from './note-sources.js';
-import {FactSourceRepository,type FactAudience,type SourcedFact} from './fact-sources.js';
+import {FactSourceRepository,factRecords,type FactAudience,type SourcedFact,type StoredFact} from './fact-sources.js';
 import {bindingMoved,type SourceTagRepository} from './source-tags.js';
 import {RECALL_FACT_LIMIT,guardedFactLine,planFactBlock,recallFactText,recallFactTexts,renderFactBlock,type BlockFact} from '../fact-block.js';
-import {headerSource,type TagBy} from '../source-tags.js';
+import {headerSource,unavailableTag,type TagBy} from '../source-tags.js';
 import {bucketOf} from '../source-facts.js';
 import type {EngineFact} from '../memory/engine.js';
 
@@ -111,11 +111,12 @@ const recallFactsListed=12,recallFactChars=240,recallFactSources=2;
 const openedSources=10,openedListed=20,openedText=2000;
 /** One fact as a recall result lists it (B3.6). */
 type RecallFact={n:number;text?:string;exact:boolean;by:TagBy;sources:{source:string;tag:string;by:string}[];more:number};
-/** A fact as a record of facts stores it (B3.1, B3.6): every source, in order, so it opens by its number and a retired source
- *  is found. `peer` names whose fact it is in a recall's record; a per-turn block names its one `subject`. */
-type StoredFact={n:number;conclusion:string;peer?:string;exact:boolean;by:TagBy;time?:string|null;sources:string[];more:number;complete:boolean;session:string|null};
 const cutText=(text:string,size:number)=>{const chars=Array.from(text);return chars.length<=size?text:chars.slice(0,size-1).join('').trimEnd()+'…';};
 const factUnavailable=()=>new HttpError(404,'memory_fact_unavailable');
+/** One tagged source of a fact as a result lists it: for a fact whose line names only where and when (factPlaceOnly), its
+ *  place words and no sender or `by` of its own, so the observed peer is never shown as saying what it may rest on. */
+const sourceOf=(tag:{source:string;tag:string;by:string;place?:string},place:boolean|undefined)=>
+  place&&tag.place!==undefined?{source:tag.source,tag:tag.place,by:'unknown'}:{source:tag.source,tag:tag.tag,by:tag.by};
 /** A fact's readable sources with the one its source line names first (headerSource), the rest in their order. */
 const shownFirst=(item:Pick<SourcedFact,'header'|'readable'>):SourceReference[]=>
   item.header?[item.header,...item.readable.filter(reference=>reference.id!==item.header!.id)]:[...item.readable];
@@ -1031,9 +1032,11 @@ export class NativeMemoryRepository {
     catch(error) {
       if(bindingMoved(error)||error instanceof HttpError&&error.code==='memory_context_retired')throw error;
       // Why, by code only: the facts could not be read, or the guard changed their lines (source_lines_changed).
-      console.warn(JSON.stringify({event:'memory_source_lines_failed',engine:this.engine.id,code:error instanceof HttpError?error.code:'memory_source_lines_error'}));
+      const code=error instanceof HttpError?error.code:'memory_source_lines_error';
+      console.warn(JSON.stringify({event:'memory_source_lines_failed',engine:this.engine.id,code}));
+      // A tag request that failed counted itself already.
+      if(code!=='source_tags_unavailable')await countMemoryStep(this.control,'source_tags',false);
     }
-    await countMemoryStep(this.control,'source_tags',false);
     const fallback=await prose();
     return fallback.text?{...fallback,limitations:['representation_has_no_exact_citations','source_tags_unavailable']}:fallback;
   }
@@ -1051,10 +1054,21 @@ export class NativeMemoryRepository {
   /** What the engine's profile of a participant holds (B3.2), rebuilt from its fact list: its 25 most-derived facts, in
    *  its order, then the newest, up to 50. Exact unless more than 300 facts were learned more than once. */
   private async profileFacts(workspace:string,subject:string):Promise<FactList> {
-    const [top,recent]=await Promise.all([this.engine.mostDerived!(workspace,subject,{sessions:null}),this.engine.facts!(workspace,subject,{sessions:null,size:100,cursor:null})]);
+    // Listed without their batches, which are asked for only once the 50 are chosen.
+    const later=!!this.engine.factBatches,options={sessions:null,...later?{batches:false}:{}};
+    const [top,recent]=await Promise.all([this.engine.mostDerived!(workspace,subject,options),this.engine.facts!(workspace,subject,{...options,size:100,cursor:null})]);
     const chosen=top.facts.slice(0,profileDerived),ids=new Set(chosen.map(fact=>fact.id));
-    return {facts:[...chosen,...recent.facts.filter(fact=>!ids.has(fact.id)).slice(0,profileFactCount-chosen.length)],
-      limitations:[...new Set([...top.limitations,...recent.limitations,...top.complete?[]:['profile_most_derived_incomplete']])].sort()};
+    const facts=[...chosen,...recent.facts.filter(fact=>!ids.has(fact.id)).slice(0,profileFactCount-chosen.length)];
+    const batches=later?await this.engine.factBatches!(workspace,facts):[];
+    return {facts,limitations:[...new Set([...top.limitations,...recent.limitations,...batches,...top.complete?[]:['profile_most_derived_incomplete']])].sort()};
+  }
+  /** A fact list whose batches the engine's plugin could not give (fact_batches_*) is counted as a `source_tags` problem,
+   *  so an old or failed plugin shows on System › Health, not only in the block's limitations. */
+  private async factBatchesFailed(limitations:readonly string[]) {
+    const failed=limitations.filter(code=>code.startsWith('fact_batches_'));
+    if(!failed.length)return;
+    console.warn(JSON.stringify({event:'memory_fact_batches_failed',engine:this.engine.id,code:failed.join(',')}));
+    await countMemoryStep(this.control,'source_tags',false);
   }
   /**
    * B3.1: the summary and each fact on a numbered line with its source message's time, under source lines code builds
@@ -1069,24 +1083,32 @@ export class NativeMemoryRepository {
     const workspace=current.row.id,binding=current.binding,principal=this.principal(audience,source.id,binding);
     const scope={audience,group:audience==='owner'?null:this.recallGroup(principal)},read=input.facts;
     const page=await (input.listed??this.listFacts(workspace,read)!);
+    await this.factBatchesFailed(page.limitations);
     const sourced=await this.factSources.sourced(principal,binding,workspace,read.subject,page.facts,scope);
     const summaryReference=input.summary.trim()&&input.summaryMessage?
       (await this.factSources.receipts(workspace,[input.summaryMessage],scope)).get(input.summaryMessage)?.primary??null:null;
     const references=[...sourced.flatMap(item=>item.header?[item.header]:[]),...summaryReference?[summaryReference]:[]];
-    const tags=references.length?await this.tags!.tags(principal,binding,references,{precision:'day',historical:true,compact:true}):new Map();
+    const tags=references.length?await this.tags!.tags(principal,binding,references,{precision:'day',historical:true,compact:true,
+      place:sourced.some(item=>item.place)}):new Map();
+    // A tag request that failed gives the block in prose, as before (it counted itself).
+    if([...tags.values()].some(tag=>tag!==null&&tag.tag===unavailableTag('now').tag))throw new HttpError(503,'source_tags_unavailable');
     const facts:BlockFact[]=sourced.map(item=>{
       const tag=item.header?tags.get(item.header.id)??null:null;
       return {conclusion:item.fact.id,content:item.fact.content,by:item.by,exact:item.exact,batch:item.fact.exact===false,cited:item.fact.writes.length>0,
-        tag:tag?.tag??null,time:tag?.time??null,order:Date.parse(tag?.at??'')||Date.parse(item.fact.createdAt)||0,more:item.more};
+        tag:tag?(item.place?tag.place??null:tag.tag):null,time:tag?.time??null,order:Date.parse(tag?.at??'')||Date.parse(item.fact.createdAt)||0,more:item.more};
     });
     const plan=planFactBlock({title:input.title,summaryTitle:input.summaryTitle,summary:input.summary,
       through:summaryReference?tags.get(summaryReference.id)?.day??null:null,facts});
     const behind=new Map(sourced.map(item=>[item.fact.id,item]));
-    const exact=plan.facts.length>0&&plan.facts.every(fact=>fact.exact);
-    const limitations=[...new Set([...exact?[]:['some_facts_cite_only_their_batch'],...page.limitations,...plan.left?['older_facts_left_out']:[]])].sort();
+    // Honcho's summary cites nothing, so a block that shows one is not exact either.
+    const summarized=!!plan.summary.trim(),batch=plan.facts.some(fact=>!fact.exact);
+    const exact=plan.facts.length>0&&!batch&&!summarized;
+    const limitations=[...new Set([...batch?['some_facts_cite_only_their_batch']:[],...summarized?['summary_has_no_exact_citations']:[],
+      ...page.limitations,...plan.left?['older_facts_left_out']:[]])].sort();
     // Every source of every fact shown, in order, readable or not: what opening a fact and retiring a source read.
     const provenance={facts:plan.facts.map(fact=>{const item=behind.get(fact.conclusion)!;
-      return {n:fact.n,conclusion:fact.conclusion,exact:fact.exact,by:fact.by,time:fact.time,sources:item.sources,more:fact.more,complete:item.complete,session:item.fact.session};}),
+      return {n:fact.n,conclusion:fact.conclusion,exact:fact.exact,by:fact.by,time:fact.time,sources:item.sources,more:fact.more,complete:item.complete,
+        session:item.fact.session,...item.place?{place:true}:{}};}),
       subject:read.subject,summary_through:plan.through,limitations};
     const guarded=await this.guardedContext(current,audience,source,{...configuration,facts_digest:digest(canonical(provenance))},plan.text,provenance);
     const text=renderFactBlock(plan,guarded.text,'nocheh:memory:'+guarded.record);
@@ -1094,17 +1116,18 @@ export class NativeMemoryRepository {
     return {text,record:guarded.record,exact,limitations};
   }
   /** One block of context, guarded once per distinct result and bounded on its own. A block of facts keeps their sources
-   *  in its bounded record's provenance. */
+   *  in the provenance of the engine's raw output, which the guard never reads (factRecords): only the bounded record's
+   *  text and a few ids are checked for secrets on the turn path, never every source id. */
   private async guardedContext(current:Current,audience:string,source:SourceReference,configuration:Record<string,unknown>,text:string,
     facts?:{limitations:string[]}&Record<string,unknown>):Promise<{text:string;record:string}> {
     const workspace=current.row.id,limitations=facts?facts.limitations:['representation_has_no_exact_citations'];
     // Identical engine output reuses its guarded copy, so a prefetched context needs no new detection on arrival.
     const key='native-context:'+digest(canonical([configuration,digest(text)]));
     const raw=await this.derived.record({operation_id:key,source:current.row.root_reference,kind:'memory_result',content:Buffer.from(text),
-      producer:this.engine.id,producer_version:this.protocol,configuration,provenance:{limitations}});
+      producer:this.engine.id,producer_version:this.protocol,configuration,provenance:facts??{limitations}});
     const output=await this.derived.record({operation_id:key+':bounded',source:current.row.root_reference,parents:[raw],kind:'memory_context',
       content:Buffer.from(Array.from(text).slice(0,contextCharacters).join('')),producer:'nocheh',producer_version:this.protocol,
-      configuration:{max_characters:contextCharacters,workspace,audience,...facts?{facts_digest:configuration.facts_digest}:{}},provenance:facts??{limitations}});
+      configuration:{max_characters:contextCharacters,workspace,audience,...facts?{facts_digest:configuration.facts_digest}:{}},provenance:{limitations}});
     await this.guards.prepareContext(output,this.protocol,this.principal(audience,source.id,current.binding),this.prepared,this.detect);
     const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
     return {text:String(value.text??''),record:output.id};
@@ -1290,6 +1313,7 @@ export class NativeMemoryRepository {
       const over=asked.reduce((total,item)=>total+new Set(item.evidence.filter(engineId)).size,0)>RECALL_FACT_LIMIT?['recall_fact_limit']:[];
       if(!wanted.length)return {record:null,listed:[],count:0,limitations:over};
       const read=await Promise.all(wanted.map(item=>this.engine.factsById!(id,item.peer,item.ids,{sessions})));
+      await this.factBatchesFailed(read.flatMap(page=>page.limitations));
       const sourced=await Promise.all(wanted.map((item,index)=>this.factSources.sourced(principal,binding,id,item.peer,read[index]!.facts,scope)));
       const all=sourced.flatMap((list,index)=>list.map(item=>({peer:wanted[index]!.peer,item})));
       // Facts that cite their messages first, then the engine's order; numbered as stored.
@@ -1298,21 +1322,24 @@ export class NativeMemoryRepository {
         ...ordered.some(({item})=>!item.exact)?['some_facts_cite_only_their_batch']:[]])].sort();
       if(!ordered.length)return {record:null,listed:[],count:0,limitations};
       const stored:StoredFact[]=ordered.map(({n,peer,item})=>({n,conclusion:item.fact.id,peer,exact:item.exact,by:item.by,sources:item.sources,more:item.more,
-        complete:item.complete,session:item.fact.session}));
-      const record=await this.derived.record({operation_id:'native-recall-facts:'+requestId,source:root,parents:[answer],kind:'memory_result',
-        content:Buffer.from(recallFactText(ordered.map(({n,item})=>({n,content:item.fact.content})))),producer:this.engine.id,producer_version:this.protocol,
-        configuration:{workspace:id,audience:scope.audience,facts:'recall'},provenance:{facts:stored,limitations}});
+        complete:item.complete,session:item.fact.session,...item.place?{place:true}:{}}));
+      // The facts with every source go on a record the guard never reads; only the text lines are guarded (factRecords).
+      const text=Buffer.from(recallFactText(ordered.map(({n,item})=>({n,content:item.fact.content}))));
+      const sources=await this.derived.record({operation_id:'native-recall-facts:'+requestId,source:root,parents:[answer],kind:'memory_result',
+        content:text,producer:this.engine.id,producer_version:this.protocol,configuration:{workspace:id,audience:scope.audience,facts:'sources'},
+        provenance:{facts:stored,limitations}});
+      const record=await this.derived.record({operation_id:'native-recall-facts:'+requestId+':text',source:root,parents:[sources],kind:'memory_result',
+        content:text,producer:'nocheh',producer_version:this.protocol,configuration:{workspace:id,audience:scope.audience,facts:'recall'},provenance:{limitations}});
       await this.current(id);await this.guards.prepareContext(record,this.protocol,actor,this.prepared,this.detect);
       const value=(await this.guards.read('derived_artifacts:'+record.id,binding)).value as {text:string};
       const texts=recallFactTexts(String(value.text??''),ordered.length);
       if(!texts)await countMemoryStep(this.control,'source_tags',false);
       const listed=ordered.slice(0,recallFactsListed),named=listed.map(({item})=>shownFirst(item).slice(0,recallFactSources));
-      const tags=await this.tags.tags(principal,binding,named.flat(),{historical:true});
+      const tags=await this.tags.tags(principal,binding,named.flat(),{historical:true,place:listed.some(({item})=>item.place)});
       const facts:RecallFact[]=listed.map(({n,item},index)=>({n,...texts?{text:cutText(texts[n-1]!,recallFactChars)}:{},exact:item.exact,by:item.by,
-        sources:named[index]!.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[{source:tag.source,tag:tag.tag,by:tag.by}]:[];}),
+        sources:named[index]!.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[sourceOf(tag,item.place)]:[];}),
         more:Math.max(0,item.readable.length-named[index]!.length)}));
       if(texts)await this.prepared.allow(principal,facts.map(fact=>fact.text??''));
-      if(texts)await countMemoryStep(this.control,'source_tags',true);
       return {record:record.id,listed:facts,count:ordered.length,limitations:texts?limitations:[...limitations,'fact_text_unavailable'].sort()};
     } catch(error) {
       if(bindingMoved(error))throw error;
@@ -1337,21 +1364,18 @@ export class NativeMemoryRepository {
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding),retirements=this.contexts.access.retirements;
     if(!workspace||!this.tags||!this.engine.factExists||!this.engine.factsById||!retirements)throw factUnavailable();
     const current=await this.current(workspace.id),audience=principal.admin?'owner':this.principalAudience(principal);
-    const row=(await this.derived.pool.query(`SELECT id,kind,content_hash,provenance FROM derived_artifacts WHERE id=$1
-      AND kind IN ('memory_context','memory_result')`,[recordId])).rows[0];
-    const provenance=row?.provenance??{},configuration=provenance.configuration??{};
-    const facts:StoredFact[]=Array.isArray(provenance.facts)?provenance.facts:[];
-    if(!row||!facts.length||configuration.workspace!==current.row.id||audience!=='owner'&&configuration.audience!==audience)throw factUnavailable();
+    const row=(await factRecords(this.derived.pool,[recordId])).get(recordId),configuration=row?.configuration??{},facts=row?.facts??[];
+    if(!row||configuration.workspace!==current.row.id||audience!=='owner'&&configuration.audience!==audience)throw factUnavailable();
     // Whose fact it is: a recall's record names each one's participant, a per-turn block its one subject.
-    const peerOf=(fact:StoredFact)=>typeof fact.peer==='string'?fact.peer:typeof provenance.subject==='string'?provenance.subject:null;
+    const peerOf=(fact:StoredFact)=>typeof fact.peer==='string'?fact.peer:row.subject;
     const valid=(fact:StoredFact)=>Number.isSafeInteger(fact?.n)&&engineId(fact.conclusion)&&Array.isArray(fact.sources)&&
       fact.sources.every(id=>typeof id==='string'&&/^[a-f0-9]{64}$/.test(id))&&engineId(peerOf(fact));
     const chosen=n===null?facts.slice(0,openedListed):facts.filter(fact=>fact?.n===n);
     if(!chosen.length||!chosen.every(valid))throw factUnavailable();
     if(await this.correcting(current))throw factUnavailable();
-    const [retired,sessions]=await Promise.all([retirements.retiredAmong(chosen.flatMap(fact=>fact.sources)),
-      retirements.retiredSessions(chosen.filter(fact=>fact.complete!==true&&typeof fact.session==='string').map(fact=>fact.session!))]);
-    const forgotten=(fact:StoredFact)=>fact.sources.some(id=>retired.has(id))||fact.complete!==true&&typeof fact.session==='string'&&sessions.has(fact.session);
+    // Forgotten as the retired route forgets it (B6.2): a record any of whose facts rests on a retired message opens no
+    // fact at all, so a stored row that cites it is withheld whenever one that opened it would be.
+    const forgotten=(await retirements.retiredRecords([recordId])).has(recordId);
     const actor=principal.admin?current.principal:principal,space=current.row.id;
     // The sources this reader may read, as learned (historical), the one each fact's source line names first.
     const captured=await this.contexts.access.archive.capturedMany(chosen.flatMap(fact=>fact.sources));
@@ -1367,26 +1391,29 @@ export class NativeMemoryRepository {
     if(n===null) {
       // The first facts and the source each one's line names; one still held by the engine and with no retired source.
       const peers=[...new Set(chosen.map(fact=>peerOf(fact)!))];
-      const held=new Set((await Promise.all(peers.map(peer=>this.engine.factsById!(space,peer,chosen.filter(fact=>peerOf(fact)===peer).map(fact=>fact.conclusion),{sessions:null}))))
+      const held=forgotten?new Set<string>():new Set((await Promise.all(peers.map(peer=>this.engine.factsById!(space,peer,
+        chosen.filter(fact=>peerOf(fact)===peer).map(fact=>fact.conclusion),{sessions:null}))))
         .flatMap(page=>page.facts.map(fact=>fact.id)));
-      const heads=chosen.map(fact=>forgotten(fact)||!held.has(fact.conclusion)?null:shown(fact)[0]??null);
-      const tags=await this.tags.tags(principal,current.binding,heads.filter((head):head is SourceReference=>head!==null),{historical:true});
+      const heads=chosen.map(fact=>forgotten||!held.has(fact.conclusion)?null:shown(fact)[0]??null);
+      const tags=await this.tags.tags(principal,current.binding,heads.filter((head):head is SourceReference=>head!==null),
+        {historical:true,place:chosen.some(fact=>fact.place===true)});
       await this.current(space);await this.prepared.audience.assert(principal);
       return {source:'nocheh:memory:'+recordId,count:facts.length,facts:chosen.map((fact,index)=>{
-        const forgottenHere=forgotten(fact)||!held.has(fact.conclusion),tag=heads[index]?tags.get(heads[index]!.id):null;
-        return forgottenHere?{n:fact.n,unavailable:true}:{n:fact.n,by:fact.by,...tag?{tag:tag.tag}:{tag:null}};
+        const tag=heads[index]?tags.get(heads[index]!.id):null;
+        return heads[index]===null&&(forgotten||!held.has(fact.conclusion))?{n:fact.n,unavailable:true}:
+          {n:fact.n,by:fact.by,tag:tag?sourceOf(tag,fact.place).tag:null};
       })};
     }
     const fact=chosen[0]!;
-    if(forgotten(fact)||!await this.engine.factExists(space,peerOf(fact)!,fact.conclusion))throw factUnavailable();
+    if(forgotten||!await this.engine.factExists(space,peerOf(fact)!,fact.conclusion))throw factUnavailable();
     // The record's guarded copy, prepared and read under the current binding, as recall reads its answer.
     await this.guards.prepareContext({store:'derived',kind:'artifact',id:row.id,input_hash:row.content_hash},this.protocol,actor,this.prepared,this.detect);
     const value=(await this.guards.read('derived_artifacts:'+row.id,current.binding)).value as {text?:unknown};
     const line=guardedFactLine(String(value.text??''),facts.length,fact.n,row.kind==='memory_context'?fact.time??null:undefined);
     if(line===null)await countMemoryStep(this.control,'source_tags',false);
     const named=shown(fact),listed=named.slice(0,openedSources);
-    const tags=await this.tags.tags(principal,current.binding,listed,{historical:true});
-    const sources=listed.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[{source:tag.source,tag:tag.tag,by:tag.by}]:[];});
+    const tags=await this.tags.tags(principal,current.binding,listed,{historical:true,place:fact.place===true});
+    const sources=listed.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[sourceOf(tag,fact.place)]:[];});
     const text=line===null?null:cutText(line,openedText);
     if(text!==null)await this.prepared.allow(principal,text);
     await this.current(space);await this.prepared.audience.assert(principal);

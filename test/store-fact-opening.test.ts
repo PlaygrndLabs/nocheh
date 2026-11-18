@@ -37,9 +37,9 @@ test('a recall\'s facts open by their record and number until a source is retire
         (!f.id||f.id.in.includes(c.id)));
       return {items:items.slice(0,size),next_page:items.length>size?'next':null};
     }
-    // The uncited fact names one message of its batch, and says it named only part of it.
+    // The uncited fact names its whole batch, which Honcho keeps of the observed peer's messages only (H1).
     if(path.endsWith('/nocheh/provenance')&&body.per_node)return {roots:body.conclusion_ids,nodes:body.conclusion_ids.map((id:string)=>({id,parents:[],deleted:false,
-      exact_citations:batches.has(id)?false:null,messages:batches.get(id)??[],messages_truncated:batches.has(id)})),messages:[],limitations:[],exact_citations:false};
+      exact_citations:batches.has(id)?false:null,messages:batches.get(id)??[],messages_truncated:false})),messages:[],limitations:[],exact_citations:false};
     throw Error('unexpected honcho call '+path);
   });
   const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,runtime:async()=>({literals:[]}),memoryEngine:engine});
@@ -96,8 +96,14 @@ test('a recall\'s facts open by their record and number until a source is retire
       'cited facts first, each with its first two sources tagged, the one it is about first');
     assert.match(recalled.facts[0].sources[0].tag,/^“Bob” · this chat · 2025-11-03 14:13 UTC$/);
     assert.ok(!JSON.stringify(recalled).includes(question.id),'the third source is not listed');
-    const stored=(await stores.derived.query('SELECT provenance FROM derived_artifacts WHERE id=$1',[factsRecord])).rows[0].provenance;
+    // The batch fact names where and when it was learned, never Bob as its sender.
+    assert.match(recalled.facts[2].sources[0].tag,/^learned in this chat on 2025-11-03 /);assert.equal(recalled.facts[2].sources[0].by,'unknown');
+    // The record the model reads is guarded text only; its unguarded parent keeps every source (M1).
+    const guardedRecord=(await stores.derived.query('SELECT provenance FROM derived_artifacts WHERE id=$1',[factsRecord])).rows[0].provenance;
+    assert.equal(guardedRecord.facts,undefined);
+    const stored=(await stores.derived.query('SELECT provenance FROM derived_artifacts WHERE id=$1',[guardedRecord.parents[0].id])).rows[0].provenance;
     assert.deepEqual(stored.facts[0].sources,[answer.id,later.id,question.id],'but stored, as every source is');
+    assert.equal(stored.facts[2].complete,false,'a whole batch is never complete: other people\'s messages it rests on are not named');
 
     // Opened by its number, from the record's guarded copy; another group's reader never opens it.
     const opened=await s.memory.openFact(reader,factsRecord,1) as any;
@@ -111,12 +117,15 @@ test('a recall\'s facts open by their record and number until a source is retire
     // them the owner's question; a per-turn block whose uncited fact names only part of the second session; the same fact named
     // completely; and a record of another kind, which never counts.
     const many=[...Array.from({length:199},(_,n)=>({store:'archive',kind:'event',id:digest(`fact-opening:${run}:unknown:${n}`),revision:'1',input_hash:digest('x')})),question];
-    const record=async(name:string,kind:string,provenance:Record<string,unknown>)=>(await s.derived.record({operation_id:`fact-opening:${run}:${name}`,source:answer,
-      kind:kind as any,content:Buffer.from(name),producer:'nocheh',producer_version:'fixture',configuration:{workspace,audience:A},provenance})).id;
-    const recall200=await record('recall-200','memory_result',{evidence:many,limitations:[]});
-    const partial=await record('partial','memory_context',{facts:[{n:1,conclusion:bakes,exact:false,by:'person',sources:[named.id],more:0,complete:false,session:second}]});
-    const whole=await record('whole','memory_context',{facts:[{n:1,conclusion:bakes,exact:false,by:'person',sources:[named.id],more:0,complete:true,session:second}]});
-    const input=await record('input','memory_input',{evidence:[question]});
+    const record=async(name:string,kind:string,provenance:Record<string,unknown>,extra:Record<string,unknown>={},parents?:any[])=>(await s.derived.record({operation_id:`fact-opening:${run}:${name}`,
+      source:answer,...parents?{parents}:{},kind:kind as any,content:Buffer.from(name),producer:'nocheh',producer_version:'fixture',configuration:{workspace,audience:A,...extra},provenance}));
+    // A per-turn block: the bounded record the model reads, whose raw parent keeps the facts.
+    const block=async(name:string,facts:unknown[])=>(await record(name,'memory_context',{limitations:[]},{facts_digest:digest(name)},
+      [await record(name+':raw','memory_result',{facts,subject:BOB,limitations:[]})])).id;
+    const recall200=(await record('recall-200','memory_result',{evidence:many,limitations:[]})).id;
+    const partial=await block('partial',[{n:1,conclusion:bakes,exact:false,by:'person',sources:[named.id],more:0,complete:false,session:second}]);
+    const whole=await block('whole',[{n:1,conclusion:likes,exact:true,by:'person',sources:[tea.id],more:0,complete:true,session:first}]);
+    const input=(await record('input','memory_input',{evidence:[question]})).id;
     const ids=[answer.id,answerRecord,factsRecord,recall200,partial,whole,input];
     const before=await s.retirements.historyRetirements(ids);
     assert.deepEqual([before.retired,before.retired_records],[[],[]],'nothing is retired yet');
@@ -128,27 +137,31 @@ test('a recall\'s facts open by their record and number until a source is retire
     const after=await s.retirements.historyRetirements(ids);
     assert.deepEqual(after.retired_records,[factsRecord,recall200].sort());assert.deepEqual(after.retired,[factsRecord,recall200].sort());
     assert.notEqual(after.revision,before.revision);
-    // Retire means forget at once: while the correction waits, nothing opens; once it is done, the fact with the retired
-    // source still does not, and a fact no retirement touched does.
+    // Retire means forget at once: while the correction waits, nothing opens; once it is done, no fact of the record the
+    // retired route reports opens either, so a row that opened one is withheld as surely as one that listed it.
     assert.equal(await (s.memory as any).correcting(await (s.memory as any).current(workspace)),true);
     await assert.rejects(s.memory.openFact(await turn(),factsRecord,2),{code:'memory_fact_unavailable'},'a correction is pending');
     (s.memory as any).correcting=async()=>false;
     await assert.rejects(s.memory.openFact(await turn(),factsRecord,1),{code:'memory_fact_unavailable'},'its third source is retired');
-    assert.equal((await s.memory.openFact(await turn(),factsRecord,2) as any).text,'Bob likes tea');
-    assert.deepEqual((await s.memory.openFact(await turn(),factsRecord,null) as any).facts.map((fact:any)=>fact.unavailable===true),[true,false,false]);
+    await assert.rejects(s.memory.openFact(await turn(),factsRecord,2),{code:'memory_fact_unavailable'},'another fact of the same record');
+    assert.deepEqual((await s.memory.openFact(await turn(),factsRecord,null) as any).facts.map((fact:any)=>fact.unavailable===true),[true,true,true]);
 
     // A message of the second session that no fact names: the fact that names only part of that session goes with it.
     await s.retirements.set(owner,quiet.id,{retired:true,expected_revision:0,operation_id:`fact-opening:${run}:retire:quiet`});
     const session2=await s.retirements.historyRetirements(ids);
     assert.deepEqual(session2.retired_records,[factsRecord,partial,recall200].sort(),'the partial block and the recall whose third fact is partial; never the complete one');
     await assert.rejects(s.memory.openFact(await turn(),factsRecord,3),{code:'memory_fact_unavailable'});
-    assert.equal((await s.memory.openFact(await turn(),factsRecord,2) as any).fact,2,'a fact in an untouched session still opens');
-    // The engine deleted the tea fact (its session was rebuilt): it no longer opens.
-    conclusions.splice(conclusions.findIndex(c=>c.id===likes),1);
-    await assert.rejects(s.memory.openFact(await turn(),factsRecord,2),{code:'memory_fact_unavailable'});
     // Restoring the question brings the 200-message answer back; the second session's retirement still holds the others.
     await s.retirements.set(owner,question.id,{retired:false,expected_revision:1,operation_id:`fact-opening:${run}:restore:question`});
     assert.deepEqual((await s.retirements.historyRetirements(ids)).retired_records,[factsRecord,partial].sort());
+    await assert.rejects(s.memory.openFact(await turn(),factsRecord,2),{code:'memory_fact_unavailable'},'the record still rests on a retired message');
+    // Restoring the second session's message too: the record stands again, and a fact the engine still holds opens.
+    await s.retirements.set(owner,quiet.id,{retired:false,expected_revision:1,operation_id:`fact-opening:${run}:restore:quiet`});
+    assert.deepEqual((await s.retirements.historyRetirements(ids)).retired_records,[]);
+    assert.equal((await s.memory.openFact(await turn(),factsRecord,2) as any).text,'Bob likes tea');
+    // The engine deleted the tea fact (its session was rebuilt): it no longer opens.
+    conclusions.splice(conclusions.findIndex(c=>c.id===likes),1);
+    await assert.rejects(s.memory.openFact(await turn(),factsRecord,2),{code:'memory_fact_unavailable'});
   } finally {
     await Promise.all([stores.archive.end(),stores.derived.end(),stores.control.end()]);await rm(root,{recursive:true,force:true});
   }

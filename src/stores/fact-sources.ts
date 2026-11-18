@@ -2,7 +2,7 @@ import type pg from 'pg';
 import type {Reader} from '../access.js';
 import type {EngineFact} from '../memory/engine.js';
 import {bucketOf} from '../source-facts.js';
-import {factBy,factOrder,headerSource,type FactCited,type TagBy} from '../source-tags.js';
+import {factBy,factOrder,factPlaceOnly,headerSource,type FactCited,type TagBy} from '../source-tags.js';
 import {readSetParam,readSetSql,recallCondition,type ReadSet} from '../spaces.js';
 import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
@@ -17,9 +17,12 @@ export interface FactAudience {audience:string;group:readonly string[]|null;read
  * holds, readable or not, in factOrder, so a later retirement of any of them is found (`complete` says whether the engine
  * named every message; an uncited fact names at most a few of its batch). `readable` are those the reader may read, in
  * the same order; `header` the one its source line names (headerSource); `more` how many other readable ones it has.
- * `exact` only when the engine cited its messages and every one maps to a receipt the reader may read.
+ * `exact` only when the engine cited every one of its messages and each maps to a receipt the reader may read. `complete`
+ * only for such a cited, uncut list: a fact learned with its batch rests on messages of other people that Honcho never
+ * names (it keeps only the observed peer's). `place` when its source line names only where and when (factPlaceOnly).
  */
-export interface SourcedFact {fact:EngineFact;sources:string[];readable:SourceReference[];header:SourceReference|null;by:TagBy;exact:boolean;more:number;complete:boolean}
+export interface SourcedFact {fact:EngineFact;sources:string[];readable:SourceReference[];header:SourceReference|null;by:TagBy;exact:boolean;more:number;
+  complete:boolean;place:boolean}
 
 type Receipt={peer:string;primary:SourceReference|null;references:SourceReference[];valid:boolean};
 const fullId=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -74,10 +77,47 @@ export class FactSourceRepository {
           cited.push({id:reference.id,own:receipt.peer===observed,bucket,reference});
         }
       }
-      const ordered=factOrder(cited),exact=fact.exact===true&&!unmapped&&cited.length>0&&cited.every(item=>item.bucket!==null);
+      // A cut citation list leaves messages out (a ninth may be anyone's), so only a whole one is exact.
+      const complete=fact.exact===true&&fact.complete&&!unmapped&&cited.length>0;
+      const ordered=factOrder(cited),exact=complete&&cited.every(item=>item.bucket!==null);
       const header=headerSource(ordered),shown=ordered.filter(item=>item.bucket!==null);
       return {fact,sources:ordered.flatMap(item=>item.id===null?[]:[item.id]),readable:shown.map(item=>item.reference!),header:header?.reference??null,
-        by:factBy(ordered,exact),exact,more:Math.max(0,shown.length-(header?1:0)),complete:fact.complete&&!unmapped};
+        by:factBy(ordered,exact),exact,more:Math.max(0,shown.length-(header?1:0)),complete,place:factPlaceOnly(ordered,exact)};
     });
   }
+}
+
+/** A fact as a record of facts stores it (B3.1, B3.6): every source, in order, so it opens by its number and a retired
+ *  source is found. `peer` names whose fact it is in a recall's record; a per-turn block names its one `subject`. `place`
+ *  when its source line names only where and when (factPlaceOnly). */
+export type StoredFact={n:number;conclusion:string;peer?:string;exact:boolean;by:TagBy;time?:string|null;sources:string[];more:number;complete:boolean;
+  session:string|null;place?:boolean};
+/** A record of facts a turn read, by the id the model sees: its own row (configuration, kind, the guarded text) and the
+ *  facts its unguarded parent keeps. */
+export type FactRecord={id:string;kind:string;content_hash:string;configuration:Record<string,unknown>;facts:StoredFact[];subject:string|null};
+const hex=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
+/** Whether a row is a record of facts the model reads: a per-turn block's bounded record, or a recall's guarded facts. */
+const factRecordKind=(kind:string,configuration:any)=>kind==='memory_context'&&typeof configuration?.facts_digest==='string'||
+  kind==='memory_result'&&configuration?.facts==='recall';
+/**
+ * The records of facts among these ids (B3.1, B3.6), in two queries. A record's facts live in the provenance of its one
+ * parent, the engine's raw output, which the guard never reads, so a turn checks only the text it shows for secrets,
+ * never every source id (the parent's workspace and audience must match). Any other id is left out.
+ */
+export async function factRecords(derived:Pick<pg.Pool,'query'>,ids:readonly string[]):Promise<Map<string,FactRecord>> {
+  const found=new Map<string,FactRecord>(),wanted=[...new Set(ids)].filter(hex);
+  if(!wanted.length)return found;
+  const rows=(await derived.query(`SELECT id,kind,content_hash,provenance FROM derived_artifacts WHERE id=ANY($1::text[])
+    AND kind IN ('memory_context','memory_result')`,[wanted])).rows.filter(row=>factRecordKind(row.kind,row.provenance?.configuration));
+  const parentOf=(row:any)=>{const parents=row.provenance?.parents;return Array.isArray(parents)&&parents.length===1&&hex(parents[0]?.id)?parents[0].id as string:null;};
+  const parentIds=rows.map(parentOf).filter((id):id is string=>id!==null);
+  const parents=new Map(parentIds.length?(await derived.query(`SELECT id,provenance FROM derived_artifacts WHERE id=ANY($1::text[]) AND kind='memory_result'`,
+    [parentIds])).rows.map(row=>[row.id as string,row.provenance??{}]):[]);
+  for(const row of rows) {
+    const configuration=row.provenance.configuration,parent=parents.get(parentOf(row)??''),stored=parent?.configuration;
+    if(!parent||!Array.isArray(parent.facts)||!parent.facts.length||stored?.workspace!==configuration.workspace||stored?.audience!==configuration.audience)continue;
+    found.set(row.id,{id:row.id,kind:row.kind,content_hash:row.content_hash,configuration,facts:parent.facts,
+      subject:typeof parent.subject==='string'?parent.subject:null});
+  }
+  return found;
 }

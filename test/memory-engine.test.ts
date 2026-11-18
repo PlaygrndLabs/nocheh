@@ -218,6 +218,20 @@ test('an uncited fact keeps no writes when the plugin cannot name its batch, and
   assert.deepEqual(tooMany.limitations,['fact_batches_invalid']);
   const gone=await run(body=>({roots:body.conclusion_ids,limitations:['conclusion_unavailable'],nodes:[]}));
   assert.deepEqual([gone.limitations,gone.facts[0]!.exact,gone.facts[0]!.complete],[['conclusion_unavailable'],null,false]);
+  // A whole batch is still never complete: Honcho keeps only the observed peer's messages of it, never the others' the
+  // fact may rest on (H1); nor is a fact with no message named at all (L3).
+  const whole=await run(body=>({roots:body.conclusion_ids,limitations:[],nodes:[{id:id(1),parents:[],exact_citations:false,messages_truncated:false,
+    messages:[{message_id:id(21),receipt_id:receipt}]}]}));
+  assert.deepEqual([whole.facts[0]!.writes,whole.facts[0]!.exact,whole.facts[0]!.complete],[[id(21)],false,false]);
+  const none=await run(body=>({roots:body.conclusion_ids,limitations:[],nodes:[{id:id(1),parents:[],exact_citations:null,messages_truncated:false,messages:[]}]}));
+  assert.deepEqual([none.facts[0]!.writes,none.facts[0]!.exact,none.facts[0]!.complete],[[],null,false]);
+  // Listed without batches, they are asked for once the caller chose its facts (L5).
+  const later=fake((path,body)=>path.startsWith(listPath)?list:{roots:body.conclusion_ids,limitations:[],
+    nodes:[{id:id(1),parents:[],exact_citations:false,messages_truncated:false,messages:[{message_id:id(21),receipt_id:receipt}]}]});
+  const page=await later.engine.facts('space','person',{sessions:null,size:100,cursor:null,batches:false});
+  assert.deepEqual([page.facts[0]!.writes,later.calls.length],[[],1],'no plugin call while listing');
+  assert.deepEqual(await later.engine.factBatches('space',page.facts.slice(0,1)),[]);
+  assert.deepEqual([page.facts[0]!.writes,later.calls.length],[[id(21)],2]);
 });
 
 test('facts by id keep the order asked for, the reader\'s sessions and only facts that still exist',async()=>{
