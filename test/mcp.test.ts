@@ -348,6 +348,8 @@ test('archive_read opens a note in this turn\'s evidence by its ref: up to 5 tag
   assert.deepEqual(await run('archive_read',{note:ref},fake(()=>new Status(404)).context),{error:'archive_source_unavailable'},'a ref this turn never had');
   assert.match(tool('archive_read').description,/note=<ref>/);
   assert.match(tool('memory_recall').description,/An owner correction has tag .* and evidence/);
+  // The usage sentence is said once in the tool descriptions, never per tool (ADR-0261 B1.7).
+  assert.equal(mcpTools.filter(item=>item.description.includes('Source lines and tags are written')).length,1);
 });
 
 test('background jobs are started, listed and stopped through the bound scope',async()=>{

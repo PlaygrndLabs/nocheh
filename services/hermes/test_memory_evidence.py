@@ -104,8 +104,27 @@ class MemoryEvidenceTests(unittest.TestCase):
                 system_prompt._memory_parts(None)
                 result=evidence.inject({'messages':[{'role':'user','content':'current request'}]})
                 self.assertEqual(json.loads(result['messages'][0]['content'][len(evidence.PREFIX):])['entries'],
-                                 [{'source':'nocheh.memory.recall','content':limited}])
+                                 [{'source':'nocheh.memory.recall','about':evidence.SOURCE_USAGE,'content':limited}])
             finally:restore()
+
+    def test_the_recall_evidence_says_once_what_source_lines_mean_in_the_words_the_tools_use(self):
+        # Once per evidence block and in the tool descriptions, never inside a tool result (ADR-0261).
+        import re
+        from pathlib import Path
+        from .prompts import DEFAULTS
+        code=(Path(__file__).resolve().parents[2]/'src'/'source-tags.ts').read_text()
+        written=re.search(r"export const sourceTagUsage=((?:'(?:[^'\\]|\\.)*'\s*\+?\s*)+);",code)
+        self.assertIsNotNone(written)
+        usage=''.join(part.replace("\\'","'") for part in re.findall(r"'((?:[^'\\]|\\.)*)'",written.group(1)))
+        self.assertEqual(evidence.SOURCE_USAGE,usage)
+        self.assertTrue(DEFAULTS['memory.evidence'].endswith(' '+usage),'the default evidence instruction carries it too')
+        recalled={'sources':[{'source':'nocheh:memory:'+'a'*64,'text':'Source [by=person]: “Bob” · this chat · 2026-11-03 UTC'}]}
+        restore=evidence.install(recalled)
+        try:
+            entries=json.loads(evidence.inject({'messages':[{'role':'user','content':'q'}]})['messages'][0]['content'][len(evidence.PREFIX):])['entries']
+            self.assertEqual([entry.get('about') for entry in entries],[usage])
+            self.assertEqual(json.dumps(entries).count('Source lines and tags are written'),1)
+        finally:restore()
 
     def test_a_note_shows_its_own_ref_and_no_other(self):
         name=key('memory','A note.')
