@@ -32,7 +32,12 @@ def verify_capability(credential,secret,scope,event_id):
         # chat, with the chat itself as its scope (ADR-0249).
         answer=claims.get('answer')
         if answer is not None and (not scope.owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):raise ValueError()
-        if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner and answer is None else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
+        # The owner's ask about a member (step 4b) is the same: its pass names the ask, reads as the owner's private chat
+        # and never as the owner, and is never an answer's too. Which chat it reads is bound by storage, never named here.
+        member_read=claims.get('member_read')
+        if member_read is not None and (not scope.owner or answer is not None or not isinstance(member_read,str) or
+                                        not re.fullmatch(r'[a-f0-9]{32}',member_read)):raise ValueError()
+        if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner and answer is None and member_read is None else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
             raise ValueError()
         if claims.get('space') is not None:
             if claims['space'] != scope.space or type(claims.get('revision')) is not int or claims['revision'] < 1:raise ValueError()
@@ -65,6 +70,8 @@ class Scope:
     logical_profile: str = ''
     project: str = ''
     answer: str = ''
+    # The owner's ask about a member this turn answers (step 4b): never the owner, never carried, read only.
+    member_read: str = ''
     # Where a Telegram turn's chat is in its app now, as its pass binds it: ('telegram', chat id, topic key or None).
     app: tuple = ()
 
@@ -125,6 +132,11 @@ class Scopes:
         answer=claims.get('answer')
         if 'answer' in claims and (generation is None or scope.owner or not isinstance(answer,str) or not re.fullmatch(r'[a-f0-9]{32}',answer)):
             raise ValueError('invalid_private_answer')
+        # The owner's ask about a member is its own conversation too (step 4b), named by its ask as storage names it.
+        member_read=claims.get('member_read')
+        if 'member_read' in claims and (generation is None or scope.owner or answer is not None or not isinstance(member_read,str) or
+                                        not re.fullmatch(r'[a-f0-9]{32}',member_read)):
+            raise ValueError('invalid_member_read')
         if generation is not None:
             if not re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}',str(generation)) or type(epoch) is not int or epoch<1:
                 raise ValueError('invalid_installation_generation')
@@ -136,8 +148,9 @@ class Scopes:
             default=Scopes.profile(scope.space or scope.chat_id)
             if logical and logical!=default:identity.append(logical)
             if answer is not None:identity.append('answer:'+answer)
+            if member_read is not None:identity.append('member_read:'+member_read)
             scope=replace(scope,profile=Scopes.profile(json.dumps(identity,separators=(',',':'),ensure_ascii=False)),generation=generation,purpose=purpose,
-                          logical_profile=logical or '',answer=answer or '')
+                          logical_profile=logical or '',answer=answer or '',member_read=member_read or '')
         # The chat's project brings its role and skills; it never changes which profile or history the turn uses.
         project=claims.get('project')
         if project is not None:
@@ -150,7 +163,7 @@ class Scopes:
 
         The pass's app binding must name this update's chat and topic, and the served list must agree: the update's
         Telegram id (now or before) and topic are that space, which is where the binding says it is now (ADR-0252). The
-        owner's own turn (no scope) and a private answer (ADR-0249) are the owner writing in the owner's private chat;
+        owner's own turn (no scope), a private answer (ADR-0249) and the owner's ask about a member (step 4b) are the owner writing in the owner's private chat;
         any other is a person writing in a served group, whom the app admitted (its member directory, step 3) before it
         signed this event's pass: a bot, or a message in a chat's own name, never is. A turn this policy does not serve is
         None; a pass that does not match its update is refused."""
@@ -175,7 +188,7 @@ class Scopes:
         served=self.current(epoch if type(epoch) is int else None,60.0,lambda served:served.resolve(external,topic)==space)
         # A list that cannot be read is no answer: the turn fails, to be tried again, rather than be dropped as unserved.
         if not served.available:raise RuntimeError('served_chats_unavailable')
-        owner=claims.get('scope') is None or claims.get('answer') is not None
+        owner=claims.get('scope') is None or claims.get('answer') is not None or claims.get('member_read') is not None
         # A chat no longer served (the owner's chat changed, a group left the list) gets no turn.
         if not (served.is_owner(nocheh) if owner else served.group(nocheh)==nocheh):return None
         # A served one: the update is from this chat and topic, by its Telegram id now or before, and the binding is where it

@@ -157,7 +157,9 @@ export function storageWorkflowOperations(s:StorageServices,call:RuntimeCall):Pa
       });
     },
     // A job id `continue:<action>` is an approved operation's follow-up turn in the chat that asked; others are event ids.
-    telegram:(id,authority)=>id.startsWith('continue:')?s.continuations.run(id.slice(9),authority):s.telegram.run(id,authority),
+    // A job id `ask:<id>` answers the owner's ask about a member (step 4b).
+    telegram:(id,authority)=>id.startsWith('continue:')?s.continuations.run(id.slice(9),authority):id.startsWith('ask:')?s.memberAskTurns.run(id.slice(4),authority):
+      s.telegram.run(id,authority),
     browser:(id,authority)=>s.browser.run(id,authority),
     schedules:(id,authority)=>s.scheduled.operation(id,authority),
     background:(id,authority)=>s.jobs.operation(id,authority),

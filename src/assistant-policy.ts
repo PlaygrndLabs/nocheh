@@ -163,15 +163,25 @@ export async function settleTelegramChat(source:{channel:string;scope:string}):P
 
 /** Final Telegram send authorization uses the captured original, never a prepared representation. An answer reader's
  * pass (ADR-0249) delivers only into the owner's own private chat, from the owner's own update there, and only with
- * its read set bound from its open record; never into a group. */
-export function telegramDeliveryAllowed(policy:AssistantPolicy,principal:{scope:string|null;answer?:string;reads?:unknown},source:{origin:string;channel:string;kind:string;scope:string;payload:Buffer}|null):boolean {
+ * its read set bound from its open record; never into a group. The owner's ask about a member (memberRead, step 4b)
+ * delivers the same way, only into the owner's own private chat from the owner's own update there, and only with the
+ * asked member's chat bound from its running record. A member in their own private chat (step 4) delivers only into
+ * that chat, from their own update there, and only with that very chat bound as theirs. */
+export function telegramDeliveryAllowed(policy:AssistantPolicy,principal:{scope:string|null;answer?:string;reads?:unknown;member?:string;memberRead?:string;memberChat?:string},
+  source:{origin:string;channel:string;kind:string;scope:string;payload:Buffer}|null):boolean {
   if(!source)return false;
   if(principal.answer!==undefined&&(source.channel!=='telegram'||!principal.reads))return false;
+  // Every reader bound to a member's chat answers only in Telegram, and only with that chat bound for this request.
+  if((principal.member!==undefined||principal.memberRead!==undefined)&&(source.channel!=='telegram'||!principal.reads||!principal.memberChat))return false;
   if(source.channel!=='telegram')return true;
   if(source.origin!=='live'||source.kind!=='telegram_update')return false;
   try {
-    const selected=conversationScope(policy,JSON.parse(source.payload.toString()),source.scope);
-    if(principal.answer!==undefined)return !!selected&&selected.owner&&selected.chat_id===principal.scope;
+    const selected=conversationScope(policy,JSON.parse(source.payload.toString()),source.scope) as {owner:boolean;chat_id:string;member?:string}|null;
+    if(principal.answer!==undefined||principal.memberRead!==undefined)return !!selected&&selected.owner&&selected.chat_id===principal.scope;
+    if(principal.member!==undefined)return !!selected&&!selected.owner&&selected.member===principal.member&&selected.chat_id===principal.scope&&
+      principal.memberChat===principal.scope;
+    // A private chat that is not the owner's delivers only for its own member's reader (fail closed).
+    if(selected&&!selected.owner&&chats().kind(selected.chat_id)==='private')return false;
     return !!selected&&(selected.owner?null:selected.chat_id)===principal.scope;
   }catch{return false;}
 }

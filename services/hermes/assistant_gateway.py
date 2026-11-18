@@ -27,12 +27,20 @@ def render_reply_citations(text):
 
 CONTINUATION=re.compile(r'[a-f0-9]{64}')
 CONTINUATION_ATTEMPT=re.compile(r'c[1-9]\d{0,2}-[a-f0-9]{40}')
+# The owner's ask about a member (step 4b) runs on the asking message under an attempt that names the ask.
+MEMBER_READ_ATTEMPT=re.compile(r'm[1-9]\d{0,2}-[a-f0-9]{32}')
 
 
 def continuation_id(body):
     """The leader action id of a continuation, or None for a message turn. A continuation's attempt names it, so its
     receipt, run and archived result never meet a message turn's; it carries no fixed control reply."""
     attempt,value=body.get('attempt'),body.get('continuation')
+    ask=body.get('member_read')
+    if ask is not None:
+        # Its attempt names its ask, so it never meets the asking turn's own receipt, run or reply; never a continuation.
+        if (value is not None or not isinstance(ask,dict) or not isinstance(attempt,str) or not MEMBER_READ_ATTEMPT.fullmatch(attempt)
+                or ask.get('ask')!=attempt[-32:] or body.get('control_reply') is not None):raise ValueError('invalid_member_read')
+        return None
     if value is None:
         if type(attempt) is not int or attempt<1:raise ValueError('invalid_dispatch_attempt')
         return None
@@ -60,12 +68,13 @@ def prepare_profile(root,scope,model):
     from .persona import audience, materialize
     # A private answer runs in the owner's private chat but never loads that chat's own role or skills: it gets the
     # project's, else the groups default (ADR-0249).
-    materialize(root, profile, None if scope.answer else scope.chat_id, scope.project, audience(scope))
+    # The owner's ask about a member (step 4b) loads none either.
+    materialize(root, profile, None if scope.answer or scope.member_read else scope.chat_id, scope.project, audience(scope))
     from .native_memory import save_receipt
     # The marker keeps the chat beside its space, so what a topic inherits never comes from the shape of its id (ADR-0252).
     save_receipt(profile/'space.json',json.dumps({'space':scope.space or scope.chat_id,'chat':scope.chat_id,'revision':scope.revision,'owner':scope.owner,
         'guard_epoch':scope.guard_epoch,'generation':scope.generation,'purpose':scope.purpose,'logical_profile':scope.logical_profile,
-        **({'answer':scope.answer} if scope.answer else {})}))
+        **({'answer':scope.answer} if scope.answer else {}),**({'member_read':scope.member_read} if scope.member_read else {})}))
     plugins=profile/'plugins';plugins.mkdir(exist_ok=True)
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
@@ -74,7 +83,9 @@ def prepare_profile(root,scope,model):
         # and the superseded profiles are removed once idle.
         from .profile_history import carry, prune, prune_answers
         # A private answer starts empty: no earlier answer's conversation, from any group, is carried into it (ADR-0249).
-        if scope.purpose!='filter' and not scope.answer:carry(profile)
+        # Nor is anything carried into the owner's ask about a member (step 4b), and its profile is never carried on: it is
+        # not the owner's and no later turn opens it.
+        if scope.purpose!='filter' and not scope.answer and not scope.member_read:carry(profile)
         prune(profile)
         # No later turn opens a private answer's profile, so any turn removes those no answer can run in any more.
         prune_answers(profile)
@@ -100,15 +111,16 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
             try:os.fsync(directory)
             finally:os.close(directory)
         await asyncio.to_thread(save_cursor)
-        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner,bool(scope.answer))
+        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner,bool(scope.answer),bool(scope.member_read))
         except Exception:pass # A missing title is cosmetic; the next turn tries again.
     return result
 
 
-def session_title(message,owner,answer=False):
+def session_title(message,owner,answer=False,member_read=False):
     """The chat a Telegram session belongs to, as the dashboard's session list shows it. A private answer's own
-    session is named as one, so the owner's private chat keeps its own name (ADR-0249)."""
+    session is named as one, so the owner's private chat keeps its own name (ADR-0249); so is an ask about a member."""
     if answer:return 'Private answer'
+    if member_read:return 'Ask about a member'
     chat=message.get('chat') if isinstance(message.get('chat'),dict) else {}
     title=chat.get('title') if isinstance(chat.get('title'),str) else ''
     name='Private chat' if owner else title.strip() or 'Telegram group'
@@ -123,12 +135,12 @@ def session_title(message,owner,answer=False):
     return name[:90]
 
 
-def title_session(profile,session_id,message,owner,answer=False):
+def title_session(profile,session_id,message,owner,answer=False,member_read=False):
     """Name a Telegram session after its chat. It is Hermes's top automatic title: it replaces a first-message
     title and stays once set, and Hermes keeps a title set by hand over it."""
     from hermes_state import SessionDB
     from .isolated_profile import database_path
-    title=session_title(message,owner,answer)
+    title=session_title(message,owner,answer,member_read)
     db=SessionDB(database_path(profile))
     try:
         if not db.get_session(session_id) or db.get_session_title_source(session_id) in (SessionDB.TITLE_SOURCE_LLM,SessionDB.TITLE_SOURCE_USER):return
