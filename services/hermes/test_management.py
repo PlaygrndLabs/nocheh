@@ -109,6 +109,57 @@ class ManagementTests(unittest.TestCase):
             self.assertNotIn('answer_group',listing['nocheh-'+'b2'*12],'one from before the receipt names nothing')
             self.assertTrue(listing['nocheh-'+'b2'*12]['private_answer'])
 
+    def test_the_newest_setup_of_a_chat_is_marked_latest(self):
+        # After a reinstall the owner's chat has a profile per setup; the base one may not exist on disk. Only the newest
+        # existing one is marked latest, so the dashboard's Notes opens on the notes the chat uses now.
+        policy=Scopes({'enabled':True},Served.of('123',groups=['-20']))
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for name,meta in (('nocheh-'+'a1'*12,{'space':'123','owner':True,'revision':1,'guard_epoch':2}),
+                              ('nocheh-'+'b2'*12,{'space':'123','owner':True,'revision':1,'guard_epoch':5}),
+                              ('nocheh-'+'c3'*12,{'space':'123','owner':False,'revision':1,'guard_epoch':9,'answer':'a'*32}),
+                              ('nocheh-'+'d4'*12,{'space':'-20','owner':False,'revision':3,'guard_epoch':5})):
+                path=root/'profiles'/name;path.mkdir(parents=True)
+                (path/'space.json').write_text(json.dumps(meta))
+            listing={p['profile']:p for p in dispatch(root,'test',policy,{'action':'profiles'})['history_profiles']}
+            self.assertFalse(listing[Scopes.profile('123')]['exists'])
+            self.assertEqual([p for p,v in listing.items() if v.get('latest')],['nocheh-'+'b2'*12,'nocheh-'+'d4'*12])
+            self.assertFalse(listing['nocheh-'+'a1'*12]['latest'])
+            self.assertFalse(listing[Scopes.profile('123')]['latest'])
+            self.assertNotIn('latest',listing['nocheh-'+'c3'*12],'a private answer is never a chat\'s current notes')
+
+    def test_after_a_reinstall_the_new_installations_notes_are_latest(self):
+        # A reinstall starts guard epochs again at 1, and the old installation's profiles stay on disk at their high
+        # epochs. The installation whose notes were used last is the current one, whatever its epoch.
+        import os
+        policy=Scopes({'enabled':True},Served.of('123'))
+        old,new='11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222'
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for name,meta,used in (('nocheh-'+'a1'*12,{'space':'123','owner':True,'revision':1,'guard_epoch':40,'generation':old},1_000_000),
+                                   ('nocheh-'+'b2'*12,{'space':'123','owner':True,'revision':1,'guard_epoch':2,'generation':new},2_000_000)):
+                path=root/'profiles'/name;path.mkdir(parents=True)
+                (path/'space.json').write_text(json.dumps(meta));os.utime(path/'space.json',(used,used))
+            listing={p['profile']:p for p in dispatch(root,'test',policy,{'action':'profiles'})['history_profiles']}
+            self.assertTrue(listing['nocheh-'+'b2'*12]['latest'])
+            self.assertFalse(listing['nocheh-'+'a1'*12]['latest'])
+
+    def test_a_named_profile_beside_the_chat_is_never_its_current_notes(self):
+        # A named owner profile has the same chat, setup and owner as the chat's own one; only the chat's own profile is
+        # its current notes, and the named one carries no mark either way.
+        policy=Scopes({'enabled':True},Served.of('123'))
+        generation='22222222-2222-4222-8222-222222222222'
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            own={'space':'123','owner':True,'revision':1,'guard_epoch':3,'generation':generation,'logical_profile':Scopes.profile('123')}
+            for name,meta in (('nocheh-'+'00'*12,{**own,'logical_profile':'profile-'+'ab'*24}),('nocheh-'+'ff'*12,own)):
+                path=root/'profiles'/name;path.mkdir(parents=True)
+                (path/'space.json').write_text(json.dumps(meta))
+            listing={p['profile']:p for p in dispatch(root,'test',policy,{'action':'profiles'})['history_profiles']}
+            self.assertNotIn('latest',listing['nocheh-'+'00'*12])
+            self.assertTrue(listing['nocheh-'+'ff'*12]['latest'])
+            self.assertFalse(listing[Scopes.profile('123')]['latest'])
+
     def test_a_members_chat_and_an_ask_about_a_member_are_marked_as_such(self):
         # Step 4 and 4b: the dashboard's Notes names these profiles as a member's and as the owner's question, never as
         # the owner's own chat or a group.

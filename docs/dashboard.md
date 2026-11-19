@@ -193,7 +193,9 @@ are disabled. See [ADR-0028](adr/0028-isolated-native-browser-turns.md) for the 
 
 ## Native memory and Honcho
 
-Memory › Assistant notes lists configured and historical group/topic profiles, and each private answer's own profile by where it was asked and the day it ran. A member's private chat is listed as “Member · <name>” and your question about a member as “Your question about a member · <date>”, the day it ran, after your own chat and the groups; a member's profile names its people notes “About this member”. Notes are read-only;
+Memory › Assistant notes lists configured and historical group/topic profiles, and each private answer's own profile by where it was asked and the day it ran. A member's private chat is listed as “Member · <name>” and your question about a member as “Your question about a member · <date>”, the day it ran, after your own chat and the groups; a member's profile names its people notes “About this member”.
+The page opens on the current notes of your private chat; after a reinstall, a chat's notes from earlier setups are listed after its current ones as “earlier notes”, oldest first.
+Notes are read-only;
 preferences in Settings › Assistant use the same locked resolver as assistant startup and take effect on
 the next turn. Session messages are paginated in groups of 50, with a 20,000
 character preview per message. Notes are bounded to 256 KiB and explicitly show
