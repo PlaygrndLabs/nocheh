@@ -230,10 +230,12 @@ people not allowed where they wrote were kept out of your notes, a line above
 the notes counts them; they are still in that group's long-term memory
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
-Each note also shows the day its label names, in your Settings › Tasks time
-zone, and **Original message** links to the messages it was written from: the
+A note from a notes review also shows its day, in your Settings › Tasks time
+zone (a note Nocheh wrote while answering names its day in its label), and each
+note has **Original message** links to the messages it was written from: the
 messages a review read, first message first, or the message the turn answered.
-A hidden (retired) message is shown as **Retired message** and never linked
+A message hidden from the assistant reads **Hidden from assistant** and is never
+linked
 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).
 
 Memory › Long-term memory has a **Facts it learned** card below **Re-run or
@@ -241,12 +243,14 @@ replace**, which is unchanged and still asks before it runs. A line counts the
 facts, such as “412 exact · 96 learned with other messages · 7 none”: exact
 facts name every message they came from; others know only the messages they
 were learned with, or none. The facts are listed newest first, 25 at a time,
-and you can pick **In chat** or **About person** (a person's panel in People
-links here as “What long-term memory learned about <name>”). Each fact shows
+and you can pick **In chat** or **About person**, searching people by name (a
+person's panel in People links here as “What long-term memory learned about
+<name>”). A page with none of its own says so and **Older** goes on. Each fact shows
 when it was learned, an **Exact source** or **Learned with other messages**
 badge, and links to the messages it came from, with a short label and when
-each was sent. Looking changes nothing and nothing is learned again. Members'
-private chats are never learned, so they are not offered as a chat.
+each was sent. Looking changes nothing and nothing is learned again. Other
+people's private chats with Nocheh are never learned, so they are not offered
+as a chat.
 
 ```sh
 ./bin/nocheh memory list
@@ -627,12 +631,15 @@ A message's details also show its **Thread**: what it **Replies to**, the
 forum **Topic** it is in with a link to the topic's first message, where it
 was **Forwarded from**, and the **Replies** to it. A message in a forum topic
 shows its topic, never the topic's first message as what it replies to, and
-that first message says it opens the topic. **Learned into memory** lists the
-facts long-term memory learned from the message, each with its badge and the
-messages it came from. Every linked message carries a short label in your own
-words and when it was sent; Facts, People, Projects and Inbox review show the
-same label beside their links. A hidden (retired) message reads **Retired
-message** and is never linked; a message Nocheh never kept reads “Source not
+that first message says it opens the topic. Someone else's private chat stays
+under **Members' chats**: seen from another chat, a reply into it is only named
+as being there, and a reply from it isn't listed. **Learned into memory** lists
+the facts long-term memory learned from the message, each with its badge and
+the messages it came from; it asks long-term memory when the panel opens and
+when you press **Check again**, not on every live update. Every linked message
+carries a short label in your own words and when it was sent; Facts, People,
+Projects and Inbox review show the same label beside their links. A message
+hidden from the assistant reads **Hidden from assistant** and is never linked; a message Nocheh never kept reads “Source not
 recorded”, and while labels can't be read links read “Source not available
 right now”, counted on System › Health
 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).

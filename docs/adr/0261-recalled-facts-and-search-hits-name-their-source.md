@@ -425,50 +425,70 @@ turn's own message and answer stay.
   reads any of it. The owner reads every chat, members' private chats included,
   as Messages already shows them (ADR-0262); those chats are never learned, so
   their messages have no facts and the Facts list's chat filter does not offer
-  them.
+  them. They stay out of what the owner sees by default: seen from any other
+  chat, a reply into someone else's private chat reads only “A message in
+  someone else's private chat” (`reply_in_private_chat`, no label, no link), and
+  a reply from one is left out of **Replies**; from inside that chat both show.
 - **An original, in the owner's words.** Each message the dashboard links is
   `{id, label, at, forward?}`: a short label code builds from the archive with
   the Notes page's own words (`ownerEventLabel`, `placeLabel`, `whoLabel`, edited
-  in Settings › Assistant), and when it was sent (`OwnerOriginals`). A retired
-  message reads only `{retired: true}`, never with its id or a link (“Retired
-  message”). A message the archive does not hold reads “Source not recorded”, and
+  in Settings › Assistant), and when it was sent (`OwnerOriginals`, 200 to a
+  batch of reads, every id asked named). A retired message, or a reaction to
+  one (`retiredAmong`, as `canRead` reads it), reads only `{retired: true}`,
+  never with its id or a link (“Hidden from assistant”, the Messages list's own
+  words for it). A message the archive does not hold reads “Source not recorded”, and
   when the labels or the retirement check can't be read every original of that
   request reads “Source not available right now”, both without an id
-  (ADR-0257's fail-closed labels); that failure is counted as `source_tags`.
+  (ADR-0257's fail-closed labels); that failure is counted as `source_tags`. A
+  lookup that works counts nothing, so the dashboard never marks a turn's
+  counted failure as fixed.
   `GET /v1/memory/originals` labels up to 50 ids in the order asked, so Facts,
   People, Projects and Inbox review show a label and time beside each link with
-  one lookup per page (at most 4); a page whose lookup fails shows its links as
-  before, without labels.
+  one lookup per page or panel (at most 4; an Inbox proposal names every new
+  project's, moved chat's and its own originals together); a page whose lookup
+  fails shows its links as before, without labels.
 - **Messages › detail.** A **Thread** section (`GET /v1/events/<id>/thread`,
   `ownerThread` on step 1's relations, `RelationshipRepository.replies` and
   `telegramTopicOpening`): **Replies to**, **Topic** (its chat and topic in the
   owner's words, with a link to the topic's first message), **Forwarded from**
   and **Replies (N)** (up to 100 counted, “100+” past that, the first 20
-  listed). A message replying to its topic's opening shows only **Topic**, never
-  **Replies to**; the opening says it opens the topic and lists no replies,
-  since they are the whole topic. An old Desktop import's reply into another
-  chat is named, not linked. A **Learned into memory** section
-  (`GET /v1/events/<id>/learned`): the facts citing the message, found with
-  Honcho's stock `/conclusions/list` filtered on `source_message_ids` by the
+  listed, each a **Reply** link). A message replying to its topic's opening
+  shows only **Topic**, never **Replies to**; the opening says it opens the
+  topic and lists no replies, since they are the whole topic. A topic's message
+  that replies to a message in another chat carries its opening too: it shows
+  that message as **Replies to** and its **Topic** (archive_read's thread reads
+  it the same way). An old Desktop import's reply into another chat is named,
+  not linked. A **Learned into memory** section
+  (`GET /v1/memory/message-facts?id=<id>`): the facts citing the message, found
+  with Honcho's stock `/conclusions/list` filtered on `source_message_ids` by the
   remote ids of its done, unretired receipts (`everyFact`), each with its badge
   (**Exact source**, or **Learned with other messages** for a fact that knows
   only its batch), when it was learned and its originals (the open message reads
-  “This message”). Both load when the panel opens and when Messages' live
-  updates tick, never on a timer, since Learned asks long-term memory itself.
+  “This message”). The receipts are found by the message alone, on its two
+  indexes (`memory_receipts_live_source`, and `memory_receipts_live_references`,
+  a GIN index on `source_references` added if missing), never by walking the
+  memory. The Thread loads when the panel opens and with Messages' live
+  updates; Learned asks long-term memory itself, so it loads when the panel
+  opens and on **Check again**, never on a live update or a timer (its path is
+  outside Messages' live paths).
 - **Memory › Long-term.** A **Facts it learned** card after **Re-run or
   replace**, which is unchanged and still asks before it runs: a coverage line
   from `citationCoverage()` (“412 exact · 96 learned with other messages · 7
   none”, `GET /v1/memory/longterm/coverage`), and the facts newest first, 25 a
   page (`GET /v1/memory/facts?chat=&person=&after=`), filtered by chat (its
   memory's sessions and its topics') or by person (that person's own facts about
-  themselves, from People's “What long-term memory learned about <name>”). Each
+  themselves, from People's “What long-term memory learned about <name>”, or
+  found by name: the person chosen stays offered even when a search doesn't
+  find them, everyone by name). A page that holds none of its own while older
+  pages follow says so (“None on this page”), never “No facts here yet”. Each
   fact shows its text, its badge, when it was learned, the label and time of the
   original its source line names first and up to 5 originals in the fact's order
   (section 6), the rest counted. Facts one participant holds about another are left
   out. Sources come from `FactSourceRepository` for the owner's audience, as in
   a turn.
-- **Memory › Notes.** Each note shows the day its label names (a review's main
-  message's, a turn's own, in the owner's Settings › Tasks zone) and **Original
+- **Memory › Notes.** Each review's note shows its day (its main message's, in
+  the owner's Settings › Tasks zone; a turn's note names its own day in its
+  label, so it isn't shown twice) and **Original
   message N** links to the messages its writer read (a review's batch, first
   message first, or the message the turn answered), a retired one shown but not
   linked.
@@ -522,11 +542,12 @@ turn's own message and answer stay.
 - **A label field in every page's own answer (Facts, People, Projects, Inbox).**
   Not chosen: one lookup route keeps each page's answer as it was, and a page
   whose lookup fails still shows its links.
-- **Refreshing Learned into memory on a timer.** Not chosen: it asks long-term
-  memory itself, so an open panel would query it every minute; it reloads with
-  Messages' live updates instead.
+- **Refreshing Learned into memory on a timer or with Messages' live updates.**
+  Not chosen: it asks long-term memory itself, so an open panel would query it
+  on every change in any chat (or every 10 seconds while live updates are
+  paused); it loads when the panel opens and on **Check again**.
 - **Linking a retired original with a mark.** Rejected: a retired message is
-  never an original; it reads only “Retired message”.
+  never an original; it reads only “Hidden from assistant”.
 </alternatives>
 
 <consequences>
@@ -623,7 +644,8 @@ turn's own message and answer stay.
     reads the whole row (it errs toward more reads).
 - Step 4: opening a message in Messages reads its thread (a few queries and one
   label request) and asks long-term memory once for the facts citing it, with
-  one receipts query; each Facts page is one engine list, one receipts query and
+  one receipts query on two indexes (one more GIN index on the receipts, a
+  little more work on each memory write); each Facts page is one engine list, one receipts query and
   one label request; the coverage line is one plugin call a minute while the
   Long-term tab is open. Facts, People, Projects and an Inbox review panel make
   at most 4 label lookups of 50 ids each. Nothing is stored.
@@ -641,4 +663,10 @@ turn's own message and answer stay.
     others merged into it in People.
   - Notes' original links carry no label of their own; the note's label names
     them.
+  - A reply from someone else's private chat is left out of a message's
+    **Replies** and its count when seen from another chat, and a reply into one
+    is named only as being there; the owner reads it under Messages › Members'
+    chats.
+  - Learned into memory no longer follows Messages' live updates; it shows what
+    was learned when the panel opened until **Check again**.
 </consequences>

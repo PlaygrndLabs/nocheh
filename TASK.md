@@ -14,10 +14,13 @@ again; only the owner reads any of it.
 - Storage: originals in the owner's words (`OwnerOriginals`, `ownerEventLabels`; a retired one
   `{retired:true}`, never an id; “Source not recorded” and fail-closed “Source not available
   right now” without an id, counted as `source_tags`), `GET /v1/memory/originals` (≤50 ids);
-  `GET /v1/events/<id>/thread` (`ownerThread`) and `/learned` (engine `everyFact` on stock
-  `/conclusions/list` with `source_message_ids`, facts about another participant left out);
+  `GET /v1/events/<id>/thread` (`ownerThread`; someone else's private chat kept out of other
+  chats' threads) and `GET /v1/memory/message-facts` (engine `everyFact` on stock
+  `/conclusions/list` with `source_message_ids`, receipts found on two indexes, facts about
+  another participant left out; outside Messages' live paths, so it loads on open and Check again);
   `GET /v1/memory/facts` (newest first, 25 a page, by chat or person, ≤5 originals a fact) and
-  `/longterm/coverage`; each note's `day` and `originals`; empty reasons uncounted, a failed
+  `/longterm/coverage`; each review note's `day` (a turn's label names its own) and each note's
+  `originals`; empty reasons uncounted, a failed
   engine read counted ([store](test/store-memory-dashboard.test.ts),
   [notes](test/store-note-sources.test.ts), [engine](test/memory-engine.test.ts),
   [relay](services/hermes/test_management_api_errors.py)).
