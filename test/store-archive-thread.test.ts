@@ -71,6 +71,9 @@ test('archive_read opens a message with its source and its thread, each part onl
     const bobB=await capture(B,{message:message(GP2,1,bob,'Bob in GP2',T)});
     // GP2's reply to GP1's plan, as Telegram sends a reply into another chat: never counted or shown in GP1.
     const quoted=await capture(B,{message:message(GP2,2,bob,'Bob quotes GP1',T+30,{external_reply:{origin:{type:'user',sender_user:bob,date:T},chat:GP1,message_id:1}})});
+    // A message in GP1's Trips topic replying to GP2's: Telegram names the topic's opening as its reply too.
+    const topicQuote=await capture(A,{message:message(GP1,9,ana,'Ana in trips quotes GP2',T+620,{message_thread_id:77,is_topic_message:true,
+      reply_to_message:openingMessage,external_reply:{origin:{type:'user',sender_user:bob,date:T},chat:GP2,message_id:1}})});
     const bot={id:999,is_bot:true,first_name:'Nocheh'};
     const answered=await capture(A,{message:message(GP1,8,bot,'Noted, Ana',T+600),answers:ana2.id,send_class:'reply'},'telegram_delivered_message');
     // A forged answer of Nocheh's in GP2 naming GP1's message: its own canRead leaves it out.
@@ -140,6 +143,10 @@ test('archive_read opens a message with its source and its thread, each part onl
     assert.equal(fromGP2.reply_to,undefined);
     assert.ok(!JSON.stringify(addedOf(fromGP2)).includes('GP1')&&!JSON.stringify(fromGP2).includes(bob1.id),'GP1 is named only where Telegram\'s own copy names it');
     // The owner reads the whole thread, GP2's reply into GP1 too, in the Tasks time zone.
+    // A topic's message replying to another chat's: what it replies to is that message, never its topic's opening.
+    const topicQuoted=await open(owner,topicQuote);
+    assert.deepEqual([topicQuoted.reply_to?.source,topicQuoted.topic],['nocheh:event:'+bobB.id,'group “GP1” › topic “Trips”']);
+    assert.equal((await open(general,topicQuote)).reply_to,undefined,'GP1 reads none of GP2');
     const owned=await open(owner,bob1,10);
     assert.deepEqual([owned.tag,owned.replies.count,owned.replies.items.at(-1)?.source],['“Bob” (@bob_gp) · group “GP1” · 2025-11-03 15:12 Europe/Berlin',4,'nocheh:event:'+quoted.id]);
     assert.equal(owned.replies.items.find((item:any)=>item.source==='nocheh:event:'+imported.id)?.tag,'“Ana” · group “GP1” · 2025-11-03 14:21 local time of the export',

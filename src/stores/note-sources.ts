@@ -6,7 +6,7 @@ import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.j
 import {sourceChat} from '../spaces.js';
 import {telegramMessage} from '../chats-telegram.js';
 import {bucketOf,eventClass,heldBy,heldKey,nochehHeld,nochehPinned,nochehQuoted,quotesToTrace,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
-import {fromToken,modelLabel,modelSourceWords,noteDay,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
+import {fromToken,modelLabel,modelSourceWords,noteDay,ownerEventLabel,ownerLabel,ownerOrigin,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
 import {nameKeys,type Who} from '../task-reminder-text.js';
 import {embeddedSource,pinnedSource,sourceObjectId,type SourceIdentity} from '../source-model.js';
@@ -413,17 +413,55 @@ export class NoteSourceRepository {
     return {labels:origins.map(list=>({from:fromToken(list),label:modelLabel(list,names)})),sources,days:origins.map(noteDay)};
   }
 
+  /** The owner's own words (memory.source_texts, and the reminder and approval texts' words for people and chats). */
+  async ownerWords():Promise<SourceWords> {
+    const prompts=await ownerPrompts(this.stores.control);
+    return {lines:sourceLines(prompts['memory.source_texts']),reminder:reminderLines(prompts['tasks.reminder_texts']),places:approvalLines(prompts['telegram.approval_texts'])};
+  }
+  /** People and chats named as reminders name them, for these messages' senders. */
+  private async ownerNames(known:Iterable<LabelEvent>) {
+    const people:Who[]=[...known].flatMap(item=>item.facts?.author==='person'?[{by:'person' as const,account:item.facts.account,name:item.facts.name}]:[]);
+    const names=await peopleNames(this.stores.control,chats(),this.policy() as AssistantPolicy,people);
+    return {names,keys:nameKeys(names,people)};
+  }
   /** Each note's source in the owner's own words (memory.source_texts), naming people and chats as reminders do, for
-   *  the Notes page, in the order of `notes`. */
-  async ownerLabels(notes:readonly NoteInput[]):Promise<NoteSource[]> {
+   *  the Notes page, in the order of `notes`, with a review's day (its main message's, in the owner's zone; a turn's label
+   *  names its own) and the messages its writer read: a review's batch, its first message first, or the turn's message. */
+  async ownerLabels(notes:readonly NoteInput[]):Promise<(NoteSource&{day:string|null;sources:string[]})[]> {
     if(!notes.length)return [];
-    const {origins,known,partial}=await this.resolve(notes,true,true),prompts=await ownerPrompts(this.stores.control);
-    const words:SourceWords={lines:sourceLines(prompts['memory.source_texts']),reminder:reminderLines(prompts['tasks.reminder_texts']),
-      places:approvalLines(prompts['telegram.approval_texts'])};
-    const people:Who[]=[...known.values()].flatMap(item=>item.facts?.author==='person'?[{by:'person' as const,account:item.facts.account,name:item.facts.name}]:[]);
-    const names=await peopleNames(this.stores.control,chats(),this.policy() as AssistantPolicy,people),keys=nameKeys(names,people);
+    const {origins,known,partial,sources}=await this.resolve(notes,true,true),words=await this.ownerWords();
+    const {names,keys}=await this.ownerNames(known.values());
     await this.counted(!partial);
-    return origins.map(list=>({from:fromToken(list),label:ownerLabel(list,words,names,keys)}));
+    // A turn's label names its day already ({date}, which the owner's words must keep); a review's day is shown beside it.
+    return origins.map((list,index)=>({from:fromToken(list),label:ownerLabel(list,words,names,keys),day:list[0]?.by==='turn'?null:noteDay(list),
+      sources:sources[index]??[]}));
+  }
+  /**
+   * Each of these messages in the owner's words, for the owner's dashboard (ADR-0261 step 4): who sent what kind of
+   * message where (ownerEventLabel, as the Notes page names a review's), where a forward came from, and when it was sent
+   * (sourceMoment). A message the archive does not hold reads "Source not recorded". Throws when they can't be built.
+   */
+  async ownerEventLabels(ids:readonly string[]):Promise<Map<string,{label:string;at:string|null;forward?:string;missing?:true}>> {
+    const wanted=[...new Set(ids.filter(fullId))],found=new Map<string,{label:string;at:string|null;forward?:string;missing?:true}>();
+    if(!wanted.length)return found;
+    const [classes,rows,words]=await Promise.all([this.classesFor(wanted),
+      this.stores.archive.query('SELECT id,channel,kind,scope,payload,occurred_at,received_at FROM events WHERE id=ANY($1::text[])',[wanted]),this.ownerWords()]);
+    const policy=this.policy() as AssistantPolicy,events=new Map<string,LabelEvent>(),moments=new Map<string,string|null>();
+    for(const row of rows.rows) {
+      const known=classes.get(row.id);if(!known)continue;
+      let payload:unknown=null;try{payload=JSON.parse((row.payload as Buffer).toString());}catch{}
+      const event:LabelEvent={class:known.class,facts:known.facts,chat:sourceChat({channel:row.channel,scope:row.scope})};
+      // Only a person's message can come from someone not allowed there now.
+      if(known.facts.author==='person')event.allowed=notesSender(policy,{channel:row.channel,kind:row.kind,scope:row.scope,payload})==='review';
+      events.set(row.id,event);moments.set(row.id,sourceMoment(row).at);
+    }
+    const {names,keys}=await this.ownerNames(events.values());
+    for(const id of wanted) {
+      const event=events.get(id);
+      if(!event){found.set(id,{label:words.lines.unknown,at:null,missing:true});continue;}
+      found.set(id,{label:ownerEventLabel(event,words,names,keys),at:moments.get(id)??null,...event.class.startsWith('forward_')?{forward:ownerOrigin(event,words)}:{}});
+    }
+    return found;
   }
 
   /**
@@ -473,7 +511,7 @@ export class NoteSourceRepository {
    * The Notes page's notes (the brain's `memory` result), each with its source in the owner's words in place of what
    * Hermes recorded; the records themselves stay in Hermes. A note whose source can't be read now says so.
    */
-  async withOwnerLabels(result:unknown):Promise<unknown> {
+  async withOwnerLabels(result:unknown,originals?:(ids:string[])=>Promise<ReadonlyMap<string,unknown>>):Promise<unknown> {
     const value=record(result);
     if(!value||!Array.isArray(value.memories))return result;
     const space=typeof value.scope==='string'?value.scope:null;
@@ -488,11 +526,19 @@ export class NoteSourceRepository {
         {item:memory,entries:null};
     });
     // A failed lookup is counted for the owner's notice, and every note still shows, as not available right now.
-    let labels:NoteSource[]|null=null;
+    let labels:Awaited<ReturnType<NoteSourceRepository['ownerLabels']>>|null=null;
     try{labels=await this.ownerLabels(memories.flatMap(memory=>memory.entries?.map(entry=>entry.input)??[]));}catch{await this.counted(false);}
     const unavailable:NoteSource={from:'unavailable',label:sourceLines(undefined).unavailable};
+    // Each note's day and the messages its writer read (a review's batch, a turn's message), named as originals are
+    // (OwnerOriginals counts its own failure and fails closed).
+    const named=originals&&labels?await originals([...new Set(labels.flatMap(label=>label.sources))]):null;
+    const shown=(index:number)=>{
+      const found=labels?.[index];if(!found)return unavailable;
+      const {sources,...label}=found;
+      return {...label,...named?{originals:sources.flatMap(id=>named.get(id)??[])}:{}};
+    };
     return {...value,memories:memories.map(({item,entries})=>entries===null?item:{...item as object,entries:entries.map(({entry,index})=>
-      ({target:entry?.target,text:entry?.text,...labels?.[index]??unavailable}))})};
+      ({target:entry?.target,text:entry?.text,...shown(index)}))})};
   }
 
   /**

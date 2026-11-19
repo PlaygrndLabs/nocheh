@@ -5,7 +5,8 @@
 import {useState, type ReactNode} from 'react';
 import {ChevronRight, Pencil, Search, Share2, UserRound} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
-import {setParams} from '../../lib/routes';
+import {OriginalNames} from '../../lib/originals';
+import {href, setParams} from '../../lib/routes';
 import {refreshResources, useResource} from '../../lib/resource';
 import {
   Badge,
@@ -188,7 +189,10 @@ function PersonDrawer({id, onClose}: {id: string | null; onClose: () => void}) {
       {detail.error && <LoadError what="this person" onRetry={() => void refreshResources()} />}
       {!detail.data && !detail.error && <LoadingRows rows={4} />}
       {detail.data && entity && (
-        <PersonDetail key={entity.id} entity={entity} claims={detail.data.claims} data={detail.data} />
+        // Every claim's originals are named with one lookup for the whole panel.
+        <OriginalNames ids={detail.data.claims.flatMap(claim => claim.evidence.map(source => source.id))}>
+          <PersonDetail key={entity.id} entity={entity} claims={detail.data.claims} data={detail.data} />
+        </OriginalNames>
       )}
     </Drawer>
   );
@@ -261,6 +265,14 @@ function PersonDetail({
 
       {data.partial && <Notice>Only the first 200 facts are shown.</Notice>}
       {grants.error && <p className="text-[13px] text-muted">Couldn’t check which chats may use these facts.</p>}
+      {entity.state === 'active' && (
+        <a
+          className="block text-[13px] text-accent-text hover:underline"
+          href={href('memory', {view: 'longterm', about: entity.id})}
+        >
+          What long-term memory learned about {entity.name}
+        </a>
+      )}
       <MergePerson entity={entity} />
       <Technical value={{entity, bindings: data.bindings}} />
     </div>

@@ -53,6 +53,8 @@ CREATE INDEX IF NOT EXISTS memory_receipts_live_session ON memory_ingestion_rece
 CREATE INDEX IF NOT EXISTS memory_receipts_live_source ON memory_ingestion_receipts((source_reference->>'id')) WHERE retired_at IS NULL;
 CREATE INDEX IF NOT EXISTS memory_receipts_source ON memory_ingestion_receipts((source_reference->>'id')) WHERE projection_reference IS NULL;
 CREATE INDEX IF NOT EXISTS memory_receipts_live_writer ON memory_ingestion_receipts(generation,peer_id) WHERE retired_at IS NULL AND state='done';
+-- The receipts that carry a message among others, for the dashboard's Learned into memory (ADR-0261 step 4).
+CREATE INDEX IF NOT EXISTS memory_receipts_live_references ON memory_ingestion_receipts USING gin(source_references jsonb_path_ops) WHERE retired_at IS NULL AND state='done';
 CREATE TABLE IF NOT EXISTS memory_sessions (
  workspace text NOT NULL REFERENCES memory_generations(id),key text NOT NULL,audience text NOT NULL,
  kind text NOT NULL CHECK(kind IN ('conversation','entity_evidence','projection','material')),

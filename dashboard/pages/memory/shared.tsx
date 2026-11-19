@@ -4,6 +4,7 @@ import {apiPost} from '../../lib/api';
 import {currentAppId, privateChatErrors, type Chat} from '../../lib/chats-model';
 import {useChatDirectory} from '../../lib/chat-directory';
 import {refreshResources, useResource} from '../../lib/resource';
+import {OriginalItem, useNamedOriginals} from '../../lib/originals';
 import {cn} from '../../lib/utils';
 
 export const CONFLICT_TEXT = 'This changed somewhere else. Reload to see the latest, your text is kept.';
@@ -146,19 +147,35 @@ export function chatName(row: Conversation): string {
   );
 }
 
-/** Links to the original messages a fact came from. */
+/**
+ * Links to the original messages a fact came from, each with a short label in your words and when it was sent; a
+ * retired message is never linked (ADR-0261 step 4). Until the labels come, or if they can't, the links show alone.
+ */
 export function EvidenceLinks({sources, className}: {sources?: {id: string}[] | null; className?: string}) {
   const list = (sources ?? []).filter(source => source?.id);
+  const shown = list.slice(0, 12);
+  const named = useNamedOriginals(shown.map(source => source.id));
   if (!list.length) return <p className={cn('text-[13px] text-muted', className)}>No linked messages.</p>;
   return (
-    <ul className={cn('flex flex-wrap gap-x-4 gap-y-1 text-[13px]', className)}>
-      {list.slice(0, 12).map((source, index) => (
-        <li key={source.id + index}>
-          <a className="text-accent-text hover:underline" href={'#messages?source=' + encodeURIComponent(source.id)}>
-            Original message {list.length > 1 ? index + 1 : ''}
-          </a>
-        </li>
-      ))}
+    <ul className={cn('space-y-0.5 text-[13px]', className)} aria-label="Original messages">
+      {shown.map((source, index) => {
+        const text = 'Original message' + (list.length > 1 ? ' ' + (index + 1) : '');
+        const original = named.get(source.id);
+        return (
+          <li key={source.id + index} className="break-words">
+            {original ? (
+              <OriginalItem original={original} linkText={text} />
+            ) : (
+              <a
+                className="text-accent-text hover:underline"
+                href={'#messages?source=' + encodeURIComponent(source.id)}
+              >
+                {text}
+              </a>
+            )}
+          </li>
+        );
+      })}
       {list.length > 12 && <li className="text-muted">and {list.length - 12} more</li>}
     </ul>
   );

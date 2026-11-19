@@ -89,7 +89,7 @@ def dispatch(body):
     if operation == 'memory.api':
         from urllib.parse import urlsplit
         path=body['path'];parsed=urlsplit(path)
-        if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/longterm','/v1/memory/longterm/rebuild','/v1/memory/longterm/retry-failed','/v1/memory/longterm/fresh-start','/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview'):
+        if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/longterm','/v1/memory/longterm/rebuild','/v1/memory/longterm/retry-failed','/v1/memory/longterm/fresh-start','/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview','/v1/memory/facts','/v1/memory/longterm/coverage','/v1/memory/originals','/v1/memory/message-facts'):
             raise ValueError('memory_route_denied')
         return api_call(path,body.get('body'),'memory_operation_unavailable')
     if operation == 'operations.list':
@@ -168,7 +168,7 @@ def dispatch(body):
         from urllib.parse import urlsplit
         import re
         path = body['path']; parsed = urlsplit(path)
-        if parsed.scheme or parsed.netloc or not (parsed.path in ('/v1/status', '/v1/runtime', '/v1/search', '/v1/scopes') or re.fullmatch(r'/v1/events/[a-f0-9]{64}', parsed.path)):
+        if parsed.scheme or parsed.netloc or not (parsed.path in ('/v1/status', '/v1/runtime', '/v1/search', '/v1/scopes') or re.fullmatch(r'/v1/events/[a-f0-9]{64}(?:/thread)?', parsed.path)):
             raise ValueError('archive_route_denied')
         return API().call(path)
     if operation.startswith('settings.'):

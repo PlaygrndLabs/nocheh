@@ -190,6 +190,36 @@ test('facts come from the stock list with their cited writes, and uncited ones a
   await assert.rejects(engine.facts('space','person',{sessions:null,size:101,cursor:null}),{code:'invalid_fact_request',status:400});
 });
 
+test('every participant\'s facts for the owner\'s dashboard: by the stock list\'s filters, never one peer\'s facts about another (ADR-0261 step 4)',async()=>{
+  const pages:Record<string,unknown>={
+    '':{items:[conclusion(1,{observer_id:'bob',observed_id:'ana',source_message_ids:[id(11)]})],next_page:'p2'},
+    p2:{items:[conclusion(2,{observer_id:'ana',observed_id:'ana',source_message_ids:[id(11),id(12)]}),conclusion(3,{observer_id:'bob',observed_id:'bob'})],next_page:'p3'}};
+  const {calls,engine}=fake((path,body)=>{
+    if(path.startsWith(listPath))return pages[new URL('http://h'+path).searchParams.get('cursor')!];
+    if(path.endsWith('/nocheh/provenance'))return {roots:body.conclusion_ids,limitations:[],
+      nodes:body.conclusion_ids.map((v:string)=>({id:v,parents:[],deleted:false,exact_citations:false,messages_truncated:false,messages:[{message_id:id(21),receipt_id:receipt}]}))};
+    throw Error('unexpected '+path);
+  });
+  const all=await engine.everyFact('space',{sessions:['s1'],size:25,cursor:null});
+  assert.deepEqual(calls.filter(c=>c.path.startsWith(listPath)).map(c=>[c.path,c.body]),[
+    [listPath+'?size=25&cursor=',{filters:{level:'explicit',session_id:{in:['s1']}}}],
+    [listPath+'?size=25&cursor=p2',{filters:{level:'explicit',session_id:{in:['s1']}}}]],'a page of only one peer\'s facts about another is followed by the next');
+  assert.deepEqual(all.facts.map(f=>[f.id,f.participant,f.writes,f.exact]),[[id(2),'ana',[id(11),id(12)],true],[id(3),'bob',[id(21)],false]],
+    'each names whose fact it is; an uncited one gets its batch');
+  assert.equal(all.next,'p3');
+  calls.length=0;
+  const citing=await fake((path,body)=>{calls.push({path,body,method:undefined});return {items:[conclusion(4,{source_message_ids:[id(11)]})],next_page:null};})
+    .engine.everyFact('space',{sessions:null,citing:[id(11)],size:25,cursor:null});
+  assert.deepEqual(calls[0]!.body,{filters:{level:'explicit',source_message_ids:{in:[id(11)]}}});
+  assert.deepEqual(citing.facts.map(f=>[f.id,f.participant,f.exact]),[[id(4),'person',true]]);
+  for(const answer of [{items:[conclusion(5,{source_message_ids:[id(12)]})],next_page:null},{items:[conclusion(5)],next_page:null},
+    {items:[conclusion(5,{observer_id:'not an id!',observed_id:'not an id!',source_message_ids:[id(11)]})],next_page:null}])
+    await assert.rejects(fake(()=>answer).engine.everyFact('space',{sessions:null,citing:[id(11)],size:25,cursor:null}),{code:engineErrors.invalid},
+      'a fact that cites none of the messages asked about is a broken answer');
+  assert.deepEqual(await engine.everyFact('space',{sessions:null,citing:[],size:25,cursor:null}),{facts:[],next:null,limitations:[]});
+  await assert.rejects(engine.everyFact('space',{sessions:null,citing:['short'],size:25,cursor:null}),{code:'invalid_fact_request'});
+});
+
 test('a fact list that is not what was asked is a broken answer',async()=>{
   const answers:Record<string,unknown>[]=[
     {items:[conclusion(1,{observed_id:'someone else'})],next_page:null},

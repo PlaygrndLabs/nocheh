@@ -35,6 +35,7 @@ import {HideControl} from './hide';
 import {seenRows} from './list';
 import {useChatNames} from './chat-names';
 import {useCommand} from './use-command';
+import {LearnedSection, ThreadSection} from './thread';
 import {GeneratedVersions, Reprocess} from './versions';
 
 function Section({title, aside, children}: {title: ReactNode; aside?: ReactNode; children: ReactNode}) {
@@ -226,6 +227,14 @@ function MessageDetail({id, record, onOpen}: {id: string; record: any; onOpen: (
           </ul>
         </Section>
       )}
+
+      <Section title="Thread">
+        <ThreadSection id={id} />
+      </Section>
+
+      <Section title="Learned into memory">
+        <LearnedSection id={id} />
+      </Section>
 
       {(hasSpeech(types) || transcripts.length > 0) && (
         <Section title="Transcript" aside={<Badge tone="info">Generated</Badge>}>

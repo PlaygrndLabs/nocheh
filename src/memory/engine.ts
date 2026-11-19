@@ -32,6 +32,8 @@ export type EngineFact={id:string;content:string;session:string|null;writes:stri
   derived:number;createdAt:string};
 /** A page of facts. `limitations` name what the engine could not say, such as a fact's batch it could not read. */
 export type EngineFactPage={facts:EngineFact[];next:string|null;limitations:string[]};
+/** A fact with the participant that learned it about itself (everyFact). */
+export type ParticipantFact=EngineFact&{participant:string};
 /** How many of a space's learned facts cite their writes, know only their learning batch, or neither. */
 export type EngineCoverage={explicit:number;cited:number;batchOnly:number;none:number};
 
@@ -101,6 +103,11 @@ export type MemoryEngine={
   factExists?(space:string,participant:string,id:string):Promise<boolean>;
   /** Facts learned more than once, most often first and then newest. `complete` is false when there were more than it reads. */
   mostDerived?(space:string,participant:string,options:{sessions:string[]|null;batches?:boolean}):Promise<{facts:EngineFact[];complete:boolean;limitations:string[]}>;
+  /** Facts any participant learned about itself, newest first, a page at a time, for the owner's dashboard: within
+   *  `sessions` when given, and only those that cite one of `citing` (engine write ids) when given. A fact one participant
+   *  holds about another is never listed, so a page may hold fewer than `size`; `next` is null on the last page. */
+  everyFact?(space:string,options:{sessions:string[]|null;citing?:string[];size:number;cursor:string|null}):
+    Promise<{facts:ParticipantFact[];next:string|null;limitations:string[]}>;
   /** Counts only, for the owner's dashboard. */
   citationCoverage?(space:string):Promise<EngineCoverage>;
 };

@@ -25,7 +25,7 @@ import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsR
 import type {ChatState} from '../src/chat-wire.js';
 import {labeledPlaceholders,memberPrivateDailyLimitReply,memberReadFrame,memberReadTexts,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,sourceTexts} from '../src/prompts.js';
 import {matchesArchiveFilters} from '../src/archive-filters.js';
-import {archiveScopes,otherPrivate} from '../src/spaces.js';
+import {archiveScopes,otherPrivate,parentSpace} from '../src/spaces.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
@@ -461,7 +461,9 @@ const devonId=hx('d1');
 const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
  {id:projectEntityId,kind:'project',name:'Aurora field guide',state:'active',project_id:projectId,merged_into:null,revision:1}];
 const claim=(id:string,subject:string,object:string|null,predicate:string,content:string,extra:any={})=>({id,subject_entity_id:subject,object_entity_id:object,predicate,revision:1,content,relationship_kind:object?'associated':null,attribution:'direct',speaker_entity_id:subject,uncertainty:'explicit',author:'learning',retired:false,evidence:[{id}],created_at:minutesAgo(900),...extra});
-const claims:any[]=[claim(factId,personId,null,'preference','Mira prefers quiet aurora viewpoints away from tour-bus routes.'),
+// Mira's preference came from the owner's message (named on People in the owner's words, ADR-0261 step 4); the other
+// claims name only themselves, which no message is, so they read "Source not recorded" with no link.
+const claims:any[]=[claim(factId,personId,null,'preference','Mira prefers quiet aurora viewpoints away from tour-bus routes.',{evidence:[{id}]}),
  claim(hx('d2'),personId,devonId,'travel_partner','Mira and Devon are planning the Iceland trip together.',{relationship_kind:'participates',uncertainty:'supported'}),
  claim(hx('d3'),devonId,null,'diet','Devon is vegetarian.',{attribution:'reported',uncertainty:'supported'}),
  claim(hx('d4'),projectEntityId,null,'scope','The field guide covers viewpoints within two hours of Reykjavik.')];
@@ -505,7 +507,7 @@ const projectSuggestion:any={id:'02'.repeat(32),kind:'project',name:'Aurora cabi
 const knowledgeProposal:any={id:'f'.repeat(64),kind:'organization',origin:'learning',state:'review',revision:1,approved:false,created_at:inboxAgo(95),source_scope:conversation,source_reference:{id},error_code:null,result:null,decision_history:[],affected_topics:{},
  // As the server works it out: the project the group would join, with the groups already there (ADR-0247).
  get project_groups(){return [{id:projectId,name:'Aurora field guide',groups:projectGroups(projectId).filter(g=>g!=='-10073')}];},undo_project_groups:[],
- proposal:{kind:'organization',reason:'Weekend notes plans the same aurora trip; one project keeps its role and tasks together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:'-10073',project_id:projectId,reason:'Every recent message in this group is about the trip.',evidence_ids:[id],expected_revision:0}]}};
+ proposal:{kind:'organization',reason:'Weekend notes plans the same aurora trip; one project keeps its role and tasks together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:'-10073',project_id:projectId,reason:'Every recent message in this group is about the trip.',evidence_ids:[voiceId],expected_revision:0}]}};
 function inboxDecisions(){
  const summary=(kind:string,row:any,extra:any)=>({kind,id:row.id,state:row.state??row.status,revision:row.revision??1,created_at:row.created_at,source_scope:null,destination:null,fingerprint:null,...extra});
  // An unclear outcome waits until it is closed (ADR-0218).
@@ -654,6 +656,59 @@ const messagesFixture=(()=>{
   return false;
  };
 })();
+/*
+ * Where messages and facts came from (ADR-0261 step 4), in the owner's words as storage names them: each message's
+ * Thread and Learned into memory sections, long-term memory's facts and coverage, and the short labels pages look up.
+ * The aurora tour question is answered and learned exactly; Mira's forecast question replies to its topic's first message
+ * (the cloud photo request), so it shows its Topic and no Replies to; the packing request replies to the ridge photo, which
+ * is retired and never linked; the booking was forwarded from a channel and replies to the tour question.
+ */
+const sourcesFixture=(()=>{
+ const hex=(n:string)=>n.repeat(32),ago=(minutes:number)=>new Date(Date.now()-minutes*60000).toISOString();
+ const ids={tour:hex('e1'),tourReply:hex('e2'),forecast:hex('e3'),packing:hex('e4'),booking:hex('e5'),opening:hex('e6'),photo:hex('e8'),browser:hex('ea'),memberAsk:hex('ec')};
+ const named=new Map<string,{label:string;minutes:number;forward?:string}>([
+  [id,{label:'you in your private chat',minutes:2000}],[voiceId,{label:'an audio file you sent in your private chat',minutes:420}],
+  [ids.tour,{label:'you in your private chat',minutes:12}],[ids.tourReply,{label:'Nocheh’s reply in your private chat',minutes:11}],
+  [ids.forecast,{label:'“Mira Chen” in “Aurora planning” › Iceland planning',minutes:40}],[ids.packing,{label:'you in your private chat',minutes:95}],
+  [ids.booking,{label:'a message you forwarded in your private chat, from the channel “Night sky news”',minutes:130,forward:'the channel “Night sky news”'}],
+  [ids.opening,{label:'“Mira Chen” in “Aurora planning” › Iceland planning',minutes:300}],[ids.browser,{label:'you in the browser chat',minutes:3000}],
+  [ids.memberAsk,{label:'“Mira Chen” in Mira Chen’s private chat',minutes:20}]]);
+ const retired=new Set([ids.photo]);
+ const original=(source:string)=>{if(retired.has(source))return {retired:true};const known=named.get(source);
+  return known?{id:source,label:known.label,at:ago(known.minutes),...known.forward?{forward:known.forward}:{}}:{unavailable:true,label:'Source not recorded'};};
+ const fact=(key:string,text:string,minutes:number,chat:string,person:string|null,sources:string[],exact:boolean,batch:boolean)=>{const originals=sources.map(original),head=originals[0] as any;
+  return {chat,person,fact:{id:hex(key),text,learned_at:ago(minutes),exact,batch,by:exact?'owner':'mixed',label:head?.id?head.label:null,at:head?.id?head.at:null,originals,more:0}};};
+ const facts=[fact('f1','You booked the 21:30 aurora tour for Friday.',10,'42',null,[ids.tour],true,false),
+  fact('f2','The aurora tour leaves from the harbour car park.',9,'42',null,[ids.tour,ids.tourReply],false,true),
+  fact('f3','Mira wants to check the Kp forecast before the trip.',30,'-10042/topic/7',personId,[ids.forecast],true,false),
+  fact('f4','Mira took photos from the ridge.',1400,'-10042',personId,[ids.photo],false,false)].sort((a,b)=>a.fact.learned_at<b.fact.learned_at?1:-1);
+ const empty={reply_to:null,replies:{count:0,items:[]},topic:null,forwarded_from:null};
+ const topic={label:'“Aurora planning” › Iceland planning'};
+ const threads=new Map<string,any>([
+  [ids.tour,{...empty,replies:{count:1,items:[original(ids.tourReply)]}}],
+  [ids.forecast,{...empty,topic:{...topic,opening:original(ids.opening)}}],
+  [ids.opening,{...empty,replies:{count:0,items:[],topic:true},topic:{...topic,opens:true,opening:null}}],
+  [ids.packing,{...empty,reply_to:original(ids.photo)}],
+  [ids.booking,{...empty,reply_to:original(ids.tour),forwarded_from:'the channel “Night sky news”'}]]);
+ const learned=new Map<string,any>([[ids.tour,{facts:facts.filter(f=>f.fact.originals.some((o:any)=>o.id===ids.tour)).map(f=>f.fact)}],
+  [ids.forecast,{facts:facts.filter(f=>f.fact.originals.some((o:any)=>o.id===ids.forecast)).map(f=>f.fact)}],[ids.packing,{facts:[]}],
+  [voiceId,{facts:[],reason:'unavailable'}]]);
+ const notes:Record<string,{day:string|null;originals:any[]}>={own:{day:'2026-11-12',originals:[original(ids.tour),original(ids.packing)]},
+  forward:{day:'2026-11-14',originals:[original(ids.booking),original(ids.photo)]},turn:{day:null,originals:[original(id)]}};
+ return {notes,handle(req:any,res:any,route:string,url:URL):boolean{
+  if(req.method!=='GET')return false;
+  const thread=/^\/events\/([a-f0-9]{64})\/thread$/.exec(route);
+  if(thread){json(res,200,threads.get(thread[1]!)??empty);return true;}
+  if(route==='/memory/message-facts'){const source=url.searchParams.get('id')??'';if(!/^[a-f0-9]{64}$/.test(source))throw new HttpError(400,'invalid_fact_request');
+   json(res,200,learned.get(source)??{facts:[],reason:'not_learned'});return true;}
+  if(route==='/memory/longterm/coverage'){json(res,200,{coverage:{total:515,exact:412,with_others:96,none:7}});return true;}
+  if(route==='/memory/facts'){const chat=url.searchParams.get('chat')??'',person=url.searchParams.get('person')??'';
+   json(res,200,{facts:facts.filter(f=>(!chat||f.chat===chat||parentSpace(f.chat)===chat)&&(!person||f.person===person)).map(f=>f.fact),next:null});return true;}
+  if(route==='/memory/originals'){const asked=url.searchParams.getAll('id');if(!asked.length||asked.length>50||asked.some(item=>!/^[a-f0-9]{64}$/.test(item)))throw new HttpError(400,'invalid_originals_request');
+   json(res,200,{originals:asked.map(original)});return true;}
+  return false;
+ }};
+})();
 async function scenario(){try{return (await readFile('/tmp/nocheh-ui-scenario','utf8')).trim();}catch{return 'normal';}}
 const server=createServer((req,res)=>{void(async()=>{
  const url=new URL(req.url||'/','http://fixture'),path=url.pathname;
@@ -684,6 +739,7 @@ const server=createServer((req,res)=>{void(async()=>{
  const route=path.replace(/^\/api\/(?:plugins\/)?nocheh/,'');
  const mode=await scenario();if(mode==='conflict'&&!modeRevision){settingsRevision+='external';revision++;modeRevision=true;}if(mode!=='conflict')modeRevision=false;if(mode==='offline'&&['/monitoring','/workflows/metrics','/status','/tools/actions'].includes(route))throw new HttpError(503,'fixture_observation_unavailable');
  if(await messagesFixture(req,res,route,url))return;
+ if(sourcesFixture.handle(req,res,route,url))return;
  // The owner password card, on a synthetic password; the preview itself has no sign-in.
  if(route==='/owner-lock'&&req.method==='GET')return json(res,200,await ownerLock.status());
  if(route==='/owner-lock/password'&&req.method==='POST'){const body=await readJson(req) as any;const {token}=await ownerLock.changePassword(body.current,body.password);return json(res,200,{...await ownerLock.status(token),csrf:sessions.authorize(req).csrf});}
@@ -761,10 +817,11 @@ const server=createServer((req,res)=>{void(async()=>{
     {owner:false,scope:'73',profile:'nocheh-'+'c3'.repeat(12),member:true},{owner:false,scope:'42',profile:'nocheh-'+'d4'.repeat(12),member_read:true,answer_at:'2026-11-14T09:00:00+00:00'}]});}
   if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy.\n§\nAlice is planning a trip to Iceland.\n§\nThe lunch poll now offers tacos on Friday.',citations:[],
     // Each note with where it came from, in the owner's words (ADR-0257).
-    entries:[{target:'memory',text:'Synthetic memory: interested in astronomy.',from:'owner',label:'Your own messages in your private chat'},
-      {target:'memory',text:'Alice is planning a trip to Iceland.',from:'forward',label:'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”'},
+    // Step 4: the day each names and the messages its writer read (a retired one is never linked).
+    entries:[{target:'memory',text:'Synthetic memory: interested in astronomy.',from:'owner',label:'Your own messages in your private chat',...sourcesFixture.notes.own},
+      {target:'memory',text:'Alice is planning a trip to Iceland.',from:'forward',label:'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”',...sourcesFixture.notes.forward},
       {target:'memory',text:'The lunch poll now offers tacos on Friday.',from:'forward',label:'Nocheh’s notes review of a message holding someone else’s words, such as a shared checklist or poll, that you pinned in your private chat'}]},
-    {name:'USER.md',exists:true,text:'Prefers short answers.',citations:[],entries:[{target:'user',text:'Prefers short answers.',from:'turn',label:'Nocheh’s note from your private chat on 2026-11-12'}]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
+    {name:'USER.md',exists:true,text:'Prefers short answers.',citations:[],entries:[{target:'user',text:'Prefers short answers.',from:'turn',label:'Nocheh’s note from your private chat on 2026-11-12',...sourcesFixture.notes.turn}]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));
   if(route==='/prompts')return json(res,200,prompts);

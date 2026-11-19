@@ -5,6 +5,7 @@ import {useFeedback} from '../../ui/overlay';
 import {knowledgeDecisionControls} from '../../lib/supervision';
 import {otherGroupsText, projectGroupsNote, projectTasksWarning, relatedGroupsHint} from '../chats/rule-dialog';
 import {useChatDirectory} from '../../lib/chat-directory';
+import {OriginalNames} from '../../lib/originals';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
 import {stateLabel, useChatNames, useCommand} from './shared';
 
@@ -235,189 +236,196 @@ export function KnowledgeReview({
     );
 
   const topics = Object.entries(proposal.affected_topics ?? {}).filter(([, list]) => list.length > 0);
+  // Every original in the panel (each new project's, each moved chat's and the proposal's own) is named with one lookup.
+  const originals = [
+    ...[...(content.creates ?? []), ...(content.assignments ?? [])].flatMap((item: any) => item.evidence_ids ?? []),
+    proposal.source_reference?.id,
+  ];
 
   return (
-    <ReviewDrawer
-      title={proposalTitle(kind) + (proposal.state === 'review' ? '?' : '')}
-      description={proposalEffect(kind)}
-      onClose={onClose}
-      review={review}
-      error={command.error}
-      footer={footer}
-    >
-      <Badge tone={tone} dot>
-        {label}
-      </Badge>
-      {proposal.state === 'stale' && (
-        <Notice tone="warn" title="Can’t be applied">
-          Something changed after this was prepared. Dismiss it; Nocheh will suggest a fresh one if still needed.
-        </Notice>
-      )}
-      {proposal.state === 'failed' && (
-        <Notice tone="bad" title="Applying it failed">
-          {proposal.error_code
-            ? 'Reason: ' + proposal.error_code.replaceAll('_', ' ') + '.'
-            : 'No reason was recorded.'}
-        </Notice>
-      )}
-      {['queued', 'waiting'].includes(proposal.state) && (
-        <p className="text-[13px] text-muted">
-          You approved this. It applies when Nocheh is not in the middle of a reply.
-        </p>
-      )}
-      {review.stale && proposal.state === 'review' && (
-        <Notice tone="warn" title="Can’t be approved any more">
-          Something it depends on changed. You can still reject it.
-        </Notice>
-      )}
-      {privateChats.length > 0 && (
-        <Notice tone="warn" title="Names a private chat. Nocheh won’t apply it.">
-          Private chats never share, get shared with or join a project, so this leaves out{' '}
-          {privateChats.map(space => chat(space)).join(', ')}.{' '}
-          {['review', 'queued', 'waiting', 'stale', 'failed'].includes(proposal.state)
-            ? 'Reject or dismiss it; Nocheh suggests a fresh one if still needed.'
-            : 'It was made before private chats were left out.'}
-        </Notice>
-      )}
-      <ProjectGroupsNotice projects={moved} chat={chat} />
-      {listed.length > 0 && (
-        <Notice tone="warn" title="A chat here joins a project with tasks">
-          {projectTasksWarning(
-            'a chat this moves',
-            listed.map(project => project.name),
-          )}
-        </Notice>
-      )}
-      {content.reason && (
-        <blockquote dir="auto" className="border-l-2 border-line-strong pl-3 text-sm text-fg/80">
-          {content.reason}
-        </blockquote>
-      )}
+    <OriginalNames ids={originals}>
+      <ReviewDrawer
+        title={proposalTitle(kind) + (proposal.state === 'review' ? '?' : '')}
+        description={proposalEffect(kind)}
+        onClose={onClose}
+        review={review}
+        error={command.error}
+        footer={footer}
+      >
+        <Badge tone={tone} dot>
+          {label}
+        </Badge>
+        {proposal.state === 'stale' && (
+          <Notice tone="warn" title="Can’t be applied">
+            Something changed after this was prepared. Dismiss it; Nocheh will suggest a fresh one if still needed.
+          </Notice>
+        )}
+        {proposal.state === 'failed' && (
+          <Notice tone="bad" title="Applying it failed">
+            {proposal.error_code
+              ? 'Reason: ' + proposal.error_code.replaceAll('_', ' ') + '.'
+              : 'No reason was recorded.'}
+          </Notice>
+        )}
+        {['queued', 'waiting'].includes(proposal.state) && (
+          <p className="text-[13px] text-muted">
+            You approved this. It applies when Nocheh is not in the middle of a reply.
+          </p>
+        )}
+        {review.stale && proposal.state === 'review' && (
+          <Notice tone="warn" title="Can’t be approved any more">
+            Something it depends on changed. You can still reject it.
+          </Notice>
+        )}
+        {privateChats.length > 0 && (
+          <Notice tone="warn" title="Names a private chat. Nocheh won’t apply it.">
+            Private chats never share, get shared with or join a project, so this leaves out{' '}
+            {privateChats.map(space => chat(space)).join(', ')}.{' '}
+            {['review', 'queued', 'waiting', 'stale', 'failed'].includes(proposal.state)
+              ? 'Reject or dismiss it; Nocheh suggests a fresh one if still needed.'
+              : 'It was made before private chats were left out.'}
+          </Notice>
+        )}
+        <ProjectGroupsNotice projects={moved} chat={chat} />
+        {listed.length > 0 && (
+          <Notice tone="warn" title="A chat here joins a project with tasks">
+            {projectTasksWarning(
+              'a chat this moves',
+              listed.map(project => project.name),
+            )}
+          </Notice>
+        )}
+        {content.reason && (
+          <blockquote dir="auto" className="border-l-2 border-line-strong pl-3 text-sm text-fg/80">
+            {content.reason}
+          </blockquote>
+        )}
 
-      {kind === 'organization' ? (
-        <div className="space-y-4">
-          {!!content.creates?.length && (
-            <section>
-              <h3 className="mb-2 text-sm font-semibold">New projects</h3>
-              <ul className="space-y-2">
-                {content.creates.map((create: any) => (
-                  <li key={create.key} className="rounded-lg border border-line p-3">
-                    <p className="text-sm font-medium">{create.name}</p>
-                    {create.description && <p className="mt-0.5 text-[13px] text-muted">{create.description}</p>}
-                    <div className="mt-2">
-                      <EvidenceLinks ids={create.evidence_ids ?? []} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          {!!content.assignments?.length && (
-            <section>
-              <h3 className="mb-2 text-sm font-semibold">Chats to move</h3>
-              <ul className="space-y-2">
-                {content.assignments.map((assignment: any) => (
-                  <li key={assignment.space_id} className="rounded-lg border border-line p-3">
-                    <p className="text-sm">
-                      <span className="font-medium">{chat(assignment.space_id)}</span> → {projectName(assignment)}
-                    </p>
-                    {assignment.reason && <p className="mt-0.5 text-[13px] text-muted">{assignment.reason}</p>}
-                    <div className="mt-2">
-                      <EvidenceLinks ids={assignment.evidence_ids ?? []} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </div>
-      ) : (
-        <Facts>
-          {Object.entries(content.payload ?? {})
-            .filter(([key]) => fieldLabels[key])
-            .map(([key, value]) => (
-              <Fact key={key} label={fieldLabels[key]}>
-                <span dir="auto" className="whitespace-pre-wrap">
-                  {chatFields.has(key)
-                    ? (Array.isArray(value) ? value : [value]).map(v => chat(String(v))).join(', ')
-                    : Array.isArray(value)
-                      ? value.join(', ')
-                      : typeof value === 'boolean'
-                        ? value
-                          ? 'Yes'
-                          : 'No'
-                        : String(value ?? 'None')}
-                </span>
-              </Fact>
-            ))}
-        </Facts>
-      )}
-
-      {audience && (
-        <Facts>
-          <Fact label="Came from">{audience.sources.map(space => chat(space)).join(', ') || 'Unknown'}</Fact>
-          {kind === 'fact_grant' && seers ? (
-            <Fact label="Who will see it">Everyone in {chat(seers)}</Fact>
-          ) : (
-            <Fact label="Who can read the new wording">
-              {(audience.readers
-                ? 'Everyone in ' + chat(audience.readers.group ?? audience.readers.space)
-                : 'Only you') + '. Any chat you shared it with pauses until you approve the new wording there.'}
-            </Fact>
-          )}
-        </Facts>
-      )}
-      {unseen && proposal.state === 'review' && (
-        <Notice tone="warn" title="Can’t be approved right now">
-          {proposal.fact_audience_error === 'entity_claim_not_found'
-            ? 'This fact no longer exists. You can still reject it.'
-            : 'Nocheh couldn’t work out where this fact came from and who would read it. Reopen it shortly, or reject it.'}
-        </Notice>
-      )}
-      {kind === 'fact_grant' && audience?.confirm_required && (
-        <Notice tone="warn" title="This fact comes from a private chat">
-          Approving shares its wording from{' '}
-          {audience.private_sources.map(space => chat(space)).join(', ') || 'a chat Nocheh can’t place'}.
-        </Notice>
-      )}
-
-      {topics.length > 0 && (
-        <section>
-          <h3 className="mb-1 text-sm font-semibold">Topics that follow their group</h3>
-          <p className="mb-2 text-[13px] text-muted">These topics move with their group too.</p>
-          <ul className="list-disc space-y-0.5 pl-5 text-sm">
-            {topics
-              .flatMap(([, list]) => list)
-              .map(topic => (
-                <li key={topic}>{chat(topic)}</li>
+        {kind === 'organization' ? (
+          <div className="space-y-4">
+            {!!content.creates?.length && (
+              <section>
+                <h3 className="mb-2 text-sm font-semibold">New projects</h3>
+                <ul className="space-y-2">
+                  {content.creates.map((create: any) => (
+                    <li key={create.key} className="rounded-lg border border-line p-3">
+                      <p className="text-sm font-medium">{create.name}</p>
+                      {create.description && <p className="mt-0.5 text-[13px] text-muted">{create.description}</p>}
+                      <div className="mt-2">
+                        <EvidenceLinks ids={create.evidence_ids ?? []} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {!!content.assignments?.length && (
+              <section>
+                <h3 className="mb-2 text-sm font-semibold">Chats to move</h3>
+                <ul className="space-y-2">
+                  {content.assignments.map((assignment: any) => (
+                    <li key={assignment.space_id} className="rounded-lg border border-line p-3">
+                      <p className="text-sm">
+                        <span className="font-medium">{chat(assignment.space_id)}</span> → {projectName(assignment)}
+                      </p>
+                      {assignment.reason && <p className="mt-0.5 text-[13px] text-muted">{assignment.reason}</p>}
+                      <div className="mt-2">
+                        <EvidenceLinks ids={assignment.evidence_ids ?? []} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+        ) : (
+          <Facts>
+            {Object.entries(content.payload ?? {})
+              .filter(([key]) => fieldLabels[key])
+              .map(([key, value]) => (
+                <Fact key={key} label={fieldLabels[key]}>
+                  <span dir="auto" className="whitespace-pre-wrap">
+                    {chatFields.has(key)
+                      ? (Array.isArray(value) ? value : [value]).map(v => chat(String(v))).join(', ')
+                      : Array.isArray(value)
+                        ? value.join(', ')
+                        : typeof value === 'boolean'
+                          ? value
+                            ? 'Yes'
+                            : 'No'
+                          : String(value ?? 'None')}
+                  </span>
+                </Fact>
               ))}
-          </ul>
-        </section>
-      )}
+          </Facts>
+        )}
 
-      <Details summary="Where this came from">
-        <div className="space-y-3 text-sm">
-          {proposal.source_scope && (
-            <Facts>
-              <Fact label="Suggested in">{chat(proposal.source_scope)}</Fact>
-              {proposal.delegation_id && (
-                <Fact label="Allowed by">Your standing permission to organize (checked again before applying)</Fact>
-              )}
-            </Facts>
-          )}
-          <EvidenceLinks ids={[proposal.source_reference?.id]} />
-          <Technical
-            value={{
-              proposal: proposal.proposal,
-              result: proposal.result,
-              decision_history: proposal.decision_history,
-              delegation: proposal.delegation_id
-                ? {id: proposal.delegation_id, revision: proposal.delegation_revision}
-                : null,
-            }}
-          />
-        </div>
-      </Details>
-    </ReviewDrawer>
+        {audience && (
+          <Facts>
+            <Fact label="Came from">{audience.sources.map(space => chat(space)).join(', ') || 'Unknown'}</Fact>
+            {kind === 'fact_grant' && seers ? (
+              <Fact label="Who will see it">Everyone in {chat(seers)}</Fact>
+            ) : (
+              <Fact label="Who can read the new wording">
+                {(audience.readers
+                  ? 'Everyone in ' + chat(audience.readers.group ?? audience.readers.space)
+                  : 'Only you') + '. Any chat you shared it with pauses until you approve the new wording there.'}
+              </Fact>
+            )}
+          </Facts>
+        )}
+        {unseen && proposal.state === 'review' && (
+          <Notice tone="warn" title="Can’t be approved right now">
+            {proposal.fact_audience_error === 'entity_claim_not_found'
+              ? 'This fact no longer exists. You can still reject it.'
+              : 'Nocheh couldn’t work out where this fact came from and who would read it. Reopen it shortly, or reject it.'}
+          </Notice>
+        )}
+        {kind === 'fact_grant' && audience?.confirm_required && (
+          <Notice tone="warn" title="This fact comes from a private chat">
+            Approving shares its wording from{' '}
+            {audience.private_sources.map(space => chat(space)).join(', ') || 'a chat Nocheh can’t place'}.
+          </Notice>
+        )}
+
+        {topics.length > 0 && (
+          <section>
+            <h3 className="mb-1 text-sm font-semibold">Topics that follow their group</h3>
+            <p className="mb-2 text-[13px] text-muted">These topics move with their group too.</p>
+            <ul className="list-disc space-y-0.5 pl-5 text-sm">
+              {topics
+                .flatMap(([, list]) => list)
+                .map(topic => (
+                  <li key={topic}>{chat(topic)}</li>
+                ))}
+            </ul>
+          </section>
+        )}
+
+        <Details summary="Where this came from">
+          <div className="space-y-3 text-sm">
+            {proposal.source_scope && (
+              <Facts>
+                <Fact label="Suggested in">{chat(proposal.source_scope)}</Fact>
+                {proposal.delegation_id && (
+                  <Fact label="Allowed by">Your standing permission to organize (checked again before applying)</Fact>
+                )}
+              </Facts>
+            )}
+            <EvidenceLinks ids={[proposal.source_reference?.id]} />
+            <Technical
+              value={{
+                proposal: proposal.proposal,
+                result: proposal.result,
+                decision_history: proposal.decision_history,
+                delegation: proposal.delegation_id
+                  ? {id: proposal.delegation_id, revision: proposal.delegation_revision}
+                  : null,
+              }}
+            />
+          </div>
+        </Details>
+      </ReviewDrawer>
+    </OriginalNames>
   );
 }

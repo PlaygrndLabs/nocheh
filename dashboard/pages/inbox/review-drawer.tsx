@@ -3,6 +3,7 @@ import * as React from 'react';
 import {RefreshCw} from 'lucide-react';
 import {Button, Notice} from '../../ui/core';
 import {Drawer} from '../../ui/overlay';
+import {OriginalItem, useNamedOriginals} from '../../lib/originals';
 
 export type ReviewState = {
   /** The item changed elsewhere after this panel opened. */
@@ -97,19 +98,31 @@ export function Exact({label, children, mono}: {label: React.ReactNode; children
   );
 }
 
-/** Links to the original messages behind a suggestion. */
+/**
+ * Links to the original messages behind a suggestion, each with a short label in your words and when it was sent; a
+ * retired message is never linked (ADR-0261 step 4). Until the labels come, or if they can't, the links show alone.
+ */
 export function EvidenceLinks({ids}: {ids: (string | undefined | null)[]}) {
   const list = ids.filter((id): id is string => !!id);
+  const named = useNamedOriginals(list);
   if (!list.length) return null;
   return (
-    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-      {list.map((id, index) => (
-        <li key={id + index}>
-          <a className="text-accent-text hover:underline" href={'#messages?source=' + encodeURIComponent(id)}>
-            {list.length === 1 ? 'Open the original message' : `Original message ${index + 1}`}
-          </a>
-        </li>
-      ))}
+    <ul className="space-y-0.5 text-sm" aria-label="Original messages">
+      {list.map((id, index) => {
+        const text = list.length === 1 ? 'Open the original message' : `Original message ${index + 1}`;
+        const original = named.get(id);
+        return (
+          <li key={id + index} className="break-words">
+            {original ? (
+              <OriginalItem original={original} linkText={text} />
+            ) : (
+              <a className="text-accent-text hover:underline" href={'#messages?source=' + encodeURIComponent(id)}>
+                {text}
+              </a>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

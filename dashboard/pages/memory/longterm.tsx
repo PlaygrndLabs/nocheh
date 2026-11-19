@@ -1,7 +1,7 @@
 /**
  * Memory › Long-term: whether long-term memory is connected, up to date and
  * usable; connecting it; its monthly spending limit; re-running or replacing
- * it; and a look at what it holds.
+ * it; the facts it learned with where each came from; and a look at what it holds.
  */
 import {useEffect, useRef, useState, type ReactNode} from 'react';
 import {apiPost} from '../../lib/api';
@@ -25,6 +25,7 @@ import {
   type Tone,
 } from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
+import {LongTermFacts} from './longterm-facts';
 import {Rebuild} from './rebuild';
 import {CONFLICT_TEXT, Meter, errorWords, useCommand} from './shared';
 
@@ -84,6 +85,7 @@ export function LongTerm() {
       <StatusCard memory={memory} service={service} />
       <BudgetCard editable={budgetEditable} />
       {memory.data && <Rebuild revision={memory.data.connection.revision ?? 0} attached={attached} />}
+      {memory.data && <LongTermFacts />}
       {memory.data?.engine?.capabilities?.inspect && (
         <Browse running={!!service.data?.running} workspace={memory.data.workspace?.id ?? ''} />
       )}

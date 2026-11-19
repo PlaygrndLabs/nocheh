@@ -342,7 +342,8 @@ function ownerWho(event:LabelEvent,owner:boolean,words:SourceWords,names:Names,k
   const line=words.lines.person_not_allowed;
   return whoLabel(who,{...base,lines:{...base.lines,person:line,person_gone:line,unnamed_person:fillLine(line,{name:words.lines.origin_unnamed})}},names,keys);
 }
-function ownerOrigin(event:LabelEvent,words:SourceWords):string {
+/** Where a forward came from, in the owner's words. */
+export function ownerOrigin(event:LabelEvent,words:SourceWords):string {
   const line=words.lines,from=forwardOf(event.class),name=quoted(event.facts?.forward_name);
   if(from==='hidden')return line.origin_hidden;
   if(from==='bot')return line.origin_bot;

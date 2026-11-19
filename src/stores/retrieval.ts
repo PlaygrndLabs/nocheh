@@ -32,6 +32,8 @@ import {isTelegramChat,telegramMessage,telegramTopicOpening} from '../chats-tele
 import {repliesElsewhere} from '../observed-source.js';
 import type {LearnedMemoryRepository} from './learned.js';
 import {ownerTimeZone} from './task-settings.js';
+import type {OwnerOriginals} from './owner-originals.js';
+import {placeLabel} from '../chat-labels.js';
 
 const pending=(error:unknown)=>error instanceof HttpError&&error.code==='guard_preparation_pending';
 // One chat's records in time order, under every id the chat has had ($1, archiveScopes: ADR-0252). Telegram gives a
@@ -65,6 +67,8 @@ const quoting=(value:unknown):boolean=>{
 };
 /** How much of a related message archive_read shows: what it answers or replies to, and each further one (ADR-0261). */
 const ANSWER_TEXT=500,THREAD_TEXT=300;
+/** The replies to a message the owner's Thread section lists; the rest are counted. */
+const OWNER_THREAD_REPLIES=20;
 /** How many sources an opened learned entry names (ADR-0261). */
 const LEARNED_EVIDENCE=5;
 /** At most `size` characters of a text, never half of one that takes two. */
@@ -293,8 +297,10 @@ export class SourceRepository {
     // What it replies to, then what that replies to: the first readable copy of each, never a topic's opening.
     const hops:SourceReference[]=[];let current=reference.id,withheld=SourceRepository.elsewhere(self);
     for(let step=0;step<=options.chain&&!withheld;step++) {
-      const targets=(await this.access.relationships.replyTargets([current],audience)).get(current)??[];
-      if(!targets.length||(await this.topicOpenings(targets.map(target=>target.id))).size)break;
+      // A topic's message carries its topic's opening as a reply; another target is one it replies to in another chat.
+      const all=(await this.access.relationships.replyTargets([current],audience)).get(current)??[];
+      const openings=await this.topicOpenings(all.map(target=>target.id)),targets=all.filter(target=>!openings.has(target.id));
+      if(!targets.length)break;
       const open=await readable(targets),target=targets.find(item=>open.get(item.id)===true);
       if(!target||target.id===reference.id||hops.some(hop=>hop.id===target.id))break;
       hops.push(target);current=target.id;withheld=SourceRepository.elsewhere((await this.originals([target.id])).get(target.id));
@@ -334,6 +340,55 @@ export class SourceRepository {
       ...(SourceRepository.elsewhere(self)?{reply_link_withheld:'other_chat'}:{}),
       replies:opening?{count:0,items:[],topic:true}:{count:replying.length,items:replying.slice(0,options.replies).map(item=>named(item,THREAD_TEXT)),...(complete?{}:{complete:false})}};
     return {fields,linked:shownItems.map(item=>item.id)};
+  }
+  /**
+   * The Thread section of a message on the owner's dashboard (ADR-0261 step 4), from the archive's relations as
+   * archive_read reads them: what it replies to, how many messages reply to it with the first OWNER_THREAD_REPLIES
+   * listed, the topic it is in, and where a forward came from, each in the owner's words (OwnerOriginals: a retired
+   * message reads only `retired`). The owner reads every chat. A forum topic's opening is no reply: a message replying to
+   * it shows its topic, never `reply_to`, and the opening's own replies are the whole topic, which are not listed here.
+   * An old Telegram Desktop export's reply into another chat keeps no link (`reply_in_other_chat`). Someone else's private
+   * chat stays out of the owner's default view (ADR-0262): seen from any other chat, a reply into it reads only
+   * `reply_in_private_chat`, never its message, and a reply from it is left out.
+   */
+  async ownerThread(principal:Reader,id:string,originals:OwnerOriginals) {
+    admin(principal);
+    await this.permitted(principal,id,null);
+    const self=(await this.originals([id])).get(id)!,audience:RelationshipAudience={kind:'owner'};
+    const message=telegramMessage(self.payload) as {reply_to_message?:unknown}|null;
+    const elsewhere=SourceRepository.elsewhere(self),opens=telegramTopicOpening(message);
+    const described=(await this.access.relationships.describeMany([id])).get(id),chat=described?.chat??sourceChat(self);
+    const base=(place:string|null)=>chats().parentOf(place)??place;
+    const placesOf=async(ids:readonly string[])=>{const found=await this.access.relationships.describeMany(ids);return (item:string)=>found.get(item)?.chat??null;};
+    // A message in someone else's private chat is shown only from inside that chat.
+    const shown=(place:string|null)=>!otherPrivate(place)||base(place)===base(chat);
+    const targets=elsewhere?[]:((await this.access.relationships.replyTargets([id],audience)).get(id)??[]).filter(target=>target.id!==id);
+    const openings=await this.topicOpenings(targets.map(target=>target.id)),placeOf=await placesOf(targets.map(target=>target.id));
+    // Every copy of an opening is one, and the message's own embedded reply says so too (as groupAddressing reads it).
+    const embedded=telegramTopicOpening(message?.reply_to_message);
+    const opening=targets.find(target=>openings.has(target.id))??null,toOpening=!!opening||embedded;
+    // A topic's message that replies to one in another chat carries its topic's opening too: what it replies to is that
+    // other message, never the opening (when the embedded reply is the opening, only a message in another chat is).
+    const target=targets.find(item=>!openings.has(item.id)&&(!embedded||placeOf(item.id)!==null&&base(placeOf(item.id))!==base(chat)))??null;
+    const replyTo=target&&shown(placeOf(target.id))?target:null,hidden=!!target&&!replyTo;
+    let replying:string[]=[],complete=true;
+    if(!opens) {
+      const object=described?.object_id;
+      const found=object?await this.access.relationships.replies(object,audience,100):{replies:[],more:false};
+      const rows=await this.originals(found.replies.flatMap(reply=>reply.references.map(item=>item.id)));
+      replying=found.replies.map(reply=>reply.references.find(item=>!SourceRepository.elsewhere(rows.get(item.id)))?.id)
+        .filter((item):item is string=>!!item&&item!==id);
+      const replyPlace=await placesOf(replying);
+      replying=replying.filter(item=>shown(replyPlace(item)));
+      complete=!found.more;
+    }
+    const inTopic=chat!==null&&chats().kind(chat)==='topic',listed=replying.slice(0,OWNER_THREAD_REPLIES);
+    const named=await originals.originals([id,...replyTo?[replyTo.id]:[],...opening?[opening.id]:[],...listed]);
+    const own=named.get(id),words=inTopic||opens||toOpening?await originals.notes.ownerWords():null;
+    return {reply_to:replyTo?named.get(replyTo.id)??null:null,...elsewhere?{reply_in_other_chat:true}:{},...hidden?{reply_in_private_chat:true}:{},
+      replies:opens?{count:0,items:[],topic:true}:{count:replying.length,items:listed.flatMap(item=>named.get(item)??[]),...complete?{}:{complete:false}},
+      topic:words?{label:chat?placeLabel(chat,words.places):words.places.unknown_chat,...opens?{opens:true}:{},opening:opening?named.get(opening.id)??null:null}:null,
+      forwarded_from:own&&'forward' in own?own.forward??null:null};
   }
   /**
    * What the model learned and the owner corrected, opened by its id and revision (archive_read nocheh:learned): only the

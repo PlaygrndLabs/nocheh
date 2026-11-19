@@ -683,6 +683,27 @@ class ProductScenarios(Scenarios):
         sources = [item for item in result.get('sources') or [] if isinstance(item, dict)]
         self.gate('ref_opens_its_batch', 'nocheh:event:'+event_id in [item.get('source') for item in sources]
                   and all(item.get('tag') and item.get('by') in self.TAG_BYS for item in sources), result=str(result)[:600])
+        # The owner's Notes page names the same day and links the message the review read (ADR-0261 step 4).
+        entry = self.dashboard_note(mark)
+        self.gate('notes_page_names_day_and_originals', entry is not None and entry.get('day') == day
+                  and event_id in [self.linked(item) for item in entry.get('originals') or []], entry=entry, day=day)
+
+    def dashboard_note(self, mark):
+        """The note holding the mark on the owner's Notes page (Memory › Assistant notes, the owner's own profile), as the
+        dashboard reads it: its label, day and originals. The owner's chat has a profile per installation epoch, each
+        listed as "Your private chat", and the canonical one listed first holds nothing once turns run by epoch, so each
+        of the owner's own profiles is read, newest first, as the owner would pick them."""
+        dashboard = self.dashboard()
+        profiles = dashboard.get('/memory/profiles')
+        owned = [item for item in profiles.get('history_profiles') or profiles.get('profiles') or []
+                 if item.get('owner') and item.get('exists') is not False
+                 and not (item.get('private_answer') or item.get('member') or item.get('member_read'))]
+        for profile in sorted(owned, key=lambda item: item.get('guard_epoch') or 0, reverse=True):
+            view = dashboard.get('/memory?'+urllib.parse.urlencode({'scope': profile['scope'], 'profile': profile['profile']}))
+            entry = next((entry for note in view.get('memories') or [] for entry in note.get('entries') or [] if mark in str(entry.get('text'))), None)
+            if entry is not None:
+                return entry
+        return None
 
     @staticmethod
     def recalled_notes(result, mark):
@@ -1599,6 +1620,91 @@ class ProductScenarios(Scenarios):
         opened = self.tool_result(found[-1].get('result')) if found else {}
         self.gate('model_opened_the_answer', opened.get('source') == 'nocheh:event:'+answered and opened.get('by') == 'nocheh' and mark in str(opened.get('text'))
                   and text.startswith('[brain] mcp__nocheh__archive_read'), opened={key: opened.get(key) for key in ('source', 'by', 'tag', 'error')})
+
+    # The owner's dashboard shows where messages and facts came from (ADR-0261 step 4) -----------------------------------
+
+    # A topic new to the group, so its opening is the only one its messages reply to.
+    SOURCES_TOPIC = 54
+    FULL_ID = re.compile(r'[a-f0-9]{64}')
+
+    @classmethod
+    def linked(cls, original):
+        """The message id an original on the dashboard links to, or None (retired, unavailable or no original)."""
+        return original.get('id') if isinstance(original, dict) and cls.FULL_ID.fullmatch(str(original.get('id'))) else None
+
+    @classmethod
+    def labelled(cls, original):
+        """An original the dashboard links with a short label in the owner's own words, and never an id in that label."""
+        return bool(cls.linked(original)) and bool(str(original.get('label') or '').strip()) and not cls.FULL_ID.search(str(original.get('label')))
+
+    def dashboard_shows_where_memory_came_from(self):
+        # The owner's dashboard shows a message's thread and what long-term memory learned from it, lists the facts it
+        # learned with the messages they came from, and counts how many name them exactly (ADR-0261 step 4). In a new
+        # forum topic GUEST asks, Bob answers with a LEARNMARK as a reply, and the owner replies to Bob; every one of them
+        # is sent as Telegram sends a topic message, replying to the topic's opening. The owner also states a PRIVATEMARK
+        # fact in their private chat. The fixture's learning keeps each marked message as a conclusion about its writer
+        # that cites it (installation-provider.py PrivacyCanary). A topic's opening is the topic, never what a message
+        # replies to. Once GUEST's question is retired, it reads only as retired, never linked; it is restored at the end.
+        number = str(self.f.ids())
+        mark, private, topic = 'LEARNMARK'+number, 'PRIVATEMARK'+number, self.SOURCES_TOPIC
+        bob = {'from': {'id': MEMBER, 'is_bot': False, 'first_name': 'Bob', 'username': 'bob_synthetic'}}
+        opening = self.topic_created(GROUP, topic, 'Source checks')
+        updates = {'first': self.f.message(GROUP, 'Shall we sail on Sunday?', sender=GUEST, mention=False, topic=topic, reply_to=opening)}
+        updates['stated'] = self.f.message(GROUP, 'my dinghy leaves at ten '+mark, sender=MEMBER, mention=False, topic=topic,
+                                           reply_to=updates['first']['message'], extra=bob)
+        updates['after'] = self.f.message(GROUP, 'Then Sunday at ten', mention=False, topic=topic, reply_to=updates['stated']['message'])
+        ids = {name: self.turn(update, GROUP, topic, expect_reply=False)[0] for name, update in updates.items()}
+        self.turn(self.f.message(OWNER, 'Every Sunday I water the garden. '+private), OWNER)
+        self.honcho_learned(mark)
+        self.honcho_learned(private)
+        dashboard = self.dashboard()
+        thread = lambda name: dashboard.get('/events/'+ids[name]+'/thread')
+        stated, first = thread('stated'), thread('first')
+        self.current['observed'] = {'stated': stated, 'first': first}
+        self.gate('thread_names_what_it_replies_to', self.linked(stated.get('reply_to')) == ids['first'] and self.labelled(stated['reply_to']),
+                  reply_to=stated.get('reply_to'))
+        replies = stated.get('replies') or {}
+        self.gate('thread_lists_its_replies', replies.get('count') == 1 and [self.linked(item) for item in replies.get('items') or []] == [ids['after']]
+                  and all(self.labelled(item) for item in replies['items']), replies=replies)
+        topic_line = first.get('topic') or {}
+        self.gate('topic_message_shows_its_topic_not_a_reply', first.get('reply_to') is None and 'Source checks' in str(topic_line.get('label'))
+                  and self.linked(topic_line.get('opening')) is not None and not topic_line.get('opens'), thread=first)
+        opened = dashboard.get('/events/'+self.linked(topic_line.get('opening'))+'/thread') if self.linked(topic_line.get('opening')) else {}
+        self.gate('topic_opening_lists_no_replies', (opened.get('topic') or {}).get('opens') is True and opened.get('reply_to') is None
+                  and (opened.get('replies') or {}).get('topic') is True and not (opened.get('replies') or {}).get('items'), thread=opened)
+        # Bob's own fact; the owner's reply to him is also learned, as having answered a question about the mark.
+        own_fact = lambda page: next((item for item in page.get('facts') or [] if mark in str(item.get('text'))
+                                      and 'answered a question' not in str(item.get('text'))), None)
+        learned = dashboard.get('/memory/message-facts?id='+ids['stated'])
+        fact = own_fact(learned)
+        self.gate('learned_into_memory_names_the_fact', fact is not None and fact.get('exact') is True
+                  and self.linked((fact.get('originals') or [None])[0]) == ids['stated'] and self.labelled(fact['originals'][0])
+                  and fact.get('label') == fact['originals'][0]['label'], learned=learned)
+        listed = lambda chat: dashboard.get('/memory/facts?'+urllib.parse.urlencode({'chat': chat, 'person': '', 'after': ''}))
+        group, own = listed(self.f.chat(GROUP)), listed(self.f.chat(OWNER))
+        texts = lambda page: [str(item.get('text')) for item in page.get('facts') or []]
+        found = own_fact(group)
+        self.gate('facts_list_names_where_each_came_from', found is not None and self.linked((found.get('originals') or [None])[0]) == ids['stated']
+                  and bool(found.get('learned_at')), found=found, reason=group.get('reason'))
+        moments = [str(item.get('learned_at')) for item in group.get('facts') or []]
+        self.gate('facts_list_newest_first', moments == sorted(moments, reverse=True), learned_at=moments[:10])
+        self.gate('facts_list_keeps_each_chat_apart', not any(private in text for text in texts(group)) and any(private in text for text in texts(own))
+                  and not any(mark in text for text in texts(own)), group=[text[:80] for text in texts(group)][:10], own=[text[:80] for text in texts(own)][:10])
+        coverage = dashboard.get('/memory/longterm/coverage').get('coverage') or {}
+        self.gate('coverage_counts_exact_facts', isinstance(coverage.get('exact'), int) and coverage['exact'] >= 2
+                  and coverage.get('total') == coverage['exact']+coverage.get('with_others', -1)+coverage.get('none', -1), coverage=coverage)
+        names = dashboard.get('/memory/originals?'+urllib.parse.urlencode([('id', ids['first']), ('id', ids['stated'])])).get('originals') or []
+        self.gate('originals_carry_short_labels', [self.linked(item) for item in names] == [ids['first'], ids['stated']] and all(map(self.labelled, names)),
+                  originals=names)
+        self.retire(ids['first'])
+        try:
+            stated, names = thread('stated'), dashboard.get('/memory/originals?id='+ids['first']).get('originals')
+            self.gate('retired_message_is_never_linked', stated.get('reply_to') == {'retired': True} and names == [{'retired': True}]
+                      and ids['first'] not in json.dumps([stated, names]), reply_to=stated.get('reply_to'), originals=names)
+        finally:
+            current = self.f.app('/v1/sources/'+ids['first']+'/retirement')
+            self.f.app('/v1/sources/'+ids['first']+'/retirement', {'retired': False, 'expected_revision': current['revision'],
+                                                                  'operation_id': 'scenario-dashboard-sources-'+ids['first'][:16]})
 
     def private_chat_stays_out_of_groups(self):
         # What the owner keeps on their private side never reaches what the model sees for a group, and no group reply
@@ -4892,6 +4998,8 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  # Replies in the turn and where notes came from (ADR-0261 step 3), before the retirement that withholds a reply.
                  'topic_message_is_not_a_reply', 'reply_note_reads_reply', 'reply_source_question',
                  'retired_source_leaves_tags', 'owner_recall_session_hits_have_text',
+                 # The dashboard's sources (ADR-0261 step 4); it retires one message and restores it.
+                 'dashboard_shows_where_memory_came_from',
                  'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'read_only_member_cannot_add_a_task',

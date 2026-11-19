@@ -7,6 +7,7 @@ import {useState} from 'react';
 import {ChevronRight, FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
+import {OriginalNames} from '../../lib/originals';
 import {refreshResources, useResource} from '../../lib/resource';
 import {decisionLink, proposalState, type DecisionKind} from '../../lib/supervision';
 import {
@@ -344,7 +345,14 @@ function ProjectDetail({
             where={project.name}
             description="Only you set these. Every chat in this project uses them, on top of the default for groups, with the chat’s own on top. Defaults are in Settings › Assistant."
           />
-          <ProjectKnowledge project={project} context={context} />
+          {/* Every item's originals are named with one lookup for the whole list. */}
+          <OriginalNames
+            ids={context.knowledge.items.flatMap(item =>
+              item.type === 'learned' ? [] : (item.evidence ?? []).map(source => source.id),
+            )}
+          >
+            <ProjectKnowledge project={project} context={context} />
+          </OriginalNames>
           <PrivateAnswers project={project.id} />
           {context.decisions.total > 0 && (
             <section>
