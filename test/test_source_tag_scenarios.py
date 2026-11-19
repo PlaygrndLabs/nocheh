@@ -16,6 +16,7 @@ import os
 import re
 import tempfile
 import unittest
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -66,7 +67,12 @@ class Installation(Fixture):
     `nocheh_as_owner` (Nocheh's own message reads by=owner), `reply_not_read` (a note after a reply reads as the turn's own),
     `reply_read_later` (an earlier reply block counts for a later note that copied nothing), `reply_span_ignored` (retirement
     leaves a reply block in stored history), `reply_tool_work_kept` (it withholds the block but not the turn's tool work and
-    notes), `review_undated` (a review's label names no day), `ref_missing` (a note has no ref) and `ref_opens_nothing`."""
+    notes), `review_undated` (a review's label names no day), `ref_missing` (a note has no ref) and `ref_opens_nothing`.
+    Step 4 faults, on the owner's dashboard (OwnerDashboard): `opening_lists_replies` (a topic's opening lists the whole
+    topic as its replies), `replies_dropped`, `retired_linked` (a retired original stays a link), `learned_unsourced` (facts
+    without their originals), `facts_unfiltered` (the chat filter is ignored), `facts_oldest_first`, `coverage_missing`,
+    `labels_missing` (originals by id only), `notes_undated` and `notes_unlinked` (Notes without a review's day or its
+    originals); `opening_is_reply` makes a topic's opening what its messages reply to there too."""
 
     def __init__(self, directory, fault=None):
         self.directory, self.next_id, self.fault = directory, 1794900000, fault
@@ -87,6 +93,15 @@ class Installation(Fixture):
 
     def sent(self):
         return self.sent_rows
+
+    @staticmethod
+    def chat(chat, topic=None, seconds=None):
+        """The Nocheh id of a chat or topic, as the owner's chat list names it."""
+        return str(chat)+('' if topic is None else '/'+str(topic))
+
+    def dashboard(self):
+        """The owner's dashboard API (tools/acceptance/owner_dashboard.py), as the scenarios read it."""
+        return OwnerDashboard(self)
 
     def inject(self, update):
         """An update no turn answers, such as a forum topic's opening message (ProductScenarios.topic_created)."""
@@ -110,8 +125,8 @@ class Installation(Fixture):
             return {}
         found = re.fullmatch(r'/v1/sources/([a-f0-9]{64})/retirement', path)
         if found:
-            if body is not None and body.get('retired'):
-                self.retired.add(found[1])
+            if body is not None:
+                (self.retired.add if body.get('retired') else self.retired.discard)(found[1])
             return {'retired': found[1] in self.retired, 'revision': 1 if found[1] in self.retired else 0}
         raise AssertionError('unexpected route '+path)
 
@@ -125,7 +140,7 @@ class Installation(Fixture):
         row = {'id': event_id, 'chat': message['chat']['id'], 'topic': message.get('message_thread_id'), 'number': message['message_id'],
                'sender': message['from']['id'], 'name': message['from'].get('first_name'), 'username': message['from'].get('username'),
                'text': message.get('text') or '', 'addressed': bool(message.get('entities')) or message['chat']['id'] > 0,
-               'date': message['date'], 'opening': 'forum_topic_created' in message,
+               'date': message['date'], 'opening': 'forum_topic_created' in message, 'topic_name': (message.get('forum_topic_created') or {}).get('name'),
                'reply_to': next((item['id'] for item in self.messages+self.answers if target and item['number'] == target
                                  and item['chat'] == message['chat']['id']), None),
                'outside_to': next((item['id'] for item in self.messages if outside and item['number'] == outside['message_id']
@@ -245,7 +260,7 @@ class Installation(Fixture):
                 sources = [batch[position]['id'] for position in item['source_indices']]
                 if not set(sources) & self.retired:
                     found.append({'peer': 'forwards' if row['forward'] else row['sender'], 'chat': row['chat'], 'topic': row['topic'],
-                                  'content': item['content'], 'sources': sources})
+                                  'content': item['content'], 'sources': sources, 'learned_at': '2026-11-17T10:00:%02d.%03dZ' % divmod(index, 1000)})
         return found
 
     def fact_by(self, rows):
@@ -400,7 +415,7 @@ class Installation(Fixture):
                                                                              if row['role'] == 'user' and row['turn'] != turn):
             reads.append('reply')
         label = 'Nocheh\'s note from this chat on '+DAY+(', after reading '+', '.join(READ_WORDS[read] for read in reads) if reads else '')
-        return {'from': 'turn_read' if reads else 'turn', 'label': label, 'sources': [turn]}
+        return {'from': 'turn_read' if reads else 'turn', 'label': label, 'sources': [turn], 'day': DAY}
 
     def review(self, event_id, mark):
         """The owner's notes review of a message saves the note it asks for ([[review-note:]]), labelled with the day of that
@@ -409,7 +424,7 @@ class Installation(Fixture):
         day = datetime.fromtimestamp(row['date'], timezone.utc).strftime('%Y-%m-%d')
         text = next(found.strip() for found in BRAIN.REVIEW_NOTE.findall(row['text']) if mark in found)
         label = 'Nocheh\'s notes review '+('' if self.fault == 'review_undated' else 'on '+day+' ')+'of another person\'s message in a group › a topic'
-        self.notes.append({'text': text, 'turn': None, 'session': (OWNER, None), 'from': 'person', 'label': label, 'sources': [event_id]})
+        self.notes.append({'text': text, 'turn': None, 'session': (OWNER, None), 'from': 'person', 'label': label, 'sources': [event_id], 'day': day})
         return {'state': 'done', 'provenance': {}}
 
     def open_note(self, session, mark):
@@ -503,6 +518,89 @@ class Installation(Fixture):
         return event_id, 0
 
 
+class OwnerDashboard:
+    """The owner's dashboard reads of where messages and facts came from (ADR-0261 step 4: src/stores/retrieval.ts
+    ownerThread, src/stores/memory-dashboard.ts, src/stores/owner-originals.ts, the Notes page's entries), over the made-up
+    installation. The owner reads every chat. Faults of the installation make it behave like a product without them, or
+    one that links what it must not."""
+
+    def __init__(self, installation):
+        self.i = installation
+
+    @property
+    def fault(self):
+        return self.i.fault
+
+    def original(self, event_id, labelled=True):
+        """An original as the dashboard links it: its id, a short label in the owner's words and when it was sent; a retired
+        one reads only `retired`."""
+        row = self.i.message_of(event_id)
+        if event_id in self.i.retired and self.fault != 'retired_linked':
+            return {'retired': True}
+        if row is None:
+            return {'unavailable': True, 'label': 'Source not recorded'}
+        label = self.i.tag((OWNER, None), row)['tag'].rsplit(' · ', 1)[0]
+        return {'id': event_id, 'label': label, 'at': AT} if labelled else {'id': event_id, 'label': '', 'at': None}
+
+    def thread(self, event_id):
+        row = self.i.message_of(event_id)
+        target = self.i.message_of(row['reply_to']) if row['reply_to'] else None
+        opening = target if target is not None and target['opening'] else None
+        reply_to = self.i.replied_to(row) if row['reply_to'] else None
+        if row['opening'] and self.fault != 'opening_lists_replies':
+            replies = {'count': 0, 'items': [], 'topic': True}
+        else:
+            found = [item for item in self.i.messages if item['reply_to'] == row['id'] and self.fault != 'replies_dropped']
+            replies = {'count': len(found), 'items': [self.original(item['id']) for item in found[:20]]}
+        named = next((item['topic_name'] for item in self.i.messages if item['opening'] and (item['chat'], item['topic']) == (row['chat'], row['topic'])), None)
+        topic = None if row['topic'] is None else {
+            'label': 'group “Synthetic Forum '+str(row['chat'])+'”'+(' › topic “'+named+'”' if named else ' › a topic'),
+            **({'opens': True} if row['opening'] else {}), 'opening': self.original(opening['id']) if opening else None}
+        return {'reply_to': self.original(reply_to['id']) if reply_to else None, 'replies': replies, 'topic': topic,
+                'forwarded_from': row['forward']}
+
+    def fact(self, fact):
+        rows = [self.i.message_of(source) for source in fact['sources']]
+        head, by = self.i.fact_by(rows)
+        ordered = [head['id']]+[source for source in fact['sources'] if source != head['id']]
+        originals = [] if self.fault == 'learned_unsourced' else [self.original(source) for source in ordered[:5]]
+        first = originals[0] if originals and 'id' in originals[0] else {}
+        return {'id': hashlib.sha256(json.dumps(fact['sources']+[fact['content']]).encode()).hexdigest()[:20], 'text': fact['content'],
+                'learned_at': fact['learned_at'], 'exact': True, 'batch': False, 'by': by, 'label': first.get('label'), 'at': first.get('at'),
+                'originals': originals, 'more': max(0, len(ordered)-5)}
+
+    def get(self, path):
+        url = urllib.parse.urlsplit(path)
+        query = urllib.parse.parse_qs(url.query, keep_blank_values=True)
+        found = re.fullmatch(r'/events/([a-f0-9]{64})/(thread|learned)', url.path)
+        if found and found[2] == 'thread':
+            return self.thread(found[1])
+        facts = self.i.facts()
+        if found:
+            cited = [self.fact(fact) for fact in reversed(facts) if found[1] in fact['sources']]
+            return {'facts': cited} if cited else {'facts': [], 'reason': 'not_learned'}
+        if url.path == '/memory/facts':
+            chat = query['chat'][0]
+            chosen = [fact for fact in facts if not chat or self.fault == 'facts_unfiltered' or self.i.chat(fact['chat']) == chat]
+            chosen = sorted(chosen, key=lambda fact: fact['learned_at'], reverse=self.fault != 'facts_oldest_first')
+            return {'facts': [self.fact(fact) for fact in chosen[:25]], 'next': None}
+        if url.path == '/memory/longterm/coverage':
+            if self.fault == 'coverage_missing':
+                return {'coverage': None, 'reason': 'not_supported'}
+            return {'coverage': {'total': len(facts), 'exact': len(facts), 'with_others': 0, 'none': 0}}
+        if url.path == '/memory/originals':
+            return {'originals': [self.original(event_id, self.fault != 'labels_missing') for event_id in query['id']]}
+        if url.path == '/memory/profiles':
+            return {'profiles': [{'scope': self.i.chat(OWNER), 'profile': 'default', 'owner': True}]}
+        if url.path == '/memory':
+            entries = [{'target': 'memory', 'text': note['text'], 'from': note['from'], 'label': note['label'],
+                        'day': None if self.fault == 'notes_undated' else note['day'],
+                        'originals': [] if self.fault == 'notes_unlinked' else [self.original(source) for source in note['sources'] if source]}
+                       for note in self.i.notes]
+            return {'memories': [{'name': 'MEMORY.md', 'exists': True, 'text': '', 'citations': [], 'entries': entries}], 'sessions': []}
+        raise AssertionError('unexpected dashboard route '+path)
+
+
 class SourceTagScenarioTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
@@ -516,6 +614,7 @@ class SourceTagScenarioTests(unittest.TestCase):
         scenarios.topic_chat = lambda chat, topic: str(chat)+'/'+str(topic)
         scenarios.honcho_learned = lambda mark: None
         scenarios.reviewed = installation.review
+        scenarios.dashboard = installation.dashboard
         scenarios.delivered = lambda row: {'id': installation.sent_id(row['message']), 'payload': {'send_class': 'reply'}}
         with contextlib.redirect_stdout(io.StringIO()):
             getattr(scenarios, name)()
@@ -633,13 +732,39 @@ class SourceTagScenarioTests(unittest.TestCase):
     def test_review_note_opens_its_batch(self):
         # The part native_notes_reach_later_turns adds for step 3; the rest of it reads Hermes's notes the fake does not keep.
         scenarios, _ = self.run_scenario('review_note_opens_its_batch')
-        self.assertEqual([gate['gate'] for gate in scenarios.current['gates']][-3:], ['review_label_names_its_day', 'note_has_its_ref', 'ref_opens_its_batch'])
+        self.assertEqual([gate['gate'] for gate in scenarios.current['gates']][-4:], ['review_label_names_its_day', 'note_has_its_ref', 'ref_opens_its_batch',
+                                                                                     'notes_page_names_day_and_originals'])
         self.fails('review_note_opens_its_batch', 'review_undated', 'review_label_names_its_day')
         self.fails('review_note_opens_its_batch', 'ref_missing', 'note_has_its_ref')
         self.fails('review_note_opens_its_batch', 'ref_opens_nothing', 'ref_opens_its_batch')
+        # The Notes page (step 4): a review's day and the messages it read.
+        self.fails('review_note_opens_its_batch', 'notes_undated', 'notes_page_names_day_and_originals')
+        self.fails('review_note_opens_its_batch', 'notes_unlinked', 'notes_page_names_day_and_originals')
         source = (ROOT/'tools/acceptance/product_scenarios.py').read_text()
         self.assertIn('        self.review_note_opens_its_batch()\n\n    def review_note_opens_its_batch(self):', source,
                       'native_notes_reach_later_turns ends with it')
+
+    # The owner's dashboard shows where messages and facts came from (ADR-0261 step 4) ------------------------------------
+
+    def test_dashboard_shows_where_memory_came_from(self):
+        scenarios, installation = self.run_scenario('dashboard_shows_where_memory_came_from')
+        gates = [gate['gate'] for gate in scenarios.current['gates']]
+        self.assertEqual(gates[-1], 'retired_message_is_never_linked')
+        self.assertTrue({'thread_names_what_it_replies_to', 'thread_lists_its_replies', 'topic_message_shows_its_topic_not_a_reply',
+                         'topic_opening_lists_no_replies', 'learned_into_memory_names_the_fact', 'facts_list_names_where_each_came_from',
+                         'facts_list_newest_first', 'facts_list_keeps_each_chat_apart', 'coverage_counts_exact_facts',
+                         'originals_carry_short_labels'} <= set(gates))
+        self.assertFalse(installation.retired, 'the retired message is restored')
+        self.assertIn('answered a question about LEARNMARK', json.dumps(installation.facts()), 'the owner\'s reply is learned too, and told apart')
+        self.fails('dashboard_shows_where_memory_came_from', 'opening_is_reply', 'topic_message_shows_its_topic_not_a_reply')
+        self.fails('dashboard_shows_where_memory_came_from', 'opening_lists_replies', 'topic_opening_lists_no_replies')
+        self.fails('dashboard_shows_where_memory_came_from', 'replies_dropped', 'thread_lists_its_replies')
+        self.fails('dashboard_shows_where_memory_came_from', 'learned_unsourced', 'learned_into_memory_names_the_fact')
+        self.fails('dashboard_shows_where_memory_came_from', 'facts_oldest_first', 'facts_list_newest_first')
+        self.fails('dashboard_shows_where_memory_came_from', 'facts_unfiltered', 'facts_list_keeps_each_chat_apart')
+        self.fails('dashboard_shows_where_memory_came_from', 'coverage_missing', 'coverage_counts_exact_facts')
+        self.fails('dashboard_shows_where_memory_came_from', 'labels_missing', 'originals_carry_short_labels')
+        self.fails('dashboard_shows_where_memory_came_from', 'retired_linked', 'retired_message_is_never_linked')
 
     def test_a_fact_answering_another_peers_marked_question_cites_the_answer_then_the_question(self):
         privacy = provider().PrivacyCanary({})
@@ -658,7 +783,7 @@ class SourceTagScenarioTests(unittest.TestCase):
         for name in ('search_hits_name_their_source', 'group_tags_stay_in_the_group', 'reply_thread_opens', 'topic_sharing_group_keeps_evidence',
                      'retired_source_leaves_tags', 'owner_recall_session_hits_have_text', 'recalled_fact_opens_its_original', 'fact_about_bob_names_bob',
                      'recall_facts_carry_sources', 'forward_fact_names_its_origin', 'per_turn_memory_stays_small', 'topic_message_is_not_a_reply',
-                     'reply_note_reads_reply', 'reply_source_question'):
+                     'reply_note_reads_reply', 'reply_source_question', 'dashboard_shows_where_memory_came_from'):
             self.assertIn(name, PRODUCT_ORDER)
             self.assertIn(name, TITLES)
         # A retired reply target is checked after the reply scenarios, whose blocks it would otherwise withhold.
