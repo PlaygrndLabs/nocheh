@@ -1,8 +1,8 @@
 # ADR-0261: Recalled facts and search hits name their source
 
 <status>
-Step 1 accepted on 2026-11-17, steps 2 and 3 on 2026-11-18; step 4 is
-planned. The owner asked for
+Step 1 accepted on 2026-11-17, steps 2 and 3 on 2026-11-18, step 4 on
+2026-11-19. The owner asked for
 memory to track the source of each fact, not only to keep history without its
 thread and relations, and to do it before the MVP. The design "Recalled facts
 and search hits name their source" was reviewed three times (an adversarial
@@ -109,7 +109,8 @@ turn's own message and answer stay.
   `source_tags` memory problem, shown on System › Health and in the owner's
   notice. A moved binding is rethrown, not counted.
 - Tags are given only to readers inside a turn; the dashboard, admin reads and
-  reads outside a turn get today's shapes.
+  reads outside a turn get today's shapes. The owner's dashboard names messages
+  in the owner's own words instead (section 8).
 - How to read them is said once, in the tool descriptions; it is never repeated
   inside a tool result, so stored history does not pile it up.
 
@@ -210,8 +211,8 @@ turn's own message and answer stay.
   `messages_truncated`); such a fact is never exact, and a failed or old
   plugin leaves it with no messages (`fact_batches_unavailable`,
   `fact_batches_unsupported`, `fact_batches_invalid`) without failing the read.
-  `GET /citation-coverage` and `citationCoverage()` can count how many live
-  facts cite their messages; nothing calls them until step 4.
+  `GET /citation-coverage` and `citationCoverage()` count how many live facts
+  cite their messages; Memory › Long-term's coverage line calls them (step 4).
   No Honcho code or setting changes, and nothing is learned again.
 - **From fact to message.** One query maps a fact's messages to Nocheh's
   receipts that are done, not retired and in the reader's audience (the
@@ -417,11 +418,68 @@ turn's own message and answer stay.
   and ends the default `memory.evidence` text; it is never written into a tool
   result.
 
-## 8. Later steps (planned)
+## 8. The owner's dashboard shows where messages and facts came from (step 4)
 
-- **Step 4: dashboard.** Messages › detail shows a message's thread and what
-  was learned from it; Memory › Long-term lists facts with their sources; the
-  Notes page names a review's day.
+- **Only the owner.** Every read is the owner's (`admin()`), through the
+  dashboard's owner session and the management relay; no member, group or turn
+  reads any of it. The owner reads every chat, members' private chats included,
+  as Messages already shows them (ADR-0262); those chats are never learned, so
+  their messages have no facts and the Facts list's chat filter does not offer
+  them.
+- **An original, in the owner's words.** Each message the dashboard links is
+  `{id, label, at, forward?}`: a short label code builds from the archive with
+  the Notes page's own words (`ownerEventLabel`, `placeLabel`, `whoLabel`, edited
+  in Settings › Assistant), and when it was sent (`OwnerOriginals`). A retired
+  message reads only `{retired: true}`, never with its id or a link (“Retired
+  message”). A message the archive does not hold reads “Source not recorded”, and
+  when the labels or the retirement check can't be read every original of that
+  request reads “Source not available right now”, both without an id
+  (ADR-0257's fail-closed labels); that failure is counted as `source_tags`.
+  `GET /v1/memory/originals` labels up to 50 ids in the order asked, so Facts,
+  People, Projects and Inbox review show a label and time beside each link with
+  one lookup per page (at most 4); a page whose lookup fails shows its links as
+  before, without labels.
+- **Messages › detail.** A **Thread** section (`GET /v1/events/<id>/thread`,
+  `ownerThread` on step 1's relations, `RelationshipRepository.replies` and
+  `telegramTopicOpening`): **Replies to**, **Topic** (its chat and topic in the
+  owner's words, with a link to the topic's first message), **Forwarded from**
+  and **Replies (N)** (up to 100 counted, “100+” past that, the first 20
+  listed). A message replying to its topic's opening shows only **Topic**, never
+  **Replies to**; the opening says it opens the topic and lists no replies,
+  since they are the whole topic. An old Desktop import's reply into another
+  chat is named, not linked. A **Learned into memory** section
+  (`GET /v1/events/<id>/learned`): the facts citing the message, found with
+  Honcho's stock `/conclusions/list` filtered on `source_message_ids` by the
+  remote ids of its done, unretired receipts (`everyFact`), each with its badge
+  (**Exact source**, or **Learned with other messages** for a fact that knows
+  only its batch), when it was learned and its originals (the open message reads
+  “This message”). Both load when the panel opens and when Messages' live
+  updates tick, never on a timer, since Learned asks long-term memory itself.
+- **Memory › Long-term.** A **Facts it learned** card after **Re-run or
+  replace**, which is unchanged and still asks before it runs: a coverage line
+  from `citationCoverage()` (“412 exact · 96 learned with other messages · 7
+  none”, `GET /v1/memory/longterm/coverage`), and the facts newest first, 25 a
+  page (`GET /v1/memory/facts?chat=&person=&after=`), filtered by chat (its
+  memory's sessions and its topics') or by person (that person's own facts about
+  themselves, from People's “What long-term memory learned about <name>”). Each
+  fact shows its text, its badge, when it was learned, the label and time of the
+  original its source line names first and up to 5 originals in the fact's order
+  (section 6), the rest counted. Facts one participant holds about another are left
+  out. Sources come from `FactSourceRepository` for the owner's audience, as in
+  a turn.
+- **Memory › Notes.** Each note shows the day its label names (a review's main
+  message's, a turn's own, in the owner's Settings › Tasks zone) and **Original
+  message N** links to the messages its writer read (a review's batch, first
+  message first, or the message the turn answered), a retired one shown but not
+  linked.
+- **System › Health.** Already showed the `source_tags` and `note_refs` lines
+  (steps 1 and 3); the dashboard's failures add to `source_tags`.
+- **Empty is not a failure.** No memory space (`no_memory`), an engine that
+  can't list facts (`not_supported`) or a message never learned
+  (`not_learned`) reads its own plain sentence and is not counted; a read the
+  engine fails reads “can't be reached right now” (`unavailable`) and is counted
+  as `source_tags`. Nothing is learned again and no Honcho code or setting
+  changes; looking changes nothing.
 
 </decision>
 
@@ -461,6 +519,14 @@ turn's own message and answer stay.
   showed it, carried by every later message in the topic and shown to every
   member by Telegram, as a group's title is; retiring a message retires it as
   a memory source, not the name of the place it was in.
+- **A label field in every page's own answer (Facts, People, Projects, Inbox).**
+  Not chosen: one lookup route keeps each page's answer as it was, and a page
+  whose lookup fails still shows its links.
+- **Refreshing Learned into memory on a timer.** Not chosen: it asks long-term
+  memory itself, so an open panel would query it every minute; it reloads with
+  Messages' live updates instead.
+- **Linking a retired original with a mark.** Rejected: a retired message is
+  never an original; it reads only “Retired message”.
 </alternatives>
 
 <consequences>
@@ -522,8 +588,6 @@ turn's own message and answer stay.
     (another memory space), but a stored row citing it is withheld only for a
     retired message it names.
   - Recall's prose answer is still not sourced sentence by sentence.
-  - Citation coverage can be counted by the plugin, but nothing calls it until
-    step 4.
 - Step 3: a turn whose message replies to another reads about 120 more tokens,
   kept in its history until compaction, and each recent message that replies
   to another about 45; a plain message in a forum topic reads none. Each turn
@@ -552,10 +616,29 @@ turn's own message and answer stay.
     its day as `<day> UTC`.
   - A note's ref opens only in the turn whose evidence showed it, and only for 7
     days; refs that could not be kept leave that turn's notes without them.
-  - The Notes page shows no review day until step 4.
   - A recent message's reply part names the message without its text; the model
     opens it with `archive_read` to read it.
   - An earlier group message whose row holds a reply block makes a note that
     copies from that row read `recent` as well as `reply`: the earlier-row rule
     reads the whole row (it errs toward more reads).
+- Step 4: opening a message in Messages reads its thread (a few queries and one
+  label request) and asks long-term memory once for the facts citing it, with
+  one receipts query; each Facts page is one engine list, one receipts query and
+  one label request; the coverage line is one plugin call a minute while the
+  Long-term tab is open. Facts, People, Projects and an Inbox review panel make
+  at most 4 label lookups of 50 ids each. Nothing is stored.
+- What the owner loses in step 4:
+  - A link on Facts, People, Projects or Inbox review to a message the archive
+    does not hold reads “Source not recorded” and is no longer a link (it opened
+    nothing).
+  - While storage can't read the labels or the retirement check (counted as
+    `source_tags`), those links read “Source not available right now” instead
+    of opening the message (ADR-0257's labels fail closed); when the lookup
+    itself can't be reached, they show without labels as before.
+  - Learned into memory shows the first 25 facts citing a message, and a fact
+    its first 5 originals; Thread lists the first 20 replies.
+  - The person filter reads only that person's own memory participant, not
+    others merged into it in People.
+  - Notes' original links carry no label of their own; the note's label names
+    them.
 </consequences>

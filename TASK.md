@@ -2,6 +2,57 @@
 
 <current>
 
+Memory step 4: the dashboard shows where messages and facts came from
+([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md) step 4;
+owner, 2026-11-17: track the source of each fact before the MVP; built on the same three
+recommended answers as steps 1 to 3). No Honcho code or setting changes and nothing is learned
+again; only the owner reads any of it.
+- Already there from steps 1 to 3: the engine's `facts()`, `factsById()` and
+  `citationCoverage()`, `FactSourceRepository`, the archive thread and topic-opening code, the
+  owner labels on the Notes page (without a day or links), links by id on Memory and Inbox
+  (`EvidenceLinks`), and the `source_tags` and `note_refs` lines on System › Health.
+- Storage: originals in the owner's words (`OwnerOriginals`, `ownerEventLabels`; a retired one
+  `{retired:true}`, never an id; “Source not recorded” and fail-closed “Source not available
+  right now” without an id, counted as `source_tags`), `GET /v1/memory/originals` (≤50 ids);
+  `GET /v1/events/<id>/thread` (`ownerThread`) and `/learned` (engine `everyFact` on stock
+  `/conclusions/list` with `source_message_ids`, facts about another participant left out);
+  `GET /v1/memory/facts` (newest first, 25 a page, by chat or person, ≤5 originals a fact) and
+  `/longterm/coverage`; each note's `day` and `originals`; empty reasons uncounted, a failed
+  engine read counted ([store](test/store-memory-dashboard.test.ts),
+  [notes](test/store-note-sources.test.ts), [engine](test/memory-engine.test.ts),
+  [relay](services/hermes/test_management_api_errors.py)).
+- Pages: Messages › detail **Thread** (Replies to, Topic with its first message, Forwarded
+  from, Replies (N); a topic's opening is Topic, never Replies to, and lists no replies) and
+  **Learned into memory** (Exact source or Learned with other messages); Memory › Long-term
+  **Facts it learned** with the coverage line, **In chat** and **About person** filters and
+  People's link; Notes' day and **Original message** links; a label and time beside each
+  original on Facts, People, Projects and Inbox review, one lookup per page
+  ([logic](test/dashboard-memory-sources.test.mjs), [browser](test/dashboard-pages.browser.mjs),
+  preview fixtures in [preview](test/dashboard-preview.ts)).
+- Tester: `dashboard_shows_where_memory_came_from` (a reply chain in a new forum topic with
+  Bob's LEARNMARK and the owner's PRIVATEMARK in their private chat: thread, topic opening,
+  learned facts, the Facts list by chat and newest first, coverage, labels, and a retired message
+  never linked, then restored) and the Notes page's day and originals in
+  `native_notes_reach_later_turns`, each seen to fail at its gate on a fake without the fix
+  ([scenarios](test/test_source_tag_scenarios.py)).
+  Checks (2026-11-19): the build; node unit tests (491: 436 pass, 51 skipped, and only the 4
+  workflow tests that also fail on main fail); the dashboard tests (81 of 81) and format check;
+  the browser tests (72: 69 pass, and the 3 that also fail on main); the store files of this
+  step (memory dashboard, note sources, fact sources, archive thread, owner API, fact opening:
+  8 of 8); Python Hermes (1064, with the 2 environment errors that also occur on main) and the
+  repository's Python tests (186, 2 skipped).
+  Changed from the design: short labels come from one lookup route, not a field on each page's
+  answer; Learned into memory and Thread reload with Messages' live updates, not on a timer;
+  Notes' links carry no label of their own; the person filter reads only that person's own
+  memory participant.
+  Pending:
+  - The full tester on images: `dashboard_shows_where_memory_came_from` has only run against the
+    fake. Its person filter is not gated there (the store and browser tests cover it).
+  - A live look at the Thread and Learned sections and the Facts list on the owner's install.
+  - Messages' list calls a retired message “Hidden from assistant”, these sections “Retired
+    message”; one word may be better.
+  - The privacy scan before a push.
+
 Members step 4: member private chat, and 4b: the owner asks about a member
 ([ADR-0262](docs/adr/0262-member-private-chat.md); owner, 2026-11-12, approving the Members
 design, group talk off does not stop private chat; 2026-11-18: Q1 the answer about a member is a
@@ -251,7 +302,6 @@ again; Hermes's own code is unchanged.
   Pending:
   - The full tester on images: the step 3 scenarios have only run against the fake.
   - A live look at a reply block and a note's ref in a group and in the owner's chat.
-  - The Notes page names no review day until step 4.
   - The privacy scan before a push.
   Left for later: step 4 (dashboard).
 
@@ -300,7 +350,6 @@ and nothing is learned again.
     12 facts, so `recall_facts_carry_sources` and the facts part of `retired_source_leaves_tags`
     ask as GUEST, whose few facts come first.
   - A live look at a turn's source lines and an opened fact in a group and in the owner's chat.
-  - Citation coverage is counted but shown nowhere until step 4.
   - The privacy scan before a push.
   Left for later: step 3 (replies in the turn, notes refs) and step 4 (dashboard).
 
