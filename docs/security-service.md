@@ -209,7 +209,8 @@ the owner's own typing and cited. Only the model-written summary and fact lines
 pass the guard; each line must come back with its own number and time, or the
 block reads as before and the failure is counted as `source_tags`. A fact opens
 by its record and number only for its own audience (the owner reads any), in the
-current memory space, never for a private answer, never while memory is being
+current memory space, never for a bound reader (a private answer, a member's
+private chat or the owner's ask about a member), never while memory is being
 corrected, once memory no longer holds it, or once any of its stored sources
 (or, for a fact whose sources may be incomplete, any message of its session) is
 retired. The retired route reports such records in `retired_records`, so Hermes

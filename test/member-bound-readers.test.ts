@@ -83,7 +83,8 @@ test('each bound reader reaches only its own read routes, refused with its own c
   for(const path of ['/v1/memory/shared/'+'b'.repeat(64),'/v1/memory/filtered/'+'b'.repeat(64),'/v1/memory/grants/'+'b'.repeat(64),'/v1/memory/recall'])
     assert.equal(privateAnswerRoute('GET',path,'member'),false,path);
   for(const [method,path] of [['POST','/v1/owner/tasks'],['POST','/v1/owner/tasks/'+'b'.repeat(64)],['POST','/v1/memory/recall'],['POST','/v1/memory/longterm/recall'],
-    ['POST','/v1/tools/propose'],['POST','/v1/action-requests'],['POST','/v1/jobs/start'],['POST','/v1/knowledge/proposals'],['POST','/v1/telegram/send'],['GET','/v1/data']] as const)
+    ['POST','/v1/tools/propose'],['POST','/v1/action-requests'],['POST','/v1/jobs/start'],['POST','/v1/knowledge/proposals'],['POST','/v1/telegram/send'],['GET','/v1/data'],
+    ['GET','/v1/memory/facts/'+'b'.repeat(64)],['GET','/v1/memory/facts/'+'b'.repeat(64)+'/3']] as const)
     for(const kind of ['answer','member','memberRead'] as const)assert.equal(privateAnswerRoute(method,path,kind),false,kind+' '+method+' '+path);
   // The owner's ask about a member: the archive only; no tasks, no long-term memory, no imports, no context.
   for(const [method,path] of [['GET','/v1/owner/tasks'],['GET','/v1/imports/pending'],['GET','/v1/memory/context'],['POST','/v1/memory/longterm/search'],

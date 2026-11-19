@@ -1360,7 +1360,8 @@ export class NativeMemoryRepository {
    */
   async openFact(principal:Reader,recordId:string,n:number|null) {
     if(!/^[a-f0-9]{64}$/.test(recordId)||n!==null&&!(Number.isSafeInteger(n)&&n>=1&&n<=RECALL_FACT_LIMIT))throw factUnavailable();
-    if(principal.answer!==undefined)throw factUnavailable();
+    // Never for a bound reader: a private answer, a member's private chat or the owner's ask about a member (ADR-0262).
+    if(boundReader(principal)!==null)throw factUnavailable();
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding),retirements=this.contexts.access.retirements;
     if(!workspace||!this.tags||!this.engine.factExists||!this.engine.factsById||!retirements)throw factUnavailable();
     const current=await this.current(workspace.id),audience=principal.admin?'owner':this.principalAudience(principal);

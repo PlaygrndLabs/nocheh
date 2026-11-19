@@ -68,6 +68,11 @@ only). One branch: a contract, six parts and their integration.
   and 17/17, with the canary sweep ("a member's marks never left theirs"). Its first member round
   found an ask's search calling the shared-facts route the ask may not use (fixed, with a unit
   test in [mcp](test/mcp.test.ts)), and two leak checks that counted the owner's own recall query.
+  Merged main 1182097 (fact sources, ADR-0261 step 2): bound readers (a private answer, a member's
+  private chat, the owner's ask about a member) never open `nocheh:memory:` facts; the facts route is
+  in no bound route list and `openFact` refuses any bound reader
+  ([readers](test/member-bound-readers.test.ts), [facts](test/fact-opening.test.ts)). The suites were
+  run again on the merged branch; `test_retired_source_leaves_tags` fails as on main.
   Pending: live acceptance on the owner's install after merge.
   Left for later: a member with several accounts that have private chats is not asked about (the
   owner is told so); `notesSender` does not tell `member_read` sends apart (`canLearn` and
