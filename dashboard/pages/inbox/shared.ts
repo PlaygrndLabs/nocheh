@@ -114,14 +114,19 @@ export function actionSummary(action: Pick<Action, 'kind' | 'arguments'>): strin
   return '';
 }
 
-/** What a permission covers: a chat rule for a web read covers every page on its site. */
+/** What a permission covers: a chat rule for a web read covers every page on its site, or of one file on a shared site
+ *  (written after the site); one for another server's tool covers its calls with short input. */
 export function permissionSummary(permission: Permission): string {
   if (
     permission.grain === 'chat' &&
     permission.kind === 'browser' &&
     permission.match_key?.startsWith('nocheh_browser:')
-  )
-    return 'Any page on ' + permission.match_key.slice('nocheh_browser:'.length);
+  ) {
+    const covered = permission.match_key.slice('nocheh_browser:'.length);
+    return (covered.includes('/') ? 'Any page of the shared file ' : 'Any page on ') + covered;
+  }
+  if (permission.grain === 'chat' && permission.kind === 'mcp')
+    return 'Calls with short input: ' + actionSummary(permission);
   return actionSummary(permission);
 }
 

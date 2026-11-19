@@ -195,6 +195,8 @@ test('allowed members post freely in their own group; everything else waits for 
     const tool=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf ok'}}));
     // A card that offers a chat rule names the topic too, and says above its buttons that the rule covers everyone there.
     const note='\n\n👥 “Where asked” covers you and every member who can talk in that chat or topic, not only the person who asked.';
+    // A web read's rule also says what it lets Nocheh open without asking (ADR-0263).
+    const site='\n\n🔓 “Always allow this site” lets Nocheh open any page there without asking, including addresses that carry short pieces of your data.';
     assert.equal(last('card').chat_id,'123');assert.equal(last('card').text,'⚙️ Run a command\n💬 Asked in a Telegram group › General\n\nprintf ok'+note);
     assert.deepEqual(last('card').links,[{type:'bold',offset:3,length:13},{type:'pre',offset:last('card').text.indexOf('printf ok'),length:9}],'the name is bold, the command is code');assert.match(tool.message,/asked the owner/);
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
@@ -208,7 +210,7 @@ test('allowed members post freely in their own group; everything else waits for 
     finally{ownerTools();}
     // A web address is all a page read sends, so it shows open under the summary, which says it is the AI's (ADR-0250).
     const opened=last('card');
-    assert.equal(opened.text,'⚙️ Open a web page · example.test\n📝 AI says: Read the made-up page.\n💬 Asked in a Telegram group › General\n\nhttps://example.test/made-up'+note);
+    assert.equal(opened.text,'⚙️ Open a web page · example.test\n📝 AI says: Read the made-up page.\n💬 Asked in a Telegram group › General\n\nhttps://example.test/made-up'+site+note);
     assert.deepEqual(opened.links,[{type:'bold',offset:3,length:30}]);
     await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf said'},summary:'Print a word.'}));
     assert.equal(last('card').text,'⚙️ Run a command\n📝 AI says: Print a word.\n💬 Asked in a Telegram group › General\n\nprintf said'+note);

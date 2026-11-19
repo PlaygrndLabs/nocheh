@@ -2,6 +2,22 @@
 
 <current>
 
+Security fixes part 5: only addresses no model built open without a card
+([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md); owner,
+2026-11-14 "all yes" on the review's fixes 2 and 7 and the Notion item; 2026-11-19: any outside
+tool may get Always allow, short input only).
+- One check (`src/link-check.ts`) for "Do what I ask", chat rules, tool rules and Notion:
+  `typed`, `forwarded` (≤2 links), `page` (8-character echo check on model-built pages) and
+  `named` reads run without a card, at most 10 a message (5 from pages, rule-covered counted);
+  other web addresses and every tool call ask; commands run as before.
+- Site rules cover one file on shared or send-to sites; no rule covers an address carrying
+  data; tool rules cover short input; each rule button's card says what it allows.
+- Notion Nothing asks me: page tools only, outside reads only when given, changes only with
+  plain or given links; `/image/` and `/signed/` are outside.
+- Checks: [unit](test/link-check.test.ts), [store](test/store-link-check.test.ts),
+  [Notion](test/store-notion.test.ts), [buttons](test/store-approval-buttons.test.ts).
+  Full tester's tool scenarios pass in the cloud. Pending: a live reply after merge.
+
 Memory step 4: the dashboard shows where messages and facts came from
 ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md) step 4;
 owner, 2026-11-17: track the source of each fact before the MVP; built on the same three

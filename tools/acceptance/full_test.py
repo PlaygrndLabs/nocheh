@@ -92,6 +92,7 @@ TITLES = {
     'send_to_allowed_person_private': 'A message to a member\'s private chat waits for your card, which names them',
     'owner_private_card_and_approve': 'Approval card in private chat, Approve button',
     'owner_private_card_reject': 'Approval card, Reject button', 'tool_card_reads_in_words': 'A tool\'s approval card reads in words, not JSON',
+    'owner_freedom_opens_only_given_links': '"Do what I ask" opens links the owner gave, and a built address asks',
     'forwarded_messages_are_not_the_owners_words': 'A forwarded message reads as shared information, and a forwarded command never runs',
     'same_group_post_goes_right_away': 'Post in your own group needs no approval',
     'member_cross_group_card_in_origin': 'Member reviews their own message to another group',

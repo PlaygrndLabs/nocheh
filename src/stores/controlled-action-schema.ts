@@ -45,6 +45,11 @@ ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS summary_reference jsonb;
 -- runs without a card (controlledAuthorities; null for a grant or the owner's approval) (step 3).
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS asker_account text CHECK(asker_account IS NULL OR asker_account ~ '^[a-f0-9]{64}$');
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS authority text CHECK(authority IS NULL OR authority IN (${controlledAuthorities.map(value=>`'${value}'`).join(',')}));
+-- Why a web read or another server's tool ran without a card (ADR-0263): a link the owner gave ('typed'), one in a forward
+-- ('forwarded'), one on a page opened for the same message ('page'), a site the owner named ('named'), or a chat rule
+-- ('rule'). One message opens only so many this way.
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS free_read text CHECK(free_read IS NULL OR free_read IN ('typed','forwarded','page','named','rule'));
+CREATE INDEX IF NOT EXISTS controlled_action_free_reads ON controlled_actions(event_id) WHERE free_read IS NOT NULL;
 -- Page reads that ended unclear before reads closed themselves.
 UPDATE controlled_actions SET resolution='read_closed',resolved_at=updated_at WHERE state='ambiguous' AND kind='browser' AND resolution IS NULL;
 CREATE TABLE IF NOT EXISTS action_owner_commands (
