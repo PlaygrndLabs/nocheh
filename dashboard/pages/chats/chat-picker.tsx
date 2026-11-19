@@ -10,6 +10,7 @@ import {useChatDirectory} from '../../lib/chat-directory';
 import {chatName, isGroupChat, kindLabel, unknownChat, type Chat, type Directory} from '../../lib/chats-model';
 import {cn} from '../../lib/utils';
 import {Input} from '../../ui/core';
+import {otherPrivate} from '../messages/chat-names';
 
 export function ChatPicker({
   label,
@@ -21,6 +22,7 @@ export function ChatPicker({
   hint,
   groupsOnly,
   wholeGroups,
+  noOthersPrivate,
 }: {
   label: string;
   value: string[];
@@ -31,6 +33,8 @@ export function ChatPicker({
   hint?: string;
   groupsOnly?: boolean;
   wholeGroups?: boolean;
+  /** Leave out other people's private chats (and their topics), which long-term memory never learns from. */
+  noOthersPrivate?: boolean;
 }) {
   const id = useId();
   const [query, setQuery] = useState('');
@@ -42,7 +46,8 @@ export function ChatPicker({
   const find = (space: string | null | undefined): Chat | null =>
     (space && resource.data?.items.find(row => row.space_id === space)) || all.find(space);
   const allowed = (chat: Chat) =>
-    (!groupsOnly && !wholeGroups) || (isGroupChat(chat, find) && (!wholeGroups || chat.kind === 'group'));
+    (!noOthersPrivate || !otherPrivate(chat, find)) &&
+    ((!groupsOnly && !wholeGroups) || (isGroupChat(chat, find) && (!wholeGroups || chat.kind === 'group')));
   const rows = (resource.data?.items ?? []).filter(row => !exclude.includes(row.space_id) && allowed(row));
   const display = (chat: Chat) =>
     chat.kind === 'topic' && chat.parent_name ? `${chatName(chat)} · ${chat.parent_name}` : chatName(chat);
@@ -129,7 +134,9 @@ export function ChatPicker({
                   ? 'Only whole groups can be chosen here. A topic follows its group, and a private chat never joins.'
                   : deferred && refused.length && groupsOnly
                     ? 'Only groups and topics can be chosen here, never a private chat.'
-                    : 'No chats match. Search by name or Telegram ID.'}
+                    : deferred && refused.length && noOthersPrivate
+                      ? 'Other people’s private chats aren’t learned from, so they aren’t listed here.'
+                      : 'No chats match. Search by name or Telegram ID.'}
               </li>
             )}
           </ul>

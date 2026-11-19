@@ -35,14 +35,16 @@ class ManagementApiErrorTests(unittest.TestCase):
         # ADR-0261 step 4: the Facts list, the coverage line, original labels, and a message's thread and learned facts.
         with patch('tools.operations.archive.archive.API') as api:
             api.return_value.call.return_value = {'ok': True}
-            for path in ('/v1/memory/facts?chat=&person=&after=', '/v1/memory/longterm/coverage', '/v1/memory/originals?id=' + 'a' * 64):
+            for path in ('/v1/memory/facts?chat=&person=&after=', '/v1/memory/longterm/coverage', '/v1/memory/originals?id=' + 'a' * 64,
+                         '/v1/memory/message-facts?id=' + 'b' * 64):
                 with self.subTest(path=path):
                     self.assertEqual(dispatch({'operation': 'memory.api', 'path': path, 'body': None}), {'ok': True})
-            for route in ('', '/thread', '/learned'):
+            for route in ('', '/thread'):
                 with self.subTest(route=route):
                     self.assertEqual(dispatch({'operation': 'archive.read', 'path': '/v1/events/' + 'b' * 64 + route}), {'ok': True})
             api.reset_mock()
-            for path in ('/v1/events/' + 'b' * 64 + '/replies', '/v1/events/' + 'b' * 64 + '/thread/x', '/v1/events/short/thread'):
+            for path in ('/v1/events/' + 'b' * 64 + '/replies', '/v1/events/' + 'b' * 64 + '/thread/x', '/v1/events/short/thread',
+                         '/v1/events/' + 'b' * 64 + '/learned'):
                 with self.subTest(path=path), self.assertRaisesRegex(ValueError, '^archive_route_denied$'):
                     dispatch({'operation': 'archive.read', 'path': path})
             api.assert_not_called()

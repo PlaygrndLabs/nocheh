@@ -1,6 +1,6 @@
 /**
  * Original messages as the dashboard links them (ADR-0261 step 4): a link that opens the message, with a short label in
- * your own words and when it was sent. A retired message is never linked; it reads "Retired message". A message whose
+ * your own words and when it was sent. A retired message is never linked; it reads "Hidden from assistant". A message whose
  * label can't be made now has no link either, only its reason.
  */
 import {createContext, useContext, useMemo, type ReactNode} from 'react';
@@ -64,7 +64,7 @@ export function useNamedOriginals(ids: readonly (string | null | undefined)[]): 
   return above ?? own;
 }
 
-/** One original: a link with its label and time, "Retired message", or why it can't be opened. */
+/** One original: a link with its label and time, "Hidden from assistant", or why it can't be opened. */
 export function OriginalItem({
   original,
   linkText = 'Original message',
@@ -97,7 +97,8 @@ export function OriginalItem({
   );
 }
 
-/** A list of originals, numbered when there are several, and how many more there are. */
+/** A list of originals, numbered when there are several, and how many more there are. `item` is what each link
+ *  says (“Original message”, or “Reply” for the messages replying to one). */
 export function OriginalList({
   originals,
   more = 0,
@@ -105,6 +106,7 @@ export function OriginalList({
   short,
   className,
   label,
+  item = 'Original message',
 }: {
   originals: Original[];
   more?: number;
@@ -112,6 +114,7 @@ export function OriginalList({
   short?: boolean;
   className?: string;
   label?: string;
+  item?: string;
 }) {
   if (!originals.length && !more) return <p className={cn('text-[13px] text-muted', className)}>No linked messages.</p>;
   return (
@@ -122,7 +125,7 @@ export function OriginalList({
             original={original}
             current={current}
             short={short}
-            linkText={'Original message' + (originals.length + more > 1 ? ' ' + (index + 1) : '')}
+            linkText={item + (originals.length + more > 1 ? ' ' + (index + 1) : '')}
           />
         </li>
       ))}

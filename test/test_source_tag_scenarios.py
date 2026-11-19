@@ -572,12 +572,12 @@ class OwnerDashboard:
     def get(self, path):
         url = urllib.parse.urlsplit(path)
         query = urllib.parse.parse_qs(url.query, keep_blank_values=True)
-        found = re.fullmatch(r'/events/([a-f0-9]{64})/(thread|learned)', url.path)
-        if found and found[2] == 'thread':
+        found = re.fullmatch(r'/events/([a-f0-9]{64})/thread', url.path)
+        if found:
             return self.thread(found[1])
         facts = self.i.facts()
-        if found:
-            cited = [self.fact(fact) for fact in reversed(facts) if found[1] in fact['sources']]
+        if url.path == '/memory/message-facts':
+            cited = [self.fact(fact) for fact in reversed(facts) if query['id'][0] in fact['sources']]
             return {'facts': cited} if cited else {'facts': [], 'reason': 'not_learned'}
         if url.path == '/memory/facts':
             chat = query['chat'][0]

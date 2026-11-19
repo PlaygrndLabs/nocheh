@@ -14,19 +14,28 @@ import type {SourceRetirementRepository} from './source-retirement.js';
  */
 export type Original={id:string;label:string;at:string|null;forward?:string}|{retired:true}|{unavailable:true;label:string};
 
-/** The most originals one dashboard request labels. */
+/** The most originals labelled in one batch of reads; more are labelled batch by batch. */
 export const ORIGINALS_LIMIT=200;
 
 export class OwnerOriginals {
   constructor(readonly control:Pick<pg.Pool,'query'>,readonly notes:Pick<NoteSourceRepository,'ownerEventLabels'|'ownerWords'>,
-    readonly retirements:Pick<SourceRetirementRepository,'retiredEvents'>){}
+    readonly retirements:Pick<SourceRetirementRepository,'retiredAmong'>){}
 
-  /** Each of these messages (full ids only, at most ORIGINALS_LIMIT), by id, in one batch of reads. */
+  /**
+   * Each of these messages (full ids only), by id, ORIGINALS_LIMIT to a batch of reads. A message that is retired, or a
+   * reaction to one, reads only `retired`, as canRead treats it. Only a failure is counted: the dashboard's own lookups
+   * never mark a turn's failure as fixed.
+   */
   async originals(ids:readonly string[]):Promise<Map<string,Original>> {
-    const wanted=[...new Set(ids.filter(id=>/^[a-f0-9]{64}$/.test(id)))].slice(0,ORIGINALS_LIMIT),found=new Map<string,Original>();
-    if(!wanted.length)return found;
+    const wanted=[...new Set(ids.filter(id=>/^[a-f0-9]{64}$/.test(id)))],found=new Map<string,Original>();
+    for(let start=0;start<wanted.length;start+=ORIGINALS_LIMIT)
+      for(const [id,original] of await this.batch(wanted.slice(start,start+ORIGINALS_LIMIT)))found.set(id,original);
+    return found;
+  }
+  private async batch(wanted:readonly string[]):Promise<Map<string,Original>> {
+    const found=new Map<string,Original>();
     try {
-      const retired=await this.retirements.retiredEvents(wanted),live=wanted.filter(id=>!retired.has(id));
+      const retired=await this.retirements.retiredAmong(wanted),live=wanted.filter(id=>!retired.has(id));
       const labels=await this.notes.ownerEventLabels(live);
       for(const id of wanted) {
         if(retired.has(id)){found.set(id,{retired:true});continue;}
@@ -34,7 +43,6 @@ export class OwnerOriginals {
         if(!label)throw new Error('original_label_missing');
         found.set(id,label.missing?{unavailable:true,label:label.label}:{id,label:label.label,at:label.at,...label.forward?{forward:label.forward}:{}});
       }
-      await countMemoryStep(this.control,'source_tags',true);
       return found;
     } catch {
       await countMemoryStep(this.control,'source_tags',false);

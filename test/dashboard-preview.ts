@@ -507,7 +507,7 @@ const projectSuggestion:any={id:'02'.repeat(32),kind:'project',name:'Aurora cabi
 const knowledgeProposal:any={id:'f'.repeat(64),kind:'organization',origin:'learning',state:'review',revision:1,approved:false,created_at:inboxAgo(95),source_scope:conversation,source_reference:{id},error_code:null,result:null,decision_history:[],affected_topics:{},
  // As the server works it out: the project the group would join, with the groups already there (ADR-0247).
  get project_groups(){return [{id:projectId,name:'Aurora field guide',groups:projectGroups(projectId).filter(g=>g!=='-10073')}];},undo_project_groups:[],
- proposal:{kind:'organization',reason:'Weekend notes plans the same aurora trip; one project keeps its role and tasks together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:'-10073',project_id:projectId,reason:'Every recent message in this group is about the trip.',evidence_ids:[id],expected_revision:0}]}};
+ proposal:{kind:'organization',reason:'Weekend notes plans the same aurora trip; one project keeps its role and tasks together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:'-10073',project_id:projectId,reason:'Every recent message in this group is about the trip.',evidence_ids:[voiceId],expected_revision:0}]}};
 function inboxDecisions(){
  const summary=(kind:string,row:any,extra:any)=>({kind,id:row.id,state:row.state??row.status,revision:row.revision??1,created_at:row.created_at,source_scope:null,destination:null,fingerprint:null,...extra});
  // An unclear outcome waits until it is closed (ADR-0218).
@@ -693,12 +693,14 @@ const sourcesFixture=(()=>{
  const learned=new Map<string,any>([[ids.tour,{facts:facts.filter(f=>f.fact.originals.some((o:any)=>o.id===ids.tour)).map(f=>f.fact)}],
   [ids.forecast,{facts:facts.filter(f=>f.fact.originals.some((o:any)=>o.id===ids.forecast)).map(f=>f.fact)}],[ids.packing,{facts:[]}],
   [voiceId,{facts:[],reason:'unavailable'}]]);
- const notes:Record<string,{day:string;originals:any[]}>={own:{day:'2026-11-12',originals:[original(ids.tour),original(ids.packing)]},
-  forward:{day:'2026-11-14',originals:[original(ids.booking),original(ids.photo)]},turn:{day:'2026-11-12',originals:[original(id)]}};
+ const notes:Record<string,{day:string|null;originals:any[]}>={own:{day:'2026-11-12',originals:[original(ids.tour),original(ids.packing)]},
+  forward:{day:'2026-11-14',originals:[original(ids.booking),original(ids.photo)]},turn:{day:null,originals:[original(id)]}};
  return {notes,handle(req:any,res:any,route:string,url:URL):boolean{
   if(req.method!=='GET')return false;
-  const section=/^\/events\/([a-f0-9]{64})\/(thread|learned)$/.exec(route);
-  if(section){const source=section[1]!;json(res,200,section[2]==='thread'?threads.get(source)??empty:learned.get(source)??{facts:[],reason:'not_learned'});return true;}
+  const thread=/^\/events\/([a-f0-9]{64})\/thread$/.exec(route);
+  if(thread){json(res,200,threads.get(thread[1]!)??empty);return true;}
+  if(route==='/memory/message-facts'){const source=url.searchParams.get('id')??'';if(!/^[a-f0-9]{64}$/.test(source))throw new HttpError(400,'invalid_fact_request');
+   json(res,200,learned.get(source)??{facts:[],reason:'not_learned'});return true;}
   if(route==='/memory/longterm/coverage'){json(res,200,{coverage:{total:515,exact:412,with_others:96,none:7}});return true;}
   if(route==='/memory/facts'){const chat=url.searchParams.get('chat')??'',person=url.searchParams.get('person')??'';
    json(res,200,{facts:facts.filter(f=>(!chat||f.chat===chat||parentSpace(f.chat)===chat)&&(!person||f.person===person)).map(f=>f.fact),next:null});return true;}

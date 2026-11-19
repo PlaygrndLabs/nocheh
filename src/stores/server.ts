@@ -415,9 +415,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&path==='/v1/memory/facts')return json(res,200,await s.memoryDashboard.facts(principal,{chat:url.searchParams.get('chat')??'',
       person:url.searchParams.get('person')??'',after:url.searchParams.get('after')??''}));
     if(req.method==='GET'&&path==='/v1/memory/originals')return json(res,200,await s.originals.lookup(principal,url.searchParams.getAll('id')));
-    const eventSection=path.match(/^\/v1\/events\/([a-f0-9]{64})\/(thread|learned)$/);
-    if(req.method==='GET'&&eventSection)return json(res,200,eventSection[2]==='thread'?await s.sources.ownerThread(principal,eventSection[1]!,s.originals):
-      await s.memoryDashboard.learned(principal,eventSection[1]!));
+    // A message's facts are asked of long-term memory itself, so they sit outside Messages' live paths (/events/).
+    if(req.method==='GET'&&path==='/v1/memory/message-facts')return json(res,200,await s.memoryDashboard.learned(principal,url.searchParams.get('id')??''));
+    const eventThread=path.match(/^\/v1\/events\/([a-f0-9]{64})\/thread$/);
+    if(req.method==='GET'&&eventThread)return json(res,200,await s.sources.ownerThread(principal,eventThread[1]!,s.originals));
     if(path==='/v1/memory/longterm') {
       admin(principal);
       if(req.method==='GET')return json(res,200,await s.memory.status());

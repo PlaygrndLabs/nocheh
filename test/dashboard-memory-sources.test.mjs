@@ -22,6 +22,7 @@ const {
   originalLookups,
   originalsById,
   originalView,
+  personOptions,
   threadRows,
 } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
@@ -74,11 +75,19 @@ test('the Thread section lists what it replies to, the topic, the forward and th
     elsewhere.map(row => [row.heading, 'original' in row]),
     [['Replies to', false]],
   );
+  // A reply into someone else's private chat names no message there and links none.
+  const hidden = threadRows({...none, reply_in_private_chat: true});
+  assert.deepEqual(
+    hidden.map(row => [row.kind, row.heading, 'original' in row]),
+    [['reply_private', 'Replies to', false]],
+  );
+  assert.match(hidden[0].text, /someone else’s private chat/);
   assert.deepEqual(kinds(none), [], 'a message on its own has no lines');
 });
 
 test('a retired original is never linked, and one whose label fails has no link either', () => {
-  assert.deepEqual(originalView({retired: true}), {text: 'Retired message'});
+  // Hidden from assistant: the Messages list's own words for a retired message.
+  assert.deepEqual(originalView({retired: true}), {text: 'Hidden from assistant'});
   assert.deepEqual(originalView({unavailable: true, label: 'Source not available right now'}), {
     text: 'Source not available right now',
     unavailable: true,
@@ -113,6 +122,26 @@ test('each reason a list of facts is empty reads differently', () => {
   assert.equal(new Set(texts).size, reasons.length);
   assert.match(factsReasonText('unavailable', 'list'), /can’t be reached right now/);
   assert.notEqual(factsReasonText(undefined, 'list'), factsReasonText(undefined, 'message'));
+  // A page with none of its own while older pages follow never reads as nothing learned.
+  assert.equal(factsReasonText(undefined, 'list', true), 'None on this page. Older facts may be on the next pages.');
+  assert.equal(factsReasonText(undefined, 'list', false), 'No facts here yet.');
+});
+
+test('the person filter offers the chosen person even when the search doesn’t find them, everyone by name', () => {
+  const zed = {id: hex('09'), name: 'Zed'};
+  const found = [
+    {id: hex('01'), name: 'Mira Chen'},
+    {id: hex('02'), name: 'Devon'},
+  ];
+  assert.deepEqual(
+    personOptions(found, zed).map(person => person.name),
+    ['Devon', 'Mira Chen', 'Zed'],
+  );
+  assert.deepEqual(
+    personOptions(found, found[0]).map(person => person.name),
+    ['Devon', 'Mira Chen'],
+  );
+  assert.deepEqual(personOptions([], null), []);
 });
 
 test('pages ask for whole message ids only, each once, 50 a lookup and 200 at most, and read the answers back by id', () => {

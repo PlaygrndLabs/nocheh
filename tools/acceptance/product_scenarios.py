@@ -1669,7 +1669,7 @@ class ProductScenarios(Scenarios):
         # Bob's own fact; the owner's reply to him is also learned, as having answered a question about the mark.
         own_fact = lambda page: next((item for item in page.get('facts') or [] if mark in str(item.get('text'))
                                       and 'answered a question' not in str(item.get('text'))), None)
-        learned = dashboard.get('/events/'+ids['stated']+'/learned')
+        learned = dashboard.get('/memory/message-facts?id='+ids['stated'])
         fact = own_fact(learned)
         self.gate('learned_into_memory_names_the_fact', fact is not None and fact.get('exact') is True
                   and self.linked((fact.get('originals') or [None])[0]) == ids['stated'] and self.labelled(fact['originals'][0])

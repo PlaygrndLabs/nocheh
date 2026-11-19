@@ -425,14 +425,16 @@ export class NoteSourceRepository {
     return {names,keys:nameKeys(names,people)};
   }
   /** Each note's source in the owner's own words (memory.source_texts), naming people and chats as reminders do, for
-   *  the Notes page, in the order of `notes`, with the day it names (a review's main message's, or the turn's, in the
-   *  owner's zone) and the messages its writer read: a review's batch, its first message first, or the turn's message. */
+   *  the Notes page, in the order of `notes`, with a review's day (its main message's, in the owner's zone; a turn's label
+   *  names its own) and the messages its writer read: a review's batch, its first message first, or the turn's message. */
   async ownerLabels(notes:readonly NoteInput[]):Promise<(NoteSource&{day:string|null;sources:string[]})[]> {
     if(!notes.length)return [];
     const {origins,known,partial,sources}=await this.resolve(notes,true,true),words=await this.ownerWords();
     const {names,keys}=await this.ownerNames(known.values());
     await this.counted(!partial);
-    return origins.map((list,index)=>({from:fromToken(list),label:ownerLabel(list,words,names,keys),day:noteDay(list),sources:sources[index]??[]}));
+    // A turn's label names its day already ({date}, which the owner's words must keep); a review's day is shown beside it.
+    return origins.map((list,index)=>({from:fromToken(list),label:ownerLabel(list,words,names,keys),day:list[0]?.by==='turn'?null:noteDay(list),
+      sources:sources[index]??[]}));
   }
   /**
    * Each of these messages in the owner's words, for the owner's dashboard (ADR-0261 step 4): who sent what kind of

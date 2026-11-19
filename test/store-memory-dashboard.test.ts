@@ -13,7 +13,7 @@ import {sourceLines} from '../src/prompts.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {loadChatSnapshot} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {MemoryDashboard} from '../src/stores/memory-dashboard.js';
+import {LEARNED_WRITES,MemoryDashboard} from '../src/stores/memory-dashboard.js';
 import {materialPeer,materialSessionKey} from '../src/stores/native-memory.js';
 import {memoryProblems} from '../src/stores/note-sources.js';
 import {OwnerOriginals} from '../src/stores/owner-originals.js';
@@ -77,6 +77,20 @@ test('the owner\'s dashboard reads a message\'s thread and what was learned from
     const forward=await capture(A,{message:message(GP1,7,ana,'City news item',T+270,
       {forward_origin:{type:'channel',chat:{id:-1009876543210,title:'City News',type:'channel'},message_id:9,date:T-3600}})});
     const own=await capture('123',{message:message(mine,8,sam,'Meeting with the bank at 3',T+300)});
+    // Bob's own private chat with Nocheh (ADR-0262): his "reply in another chat" to the plan, and his group message
+    // quoting it back. A message in someone else's private chat stays out of the owner's default view.
+    const bobChat={id:456,type:'private',first_name:'Bob'};
+    const bobPrivate=await capture('456',{message:message(bobChat,40,bob,'Bob quotes the plan privately',T+330,
+      {external_reply:{origin:{type:'user',sender_user:bob,date:T},chat:GP1,message_id:1}})});
+    const quotesPrivate=await capture(A,{message:message(GP1,41,bob,'Bob quotes his private chat',T+340,
+      {external_reply:{origin:{type:'user',sender_user:bob,date:T+330},chat:bobChat,message_id:40}})});
+    // A topic's message that replies to the owner's private message: Telegram also names its topic's opening.
+    const topicQuote=await capture(A,{message:message(GP1,42,sam,'Owner quotes the bank meeting in trips',T+350,{message_thread_id:77,is_topic_message:true,
+      reply_to_message:openingMessage,external_reply:{origin:{type:'user',sender_user:sam,date:T+300},chat:mine,message_id:8}})});
+    // Ana's reaction to the owner's reply, which the owner retires below: as canRead reads it, retired too.
+    const reacted=(await s.capture.capture({version:1,key:`${key}:reaction`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:A,source_id:'reaction:3',
+      revision:'1',occurred_at:String(T+360),text:null,payload:{update_id:++serial,message_reaction:{chat:GP1,message_id:3,user:ana,date:T+360,old_reaction:[],
+      new_reaction:[{type:'emoji',emoji:'👍'}]}}} as Envelope)).source.reference;
     // The chats as captured, named as the dashboard's process names them.
     restore=installChatsForTest(await loadChatSnapshot(stores.control as pg.Pool,policy));
     // The owner retires their own reply.
@@ -132,6 +146,20 @@ test('the owner\'s dashboard reads a message\'s thread and what was learned from
     const opens=await s.sources.ownerThread(admin,opening.id,s.originals) as any;
     assert.deepEqual([opens.replies,opens.topic.opens,opens.topic.opening,opens.reply_to],[{count:0,items:[],topic:true},true,null,null]);
     assert.match((await s.sources.ownerThread(admin,forward.id,s.originals) as any).forwarded_from,/City News/);
+    // Someone else's private chat: Bob's reply from there is not listed under the plan, and the group message quoting it
+    // names neither that message nor a link to it. From inside his chat, it is what it replies to.
+    assert.ok(!JSON.stringify(planThread).includes(bobPrivate.id));
+    const quoting=await s.sources.ownerThread(admin,quotesPrivate.id,s.originals) as any;
+    assert.deepEqual([quoting.reply_to,quoting.reply_in_private_chat],[null,true]);
+    assert.ok(!JSON.stringify(quoting).includes(bobPrivate.id));
+    const inBobs=await s.sources.ownerThread(admin,bobPrivate.id,s.originals) as any;
+    assert.equal(inBobs.reply_to.id,plan.id,'from his own chat, the group message it replies to is linked');
+    // A topic's message replying to a message in another chat: that message, and its topic, never the opening.
+    const quotedInTopic=await s.sources.ownerThread(admin,topicQuote.id,s.originals) as any;
+    assert.equal(quotedInTopic.reply_to.id,own.id);assert.match(quotedInTopic.reply_to.label,/private chat/);
+    assert.match(quotedInTopic.topic.label,/Trips/);assert.equal(quotedInTopic.topic.opening.id,opening.id);
+    // A reaction to a retired message is never an original either.
+    assert.deepEqual((await s.originals.lookup(admin,[reacted.id])).originals,[{retired:true}]);
 
     // Learned into memory: the facts citing a message, through its receipts, with the exact badge; never a peer's fact
     // about another peer.
@@ -142,6 +170,20 @@ test('the owner\'s dashboard reads a message\'s thread and what was learned from
     assert.deepEqual(fromAna.facts.map(fact=>fact.id),[agreed]);
     assert.deepEqual(fromAna.facts[0]!.originals.map(linked),[ana2.id,{retired:true}],'a retired source reads only retired');
     assert.deepEqual(await s.memoryDashboard.learned(admin,t77.id),{facts:[],reason:'not_learned'});
+    // Finding a message's writes reads its two indexes, never the whole memory: planned over a memory of 20,000 writes,
+    // each carrying its message and the next, then rolled back.
+    // As the database's owner, since only it may analyze the table.
+    const db=new pg.Client({...config,database:'nocheh_control'});await db.connect();
+    try {
+      await db.query('BEGIN');
+      await db.query(`INSERT INTO memory_ingestion_receipts(id,generation,source_reference,source_references,guard_source_id,prepared_id,content_hash,state,remote_id)
+        SELECT 'bulk'||n,$1,jsonb_build_object('id','m'||n),jsonb_build_array(jsonb_build_object('id','m'||n),jsonb_build_object('id','m'||(n+1))),
+          'events:m'||n,'p'||n,'h','done','r'||n FROM generate_series(1,20000) n`,[workspace]);
+      await db.query('ANALYZE memory_ingestion_receipts');
+      const planned=JSON.stringify((await db.query('EXPLAIN (FORMAT JSON) '+LEARNED_WRITES,[workspace,'m77'])).rows);
+      for(const index of ['memory_receipts_live_source','memory_receipts_live_references'])assert.ok(planned.includes(index),index+': '+planned.slice(0,900));
+      assert.ok(!planned.includes('memory_receipts_remote')&&!planned.includes('Seq Scan'),planned.slice(0,900));
+    } finally {await db.query('ROLLBACK');await db.end();}
 
     // The Facts list: newest first, by chat or by person, a fact learned with its batch never exact.
     const all=await s.memoryDashboard.facts(admin,{chat:'',person:'',after:''});
@@ -166,7 +208,8 @@ test('the owner\'s dashboard reads a message\'s thread and what was learned from
       {target:'memory',text:'Bob has a plan',key:digest(key+':note1'),origins:[turn(plan)]},
       {target:'memory',text:'The owner agreed',key:digest(key+':note2'),origins:[turn(sam3)]}]}]},ids=>s.originals.originals(ids)) as any;
     const [first,second]=notes.memories[0].entries;
-    assert.equal(first.day,'2025-11-03');assert.deepEqual(first.originals.map(linked),[plan.id]);
+    // A turn's label names its own day ({date}), so the day is not shown again beside it.
+    assert.equal(first.day,null);assert.match(first.label,/2025-11-03/);assert.deepEqual(first.originals.map(linked),[plan.id]);
     assert.deepEqual(second.originals,[{retired:true}]);
 
     // Only the owner: a turn reader, even the owner's own, gets none of it.

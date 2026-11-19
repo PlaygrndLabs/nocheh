@@ -26,6 +26,16 @@ export type FactsReason='no_memory'|'not_supported'|'not_learned'|'unavailable';
 
 /** Facts per dashboard page, and originals named per fact (the rest counted): within OwnerOriginals' limit together. */
 const OWNER_FACT_PAGE=25,OWNER_FACT_ORIGINALS=5;
+/**
+ * The memory writes that carry one message: a receipt that wrote it, or one that carries it among others. Each is found by
+ * the message alone, on its own index (memory_receipts_live_source, memory_receipts_live_references), before the memory
+ * space is checked, so the planner never walks the whole space by its writes' order to find them.
+ */
+export const LEARNED_WRITES=`WITH found AS MATERIALIZED (
+ SELECT generation,state,remote_id FROM memory_ingestion_receipts WHERE (source_reference->>'id')=$2 AND retired_at IS NULL
+ UNION ALL SELECT generation,state,remote_id FROM memory_ingestion_receipts
+  WHERE source_references @> jsonb_build_array(jsonb_build_object('id',$2::text)) AND retired_at IS NULL AND state='done')
+SELECT DISTINCT remote_id FROM found WHERE generation=$1 AND state='done' AND remote_id IS NOT NULL ORDER BY remote_id LIMIT 100`;
 const fullId=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 
 /**
@@ -81,9 +91,7 @@ export class MemoryDashboard {
     const space=await this.memory.dashboardSpace();
     if(!space)return {facts:[],reason:'no_memory'};
     if(!this.engine.everyFact)return {facts:[],reason:'not_supported'};
-    const writes=(await this.stores.control.query(`SELECT DISTINCT remote_id FROM memory_ingestion_receipts WHERE generation=$1 AND state='done'
-      AND retired_at IS NULL AND remote_id IS NOT NULL AND (source_reference->>'id'=$2 OR source_references @> jsonb_build_array(jsonb_build_object('id',$2::text)))
-      ORDER BY remote_id LIMIT 100`,[space.id,id])).rows.map(row=>row.remote_id).filter(engineId);
+    const writes=(await this.stores.control.query(LEARNED_WRITES,[space.id,id])).rows.map(row=>row.remote_id).filter(engineId);
     if(!writes.length)return {facts:[],reason:'not_learned'};
     try {
       const page=await this.engine.everyFact(space.id,{sessions:null,citing:writes,size:OWNER_FACT_PAGE,cursor:null});

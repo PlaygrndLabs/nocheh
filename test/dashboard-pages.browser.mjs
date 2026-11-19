@@ -3031,6 +3031,9 @@ test('a message shows what it replies to, its replies and the facts long-term me
   await thread.getByText('Replies (1)', {exact: true}).waitFor();
   await thread.getByText('Nocheh’s reply in your private chat', {exact: false}).waitFor();
   assert.equal(await linksTo(thread, sourceIds.tourReply), 1);
+  // A reply is called a reply, never an original.
+  await thread.getByRole('link', {name: 'Reply', exact: true}).waitFor();
+  assert.equal(await thread.getByRole('link', {name: /^Original message/}).count(), 0);
   assert.equal(await thread.locator('dt', {hasText: 'Replies to'}).count(), 0, 'it replies to nothing');
   const learned = panelSection(page, 'Learned into memory');
   const exact = learned.getByRole('listitem').filter({hasText: 'You booked the 21:30 aurora tour for Friday.'});
@@ -3065,7 +3068,7 @@ test('a message in a topic shows its Topic and never Replies to, and a retired m
   assert.equal(await thread.getByText(/^Replies \(/).count(), 0, 'the whole topic is not listed as its replies');
   await page.goto(origin + '/#messages?source=' + sourceIds.packing);
   thread = panelSection(page, 'Thread');
-  await thread.getByText('Original message · Retired message', {exact: true}).waitFor();
+  await thread.getByText('The message it replies to · Hidden from assistant', {exact: true}).waitFor();
   assert.equal(await linksTo(thread, sourceIds.photo), 0);
   await page.goto(origin + '/#messages?source=' + sourceIds.booking);
   thread = panelSection(page, 'Thread');
@@ -3096,7 +3099,7 @@ test('Long-term lists facts newest first with their sources, by chat or person, 
     'Mira took photos from the ridge.',
   ]);
   const photo = facts.getByRole('listitem').filter({hasText: 'Mira took photos from the ridge.'}).first();
-  await photo.getByText('Retired message', {exact: false}).waitFor();
+  await photo.getByText('Hidden from assistant', {exact: false}).waitFor();
   assert.equal(await linksTo(photo, sourceIds.photo), 0, 'a retired original is never linked');
   const forecast = facts.getByRole('listitem').filter({hasText: 'Mira wants to check the Kp forecast'}).first();
   await forecast.getByText('“Mira Chen” in “Aurora planning” › Iceland planning', {exact: false}).waitFor();
@@ -3134,7 +3137,7 @@ test('Notes shows the day each note names and links its original messages, never
   assert.equal(await linksTo(links, sourceIds.tour), 1);
   assert.equal(await linksTo(links, sourceIds.packing), 1);
   const forward = notes.getByRole('listitem').filter({hasText: 'Alice is planning a trip to Iceland.'}).first();
-  await forward.getByText('Original message 2 · Retired message', {exact: true}).waitFor();
+  await forward.getByText('Original message 2 · Hidden from assistant', {exact: true}).waitFor();
   assert.equal(await linksTo(forward, sourceIds.photo), 0);
   assert.equal(await linksTo(forward, sourceIds.booking), 1);
   assert.deepEqual(problems, []);
@@ -3169,4 +3172,90 @@ test('Facts, People and Inbox review name each original next to its link', async
   await drawer.getByText(label, {exact: false}).waitFor();
   assert.deepEqual([...factProblems, ...peopleProblems, ...inboxProblems], []);
   await inbox.close();
+});
+
+/** A page opened with every dashboard request it makes counted by path, the query left out. */
+async function counted(hash) {
+  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const problems = [],
+    asked = new Map();
+  page.on('pageerror', error => problems.push('page error: ' + error.message));
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/api/nocheh/')) {
+      const path = url.pathname.slice('/api/nocheh'.length);
+      asked.set(path, (asked.get(path) ?? 0) + 1);
+    }
+  });
+  await page.goto(origin + '/#' + hash);
+  await page.locator('main h1').first().waitFor();
+  await page.waitForLoadState('networkidle');
+  return {page, problems, asked: path => asked.get(path) ?? 0};
+}
+
+test('what a message taught long-term memory is asked when its panel opens and when you check again, never on a live update', async () => {
+  const {page, problems, asked} = await counted('messages?source=' + sourceIds.tour);
+  const learned = panelSection(page, 'Learned into memory');
+  await learned.getByText('You booked the 21:30 aurora tour for Friday.').waitFor();
+  const thread = '/events/' + sourceIds.tour + '/thread';
+  assert.equal(asked('/memory/message-facts'), 1);
+  // Live updates are paused in the preview, so Messages refreshes what it shows every 10 seconds: the thread, never this.
+  await page.getByText('Live updates paused', {exact: true}).waitFor();
+  const before = asked(thread);
+  await page.waitForTimeout(11000);
+  assert.ok(asked(thread) > before, 'the thread follows live updates');
+  assert.equal(asked('/memory/message-facts'), 1, 'long-term memory is not asked again on a live update');
+  await learned.getByRole('button', {name: 'Check again'}).click();
+  await page.waitForLoadState('networkidle');
+  assert.equal(asked('/memory/message-facts'), 2);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('an Inbox proposal names every original of its new projects and moved chats with one lookup', async () => {
+  const {page, problems, asked} = await counted('inbox?kind=knowledge&decision=' + 'f'.repeat(64));
+  const drawer = page.getByRole('dialog');
+  await drawer.getByText('Iceland trip 2027', {exact: true}).waitFor();
+  await drawer.getByText('an audio file you sent in your private chat', {exact: false}).waitFor();
+  await drawer.getByText('you in your private chat', {exact: false}).first().waitFor();
+  assert.equal(asked('/memory/originals'), 1, 'one lookup for the whole panel');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Long-term’s filters: the chosen person stays chosen while searching, and other people’s private chats aren’t offered', async () => {
+  const {page, problems} = await open('memory?view=longterm&about=' + '1'.repeat(64));
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Facts it learned'})});
+  const person = card.locator('#facts-person');
+  await card.getByRole('list', {name: 'Facts', exact: true}).getByText('Mira took photos from the ridge.').waitFor();
+  await card.getByRole('searchbox', {name: 'Search people'}).fill('Devon');
+  await card.locator('#facts-person option', {hasText: 'Devon'}).waitFor({state: 'attached'});
+  assert.equal(await person.inputValue(), '1'.repeat(64));
+  assert.deepEqual(
+    (await card.locator('#facts-person option').allTextContents()).map(text => text.trim()),
+    ['Anyone', 'Devon', 'Mira Chen'],
+  );
+  // Mira's private chat with Nocheh is hers: long-term memory never learns from it, so it isn't a choice here.
+  const chats = card.getByRole('listbox', {name: 'In chat'});
+  await chats
+    .getByRole('option', {name: /^Aurora planning/})
+    .first()
+    .waitFor();
+  assert.equal(await chats.getByRole('option', {name: /Mira Chen/}).count(), 0);
+  await card.getByPlaceholder('Search by name or Telegram ID').fill('Mira');
+  await card.getByText('Other people’s private chats aren’t learned from, so they aren’t listed here.').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a note Nocheh wrote while answering names its day once, in its own words', async () => {
+  const {page, problems} = await open('memory?view=notes');
+  const turn = page.getByRole('listitem').filter({hasText: 'Prefers short answers.'}).first();
+  await turn.getByText('Nocheh’s note from your private chat on 2026-11-12', {exact: true}).waitFor();
+  const day = await page.evaluate(() =>
+    new Date(2026, 10, 12).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}),
+  );
+  assert.equal(await turn.getByText(day, {exact: true}).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
 });

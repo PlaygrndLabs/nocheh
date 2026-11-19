@@ -19,6 +19,8 @@ export type MessageThread = {
   reply_to: Original | null;
   /** An old Telegram Desktop import's reply into another chat, which keeps no link. */
   reply_in_other_chat?: true;
+  /** A reply into someone else's private chat: it stays under Messages › Members’ chats, so it is neither named nor linked. */
+  reply_in_private_chat?: true;
   /** The messages replying to it: all counted, the first 20 listed. `topic` when it opens a topic, whose replies are
    *  the whole topic and are not listed. `complete: false` when there were more than could be counted. */
   replies: {count: number; items: Original[]; topic?: true; complete?: false};
@@ -55,7 +57,7 @@ export type Fact = {
   more: number;
 };
 
-/** GET /events/<id>/learned: the facts that cite this message. `more` when there are more than one page. */
+/** GET /memory/message-facts?id=<id>: the facts that cite this message. `more` when there are more than one page. */
 export type LearnedFromMessage = {facts: Fact[]; reason?: FactsReason; more?: true};
 /** GET /memory/facts?chat=&person=&after=: newest first, a page at a time (pass `next` as `after`). */
 export type FactsPage = {facts: Fact[]; next: string | null; reason?: FactsReason};
@@ -112,11 +114,14 @@ export function originalsById(paths: readonly string[], answers: readonly (Origi
   return found;
 }
 
-/** What one original shows: a link to it, a retired message (never linked), or why there is none to open. */
+/** What one original shows: a link to it, a message hidden from the assistant (never linked), or why there is none to
+ *  open. Hidden is the Messages list's own word for a retired message. */
 export type OriginalView =
-  {link: string; label: string; at: string | null} | {text: 'Retired message'} | {text: string; unavailable: true};
+  | {link: string; label: string; at: string | null}
+  | {text: 'Hidden from assistant'}
+  | {text: string; unavailable: true};
 export function originalView(original: Original): OriginalView {
-  if ('retired' in original) return {text: 'Retired message'};
+  if ('retired' in original) return {text: 'Hidden from assistant'};
   if ('unavailable' in original) return {text: original.label, unavailable: true};
   return {link: original.id, label: original.label, at: original.at};
 }
@@ -134,19 +139,30 @@ export function factBadge(fact: Pick<Fact, 'exact' | 'batch'>): {label: string; 
   return null;
 }
 
-/** Why a list of facts is empty, in plain words. */
-export function factsReasonText(reason: FactsReason | undefined, where: 'message' | 'list'): string {
+/** Why a list of facts is empty, in plain words. A page with none of its own while older ones follow says so. */
+export function factsReasonText(reason: FactsReason | undefined, where: 'message' | 'list', older = false): string {
   if (reason === 'no_memory') return 'Long-term memory hasn’t learned anything yet.';
   if (reason === 'not_supported') return 'The memory engine in use can’t list what it learned.';
   if (reason === 'not_learned') return 'Long-term memory hasn’t learned from this message.';
   if (reason === 'unavailable') return 'Long-term memory can’t be reached right now. Try again in a minute.';
-  return where === 'message' ? 'No fact in long-term memory comes from this message now.' : 'No facts here yet.';
+  if (where === 'message') return 'No fact in long-term memory comes from this message now.';
+  return older ? 'None on this page. Older facts may be on the next pages.' : 'No facts here yet.';
+}
+
+/** A person the Facts list can be narrowed to. */
+export type Person = {id: string; name: string};
+/** The people to choose from: the ones found, and the one chosen even when the search doesn't find them, by name. */
+export function personOptions(found: readonly Person[], chosen: Person | null | undefined): Person[] {
+  const all = new Map(found.map(person => [person.id, person]));
+  if (chosen) all.set(chosen.id, chosen);
+  return [...all.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1));
 }
 
 /** One line of a message's Thread section. */
 export type ThreadRow =
   | {kind: 'reply_to'; heading: 'Replies to'; original: Original}
   | {kind: 'reply_elsewhere'; heading: 'Replies to'; text: string}
+  | {kind: 'reply_private'; heading: 'Replies to'; text: string}
   | {kind: 'topic'; heading: 'Topic'; label: string; opens: boolean; opening: Original | null}
   | {kind: 'forward'; heading: 'Forwarded from'; text: string}
   | {kind: 'replies'; heading: string; items: Original[]; more: number};
@@ -164,6 +180,12 @@ export function threadRows(thread: MessageThread): ThreadRow[] {
       kind: 'reply_elsewhere',
       heading: 'Replies to',
       text: 'A message in another chat (an old import keeps no link to it)',
+    });
+  else if (thread.reply_in_private_chat)
+    rows.push({
+      kind: 'reply_private',
+      heading: 'Replies to',
+      text: 'A message in someone else’s private chat (open it under Messages › Members’ chats)',
     });
   if (thread.topic)
     rows.push({

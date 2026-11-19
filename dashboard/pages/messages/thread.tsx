@@ -1,13 +1,15 @@
 /**
  * A message's Thread and Learned into memory sections (ADR-0261 step 4): what it replies to, its topic, where a forward
  * came from and the messages replying to it; and the facts long-term memory learned from it. Every message is named in
- * your own words by storage; a retired one is never linked. Each is read when the panel opens and again when Messages'
- * live updates tick, not on a timer: what was learned is asked of long-term memory itself.
+ * your own words by storage; a retired one is never linked. The thread is read when the panel opens and again when
+ * Messages' live updates tick. What was learned is asked of long-term memory itself, so it is read only when the panel
+ * opens and when you check again: never on a live update or a timer.
  */
+import {useState} from 'react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {factsReasonText, threadRows, type LearnedFromMessage, type MessageThread} from '../../lib/memory-sources';
 import {FactItem, OriginalItem, OriginalList} from '../../lib/originals';
-import {LoadError, Skeleton} from '../../ui/core';
+import {Button, LoadError, Skeleton} from '../../ui/core';
 
 export function ThreadSection({id}: {id: string}) {
   const thread = useResource<MessageThread>('/events/' + id + '/thread');
@@ -22,8 +24,10 @@ export function ThreadSection({id}: {id: string}) {
         <div key={row.kind}>
           <dt className="text-xs font-medium text-muted">{row.heading}</dt>
           <dd className="mt-0.5 break-words">
-            {row.kind === 'reply_to' && <OriginalItem original={row.original} />}
-            {(row.kind === 'reply_elsewhere' || row.kind === 'forward') && <span dir="auto">{row.text}</span>}
+            {row.kind === 'reply_to' && <OriginalItem original={row.original} linkText="The message it replies to" />}
+            {(row.kind === 'reply_elsewhere' || row.kind === 'reply_private' || row.kind === 'forward') && (
+              <span dir="auto">{row.text}</span>
+            )}
             {row.kind === 'topic' && (
               <>
                 <span dir="auto">{row.label}</span>
@@ -36,7 +40,7 @@ export function ThreadSection({id}: {id: string}) {
               </>
             )}
             {row.kind === 'replies' && (
-              <OriginalList originals={row.items} more={row.more} label="Replies to this message" />
+              <OriginalList originals={row.items} more={row.more} label="Replies to this message" item="Reply" />
             )}
           </dd>
         </div>
@@ -46,7 +50,8 @@ export function ThreadSection({id}: {id: string}) {
 }
 
 export function LearnedSection({id}: {id: string}) {
-  const learned = useResource<LearnedFromMessage>('/events/' + id + '/learned');
+  const [asked, setAsked] = useState(0);
+  const learned = useResource<LearnedFromMessage>('/memory/message-facts?id=' + id, 0, asked);
   if (learned.error && !learned.data)
     return (
       <LoadError
@@ -57,7 +62,18 @@ export function LearnedSection({id}: {id: string}) {
     );
   if (!learned.data) return <Skeleton className="h-12 w-full" />;
   const {facts, reason, more} = learned.data;
-  if (!facts.length) return <p className="text-[13px] text-muted">{factsReasonText(reason, 'message')}</p>;
+  const again = (
+    <Button size="sm" variant="ghost" busy={learned.loading} onClick={() => setAsked(value => value + 1)}>
+      Check again
+    </Button>
+  );
+  if (!facts.length)
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[13px] text-muted">{factsReasonText(reason, 'message')}</p>
+        {again}
+      </div>
+    );
   return (
     <>
       <ul className="space-y-2" aria-label="Facts learned from this message">
@@ -66,6 +82,7 @@ export function LearnedSection({id}: {id: string}) {
         ))}
       </ul>
       {more && <p className="mt-2 text-xs text-muted">Only the first page is shown.</p>}
+      <div className="mt-2">{again}</div>
     </>
   );
 }
