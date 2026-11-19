@@ -64,9 +64,11 @@ only). One branch: a contract, six parts and their integration.
   (1047, with the 2 environment errors that also occur on main) and the repository's Python tests
   (172, 2 skipped); the dashboard build, format check and its tests (72 of 72); the browser tests
   (67: 64 pass, and the 3 that also fail on main).
-  Pending:
-  - The whole full tester on images, with the canary sweep. It has not run on this step.
-  - The privacy scan before a push, and live acceptance on the owner's install after merge.
+  The whole full tester on fresh images, in five parts (2026-11-18/19): 45/45, 29/29, 25/25, 30/30
+  and 17/17, with the canary sweep ("a member's marks never left theirs"). Its first member round
+  found an ask's search calling the shared-facts route the ask may not use (fixed, with a unit
+  test in [mcp](test/mcp.test.ts)), and two leak checks that counted the owner's own recall query.
+  Pending: live acceptance on the owner's install after merge.
   Left for later: a member with several accounts that have private chats is not asked about (the
   owner is told so); `notesSender` does not tell `member_read` sends apart (`canLearn` and
   `privateHold` refuse them first); reading a group only from when the member joined
