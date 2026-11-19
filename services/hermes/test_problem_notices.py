@@ -163,11 +163,11 @@ class ProblemNoticeTests(unittest.TestCase):
         own = {**refusals(2, 0)[0], 'reasons': {'nocheh_error': 2}, 'causes': {'nocheh_error:detector_contract_rejected': 2}}
         self.assertEqual(problems.why(own), '2 Nocheh’s own error (detector contract rejected)',
                          'a refusal of Nocheh’s own says which, never that the provider rejected the call')
-        cut = {**refusals(1, 0)[0], 'part': 'transcription', 'label': 'Voice notes', 'reasons': {'nocheh_error': 1},
-               'causes': {'nocheh_error:audio_cut': 1}}
-        self.check(NOW, usage=[cut])
-        self.assertEqual(self.sent[-1]['problems'], ['Voice notes (synthetic-model): 1 model call failed today: 1 Nocheh’s own error (audio cut).'],
-                         'a recording that could not be cut to the part read for someone not allowed is told')
+        voice = {**refusals(1, 0)[0], 'part': 'transcription', 'label': 'Voice notes', 'reasons': {'nocheh_error': 1},
+                 'causes': {'nocheh_error:invalid_answer': 1}}
+        self.check(NOW, usage=[voice])
+        self.assertEqual(self.sent[-1]['problems'], ['Voice notes (synthetic-model): 1 model call failed today: 1 Nocheh’s own error (invalid answer).'],
+                         'a voice note Nocheh itself failed to read is told')
 
     def test_only_todays_model_failures_count(self):
         found = problems.problems(monitoring(), refusals(1, 1), TODAY)

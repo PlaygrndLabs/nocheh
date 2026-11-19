@@ -58,7 +58,7 @@ TITLES = {
     'schedule_fires_and_waits_for_review': 'Scheduled job waits for approval', 'participant_not_permitted': 'A stranger in a group: one fixed reply a day',
     'group_answers_only_when_addressed': 'Groups: answers only when addressed', 'unselected_group': 'Groups you never added Nocheh to stay off and silent',
     'retirement_hides_fact': 'Hidden message leaves search', 'voice_is_transcribed': 'Voice notes are turned into text',
-    'long_voice_is_cut_for_people_not_allowed': 'A long voice note from someone who is not a member is read up to 15 minutes; yours in full',
+    'long_voice_is_read_whole_from_everyone': 'A long voice note from someone who is not a member is read whole',
     'photo_is_read': 'Photos are read once, at their largest size, for their text',
     'hermes_is_locked_down': 'The assistant runs locked down and sees only its own folders',
     'files_upload_over_1mb': 'A large upload on the Files page is kept whole',
