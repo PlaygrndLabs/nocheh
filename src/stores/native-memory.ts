@@ -127,6 +127,8 @@ export const SEARCH_TAGGED_PER_BATCH=3;
 /** The ids of a memory search to name by source: those among the first SEARCH_TAGGED_PER_BATCH of their batch. */
 export const searchTagged=(found:{ids:readonly string[];from?:readonly {position:number}[]}):Set<string>=>
   new Set(found.ids.filter((_id,index)=>(found.from?.[index]?.position??SEARCH_TAGGED_PER_BATCH)<SEARCH_TAGGED_PER_BATCH));
+/** The most sources an owner correction in recall names, tagged (B3.6). */
+const CORRECTION_EVIDENCE=3;
 /** Long-term memory behind the memory socket (ADR-0232). The engine, Honcho today, stores and learns; Nocheh owns guarded
  * inputs, immutable results, recoverable receipts, sharing rules, corrections and deletions.
  * One memory space serves the installation; sessions bound conversations; guard epochs never rebuild it. */
@@ -1175,13 +1177,13 @@ export class NativeMemoryRepository {
   private async relevantOwnerCorrections(principal:Reader,query:string,binding:GuardBinding) {
     const space=principal.space??principal.scope;
     if(!space)return [];
-    const rows=(await this.contexts.access.stores.derived.query(`SELECT e.id,e.subject,e.scope_id FROM learned_entries e
+    const rows=(await this.contexts.access.stores.derived.query(`SELECT e.id,e.subject,e.scope_id,v.created_at FROM learned_entries e
       JOIN learned_versions v ON v.entry_id=e.id AND v.revision=e.active_revision
       WHERE e.scope_kind='conversation' AND ${recallCondition('e.scope_id','$1','$2')} AND v.author='owner' AND NOT v.retired
       ORDER BY e.id LIMIT 101`,[space,this.recallGroup(principal)])).rows;
     if(rows.length>100)throw new HttpError(409,'owner_correction_limit');
     const normalized=(text:string)=>text.toLocaleLowerCase().replace(/\s+/g,' ').trim();
-    const question=normalized(query),sources=[];
+    const question=normalized(query),found=[];
     for(const row of rows) {
       const subject=normalized(row.subject);
       if(!subject||!question.includes(subject))continue;
@@ -1190,12 +1192,20 @@ export class NativeMemoryRepository {
           this.contexts.access.canRead(principal,reference,binding),this.contexts.access.recall(principal));
         const text=`Active owner correction for ${version.subject} in ${row.scope_id===space?'this conversation':'another topic of this group'} (revision ${version.revision}): ${version.text}`;
         await this.prepared.allow(principal,text);
-        sources.push({source:`nocheh:learned:${row.id}:${version.revision}`,kind:'owner_corrected_interpretation',text,exact_citations:false});
+        found.push({row,version,text});
       } catch(error) {
         if(error instanceof HttpError&&error.code==='learned_memory_not_found')continue;
         throw error;
       }
     }
+    // Each names where and when the owner made it, and its first sources tagged (B3.6), all in one batch each; read()
+    // already checked every source with canRead.
+    const evidence=found.map(({version})=>((version.evidence??[]) as SourceReference[]).slice(0,CORRECTION_EVIDENCE));
+    const [tags,named]=this.tags&&found.length?await Promise.all([this.tags.tags(principal,binding,evidence.flat()),
+      this.tags.corrections(principal,found.map(({row})=>({chat:row.scope_id as string,made:row.created_at instanceof Date?row.created_at:null})))]):[null,null];
+    const sources=found.map(({row,version,text},index)=>({source:`nocheh:learned:${row.id}:${version.revision}`,kind:'owner_corrected_interpretation',text,exact_citations:false,
+      ...named?{tag:named[index]!,evidence:evidence[index]!.map(reference=>{const tag=tags!.get(reference.id)??{...unavailableTag('here')};
+        return {source:'nocheh:event:'+reference.id,tag:tag.tag,by:tag.by};})}:{}}));
     await this.guards.assertCurrent(binding);
     return sources;
   }

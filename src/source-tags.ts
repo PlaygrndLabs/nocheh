@@ -176,7 +176,7 @@ function what(source:TagSource,reader:TagReader,size:number):string|null {
   return null;
 }
 
-function where(source:TagSource,reader:TagReader,names:ReadonlyMap<string,string>,size:number,directory:ChatDirectory):string {
+function where(source:Pick<TagSource,'chat'|'web'>,reader:TagReader,names:ReadonlyMap<string,string>,size:number,directory:ChatDirectory):string {
   if(source.chat!==null&&source.chat===reader.chat)return words.this_chat;
   // The owner's ask about a member reading that member's chat: whose chat it is, by the name Telegram showed for it.
   if(reader.member_chat&&source.chat===reader.member_chat) {
@@ -243,6 +243,21 @@ export function sourceDetails(source:TagSource,reader:TagReader,names:ReadonlyMa
   const topic=source.chat!==null&&directory.parentOf(source.chat)!==null&&(reader.owner||directory.groupOf(source.chat)!==null);
   if(topic)details.topic=modelPlace({chat:source.chat,web:false},names,TAG_NAME_LIMIT,directory);
   return details;
+}
+
+/**
+ * An owner correction's tag (B3.6): `the owner's correction · <where> · <day>`, the day it was made in the reader's zone
+ * (the owner's Tasks zone for the owner, UTC for anyone else) and the conversation it corrects, named as a source's
+ * chat is. Names shrink first.
+ */
+export function correctionTag(chat:string|null,made:Date|null,reader:TagReader,names:ReadonlyMap<string,string>,directory:ChatDirectory=chats()):string {
+  const day=made&&!Number.isNaN(made.getTime())?zoned(made.getTime(),reader.owner?reader.zone:'UTC').day:words.no_time;
+  let tag='';
+  for(const size of [TAG_NAME_LIMIT,24,12,0]) {
+    tag=[words.correction,where({chat,web:false},reader,names,size,directory),day].join(' · ');
+    if(length(tag)<=TAG_LIMIT)return tag;
+  }
+  return shorten(tag,TAG_LIMIT);
 }
 
 /** What the owner shared or granted, named only by the day the owner did it, never by the original's sender, chat or day

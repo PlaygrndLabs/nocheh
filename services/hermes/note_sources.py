@@ -29,7 +29,7 @@ TARGETS=(('memory','MEMORY.md'),('user','USER.md'))
 # A note keeps at most this many origins, its writer first; the rest are counted, and a count reads as unknown.
 ORIGINS=10
 CITES=20
-READS=('forward','file','recent','archive','web','notion','tools','commands','past','other')
+READS=('forward','file','recent','reply','archive','web','notion','tools','commands','past','other')
 CHANNELS=('telegram','browser','scheduler','background')
 FROM=('owner','nocheh','person','forward','file','mixed','turn','turn_read','unknown','unavailable')
 UNAVAILABLE={'from':'unavailable','label':'source not available right now'}
@@ -37,9 +37,13 @@ LOOKUP_BATCH=50
 LOCK_SECONDS=30
 # A run of this many characters shared with an earlier note is that note's text carried forward.
 RUN=32
+# The shortest replied-to text a note copies whole that counts as copied, when it is shorter than RUN (_reply_copied).
+SHORT_COPY=12
 IDENTIFIER=re.compile(r'(?<![a-f0-9])[a-f0-9]{64}(?![a-f0-9])')
 FULL=re.compile(r'[a-f0-9]{64}')
 DAY=re.compile(r'\d{4}-\d{2}-\d{2}')
+# A note's ref in a turn's evidence: the first 12 hex of its key, which archive_read {note} opens in that turn (ADR-0261).
+REF=re.compile(r'[a-f0-9]{12}')
 # Distinctive tokens: a number of six or more digits, an email address, a web address's host, and a code of 15 or more
 # letters and digits with a digit in it.
 TOKENS=(re.compile(r'\d{6,}'),re.compile(r'[^\s@<>()"\']+@[^\s@<>()"\']+\.[^\s@<>()"\']+'),re.compile(r'https?://([^/\s:?#<>"\']+)'),
@@ -104,7 +108,11 @@ def valid(origin):
     by=origin.get('by')
     if by=='unknown':return set(origin)=={'by'}
     if by=='review':return set(origin)=={'by','review'} and isinstance(origin['review'],str) and bool(FULL.fullmatch(origin['review']))
-    return (by=='turn' and set(origin)=={'by','event','channel','at','reads','complete'} and isinstance(origin['event'],str)
+    # A turn's moment (at_time, Unix seconds) goes with its UTC day; a record written before it was has the day alone.
+    timed='at_time' in origin
+    if timed and not (type(origin['at_time']) is int and 0<=origin['at_time']<=10**11 and isinstance(origin.get('at'),str)
+                      and datetime.fromtimestamp(origin['at_time'],timezone.utc).strftime('%Y-%m-%d')==origin['at']):return False
+    return (by=='turn' and set(origin)-{'at_time'}=={'by','event','channel','at','reads','complete'} and isinstance(origin['event'],str)
             and bool(FULL.fullmatch(origin['event'])) and isinstance(origin['channel'],str) and origin['channel'] in CHANNELS
             and isinstance(origin['at'],str) and bool(DAY.fullmatch(origin['at'])) and isinstance(origin['reads'],list)
             and len(origin['reads'])<=12 and all(isinstance(read,str) and read in READS for read in origin['reads'])
@@ -281,9 +289,11 @@ def service_post(body):
 
 
 def label_ok(value):
-    """A label as storage sends it: a known `from` and a short line without control characters."""
+    """A label as storage sends it: a known `from` and a short line without control characters, and for a turn's notes
+    the note's ref, 12 hex."""
     return (isinstance(value,dict) and value.get('from') in FROM and isinstance(value.get('label'),str)
-            and 0<len(value['label'])<=300 and not any(ord(c)<32 or 0x7f<=ord(c)<0xa0 or c in '  ' for c in value['label']))
+            and 0<len(value['label'])<=300 and not any(ord(c)<32 or 0x7f<=ord(c)<0xa0 or c in '  ' for c in value['label'])
+            and ('ref' not in value or isinstance(value['ref'],str) and bool(REF.fullmatch(value['ref']))))
 
 
 def note(records,target,entry):
@@ -297,21 +307,27 @@ def notes(found,records):
     return [note(records,target,entry) for target,items in found.items() for entry in items]
 
 
-def lookup(profile,found,space=None,post=None):
-    """The model's labels for the notes in `found` (entries()), by key: {'from','label'}. A failure labels every note as
-    not available right now, never as anyone's, and counts; the turn goes on."""
+def lookup(profile,found,space=None,post=None,turn_event=None):
+    """The model's labels for the notes in `found` (entries()), by key: {'from','label'}, and in a turn (`turn_event`,
+    the message it answers) each note's `ref`, which opens in that turn the messages it was written from; a ref that is
+    not its own note's is left out. A failure labels every note as not available right now, never as anyone's, and
+    counts; the turn goes on."""
     if not found:return {}
     items=notes(found,load(profile))
     if not items:return {}
     try:
         labels={}
         for start in range(0,len(items),LOOKUP_BATCH):
-            labels.update((post or service_post)({'notes':items[start:start+LOOKUP_BATCH],**({'space':space} if isinstance(space,str) and space else {})}))
+            labels.update((post or service_post)({'notes':items[start:start+LOOKUP_BATCH],**({'space':space} if isinstance(space,str) and space else {}),
+                                                  **({'turn_event':turn_event} if isinstance(turn_event,str) and FULL.fullmatch(turn_event) else {})}))
     except Exception:
         failed('lookup');return {item['key']:dict(UNAVAILABLE) for item in items}
     done('lookup')
-    return {item['key']:{'from':labels[item['key']]['from'],'label':labels[item['key']]['label']} if label_ok(labels.get(item['key'])) else dict(UNAVAILABLE)
-            for item in items}
+    def shown(name):
+        value=labels.get(name)
+        if not label_ok(value):return dict(UNAVAILABLE)
+        return {'from':value['from'],'label':value['label'],**({'ref':value['ref']} if value.get('ref')==name[:12] else {})}
+    return {item['key']:shown(item['key']) for item in items}
 
 
 def last_message(database):
@@ -354,24 +370,42 @@ def _others(text):
     return any(line.startswith(SPEAKER) and not line.endswith(OWNER_SPEAKER) for line in text.split('\n'))
 
 
+def _replied(content):
+    """The texts of the replied-to blocks in a stored message whose by= is not the owner's, read where plan() reads them:
+    in the frame Nocheh writes before the message's own text (retired_history._spans). The by= stands before any name,
+    so no name changes it, and a recent message's reply part holds no text, so it is never one."""
+    from .retired_history import REPLY,_spans
+    lines=content.split('\n') if isinstance(content,str) else []
+    return ['\n'.join(lines[start+1:end]) for kind,_,start,end in _spans(content)
+            if kind=='reply' and REPLY.fullmatch(lines[start]) and not lines[start].startswith('[Replying to, by=owner:')]
+
+
 def _written(ops):
     """What a run's memory operations wrote, as the copy check reads it: the runs of RUN characters and the distinctive
-    tokens of each text."""
-    runs,tokens=set(),set()
+    tokens of each text, and each text whole (_reply_copied)."""
+    runs,tokens,plains=set(),set(),[]
     for op in ops:
         if isinstance(op.get('content'),str):
-            plain=_plain(op['content']);runs|=_runs(plain);tokens|=_tokens(plain)
-    return runs,tokens
+            plain=_plain(op['content']);runs|=_runs(plain);tokens|=_tokens(plain);plains.append(plain)
+    return runs,tokens,plains
 
 
 def _copied(text,written):
     """Whether a stored message shares a run of RUN characters or a distinctive token with what a run wrote, as
     inheritance tells a note's text carried forward. A long message is read once: its runs are looked up in the
     written ones, and the written tokens are looked for in it, never the other way round."""
-    runs,tokens=written
+    runs,tokens=written[0],written[1]
     if not isinstance(text,str) or not runs and not tokens:return False
     plain=_plain(text)
     return any(token in plain for token in tokens) or any(plain[start:start+RUN] in runs for start in range(len(plain)-RUN+1))
+
+
+def _reply_copied(text,written):
+    """_copied for a replied-to block's text, which is at most 200 characters and often shorter than a run: a text of
+    at least SHORT_COPY characters that a note holds whole counts as copied too."""
+    if _copied(text,written):return True
+    plain=_plain(text) if isinstance(text,str) else ''
+    return SHORT_COPY<=len(plain)<RUN and any(plain in written_plain for written_plain in written[2])
 
 
 def turn_reads(database,session,last,body):
@@ -382,15 +416,21 @@ def turn_reads(database,session,last,body):
     a run of text or a distinctive token from. An earlier read the turn did not copy from leaves its notes alone, so a
     note the owner dictates later in a long session stays the turn's own; a full paraphrase escapes, as in a review.
     A forward of the sender's own earlier message in the message it answered is their own words, not a read; earlier in
-    the session only the owner's is (OWN_FORWARDS)."""
+    the session only the owner's is (OWN_FORWARDS).
+
+    The message the turn's own message replies to is a read too, unless the owner typed it: Nocheh's own message
+    counts, since it may carry what others said. Earlier in the session such a block counts only when what the turn
+    wrote copies from its text (_replied), as other people's recent messages do, or, for a text shorter than a run,
+    holds it whole (_reply_copied)."""
     from .retired_history import _columns,_read_only,_summary,memory_ops
-    from .turn_process import forwarded,recent_group
+    from .turn_process import forwarded,recent_group,reply_block
     reads=[]
     def add(token):
         if token not in reads:reads.append(token)
     if forwarded(body.get('forwarded')) and body['forwarded'] not in OWN_FORWARDS:add('forward')
     if body.get('files'):add('file')
     if recent_group(body.get('recent_group')):add('recent')
+    if reply_block(body.get('reply')) and body['reply']['by']!='owner':add('reply')
     database=Path(database)
     if last is None:return reads,None,False
     if not database.is_file():return reads,[],True
@@ -413,6 +453,7 @@ def turn_reads(database,session,last,body):
             for marker,token in MARKERS:
                 if marker in content and (token!='forward' or _forwards(content)):add(token)
             if 'recent' not in reads and _others(content) and _copied(content,written):add('recent')
+            if 'reply' not in reads and any(_reply_copied(text,written) for text in _replied(content)):add('reply')
         elif row['role']=='tool':
             token=tool_read(row)
             if token and token not in reads and _copied(content,written):add(token)
@@ -436,14 +477,15 @@ def space_of(profile):
     return space if isinstance(space,str) and 0<len(space)<=200 else None
 
 
-def before(profile,space=None,database=None):
+def before(profile,space=None,database=None,turn_event=None):
     """The notes before a run, read under the notes lock, the newest stored message, and the labels the run shows its
-    notes with. A run whose notes could not be read under the lock records nothing after it."""
+    notes with; a turn's (`turn_event`) carry each note's ref. A run whose notes could not be read under the lock records
+    nothing after it."""
     with held(profile) as locked:
         found=entries(profile)
         last=last_message(database) if database is not None else None
     if not locked:failed('lock')
-    labels=lookup(profile,found,space if space is not None else space_of(profile)) if found is not None else {}
+    labels=lookup(profile,found,space if space is not None else space_of(profile),turn_event=turn_event) if found is not None else {}
     return {'before':found if locked else None,'last':last,'sources':labels,
             'trusted':frozenset(name for name,label in labels.items() if label.get('from')=='owner')}
 
@@ -461,10 +503,12 @@ def after(profile,watch,origin,ops=None):
 
 
 def turn_origin(body,reads,complete,now=None):
-    """A turn's origin: the message it answered, its channel, its day, and what it read."""
+    """A turn's origin: the message it answered, its channel, its UTC day and its moment (at_time, Unix seconds), which
+    storage shows as a day in the reader's zone, and what it read."""
     channel=body.get('channel','telegram');event=body.get('event_id')
     if channel not in CHANNELS or not isinstance(event,str) or not FULL.fullmatch(event):return {'by':'unknown'}
-    return {'by':'turn','event':event,'channel':channel,'at':datetime.fromtimestamp(now or time.time(),timezone.utc).strftime('%Y-%m-%d'),
+    moment=int(now or time.time())
+    return {'by':'turn','event':event,'channel':channel,'at':datetime.fromtimestamp(moment,timezone.utc).strftime('%Y-%m-%d'),'at_time':moment,
             'reads':[read for read in reads if read in READS][:12],'complete':bool(complete)}
 
 

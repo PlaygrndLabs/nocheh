@@ -28,7 +28,8 @@ class ScriptedBrain:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|turn|notes|note_from|memory_about|memory_blocks)(?::([^\]]*))?\]\]')
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|turn|notes|note_from|note_open|memory_about|memory_blocks|replied)'
+                           r'(?::([^\]]*))?\]\]')
     # A notes review (its one tool is memory) that reads [[review-note:TEXT]] in a message saves TEXT as a native note,
     # as a model notes what it read, so a scenario sees which messages a review read and how the note is labelled.
     REVIEW_NOTE = re.compile(r'\[\[review-note:([^\]]{1,300})\]\]')
@@ -49,6 +50,13 @@ class ScriptedBrain:
     # each read with mcp__nocheh__action_status, as the text asks.
     CONTINUED = '[Operations ended]'
     OPERATION = re.compile(r'^- ([a-f0-9]{64}) \([a-z_]+\): [a-z_]+$', re.M)
+    # The frame Nocheh's code writes before a turn's own message (services/hermes/turn_process.py, ADR-0261): the block
+    # naming the message it replies to, with at most 200 characters of that message's text and the line that ends it; each
+    # recent group message's speaker line with its source, and its reply part, which names a message without its text. A
+    # member's text cannot write these lines: Nocheh turns a line that starts like one into '('.
+    REPLY_BLOCK = re.compile(r'^\[Replying to, by=([a-z]+): (.*)\] \(source nocheh:event:([a-f0-9]{64})\)\n(.*)\n\[End of replied-to message\]$', re.M)
+    REPLY_PART = re.compile(r'^\[In reply to, by=([a-z]+): (.*)\] \(source nocheh:event:([a-f0-9]{64})\)$', re.M)
+    RECENT_ITEM = re.compile(r'^\[Group message from .*\] \(source nocheh:event:([a-f0-9]{64})\)$', re.M)
     # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
     EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
     TOOLS = {'search': 'mcp__nocheh__archive_search', 'recall': 'mcp__nocheh__memory_recall', 'action': 'mcp__nocheh__action_request',
@@ -124,6 +132,26 @@ class ScriptedBrain:
         memory evidence. Never the conversation, which also quotes a note when it was saved."""
         return ([self.text(message.content) for message in body.messages if message.role == 'system']
                 + [json.dumps(note.get('content'), ensure_ascii=False) for note in self.evidence_notes(body)])
+
+    @classmethod
+    def reply_frame(cls, text):
+        """What a turn's framed message says about replies: its reply block ({by, tag, id, text}, or None), the reply part
+        of each recent group message ({by, tag, id}) and the recent messages' ids, in order."""
+        found = cls.REPLY_BLOCK.search(text)
+        return {'block': {'by': found[1], 'tag': found[2], 'id': found[3], 'text': found[4]} if found else None,
+                'parts': [{'by': part[1], 'tag': part[2], 'id': part[3]} for part in cls.REPLY_PART.finditer(text)],
+                'recent': cls.RECENT_ITEM.findall(text)}
+
+    def opened(self, kind, argument, later, arguments, **seen):
+        """archive_read called once with `arguments`, then the answer from its actual result, both recorded with `seen`."""
+        name = self.NOCHEH + 'archive_read'
+        results = [message for message in later if message.role == 'tool']
+        if not results:
+            self.record(directive=kind, argument=argument, phase='call', tool=name, **seen)
+            return {'tool': name, 'arguments': arguments}
+        result = self.result(name, results[-1].content)
+        self.record(directive=kind, argument=argument, phase='final', tool=name, result=result[:20000], **seen)
+        return {'content': '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
 
     def record(self, **event):
         self.events = (self.events + [event])[-500:]
@@ -211,6 +239,11 @@ class ScriptedBrain:
         # [[after:silent]] makes the answer after a tool result [NO_REPLY], as
         # Nocheh asks once an approval card already answers the request.
         silent_after = '[[after:silent]]' in current
+        # [[replied:N]] records what the turn's frame says about replies (ADR-0261), once per turn, beside any tool directive;
+        # [[replied:open N]] alone also opens the replied-to message with archive_read, by the id its block names.
+        replied = next((found for found in self.DIRECTIVE.finditer(current) if found[1] == 'replied'), None)
+        if replied and not [message for message in later if message.role == 'tool']:
+            self.record(directive='replied', argument=(replied[2] or '').strip(), phase='frame', **self.reply_frame(current))
         if tools:
             results = [message for message in later if message.role == 'tool']
             if len(results) < len(tools):
@@ -271,8 +304,24 @@ class ScriptedBrain:
             # The source a native note with the marker carries, as Nocheh's code labelled it: owner, person, turn...
             found = next((note for note in self.evidence_notes(body) if argument and argument in str(note.get('content'))), None)
             source = str(found.get('from')) if found else 'absent'
-            self.record(directive=kind, argument=argument, phase='final', present=found is not None, source=source)
+            self.record(directive=kind, argument=argument, phase='final', present=found is not None, source=source,
+                        label=found.get('label') if found else None, ref=found.get('ref') if found else None)
             return {'content': '[brain] note_from ' + argument + ' ' + source}
+        if kind == 'note_open':
+            # The native note with the marker opened by its ref, in this turn, as its evidence gave it (archive_read note=<ref>,
+            # ADR-0261): the messages its writer read. A note without a ref answers no_ref, none at all absent.
+            found = next((note for note in self.evidence_notes(body) if argument and argument in str(note.get('content'))), None)
+            seen = {'present': found is not None, 'source': str(found.get('from')) if found else 'absent',
+                    'label': found.get('label') if found else None, 'ref': found.get('ref') if found else None}
+            if not isinstance(seen['ref'], str) or not seen['ref']:
+                self.record(directive=kind, argument=argument, phase='final', **seen)
+                return {'content': '[brain] note_open ' + argument + (' no_ref' if found else ' absent')}
+            return self.opened(kind, argument, later, {'note': seen['ref']}, **seen)
+        if kind == 'replied':
+            block = self.reply_frame(current)['block']
+            if argument.split(' ')[0] == 'open' and block:
+                return self.opened(kind, argument, later, {'id': 'nocheh:event:' + block['id']}, block=block)
+            return {'content': '[brain] replied ' + ('by=' + block['by'] if block else 'absent')}
         if kind == 'memory_about':
             # Which long-term memory blocks of the turn hold the marker, by what Nocheh's code says each is about.
             about = sorted({str(block.get('about') or 'none') for block in self.memory_blocks(body) if argument and argument in str(block.get('text'))})

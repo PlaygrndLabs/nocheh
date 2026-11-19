@@ -66,19 +66,20 @@ test('a member\'s private chat: admission, its groups, the daily cap, its passes
   const bot=String(Date.now()).slice(-9);let update=0;
   /** One live Telegram message in chat `telegram` (a Telegram id) from `from`. Only a message the test dispatches carries
    * its update id: a turn waits for an earlier update in its chat that has not started. */
-  const capture=async(telegram:string,from:string,text:string,type='private',ordered=false)=>{
-    const n=++update,message={message_id:n,date:1700000000+n,chat:{id:Number(telegram),type},from:{id:Number(from),is_bot:false,first_name:'Someone'},text};
+  const capture=async(telegram:string,from:string,text:string,type='private',ordered=false,extra:Record<string,unknown>={})=>{
+    const n=++update,message={message_id:n,date:1700000000+n,chat:{id:Number(telegram),type},from:{id:Number(from),is_bot:false,first_name:'Someone'},text,...extra};
     return (await s.capture.capture({version:1,key:`telegram:${bot}:update:${n}`,origin:'live',kind:'telegram_update',bot_id:bot,scope:telegram,
       source_id:String(n),revision:'1',occurred_at:null,text,payload:ordered?{update_id:n,message}:{message}} as Envelope)).source.reference;
   };
   const epoch=async(family:string)=>({owner:'inngest' as const,epoch:Number((await stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family])).rows[0].epoch)});
-  const dispatch=async(telegram:string,from:string,text:string,type='private')=>{
-    const source=await capture(telegram,from,text,type,true);
+  const dispatch=async(telegram:string,from:string,text:string,type='private',extra:Record<string,unknown>={})=>{
+    const source=await capture(telegram,from,text,type,true,extra);
     await s.preparation.run(source.id,async()=>{throw Error('unexpected download');},'fixture',s.detect,await epoch('preparation'));
     await s.telegram.run(source.id,await epoch('telegram'));
     const row=(await stores.control.query('SELECT state,error_code FROM dispatches WHERE event_id=$1',[source.id])).rows[0];
     const turn=turns.find(item=>item.event_id===source.id);
-    return {id:source.id,state:row?.state as string,error_code:row?.error_code as string|null,turn:!!turn,claims:turn?claimsOf(String(turn.archive_credential)):null};
+    return {id:source.id,state:row?.state as string,error_code:row?.error_code as string|null,turn:!!turn,claims:turn?claimsOf(String(turn.archive_credential)):null,
+      reply:turn?.reply as {line:string;text:string;by:string;id:string}|undefined,body:turn};
   };
   const claimsOf=(credential:string)=>JSON.parse(Buffer.from(credential.split('.')[1]!,'base64url').toString()) as Record<string,unknown>;
   /** Sets when Telegram last confirmed an account's row in a group, `days` ago. */
@@ -198,6 +199,45 @@ test('a member\'s private chat: admission, its groups, the daily cap, its passes
     assert.deepEqual([owners.turn,owners.claims!.lane,owners.claims!.member],[true,undefined,undefined]);
     const ownChat=await dispatch(OWNER,OWNER,'hello');
     assert.deepEqual([ownChat.turn,ownChat.claims!.scope,ownChat.claims!.lane,ownChat.claims!.member],[true,null,undefined,undefined]);
+
+    // The reply block (ADR-0261) in a member's private chat is built as that member reads (ADR-0262): Nocheh's answer in
+    // their own chat, with its text, and a message of a group they read; never the owner's private chat nor another
+    // member's, and never a Telegram ID. In the owner's chat, a reply to Nocheh's answer to an ask about a member gives
+    // no block, so that member's words never reach the owner's turn, its notes or what it learns.
+    const said=async(telegram:string,text:string,send_class:string)=>{
+      const n=++update,message={message_id:n,date:1700000000+n,chat:{id:Number(telegram),type:'private'},from:{id:Number(bot),is_bot:true,first_name:'Nocheh'},text};
+      const source=(await s.capture.capture({version:1,key:`${key}:sent:${n}`,origin:'live',kind:'telegram_delivered_message',bot_id:bot,scope:telegram,
+        source_id:String(n),revision:'1',occurred_at:String(message.date),text,payload:{message,send_class}} as Envelope)).source.reference;
+      await s.guards.prepare(source,'fixture',s.detect);return {id:source.id,message};
+    };
+    const written=async(telegram:string,from:string,text:string,type:string)=>{
+      const source=await capture(telegram,from,text,type);await s.guards.prepare(source,'fixture',s.detect);
+      return {id:source.id,external:{chat:{id:Number(telegram),type},message_id:update}};
+    };
+    const noIds=(value:unknown)=>{const text=JSON.stringify(value);for(const id of [MEMBER_NG,MEMBER_GP,OWNER,NG1_TG,bot])assert.ok(!text.includes(id),'no Telegram ID: '+id);};
+    const shift=await said(MEMBER_NG,'Your shift starts at 09:00.','reply');
+    const toShift=await dispatch(MEMBER_NG,MEMBER_NG,'source?','private',{reply_to_message:shift.message});
+    assert.equal(toShift.claims!.member,MEMBER_NG_ID);
+    assert.deepEqual([toShift.reply?.by,toShift.reply?.text,toShift.reply?.id],['nocheh','Your shift starts at 09:00.',shift.id]);
+    assert.ok(toShift.reply!.line.startsWith('[Replying to, by=nocheh: Nocheh, Nocheh\'s reply · this chat · ')&&toShift.reply!.line.endsWith(`(source nocheh:event:${shift.id})`),
+      toShift.reply!.line);
+    assert.equal(toShift.body!.speaker,undefined);noIds(toShift.reply);
+    const inGroup=await written(NG1_TG,MEMBER_NG,'Lunch moves to 13:00','supergroup');
+    const toGroup=await dispatch(MEMBER_NG,MEMBER_NG,'is that still true?','private',{external_reply:inGroup.external});
+    assert.deepEqual([toGroup.reply?.by,toGroup.reply?.id],['person',inGroup.id],'a group the member reads');noIds(toGroup.reply);
+    const ownerWords=await written(OWNER,OWNER,'The owner\'s private plan','private');
+    const otherMember=await written(MEMBER_GP,MEMBER_GP,'Mira\'s private words','private');
+    for(const [why,target] of [['the owner\'s private chat',ownerWords],['another member\'s private chat',otherMember]] as const) {
+      const turn=await dispatch(MEMBER_NG,MEMBER_NG,'and this?','private',{external_reply:target.external});
+      assert.equal(turn.turn,true,why);assert.equal(turn.reply,undefined,why);
+      assert.ok(!JSON.stringify(turn.body).includes(target.id),why);
+    }
+    const answered=await said(OWNER,'From Nils\'s private chat: they start at 09:00.','member_read');
+    const toAsk=await dispatch(OWNER,OWNER,'why?','private',{reply_to_message:answered.message});
+    assert.deepEqual([toAsk.turn,toAsk.reply],[true,undefined]);
+    assert.ok(!JSON.stringify(toAsk.body!.reply??null).includes('09:00')&&!JSON.stringify(toAsk.body).includes(answered.id),'no block, no id of the ask\'s answer');
+    const plain=await said(OWNER,'Your flight is on Friday.','reply');
+    assert.deepEqual((await dispatch(OWNER,OWNER,'source?','private',{reply_to_message:plain.message})).reply?.id,plain.id,'the owner\'s own reply still has its block');
 
     // The daily cap counts private and group turns together; over it, the private daily-limit reply (at most once a
     // day, `once`) and no turn.

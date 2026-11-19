@@ -26,7 +26,7 @@ import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
 import {unavailableTag,zonedDay,type Tag,type TagDetails} from '../source-tags.js';
 import {bindingMoved,ownerReader,type SourceTagRepository,type TagOptions} from './source-tags.js';
-import {countMemoryStep} from './note-sources.js';
+import {NOTE_SOURCES_SHOWN,countMemoryStep} from './note-sources.js';
 import {bucketOf,sourceFacts} from '../source-facts.js';
 import {isTelegramChat,telegramMessage,telegramTopicOpening} from '../chats-telegram.js';
 import {repliesElsewhere} from '../observed-source.js';
@@ -357,6 +357,29 @@ export class SourceRepository {
     await this.audience.assert(principal);await this.allowPrepared(principal,result);return result;
   }
 
+  /**
+   * What a note in this turn's evidence was written from, by its ref (archive_read {note}, ADR-0261): the messages the
+   * turn's own lookup kept for it (a review's batch, or the message a turn answered), each through canRead, at most
+   * NOTE_SOURCES_SHOWN of them, tagged. A ref opens only in the turn whose evidence showed it, and not after seven days;
+   * it opens nothing for a private answer, which has no notes.
+   */
+  async noteEntry(principal:Reader,ref:string){return afterEpoch(jobRun(principal),()=>this.noteOnce(principal,ref));}
+  private async noteOnce(principal:Reader,ref:string) {
+    // No bound reader opens a note's ref (ADR-0262): a private answer, a member's private chat and the owner's ask about a
+    // member keep no notes, and the ask shares its turn's message, and so its note refs, with the owner's asking turn.
+    if(principal.admin||!principal.turnEvent||boundReader(principal)!==null||!this.tags)throw new HttpError(403,'scoped_turn_required');
+    const binding=await this.audience.assert(principal);
+    const ids=await this.tags.notes.noteSources(principal.turnEvent,ref);
+    if(ids===null)throw new HttpError(404,'note_not_found');
+    const captured=await this.access.archive.capturedMany(ids),references=ids.flatMap(id=>captured.has(id)?[captured.get(id)!.reference]:[]);
+    // A message the reader may not read is left out, with no count, as an unreadable reference is anywhere; canRead
+    // comes first (checked), so a check that fails opens none of them.
+    const tags=await this.tags.checked(principal,binding,references),readable=references.flatMap(reference=>{const tag=tags.get(reference.id);return tag?[tag]:[];});
+    const shown=readable.slice(0,NOTE_SOURCES_SHOWN);
+    const result={note:ref,sources:shown.map(tag=>({source:tag.source,tag:tag.tag,by:tag.by})),...readable.length>shown.length?{more:readable.length-shown.length}:{}};
+    await this.audience.assert(principal);await this.allowPrepared(principal,result);return result;
+  }
+
   /** Archive search deliberately excludes transcripts, contexts and learned results. */
   async search(principal:Reader,query:string,count=20,filters:ArchiveFilters={kind:'',scope:'',reply:''}){return afterEpoch(jobRun(principal),()=>this.searchOnce(principal,query,count,filters));}
   private async searchOnce(principal:Reader,query:string,count:number,filters:ArchiveFilters) {
@@ -584,6 +607,45 @@ export class SourceRepository {
       if(target){item.reply_source='nocheh:event:'+target.id;linked.push(target.id);}
     }
     return linked;
+  }
+  /**
+   * What each of these messages replies to, for a turn's frame (ADR-0261): the first copy of its target the reader may
+   * read (canRead, one batch for all of them), within the reader's conversations (relationAudience), with its tag; with
+   * `text`, also that copy's text as this reader's own copy holds it. Targets come from the archive's reply relation in
+   * one read for all the messages, or from `targets`, which a message's read() already returned. A forum topic's
+   * opening is no reply: told by the target's own captured payload, and by the reply the message itself embeds, by a
+   * field's presence alone. An unreadable, retired or never archived target gives nothing; so does one whose copy is
+   * still being checked, when its text is asked for.
+   */
+  async repliedTo(principal:Reader,messages:readonly {id:string;payload:unknown;targets?:readonly SourceReference[]}[],options:{text?:boolean}={}):
+    Promise<Map<string,Tag&{text?:string}>> {
+    const found=new Map<string,Tag&{text?:string}>();
+    if(principal.admin||!principal.turnEvent||!this.tags)return found;
+    const binding=await this.audience.assert(principal);
+    const replying=messages.filter(message=>!telegramTopicOpening((telegramMessage(message.payload) as {reply_to_message?:unknown}|null)?.reply_to_message));
+    const asked=replying.filter(message=>!message.targets).map(message=>message.id);
+    const looked=asked.length?await this.access.relationships.replyTargets(asked,this.relationAudience(principal)):new Map<string,SourceReference[]>();
+    const targets=new Map(replying.map(message=>[message.id,(message.targets??looked.get(message.id)??[]).filter(target=>target.id!==message.id)]));
+    const candidates=[...targets.values()].flat();
+    if(!candidates.length)return found;
+    const [openings,open]=await Promise.all([this.topicOpenings(candidates.map(target=>target.id)),this.access.readable(principal,candidates,binding)]);
+    const chosen=new Map<string,SourceReference>();
+    for(const [id,list] of targets) {
+      // Every copy of an opening is one: a message replying to it replies to no message.
+      if(list.some(target=>openings.has(target.id)))continue;
+      const target=list.find(item=>open.get(item.id)===true);if(target)chosen.set(id,target);
+    }
+    const copies=new Map<string,{text:string;payload:unknown}|null>();
+    if(options.text)for(const target of chosen.values())if(!copies.has(target.id))copies.set(target.id,await this.shownCopy(target.id,binding));
+    const shown=new Map<string,unknown>([...copies].filter(([,copy])=>copy).map(([id,copy])=>[id,copy!.payload]));
+    const wanted=[...chosen.values()].filter(target=>!options.text||copies.get(target.id));
+    const tags=wanted.length?await this.tags.tags(principal,binding,wanted,{shown}):new Map();
+    for(const [id,target] of chosen) {
+      const tag=tags.get(target.id),copy=copies.get(target.id);
+      if(!tag||options.text&&!copy)continue;
+      found.set(id,{source:tag.source,tag:tag.tag,by:tag.by,at:tag.at,...(options.text?{text:copy!.text}:{})});
+    }
+    return found;
   }
   /** Which of these events are a forum topic's opening (telegramTopicOpening), told by a field's presence alone. */
   private async topicOpenings(ids:readonly string[]):Promise<Set<string>> {

@@ -6,13 +6,15 @@ import {approvalLines,ownerPrompts,reminderLines,sourceLines} from '../prompts.j
 import {sourceChat} from '../spaces.js';
 import {telegramMessage} from '../chats-telegram.js';
 import {bucketOf,eventClass,heldBy,heldKey,nochehHeld,nochehPinned,nochehQuoted,quotesToTrace,sourceFacts,type EventClass,type SourceFacts} from '../source-facts.js';
-import {fromToken,modelLabel,modelSourceWords,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
+import {fromToken,modelLabel,modelSourceWords,noteDay,ownerLabel,readTokens,reviewOrigin,type LabelEvent,type NoteFrom,type NoteOrigin,type ReadToken,
   type SourceWords} from '../source-labels.js';
 import {nameKeys,type Who} from '../task-reminder-text.js';
 import {embeddedSource,pinnedSource,sourceObjectId,type SourceIdentity} from '../source-model.js';
 import type {SourceReference} from './archive.js';
 import {peopleNames} from './people-names.js';
 import {recallNames} from './recall-places.js';
+import {sourceClock,sourceMoment,zonedDay} from '../source-tags.js';
+import {ownerTimeZone} from './task-settings.js';
 
 type Pools={archive:Pick<pg.Pool,'query'>;derived:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>};
 const fullId=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -28,7 +30,7 @@ export const turnChannels=['telegram','browser','scheduler','background'] as con
 /** One origin as Hermes's parent records it (services/hermes/note_sources.py): a notes review by its id, a turn by the
  *  message it answered, its channel, its day and what it read, or nobody known. */
 export type StoredOrigin={by:'review';review:string}|
-  {by:'turn';event:string;channel:typeof turnChannels[number];at:string;reads:ReadToken[];complete:boolean}|{by:'unknown'};
+  {by:'turn';event:string;channel:typeof turnChannels[number];at:string;at_time?:number;reads:ReadToken[];complete:boolean}|{by:'unknown'};
 /** One note as Hermes sends it: its key, its recorded origins and how many more it had to drop, the events it cites and
  *  whether it cites more than were sent, and the chat of the profile it is in. */
 export interface NoteInput {key:string;origins:StoredOrigin[];more:number;cites:string[];more_cites:boolean;space:string|null}
@@ -42,20 +44,40 @@ export interface Carried {pinned:'learned'|'unlearned'|'bot'|null;quote:boolean;
  * The stores' own day count of the memory steps whose failure Hermes never sees (ADR-0257): labelling notes and naming
  * their chats (`notes`), for Hermes's lookups before a turn or review as for recall and the Notes page, recall's ask
  * of the owner's forwards and files (`memory_read`), and building the source tags of search hits and opened originals
- * (`source_tags`, ADR-0261). /v1/status shows today's, and the owner's notice and System › Health show each as a line of
- * its own (`note_labels`, `forwards_read`, `source_tags`), apart from Hermes's lines. `done` counts the steps that worked
+ * (`source_tags`, ADR-0261), and keeping a turn's note refs (`note_refs`, ADR-0261). /v1/status shows today's, and the
+ * owner's notice and System › Health show each as a line of its own (`note_labels`, `forwards_read`, `source_tags`,
+ * `note_refs`), apart from Hermes's lines. `done` counts the steps that worked
  * after the day's first failure of that kind.
  */
 export const memoryProblemSchema=`
 CREATE TABLE IF NOT EXISTS memory_problem_days (
- day date NOT NULL,kind text NOT NULL CHECK(kind IN ('notes','memory_read','source_tags')),done integer NOT NULL DEFAULT 0,failed integer NOT NULL DEFAULT 0,
+ day date NOT NULL,kind text NOT NULL CHECK(kind IN ('notes','memory_read','source_tags','note_refs')),done integer NOT NULL DEFAULT 0,failed integer NOT NULL DEFAULT 0,
  PRIMARY KEY(day,kind)
 );
--- Source tags are counted too (ADR-0261).
+-- Source tags and note refs are counted too (ADR-0261).
 ALTER TABLE memory_problem_days DROP CONSTRAINT IF EXISTS memory_problem_days_kind_check;
-ALTER TABLE memory_problem_days ADD CONSTRAINT memory_problem_days_kind_check CHECK(kind IN ('notes','memory_read','source_tags'));
+ALTER TABLE memory_problem_days ADD CONSTRAINT memory_problem_days_kind_check CHECK(kind IN ('notes','memory_read','source_tags','note_refs'));
 `;
-export type MemoryProblemKind='notes'|'memory_read'|'source_tags';
+export type MemoryProblemKind='notes'|'memory_read'|'source_tags'|'note_refs';
+
+/**
+ * What a turn's notes came from, kept for that turn alone (ADR-0261): each note's ref (the first 12 hex of its key) with
+ * the messages it was written from, the review's batch or the message the turn answered, as Hermes's lookup before the
+ * turn named them. archive_read {note} opens them within that turn, each through canRead. Rows go after seven days.
+ * No chat is kept: the reader's own access decides what a ref opens, so nothing here is a chat value to seed.
+ */
+export const noteLookupSchema=`
+CREATE TABLE IF NOT EXISTS note_lookups (
+ turn_event text PRIMARY KEY CHECK(turn_event ~ '^[a-f0-9]{64}$'),notes jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now()
+);
+`;
+/** How long a turn's note refs open. */
+export const NOTE_LOOKUP_DAYS=7;
+/** The most messages kept for one note's ref, and the most a ref opens. */
+const NOTE_SOURCES_KEPT=10;
+export const NOTE_SOURCES_SHOWN=5;
+/** A note's ref: the first 12 hex of its key, which the turn's evidence shows beside it. */
+export const noteRef=(key:string)=>key.slice(0,12);
 /** Counts one step that worked or failed, today in UTC. Every failure is counted. A step that worked is counted only once
  *  today's count for its kind already holds a failure, which is all the owner's notice needs to say it works again, so
  *  the Notes page's polls, recall and each turn's lookup write nothing while nothing fails. A count that can't be
@@ -67,6 +89,8 @@ export async function countMemoryStep(control:Pick<pg.Pool,'query'>,kind:MemoryP
       ON CONFLICT(day,kind) DO UPDATE SET failed=memory_problem_days.failed+1`,[kind]);
   }catch{}
 }
+/** A guard binding that moved on is the caller's to retry, never a memory step that failed (source-tags.ts re-exports it). */
+export const bindingMoved=(error:unknown)=>error instanceof HttpError&&['guard_context_changed','guard_transition_pending'].includes(error.code);
 /** Today's counts, in the shape the provider monitor reads Hermes's own (usage.note_rows). */
 export async function memoryProblems(control:Pick<pg.Pool,'query'>):Promise<{day:string;kind:MemoryProblemKind;done:number;failed:number}[]> {
   return (await control.query(`SELECT to_char(day,'YYYY-MM-DD') AS day,kind,done,failed FROM memory_problem_days
@@ -77,10 +101,13 @@ function storedOrigin(value:unknown):StoredOrigin|null {
   const found=record(value),keys=found?Object.keys(found).sort().join(','):'';
   if(found?.by==='unknown'&&keys==='by')return {by:'unknown'};
   if(found?.by==='review'&&keys==='by,review'&&fullId(found.review))return {by:'review',review:found.review};
-  if(found?.by!=='turn'||keys!=='at,by,channel,complete,event,reads'||!fullId(found.event)||!(turnChannels as readonly string[]).includes(found.channel)||
+  // A turn's moment (at_time, Unix seconds) came with its UTC day; a note written before it was has the day alone.
+  const timed=keys==='at,at_time,by,channel,complete,event,reads';
+  if(found?.by!=='turn'||keys!=='at,by,channel,complete,event,reads'&&!timed||!fullId(found.event)||!(turnChannels as readonly string[]).includes(found.channel)||
     typeof found.at!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(found.at)||typeof found.complete!=='boolean'||!Array.isArray(found.reads)||found.reads.length>12||
     found.reads.some((read:unknown)=>!(readTokens as readonly unknown[]).includes(read)))return null;
-  return {by:'turn',event:found.event,channel:found.channel,at:found.at,reads:[...new Set(found.reads as ReadToken[])],complete:found.complete};
+  if(timed&&!(Number.isSafeInteger(found.at_time)&&found.at_time>=0&&found.at_time<=1e11&&new Date(found.at_time*1000).toISOString().slice(0,10)===found.at))return null;
+  return {by:'turn',event:found.event,channel:found.channel,at:found.at,...timed?{at_time:found.at_time as number}:{},reads:[...new Set(found.reads as ReadToken[])],complete:found.complete};
 }
 /**
  * A note as Hermes sends it, checked, or null: at most 10 origins of the shapes its parent writes, a count of more, at
@@ -301,8 +328,11 @@ export class NoteSourceRepository {
    * be the owner's; one that had to drop origins has an unknown one too. `detail` also reads each message's chat and
    * whether its sender is allowed there now, which only the owner's words name. Origins come back in the order of
    * `notes`, so two notes with the same key in different profiles keep their own; `partial` says a place read failed.
+   * Days are the reader's (B1.4): the owner's Tasks zone for the owner, UTC for anyone else. A review's is its messages'
+   * days, read in one batch; a turn's is its recorded moment's, or the UTC day it recorded alone, marked so. `sources`
+   * names, for each note, the messages its writer read: a review's batch, or the message a turn answered.
    */
-  private async resolve(notes:readonly NoteInput[],detail:boolean) {
+  private async resolve(notes:readonly NoteInput[],detail:boolean,owner=false) {
     const reviewIds=[...new Set(notes.flatMap(note=>note.origins.flatMap(origin=>origin.by==='review'?[origin.review]:[])))];
     const rows=reviewIds.length?(await this.stores.control.query('SELECT id,provenance,source_reference FROM native_review_jobs WHERE id=ANY($1::text[])',[reviewIds])).rows:[];
     // Each review's place is read from its source message, all at once; one that can't be read is a chat Nocheh can't
@@ -319,8 +349,16 @@ export class NoteSourceRepository {
         if(origin.by==='review'&&detail)for(const id of reviews.get(origin.review)?.events??[])ids.add(id);
       }
     }
-    const classes=await this.classesFor([...ids]),known=new Map<string,LabelEvent>();
+    const batch=[...new Set([...ids,...[...reviews.values()].flatMap(row=>row.events)])];
+    const [classes,zone,moments]=await Promise.all([this.classesFor([...ids]),owner?ownerTimeZone(this.stores.control):Promise.resolve('UTC'),
+      batch.length?this.stores.archive.query('SELECT id,kind,occurred_at,received_at FROM events WHERE id=ANY($1::text[])',[batch]):Promise.resolve({rows:[]})]);
+    const known=new Map<string,LabelEvent>();
     for(const [id,found] of classes)known.set(id,{class:found.class,facts:found.facts});
+    // Each message's day as this reader reads days; a review's own record gives each batch message its class.
+    for(const row of moments.rows as {id:string;kind:string;occurred_at:string|null;received_at:Date|null}[]) {
+      const day=sourceClock(sourceMoment(row).moment,{owner,zone})?.day??null;
+      known.set(row.id,{...known.get(row.id)??{class:'unknown'},day});
+    }
     if(detail&&ids.size) {
       const policy=this.policy();
       for(const event of (await this.stores.archive.query('SELECT id,channel,kind,scope,payload FROM events WHERE id=ANY($1::text[])',[[...ids]])).rows) {
@@ -340,14 +378,23 @@ export class NoteSourceRepository {
         const found=reviewOrigin(row.provenance,note.cites,{chat:row.place},known);
         return note.more_cites&&found.by==='review'?{...found,owner:false}:found;
       }
-      return {by:'turn',place:{chat:place(note.space),web:stored.channel==='browser'},date:stored.at,reads:stored.reads,
-        answered:classes.get(stored.event)?.class??null,complete:stored.complete,job:stored.channel==='scheduler'||stored.channel==='background'};
+      const timed=stored.at_time!==undefined;
+      return {by:'turn',place:{chat:place(note.space),web:stored.channel==='browser'},date:timed?zonedDay(stored.at_time!*1000,zone):stored.at,
+        ...timed?{}:{utc:true},reads:stored.reads,answered:classes.get(stored.event)?.class??null,complete:stored.complete,
+        job:stored.channel==='scheduler'||stored.channel==='background'};
     };
+    // What each note's writer read, for its ref: a review's batch, its first message first, or the turn's message.
+    const sources=notes.map(note=>{
+      const first=note.origins[0];
+      if(first?.by==='turn')return [first.event];
+      if(first?.by!=='review')return [];
+      return (reviews.get(first.review)?.events??[]).slice(0,NOTE_SOURCES_KEPT);
+    });
     const origins=notes.map(note=>[...note.origins.map(stored=>origin(stored,note)),...note.more?[{by:'unknown'} as NoteOrigin]:[]]);
     const chatsNamed=new Set<string>();
     for(const list of origins)for(const item of list)if(item.by==='review'||item.by==='turn')if(item.place.chat)chatsNamed.add(item.place.chat);
     for(const item of known.values())if(item.chat)chatsNamed.add(item.chat);
-    return {origins,known,chats:[...chatsNamed],partial};
+    return {origins,known,chats:[...chatsNamed],partial,sources};
   }
   /** Counts one labelling in the stores' day count: it failed when it threw or could not name a chat. */
   private async counted(ok:boolean){await countMemoryStep(this.stores.control,'notes',ok);}
@@ -356,17 +403,21 @@ export class NoteSourceRepository {
    *  group and topic names Nocheh saved appear, which the request guard still checks since they are never let through
    *  beforehand. */
   async labels(notes:readonly NoteInput[]):Promise<NoteSource[]> {
-    if(!notes.length)return [];
-    const {origins,chats:named,partial}=await this.resolve(notes,false),names=await recallNames(this.stores,named);
+    return (await this.labelled(notes,false)).labels;
+  }
+  /** labels(), with the messages each note's writer read (resolve's `sources`). `owner`: the owner reads them. */
+  private async labelled(notes:readonly NoteInput[],owner:boolean):Promise<{labels:NoteSource[];sources:string[][];days:(string|null)[]}> {
+    if(!notes.length)return {labels:[],sources:[],days:[]};
+    const {origins,chats:named,partial,sources}=await this.resolve(notes,false,owner),names=await recallNames(this.stores,named);
     await this.counted(!partial);
-    return origins.map(list=>({from:fromToken(list),label:modelLabel(list,names)}));
+    return {labels:origins.map(list=>({from:fromToken(list),label:modelLabel(list,names)})),sources,days:origins.map(noteDay)};
   }
 
   /** Each note's source in the owner's own words (memory.source_texts), naming people and chats as reminders do, for
    *  the Notes page, in the order of `notes`. */
   async ownerLabels(notes:readonly NoteInput[]):Promise<NoteSource[]> {
     if(!notes.length)return [];
-    const {origins,known,partial}=await this.resolve(notes,true),prompts=await ownerPrompts(this.stores.control);
+    const {origins,known,partial}=await this.resolve(notes,true,true),prompts=await ownerPrompts(this.stores.control);
     const words:SourceWords={lines:sourceLines(prompts['memory.source_texts']),reminder:reminderLines(prompts['tasks.reminder_texts']),
       places:approvalLines(prompts['telegram.approval_texts'])};
     const people:Who[]=[...known.values()].flatMap(item=>item.facts?.author==='person'?[{by:'person' as const,account:item.facts.account,name:item.facts.name}]:[]);
@@ -379,15 +430,43 @@ export class NoteSourceRepository {
    * The internal lookup Hermes makes before a turn or review (POST /internal/notes/sources): its notes checked, then
    * their labels in the model's words. A body that is not as Hermes's parent writes it is refused whole.
    */
-  async lookup(body:unknown):Promise<{labels:Record<string,NoteSource>}> {
-    const found=record(body),space=found?.space;
-    if(!found||!Array.isArray(found.notes)||found.notes.length>200||Object.keys(found).some(name=>name!=='notes'&&name!=='space')||
-      space!==undefined&&(typeof space!=='string'||!space||space.length>200))throw new HttpError(400,'invalid_note_sources');
+  async lookup(body:unknown):Promise<{labels:Record<string,NoteSource&{ref?:string}>}> {
+    const found=record(body),space=found?.space,turn=found?.turn_event;
+    if(!found||!Array.isArray(found.notes)||found.notes.length>200||Object.keys(found).some(name=>!['notes','space','turn_event'].includes(name))||
+      space!==undefined&&(typeof space!=='string'||!space||space.length>200)||turn!==undefined&&!fullId(turn))throw new HttpError(400,'invalid_note_sources');
     const notes=found.notes.map(note=>noteInput(note,space??null)) as (NoteInput|null)[];
     if(notes.some(note=>note===null))throw new HttpError(400,'invalid_note_sources');
-    // One profile's notes: two with the same key are the same entry, so keying by it loses nothing.
-    const labels=await this.labels(notes as NoteInput[]);
-    return {labels:Object.fromEntries((notes as NoteInput[]).map((note,index)=>[note.key,labels[index]!]))};
+    // One profile's notes: two with the same key are the same entry, so keying by it loses nothing. The owner's own chat
+    // reads days in the owner's zone; any other, or none named, in UTC.
+    const {labels,sources}=await this.labelled(notes as NoteInput[],typeof space==='string'&&chats().isOwner(space));
+    // A turn's notes each get a ref that opens, in that turn alone, the messages its writer read (archive_read {note}).
+    // When they can't be kept, the labels still go out, without refs, and the failure is counted as `note_refs`.
+    const kept=typeof turn==='string'&&await this.keep(turn,notes as NoteInput[],sources);
+    return {labels:Object.fromEntries((notes as NoteInput[]).map((note,index)=>[note.key,{...labels[index]!,...kept?{ref:noteRef(note.key)}:{}}]))};
+  }
+  /** Keeps a turn's note refs with the messages each opens, beside any this turn's earlier lookups kept, and drops
+   *  every turn's that is older than NOTE_LOOKUP_DAYS. Whether they were kept. */
+  private async keep(turn:string,notes:readonly NoteInput[],sources:readonly string[][]):Promise<boolean> {
+    const refs:Record<string,string[]>={};
+    notes.forEach((note,index)=>{const ref=noteRef(note.key);refs[ref]=[...new Set([...refs[ref]??[],...sources[index]??[]])].slice(0,NOTE_SOURCES_KEPT);});
+    try {
+      await this.stores.control.query(`DELETE FROM note_lookups WHERE created_at<now()-make_interval(days=>$1)`,[NOTE_LOOKUP_DAYS]);
+      await this.stores.control.query(`INSERT INTO note_lookups(turn_event,notes) VALUES($1,$2::jsonb)
+        ON CONFLICT(turn_event) DO UPDATE SET notes=note_lookups.notes||excluded.notes`,[turn,JSON.stringify(refs)]);
+      await countMemoryStep(this.stores.control,'note_refs',true);
+      return true;
+    }catch{await countMemoryStep(this.stores.control,'note_refs',false);return false;}
+  }
+  /**
+   * The messages a note's ref opens in this turn (archive_read {note}): those the turn's lookup kept for it, while they
+   * are not older than NOTE_LOOKUP_DAYS, at most NOTE_SOURCES_SHOWN of them once the caller keeps those the reader may
+   * read. A ref this turn never had opens nothing.
+   */
+  async noteSources(turn:string,ref:string):Promise<string[]|null> {
+    if(!fullId(turn)||!/^[a-f0-9]{12}$/.test(ref))return null;
+    const row=(await this.stores.control.query(`SELECT notes->$2 AS sources FROM note_lookups WHERE turn_event=$1
+      AND created_at>=now()-make_interval(days=>$3)`,[turn,ref,NOTE_LOOKUP_DAYS])).rows[0];
+    return Array.isArray(row?.sources)?row.sources.filter(fullId):null;
   }
 
   /**
@@ -419,26 +498,40 @@ export class NoteSourceRepository {
   /**
    * The owner's recall (the brain's `recall` result) with each note hit's source in the model's words and each past
    * conversation hit's writer in fixed words; what Hermes recorded stays behind. Run before the hits' places are named,
-   * since a note's source reads the chat of the profile it is in.
+   * since a note's source reads the chat of the profile it is in. Each note hit also gets its day, in the owner's zone,
+   * and with `tag` (the owner's SourceTagRepository.checked, which checks canRead first and keeps only what the owner may
+   * read) up to
+   * RECALL_NOTE_SOURCES of the messages its writer read, tagged (B3.6).
    */
-  async withRecallSources(result:unknown):Promise<unknown> {
+  async withRecallSources(result:unknown,tag?:(ids:string[])=>Promise<ReadonlyMap<string,{source:string;tag:string;by:string}|null>>):Promise<unknown> {
     const value=record(result);
     if(!value||!Array.isArray(value.hits))return result;
     const hits=value.hits.map(hit=>record(hit)).filter(hit=>hit!==null);
     const inputs=hits.map(hit=>hit.kind==='native_note'?noteInput(hit.note,typeof hit.space==='string'?hit.space:null):null);
     // Each hit is labelled on its own, by its place among the notes asked: the same note in two profiles keeps each one's source.
     const asked=inputs.flatMap((input,index)=>input?[{input,index}]:[]),position=new Map(asked.map((item,at)=>[item.index,at]));
-    let labels:NoteSource[]|null=null;
-    try{labels=await this.labels(asked.map(item=>item.input));}catch{await this.counted(false);}
-    const words=modelSourceWords.labels,unknown:NoteSource={from:'unknown',label:words.unknown};
+    let found:Awaited<ReturnType<NoteSourceRepository['labelled']>>|null=null;
+    try{found=await this.labelled(asked.map(item=>item.input),true);}catch{await this.counted(false);}
+    const labels=found?.labels??null,words=modelSourceWords.labels,unknown:NoteSource={from:'unknown',label:words.unknown};
+    // Every hit's sources tagged in one batch; one that fails leaves the hits without them, never with a source not checked.
+    let tagged:ReadonlyMap<string,{source:string;tag:string;by:string}|null>=new Map();
+    const firstOf=(at:number)=>(found?.sources[at]??[]).slice(0,NOTE_SOURCES_SHOWN),read=[...new Set(asked.flatMap((_item,at)=>firstOf(at)))];
+    if(tag&&read.length)try{tagged=await tag(read);}catch(error){
+      if(bindingMoved(error))throw error;
+      await countMemoryStep(this.stores.control,'source_tags',false);}
+    const sourcesOf=(at:number)=>firstOf(at).flatMap(id=>{const item=tagged.get(id);return item?[{source:item.source,tag:item.tag,by:item.by}]:[];})
+      .slice(0,RECALL_NOTE_SOURCES);
     return {...value,hits:hits.map((hit,index)=>{
       const {note,role,...rest}=hit,at=position.get(index);
-      if(hit.kind==='native_note')return {...rest,source:labels===null?{from:'unavailable',label:words.unavailable}:at!==undefined&&labels[at]||unknown};
+      if(hit.kind==='native_note')return {...rest,source:labels===null?{from:'unavailable',label:words.unavailable}:at!==undefined&&labels[at]||unknown,
+        ...found&&at!==undefined?{day:found.days[at]??null,...tag?{sources:sourcesOf(at)}:{}}:{}};
       if(hit.kind==='native_session')return {...rest,role:role==='assistant'?recallRoleWords.assistant:role==='tool'?recallRoleWords.tool:recallRoleWords.message};
       return rest;
     })};
   }
 }
 
+/** The most messages a note hit in the owner's recall names, tagged (B3.6). */
+const RECALL_NOTE_SOURCES=3;
 /** The fixed words for who wrote a past conversation's row that the owner's recall finds. */
 export const recallRoleWords={assistant:'Nocheh\'s reply',tool:'a tool result',message:'a message'} as const;

@@ -121,7 +121,8 @@ test('a note\'s source has its own lines in the owner\'s words, which keep every
   assert.equal(lines.pinned_nocheh,'Nocheh\'s own message that {who} pinned in {place}');
   assert.equal(lines.held,'a message {who} sent in {place} holding someone else\'s words, such as a shared checklist or poll');
   assert.equal(lines.pinned_held,'a message holding someone else\'s words, such as a shared checklist or poll, that {who} pinned in {place}');
-  assert.equal(Object.keys(lines).length,52);
+  assert.equal(lines.read_reply,'the message it replied to');
+  assert.equal(Object.keys(lines).length,53);
   // Every value a default line holds is one its edited line must keep.
   const required=labeledPlaceholders['memory.source_texts']!;
   for(const [name,line] of Object.entries(lines)) {

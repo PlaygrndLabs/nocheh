@@ -30,6 +30,7 @@ import {reloadMembers} from './members.js';
 import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
 import {forwardLine,forwardOrigin} from '../forwarded.js';
+import type {Tag,TagBy} from '../source-tags.js';
 import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply,type ReplyButton} from './telegram-reply.js';
 
 export const telegramDispatchSchema=`
@@ -70,6 +71,31 @@ export function speakerLine(original:any,representation:any,owner?:string|null):
   return '[Group message from '+name+username+sent+']'+own;
 }
 
+/** The source tag's limit in a reply line (TAG_LIMIT), the replied-to text the reply block keeps, and a reply line's
+ *  limit, which turn_process.py checks again: the tag plus the fixed words and the source id. */
+const REPLY_TAG=160,REPLY_TEXT=200,REPLY_LINE=300;
+/** One line of a reply's source: its fixed words, by= (whose words they are, as the tag's own by) and the tag, then its
+ *  source. No newline, so nothing in a tag can end the line. */
+function replyLine(words:string,target:Pick<Tag,'source'|'tag'|'by'>):string|null {
+  const tag=Array.from(target.tag.replace(/[\s\p{Cc}\p{Zl}\p{Zp}]+/gu,' ').trim()).slice(0,REPLY_TAG).join('').trim();
+  const line=`[${words}, by=${target.by}: ${tag}] (source ${target.source})`;
+  return /^nocheh:event:[a-f0-9]{64}$/.test(target.source)&&line.length<=REPLY_LINE?line:null;
+}
+/**
+ * The block naming the message a turn's own message replies to (ADR-0261), for turn_process.py to put after the speaker
+ * line, or first in the owner's chat: who · where · when with by=, at most REPLY_TEXT characters of the text as this
+ * reader's own copy holds it on one line, and its id, which retiring that message withholds from stored history with the
+ * turn's tool work (retired_history.py). Null when there is nothing to show.
+ */
+export function replyBlock(target:(Pick<Tag,'source'|'tag'|'by'>&{text?:string})|undefined):{line:string;text:string;by:TagBy;id:string}|null {
+  if(!target||typeof target.text!=='string')return null;
+  const line=replyLine('Replying to',target);if(!line)return null;
+  const text=Array.from(target.text.replace(/[\s\p{Cc}\p{Zl}\p{Zp}]+/gu,' ').trim()).slice(0,REPLY_TEXT).join('').trim()||'[A message without text]';
+  return {line,text,by:target.by,id:target.source.slice('nocheh:event:'.length)};
+}
+/** A recent group message's reply part (ADR-0261): who · where · when of the message it replies to, without its text. */
+export const replyPart=(target:Pick<Tag,'source'|'tag'|'by'>|undefined):string|null=>target?replyLine('In reply to',target):null;
+
 /**
  * What in a captured group message can address the bot: a reply to one of its
  * messages or a tap on its name, and the @usernames the message names. The
@@ -106,6 +132,9 @@ export function privateStart(original:any):string|null {
 /** A group's or topic's name for a private answer's first line: no brackets or control characters, so it cannot end
  * that line or start another that looks like Nocheh's own, and never a numeric Telegram ID. */
 const placeName=(value:unknown)=>typeof value==='string'?value.replace(/[\[\]\p{Cc}\p{Cf}]+/gu,' ').replace(/\s+/g,' ').trim().slice(0,64).trim():'';
+
+/** A recent group message as a turn's frame shows it (turn_process.recent_group). */
+type RecentItem={id:string;speaker:string;text:string;forwarded?:string;reply?:string};
 
 /** The owner's command reply, which Nocheh's bot sends without a brain turn. */
 function controlReply(input:Input):TurnReceipt|null {
@@ -357,9 +386,11 @@ export class TelegramDispatchRepository {
    * never reach Hermes on their own, so a reply would not know what was just said.
    * Each is the guarded copy this conversation may read, labeled with its speaker,
    * and cites its source so retiring it withholds that message's text, and the tool
-   * work and notes of the turn that carried it, from Hermes' stored history.
+   * work and notes of the turn that carried it, from Hermes' stored history. One that
+   * replies to a message names it in its own `reply` part: who · where · when, never
+   * its text, looked up for all of them at once (SourceRepository.repliedTo).
    */
-  private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<{id:string;speaker:string;text:string;forwarded?:string}[]> {
+  private async recentGroup(source:SourceReference,space:string,principal:Reader):Promise<RecentItem[]> {
     const own=(await this.archive.pool.query('SELECT scope,received_at FROM events WHERE id=$1',[source.id])).rows[0];
     if(!own)return [];
     // Under every Telegram id the chat has had, so a group Telegram upgraded keeps the lines from before (ADR-0252).
@@ -369,7 +400,7 @@ export class TelegramDispatchRepository {
     if(!rows.length)return [];
     const states=new Map((await this.control.query('SELECT event_id,state,error_code FROM dispatches WHERE event_id=ANY($1::text[])',
       [rows.map(row=>row.id)])).rows.map(row=>[row.event_id as string,row]));
-    const recent:{id:string;speaker:string;text:string;forwarded?:string}[]=[];
+    const recent:RecentItem[]=[],originals=new Map<string,unknown>();
     for(const row of rows) {
       // Members who may not talk to Nocheh are still part of the conversation. Album parts went with
       // their album's turn; any other outcome is the last turn, already in Hermes' history.
@@ -382,11 +413,24 @@ export class TelegramDispatchRepository {
         const original=JSON.parse(row.payload.toString()),speaker=speakerLine(original,guarded.event.payload,this.access.policy().owner_id);
         // A forward among them says where it came from too, as the message a turn answers does (ADR-0250).
         const forwarded=forwardLine(forwardOrigin(original?.message,guarded.event.payload?.message),false);
-        if(speaker)recent.push({id:row.id,speaker,text,...(forwarded?{forwarded}:{})});
+        if(speaker){recent.push({id:row.id,speaker,text,...(forwarded?{forwarded}:{})});originals.set(row.id,original);}
       } catch {continue;}
       if(recent.length===20)break;
     }
+    const replies=await this.sources.repliedTo(principal,recent.map(item=>({id:item.id,payload:originals.get(item.id)})));
+    for(const item of recent){const reply=replyPart(replies.get(item.id));if(reply)item.reply=reply;}
     return recent.reverse();
+  }
+  /**
+   * The message a turn's own message replies to, as its reply block (replyBlock), from the reply relation the message's
+   * read already returned and the reader's own access check (SourceRepository.repliedTo); null when it replies to
+   * nothing this reader may read, or only to its forum topic's opening. A member's private turn asks as that member,
+   * bound to their own chat (memberPrincipal), so it never quotes the owner's chat or another private chat; no reader
+   * but the dashboard reads Nocheh's answer to an ask about a member (ADR-0262).
+   */
+  private async replyOf(principal:Reader,id:string,payload:unknown,read:{relationships:{targets:{kind:string;references:SourceReference[]}[]}}) {
+    const targets=read.relationships.targets.filter(target=>target.kind==='reply_to').flatMap(target=>target.references);
+    return replyBlock((await this.sources.repliedTo(principal,[{id,payload,targets}],{text:true})).get(id));
   }
   /**
    * Telegram sends an album as one message per photo or file. It is answered
@@ -569,13 +613,14 @@ export class TelegramDispatchRepository {
     const questionPayload=JSON.parse((await this.archive.pool.query('SELECT payload FROM events WHERE id=$1',[row.question_event])).rows[0].payload.toString());
     const speaker=speakerLine(questionPayload,question.event.payload,this.access.policy().owner_id),recent=await this.recentGroup(asked,row.from_chat_id,principal);
     const forwarded=forwardLine(forwardOrigin(questionPayload?.message,question.event.payload?.message),false);
+    const reply=await this.replyOf(principal,row.question_event,questionPayload,question);
     const privateAnswer={...await this.answerFrame(row,principal,binding),question_event:row.question_event};
     const app=appBindingOf(space);
     const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,chat,space,...(app?{app}:{}),
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:null,guard_mode:binding.mode,
-      private_answer:privateAnswer,...(tooLarge?{files_too_large:tooLarge}:{}),...(speaker?{speaker}:{}),...(forwarded?{forwarded}:{}),...(recent.length?{recent_group:recent}:{})};
+      private_answer:privateAnswer,...(tooLarge?{files_too_large:tooLarge}:{}),...(speaker?{speaker}:{}),...(forwarded?{forwarded}:{}),...(reply?{reply}:{}),...(recent.length?{recent_group:recent}:{})};
     const input={binding,principal,body};
-    await this.prepared.allow(principal,{text,transcripts,files,speaker,forwarded,recent_group:recent,private_answer:privateAnswer});await currentTurn(this,input);
+    await this.prepared.allow(principal,{text,transcripts,files,speaker,forwarded,reply,recent_group:recent,private_answer:privateAnswer});await currentTurn(this,input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
@@ -670,11 +715,13 @@ export class TelegramDispatchRepository {
     const speaker=personal?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=personal?[]:await this.recentGroup(source,space,principal);
     // Where a forwarded message came from, in Nocheh's own words, before its text (ADR-0250).
     const forwarded=forwardLine(forwardOrigin(payload?.message,selected.event.payload?.message),scope.owner);
+    // A command's fixed reply runs no model, so it needs no reply block.
+    const replied=control===null?await this.replyOf(principal,source.id,payload,selected):null;
     const app=appBindingOf(space);
     const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,chat,space,...(app?{app}:{}),
       payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
-      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(forwarded?{forwarded}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
-    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,forwarded,recent_group:recent});await currentTurn(this,input);
+      ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(forwarded?{forwarded}:{}),...(replied?{reply:replied}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
+    const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,forwarded,reply:replied,recent_group:recent});await currentTurn(this,input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});

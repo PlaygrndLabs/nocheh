@@ -53,9 +53,10 @@ DERIVED=('api_content','reasoning','reasoning_content','reasoning_details','code
 # Kept in Hermes's own key/value table so it travels and commits with the rows it describes. The value is the retirement
 # revision a profile was brought current at, after the version of the rules that did it: a profile checked by older
 # rules is planned again once, at the same revision, so a change in what the rules withhold reaches what is already
-# stored (ADR-0261: quoted messages retired before that change).
+# stored (ADR-0261: quoted messages retired before that change; quoted2, notes a later turn of the session copied from
+# a retired message).
 CHECKED_KEY='nocheh_retired_history_revision'
-PLAN_VERSION='quoted1'
+PLAN_VERSION='quoted2'
 # A patched span shorter than this would mark unrelated note entries.
 SPAN_MINIMUM=4
 LOOKUP_BATCH=200
@@ -316,15 +317,29 @@ def plan(rows,lookup):
         if row['role']=='tool':return TOOL_WITHHELD.format(_sources(causes|replies,records))
         if row.get('tool_calls') and not row['content']:return ''
         return ANSWER_WITHHELD.format(_sources(replies)) if replies else CITING_WITHHELD.format(_sources(causes,records))
+    from .note_sources import _reply_copied,_written
+    # Each session's retired texts its earlier turns held, by the retired message: a later turn whose notes copy one
+    # wrote them from it (note_sources.turn_reads reads the same copies), so its tool work and notes go with it too.
+    forgotten=[];session=object()
     for event,user,following in turns:
         quoted=set();carried=set()
+        first=user or (following[0] if following else None)
+        if first is not None and first['session_id']!=session:session=first['session_id'];forgotten=[]
+        ops=[op for row in following if row['role']=='assistant' and not _summary(row) for op in memory_ops(row)]
+        written=_written(ops) if ops and forgotten else None
+        copied={cause for cause,text in forgotten if _reply_copied(text,written)} if written else set()
         if event in retired:
             withhold(user,USER_WITHHELD.format(_sources([event])))
+            forgotten.append((event,user['content']))
         elif user:
             # A retired message the row quoted counts like a retired turn message for the rows after it: the turn's
             # tool work, and with it the notes it wrote, is withheld, and the delivered answer loses only its reasoning.
             content,quoted=_unquoted(user['content'],retired)
             if content!=user['content']:withhold(user,content)
+            lines=user['content'].split('\n') if quoted else []
+            forgotten+=[(span,'\n'.join(lines[start+1:end] if kind=='reply' else lines[start+1:end+1]))
+                        for kind,span,start,end in _spans(user['content']) if kind!='part' and span in quoted]
+        quoted|=copied
         replies=set(answered.get(event,()))
         answer=next((row for row in reversed(following) if row['role']=='assistant' and not row.get('tool_calls')
                      and isinstance(row['content'],str) and row['content'].strip() and not _summary(row)),None)
@@ -335,7 +350,9 @@ def plan(rows,lookup):
                 withhold(row,placeholder(row,causes,replies))
                 # A tool result that held a retired message's text counts for the rest of the turn as a quoted one
                 # does: what the turn copied from it, its notes too, goes with it.
-                if row['role']=='tool':carried|=_cites(row)&retired
+                if row['role']=='tool':
+                    carried|=_cites(row)&retired
+                    forgotten+=[(cause,row['content']) for cause in sorted(_cites(row)&retired) if isinstance(row['content'],str)]
             elif event in retired or quoted or carried:
                 # The delivered answer stays; reasoning about the retired message does not.
                 change={key:None for key in DERIVED if key!='api_content' and key in row and row[key] is not None}

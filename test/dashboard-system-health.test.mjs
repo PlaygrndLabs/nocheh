@@ -152,6 +152,14 @@ test('source tags that could not be built are a stores line of their own (ADR-02
   );
 });
 
+test('note refs that could not be kept are a stores line of their own (ADR-0261)', () => {
+  // Their labels went out; only the refs were lost, which a note labels line would misreport.
+  assert.deepEqual(
+    issues({note_problems: [{day: '2026-11-14', kind: 'note_refs', failed: 2, ok: 0}]}).map(row => [row.text, row.detail, row.link]),
+    [['Keeping note refs failed 2 times today', 'Those notes went out with their sources named but could not be opened by ref. The notes are kept.', undefined]],
+  );
+});
+
 test('a task that ended shows its recorded reason as a note, and only an open one is waiting for something', () => {
   // A memory step that completed without learning Nocheh's own card waits for nothing.
   assert.deepEqual(

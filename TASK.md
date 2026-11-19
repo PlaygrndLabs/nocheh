@@ -192,6 +192,69 @@ members live in the control store and are managed on the Members page.
   bot an admin in members' groups is recommended. Your own web and tool requests in groups no
   longer show a card; ask if you want that back.
 
+Memory step 3: replies in the turn and where notes came from
+([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md) step 3;
+owner, 2026-11-17: track the source of each fact before the MVP; built on the same three
+recommended answers as steps 1 and 2). No Honcho code or setting changes and nothing is learned
+again; Hermes's own code is unchanged.
+- Already there from steps 1 and 2: `FRAME_WORDS` with the reply words, the retirement plan's
+  reply block and reply part spans with their tests, `telegramTopicOpening`, `readable()`,
+  `SourceTagRepository`, `_copied()`, the source-usage sentence in archive_search's description,
+  and owner recall's `native_session` text (V1).
+- The reply block: a turn whose message replies to a message its reader may read quotes it after
+  the speaker line (first in the owner's chat) as `[Replying to, by=…: <tag>] (source …)`, up to
+  200 characters of the reader's copy unframed, `[End of replied-to message]`, built from the
+  read's own relations, `readable()` and one tag request (`SourceRepository.repliedTo`), never
+  payload ids; a reply to Nocheh reads `by=nocheh`; owner, group and private-answer turns, and a
+  member's private chat (first, as that member reads; never a `member_read` answer, never the ask
+  about a member, [store](test/store-member-private.test.ts),
+  [Hermes](services/hermes/test_member_private.py));
+  recent messages carry `[In reply to, by=…]` parts without text, looked up at once; a forum
+  topic's opening is never a reply ([unit](test/telegram-reply-frame.test.ts),
+  [store](test/store-telegram-reply.test.ts), [Hermes](services/hermes/test_turn_process.py)).
+- Notes: the `reply` read (this turn unless the owner typed the target, earlier rows only when
+  the note copies the block's text; owner words `read_reply`), a review's label names its main
+  message's day before its place, a turn's note its day from `at_time` in the reader's zone (old
+  notes `<day> UTC`); each note in a turn's evidence has a `ref` that `archive_read note=<ref>`
+  opens in that turn only (`note_lookups`, 7 days, up to 5 tagged and read-checked sources);
+  owner corrections in `memory_recall` have `tag` and `evidence`, owner note hits `day` and
+  `sources`; the source-usage sentence is the recall evidence's `about` and ends the default
+  `memory.evidence` ([labels](test/source-labels.test.ts), [refs](test/store-note-refs.test.ts),
+  [store](test/store-note-sources.test.ts), [recall](test/store-native-memory.test.ts),
+  [Hermes](services/hermes/test_note_sources.py), [evidence](services/hermes/test_memory_evidence.py)).
+- Tester: `topic_message_is_not_a_reply`, `reply_note_reads_reply`, `reply_source_question`, a
+  retired reply target in `retired_source_leaves_tags` (its block, the turn's tool work and its
+  note go) and a review note's day and ref in `native_notes_reach_later_turns`, each seen to fail
+  at its gate on a fake without the fix; the scripted model's `[[replied:]]` reads a turn's reply
+  frame and `[[note_open:]]` opens a note by its ref ([scenarios](test/test_source_tag_scenarios.py),
+  [model](test/test_scripted_brain.py)). The fake now names a recall row's role in words, as
+  storage does, which `retired_source_leaves_tags`'s fake run had missed since step 2.
+  Checks (2026-11-18): the build; node unit tests (456: 401 pass, 51 skipped, and only the 4
+  workflow tests that also fail on main fail); the store files of this step (telegram reply and
+  dispatch, note refs, note sources and native memory: 25 of 25; archive thread, server, source
+  tags, search tags and native review also pass); Python Hermes (1040, with the 2 environment errors that also
+  occur on main), Telegram (152) and the repository's Python tests (164, 2 skipped).
+  Changed from the design: a review label's day comes before its place, so a cut label keeps it;
+  a private answer quotes what its question replies to; `archive_read` no longer requires `id`
+  when `note` is given; the model's reply read says "the message it replied to", without "(not
+  the owner's own words)", so an owner-chat label stays whole.
+  Review fixes: a replied-to text shorter than a run that a later note holds whole reads `reply`;
+  a later turn's note copied from a retired message (its turn message, replied-to block, recent
+  message or tool result) is withheld with that turn's tool work (`plan()` rules `quoted2`); a
+  note ref and owner note hits check canRead before tagging (`SourceTagRepository.checked`), so
+  a failed check opens nothing, and a failed tagger is counted; refs not kept count as
+  `note_refs`, a line of their own; recall `day` is null for a note with only a UTC day; the
+  reply frame's line shapes come from `retired_history.py`; the tester's dictated note no longer
+  shares a number with Bob's message ([Hermes](services/hermes/test_note_sources.py),
+  [retire](services/hermes/test_retired_history.py), [refs](test/store-note-refs.test.ts),
+  [monitor](services/hermes/test_monitoring.py), [health](test/dashboard-system-health.test.mjs)).
+  Pending:
+  - The full tester on images: the step 3 scenarios have only run against the fake.
+  - A live look at a reply block and a note's ref in a group and in the owner's chat.
+  - The Notes page names no review day until step 4.
+  - The privacy scan before a push.
+  Left for later: step 4 (dashboard).
+
 Memory step 2: recalled facts name their source
 ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md) step 2;
 owner, 2026-11-17: track the source of each fact before the MVP; built on the same three

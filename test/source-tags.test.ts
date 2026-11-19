@@ -4,7 +4,7 @@ import {chatDirectory} from '../src/chats.js';
 import {desktopLocalTime,telegramSenderName,telegramTopicOpening} from '../src/chats-telegram.js';
 import {forwardFacts,frameName} from '../src/forwarded.js';
 import {bucketOf,eventClass,eventClasses,sourceFacts,type EventClass,type SourceFacts} from '../src/source-facts.js';
-import {TAG_LIMIT,shownFileName,sharedTag,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type TagReader,type TagSource} from '../src/source-tags.js';
+import {TAG_LIMIT,correctionTag,shownFileName,sharedTag,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type TagReader,type TagSource} from '../src/source-tags.js';
 import {automaticPersonId,ownerChosenName} from '../src/stores/entities.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,GP2,OWNER,fixtureChats} from './fixture-groups.js';
 
@@ -222,6 +222,16 @@ test('ownerChosenName is empty for a name Nocheh gave by itself and set for one 
   assert.equal(ownerChosenName({id:confirmed,name:'Uncle Bob',revision:1},{entity_id:confirmed,state:'confirmed'},identity),'Uncle Bob','a confirmed suggestion');
   assert.equal(ownerChosenName({id:confirmed,name:'Bob',revision:1},{entity_id:confirmed,state:'exact'},identity),'Bob','a binding a merge moved');
   assert.equal(ownerChosenName({id:automatic,name:'  ',revision:2},exact,identity),null);
+});
+
+test('an owner correction names where it applies and the day it was made, in the owner\'s zone only for the owner (B3.6)',()=>{
+  const late=new Date(Date.UTC(2026,10,3,23,30));
+  assert.equal(correctionTag(GP1_TOPIC,late,owner,names,directory),'the owner\'s correction · group “GP1” › topic “Trips” · 2026-11-04');
+  assert.equal(correctionTag(OWNER,late,owner,names,directory),'the owner\'s correction · this chat · 2026-11-04');
+  assert.equal(correctionTag(GP1,late,member,names,directory),'the owner\'s correction · this chat · 2026-11-03','UTC for a member, whatever zone is passed');
+  assert.equal(correctionTag(GP1_TOPIC,null,member,names,directory),'the owner\'s correction · group “GP1” › topic “Trips” · a time not recorded');
+  assert.equal(correctionTag(OWNER,late,member,names,directory),'the owner\'s correction · a chat Nocheh can\'t name · 2026-11-03','nothing of the owner\'s is named to anyone else');
+  assert.ok(correctionTag(GP1_TOPIC,late,owner,new Map([[GP1,'G'.repeat(200)],[GP1_TOPIC,'T'.repeat(200)]]),directory).length<=TAG_LIMIT);
 });
 
 test('shared facts name only the day the owner shared them, and an unreadable source names nothing',()=>{

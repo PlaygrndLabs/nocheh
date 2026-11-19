@@ -6,12 +6,12 @@ import {telegramMessage,telegramSenderName,telegramUsername} from '../chats-tele
 import {forwardFacts} from '../forwarded.js';
 import {HttpError} from '../http.js';
 import {sourceChat} from '../spaces.js';
-import {placeTag,shownFileName,sourceClock,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
+import {correctionTag,placeTag,shownFileName,sourceClock,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
 import type {SourceReference} from './archive.js';
 import {boundChat,type SourceAccessRepository} from './access.js';
 import {ownerPeopleNames} from './entities.js';
 import type {GuardBinding} from './guards.js';
-import {countMemoryStep,type NoteSourceRepository} from './note-sources.js';
+import {bindingMoved,countMemoryStep,type NoteSourceRepository} from './note-sources.js';
 import {recallNames} from './recall-places.js';
 import {ownerTimeZone} from './task-settings.js';
 
@@ -26,8 +26,7 @@ export interface TagOptions {precision?:'minute'|'day';historical?:boolean;shown
   place?:boolean}
 /** The one call that runs every request's tag texts through the secret check (PreparedContextRepository.prepare). */
 type Prepare=(principal:Reader,value:unknown,detect:(text:string,background?:boolean)=>Promise<unknown>)=>Promise<unknown>;
-/** A guard binding that moved on is the caller's to retry, never a tag that failed. */
-export const bindingMoved=(error:unknown)=>error instanceof HttpError&&['guard_context_changed','guard_transition_pending'].includes(error.code);
+export {bindingMoved};
 
 /** Where a forward came from (forwardFacts), its kind from the original and its name only from the reader's own copy:
  *  with no such copy, no name. */
@@ -82,6 +81,52 @@ export class SourceTagRepository {
       const failed=unavailableTag('now');
       for(const id of ids)result.set(id,readable&&readable.get(id)!==true?null:{source:'nocheh:event:'+id,tag:failed.tag,by:failed.by,at:null});
       return result;
+    }
+  }
+
+  /**
+   * tags() for references no access check has passed yet, such as the messages a note's ref or a recalled note names:
+   * canRead first (readable()), and only those this reader may read are tagged; the rest map to null. A check that
+   * fails tags none of them, counted as a `source_tags` problem, since tags() alone would then name every one as "source
+   * not available right now", the placeholder for a source already checked.
+   */
+  async checked(principal:Reader,binding:GuardBinding,references:readonly SourceReference[],options:TagOptions={}):Promise<Map<string,(Tag&TagDetails)|null>> {
+    const result=new Map<string,(Tag&TagDetails)|null>(references.map(reference=>[reference.id,null]));
+    if(!references.length)return result;
+    let open:SourceReference[];
+    try {
+      const readable=await this.access.readable(principal,references,binding,{historical:options.historical===true});
+      open=references.filter(reference=>readable.get(reference.id)===true);
+    } catch(error) {
+      if(bindingMoved(error))throw error;
+      await countMemoryStep(this.stores.control,'source_tags',false);
+      return result;
+    }
+    for(const [id,tag] of await this.tags(principal,binding,open,options))result.set(id,tag);
+    return result;
+  }
+
+  /**
+   * Owner corrections' tags (B3.6), in the order given: each conversation it corrects as this reader names chats, and the
+   * day it was made in this reader's zone, all through one secret check. One that can't be built reads "source not
+   * available right now", counted as a `source_tags` problem.
+   */
+  async corrections(principal:Reader,items:readonly {chat:string|null;made:Date|null}[]):Promise<string[]> {
+    if(!items.length)return [];
+    try {
+      const owner=ownerReader(principal),policy=this.policy();
+      const [zone,names]=await Promise.all([owner?ownerTimeZone(this.stores.control):Promise.resolve('UTC'),
+        recallNames(this.stores,[...new Set(items.map(item=>item.chat).filter((chat):chat is string=>chat!==null))],{shownOnly:!owner})]);
+      const reader:TagReader={owner,chat:owner?principal.space??ownerChat(policy):principal.space??principal.scope,zone,precision:'day'};
+      const parts=items.map(item=>correctionTag(item.chat,item.made,reader,names));
+      const texts=!principal.admin&&this.prepare?await this.prepare(principal,parts,this.detect) as unknown[]:parts;
+      if(!Array.isArray(texts)||texts.length!==parts.length||texts.some(text=>typeof text!=='string'))throw new HttpError(500,'source_tags_unprepared');
+      await countMemoryStep(this.stores.control,'source_tags',true);
+      return texts as string[];
+    } catch(error) {
+      if(bindingMoved(error))throw error;
+      await countMemoryStep(this.stores.control,'source_tags',false);
+      return items.map(()=>unavailableTag('now').tag);
     }
   }
 

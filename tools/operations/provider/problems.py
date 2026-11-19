@@ -33,14 +33,14 @@ MAX_FOLLOWED = 50
 SOURCES = {'application': 'application', 'service': 'services', 'models': 'routes', 'work_unchecked': 'work', 'workers': 'work',
            'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram',
            'reader': 'readers', 'notes': 'notes', 'memory_read': 'notes', 'note_labels': 'store_notes', 'forwards_read': 'store_notes',
-           'source_tags': 'store_notes',
+           'source_tags': 'store_notes', 'note_refs': 'store_notes',
            'backup': 'backups', 'backup_unreadable': 'backups', 'backup_skipped': 'backups', 'offsite': 'backups', 'offsite_skipped': 'backups'}
 # A part's model calls, a reader's files, the steps that tell where notes came from and turns that read long-term
 # memory, counted per day with those that worked: they clear once one works after the last failure a check saw. Hermes's
-# steps (notes, memory_read) and the stores' (note_labels, forwards_read, source_tags) are lines of their own, so a step
+# steps (notes, memory_read) and the stores' (note_labels, forwards_read, source_tags, note_refs) are lines of their own, so a step
 # that works on one side never clears the other's.
-COUNTED_TODAY = ('model', 'reader', 'notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags')
-NOTE_LINES = ('notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags')
+COUNTED_TODAY = ('model', 'reader', 'notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags', 'note_refs')
+NOTE_LINES = ('notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags', 'note_refs')
 # Sends of the notices themselves, left out of the 'sends' count so a notice that fails cannot feed itself.
 OWN_SENDS = ('notice', 'notice_update')
 # Background work families, as System › Work names them.
@@ -301,6 +301,9 @@ def text(problem, new):
     if kind == 'source_tags':
         return (f"Memory labels: labelling where facts and search results came from failed {_plural(count, 'time', 'times')} "
                 'today; those showed “source not available right now”. The messages and what was learned from them are kept.')
+    if kind == 'note_refs':
+        return (f"Memory labels: note refs couldn’t be kept {_plural(count, 'time', 'times')} today; those notes went out "
+                'with their sources named but could not be opened by ref. The notes are kept.')
     if kind == 'backup':
         reason = BACKUP_REASONS.get(problem.get('reason'), BACKUP_REASONS['backup_failed'])
         if count == 1:

@@ -456,6 +456,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(!principal.admin)await s.turns.binding(principal);
       return result(await s.memory.openFact(principal,fact[1]!,fact[2]===undefined?null:Number(fact[2])),true);
     }
+    // What a note in this turn's evidence was written from, opened by archive_read {note} (ADR-0261); no bound reader's route (ADR-0262).
+    const noteEntry=path.match(/^\/v1\/memory\/notes\/([a-f0-9]{12})$/);
+    if(noteEntry&&req.method==='GET')return result(await s.sources.noteEntry(principal,noteEntry[1]!),true);
     const learnedEntry=path.match(/^\/v1\/memory\/learned\/([a-f0-9]{64})\/([1-9][0-9]{0,8})$/);
     if(learnedEntry&&req.method==='GET')return result(await s.sources.learnedEntry(principal,learnedEntry[1]!,Number(learnedEntry[2])),true);
     if(path==='/v1/memory/recall'&&req.method==='POST') {
@@ -467,7 +470,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       // member's private chat's or an ask about a member's (D7); the dashboard (admin) names none and reads every one.
       const found=await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation,
         ...(principal.admin?{}:{allowed:ownerRecallAllowed(s.access.policy())})});
-      return result(await withRecallPlaces(s.stores,await s.noteSources.withRecallSources(found)));
+      // Each note hit names up to 3 of the messages it was written from, tagged for the owner (B3.6).
+      const tagged=async(ids:string[])=>s.tags.checked(principal,binding,[...(await s.archive.capturedMany(ids)).values()].map(item=>item.reference));
+      return result(await withRecallPlaces(s.stores,await s.noteSources.withRecallSources(found,tagged)));
     }
     if(path==='/v1/memory/reviews'&&req.method==='GET'){admin(principal);return json(res,200,await s.reviews.list(principal,url.searchParams.get('after')??''));}
     if(path==='/v1/memory/reviews/control'&&req.method==='POST') {

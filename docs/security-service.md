@@ -93,7 +93,7 @@ Fresh configurations default to `NOCHEH_SECURITY_RUNTIME=isolated` and
 `NOCHEH_MEMORY_CONTEXT=evidence`.
 
 In evidence mode each native notes block is one entry, `{source, target, title,
-usage, about, notes: [{from, label, content}]}`. `content` is the note's text
+usage, about, notes: [{from, label, ref?, content}]}`. `content` is the note's text
 unchanged; `from` (one of `owner`, `nocheh`, `person`, `forward`, `file`,
 `mixed`, `turn`, `turn_read`, `unknown`, `unavailable`) and `label` (fixed
 words, at most 120 characters, no person's name) come from Nocheh's own record
@@ -215,6 +215,27 @@ corrected, once memory no longer holds it, or once any of its stored sources
 (or, for a fact whose sources may be incomplete, any message of its session) is
 retired. The retired route reports such records in `retired_records`, so Hermes
 withholds the stored rows that cite them.
+
+The reply block a turn's frame carries (ADR-0261 step 3) is built by storage from
+the reply relation the message's own read returned, the reader's read check and
+one tag request, never from an id in a payload, and passes the guard with the
+rest of the turn. Hermes takes `reply:{line, text, by, id}` only when the line
+has its fixed shape (at most 300 characters, one line, a known `by` and an id
+that are the line's own) and the text is one line of at most 200 characters, and
+always unframes the text; a recent message's `[In reply to …]` part is checked on
+its own and a bad one drops only itself. A forum topic's opening is never a
+reply target. The `reply` read token makes a turn's notes `turn_read` when the
+replied-to message is not the owner's own typing, Nocheh's own included; earlier
+in the session only when the note copies from the block's text (a run, a
+distinctive token, or a short text held whole). A note's `ref` (the first 12 hex
+of its key) is shown only when storage kept that turn's refs in `note_lookups`
+(pruned after 7 days; a failure is counted as `note_refs`); `archive_read
+{note}` opens a ref's messages only for the turn whose lookup kept it, never for
+a private answer, each through the reader's read check before it is tagged (a
+check that fails opens none), and Hermes drops a ref that is not the note's own
+key prefix. Retiring a message also withholds a later turn of the same session
+whose note copied its text, with that note. The sentence on reading source lines is the recall evidence entry's
+`about`, once per turn, and never part of a tool result.
 
 
 For an existing installation, stop Hermes and its native writers before running

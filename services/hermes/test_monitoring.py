@@ -141,6 +141,22 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(found[0]['ok'], 1, 'tags built after the failure, so the notice can say when labelling works again')
         self.assertIn('store_notes', problems.readable({'note_problems': rows, 'archive': stores}))
 
+    def test_note_refs_the_stores_could_not_keep_are_a_notice_line_of_their_own(self):
+        """ADR-0261: a turn's note refs that could not be kept leave its notes labelled but not openable by ref; the stores
+        count it as `note_refs`, never as a note labels failure, whose line says the labels failed."""
+        from datetime import datetime, timezone
+        from tools.operations.provider import problems
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        stores = {'memory_problems': [{'day': '2026-10-13', 'kind': 'note_refs', 'done': 0, 'failed': 2}]}
+        with tempfile.TemporaryDirectory() as state:
+            rows = monitoring.note_problems(state, now, archive=stores)
+        self.assertEqual(rows, [{'day': '2026-10-13', 'kind': 'note_refs', 'failed': 2, 'ok': 0}])
+        found = [problem for problem in problems.problems({'note_problems': rows}, [], '2026-10-13') if problem['kind'] == 'note_refs']
+        self.assertEqual([problems.text(problem, 1) for problem in found], [
+            'Memory labels: note refs couldn’t be kept 2 times today; those notes went out with their sources named but could '
+            'not be opened by ref. The notes are kept.'])
+        self.assertIn('store_notes', problems.readable({'note_problems': rows, 'archive': stores}))
+
     def test_a_stores_step_that_works_after_its_failure_says_working_again(self):
         # ADR-0257: the stores write a step that worked only once their day holds a failure of its kind, so steady use
         # writes nothing. The merged line still clears on a step that works after the failure, and reopens on the next.

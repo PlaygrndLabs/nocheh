@@ -207,6 +207,9 @@ a forward, a file, a mix, or a note written after the turn read something
 outside. Only a review that held other people's messages reads rules learned
 from others' words, and one learned from a forward or a file can make its note a
 mix; a review of only your own and Nocheh's messages leaves such rules out. A
+note written in a turn whose message replied to someone else's message, or to
+Nocheh's, reads "after reading the message it replied to" (amber); later in the
+conversation only a note that copies from that message does. A
 pin counts as the words of the message it pinned, and a message you sent that
 holds someone else's words, such as a shared checklist, a poll someone else
 added an option to or a service message carrying another's message, reads "a
