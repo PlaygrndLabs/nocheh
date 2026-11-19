@@ -31,9 +31,11 @@ export interface ChatAppLabel {app:ChatApp;external:string;state:ChatIdState}
  */
 export interface AppBinding {app:ChatApp;chat:string;topic:string|null}
 
-/** One chat in GET /internal/chats. A topic carries no app ids of its own: it is its parent's ids plus topic_key. */
+/** One chat in GET /internal/chats. A topic carries no app ids of its own: it is its parent's ids plus topic_key.
+ * `member_private` marks a member's own private chat with Nocheh that is open now (step 4, memberPrivate): listed only
+ * so the bot takes a member pass there; it is never served (its state is not active) and never the owner's. */
 export interface ServedChat {id:string;app:ChatApp;kind:ChatKind;parent_id:string|null;topic_key:string|null;state:ChatState;
-  app_ids:{external:string;state:ChatIdState}[]}
+  app_ids:{external:string;state:ChatIdState}[];member_private?:true}
 /**
  * GET /internal/chats, behind the service token: what the Python services may act for. The owner's private chat and
  * the owner's account are separate: owner_chat is a Nocheh chat id, owner_account the owner's id in the app (the

@@ -64,7 +64,7 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(route_class('job_report', ('approved_post', 'job_report'), 'approved_post'), 'job_report')
         for value in ('reminder', 'Job_report', None, 3, ['job_report'], {'job_report': 1}):
             self.assertEqual(route_class(value, ('approved_post', 'job_report'), 'approved_post'), 'approved_post', value)
-        self.assertEqual(len(set(SEND_CLASSES)), 11)
+        self.assertEqual(len(set(SEND_CLASSES)), 12)
 
     def test_telegram_answers_become_states_and_codes_never_descriptions(self):
         delivered = canonical({'ok': True, 'result': {'message_id': 42, 'chat': {'id': -20}, 'text': 'synthetic'}})

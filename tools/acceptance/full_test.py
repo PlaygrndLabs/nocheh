@@ -151,7 +151,16 @@ TITLES = {
     'defaults_keep_history_and_notion_off': 'Defaults: history kept, Notion off',
     'settings_apply_is_followed_to_the_end': 'Settings: Save and apply finish, and a reload keeps following',
     'memory_search_model_change_rebuilds_memory': 'Changing the memory search model rebuilds memory',
-    'private_canaries_never_left_the_owner': 'Private marks never left your private chat',
+    'member_private_chat_reads_joined_groups': 'In their private chat a member reads the groups they joined and their tasks, one project at a time, and changes nothing',
+    'member_private_chat_with_group_talk_off': 'With group talk off, a member is still answered in their private chat',
+    'member_private_chat_off_or_paused_gets_fixed_reply': 'A paused member, or one whose private chat is off, gets the fixed reply once a day',
+    'member_private_over_the_daily_cap': 'Over the daily cap, a member\'s private chat gets the limit reply once',
+    'owner_and_member_never_swap_profiles': 'A member\'s private chat never runs as you, and your chat never as a member',
+    'member_chat_is_never_a_sharing_source': 'A member\'s private chat is never a sharing rule\'s source or destination',
+    'member_private_chat_rechecks_old_presence': 'Before a member\'s private chat reads a group, Telegram is asked whether they are still in it',
+    'member_private_chat_stays_with_the_member': 'A member\'s private chat stays there: no group, other member, your turns or memory',
+    'owner_asks_about_a_member': 'You ask about a member: one separate answer from their chat only, then dropped',
+    'private_canaries_never_left_the_owner': 'Private marks never left your private chat, and a member\'s never left theirs',
     'no_lingering_isolated_turns': 'Nothing left running afterwards', 'dashboard_pages': 'Every dashboard page opens',
 }
 

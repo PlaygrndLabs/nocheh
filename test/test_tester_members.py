@@ -9,7 +9,7 @@ GROUP, OTHER, THIRD = '-10042', '-10043', 'd4'*32
 LISTED = [{'chat_id': GROUP, 'title': 'Synthetic Forum -10042', 'state': 'active'},
           {'chat_id': OTHER, 'title': 'Synthetic Forum -10043', 'state': 'active'},
           {'chat_id': THIRD, 'title': 'Synthetic Forum -10045', 'state': 'active'}]
-PERMISSIONS = {'talk': True, 'jobs': True, 'post': True, 'tools': True, 'tasks': 'write'}
+PERMISSIONS = {'talk': True, 'jobs': True, 'post': True, 'tools': True, 'tasks': 'write', 'private_chat': True}
 
 
 class FakeFixture:

@@ -87,7 +87,10 @@ export function MemberList({
                       )}
                     </span>
                     {meta && <span className="truncate text-xs text-muted">{meta}</span>}
-                    <span className="text-xs text-muted">{groupSummary(member)}</span>
+                    <span className="text-xs text-muted">
+                      {groupSummary(member)}
+                      {member.permissions.private_chat ? '' : ' · Private chat off'}
+                    </span>
                   </a>
                 </li>
               );

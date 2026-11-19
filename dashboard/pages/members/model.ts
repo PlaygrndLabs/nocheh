@@ -12,6 +12,7 @@ import type {
   MemberResult,
   MemberSettingsResult,
 } from '../../../src/member-wire';
+import {memberPrivateTextKeys} from '../../../src/member-wire';
 import {chatError, type IdentityGroup, type Person} from '../../lib/chats-model';
 
 type Named = {name: string | null; username: string | null; telegram_id: string | null};
@@ -160,6 +161,18 @@ export function withAnswers(list: MemberList | null, answers: readonly MemberAns
  */
 export function addGroups(shown: readonly string[], ticked: ReadonlySet<string>): Record<string, boolean> {
   return Object.fromEntries(shown.map(chat => [chat, ticked.has(chat)]));
+}
+
+/** The editable texts as GET /prompts answers them: the owner's replacements over the built-in texts. */
+export type PromptTexts = {texts?: Record<string, string>; defaults?: Record<string, string>};
+
+/**
+ * The owner-only line on the Members page about local laws on reading members' private chats (step 4), as the owner
+ * last wrote it or the built-in text; null until the texts load, or when both are empty. It is shown, never sent.
+ */
+export function localLawsLine(prompts: PromptTexts | null | undefined): string | null {
+  const key = memberPrivateTextKeys.localLaws;
+  return prompts?.texts?.[key]?.trim() || prompts?.defaults?.[key]?.trim() || null;
 }
 
 const memberErrors: Record<string, string> = {

@@ -41,6 +41,7 @@ import {telegramTopicSchema} from './telegram-topics.js';
 import {chatSchema} from './chat-schema.js';
 import {chatRecordSchema} from './chats.js';
 import {memberSchema} from './member-schema.js';
+import {ownerMemberAskSchema} from './owner-member-asks.js';
 import {sourceRetirementSchema} from './source-retirement.js';
 import {reactionStateSchema} from './reaction-state.js';
 import {knowledgeManagementSchema} from './knowledge-schema.js';
@@ -167,6 +168,7 @@ ${telegramTopicSchema}
 ${chatSchema}
 ${chatRecordSchema}
 ${memberSchema}
+${ownerMemberAskSchema}
 ${sourceRetirementSchema}
 ${reactionStateSchema}
 ${knowledgeManagementSchema}

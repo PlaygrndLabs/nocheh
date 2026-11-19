@@ -28,7 +28,7 @@ class ScriptedBrain:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context|turn|notes|note_from|memory_about|memory_blocks)(?::([^\]]*))?\]\]')
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|turn|notes|note_from|memory_about|memory_blocks)(?::([^\]]*))?\]\]')
     # A notes review (its one tool is memory) that reads [[review-note:TEXT]] in a message saves TEXT as a native note,
     # as a model notes what it read, so a scenario sees which messages a review read and how the note is labelled.
     REVIEW_NOTE = re.compile(r'\[\[review-note:([^\]]{1,300})\]\]')
@@ -287,12 +287,15 @@ class ScriptedBrain:
             present = bool(argument) and any(argument in block['text'] for block in blocks)
             self.record(directive=kind, argument=argument, phase='final', present=present, blocks=blocks)
             return {'content': '[brain] memory_blocks ' + argument + (' present' if present else ' absent')}
-        if kind == 'context':
+        if kind in ('context', 'context_split'):
             earlier = '\n'.join(self.text(message.content) for message in body.messages
                                 if message is not messages[index])
-            present = bool(argument) and argument in earlier
+            # [[context_split:LEFT|RIGHT]] looks for LEFT+RIGHT, so neither the probe nor its echoed answer ever
+            # holds a private mark whole: an earlier probe is no earlier mention, and the answer is no leak.
+            wanted = argument.replace('|', '') if kind == 'context_split' else argument
+            present = bool(wanted) and wanted in earlier
             self.record(directive=kind, argument=argument, phase='final', present=present)
-            return {'content': '[brain] context ' + argument + (' present' if present else ' absent')}
+            return {'content': '[brain] ' + kind + ' ' + argument + (' present' if present else ' absent')}
         self.record(directive=kind, argument=argument, phase='final')
         return {'content': '[brain] recovered ' + argument}
 

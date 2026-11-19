@@ -41,7 +41,7 @@ async function person(db:pg.Pool,external:string,name:string|null,rows:readonly 
 }
 const ref=(chat_id:string,title:string,state='active')=>({chat_id,title,state});
 const group=(chat_id:string,title:string,on:boolean,telegram:'in'|'left'|null,isNew=false,state='active')=>({...ref(chat_id,title,state),on,telegram,new:isNew});
-const allOn={talk:true,jobs:true,post:true,tools:true,tasks:'write'};
+const allOn={talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true};
 
 test('the owner adds, changes and removes members and sets the daily cap: idempotent, no guard epoch, and the directory follows at once',fixture,async()=>{
   const stores=await open(),db=stores.control,{start,restore}=await setup(db);

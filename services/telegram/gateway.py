@@ -40,7 +40,10 @@ REFUSAL_KINDS = ('not_allowed', 'daily_limit')
 # The classes storage may ask for on each route (ADR-0256); anything else gets the route's own, and the send still goes.
 REPLY_CLASSES = ('reply', 'follow_up', 'private_answer', 'card')
 ACTION_CLASSES = ('approved_post', 'job_report', 'scheduled_run', 'notice')
-NOTICE_CLASSES = ('notice', 'reminder')
+# The owner's ask about a member (step 4b) is answered in its own message, a class never learned nor consented to. It
+# goes only to the owner's private chat: a reply under the ask's own pass, or a notice there.
+MEMBER_READ = 'member_read'
+NOTICE_CLASSES = ('notice', 'reminder', MEMBER_READ)
 
 
 def topic_of(value):
@@ -197,11 +200,11 @@ class TelegramService:
         credential = body.get('archive_credential')
         if not isinstance(credential, str): raise ValueError('invalid_turn')
         # The pass's app binding names this chat and topic, and the served list agrees its space is there now (ADR-0252).
-        _, served = verify_turn_credential(credential, event, chat, topic, self.policy)
-        return chat, topic, message, credential, served
+        claims, served = verify_turn_credential(credential, event, chat, topic, self.policy)
+        return chat, topic, message, credential, served, claims
 
     def presence(self, body):
-        chat, topic, message, credential, _ = self._turn(body)
+        chat, topic, message, credential, _, _ = self._turn(body)
         finish = body.get('finish')
         if finish not in (None, 'answered', 'failed', 'clear'): raise ValueError('invalid_presence')
         if finish is not None:
@@ -279,7 +282,7 @@ class TelegramService:
             flag = self.cancels.get(key)
             if flag is not None and self.loop: self.loop.call_soon_threadsafe(flag.set)
             return self._observe(key)
-        chat, topic, message, credential, served = self._turn(body)
+        chat, topic, message, credential, served, claims = self._turn(body)
         dispatch, text, session = body.get('dispatch_key'), body.get('text'), body.get('session_id')
         bot = re.escape(self.bot_id or 'none')
         match = re.fullmatch(r'(telegram:' + bot + r':update:(\d{1,19}))(?::continuation:[a-f0-9]{64})?', dispatch) if isinstance(dispatch, str) else None
@@ -287,8 +290,15 @@ class TelegramService:
         if (not isinstance(text, str) or len(text) > 100000 or not isinstance(session, str) or not 0 < len(session) <= 200
                 or not isinstance(body.get('notify', False), bool) or not isinstance(body.get('presence', False), bool)):
             raise ValueError('invalid_reply')
-        # Answer privately, the one button a reply may carry: only in a group and only this turn's own (ADR-0249).
-        markup = answer_button(body.get('button'), chat, body['event_id'], served.owner_external())
+        # Answer privately, the one button a reply may carry: only in a served group and only this turn's own (ADR-0249);
+        # never in a private chat, the owner's or a member's (step 4).
+        markup = answer_button(body.get('button'), chat, body['event_id'], served)
+        # An ask about a member is answered under its own class, and only in the owner's private chat; its pass sends
+        # nothing else, and no other pass sends that class (step 4b).
+        if claims.get('member_read') is not None or body.get('send_class') == MEMBER_READ:
+            if claims.get('member_read') is None or body.get('send_class') not in (None, MEMBER_READ) or chat != served.owner_external() or topic is not None:
+                raise ValueError('invalid_reply')
+            body = {**body, 'send_class': MEMBER_READ}
         if self.loop is None:
             return dict(NOT_TRANSMITTED)
         future = asyncio.run_coroutine_threadsafe(self._reply(key, body, chat, topic, message, credential, markup), self.loop)
@@ -329,7 +339,8 @@ class TelegramService:
         requests, cancelled = [], self.cancels[key]
         dispatch = DISPATCH_KEY.set(body['dispatch_key'])
         # The reply answers this turn's message, which reply() checked against its dispatch key.
-        kind, answers = SEND_CLASS.set(route_class(body.get('send_class'), REPLY_CLASSES, 'reply')), SEND_ANSWERS.set(body['event_id'])
+        # reply() let member_read through only for an ask's own pass in the owner's private chat.
+        kind, answers = SEND_CLASS.set(route_class(body.get('send_class'), REPLY_CLASSES + (MEMBER_READ,), 'reply')), SEND_ANSWERS.set(body['event_id'])
         check = OUTBOUND_CHECK.set(outbound_check(chat, topic, lambda: check_delivery_policy(credential), cancelled, requests, markup))
         started, sending = int(time.time() * 1000), perf_counter()
         try:
@@ -530,7 +541,8 @@ class TelegramService:
         """The owner's fixed reply to someone who may not talk to Nocheh in a served group and
         addressed it, at most once a UTC day per person, group and kind (`once`: not allowed
         there, or over the member daily message cap), or to anyone but the owner who writes
-        to it privately, at most once a UTC day per person. No model runs and nothing else
+        to it privately, at most once a UTC day per person; a member over the daily message cap in their own private
+        chat gets that cap's reply there (`once`: daily_limit) at most once a UTC day too, apart from the other. No model runs and nothing else
         about the chat is sent. Nocheh's core has already decided the message addressed the
         bot and that the sender may not talk there: who is a member is the core's alone (step 3).
         Only a reply that may have reached Telegram uses up the day's: one Telegram refused, such as in a closed topic, or
@@ -538,7 +550,7 @@ class TelegramService:
         chat,user,message,topic=(str(body.get(key) or '') for key in ('chat_id','user_id','message_id','topic'))
         personal=body.get('private') is True
         once=body.get('once')
-        if (once is not None) if personal else once not in REFUSAL_KINDS:raise ValueError('invalid_refusal')
+        if once not in ((None,'daily_limit') if personal else REFUSAL_KINDS):raise ValueError('invalid_refusal')
         # A served group where it is in Telegram now, by the app's served list (ADR-0252).
         served=await asyncio.to_thread(self.policy.current,None,5.0,None if personal else lambda served:served.resolve(chat) is not None)
         group=None if personal else served.group(served.resolve(chat))
@@ -552,7 +564,8 @@ class TelegramService:
         # One reply a day: someone who keeps writing can't make the bot keep answering. In a group, one for each kind, in
         # the group whichever topic they write in.
         day=datetime.now(timezone.utc).strftime('%Y%m%d')
-        name='refusal-private-'+user+'-'+day if personal else 'refusal-'+once+'-'+chat+'-'+user+'-'+day
+        # Privately the not-allowed reply keeps its own key, so a stranger's day is unchanged by the cap's (step 4).
+        name=('refusal-private-' if once is None else 'refusal-private-'+once+'-')+user+'-'+day if personal else 'refusal-'+once+'-'+chat+'-'+user+'-'+day
         async with self.action_lock:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return json.loads(receipt.read_bytes())
@@ -572,6 +585,32 @@ class TelegramService:
             if result['state'] in ('done','ambiguous'):await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical(result))
             else:await asyncio.to_thread((self.receipts/(name+'.intent')).unlink)
             return result
+
+    def member_status(self, body):
+        return self.call(self.read_member(body))
+
+    async def read_member(self, body):
+        """Whether a person is still in a served group, asked of Telegram (getChatMember) before a member's private turn
+        (step 4): 'in' for a member, an admin or the creator, or a restricted person who is still a member; 'left' for
+        anyone who left, was removed or is restricted outside it. Only about a served group where it is in Telegram now.
+        A read, never a send: nothing is journaled. Anything Telegram does not answer plainly is no answer
+        (`failed`), and the app then changes nothing."""
+        chat,user=str(body.get('chat_id') or ''),str(body.get('user_id') or '')
+        # Which chat it is the served list says, below; the person is a raw Telegram user id.
+        if not chat or not re.fullmatch(r'[1-9]\d{0,18}',user) or set(body)-{'chat_id','user_id'}:raise ValueError('invalid_member_status')
+        served=await asyncio.to_thread(self.policy.current,None,5.0,lambda served:served.group(served.resolve(chat)) is not None)
+        group=served.group(served.resolve(chat))
+        if group is None or served.address(group)[0]!=chat:raise ValueError('member_status_chat_not_allowed')
+        if not self.connected():return {'state':'not_started','error_code':'telegram_not_connected'}
+        try:found=await self.bot.get_chat_member(int(chat),int(user))
+        except Exception:return {'state':'failed','error_code':'telegram_member_unknown'}
+        status=getattr(found,'status',None)
+        if status in ('creator','administrator','member'):return {'state':'done','status':'in'}
+        if status=='restricted':
+            member=getattr(found,'is_member',None)
+            if type(member) is bool:return {'state':'done','status':'in' if member else 'left'}
+        elif status in ('left','kicked'):return {'state':'done','status':'left'}
+        return {'state':'failed','error_code':'telegram_member_unknown'}
 
     def notice(self, body):
         return self.call(self.send_notice(body))

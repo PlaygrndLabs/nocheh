@@ -17,8 +17,9 @@ export type MemberPresence='in'|'left';
 /** The daily message cap: turns per member per UTC day across all groups (member_directory_state.daily_messages). */
 export const DAILY_MESSAGES_DEFAULT=200,DAILY_MESSAGES_MIN=1,DAILY_MESSAGES_MAX=10000;
 
-/** A member's permissions as stored: the sub-permissions keep their values while talk is off. */
-export interface MemberPermissions {talk:boolean;jobs:boolean;post:boolean;tools:boolean;tasks:MemberTasks}
+/** A member's permissions as stored: the sub-permissions keep their values while talk is off. `private_chat` is "Private
+ * chat with Nocheh" (step 4, members.private_chat): on by default, and independent of talk. */
+export interface MemberPermissions {talk:boolean;jobs:boolean;post:boolean;tools:boolean;tasks:MemberTasks;private_chat:boolean}
 /** A group Nocheh is in (a group chat whose state is not left, removed or archived), for the add flows. */
 export interface MemberGroupRef {chat_id:string;title:string|null;state:ChatState}
 /**
@@ -46,7 +47,8 @@ export interface MemberList {revision:number;daily_messages:number;groups:Member
  */
 export interface MemberAddRequest {operation_id:string;account_id:string|null;telegram_id:string|null;groups:Record<string,boolean>}
 /** The changes POST /v1/members/:id may carry; at least one. `groups` switches groups on (true) or off (false). */
-export interface MemberChanges {state?:MemberState;talk?:boolean;jobs?:boolean;post?:boolean;tools?:boolean;tasks?:MemberTasks;groups?:Record<string,boolean>}
+export interface MemberChanges {state?:MemberState;talk?:boolean;jobs?:boolean;post?:boolean;tools?:boolean;tasks?:MemberTasks;private_chat?:boolean;
+  groups?:Record<string,boolean>}
 /** POST /v1/members/:id: change a member. */
 export interface MemberChangeRequest {operation_id:string;changes:MemberChanges}
 /** POST /v1/members/:id/remove. */
@@ -67,6 +69,19 @@ export interface MemberSettingsResult {revision:number;daily_messages:number}
 export const memberTextKeys={dailyLimit:'telegram.member_daily_limit',groupTools:'telegram.group_tools_texts'} as const;
 /** The lines of telegram.group_tools_texts: with a follow-up reply to come, and without. */
 export const groupToolsTextLabels=['allowed_follow_up','allowed'] as const;
+/**
+ * The editable texts step 4 adds (member private chat, and the owner asking about a member). src/prompts.ts holds the
+ * defaults of the texts Nocheh sends itself; reply.member's default is Hermes's (services/hermes/prompts.py), as every
+ * reply.* text is. Settings › Assistant lists them.
+ * - reply: a prompt key, the reply rules of a member's own private chat with Nocheh (read only, with the truthful rule
+ *   that the owner can read the chat).
+ * - privateDailyLimit: a prompt key, the reply sent without a model to a member over the daily cap in their private
+ *   chat, at most once a UTC day.
+ * - notAllowedPrivate: the existing key telegram.not_allowed_private, reworded for "its owner and the people they add".
+ * - localLaws: a prompt key, the owner-only line on the Members page about local laws on reading members' chats.
+ */
+export const memberPrivateTextKeys={reply:'reply.member',privateDailyLimit:'telegram.member_private_daily_limit',
+  notAllowedPrivate:'telegram.not_allowed_private',localLaws:'members.local_laws'} as const;
 /** The line telegram.approval_texts gains: why a member's approved send or tool run did not happen (the member was
  * paused, removed, or their group or permission switched off). */
 export const memberChangedReason='reason_member_changed';

@@ -1,13 +1,13 @@
-import {admin,type Reader} from '../access.js';
+import {admin,boundReader,type Reader} from '../access.js';
 import {HttpError,string} from '../http.js';
-import {matchesArchiveFilters,type ArchiveFilters} from '../archive-filters.js';
+import {matchesArchiveFilters,privateChatsParams,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
 import {reactionObservation} from '../reaction-observation.js';
 import {limit} from '../retrieval.js';
 import {type Envelope} from '../archive.js';
-import {SourceAccessRepository} from './access.js';
+import {SourceAccessRepository,boundChat} from './access.js';
 import {AudienceRepository} from './audience.js';
 import {AttachmentRepository} from './attachments.js';
 import {SelectionRepository} from './selections.js';
@@ -20,7 +20,7 @@ import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {BOX_PAGE_BUDGET,PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
-import {archiveScopes,parentSpace,readSetGroups,sourceChat} from '../spaces.js';
+import {archiveScopes,otherPrivate,parentSpace,readSetGroups,sourceChat} from '../spaces.js';
 import {chats} from '../chats.js';
 import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
@@ -28,7 +28,7 @@ import {unavailableTag,zonedDay,type Tag,type TagDetails} from '../source-tags.j
 import {bindingMoved,ownerReader,type SourceTagRepository,type TagOptions} from './source-tags.js';
 import {countMemoryStep} from './note-sources.js';
 import {bucketOf,sourceFacts} from '../source-facts.js';
-import {telegramMessage,telegramTopicOpening} from '../chats-telegram.js';
+import {isTelegramChat,telegramMessage,telegramTopicOpening} from '../chats-telegram.js';
 import {repliesElsewhere} from '../observed-source.js';
 import type {LearnedMemoryRepository} from './learned.js';
 import {ownerTimeZone} from './task-settings.js';
@@ -41,14 +41,28 @@ const pageRecords=`FROM (SELECT id,kind,at,(extract(epoch FROM at)*1000000)::big
   WHERE scope=ANY($1::text[]) AND origin<>'generated' AND kind NOT IN ('telegram_wire','import_manifest')) a) e
   WHERE ($2::timestamptz IS NULL OR e.at>=$2) AND ($3::timestamptz IS NULL OR e.at<$3)`;
 
-/** Embedded reply snapshots never substitute for an independently authorized target. */
-export function scopedObservation(value:unknown):any {
+/** Embedded reply snapshots never substitute for an independently authorized target. `hideQuote` also drops the quote
+ *  of the message replied to: a reply to Nocheh's answer to the owner's ask about a member never shows that answer's
+ *  words again (D13, SourceAccessRepository.repliesToMemberRead). */
+export function scopedObservation(value:unknown,hideQuote=false):any {
   const result=structuredClone(value) as any;
   for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(result.payload?.[kind]) {
     delete result.payload[kind].reply_to_message;delete result.payload[kind].external_reply;
+    if(hideQuote)delete result.payload[kind].quote;
   }
   return result;
 }
+/** A payload without the quote of the message it replies to, and otherwise as it is. */
+const withoutQuote=(payload:unknown):unknown=>{
+  const result=structuredClone(payload) as any;
+  for(const kind of ['message','edited_message','channel_post','edited_channel_post'])if(result?.[kind])delete result[kind].quote;
+  return result;
+};
+/** Whether a payload (or an observation holding one) carries a quote of the message it replies to. */
+const quoting=(value:unknown):boolean=>{
+  const payload=(value as any)?.payload??value;
+  return ['message','edited_message','channel_post','edited_channel_post'].some(kind=>!!payload?.[kind]?.quote);
+};
 /** How much of a related message archive_read shows: what it answers or replies to, and each further one (ADR-0261). */
 const ANSWER_TEXT=500,THREAD_TEXT=300;
 /** How many sources an opened learned entry names (ADR-0261). */
@@ -78,10 +92,19 @@ export class SourceRepository {
     for(const reference of references){const tag=tags.get(reference.id);found.set(reference.id,tag?{tag:tag.tag,by:tag.by,at:tag.at}:{...unavailableTag('here'),at:null});}
     return found;
   }
+  /** The archive scopes a member's private chat, or the owner's ask about a member, searches (step 4): the groups of its
+   *  reads and its bound chat, under every id each has had; null for any other reader (an answer included, whose own
+   *  /start is in the owner's chat), which searches everything and is narrowed by canRead alone. */
+  private boundScopes(principal:Reader):string[]|null {
+    const chat=boundChat(principal);
+    if(chat===null)return null;
+    return archiveScopes([...readSetGroups(this.access.reads(principal)!),chat]);
+  }
   /** Relations are shown within the conversations the principal recalls. */
   private relationAudience(principal:Reader):RelationshipAudience {
-    // An answer reader sees relations within the groups frozen in its record (ADR-0249).
-    if(principal.answer!==undefined)return {kind:'reads',set:this.access.reads(principal)!};
+    // A bound reader sees relations within its bound groups (an answer's frozen in its record, ADR-0249), and a member,
+    // or the owner's ask about one, within that member's own chat too (step 4).
+    if(boundReader(principal)!==null){const chat=boundChat(principal);return {kind:'reads',set:this.access.reads(principal)!,...(chat?{chat}:{})};}
     const scope=this.access.recall(principal);
     return scope?{kind:'recall',scope}:{kind:'owner'};
   }
@@ -98,6 +121,11 @@ export class SourceRepository {
     const reference=(await this.access.archive.captured(id)).reference;
     if(binding&&!await this.access.canRead(principal,reference,binding))throw new HttpError(404,'source_not_found');
     return reference;
+  }
+  /** Whether a scoped read of this event drops the quote it carries (D13): it quotes Nocheh's answer to the owner's ask
+   *  about a member. Asked only of a message that quotes anything. */
+  private async hiddenQuote(id:string,payload:unknown):Promise<boolean> {
+    return quoting(payload)&&(await this.access.repliesToMemberRead([id])).has(id);
   }
   private async currentReactionSources(principal:Reader,reference:SourceReference,binding:GuardBinding|null) {
     const {object_id}=await this.access.relationships.describe(reference);
@@ -171,10 +199,11 @@ export class SourceRepository {
     const binding=principal.admin?null:await this.audience.assert(principal),reference=await this.permitted(principal,id,binding);
     const row=(await this.stores.archive.query('SELECT * FROM events WHERE id=$1',[id])).rows[0];
     let content:any={text:row.original_text?.toString()??null,payload:JSON.parse(row.payload.toString())},guardedRevision:number|null=null;
+    const hideQuote=!!binding&&await this.hiddenQuote(id,content.payload);
     if(binding?.mode==='on') {
-      const guarded=await this.access.guards.read('events:'+id,binding);content=scopedObservation(guarded.value);guardedRevision=guarded.revision;
+      const guarded=await this.access.guards.read('events:'+id,binding);content=scopedObservation(guarded.value,hideQuote);guardedRevision=guarded.revision;
     }
-    else if(binding)content=scopedObservation(content);
+    else if(binding)content=scopedObservation(content,hideQuote);
     const event:Envelope={version:1,key:principal.admin?row.source_key:'nocheh:event:'+id,channel:row.channel,bot_id:principal.admin?row.bot_id:'',
       origin:row.origin,scope:row.scope,source_id:row.source_id,revision:row.revision,kind:row.kind,occurred_at:row.occurred_at,...content,
       ...(principal.admin&&row.wire?{wire_base64:row.wire.toString('base64')}:{}),
@@ -252,10 +281,11 @@ export class SourceRepository {
     if(binding.mode==='on') {
       const guarded=await this.access.guards.read('events:'+id,binding).catch(error=>{if(pending(error))return null;throw error;});
       if(!guarded)return null;
-      const value=scopedObservation(guarded.value);return {text:String(value.text??''),payload:value.payload??null};
+      const value=scopedObservation(guarded.value,await this.hiddenQuote(id,(guarded.value as any)?.payload));return {text:String(value.text??''),payload:value.payload??null};
     }
     const row=(await this.stores.archive.query('SELECT original_text,payload FROM events WHERE id=$1',[id])).rows[0];
-    return {text:row?.original_text?.toString()??'',payload:row?JSON.parse(row.payload.toString()):null};
+    const payload=row?JSON.parse(row.payload.toString()):null;
+    return {text:row?.original_text?.toString()??'',payload:payload&&await this.hiddenQuote(id,payload)?withoutQuote(payload):payload};
   }
   private async thread(principal:Reader,binding:GuardBinding,reference:SourceReference,payload:unknown,options:{replies:number;chain:number}) {
     const audience=this.relationAudience(principal),self=(await this.originals([reference.id])).get(reference.id)!;
@@ -332,12 +362,23 @@ export class SourceRepository {
   private async searchOnce(principal:Reader,query:string,count:number,filters:ArchiveFilters) {
     string(query,2000);limit(count);if(!query.trim())throw new HttpError(400,'empty_query');
     const binding=principal.admin?null:await this.audience.assert(principal);
+    // A member's private chat and the owner's ask about a member search only the chats they may read (the bound groups and
+    // that member's chat, step 4), so other chats' hits never crowd theirs out of the first 200; canRead still decides each.
+    const narrowed=binding?this.boundScopes(principal):null;
+    // The private-chat split (step 4) is applied in the query too, so other chats' hits never crowd the asked ones out of
+    // the first 200; matchesArchiveFilters still checks each hit.
+    const split=privateChatsParams(filters);
+    const among=(narrowed||split[0])&&binding?.mode==='on'?(await this.stores.archive.query(`SELECT id FROM events WHERE ($2::text[] IS NULL OR scope=ANY($2::text[]))
+      AND ($3::text[] IS NULL OR (scope=ANY($3::text[]))=$4) AND to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1) ORDER BY id LIMIT 5000`,
+      [query,narrowed,...split])).rows.map(row=>row.id as string):null;
     const rows=await (binding?.mode==='on'?this.stores.derived.query(`SELECT s.event_id AS id,r.content FROM guard_sources s
       JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision
       WHERE s.kind='events' AND s.state='ready' AND to_tsvector('simple',r.search_text) @@ plainto_tsquery('simple',$1)
-      ORDER BY ts_rank(to_tsvector('simple',r.search_text),plainto_tsquery('simple',$1)) DESC,s.id LIMIT 200`,[query]):
+        AND ($2::text[] IS NULL OR s.event_id=ANY($2::text[]))
+      ORDER BY ts_rank(to_tsvector('simple',r.search_text),plainto_tsquery('simple',$1)) DESC,s.id LIMIT 200`,[query,among]):
       this.stores.archive.query(`SELECT id FROM events WHERE to_tsvector('simple',search_text) @@ plainto_tsquery('simple',$1)
-        ORDER BY ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) DESC,id LIMIT 200`,[query]));
+        AND ($2::text[] IS NULL OR scope=ANY($2::text[])) AND ($3::text[] IS NULL OR (scope=ANY($3::text[]))=$4)
+        ORDER BY ts_rank(to_tsvector('simple',search_text),plainto_tsquery('simple',$1)) DESC,id LIMIT 200`,[query,narrowed,...split]));
     const stateRows=principal.admin&&rows.rows.length?(await this.stores.control.query('SELECT event_id,state FROM dispatches WHERE event_id=ANY($1::text[])',[rows.rows.map(row=>row.id)])).rows:[];
     const states=new Map(stateRows.map(row=>[row.event_id,row.state]));
     const reviews=principal.admin?await actionReviews(this.stores.control,rows.rows.map(row=>row.id),'separated'):new Map();
@@ -350,7 +391,8 @@ export class SourceRepository {
       if(binding&&!await this.access.canRead(principal,reference,binding))continue;
       const original=(await this.stores.archive.query('SELECT scope,source_id,revision,kind,origin,occurred_at,original_text,payload FROM events WHERE id=$1',[reference.id])).rows[0];
       if(!matchesArchiveFilters(original,states.get(reference.id),filters,reviews.get(reference.id)?.state))continue;
-      const value=binding?.mode==='on'?scopedObservation((await this.access.guards.read('events:'+reference.id,binding)).value):{text:original.original_text?.toString()??''};
+      const value=binding?.mode==='on'?await (async()=>{const guarded=(await this.access.guards.read('events:'+reference.id,binding)).value as any;
+        return scopedObservation(guarded,await this.hiddenQuote(reference.id,guarded?.payload));})():{text:original.original_text?.toString()??''};
       // The lexical index includes payload metadata, but a scoped hit must also
       // match the independent message text, never a stripped reply snapshot.
       const text=String(value.text??'');
@@ -397,7 +439,7 @@ export class SourceRepository {
       if(binding?.mode==='on') {
         const guarded=await this.access.guards.read('events:'+id,binding).catch(error=>{if(pending(error))return null;throw error;});
         if(!guarded)continue;
-        const value=scopedObservation(guarded.value);text=String(value.text??'');payload=value.payload??null;
+        const value=scopedObservation(guarded.value,await this.hiddenQuote(id,(guarded.value as any)?.payload));text=String(value.text??'');payload=value.payload??null;
       }
       hits.push({source:'nocheh:event:'+id,scope:captured.scope,chat_id:sourceChat(captured),kind:captured.kind,occurred_at:original.occurred_at,text:text.slice(0,2000),...(text.length>2000?{truncated:true as const}:{})});
       if(tagged.has(id)){references.push(captured.reference);if(binding?.mode==='on')shown.set(id,payload);}
@@ -415,13 +457,28 @@ export class SourceRepository {
     string(input.chat,256);
     const from=pageDate(input.from),to=pageDate(input.to,true);
     const binding=principal.admin?null:await this.audience.assert(principal),owner=principal.admin||principal.scope===null;
+    const kind=boundReader(principal);
     // An answer reader reads any group of its record, by default the asking one, and never its own private chat (ADR-0249).
-    if(principal.answer!==undefined) {
+    if(kind==='answer') {
       const reads=this.access.reads(principal)!,chat=input.chat||(parentSpace(reads.home)??reads.home);
       if(!readSetGroups(reads).includes(chat))throw new HttpError(403,'conversation_not_permitted');
       return {chat,scopes:archiveScopes([chat]),from,to,binding};
     }
+    // A member reads their own private chat, by default, or any of their joined groups; the owner's ask about a member
+    // reads only that member's chat (step 4). Nothing without its binding.
+    if(kind!==null) {
+      const reads=this.access.reads(principal)!,mine=boundChat(principal);
+      if(mine===null)throw new HttpError(409,'member_chat_closed');
+      const chat=input.chat||mine;
+      if(chat!==mine&&!readSetGroups(reads).includes(chat))throw new HttpError(403,'conversation_not_permitted');
+      return {chat,scopes:archiveScopes([chat]),from,to,binding};
+    }
     if(!owner&&input.chat&&input.chat!==principal.scope)throw new HttpError(403,'conversation_not_permitted');
+    // The owner's turns never page a private chat that is not the owner's (a member's or a stranger's); the dashboard
+    // does (step 4).
+    // A raw Telegram id is read under the chat it names, so it is told apart by that chat too.
+    if(owner&&!principal.admin&&(otherPrivate(input.chat)||isTelegramChat(input.chat)&&otherPrivate(chats().resolve('telegram',input.chat))))
+      throw new HttpError(403,'conversation_not_permitted');
     // A topic is read with the rest of its group, as a group reader reads it.
     const space=principal.space?parentSpace(principal.space)??principal.space:null;
     const chat=owner?input.chat||(principal.admin?'':space??ownerChat(this.access.policy())??''):principal.scope!;
@@ -538,9 +595,10 @@ export class SourceRepository {
     const binding=principal.admin?null:await this.audience.assert(principal);
     if(binding?.mode==='on')throw new HttpError(403,'original_file_requires_owner');
     const file=await this.attachments.file(id);await this.permitted(principal,file.event.id,binding);
-    // A private answer reads text, transcripts and extracted text; the only original files it opens are its own turn's
-    // (its /start and that message's album), the way the turn's files reach it (ADR-0249).
-    if(principal.answer!==undefined&&![principal.turnEvent,...(principal.turnEvent?(await albumMembers(this.stores.archive,principal.turnEvent)).map(member=>member.id):[])]
+    // A bound reader reads text, transcripts and extracted text; the only original files it opens are its own turn's
+    // (an answer's /start, a member's own message, and that message's album), the way the turn's files reach it
+    // (ADR-0249, step 4).
+    if(boundReader(principal)!==null&&![principal.turnEvent,...(principal.turnEvent?(await albumMembers(this.stores.archive,principal.turnEvent)).map(member=>member.id):[])]
       .includes(file.event.id))throw new HttpError(403,'original_file_requires_owner');
     const bytes=await this.attachments.bytes(file);if(binding)await this.audience.assert(principal);return bytes;
   }

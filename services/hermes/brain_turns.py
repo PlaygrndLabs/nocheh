@@ -2,6 +2,7 @@
 
 Receipts stay content-free like every async run. The reply lives only in the run's .outcome file."""
 import asyncio
+import contextlib
 import json
 import re
 import threading
@@ -137,17 +138,32 @@ class BrainTurns:
         # role and read tools only (ADR-0249). Its pass and its framed question must come together.
         answer=claims.get('answer') is not None
         if answer!=isinstance(body.get('private_answer'),dict):raise ValueError('invalid_private_answer')
-        if answer:scope=replace(scope,owner=False)
+        # The owner's ask about a member (step 4b) is the same: never the owner, its pass and its ask come together.
+        member_read=claims.get('member_read')
+        ask=body.get('member_read')
+        if (member_read is not None)!=isinstance(ask,dict) or member_read is not None and ask.get('ask')!=member_read:raise ValueError('invalid_member_read')
+        if answer or member_read is not None:scope=replace(scope,owner=False)
         scope=Scopes.apply_revision(scope,claims)
         # Turns in one conversation keep their arrival order; different chats
-        # and topics run side by side, up to the capacity. Lane before capacity, always.
-        key=scope.space or scope.chat_id
-        lane=self.lanes.setdefault(key,{'lock':asyncio.Lock(),'users':0});lane['users']+=1
-        try:
-            async with lane['lock']:
+        # and topics run side by side, up to the capacity. A member's turns, in their own private chat and in groups, run
+        # one at a time: their pass's lane names them (step 4). The owner's turns, an answer's and an ask's carry none.
+        # Always the member's lane first, then the space's, then capacity. A member's group turn that waits for their
+        # running private turn therefore holds no group, so the owner's and other members' turns there go on; Nocheh
+        # still sends a group's replies in arrival order. One order for every turn, so no two turns wait on each other.
+        lane=claims.get('lane')
+        async with self._lane('lane:'+lane) if lane else contextlib.nullcontext():
+            async with self._lane(scope.space or scope.chat_id):
                 async with self.capacity:
                     if cancelled.is_set():return {'state':'cancelled'}
                     return await self._run(scope,body,progress,cancelled)
+
+    @contextlib.asynccontextmanager
+    async def _lane(self,key):
+        """One turn at a time under `key`, in arrival order; an idle key leaves nothing behind. Space keys are Nocheh chat
+        ids and member keys start with `lane:`, so the two never meet."""
+        lane=self.lanes.setdefault(key,{'lock':asyncio.Lock(),'users':0});lane['users']+=1
+        try:
+            async with lane['lock']:yield
         finally:
             lane['users']-=1
             if not lane['users'] and self.lanes.get(key) is lane:del self.lanes[key]

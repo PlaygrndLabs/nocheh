@@ -1,13 +1,13 @@
 import {createServer} from 'node:http';
 import {join} from 'node:path';
-import {admin,currentReader} from '../access.js';
+import {admin,boundReader,currentReader} from '../access.js';
 import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
 import {servedChats} from '../chats.js';
 import {telegramAddress} from '../frontdoor/telegram.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
-import {archiveFilters,matchesArchiveFilters} from '../archive-filters.js';
+import {archiveFilters,matchesArchiveFilters,privateChatsParams,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
@@ -37,7 +37,7 @@ import {memoryProblems} from './note-sources.js';
 import {searchTagged} from './native-memory.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
-import {currentChats} from './chats.js';
+import {currentChats,otherPrivateScopes} from './chats.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
@@ -45,8 +45,8 @@ import {MACHINE_BODY} from './machines.js';
 import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
-import {withRecallPlaces} from './recall-places.js';
-import {readSetGroups} from '../spaces.js';
+import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
+import {memberPrivate,readSetGroups} from '../spaces.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -64,9 +64,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(req.method==='GET'&&path==='/internal/chats') {
       // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
-      // chat apart from the owner's account.
-      authorize(req,config.token);const owner=s.access.policy().owner_id;
-      return json(res,200,servedChats(await currentChats(),owner?{app:'telegram',external:owner}:null));
+      // chat apart from the owner's account; and each member's own private chat that is open now, marked member_private
+      // so the bot takes a member pass only there (step 4). A member change moves no epoch: the bot reads this list
+      // again when it is old or misses a chat, and storage checks every member pass again anyway.
+      authorize(req,config.token);const owner=s.access.policy().owner_id,directory=await currentChats();
+      return json(res,200,servedChats(directory,owner?{app:'telegram',external:owner}:null,id=>memberPrivate(id,directory)));
     }
     if(req.method==='POST'&&path==='/internal/chats/leave') {
       // The bot asks right before Nocheh leaves a group (ADR-0253): is it still pending from this add?
@@ -97,10 +99,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       }
       return json(res,200,await s.memory.prepareRequest(body));
     }
-    // An answer reader's read set comes from its record on every request, and it reaches read routes only (ADR-0249). A
-    // pass naming a chat another process recorded a moment ago (a new topic's first turn) is read again once this
-    // process's directory has looked again, as the broker does (ADR-0252).
-    const parsed=await currentReader(req,config.token),principal=parsed.answer===undefined?parsed:await s.access.bindReads(parsed);
+    // A bound reader's reads (an answer's, a member's private chat's, the owner's ask about a member's) come from the store
+    // on every request, and it reaches its read routes only (ADR-0249, ADR-0262). A pass naming a chat another process
+    // recorded a moment ago (a new topic's first turn) is read again once this process's directory has looked again, as
+    // the broker does (ADR-0252).
+    const parsed=await currentReader(req,config.token),principal=boundReader(parsed)===null?parsed:await s.access.bindReads(parsed);
     assertPrivateAnswerRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
     // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
@@ -188,6 +191,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&entityRead)return json(res,200,await s.entities.inspect(principal,entityRead[1]!));
     // Runtime knowledge tools have their own bound owner-turn checks. They never proxy arbitrary owner routes.
     if(req.method==='GET'&&path==='/v1/knowledge/context')return json(res,200,await s.knowledge.inspect(principal,Object.fromEntries(url.searchParams)));
+    // The owner asks about a member's private chat with Nocheh (step 4b): only from the owner's own live turn, which the
+    // repository checks first; the answer comes later as a separate message.
+    if(req.method==='POST'&&path==='/v1/member-asks')return json(res,200,await s.memberAsks.ask(principal,await readJson(req,16*1024)));
     if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
     const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
     if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));
@@ -335,6 +341,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(control&&req.method==='POST')return json(res,200,await controlStorageWorkflow(s.stores.control,principal,control[1]!,control[2]!,await readJson(req)));
       if(path==='/v1/workflows/migrations'||path.startsWith('/v1/workflows/migrations/'))throw new HttpError(409,'legacy_migration_not_applicable');
     }
+    // The private-chat split of the Messages list and search (step 4), resolved from the chat rows in the store.
+    const privateScopes=async(filters:ArchiveFilters):Promise<ArchiveFilters>=>filters.private_chats?
+      {...filters,private_scopes:await otherPrivateScopes(s.stores.control,s.access.policy())}:filters;
     const result=async(value:unknown,prepared=false)=>{
       if(!principal.admin){if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
       return json(res,200,value);
@@ -431,6 +440,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return result({sources:await s.sources.found(principal,found.ids,count,searchTagged(found)),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
     }
     if(path==='/v1/memory/context'&&req.method==='GET') {
+      // A member's private chat and the owner's ask about a member are given nothing shared or granted (step 4).
+      if(['member','memberRead'].includes(boundReader(principal)??''))return result({sources:[],filter_status:'disabled'},true);
       const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);
       return result({...existing,sources:[...existing.sources,...granted.sources]},true);
     }
@@ -452,7 +463,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const input=object(await readJson(req)),binding=await s.guards.state();
       if(!principal.admin)await s.turns.binding(principal);
       // Each hit says in words which chat it came from, never by its raw ID (ADR-0251), and each note where it came from (ADR-0257).
-      const found=await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation});
+      // An owner turn recalls the owner's own notes and those of the owner's chat and the groups Nocheh serves, never a
+      // member's private chat's or an ask about a member's (D7); the dashboard (admin) names none and reads every one.
+      const found=await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation,
+        ...(principal.admin?{}:{allowed:ownerRecallAllowed(s.access.policy())})});
       return result(await withRecallPlaces(s.stores,await s.noteSources.withRecallSources(found)));
     }
     if(path==='/v1/memory/reviews'&&req.method==='GET'){admin(principal);return json(res,200,await s.reviews.list(principal,url.searchParams.get('after')??''));}
@@ -466,7 +480,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const mode=url.searchParams.get('mode')??'text';
         if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);
         if(mode!=='text')throw new HttpError(400,'invalid_search_mode');
-        return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),archiveFilters(url.searchParams)),true);
+        return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),await privateScopes(archiveFilters(url.searchParams))),true);
       }
       if(path==='/v1/archive/page')return result(await s.sources.page(principal,{chat:url.searchParams.get('chat')??'',from:url.searchParams.get('from')??'',
         to:url.searchParams.get('to')??'',after:url.searchParams.get('after')??'',count:limit(url.searchParams.get('limit'),30,50)}),true);
@@ -478,8 +492,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         await s.turns.assertAudience(principal);return json(res,200,copy);
       }
       if(path==='/v1/imports/pending') {
-        // An answer reader hears only about imports into the groups of its record, not the owner's (ADR-0249).
-        if(principal.answer!==undefined)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
+        // A bound reader hears only about imports into its groups, never the owner's nor a private chat's (ADR-0249, step 4).
+        if(boundReader(principal)!==null)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
         const owner=principal.scope===null||principal.scope===ownerChat(s.access.policy());
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});
       }
@@ -500,8 +514,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99].scope:null});
       }
       if(path==='/v1/data') {
-        const after=url.searchParams.get('after')??'',filters=archiveFilters(url.searchParams);if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
-        const candidates=(await s.stores.archive.query("SELECT e.id,e.channel,e.scope,e.source_id,e.revision,e.kind,e.origin,e.occurred_at,e.received_at,e.original_text,e.payload,(SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=e.id) AS artifact_kinds FROM events e WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1)) AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2) AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message') ORDER BY e.received_at DESC,e.id DESC LIMIT $4",[after,filters.scope,filters.kind,filters.reply?201:51])).rows;
+        const after=url.searchParams.get('after')??'',filters=await privateScopes(archiveFilters(url.searchParams));if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
+        const candidates=(await s.stores.archive.query("SELECT e.id,e.channel,e.scope,e.source_id,e.revision,e.kind,e.origin,e.occurred_at,e.received_at,e.original_text,e.payload,(SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=e.id) AS artifact_kinds FROM events e WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1)) AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2) AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message') AND ($5::text[] IS NULL OR (e.scope=ANY($5::text[]))=$6) ORDER BY e.received_at DESC,e.id DESC LIMIT $4",[after,filters.scope,filters.kind,filters.reply?201:51,...privateChatsParams(filters)])).rows;
         const states=candidates.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
           error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[candidates.map(row=>row.id)])).rows:[];
         const stateById=new Map(states.map(state=>[state.event_id,state]));
@@ -541,7 +555,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     throw new HttpError(404,'not_found');
   })().catch(error=>{
     if(res.headersSent){res.destroy();return;}
-    json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'service_unavailable'});
+    // A refusal may name what to ask instead (task_project_required names the lists to choose from, D14).
+    const details=error instanceof HttpError?(error as {details?:Record<string,unknown>}).details:undefined;
+    json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'service_unavailable',...(details??{})});
   });});
   server.requestTimeout=30000;return server;
 }

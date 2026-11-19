@@ -1,4 +1,5 @@
-// Synthetic groups, projects and members shared by the Members tests (ADR-0247, ADR-0248, ADR-0249, ADR-0252, step 3).
+// Synthetic groups, projects and members shared by the Members tests (ADR-0247, ADR-0248, ADR-0249, ADR-0252, step 3,
+// step 4: members' private chats).
 // Never live values.
 import type pg from 'pg';
 import {digest} from '../src/archive.js';
@@ -12,7 +13,9 @@ import {memberDirectory,memberIdFor,type MemberDirectory,type MemberRow,type Mem
  * - old-shaped chats, stored before step 2b, keep their Telegram value as their Nocheh id: OWNER, GP1-GP4, GP1_TOPIC,
  *   UNSERVED;
  * - chats first seen after step 2b have digest ids from chatIdFor: NG1, NG1_TOPIC, NG2 (a group Telegram upgraded,
- *   with an old and a current Telegram id) and BOB_CHAT (someone else's private chat). Their Telegram ids are *_TG. */
+ *   with an old and a current Telegram id) and BOB_CHAT (someone else's private chat). Their Telegram ids are *_TG.
+ * Each family also holds two members' own private chats (step 4): MEMBER_GP_CHAT and MEMBER_GP_OFF_CHAT are old-shaped,
+ * MEMBER_NG_CHAT and MEMBER_NG_OFF_CHAT have digest ids. */
 
 /** The owner's Telegram user id (the owner's account), which is also the owner's private chat's old-shaped id. */
 export const OWNER='123';
@@ -38,6 +41,17 @@ export const NG2_OLD_TG='-4000000000002',NG2_TG='-1002000000002',NG2=chatIdFor('
 export const NG_GROUP_IDS=[NG1_TG,NG2_TG,NG2_OLD_TG] as const;
 /** Bob's Telegram user id and his private chat with Nocheh, first seen after step 2b. Not served. */
 export const BOB='456',BOB_CHAT=chatIdFor('telegram',BOB);
+/*
+ * The fixture members' Telegram user ids and their own private chats with Nocheh (step 3, step 4). In the old-shaped
+ * family a private chat's id is its Telegram user id, as the owner's is; in the family first seen after step 2b it is
+ * chatIdFor. MEMBER_GP and MEMBER_NG have private chat on; MEMBER_GP_OFF and MEMBER_NG_OFF have it off.
+ */
+export const MEMBER_GP='701',MEMBER_NG='702',MEMBER_GP_OFF='705',MEMBER_NG_OFF='706';
+export const MEMBER_GP_CHAT=MEMBER_GP,MEMBER_NG_CHAT=chatIdFor('telegram',MEMBER_NG),MEMBER_GP_OFF_CHAT=MEMBER_GP_OFF,
+  MEMBER_NG_OFF_CHAT=chatIdFor('telegram',MEMBER_NG_OFF);
+/** Every fixture member's private chat: [Telegram user id, Nocheh chat id, title]. */
+const memberPrivateChats:readonly (readonly [string,string,string])[]=[[MEMBER_GP,MEMBER_GP_CHAT,'Mira'],[MEMBER_NG,MEMBER_NG_CHAT,'Nils'],
+  [MEMBER_GP_OFF,MEMBER_GP_OFF_CHAT,'Gita'],[MEMBER_NG_OFF,MEMBER_NG_OFF_CHAT,'Noor']];
 
 /** A chat directory snapshot with the accounts its private chats name, for seedChats. */
 export interface FixtureChats extends ChatSnapshot {accounts:{id:string;app:'telegram';external_id:string}[]}
@@ -61,11 +75,13 @@ export function fixtureChats(groupIds:readonly string[]=GP_GROUP_IDS):FixtureCha
   const topic=(id:string,parent:string,key:string,state:ChatState)=>chats.push({id,app:'telegram',kind:'topic',parent_id:parent,topic_key:key,state,title:null,is_forum:false,account_id:null,app_type:null});
   chat(OWNER,'private',{current:OWNER},{account_id:account(OWNER).id,title:'Owner'});
   chat(BOB_CHAT,'private',{current:BOB},{account_id:account(BOB).id,title:'Bob'});
+  // Each fixture member's own private chat with Nocheh (step 4): off, as every private chat but the owner's is.
+  for(const [person,id,title] of memberPrivateChats)chat(id,'private',{current:person},{account_id:account(person).id,title});
   for(const [i,group] of [GP1,GP2,GP3,GP4].entries()){const state=chat(group,'group',{current:group},{title:'GP'+(i+1),is_forum:group===GP1});if(group===GP1)topic(GP1_TOPIC,GP1,GP1_TOPIC_KEY,state);}
   chat(UNSERVED,'group',{current:UNSERVED},{title:'Unserved'});
   topic(NG1_TOPIC,NG1,NG1_TOPIC_KEY,chat(NG1,'group',{current:NG1_TG},{title:'NG1',is_forum:true}));
   chat(NG2,'group',{current:NG2_TG,old:[NG2_OLD_TG]},{title:'NG2'});
-  return {chats,ids,owner_chat:OWNER,accounts:[account(OWNER),account(BOB)]};
+  return {chats,ids,owner_chat:OWNER,accounts:[account(OWNER),account(BOB),...memberPrivateChats.map(([person])=>account(person))]};
 }
 /** The fixture directory: both families, served by `groupIds` (GP1-GP4 by default). */
 export const fixtureDirectory=(groupIds:readonly string[]=GP_GROUP_IDS):ChatDirectory=>chatDirectory(fixtureChats(groupIds));
@@ -135,34 +151,40 @@ export async function seedChats(db:Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'que
 }
 
 /*
- * Members (step 3), one in each family. Synthetic Telegram user ids; their accounts are accountIdFor('telegram', id) and
- * their member ids memberIdFor(account). Both are active with every permission on and tasks read and write unless a test
- * changes them (fixtureMembers(changes)).
+ * Members (step 3, step 4), two in each family. Synthetic Telegram user ids; their accounts are accountIdFor('telegram',
+ * id) and their member ids memberIdFor(account). All are active with every permission on and tasks read and write unless
+ * a test changes them (fixtureMembers(changes)); private chat is on for MEMBER_GP and MEMBER_NG and off for
+ * MEMBER_GP_OFF and MEMBER_NG_OFF. Each has their own private chat in the chat fixtures (MEMBER_*_CHAT).
  * - MEMBER_GP: GP1 and GP2 switched on, GP3 switched off. Telegram last saw them 'in' GP1 and GP3, 'left' GP2, and 'in'
  *   UNSERVED. GP4 has no row and no Telegram row: they talk there (no row counts as on) but do not reach it.
  * - MEMBER_NG: NG1 switched on; NG2 has no row. Telegram saw them 'in' both, so NG2 is "New here" and reached.
+ * - MEMBER_GP_OFF and MEMBER_NG_OFF: no switch rows and never seen in a group (no Telegram row), so they reach no group,
+ *   no group lists them, and accounts() never lists them.
  * BOB stays a stranger; the owner is never a member.
  */
-export const MEMBER_GP='701',MEMBER_NG='702';
 export const OWNER_ACCOUNT=accountIdFor('telegram',OWNER),BOB_ACCOUNT=accountIdFor('telegram',BOB);
 export const MEMBER_GP_ACCOUNT=accountIdFor('telegram',MEMBER_GP),MEMBER_NG_ACCOUNT=accountIdFor('telegram',MEMBER_NG);
+export const MEMBER_GP_OFF_ACCOUNT=accountIdFor('telegram',MEMBER_GP_OFF),MEMBER_NG_OFF_ACCOUNT=accountIdFor('telegram',MEMBER_NG_OFF);
 export const MEMBER_GP_ID=memberIdFor(MEMBER_GP_ACCOUNT),MEMBER_NG_ID=memberIdFor(MEMBER_NG_ACCOUNT);
+export const MEMBER_GP_OFF_ID=memberIdFor(MEMBER_GP_OFF_ACCOUNT),MEMBER_NG_OFF_ID=memberIdFor(MEMBER_NG_OFF_ACCOUNT);
 
 /** A member directory snapshot with the member people's accounts, for seedMembers. */
 export interface FixtureMembers extends MemberSnapshot {people:{id:string;app:'telegram';external_id:string}[]}
-const allOn=(id:string):MemberRow=>({id,state:'active',group_talk:true,group_jobs:true,group_post_other:true,group_tools:true,tasks:'write'});
-/** Both fixture members as directory rows, each members row changed by `changes` (keyed by member id). */
+const allOn=(id:string):MemberRow=>({id,state:'active',group_talk:true,group_jobs:true,group_post_other:true,group_tools:true,tasks:'write',
+  private_chat:id!==MEMBER_GP_OFF_ID&&id!==MEMBER_NG_OFF_ID});
+/** Every fixture member as directory rows, each members row changed by `changes` (keyed by member id). */
 export function fixtureMembers(changes:Readonly<Record<string,Partial<Omit<MemberRow,'id'>>>>={}):FixtureMembers {
   const row=(id:string):MemberRow=>({...allOn(id),...changes[id],id});
-  return {members:[row(MEMBER_GP_ID),row(MEMBER_NG_ID)],
-    accounts:[{account_id:MEMBER_GP_ACCOUNT,member_id:MEMBER_GP_ID},{account_id:MEMBER_NG_ACCOUNT,member_id:MEMBER_NG_ID}],
+  return {members:[row(MEMBER_GP_ID),row(MEMBER_NG_ID),row(MEMBER_GP_OFF_ID),row(MEMBER_NG_OFF_ID)],
+    accounts:[{account_id:MEMBER_GP_ACCOUNT,member_id:MEMBER_GP_ID},{account_id:MEMBER_NG_ACCOUNT,member_id:MEMBER_NG_ID},
+      {account_id:MEMBER_GP_OFF_ACCOUNT,member_id:MEMBER_GP_OFF_ID},{account_id:MEMBER_NG_OFF_ACCOUNT,member_id:MEMBER_NG_OFF_ID}],
     chats:[{member_id:MEMBER_GP_ID,chat_id:GP1,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP2,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP3,enabled:false},
       {member_id:MEMBER_NG_ID,chat_id:NG1,enabled:true}],
     presence:[{account_id:MEMBER_GP_ACCOUNT,chat_id:GP1,state:'in'},{account_id:MEMBER_GP_ACCOUNT,chat_id:GP2,state:'left'},
       {account_id:MEMBER_GP_ACCOUNT,chat_id:GP3,state:'in'},{account_id:MEMBER_GP_ACCOUNT,chat_id:UNSERVED,state:'in'},
       {account_id:MEMBER_NG_ACCOUNT,chat_id:NG1,state:'in'},{account_id:MEMBER_NG_ACCOUNT,chat_id:NG2,state:'in'}],
     owner_account:OWNER_ACCOUNT,daily_messages:200,revision:0,
-    people:[MEMBER_GP,MEMBER_NG].map(account)};
+    people:[MEMBER_GP,MEMBER_NG,MEMBER_GP_OFF,MEMBER_NG_OFF].map(account)};
 }
 /** The fixture member directory; install it with installMembersForTest. */
 export const fixtureMemberDirectory=(changes:Parameters<typeof fixtureMembers>[0]={}):MemberDirectory=>memberDirectory(fixtureMembers(changes));
@@ -174,8 +196,8 @@ export async function seedMembers(db:Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'q
   const connection=connectionIdFor('telegram');
   for(const person of fixture.people)await db.query(`INSERT INTO chat_accounts(id,connection_id,external_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
     [person.id,connection,person.external_id]);
-  for(const row of fixture.members)await db.query(`INSERT INTO members(id,state,group_talk,group_jobs,group_post_other,group_tools,tasks)
-    VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,[row.id,row.state,row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.tasks]);
+  for(const row of fixture.members)await db.query(`INSERT INTO members(id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,[row.id,row.state,row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.tasks,row.private_chat]);
   for(const link of fixture.accounts)await db.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1 AND member_id IS NULL',[link.account_id,link.member_id]);
   for(const row of fixture.chats)await db.query('INSERT INTO member_chats(member_id,chat_id,enabled) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
     [row.member_id,row.chat_id,row.enabled]);

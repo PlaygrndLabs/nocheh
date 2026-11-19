@@ -140,7 +140,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
     async def deliver(self, envelope, gateway=None, work=0.0):
         """Show presence while the brain works for ``work`` seconds, then deliver the reply; the outcome only."""
         gateway = gateway or self.gateway
-        chat, topic, message, credential, _ = gateway._turn(envelope)
+        chat, topic, message, credential, *_ = gateway._turn(envelope)
         if envelope.get('presence') and gateway.connected() and (gateway.typing_on or gateway.reactions_on):
             await gateway._start(envelope['id'], chat, topic, message, credential)
             await asyncio.sleep(work)
@@ -149,7 +149,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
 
     async def brain_ended(self, envelope, finish, work=0.0):
         """The brain's turn ended without a reply: presence is finished as Nocheh's core does."""
-        chat, topic, message, credential, _ = self.gateway._turn(envelope)
+        chat, topic, message, credential, *_ = self.gateway._turn(envelope)
         await self.gateway._start(envelope['id'], chat, topic, message, credential)
         await asyncio.sleep(work)
         await self.gateway._finish(envelope['id'], chat, message, credential, finish)

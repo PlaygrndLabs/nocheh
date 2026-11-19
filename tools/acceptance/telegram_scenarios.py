@@ -659,8 +659,9 @@ class Scenarios:
 
     # Members ------------------------------------------------------------------
 
-    # Every permission on and the member active: what Add by Telegram user ID gives a member.
-    MEMBER_DEFAULTS = {'state': 'active', 'talk': True, 'jobs': True, 'post': True, 'tools': True, 'tasks': 'write'}
+    # Every permission on and the member active: what Add by Telegram user ID gives a member, their private chat with
+    # Nocheh included (step 4).
+    MEMBER_DEFAULTS = {'state': 'active', 'talk': True, 'jobs': True, 'post': True, 'tools': True, 'tasks': 'write', 'private_chat': True}
 
     def members_api(self, path='', body=None, allow_error=False, signed_in=False):
         """The owner's Members routes (GET /v1/members; POST /v1/members, /settings, /<id> and /<id>/remove) as the
@@ -721,7 +722,7 @@ class Scenarios:
 
     def change_member_switches(self, item, switches, changes):
         """Send the owner's change of a member, only what differs from the list's `item`: `switches` by Nocheh chat id, and
-        state and permissions (talk, jobs, post, tools, tasks). A group with no switch counts as on, so turning one on that
+        state and permissions (talk, jobs, post, tools, tasks, private_chat). A group with no switch counts as on, so turning one on that
         is already on sends nothing, and a new switch is only ever an off one. Returns the member as the list shows them."""
         current = {row['chat_id']: row['on'] for row in item['groups']}
         held = {**item['permissions'], 'state': item['state']}
@@ -735,7 +736,7 @@ class Scenarios:
 
     def change_member(self, item, groups=None, **changes):
         """The owner's change of a member: `groups` maps Telegram group ids to on or off; `changes` are state='paused' or
-        'active', talk, jobs, post, tools (True or False) and tasks ('write' or 'read')."""
+        'active', talk, jobs, post, tools and private_chat (True or False) and tasks ('write' or 'read')."""
         return self.change_member_switches(item, {self.f.chat(group): on for group, on in (groups or {}).items()}, changes)
 
     def remove_member(self, item):

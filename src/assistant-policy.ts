@@ -3,7 +3,9 @@ import { HttpError, object } from './http.js';
 import { accountIdFor, chats, chatsAfterMiss, isChatId } from './chats.js';
 import { isTelegramAccount, isTelegramChat } from './chats-telegram.js';
 import { isProxyAccount } from './chats-telegram-updates.js';
-import { members } from './members.js';
+import { freshMembers, members } from './members.js';
+import { boundReader, boundReaderReadOnly, type Reader } from './access.js';
+import { memberPrivate, otherPrivate } from './spaces.js';
 
 /** Whether every topic of a group shares one memory ('group', the default) or each topic keeps its own ('topic'). */
 export type TopicMemory='group'|'topic';
@@ -71,13 +73,21 @@ export function messageSender(policy:Pick<AssistantPolicy,'owner_id'>,payload:un
   return account?{owner:false,account}:null;
 }
 /**
- * Whom a live Telegram message comes from, and in which chat Nocheh may answer it: the owner in their own private
- * chat, or the owner or a member who talks there (talksIn) in a served group. A message in a channel's or group's own
- * name (sender_chat) or from a proxy account is nobody's, so it is never admitted in a group. `scope` is the archive's
- * raw Telegram chat id; chat_id is the Nocheh chat it names, from the chat directory (ADR-0252), so a chat with no row is
- * answered nowhere (ADR-0242).
+ * Whom a live message turn is for, as conversationScope admits it: the owner (in their own private chat or a served
+ * group), a member who talks in a served group, or a member in their own private chat with Nocheh (step 4, ADR-0262).
+ * `member` (a members.id) is set only for the last: it says the turn reads and answers as that member's own private
+ * chat, never as the owner and never as a group.
  */
-export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:string):{owner:boolean;chat_id:string;user_id:string}|null {
+export interface ConversationScope {owner:boolean;chat_id:string;user_id:string;member?:string}
+/**
+ * Whom a live Telegram message comes from, and in which chat Nocheh may answer it: the owner in their own private
+ * chat, the owner or a member who talks there (talksIn) in a served group, or a member in their own private chat when
+ * the member directory admits it (privateTalks: active, private chat on; group talk and group switches do not count,
+ * step 4). A message in a channel's or group's own name (sender_chat) or from a proxy account is nobody's, so it is
+ * never admitted in a group. `scope` is the archive's raw Telegram chat id; chat_id is the Nocheh chat it names, from the
+ * chat directory (ADR-0252), so a chat with no row is answered nowhere (ADR-0242).
+ */
+export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:string):ConversationScope|null {
   if (!policy.enabled) return null;
   const update=object(payload);
   if (!update.message) return null; // Edits, reactions and callbacks are archived without creating old replies.
@@ -87,12 +97,46 @@ export function conversationScope(policy:AssistantPolicy,payload:unknown,scope:s
   const directory=chats(),id=isTelegramChat(scope)?directory.resolve('telegram',scope):null;
   if (id===null) return null;
   const owner=chat.type==='private' && directory.kind(id)==='private' && id===ownerChat(policy) && String(sender.id)===policy.owner_id;
-  if (!owner) {
-    if (!['group','supergroup'].includes(String(chat.type)) || directory.kind(id)!=='group' || !directory.served(id)) return null;
-    if (message.sender_chat!==undefined && message.sender_chat!==null || isProxyAccount(String(sender.id))) return null;
-    if (!talksIn(policy,id,String(sender.id))) return null;
+  if (owner) return {owner,chat_id:id,user_id:String(sender.id)};
+  if (chat.type==='private') {
+    const member=privateMember(policy,id,String(sender.id),String(chat.id));
+    return member===null?null:{owner:false,chat_id:id,user_id:String(sender.id),member};
   }
+  if (!['group','supergroup'].includes(String(chat.type)) || directory.kind(id)!=='group' || !directory.served(id)) return null;
+  if (message.sender_chat!==undefined && message.sender_chat!==null || isProxyAccount(String(sender.id))) return null;
+  if (!talksIn(policy,id,String(sender.id))) return null;
   return {owner,chat_id:id,user_id:String(sender.id)};
+}
+/**
+ * The member whose own private chat `chat` (a Nocheh chat id) is, when that member may talk to Nocheh there now; else
+ * null. The chat is a private chat itself (never a topic) that is not the owner's, its person (chats.account_id) wrote
+ * the message (`user`, the sender, is the chat's own Telegram id `external`, as in every private chat), the person is
+ * not the owner nor a proxy account, and the member directory admits them (memberPrivate: active, private chat on).
+ * A stranger, a paused or removed member and one with private chat off get null, and so the fixed private reply.
+ */
+function privateMember(policy:Pick<AssistantPolicy,'owner_id'>,chat:string,user:string,external:string):string|null {
+  const directory=chats(),row=directory.get(chat);
+  if(!row||row.kind!=='private'||row.owner||user!==external||!isTelegramAccount(user)||isProxyAccount(user))return null;
+  if(policy.owner_id!==null&&user===policy.owner_id)return null;
+  const account=telegramAccount(user);
+  if(account===null||row.account_id!==account||!memberPrivate(chat,directory))return null;
+  return members().memberOf(account)?.id??null;
+}
+/**
+ * Why a reader may not have Nocheh do anything but read and answer (ADR-0249, step 4): the read-only code of its bound
+ * reader (an "Answer privately" answer, a member in their own private chat, the owner's ask about a member), or, for a
+ * turn whose chat is a private chat that is not the owner's without a member bound to it, the member code too (fail
+ * closed: such a turn may only ever be a member's). Null for every other reader. Every effect site asks this before it
+ * records anything.
+ */
+export function readOnlyReader(principal:Pick<Reader,'scope'|'space'|'answer'|'member'|'memberRead'>):string|null {
+  const bound=boundReader(principal);
+  if(bound!==null)return boundReaderReadOnly[bound];
+  return otherPrivate(principal.scope)||otherPrivate(principal.space)?boundReaderReadOnly.member:null;
+}
+/** readOnlyReader as a refusal: 403 with the reader's read-only code. */
+export function assertActingReader(principal:Pick<Reader,'scope'|'space'|'answer'|'member'|'memberRead'>):void {
+  const code=readOnlyReader(principal);if(code!==null)throw new HttpError(403,code);
 }
 
 /**
@@ -124,12 +168,16 @@ export function allowedSender(policy:AssistantPolicy,payload:unknown,scope:strin
 
 /**
  * Whether an archived event may go into the owner's own notes review: a live Telegram update only from an allowed
- * sender (allowedSender), and Nocheh's own messages and the owner's web chat always. Any other kind is refused, so a
- * kind added later stays out until it is named here. Group memory and replies do not ask this.
+ * sender (allowedSender), Nocheh's own messages in the owner's chat or a group, and the owner's web chat always. Nocheh's
+ * messages in anyone else's private chat (a member's, step 4) or in a chat the directory does not know are refused. Any
+ * other kind is refused, so a kind added later stays out until it is named here. Group memory and replies do not ask this.
  */
 export function notesSender(policy:AssistantPolicy,event:{channel:string;kind:string;scope:string;payload:unknown}):'review'|'sender_not_allowed' {
   if(event.channel==='telegram'&&event.kind==='telegram_update')return allowedSender(policy,event.payload,event.scope)?'review':'sender_not_allowed';
-  if(event.channel==='telegram'&&event.kind==='telegram_delivered_message')return 'review';
+  if(event.channel==='telegram'&&event.kind==='telegram_delivered_message') {
+    const directory=chats(),id=isTelegramChat(event.scope)?directory.resolve('telegram',event.scope):null;
+    return id!==null&&(id===ownerChat(policy)&&directory.kind(id)==='private'||directory.kind(id)==='group')?'review':'sender_not_allowed';
+  }
   if(event.channel==='browser'&&['browser_input','browser_delivered_message'].includes(event.kind))return 'review';
   return 'sender_not_allowed';
 }
@@ -149,6 +197,22 @@ export function outsideChat(policy:AssistantPolicy,source:{origin:string;channel
 }
 
 /**
+ * Whether a live Telegram update that outsideChat keeps out is from a member's own private chat that is open now
+ * (memberPrivate, step 4): it is prepared like the owner's, so the member's turn can read it. Read, learned from and
+ * shown to the owner's turns it still is not: storage reads such a chat only for the reader bound to it. Skipping is
+ * final, so a member this process has not loaded yet (added or switched on a moment ago) is looked up again first.
+ * Only nocheh-app holds a member directory; without one no chat is admitted here.
+ */
+export async function preparedMemberChat(policy:AssistantPolicy,source:{origin:string;channel:string;kind:string;scope:string}):Promise<boolean> {
+  if(!policy.enabled||!policy.owner_id||source.origin!=='live'||source.channel!=='telegram'||source.kind!=='telegram_update'||!isTelegramChat(source.scope))return false;
+  const id=chats().resolve('telegram',source.scope);
+  if(id===null||chats().kind(id)!=='private'||chats().isOwner(id))return false;
+  if(memberPrivate(id))return true;
+  await freshMembers();
+  return memberPrivate(id);
+}
+
+/**
  * For a decision that cannot be taken back (a turn refused, a message left unprepared): when this process's chat
  * directory does not hold the Telegram chat a live original came from, or holds it but does not serve it, waits until
  * the loader has looked again (ADR-0252). The capture that recorded the chat, a served group's new id after an
@@ -163,15 +227,27 @@ export async function settleTelegramChat(source:{channel:string;scope:string}):P
 
 /** Final Telegram send authorization uses the captured original, never a prepared representation. An answer reader's
  * pass (ADR-0249) delivers only into the owner's own private chat, from the owner's own update there, and only with
- * its read set bound from its open record; never into a group. */
-export function telegramDeliveryAllowed(policy:AssistantPolicy,principal:{scope:string|null;answer?:string;reads?:unknown},source:{origin:string;channel:string;kind:string;scope:string;payload:Buffer}|null):boolean {
+ * its read set bound from its open record; never into a group. The owner's ask about a member (memberRead, step 4b)
+ * delivers the same way, only into the owner's own private chat from the owner's own update there, and only with the
+ * asked member's chat bound from its running record. A member in their own private chat (step 4) delivers only into
+ * that chat, from their own update there, and only with that very chat bound as theirs. */
+export function telegramDeliveryAllowed(policy:AssistantPolicy,principal:{scope:string|null;answer?:string;reads?:unknown;member?:string;memberRead?:string;memberChat?:string},
+  source:{origin:string;channel:string;kind:string;scope:string;payload:Buffer}|null):boolean {
   if(!source)return false;
-  if(principal.answer!==undefined&&(source.channel!=='telegram'||!principal.reads))return false;
+  // Every bound reader answers only in Telegram and only with its reads bound for this request; one bound to a member's
+  // chat (a member, or the owner's ask about a member) only with that chat bound too.
+  const bound=boundReader(principal);
+  if(bound!==null&&(source.channel!=='telegram'||!principal.reads))return false;
+  if((bound==='member'||bound==='memberRead')&&!principal.memberChat)return false;
   if(source.channel!=='telegram')return true;
   if(source.origin!=='live'||source.kind!=='telegram_update')return false;
   try {
-    const selected=conversationScope(policy,JSON.parse(source.payload.toString()),source.scope);
-    if(principal.answer!==undefined)return !!selected&&selected.owner&&selected.chat_id===principal.scope;
+    const selected=conversationScope(policy,JSON.parse(source.payload.toString()),source.scope) as {owner:boolean;chat_id:string;member?:string}|null;
+    if(bound==='answer'||bound==='memberRead')return !!selected&&selected.owner&&selected.chat_id===principal.scope;
+    if(bound==='member')return !!selected&&!selected.owner&&selected.member===principal.member&&selected.chat_id===principal.scope&&
+      principal.memberChat===principal.scope;
+    // A private chat that is not the owner's delivers only for its own member's reader (fail closed).
+    if(selected&&!selected.owner&&chats().kind(selected.chat_id)==='private')return false;
     return !!selected&&(selected.owner?null:selected.chat_id)===principal.scope;
   }catch{return false;}
 }

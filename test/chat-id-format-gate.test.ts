@@ -30,7 +30,7 @@ const allowlist:readonly (readonly [string,Owner,number,string])[]=[
   // The Telegram adapter's legitimate reads of Telegram's own formats
   ['dashboard/lib/chats-model.ts','adapter',1,'validUserId: a Telegram user id typed to add a member by ID'],
   ['dashboard/lib/messages-format.ts','adapter',1,'a Desktop export matched to its group by the -100 id'],
-  ['services/telegram/gateway.py','adapter',2,'raw Telegram chat, user and message ids at the front door'],
+  ['services/telegram/gateway.py','adapter',3,'raw Telegram chat, user and message ids at the front door, and the user id a member check asks about'],
   ['services/telegram/server.py','adapter',1,'a refresh names a raw Telegram chat'],
   ['src/assistant-policy.ts','adapter',1,'TELEGRAM_OWNER_ID'],
   ['src/conversation-page.ts','adapter',1,'Telegram ids inside an original\'s payload'],

@@ -1,5 +1,8 @@
-import {turnToken,type Reader} from '../access.js';
+import {boundReader,memberClaimId,memberReadId,turnToken,type Reader} from '../access.js';
+import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
+import {otherPrivate,readSetIds} from '../spaces.js';
+import {memberChatClosed} from './member-reads.js';
 import {appBindingOf} from '../frontdoor/telegram.js';
 import {GuardRepository,carriesForward,jobRun,type GuardBinding} from './guards.js';
 import {ProjectRepository} from './projects.js';
@@ -23,25 +26,52 @@ export class AudienceRepository {
     return !!run&&run.binding.generation===principal.generation&&Number(run.binding.epoch)===principal.guard_epoch&&
       await carriesForward(this.guards.stores.control,run.binding,current);
   }
-  /** A turn's credential, for the current binding, or for `own`, a job run's kept binding while it carries (ADR-0208). */
-  async turn(secret:string,principal:Pick<Reader,'scope'|'space'|'purpose'|'logical_profile'|'answer'|'reads'>,eventId:string,expires:number,own?:GuardBinding):Promise<string> {
+  /**
+   * A turn's credential, for the current binding, or for `own`, a job run's kept binding while it carries (ADR-0208).
+   * A bound reader's pass names it and is signed only as storage bound it (ADR-0249, step 4):
+   * - `answer`: an "Answer privately" answer, in the owner's private chat, with its read set;
+   * - `member`: a member in their own private chat, with its reads and memberChat bound to that very chat;
+   * - `memberRead` (the claim member_read): the owner's ask about a member, in the owner's private chat, with the asked
+   *   member's chat bound and no group to read.
+   * A private chat that is not the owner's gets a pass only as its own member's. `lane` (a member id) is signed on a
+   * member's private pass (their own id) and on a group pass a member's message started; never on the owner's, an
+   * answer's or an ask's, and a lane that fits none of these is left out, as it grants nothing.
+   */
+  async turn(secret:string,principal:Pick<Reader,'scope'|'space'|'purpose'|'logical_profile'|'answer'|'reads'|'member'|'memberRead'|'memberChat'>&{lane?:string},
+    eventId:string,expires:number,own?:GuardBinding):Promise<string> {
     if(!principal.space)throw new HttpError(400,'conversation_required');
+    const bound=boundReader(principal);
     // A private answer's pass names its record and reads as the asker's private chat, never as the owner (ADR-0249).
     const answer=principal.answer;
     if(answer!==undefined&&(!principal.reads||principal.scope===null||principal.scope!==principal.space))throw new HttpError(409,'private_answer_closed');
+    // A member's pass reads as their own private chat, a chat that is not the owner's, and only as storage bound it.
+    const member=bound==='member'?principal.member!:undefined;
+    if(member!==undefined&&(!memberClaimId.test(member)||principal.scope===null||principal.scope!==principal.space||chats().kind(principal.scope)!=='private'||
+      !otherPrivate(principal.scope)||principal.memberChat!==principal.scope||!principal.reads||principal.reads.home!==principal.scope))throw new HttpError(409,memberChatClosed);
+    // The owner's ask about a member reads as the owner's private chat, never as the owner: the asked member's chat and
+    // no group.
+    const memberRead=bound==='memberRead'?principal.memberRead!:undefined;
+    if(memberRead!==undefined&&(!memberReadId.test(memberRead)||principal.scope===null||principal.scope!==principal.space||chats().kind(principal.scope)!=='private'||
+      !chats().isOwner(principal.scope)||!principal.memberChat||!otherPrivate(principal.memberChat)||!principal.reads||readSetIds(principal.reads).length))
+      throw new HttpError(409,memberChatClosed);
+    // Nobody else's pass is ever for a private chat that is not the owner's (fail closed, step 4).
+    if(member===undefined&&(otherPrivate(principal.scope)||otherPrivate(principal.space)))throw new HttpError(409,memberChatClosed);
+    const lane=principal.lane!==undefined&&memberClaimId.test(principal.lane)&&(member!==undefined?principal.lane===member:
+      bound===null&&principal.scope!==null&&chats().groupOf(principal.scope)!==null)?principal.lane:undefined;
     const binding=own?(await this.guards.assertCarried(own),own):await this.guards.state();
     // The chat's active project gives the turn that project's role and skills; a private answer's, the project of its
-    // record, while that project is active.
+    // record, while that project is active. A member's private chat and an ask about a member have none.
     const control=this.guards.stores.control;
     const project=answer!==undefined?principal.reads!.project===null?null:
       (await control.query<{id:string;state:string}>('SELECT id,state FROM projects WHERE id=$1',[principal.reads!.project])).rows[0]??null:
-      (await new ProjectRepository(control).effective(principal.space)).project;
+      member!==undefined||memberRead!==undefined?null:(await new ProjectRepository(control).effective(principal.space)).project;
     // The app the turn's chat lives in, as the front door that receives the turn checks it: the chat's current app id
     // and topic now, so a reply follows a group Telegram upgraded (ADR-0252). A chat the directory does not address
     // gets none, and no front door accepts a turn without it; storage itself does not require it, so job passes work.
     const app=appBindingOf(principal.space);
     return turnToken(secret,principal.scope,expires,eventId,{space:principal.space,revision:binding.epoch,
       guard_epoch:binding.epoch,generation:binding.generation,...(principal.purpose?{purpose:principal.purpose}:{}),...(principal.logical_profile?{logical_profile:principal.logical_profile}:{}),
-      ...(project?.state==='active'?{project:project.id}:{}),...(answer!==undefined?{answer}:{}),...(app?{app}:{})});
+      ...(project?.state==='active'?{project:project.id}:{}),...(answer!==undefined?{answer}:{}),...(member!==undefined?{member}:{}),
+      ...(memberRead!==undefined?{memberRead}:{}),...(lane!==undefined?{lane}:{}),...(app?{app}:{})});
   }
 }

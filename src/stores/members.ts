@@ -38,7 +38,7 @@ export async function loadMemberSnapshot(control:pg.Pool,policy:Policy):Promise<
   const db=await control.connect();
   try {
     await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const rows=(await db.query('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks FROM members')).rows;
+    const rows=(await db.query('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat FROM members')).rows;
     const accounts=(await db.query('SELECT id AS account_id,member_id FROM chat_accounts WHERE member_id IS NOT NULL')).rows;
     const chats=(await db.query('SELECT member_id,chat_id,enabled FROM member_chats')).rows;
     const presence=(await db.query<MemberPresenceRow>(`SELECT m.account_id,m.chat_id,m.state FROM chat_memberships m JOIN chat_accounts a ON a.id=m.account_id
@@ -125,7 +125,7 @@ export async function memberView(db:Db,owner:string|null,only:string|null=null,w
   const groups=new Map<string,GroupRow>(groupRows.map(row=>[row.id as string,{chat_id:row.id,title:chatLabel(row,row.username,row.external_id),state:row.state}]));
   const isIn=(group:GroupRow|undefined)=>!!group&&!['left','removed','archived'].includes(group.state);
   const ref=(group:GroupRow):MemberGroupRef=>({chat_id:group.chat_id,title:group.title,state:group.state});
-  const memberRows=(await db.query(`SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,added_at FROM members
+  const memberRows=(await db.query(`SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,added_at FROM members
     WHERE $1::text IS NULL OR id=$1 ORDER BY added_at,id`,[only])).rows;
   const accountRows=(await db.query(`SELECT a.id,a.member_id,a.external_id,a.display_name,a.username FROM chat_accounts a
     WHERE a.member_id IS NOT NULL AND ($1::text IS NULL OR a.member_id=$1) ORDER BY a.id`,[only])).rows;
@@ -147,7 +147,8 @@ export async function memberView(db:Db,owner:string|null,only:string|null=null,w
     }).sort(byTitle);
     return {id:row.id,account_id:own?.id??'',state:row.state,name:own?.display_name??null,username:own?.username??null,telegram_id:own?.external_id??null,
       owner_linked:owner!==null&&accounts.some(account=>account.id===owner),added_at:new Date(row.added_at).toISOString(),
-      permissions:{talk:row.group_talk,jobs:row.group_jobs,post:row.group_post_other,tools:row.group_tools,tasks:row.tasks},groups:memberGroups};
+      permissions:{talk:row.group_talk,jobs:row.group_jobs,post:row.group_post_other,tools:row.group_tools,tasks:row.tasks,private_chat:row.private_chat},
+      groups:memberGroups};
   });
   const people:MemberPerson[]=[];
   if(withPeople) {
@@ -273,9 +274,10 @@ export class Members implements MemberRepository {
       if(!row)throw new HttpError(404,'member_not_found');
       const c=request.changes;
       const next={state:c.state??row.state,group_talk:c.talk??row.group_talk,group_jobs:c.jobs??row.group_jobs,group_post_other:c.post??row.group_post_other,
-        group_tools:c.tools??row.group_tools,tasks:c.tasks??row.tasks};
+        group_tools:c.tools??row.group_tools,tasks:c.tasks??row.tasks,private_chat:c.private_chat??row.private_chat};
       if(Object.entries(next).some(([key,value])=>row[key]!==value))await db.query(`UPDATE members SET state=$2,group_talk=$3,group_jobs=$4,group_post_other=$5,group_tools=$6,
-        tasks=$7,revision=revision+1,updated_at=now() WHERE id=$1`,[id,next.state,next.group_talk,next.group_jobs,next.group_post_other,next.group_tools,next.tasks]);
+        tasks=$7,private_chat=$8,revision=revision+1,updated_at=now() WHERE id=$1`,
+        [id,next.state,next.group_talk,next.group_jobs,next.group_post_other,next.group_tools,next.tasks,next.private_chat]);
       if(c.groups) {
         const chats=Object.keys(c.groups),existing=new Set((await db.query('SELECT chat_id FROM member_chats WHERE member_id=$1 AND chat_id=ANY($2::text[])',
           [id,chats])).rows.map(item=>item.chat_id as string));
@@ -296,6 +298,11 @@ export class Members implements MemberRepository {
    * rows stay. Tasks and reminders name people by account, so they stay as they are. */
   async remove(principal:Reader,id:string,request:MemberRemoveRequest):Promise<MemberRemoved> {
     const done=await this.commands.run(principal,request.operation_id,{kind:'member_remove',id},async db=>{
+      // Their closed asks go with them; an open one loses its member, so its worker closes it and tells the owner once
+      // (owner-member-asks.ts). Their asks are locked first, so a worker closing one waits for this commit and then sees
+      // it has no member and removes it; it never closes one between the delete below and the member going.
+      await db.query('SELECT id FROM owner_member_asks WHERE member_id=$1 FOR UPDATE',[id]);
+      await db.query("DELETE FROM owner_member_asks WHERE member_id=$1 AND state NOT IN ('queued','running')",[id]);
       if(!(await db.query('DELETE FROM members WHERE id=$1',[id])).rowCount)throw new HttpError(404,'member_not_found');
       return {revision:await bump(db),removed:id};
     },{epoch:false});

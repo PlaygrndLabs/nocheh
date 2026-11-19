@@ -1,8 +1,8 @@
 import type {Reader} from '../access.js';
-import {admin} from '../access.js';
+import {admin,boundReader,memberClaimId,type BoundReader} from '../access.js';
 import {outsideChat,ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {groupSpace,inReadSet,inRecall,observedChat,parentSpace,readSetGroups,readSetOf,recallScope,servedGroup,sourceChat,type ReadSet,type RecallScope} from '../spaces.js';
+import {groupSpace,inReadSet,inRecall,observedChat,otherPrivate,parentSpace,readSet,readSetGroups,readSetOf,recallScope,servedGroup,sourceChat,type ReadSet,type RecallScope} from '../spaces.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository,type CapturedSource,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
@@ -12,7 +12,27 @@ import type {SourceRetirementRepository} from './source-retirement.js';
 import type {ReactionStateRepository} from './reaction-state.js';
 import {bindAnswerReads} from './private-answers.js';
 import {chats} from '../chats.js';
-import {deliveredKinds,sendClassOf,unlearnedSendClasses} from '../send-classes.js';
+import {deliveredKinds,sendClassOf,unconsentableSendClasses,unlearnedSendClasses,type SendClass} from '../send-classes.js';
+import {memberAskReads,memberChatClosed,memberReads} from './member-reads.js';
+
+/** The 409 a bound reader gets when its reads can't be bound now: an answer keeps ADR-0249's code; a member's private
+ * chat and the owner's ask about a member share step 4's. */
+const closedCode:Readonly<Record<BoundReader,string>>={answer:'private_answer_closed',member:memberChatClosed,memberRead:memberChatClosed};
+/** The one private chat that is not the owner's a reader may read (step 4): a member's own chat for a member reader, the
+ * asked member's chat for the owner's ask about a member, as bindReads set it for this request; null for every other
+ * reader, an answer reader included. */
+export function boundChat(principal:Reader):string|null {
+  const kind=boundReader(principal);
+  return (kind==='member'||kind==='memberRead')&&typeof principal.memberChat==='string'&&principal.memberChat?principal.memberChat:null;
+}
+/** Whether a bound reader of this kind reads its own turn's message in the owner's private chat: an answer its /start
+ * (ADR-0249), and the owner's ask about a member the owner's own question that asked it (step 4b). A member reads their
+ * own chat whole, through boundChat. */
+const ownTurn=(kind:ReturnType<typeof boundReader>)=>kind==='answer'||kind==='memberRead';
+/** Why an original can never be learned, nor made learnable by the owner's yes (step 4): it is in a private chat that is
+ * not the owner's (`member_chat`, a member's or anyone else's, any kind, imports included), or it is Nocheh's answer to
+ * the owner's ask about a member (`member_read`). Null for anything else. */
+export type PrivateHold='member_chat'|'member_read';
 
 /** Source access is independent of project membership and sharing configuration. */
 export class SourceAccessRepository {
@@ -21,32 +41,91 @@ export class SourceAccessRepository {
     readonly retirements?:SourceRetirementRepository,readonly reactions?:ReactionStateRepository) {
     this.relationships=new RelationshipRepository(archive);
   }
-  /** `historical` rechecks evidence that was already learned: a later reaction
-   * change adds new evidence and does not retract the earlier reaction. */
+  /**
+   * `historical` rechecks evidence that was already learned: a later reaction change adds new evidence and does not
+   * retract the earlier reaction.
+   *
+   * The order (step 4, ADR-0262): the dashboard reads everything; then retired and stale reaction sources are refused;
+   * then what someone Nocheh doesn't serve wrote, unless it is the reader's own bound member chat (boundChat); then any
+   * private chat that is not the owner's, of every kind, unless it is that bound chat; then Nocheh's answer to the
+   * owner's ask about a member (send class member_read), for every reader but the dashboard; only then the owner's own
+   * reads, and last the scoped readers' own conversations.
+   */
   async canRead(principal:Reader,reference:SourceReference,binding:GuardBinding,options:{historical?:boolean}={}):Promise<boolean> {
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);
     if(!principal.admin&&source.channel==='telegram'){
       if(await this.retirements?.isRetired(reference))return false;
       if(!options.historical&&this.reactions&&!await this.reactions.isCurrent(reference))return false;
     }
-    // What someone Nocheh doesn't serve wrote stays out of every conversation, the owner's included.
-    if(!principal.admin&&outsideChat(this.policy(),source))return false;
+    if(!principal.admin&&!this.privatelyOpen(principal,source))return false;
+    if(!principal.admin&&deliveredKinds.has(source.kind)&&(await this.sendClasses([reference.id])).get(reference.id)==='member_read')return false;
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
     if(!['telegram','browser'].includes(source.channel))return false;
-    // An answer reader reads the groups frozen in its record, and of its own private chat only its own turn's message
-    // (the /start that opened it): never the rest of that chat, and nothing without its record (ADR-0249).
-    const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
-    if(answer&&!reads)return false;
+    // A bound reader reads what bindReads resolved for this request (ADR-0249, ADR-0262): an answer the groups frozen in
+    // its record and of its own private chat only its own turn's message (the /start that opened it); a member their
+    // joined groups and all of their own private chat; the owner's ask about a member that member's chat and the owner's
+    // own question that asked it. Nothing without its binding.
+    const kind=boundReader(principal),reads=kind?principal.reads:undefined,mine=boundChat(principal);
+    if(kind&&!reads)return false;
     // An original belongs to the chat its raw scope names through chat_ids (current or old id), and to the topic its
     // observed audience names through that chat's topic rows; an id with no row reads nothing (ADR-0252).
     const chat=sourceChat(source);
-    const own=answer&&reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope;
-    if(chat===null||(answer?!own&&!readSetGroups(reads!).includes(chat):chat!==principal.scope))return false;
+    const own=ownTurn(kind)&&reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope,inMine=mine!==null&&chat===mine;
+    if(chat===null||(kind?!own&&!inMine&&!readSetGroups(reads!).includes(chat):chat!==principal.scope))return false;
     const observed=(await this.relationships.describe(reference)).audience;
     const space=observed&&observed.chat_id===source.scope?observedChat(source.channel,observed):null;
     const allowed=space!==null&&(chats().parentOf(space)??space)===chat&&
-      (answer?own?space===principal.space:inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
+      (kind?own?space===principal.space:inMine||inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
     await this.guards.assertCurrent(binding);return allowed;
+  }
+  /**
+   * Steps 3 and 4 of canRead's order for a reader that is not the dashboard: what someone Nocheh doesn't serve wrote
+   * stays out of every conversation, the owner's included, and so does any private chat that is not the owner's, of
+   * every kind (a member's updates, Nocheh's replies there, a stranger's chat), unless it is the reader's own bound
+   * member chat (boundChat), which bindReads checks in the store for every request.
+   */
+  private privatelyOpen(principal:Reader,source:CapturedSource):boolean {
+    const chat=sourceChat(source),mine=boundChat(principal),bound=mine!==null&&chat===mine;
+    if(outsideChat(this.policy(),source)&&!bound)return false;
+    return !otherPrivate(chat)||bound;
+  }
+  /** The send class each of these delivered messages was stamped with, by id; an id with none, or not a delivered
+   * message, is left out. */
+  async sendClasses(ids:readonly string[]):Promise<Map<string,SendClass>> {
+    const wanted=[...new Set(ids)],found=new Map<string,SendClass>();
+    if(!wanted.length)return found;
+    for(const row of (await this.stores.archive.query('SELECT id,payload FROM events WHERE id=ANY($1::text[]) AND kind=ANY($2::text[])',[wanted,[...deliveredKinds]])).rows) {
+      let value:unknown=null;try{value=JSON.parse((row.payload as Buffer).toString()).send_class;}catch{}
+      const sendClass=sendClassOf(value);if(sendClass)found.set(row.id as string,sendClass);
+    }
+    return found;
+  }
+  /** Why an original may never be learned or made learnable (PrivateHold), or null. */
+  async privateHold(reference:SourceReference):Promise<PrivateHold|null> {
+    // By the event alone, whatever revision the reference names: where an original is never changes with its revisions.
+    const source=await this.archive.captured(reference.id);
+    if(otherPrivate(sourceChat(source)))return 'member_chat';
+    if(deliveredKinds.has(source.kind)&&unconsentableSendClasses.has((await this.sendClasses([reference.id])).get(reference.id)!))return 'member_read';
+    return null;
+  }
+  /**
+   * Whether evidence rests on a private chat that is not the owner's, or on Nocheh's answer to the owner's ask about a
+   * member (step 4): such a fact is never granted, requested or suggested to anyone, whatever the owner confirms. A
+   * source the archive no longer holds can't be told apart, so it counts (fail closed).
+   */
+  async memberChatEvidence(evidence:readonly SourceReference[]):Promise<boolean> {
+    for(const reference of evidence)if(await this.privateHold(reference).catch(error=>{if(error instanceof HttpError)return 'member_chat';throw error;}))return true;
+    return false;
+  }
+  /** Of these events, the ones that reply to Nocheh's answer to the owner's ask about a member (send class member_read),
+   * by the archive's reply relation: a read of them shows no quote of that answer (D13). */
+  async repliesToMemberRead(ids:readonly string[]):Promise<Set<string>> {
+    const wanted=[...new Set(ids)];if(!wanted.length)return new Set();
+    const rows=(await this.stores.archive.query(`SELECT r.event_id,o.event_id AS target FROM source_relations r
+      JOIN source_revisions v ON v.object_id=r.target_id JOIN source_observations o ON o.revision_id=v.id
+      WHERE r.event_id=ANY($1::text[]) AND r.kind='reply_to'`,[wanted])).rows;
+    const classes=await this.sendClasses(rows.map(row=>row.target as string));
+    return new Set(rows.filter(row=>classes.get(row.target)==='member_read').map(row=>row.event_id as string));
   }
   /**
    * canRead for many sources at once (ADR-0261): true exactly where canRead returns true, and false where it returns
@@ -71,18 +150,22 @@ export class SourceAccessRepository {
         !options.historical&&this.reactions?this.reactions.staleAmong(telegram):new Set<string>()]);
       for(const id of telegram)if(retired.has(id)||stale.has(id))deny(id);
       open=open.filter(item=>result.get(item.reference.id)!==false);
-      // What someone Nocheh doesn't serve wrote stays out of every conversation, the owner's included.
-      for(const item of open)if(outsideChat(this.policy(),item.source))deny(item.reference.id);
+      // canRead's steps 3 to 5: outside chats, other private chats and the owner's asks' answers.
+      for(const item of open)if(!this.privatelyOpen(principal,item.source))deny(item.reference.id);
+      open=open.filter(item=>result.get(item.reference.id)!==false);
+      const classes=await this.sendClasses(open.filter(item=>deliveredKinds.has(item.source.kind)).map(item=>item.reference.id));
+      for(const item of open)if(classes.get(item.reference.id)==='member_read')deny(item.reference.id);
       open=open.filter(item=>result.get(item.reference.id)!==false);
     }
     if(principal.admin||principal.scope===null){for(const item of open)result.set(item.reference.id,true);await this.guards.assertCurrent(binding);return result;}
-    const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
-    const placed:{reference:SourceReference;source:CapturedSource;chat:string;own:boolean}[]=[];
+    const kind=boundReader(principal),reads=kind?principal.reads:undefined,mine=boundChat(principal);
+    const placed:{reference:SourceReference;source:CapturedSource;chat:string;own:boolean;inMine:boolean}[]=[];
     for(const item of open) {
-      if(!['telegram','browser'].includes(item.source.channel)||answer&&!reads){deny(item.reference.id);continue;}
-      const chat=sourceChat(item.source),own=answer&&item.reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope;
-      if(chat===null||(answer?!own&&!readSetGroups(reads!).includes(chat):chat!==principal.scope)){deny(item.reference.id);continue;}
-      placed.push({...item,chat,own});
+      if(!['telegram','browser'].includes(item.source.channel)||kind&&!reads){deny(item.reference.id);continue;}
+      const chat=sourceChat(item.source),own=ownTurn(kind)&&item.reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope,
+        inMine=mine!==null&&chat===mine;
+      if(chat===null||(kind?!own&&!inMine&&!readSetGroups(reads!).includes(chat):chat!==principal.scope)){deny(item.reference.id);continue;}
+      placed.push({...item,chat,own,inMine});
     }
     const described=await this.relationships.describeMany(placed.map(item=>item.reference.id));
     for(const item of placed) {
@@ -91,7 +174,7 @@ export class SourceAccessRepository {
       if(!found){deny(item.reference.id);continue;}
       const observed=found.audience,space=observed&&observed.chat_id===item.source.scope?observedChat(item.source.channel,observed):null;
       const allowed=space!==null&&(chats().parentOf(space)??space)===item.chat&&
-        (answer?item.own?space===principal.space:inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
+        (kind?item.own?space===principal.space:item.inMine||inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
       result.set(item.reference.id,allowed);
     }
     await this.guards.assertCurrent(binding);return result;
@@ -102,6 +185,9 @@ export class SourceAccessRepository {
       if(await this.retirements?.isRetired(reference))return false;
       if(!options.historical&&this.reactions&&!await this.reactions.isCurrent(reference))return false;
     }
+    // Never from a private chat that is not the owner's, of any kind and imports included, nor from Nocheh's answer to the
+    // owner's ask about a member: before the owner's yes is read, which can't make either learnable (step 4).
+    if(await this.privateHold(reference))return false;
     const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[reference.id])).rows[0];
     if(intake?.state==='pending')return false;
     const consent=(await this.stores.control.query('SELECT enabled FROM learning_consent WHERE event_id=$1',[reference.id])).rows[0];
@@ -133,27 +219,60 @@ export class SourceAccessRepository {
     const row=(await this.stores.archive.query('SELECT payload FROM events WHERE id=$1',[reference.id])).rows[0];
     const sendClass=row?sendClassOf(JSON.parse((row.payload as Buffer).toString()).send_class):null;
     if(!sendClass||!unlearnedSendClasses.has(sendClass))return null;
+    // Nocheh's answer to the owner's ask about a member is never learned, whatever the owner said (step 4b).
+    if(unconsentableSendClasses.has(sendClass))return 'nocheh_message';
     const consent=(await this.stores.control.query('SELECT enabled FROM learning_consent WHERE event_id=$1',[reference.id])).rows[0];
     return consent?.enabled===true?null:'nocheh_message';
   }
   /** The conversations a scoped principal recalls; null for the owner and administration, which read everything.
-   * For an answer reader, the asking group or topic (its read set's home): what its shared and granted context is for
-   * (ADR-0249). An answer reader whose read set was not bound reads nothing. */
+   * For a bound reader, its read set's home: for an answer the asking group or topic (what its shared and granted
+   * context is for, ADR-0249); for a member their own private chat and for the owner's ask the owner's private chat,
+   * neither of which is given shared or granted context (step 4). A bound reader whose reads were not bound reads nothing. */
   recall(principal:Reader):RecallScope|null {
     if(principal.admin||principal.scope===null)return null;
-    if(principal.answer!==undefined){if(!principal.reads)throw new HttpError(409,'private_answer_closed');return recallScope(principal.reads.home,this.policy().topic_memory);}
+    const kind=boundReader(principal);
+    if(kind!==null){if(!principal.reads)throw new HttpError(409,closedCode[kind]);return recallScope(principal.reads.home,this.policy().topic_memory);}
     return recallScope(principal.space??principal.scope,this.policy().topic_memory);
   }
-  /** The conversations a scoped principal reads, as a read set; null for the owner and administration. An answer
-   * reader reads the groups frozen in its record; anyone else its recall scope (ADR-0249). */
+  /** The conversations a scoped principal reads, as a read set; null for the owner and administration. A bound reader
+   * reads its bound set (groups only: a member's own chat and an asked member's chat are its boundChat, never in a set);
+   * anyone else its recall scope (ADR-0249). */
   reads(principal:Reader):ReadSet|null {
     if(principal.admin||principal.scope===null)return null;
-    if(principal.answer!==undefined){if(!principal.reads)throw new HttpError(409,'private_answer_closed');return principal.reads;}
+    const kind=boundReader(principal);
+    if(kind!==null){if(!principal.reads)throw new HttpError(409,closedCode[kind]);return principal.reads;}
     return readSetOf(this.recall(principal)!);
   }
-  /** A reader with its read set resolved on the server from its record, for every request; a reader without an answer is
-   * returned as it is. An answer whose record is closed, expired or not this turn's is refused (private_answer_closed). */
-  bindReads(principal:Reader):Promise<Reader> {return bindAnswerReads(this.stores.control,this.policy(),principal);}
+  /**
+   * A bound reader with its reads resolved in the store for this request (ADR-0249, ADR-0262); any other reader is
+   * returned as it is. An answer from its open record (private_answer_closed otherwise). A member from their own private
+   * chat: the pass's chat must be, now, a member's open private chat, of the very member the pass names, and its reads
+   * are their joined groups (memberReads) and that chat (memberChat). The owner's ask about a member from its running
+   * row: no group, and the asked member's own chat (memberAskReads). Anything else is member_chat_closed.
+   */
+  async bindReads(principal:Reader):Promise<Reader> {
+    const kind=boundReader(principal);
+    if(kind===null)return principal;
+    if(kind==='answer'){const {memberChat:_,...rest}=principal;return bindAnswerReads(this.stores.control,this.policy(),rest);}
+    const closed=()=>new HttpError(409,memberChatClosed),policy=this.policy(),owner=ownerChat(policy);
+    if(principal.admin||principal.scope===null||principal.space!==principal.scope||!principal.turnEvent||!policy.enabled||!policy.owner_id||!owner)throw closed();
+    if(kind==='member') {
+      if(!memberClaimId.test(principal.member!)||principal.scope===owner)throw closed();
+      const found=await memberReads(this.stores.control,principal.scope,owner);
+      if(!found||found.member!==principal.member||found.chat!==principal.scope)throw closed();
+      // The groups this turn leaves out (re-checks past the cap), as its dispatch wrote them; a turn with none written
+      // reads nothing.
+      const left=(await this.stores.control.query<{left_out:string[]}>('SELECT left_out FROM member_turns WHERE member_id=$1 AND event_id=$2 AND left_out IS NOT NULL',
+        [found.member,principal.turnEvent])).rows[0]?.left_out;
+      if(!left)throw closed();
+      return {...principal,reads:readSet({home:found.chat,whole:found.groups.map(group=>group.chat).filter(group=>!left.includes(group))}),memberChat:found.chat};
+    }
+    if(principal.scope!==owner)throw closed();
+    // Only the turn of the owner's own message that asked it: its pass names that message as its turn.
+    const found=await memberAskReads(this.stores.control,principal.memberRead!,owner);
+    if(!found||found.event!==principal.turnEvent)throw closed();
+    return {...principal,reads:readSet({home:owner}),memberChat:found.chat};
+  }
   async space(reference:SourceReference):Promise<string|null> {
     const source=await this.archive.verify(reference);
     const observed=(await this.relationships.describe(reference)).audience;
@@ -177,6 +296,10 @@ export class SourceAccessRepository {
   }
   async setConsent(principal:Reader,reference:SourceReference,input:unknown) {
     admin(principal);await this.archive.verify(reference);const body=object(input);
+    // A private chat that is not the owner's, and Nocheh's answer to the owner's ask about a member, are never learned:
+    // no yes can change that, so none is kept (step 4).
+    const hold=await this.privateHold(reference);
+    if(hold)throw new HttpError(409,hold==='member_chat'?'learning_consent_member_chat':'learning_consent_member_read');
     if(Object.keys(body).some(k=>!['enabled','expected_revision','operation_id'].includes(k))||typeof body.enabled!=='boolean'||
       !Number.isSafeInteger(body.expected_revision)||Number(body.expected_revision)<0)throw new HttpError(400,'invalid_learning_consent');
     return new OwnerCommands(this.stores.control).run(principal,string(body.operation_id,200),{kind:'learning_consent',reference,...body},async db=>{
@@ -193,9 +316,10 @@ export class SourceAccessRepository {
     const saved=(await this.stores.control.query('SELECT enabled,revision,updated_at FROM learning_consent WHERE event_id=$1',[reference.id])).rows[0];
     const intake=(await this.stores.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[reference.id])).rows[0];
     // Nocheh's own card or notice is not learned unless the owner turns it on, which the existing switch does.
-    const skipped=!saved&&await this.notLearned(reference)!==null;
+    const skipped=!saved&&await this.notLearned(reference)!==null,hold=await this.privateHold(reference);
     const effective=!skipped&&await this.canLearn(reference,binding);await this.guards.assertCurrent(binding);
-    return {source:reference,enabled:saved?.enabled??null,revision:saved?.revision??0,effective,
+    // `consentable` false: the owner's yes can't make it learnable (step 4), so no switch is offered.
+    return {source:reference,enabled:saved?.enabled??null,revision:saved?.revision??0,effective,consentable:hold===null,
       authority:saved?'owner':skipped?'send_class':'capture_policy',transport:intake?.transport??source.origin,intake_state:intake?.state??null,updated_at:saved?.updated_at??null};
   }
   principal(space:string):Reader {

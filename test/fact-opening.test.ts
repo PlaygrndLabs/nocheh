@@ -177,6 +177,8 @@ test('a fact opens from its record\'s guarded copy, only while it stands: its au
   const refused=async(reader:Reader,n:number|null,why:string)=>assert.rejects(fixture.memory.openFact(reader,record,n),{code:'memory_fact_unavailable'},why);
   await refused({admin:false,scope:'-200',space:'-200',turnEvent:hex('root')} as Reader,1,'another group never opens GP1\'s record');
   await refused({...fixture.reader,answer:hex('answer-record')} as Reader,1,'a private answer opens no fact');
+  await refused({...fixture.reader,member:hex('member')} as Reader,1,'a member\'s private chat opens no fact');
+  await refused({...fixture.reader,memberRead:hex('ask').slice(0,32)} as Reader,1,'the owner\'s ask about a member opens no fact');
   await refused(fixture.reader,3,'a number beyond the stored facts');
   const owner=await fixture.memory.openFact({admin:false,scope:null,turnEvent:hex('root')} as unknown as Reader,record,1) as any;
   assert.equal(owner.fact,1,'the owner opens any audience\'s record');

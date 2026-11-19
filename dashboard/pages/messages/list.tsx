@@ -1,4 +1,8 @@
-/** Messages › list: search and filter every kept message; a row opens its detail. */
+/**
+ * Messages › list: search and filter every kept message; a row opens its detail. Other people's private chats with Nocheh
+ * (members', and those of people who wrote privately without being one) are left out of the default list and kept under
+ * their own "Members' chats" filter, so they never show when the owner shares their screen (step 4).
+ */
 import {useEffect, useState, type ComponentType} from 'react';
 import {
   Bot,
@@ -35,7 +39,7 @@ import {
   type ReplyPreview,
 } from '../../lib/messages-format';
 import {Badge, Button, Card, Empty, Input, LoadError, LoadingRows, Pager, Segmented, Select} from '../../ui/core';
-import {useChatNames} from './chat-names';
+import {chatFilter, membersChats, useChatNames, useOtherPrivate} from './chat-names';
 
 /** Rows seen in the list, so the detail can show a message's reply state. */
 export const seenRows = new Map<string, MessageRow>();
@@ -67,6 +71,7 @@ export function MessageListView({onOpen}: {onOpen: (id: string) => void}) {
   const chat = useParam('chat') ?? '';
   const reply = useParam('reply') ?? '';
   const chatName = useChatNames();
+  const otherPrivate = useOtherPrivate();
   const scopes = useResource<{scopes?: {scope: string; events: number}[]}>('/scopes', 60000);
 
   const [draft, setDraft] = useState(q);
@@ -77,6 +82,11 @@ export function MessageListView({onOpen}: {onOpen: (id: string) => void}) {
     return () => clearTimeout(timer);
   }, [draft]);
 
+  // A chat the directory hasn't named yet counts as a member's, so it never shows in the main list by mistake.
+  const allScopes = scopes.data?.scopes ?? [];
+  const ownScopes = allScopes.filter(item => otherPrivate(item.scope) === false);
+  const memberScopes = allScopes.filter(item => otherPrivate(item.scope) !== false);
+
   const filterKey = [q, direction, chat, reply].join('|');
   const [cursors, setCursors] = useState<{key: string; pages: string[]}>({key: filterKey, pages: ['']});
   const pages = cursors.key === filterKey ? cursors.pages : [''];
@@ -85,7 +95,7 @@ export function MessageListView({onOpen}: {onOpen: (id: string) => void}) {
     ...(q ? {q} : {}),
     ...(after && !q ? {after} : {}),
     ...(direction ? {kind: direction} : {}),
-    ...(chat ? {scope: chat} : {}),
+    ...chatFilter(chat),
     ...(reply ? {reply} : {}),
   });
   const path = (q ? '/search' : '/data') + (params.size ? '?' + params : '');
@@ -186,15 +196,25 @@ export function MessageListView({onOpen}: {onOpen: (id: string) => void}) {
               onChange={event => setParams({chat: event.target.value || null}, true)}
               className="h-8 min-w-0 flex-1 text-[13px] sm:w-52 sm:flex-none"
             >
-              <option value="">All chats</option>
-              {chat && !scopes.data?.scopes?.some(item => item.scope === chat) && (
+              <option value="">Your chats and groups</option>
+              <option value={membersChats}>Members’ chats</option>
+              {chat && chat !== membersChats && !scopes.data?.scopes?.some(item => item.scope === chat) && (
                 <option value={chat}>{chatName(chat)}</option>
               )}
-              {(scopes.data?.scopes ?? []).map(item => (
+              {ownScopes.map(item => (
                 <option key={item.scope} value={item.scope}>
                   {chatName(item.scope)} · {item.events}
                 </option>
               ))}
+              {memberScopes.length > 0 && (
+                <optgroup label="Members’ chats">
+                  {memberScopes.map(item => (
+                    <option key={item.scope} value={item.scope}>
+                      {chatName(item.scope)} · {item.events}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </Select>
             <label htmlFor="message-reply" className="sr-only">
               Reply state

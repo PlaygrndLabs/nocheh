@@ -87,6 +87,7 @@ ROUTES = {
     '/internal/telegram/refusal': lambda body: SERVICE.refusal(body),
     '/internal/telegram/notice': lambda body: SERVICE.notice(body),
     '/internal/telegram/leave': lambda body: SERVICE.leave(body),
+    '/internal/telegram/member_status': lambda body: SERVICE.member_status(body),
     '/internal/telegram/chat': read_chat,
     '/internal/telegram/file': read_file,
 }

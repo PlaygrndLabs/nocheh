@@ -126,6 +126,10 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(call('POST', '/internal/telegram/leave', leave)[0], 401)
                 status, answer = call('POST', '/internal/telegram/leave', leave, 't' * 32)
                 self.assertEqual((status, answer['error']), (503, 'telegram_unavailable'), 'the route is there; a bot that is off leaves nothing')
+                member = {'chat_id': '-1001234567890', 'user_id': '4567'}
+                self.assertEqual(call('POST', '/internal/telegram/member_status', member)[0], 401)
+                status, answer = call('POST', '/internal/telegram/member_status', member, 't' * 32)
+                self.assertEqual((status, answer['error']), (503, 'telegram_unavailable'), 'the route is there; a bot that is off asks nothing')
                 with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': ''}):
                     self.assertEqual(call('POST', '/internal/telegram/file', {'file_id': 'a'}, 't' * 32), (503, {'error': 'telegram_unavailable'}))
             finally:

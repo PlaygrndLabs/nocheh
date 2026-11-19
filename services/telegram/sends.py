@@ -21,9 +21,10 @@ from services.durable import canonical, digest, immutable_file
 KINDS = (('telegram:', 'reply'), ('action:', 'approved_send'), ('approval:', 'approval_card'), ('approval-settle:', 'card_update'),
          ('approval-answer:', 'button_answer'), ('refusal:', 'refusal'), ('notice:', 'notice'), ('notice-edit:', 'notice_update'), ('leave:', 'leave'))
 # What kind of message Nocheh sent, kept with each delivered message (ADR-0256): replies and reports are learned, while
-# cards, card updates, refusals, notices and reminders are not. src/send-classes.ts holds the same list.
+# cards, card updates, refusals, notices, reminders and member_read (the owner's answer about a member's private chat,
+# step 4b) are not. src/send-classes.ts holds the same list.
 SEND_CLASSES = ('reply', 'follow_up', 'private_answer', 'job_report', 'scheduled_run', 'approved_post',
-                'card', 'card_update', 'refusal', 'notice', 'reminder')
+                'card', 'card_update', 'refusal', 'notice', 'reminder', 'member_read')
 # A send whose route named no class gets one from the dispatch key it ran under. A leave sends no message, but its key
 # still names a class that is never learned, so nothing it ever returns could be learned as Nocheh's words.
 DEFAULT_CLASSES = (('telegram:', 'reply'), ('action:', 'approved_post'), ('approval:', 'card'), ('approval-settle:', 'card_update'),

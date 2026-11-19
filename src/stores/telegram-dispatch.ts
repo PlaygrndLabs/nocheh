@@ -1,5 +1,5 @@
 import {albumMembers,albumSettleMs} from './albums.js';
-import type {Reader} from '../access.js';
+import {boundReader,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {conversationScope,ownerChat,settleTelegramChat,telegramAccount} from '../assistant-policy.js';
 import {chats} from '../chats.js';
@@ -23,8 +23,10 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
-import {fillTemplate,memberDailyLimitReply,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines} from '../prompts.js';
-import {readSetGroups} from '../spaces.js';
+import {fillTemplate,memberDailyLimitReply,memberPrivateDailyLimitReply,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines} from '../prompts.js';
+import {otherPrivate,readSet,readSetGroups} from '../spaces.js';
+import {memberChatClosed,memberReads,recheckMemberGroups} from './member-reads.js';
+import {reloadMembers} from './members.js';
 import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
 import {forwardLine,forwardOrigin} from '../forwarded.js';
@@ -47,8 +49,9 @@ const conversationOrderWaitMs=120000;
 const observeMs=1000;
 /** Context changes after which a finished turn's reply is not sent: the binding or audience moved on, so it runs again. */
 const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
-/** A private answer whose record closed (expired, refused or its groups changed) is withdrawn like a retired source (ADR-0249). */
-const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired','private_answer_closed'];
+/** A private answer whose record closed (expired, refused or its groups changed) is withdrawn like a retired source (ADR-0249);
+ * so is a member's private turn whose chat closed or that may no longer read a group it was given (step 4). */
+const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired','private_answer_closed',memberChatClosed];
 /**
  * Who sent a group message and when, as one line for the model. Names come
  * from the guarded representation, the time from the captured original, and
@@ -161,7 +164,9 @@ export class TelegramDispatchRepository {
       if(result.state!=='done')await this.unanswered(input);
       // A private answer that went out is recorded once, with the send of its /start; nothing else is suggested from it.
       else if(input.principal.answer!==undefined)await this.answers?.answered(input.principal.answer,String(input.body.source_key));
-      else if(input.principal.scope!==null)await this.memoryAccess.suggest(input.principal,String(input.body.text??''));
+      // Never from a member's private chat or an ask about a member: nothing there is learned or suggested (step 4).
+      else if(input.principal.scope!==null&&boundReader(input.principal)===null&&!otherPrivate(input.principal.scope))
+        await this.memoryAccess.suggest(input.principal,String(input.body.text??''));
     } catch {/* Suggestions and the answer's record are best effort and never affect the delivered reply; an unrecorded answer expires. */}
     return this.observation(await this.row(row.event_id));
   }
@@ -197,9 +202,23 @@ export class TelegramDispatchRepository {
   /** A pass for the turn under the current binding, after the turn's own binding and source are checked. */
   private async credential(input:Input):Promise<string> {
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
-    const credential=await this.prepared.audience.turn(this.token,input.principal,input.principal.turnEvent!,Date.now()+600000);
+    const lane=this.lane(input);
+    const credential=await this.prepared.audience.turn(this.token,lane?{...input.principal,lane}:input.principal,input.principal.turnEvent!,Date.now()+600000);
     await currentTurn(this,input);
     return credential;
+  }
+  /**
+   * The member a turn's lane names (step 4), so the brain runs one turn at a time per member: in their own private chat,
+   * the member bound to it; in a group, the member whose message started the turn, while they are one. The owner's
+   * turns, an answer's and an ask's have none. The lane grants nothing; storage drops it.
+   */
+  private lane(input:Input):string|undefined {
+    const principal=input.principal;
+    if(principal.member!==undefined)return principal.member;
+    if(boundReader(principal)!==null||principal.scope===null||chats().groupOf(principal.scope)===null)return undefined;
+    const from=(input.body.payload as {message?:{from?:{id?:unknown}}}|undefined)?.message?.from?.id,policy=this.access.policy();
+    if(typeof from!=='number'&&typeof from!=='string'||String(from)===policy.owner_id)return undefined;
+    return members().memberOf(telegramAccount(String(from)))?.id;
   }
   /**
    * The brain closed the turn. A done turn's reply goes out through Nocheh's bot (ADR-0235), after any earlier reply in
@@ -581,6 +600,8 @@ export class TelegramDispatchRepository {
     // read out of an id. Until the directory knows both, and the topic is the chat's own, the turn waits for it.
     const chat=telegramChat(String(original.scope)),space=await this.access.space(source);
     if(!space||!chat||space!==chat&&chats().parentOf(space)!==chat)return observation('waiting','admission',0,Date.now()+30000,'prerequisite');
+    // A member's turn is in their private chat itself, never in one of its topics (a member pass is for the chat only).
+    if(scope.member!==undefined&&(space!==chat||chat!==scope.chat_id))return observation('skipped','admission',0,Date.now(),null);
     const ready=await this.preparation.status(source.id);if(ready.state!=='completed')return ['retryable_failed','failed'].includes(ready.state)?ready:
       observation('waiting',ready.stage,0,ready.next_attempt,ready.waiting_reason);
     if(await this.heldByEarlier(source,space))return observation('waiting','admission',0,Date.now()+2000,'prerequisite');
@@ -594,8 +615,26 @@ export class TelegramDispatchRepository {
       if(typeof answer!=='string')return answer;
       refusal=answer;
     }
-    const binding=await this.guards.state(),principal:Reader={admin:false,scope:scope.owner?null:chat,space,turnEvent:source.id,
+    const binding=await this.guards.state();
+    let principal:Reader={admin:false,scope:scope.owner?null:chat,space,turnEvent:source.id,
       generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    // A member in their own private chat (step 4): every message there addresses Nocheh and counts against the daily cap,
+    // and the turn reads only as that member's chat, bound on the server; a chat that closed meanwhile gets the fixed reply.
+    if(scope.member!==undefined) {
+      if(await this.overDailyCap(scope.member,source.id)) {
+        const texts=await ownerPrompts(this.control);
+        try{await this.call('telegram.refusal',{event_id:source.id,chat_id:original.scope,message_id:String(payload.message.message_id),user_id:scope.user_id,
+          private:true,once:'daily_limit',reply:texts['telegram.member_private_daily_limit']??memberPrivateDailyLimitReply},15000);}
+        catch{/* Best effort: the message stays archived either way. */}
+        return 'member_daily_limit';
+      }
+      const bound=await this.memberPrincipal(principal,scope.member);
+      if(!bound) {
+        await this.refuse(source.id,original.source_key,original.scope,payload);
+        return observation('skipped','admission',0,Date.now(),'not_allowed');
+      }
+      principal=bound;
+    }
     await this.turns.binding(principal);
     const selected=await this.sources.read(principal,source.id);
     const album:[string,typeof selected][]=[[source.id,selected]];
@@ -609,7 +648,7 @@ export class TelegramDispatchRepository {
       if(addressing&&other)addressing={direct:addressing.direct||other.direct,handles:[...new Set([...addressing.handles,...other.handles])].sort().slice(0,20)};
     }
     // A group message nobody addressed to the bot stays archived without a turn; the next turn sees it as recent.
-    if(!scope.owner) {
+    if(!scope.owner&&scope.member===undefined) {
       const identity=await this.identity().catch(()=>null);
       // Until the bot knows its own name and @username, a mention of either cannot be recognized; skipping the message
       // for good on that guess would lose it, so the decision waits for the bot.
@@ -627,7 +666,8 @@ export class TelegramDispatchRepository {
     // Command authority comes from the original owner DM, never a guarded edit.
     const reply=refusal??await this.actions.controlReply(source),control=reply===null?null:await this.prepared.prepare(principal,reply,this.detect);
     const untranscribed=await this.untranscribedEarlier(source,space);
-    const speaker=scope.owner?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=scope.owner?[]:await this.recentGroup(source,space,principal);
+    const personal=scope.owner||scope.member!==undefined;
+    const speaker=personal?null:speakerLine(payload,selected.event.payload,this.access.policy().owner_id),recent=personal?[]:await this.recentGroup(source,space,principal);
     // Where a forwarded message came from, in Nocheh's own words, before its text (ADR-0250).
     const forwarded=forwardLine(forwardOrigin(payload?.message,selected.event.payload?.message),scope.owner);
     const app=appBindingOf(space);
@@ -639,6 +679,25 @@ export class TelegramDispatchRepository {
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
     return {reference,input};
+  }
+  /**
+   * A member's private turn's reader (step 4): the groups they joined are asked of Telegram again first where their 'in'
+   * is older than six hours or stale (at most ten, oldest first; the ones they read past the cap are left out of this
+   * turn), then storage binds the reader to the member's own chat (bindReads). The groups left out are written on the
+   * turn's member_turns row first, so every read bound to this turn later (its tools too) leaves them out the same way.
+   * Null when the chat is not, or no longer, that member's open private chat.
+   */
+  private async memberPrincipal(principal:Reader,member:string):Promise<Reader|null> {
+    const chat=principal.scope!,reads=await memberReads(this.control,chat);
+    if(!reads||reads.member!==member)return null;
+    const {past,moved}=await recheckMemberGroups(this.control,this.call,reads);
+    if(moved)await reloadMembers();
+    await this.control.query('UPDATE member_turns SET left_out=$3::text[] WHERE member_id=$1 AND event_id=$2',[member,principal.turnEvent,past]);
+    let bound:Reader;
+    try{bound=await this.access.bindReads({...principal,member});}
+    catch(error){if(error instanceof HttpError&&error.code===memberChatClosed)return null;throw error;}
+    if(bound.member!==member||bound.memberChat!==chat||!bound.reads||bound.reads.home!==chat)return null;
+    return bound;
   }
   async run(id:string,authority:ExecutionAuthority):Promise<Observation> {
     if(!/^[a-f0-9]{64}$/.test(id))return observation('failed','admission');
