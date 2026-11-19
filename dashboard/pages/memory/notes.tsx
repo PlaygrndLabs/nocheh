@@ -23,6 +23,8 @@ import {
   type Tone,
 } from '../../ui/core';
 import {Drawer} from '../../ui/overlay';
+import {noteDayText, type NoteEntry} from '../../lib/memory-sources';
+import {OriginalList} from '../../lib/originals';
 import {useChats} from './shared';
 
 type Profile = {
@@ -40,8 +42,9 @@ type Profile = {
    * carried into your conversation. */
   member_read?: boolean;
 };
-/** One note, with where it came from in your words (ADR-0257); `from` is the fixed kind its colour is keyed on. */
-type Entry = {target: string; text: string; from: string; label: string};
+/** One note, with where it came from in your words (ADR-0257); `from` is the fixed kind its colour is keyed on, and
+ * `day` and `originals` the day it names and the messages its writer read (ADR-0261 step 4). */
+type Entry = NoteEntry;
 type Note = {name: string; exists: boolean; text: string; truncated?: boolean; citations: unknown[]; entries?: Entry[]};
 type Session = {id: string; title: string; source: string};
 type MemoryView = {memories: Note[]; sessions: Session[]};
@@ -198,6 +201,7 @@ export function Notes() {
                           >
                             {entry.label}
                           </Badge>
+                          <NoteSources entry={entry} />
                         </li>
                       ))}
                     </ul>
@@ -270,6 +274,20 @@ export function Notes() {
         title={memory.data?.sessions.find(s => s.id === session)?.title}
       />
     </>
+  );
+}
+
+/** The day a note names and the messages its writer read: a review's batch, or the message a turn answered. */
+function NoteSources({entry}: {entry: Entry}) {
+  const day = noteDayText(entry.day);
+  if (!day && !entry.originals?.length) return null;
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs text-muted">
+      {day && <span>{day}</span>}
+      {!!entry.originals?.length && (
+        <OriginalList originals={entry.originals} short className="text-xs" label="Original messages" />
+      )}
+    </div>
   );
 }
 

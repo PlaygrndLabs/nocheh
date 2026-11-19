@@ -3008,3 +3008,165 @@ test('Settings lists the member private chat texts and the local laws line, each
   assert.deepEqual(problems, []);
   await page.close();
 });
+
+/** The preview's messages for ADR-0261 step 4 (test/dashboard-preview.ts, sourcesFixture). */
+const sourceIds = {
+  tour: 'e1'.repeat(32),
+  tourReply: 'e2'.repeat(32),
+  forecast: 'e3'.repeat(32),
+  packing: 'e4'.repeat(32),
+  booking: 'e5'.repeat(32),
+  opening: 'e6'.repeat(32),
+  photo: 'e8'.repeat(32),
+  voice: 'b'.repeat(64),
+};
+/** One of a message panel's sections, by its heading. */
+const panelSection = (page, title) =>
+  page.getByRole('dialog').locator('section', {has: page.getByRole('heading', {name: title, exact: true})});
+const linksTo = async (scope, id) => scope.locator(`a[href="#messages?source=${id}"]`).count();
+
+test('a message shows what it replies to, its replies and the facts long-term memory learned from it', async () => {
+  const {page, problems} = await open('messages?source=' + sourceIds.tour);
+  const thread = panelSection(page, 'Thread');
+  await thread.getByText('Replies (1)', {exact: true}).waitFor();
+  await thread.getByText('Nocheh’s reply in your private chat', {exact: false}).waitFor();
+  assert.equal(await linksTo(thread, sourceIds.tourReply), 1);
+  assert.equal(await thread.locator('dt', {hasText: 'Replies to'}).count(), 0, 'it replies to nothing');
+  const learned = panelSection(page, 'Learned into memory');
+  const exact = learned.getByRole('listitem').filter({hasText: 'You booked the 21:30 aurora tour for Friday.'});
+  await exact.getByText('Exact source', {exact: true}).waitFor();
+  // The message open now is named, not linked to itself; the other message a batch fact came from is linked.
+  await exact.getByText('This message', {exact: true}).waitFor();
+  const batch = learned.getByRole('listitem').filter({hasText: 'The aurora tour leaves from the harbour car park.'});
+  await batch.getByText('Learned with other messages', {exact: true}).waitFor();
+  assert.equal(await linksTo(batch, sourceIds.tourReply), 1);
+  assert.equal(await linksTo(learned, sourceIds.tour), 0);
+  // Opening a reply from the Thread section moves the panel to it.
+  await thread.locator(`a[href="#messages?source=${sourceIds.tourReply}"]`).click();
+  await page.waitForURL(url => url.hash.includes('source=' + sourceIds.tourReply));
+  await panelSection(page, 'Learned into memory')
+    .getByText('Long-term memory hasn’t learned from this message.', {exact: true})
+    .waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a message in a topic shows its Topic and never Replies to, and a retired message it replies to is never linked', async () => {
+  const {page, problems} = await open('messages?source=' + sourceIds.forecast);
+  let thread = panelSection(page, 'Thread');
+  await thread.locator('dt', {hasText: 'Topic'}).waitFor();
+  await thread.getByText('“Aurora planning” › Iceland planning', {exact: true}).waitFor();
+  await thread.getByRole('link', {name: 'The topic’s first message'}).waitFor();
+  assert.equal(await linksTo(thread, sourceIds.opening), 1);
+  assert.equal(await thread.locator('dt', {hasText: 'Replies to'}).count(), 0, 'the opening is its topic, not a reply');
+  await page.goto(origin + '/#messages?source=' + sourceIds.opening);
+  thread = panelSection(page, 'Thread');
+  await thread.getByText('this message opens the topic', {exact: false}).waitFor();
+  assert.equal(await thread.getByText(/^Replies \(/).count(), 0, 'the whole topic is not listed as its replies');
+  await page.goto(origin + '/#messages?source=' + sourceIds.packing);
+  thread = panelSection(page, 'Thread');
+  await thread.getByText('Original message · Retired message', {exact: true}).waitFor();
+  assert.equal(await linksTo(thread, sourceIds.photo), 0);
+  await page.goto(origin + '/#messages?source=' + sourceIds.booking);
+  thread = panelSection(page, 'Thread');
+  await thread.locator('dt', {hasText: 'Forwarded from'}).waitFor();
+  await thread.getByText('the channel “Night sky news”', {exact: true}).waitFor();
+  assert.equal(await linksTo(thread, sourceIds.tour), 1);
+  // A read long-term memory couldn't answer says so, and is not shown as nothing learned.
+  await page.goto(origin + '/#messages?source=' + sourceIds.voice);
+  await panelSection(page, 'Learned into memory')
+    .getByText('Long-term memory can’t be reached right now. Try again in a minute.', {exact: true})
+    .waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Long-term lists facts newest first with their sources, by chat or person, under the coverage line', async () => {
+  const {page, problems} = await open('memory?view=longterm');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Facts it learned'})});
+  await card.getByText('412 exact · 96 learned with other messages · 7 none', {exact: true}).waitFor();
+  const facts = card.getByRole('list', {name: 'Facts', exact: true});
+  const texts = async () =>
+    (await facts.locator(':scope > li > p:first-child').allTextContents()).map(text => text.trim());
+  await facts.getByText('Mira took photos from the ridge.').waitFor();
+  assert.deepEqual(await texts(), [
+    'The aurora tour leaves from the harbour car park.',
+    'You booked the 21:30 aurora tour for Friday.',
+    'Mira wants to check the Kp forecast before the trip.',
+    'Mira took photos from the ridge.',
+  ]);
+  const photo = facts.getByRole('listitem').filter({hasText: 'Mira took photos from the ridge.'}).first();
+  await photo.getByText('Retired message', {exact: false}).waitFor();
+  assert.equal(await linksTo(photo, sourceIds.photo), 0, 'a retired original is never linked');
+  const forecast = facts.getByRole('listitem').filter({hasText: 'Mira wants to check the Kp forecast'}).first();
+  await forecast.getByText('“Mira Chen” in “Aurora planning” › Iceland planning', {exact: false}).waitFor();
+  assert.equal(await linksTo(forecast, sourceIds.forecast), 1);
+  // About one person, then within one group and its topics.
+  await card.locator('#facts-person').selectOption({label: 'Mira Chen'});
+  await facts.getByText('Mira wants to check the Kp forecast before the trip.').waitFor();
+  await facts.getByText('You booked the 21:30 aurora tour for Friday.').waitFor({state: 'detached'});
+  assert.equal((await texts()).length, 2);
+  await page.goto(origin + '/#memory?view=longterm&chat=-10042');
+  await facts.getByText('Mira took photos from the ridge.').waitFor();
+  assert.deepEqual(await texts(), [
+    'Mira wants to check the Kp forecast before the trip.',
+    'Mira took photos from the ridge.',
+  ]);
+  await page.goto(origin + '/#memory?view=longterm&chat=42');
+  await facts.getByText('You booked the 21:30 aurora tour for Friday.').waitFor();
+  assert.equal((await texts()).length, 2);
+  // Re-running or replacing long-term memory is where it was, and still asks first.
+  await page.getByRole('heading', {name: 'Re-run or replace'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Notes shows the day each note names and links its original messages, never a retired one', async () => {
+  const {page, problems} = await open('memory?view=notes');
+  const notes = page.locator('section', {has: page.getByRole('heading', {name: 'General notes'})});
+  const own = notes.getByRole('listitem').filter({hasText: 'Synthetic memory: interested in astronomy.'}).first();
+  const day = await page.evaluate(() =>
+    new Date(2026, 10, 12).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}),
+  );
+  await own.getByText(day, {exact: true}).waitFor();
+  const links = own.getByRole('list', {name: 'Original messages'});
+  await links.getByRole('link', {name: 'Original message 1'}).waitFor();
+  assert.equal(await linksTo(links, sourceIds.tour), 1);
+  assert.equal(await linksTo(links, sourceIds.packing), 1);
+  const forward = notes.getByRole('listitem').filter({hasText: 'Alice is planning a trip to Iceland.'}).first();
+  await forward.getByText('Original message 2 · Retired message', {exact: true}).waitFor();
+  assert.equal(await linksTo(forward, sourceIds.photo), 0);
+  assert.equal(await linksTo(forward, sourceIds.booking), 1);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Facts, People and Inbox review name each original next to its link', async () => {
+  const label = 'you in your private chat';
+  const {page: facts, problems: factProblems} = await open('memory?view=facts&entry=' + 'e1'.repeat(32));
+  const from = panelSection(facts, 'Where it came from');
+  await from.getByText(label, {exact: false}).waitFor();
+  assert.equal(await linksTo(from, 'a'.repeat(64)), 1);
+  await facts.close();
+  const {page: people, problems: peopleProblems} = await open('memory?view=people&person=' + '1'.repeat(64));
+  const claim = people.getByRole('listitem').filter({hasText: 'Mira prefers quiet aurora viewpoints'}).first();
+  await claim.getByText(label, {exact: false}).waitFor();
+  assert.equal(await linksTo(claim, 'a'.repeat(64)), 1);
+  // A source that names no message the archive holds has no link, only why.
+  const unlinked = people
+    .getByRole('listitem')
+    .filter({hasText: 'Mira and Devon are planning the Iceland trip'})
+    .first();
+  await unlinked.getByText('Source not recorded', {exact: true}).waitFor();
+  assert.equal(await unlinked.locator('a[href^="#messages?source="]').count(), 0);
+  const learned = people.getByRole('link', {name: 'What long-term memory learned about Mira Chen'});
+  assert.equal(await learned.getAttribute('href'), '#memory?view=longterm&about=' + '1'.repeat(64));
+  await people.close();
+  const {page: inbox, problems: inboxProblems} = await open('inbox?kind=memory_access&decision=' + '4'.repeat(64));
+  const drawer = inbox.getByRole('dialog');
+  await drawer.locator('summary', {hasText: 'Why Nocheh suggested this'}).click();
+  await drawer.getByRole('link', {name: 'Open the original message'}).waitFor();
+  await drawer.getByText(label, {exact: false}).waitFor();
+  assert.deepEqual([...factProblems, ...peopleProblems, ...inboxProblems], []);
+  await inbox.close();
+});
