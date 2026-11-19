@@ -244,7 +244,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(!operation)throw new HttpError(400,'unknown_management_action');
       // Each note says where it came from in the owner's words; what Hermes recorded about it stays behind.
       const value=await brainOperation(s.brain,operation)(input);
-      return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value):value);
+      return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value,ids=>s.originals.originals(ids)):value);
     }
     if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
@@ -410,6 +410,14 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const retired=principal.turnEvent?await s.retirements.isRetired((await s.archive.captured(principal.turnEvent)).reference):false;
       return json(res,200,{valid:principal.admin||!retired&&telegramDeliveryAllowed(s.access.policy(),principal,source)});
     }
+    // The owner's dashboard's facts and originals (ADR-0261 step 4): owner only, each answered in the owner's words.
+    if(req.method==='GET'&&path==='/v1/memory/longterm/coverage')return json(res,200,await s.memoryDashboard.coverage(principal));
+    if(req.method==='GET'&&path==='/v1/memory/facts')return json(res,200,await s.memoryDashboard.facts(principal,{chat:url.searchParams.get('chat')??'',
+      person:url.searchParams.get('person')??'',after:url.searchParams.get('after')??''}));
+    if(req.method==='GET'&&path==='/v1/memory/originals')return json(res,200,await s.originals.lookup(principal,url.searchParams.getAll('id')));
+    const eventSection=path.match(/^\/v1\/events\/([a-f0-9]{64})\/(thread|learned)$/);
+    if(req.method==='GET'&&eventSection)return json(res,200,eventSection[2]==='thread'?await s.sources.ownerThread(principal,eventSection[1]!,s.originals):
+      await s.memoryDashboard.learned(principal,eventSection[1]!));
     if(path==='/v1/memory/longterm') {
       admin(principal);
       if(req.method==='GET')return json(res,200,await s.memory.status());

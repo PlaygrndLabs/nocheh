@@ -34,6 +34,8 @@ import {PreparedContextRepository} from './prepared-context.js';
 import {HttpError} from '../http.js';
 import {RuntimeTurnRepository} from './turns.js';
 import {NativeMemoryRepository} from './native-memory.js';
+import {OwnerOriginals} from './owner-originals.js';
+import {MemoryDashboard} from './memory-dashboard.js';
 import {NativeReviewRepository} from './native-review.js';
 import {SharingContentRepository} from './sharing.js';
 import {ImportRepository} from './imports.js';
@@ -133,6 +135,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
   const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect,noteSources,tags);
+  // The owner's dashboard names original messages in the owner's words, a retired one only as retired (ADR-0261 step 4).
+  const originals=new OwnerOriginals(stores.control,noteSources,retirements),memoryDashboard=new MemoryDashboard(stores,memory,originals,options.policy);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's asks about a member (step 4b): recorded only from a live owner-private turn, answered by their own worker.
@@ -227,7 +231,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     memberAsks,memberAskTurns:new OwnerMemberAskTurns(memberAsks,archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>ownerChat(options.policy())}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
-    memory,knowledge,supervision,
+    memory,knowledge,supervision,originals,memoryDashboard,
     reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??'',noteSources),noteSources,tags,
     shared,
     detectorVersion:options.detectorVersion,detect};

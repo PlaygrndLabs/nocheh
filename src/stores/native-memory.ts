@@ -138,7 +138,7 @@ export class NativeMemoryRepository {
     readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy(),contexts.access),
     readonly tags:SourceTagRepository|null=null){}
   /** Where recalled facts came from (ADR-0261). */
-  private get factSources(){return new FactSourceRepository(this.control,this.contexts.access,this.sources);}
+  get factSources(){return new FactSourceRepository(this.control,this.contexts.access,this.sources);}
   private get protocol(){return this.engine.protocol;}
   private get control(){return this.contexts.access.stores.control;}
   private get guards(){return this.contexts.guards;}
@@ -262,6 +262,14 @@ export class NativeMemoryRepository {
   private async workspace(binding:GuardBinding) {
     return (await this.control.query(`SELECT * FROM memory_generations WHERE installation_generation=$1 AND audience='installation'
       AND representation_version=$2 AND state<>'retired'`,[binding.generation,this.protocol])).rows[0] as any;
+  }
+  /** The memory space Nocheh reads now and the binding it was read under, for the owner's dashboard; null when there
+   *  is none, or only one a fresh start left behind (current() refuses it). */
+  async dashboardSpace():Promise<{id:string;binding:GuardBinding}|null> {
+    const row=await this.workspace(await this.guards.state());
+    if(!row)return null;
+    try{const current=await this.current(row.id);return {id:current.row.id,binding:current.binding};}
+    catch(error){if(error instanceof HttpError&&error.code==='memory_context_retired')return null;throw error;}
   }
   /** The installation workspace stays current across guard epochs; only an installation reset replaces it. */
   async current(id:string) {

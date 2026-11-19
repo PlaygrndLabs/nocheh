@@ -249,9 +249,10 @@ test('each note\'s source is labelled from what was recorded about it, never fro
     // The Notes page: each note in the owner's words, with nothing Hermes recorded passed on.
     const page=await sources.withOwnerLabels({scope:OWNER,profile:'p',memories:[{name:'MEMORY.md',text:'x',entries:[
       {target:'memory',text:'I fly to Lisbon on Friday.',...sent[0]},{target:'memory',text:'Odd record',key:digest('odd'),origins:'not a list'}]},{name:'USER.md',text:'whole text'}]}) as any;
-    assert.deepEqual(Object.keys(page.memories[0].entries[0]),['target','text','from','label']);
+    assert.deepEqual(Object.keys(page.memories[0].entries[0]),['target','text','from','label','day']);
+    assert.equal(page.memories[0].entries[0].day,saved,'a review names its day (ADR-0261 step 4)');
     assert.equal(page.memories[0].entries[0].from,'owner');assert.match(page.memories[0].entries[0].label,/^Your own messages in /);
-    assert.deepEqual(page.memories[0].entries[1],{target:'memory',text:'Odd record',from:'unknown',label:sourceLines(undefined).unknown});
+    assert.deepEqual(page.memories[0].entries[1],{target:'memory',text:'Odd record',from:'unknown',label:sourceLines(undefined).unknown,day:null});
     assert.deepEqual(page.memories[1],{name:'USER.md',text:'whole text'},'a file Hermes could not read stays whole');
 
     // Recall: a note hit's source in the model's words and a past conversation's writer in fixed words.

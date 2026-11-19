@@ -31,6 +31,22 @@ class ManagementApiErrorTests(unittest.TestCase):
                 dispatch({'operation': 'memory.api', 'path': '/v1/memory/honcho', 'body': None})
             api.assert_not_called()
 
+    def test_the_dashboards_facts_and_originals_routes_reach_storage(self):
+        # ADR-0261 step 4: the Facts list, the coverage line, original labels, and a message's thread and learned facts.
+        with patch('tools.operations.archive.archive.API') as api:
+            api.return_value.call.return_value = {'ok': True}
+            for path in ('/v1/memory/facts?chat=&person=&after=', '/v1/memory/longterm/coverage', '/v1/memory/originals?id=' + 'a' * 64):
+                with self.subTest(path=path):
+                    self.assertEqual(dispatch({'operation': 'memory.api', 'path': path, 'body': None}), {'ok': True})
+            for route in ('', '/thread', '/learned'):
+                with self.subTest(route=route):
+                    self.assertEqual(dispatch({'operation': 'archive.read', 'path': '/v1/events/' + 'b' * 64 + route}), {'ok': True})
+            api.reset_mock()
+            for path in ('/v1/events/' + 'b' * 64 + '/replies', '/v1/events/' + 'b' * 64 + '/thread/x', '/v1/events/short/thread'):
+                with self.subTest(path=path), self.assertRaisesRegex(ValueError, '^archive_route_denied$'):
+                    dispatch({'operation': 'archive.read', 'path': path})
+            api.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

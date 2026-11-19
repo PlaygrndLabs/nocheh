@@ -1,7 +1,7 @@
 import {canonical} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {longFetch} from '../long-fetch.js';
-import {engineId,engineInvalid,engineRejected,engineUnavailable,type EngineCoverage,type EngineFact,type EngineFactPage,type EngineTrace,
+import {engineId,engineInvalid,engineRejected,engineUnavailable,type EngineCoverage,type EngineFact,type EngineFactPage,type EngineTrace,type ParticipantFact,
   type EngineWrite,type EngineWriteInput,type ForgetStep,type MemoryEngine,type ParticipantRole} from './engine.js';
 
 /** GET without a body, POST with one. DELETE treats an already absent resource as deleted. */
@@ -172,16 +172,20 @@ export class HonchoEngine implements MemoryEngine {
       writes:result.messages.map((m:any)=>({id:m.message_id,receipt:m.receipt_id})),limitations:result.limitations};
   }
 
-  /** Honcho's stock conclusion list for what a peer learned about itself, a cursor page at a time (no count query). */
-  private async list(space:string,participant:string,sessions:string[]|null,size:number,cursor:string,extra:Record<string,unknown>={}) {
-    if(!engineId(participant)||sessions?.some(session=>!engineId(session)))throw new HttpError(400,'invalid_fact_request');
-    const page=await this.call(this.base(space)+'/conclusions/list?'+new URLSearchParams({size:String(size),cursor}),
-      {filters:{observer_id:participant,observed_id:participant,level:'explicit',...(sessions?{session_id:{in:sessions}}:{}),...extra}});
+  /** One page of Honcho's stock conclusion list of explicit facts (no count query). */
+  private async page(space:string,size:number,cursor:string,filters:Record<string,unknown>) {
+    const page=await this.call(this.base(space)+'/conclusions/list?'+new URLSearchParams({size:String(size),cursor}),{filters:{level:'explicit',...filters}});
     // A server without cursor pages answers a plain page, which would end a walk early without saying so.
     if(!page||!Array.isArray(page.items)||page.items.length>size||
       !(page.next_page===null||typeof page.next_page==='string'&&page.next_page.length>0&&page.next_page.length<=2048))throw engineInvalid();
+    return {items:page.items as any[],next:page.next_page as string|null};
+  }
+  /** Honcho's stock conclusion list for what a peer learned about itself, a cursor page at a time. */
+  private async list(space:string,participant:string,sessions:string[]|null,size:number,cursor:string,extra:Record<string,unknown>={}) {
+    if(!engineId(participant)||sessions?.some(session=>!engineId(session)))throw new HttpError(400,'invalid_fact_request');
+    const page=await this.page(space,size,cursor,{observer_id:participant,observed_id:participant,...(sessions?{session_id:{in:sessions}}:{}),...extra});
     const allowed=sessions&&new Set(sessions);
-    return {items:page.items.map((item:any)=>listed(item,participant,allowed)) as Listed[],next:page.next_page as string|null};
+    return {items:page.items.map((item:any)=>listed(item,participant,allowed)) as Listed[],next:page.next};
   }
   /** Honcho's list names the messages a fact cites. For a fact without citations, Nocheh's plugin names a few messages
    * of the batch it was learned from, which is never exact. Facts it cannot answer for keep no writes, and say why. */
@@ -251,6 +255,32 @@ export class HonchoEngine implements MemoryEngine {
     while(cursor&&pages<3);
     items.sort((a,b)=>b.fact.derived-a.fact.derived||(a.key<b.key?1:a.key>b.key?-1:0)||(a.fact.id<b.fact.id?-1:a.fact.id>b.fact.id?1:0));
     return {facts:items.map(item=>item.fact),complete:!cursor,limitations:options.batches===false?[]:await this.batches(space,items)};
+  }
+  /** Every peer's facts about itself, by the stock list's own filters (`source_message_ids` names the messages a fact
+   *  cites, H:src/utils/filter.py). A peer's facts about another peer are skipped, and a page of only those is followed by
+   *  the next, up to three pages. A fact that cites none of `citing` is a broken answer. */
+  async everyFact(space:string,options:{sessions:string[]|null;citing?:string[];size:number;cursor:string|null}) {
+    const {sessions,citing}=options;
+    if(!Number.isSafeInteger(options.size)||options.size<1||options.size>100||sessions?.some(session=>!engineId(session))||
+      citing&&(citing.length>listIds||citing.some(id=>!nativeId(id)))||
+      options.cursor!==null&&(typeof options.cursor!=='string'||!options.cursor||options.cursor.length>2048))throw new HttpError(400,'invalid_fact_request');
+    if(sessions&&!sessions.length||citing&&!citing.length)return {facts:[],next:null,limitations:[]};
+    const allowed=sessions&&new Set(sessions),wanted=citing&&new Set(citing),items:(Listed&{participant:string})[]=[];
+    let cursor=options.cursor??'',next:string|null=null,pages=0;
+    do {
+      const page=await this.page(space,options.size,cursor,{...(sessions?{session_id:{in:sessions}}:{}),...(citing?{source_message_ids:{in:citing}}:{})});
+      for(const item of page.items) {
+        if(!engineId(item?.observer_id)||!engineId(item?.observed_id))throw engineInvalid();
+        if(item.observer_id!==item.observed_id)continue;
+        const found=listed(item,item.observer_id,allowed);
+        if(wanted&&!found.fact.writes.some(write=>wanted.has(write)))throw engineInvalid();
+        items.push({...found,participant:item.observer_id});
+      }
+      next=page.next;cursor=next??'';pages++;
+    }while(!items.length&&next&&pages<3);
+    // The batch messages of uncited facts are filled in place, so the facts are read after.
+    const limitations=await this.batches(space,items);
+    return {facts:items.map(item=>({...item.fact,participant:item.participant}) as ParticipantFact),next,limitations};
   }
   async citationCoverage(space:string):Promise<EngineCoverage> {
     const found=await this.call(this.base(space)+'/nocheh/citation-coverage');
