@@ -101,7 +101,7 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/brain/manage',{action:'preferences',scope:'default'})).operation,'config.read');
     await request('/v1/brain/manage',{action:'unknown'},400);
     // The Notes page reads each note's source in the owner's words; what Hermes recorded stays behind (ADR-0257).
-    assert.deepEqual((await request('/v1/brain/manage',{action:'memory',scope:'123'})).memories[0].entries,[{target:'memory',text:'Juniper',from:'unknown',label:'Source not recorded'}]);
+    assert.deepEqual((await request('/v1/brain/manage',{action:'memory',scope:'123'})).memories[0].entries,[{target:'memory',text:'Juniper',from:'unknown',label:'Source not recorded',day:null,originals:[]}]);
     // Hermes's lookup takes the service token only, and a body not as Hermes writes it is refused.
     const lookup={notes:[{key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}],space:'123'};
     assert.deepEqual(await request('/internal/notes/sources',lookup),{labels:{['e'.repeat(64)]:{from:'unknown',label:'source not recorded'}}});
