@@ -41,9 +41,9 @@ const approvals: {value: Approval; label: string}[] = [
   {value: 'everything', label: 'Everything asks me'},
   {value: 'nothing', label: 'Nothing asks me'},
 ];
-/** Shown only while Nothing asks me is picked: under it, any Notion tool runs in your private chat without a card (ADR-0251). */
+/** Shown only while Nothing asks me is picked: under it, Notion's page tools run in your private chat without a card (ADR-0251, ADR-0263). */
 const nothingAsksWarning =
-  'With this on, text Nocheh reads, like a forwarded message, a file or a Notion page, can also make it change your Notion pages, or use any other Notion tool, without asking.';
+  'With this on, text Nocheh reads, like a forwarded message, a file or a Notion page, can also make it save, change or delete your Notion pages without asking. It still asks before it reads a page outside your Notion that you didn’t send it, adds an image, embed or file from outside, or uses calendar, Notion AI agents, uploads or a tool Notion adds later.';
 const signInErrors: Record<string, string> = {
   notion_sign_in_expired: 'That Notion sign-in took too long or was started elsewhere. Press Connect Notion again.',
   notion_sign_in_refused: 'Notion did not accept the sign-in. Press Connect Notion again.',
@@ -282,8 +282,8 @@ export function ConnectionSettings() {
           description={
             <>
               A call that asks shows you the exact Notion change in your private chat and the Inbox before it runs. A
-              read of a page outside your Notion, such as a public notion.site page, asks like a change, unless you pick
-              Nothing asks me; in a background job it always asks. A background job reads without asking only if its
+              read of a page outside your Notion, such as a public notion.site page, asks like a change; with Nothing asks
+              me it asks only when you didn’t send that address yourself, and in a background job it always asks. A background job reads without asking only if its
               card said so when you approved it, and only while this setting allows it; its changes always ask.
               Scheduled tasks always ask. Deny rules still win.
               {value.approval === 'nothing' && <span className="mt-1 block text-warn">{nothingAsksWarning}</span>}

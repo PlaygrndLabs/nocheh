@@ -8,6 +8,8 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {actionArguments,ruleKey} from '../action-arguments.js';
+import {freeRead,sameAddress,type FreeRead} from '../link-check.js';
+import {freeReadsLeft,turnMessageLinks,turnPages} from './free-reads.js';
 import {HttpError,object,string} from '../http.js';
 import {decide,validatePolicy,type Effect} from '../security/contract.js';
 import {evaluate,policySnapshot,recordEffect} from '../security/store.js';
@@ -36,9 +38,10 @@ const summaryOf=(value:unknown)=>{
   const line=value.replace(/\s+/g,' ').trim();
   return line&&line.length<=summaryLength?line:null;
 };
-/** How long a chat rule from a card button lasts, in minutes, by what it covers (ADR-0214): a site here for a
- * session of 12 hours or for 30 days, an exact command for 30 days. Telegram and Notion keep their own decisions. */
-export const ruleMinutes:Record<string,Partial<Record<'here'|'always',number>>>={browser:{here:720,always:43200},shell:{always:43200}};
+/** How long a chat rule from a card button lasts, in minutes, by what it covers (ADR-0214, ADR-0263): a site or a shared
+ * file here for a session of 12 hours or for 30 days, an exact command or another server's tool for 30 days. Telegram and
+ * Notion keep their own decisions. */
+export const ruleMinutes:Record<string,Partial<Record<'here'|'always',number>>>={browser:{here:720,always:43200},shell:{always:43200},mcp:{always:43200}};
 const ruleUses=1000;
 /** Whether a standing permission still covers an operation: an exact grant its fingerprint and epoch, a chat rule its
  * site or command, kind, chat or topic, profile and installation generation, never a job's operation (ADR-0214). */
@@ -158,15 +161,21 @@ export class ControlledActionRepository {
       // A follow-up was started by Nocheh after a result came back, not asked by anyone: like a job's operation, what it
       // asks for has no rule key, so no chat rule covers it and its card offers no rule (ADR-0212, ADR-0214).
       const followUp=source.store==='archive'&&await followUpTurn(db,principal);
+      // A web read or another server's tool sends out what its address and input carry. One message opens only so many
+      // without a card, by rule or by "Do what I ask"; past that, no rule covers its next one and it asks (ADR-0263).
+      const outward=body.kind==='browser'||body.kind==='mcp'&&!('connection' in args);
+      const left=outward&&source.store==='archive'?await freeReadsLeft(db,source.id):null;
       // A repeat of the same request keeps the summary it was first asked with, so its card never changes.
       // A member's request keeps their account, so the claim checks them again before it runs (step 3).
       await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference,asker_account)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`,
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null,
-          turn.job||followUp?null:ruleKey(body.kind as string,args),summary,asker&&!asker.owner?asker.account:null]);
+          turn.job||followUp||left&&left.all<=0?null:ruleKey(body.kind as string,args),summary,asker&&!asker.owner?asker.account:null]);
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint)throw new HttpError(409,'action_proposal_changed');
       const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);
+      if(outward&&row.state==='proposed'&&grant&&decision.outcome==='allow')
+        await db.query("UPDATE controlled_actions SET free_read='rule' WHERE id=$1 AND free_read IS NULL",[id]);
       // The owner freedom setting lets the owner's own live private request
       // approve itself. Deny rules are evaluated first and still block it.
       // Notion is used only from the owner's private chat while it is on; the
@@ -179,11 +188,21 @@ export class ControlledActionRepository {
       // no autonomy: every change it asks for waits for a card (ADR-0207), and
       // neither does a follow-up turn, which no owner request started (ADR-0212).
       const connected='connection' in args,live=source.store==='archive'&&!followUp,fresh=!turn.job||!await relaunchedRun(db,source.id);
-      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,ownerIds(this.access.policy()),source,turn,true):live):null;
-      const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:live?await ownerAutonomyGrant(db,principal,turn):null:null;
+      // An address the owner typed or pasted in this message, or forwarded with few enough links, may be read in Notion
+      // under Nothing asks me (ADR-0263).
+      const given=connected&&live&&!turn.job?await turnMessageLinks(this.access.stores.archive,source.id):null;
+      const provided=(address:string)=>{const exact=sameAddress(address);return !!given&&!!exact&&(given.typed.has(exact)||given.forwarded.has(exact));};
+      const notion=connected?await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,ownerIds(this.access.policy()),source,turn,true):live,provided):null;
+      // "Do what I ask" runs a command the owner asks for in their private chat. A web read, or another server's list of
+      // tools, runs only when no model built its address: a link the owner gave, one on a page opened for this message, or
+      // a site the owner named with nothing after it but their words. Everything else asks, and a tool call always does
+      // unless a rule covers it (ADR-0263).
+      const own=row.state==='proposed'&&decision.outcome==='ask'&&!connected&&live?await ownerAutonomyGrant(db,principal,turn):null;
+      const free=own&&outward&&left&&left.all>0?await this.freeRead(body.kind as string,args,source.id,left.pages>0):null;
+      const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:own&&(!outward||free)?own:null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
       if(autonomy&&decision.outcome==='allow')
-        await db.query("UPDATE controlled_actions SET state='approved',decision_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source]);
+        await db.query("UPDATE controlled_actions SET state='approved',decision_reference=$2,free_read=$3,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source,free]);
       // A group's permission for web pages and outside tools lets a live group request run without a card (step 3); deny
       // rules come first, and the row keeps why, which its claim evaluates with.
       const tools=!autonomy&&live&&row.state==='proposed'&&decision.outcome==='ask'?groupToolsGrant(asker,row.kind,args,principal.space!):null;
@@ -207,6 +226,13 @@ export class ControlledActionRepository {
         'Allowed by a rule the owner set; it runs now.'};
       return {id,state:row.state,fingerprint,message:'Review the exact operation. Execution requires owner approval or a current bounded permission.'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+  }
+  /** Why a web read or another server's list of tools may run without a card under "Do what I ask", or null (ADR-0263).
+   *  A tool call always has its card or a rule. `pages` says whether links on this message's pages may still be used. */
+  private async freeRead(kind:string,args:Record<string,unknown>,event:string,pages:boolean):Promise<FreeRead|null> {
+    if(typeof args.url!=='string'||kind==='mcp'&&args.operation!=='list')return null;
+    const links=await turnMessageLinks(this.access.stores.archive,event);
+    return freeRead(args.url,links,pages&&kind==='browser'?await turnPages(this.control,this.derived.pool,event):[]);
   }
   /** The asker's summary, kept as content beside the proposal and secret-checked as its arguments are, but never
    * part of what runs, the action's identity or its fingerprint (ADR-0224). Each wording is its own record, so a

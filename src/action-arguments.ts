@@ -1,5 +1,6 @@
 import {canonical,digest} from './archive.js';
 import {HttpError,object,string} from './http.js';
+import {browserRuleKey,toolRuleKey} from './link-check.js';
 
 /** Whether a web address's host is written plainly, so the card, a chat rule, the executor and any other parser all read
  * the same one (ADR-0214): no backslash, percent escape, user name, port spelling or non-ASCII name. */
@@ -45,10 +46,12 @@ export function actionArguments(kind:unknown,value:unknown,stored=false) {
   throw new HttpError(400,'unsupported_controlled_tool');
 }
 
-/** What a chat rule allows, in Hermes's approval rule_key format: one site for a web read, one exact
- * command for a shell command. Other operations have no rule and are decided one by one (ADR-0214). */
+/** What a chat rule allows, in Hermes's approval rule_key format: one site for a web read, or one document on a shared
+ * site; one exact command for a shell command; one tool of another server, for short input (ADR-0214, ADR-0263). A web
+ * read or a tool call that carries data, a connected service and Telegram have no rule and are decided one by one. */
 export function ruleKey(kind:string,args:any):string|null {
-  if(kind==='browser')return 'nocheh_browser:'+new URL(args.url).hostname;
+  if(kind==='browser')return browserRuleKey(args.url);
   if(kind==='shell')return 'nocheh_shell:'+digest(args.command);
+  if(kind==='mcp')return toolRuleKey(args);
   return null;
 }

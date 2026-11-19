@@ -29,7 +29,7 @@ const freedom = [
     value: 'owner_requests_execute',
     title: 'Do what I ask',
     text:
-      'When you ask in your private chat, it acts without a separate yes. Messages to groups always show you a card first. Other requests from groups, schedules and background work still wait. ' +
+      'When you ask in your private chat, it acts without a separate yes: commands run, and it opens links you send, links on pages it opened for you and a site you name. A web address it builds itself, such as a search with your words in it, asks once, with a button to always allow that site; another server’s tool asks once, with a button to always allow that tool. Messages to groups always show you a card first. Other requests from groups, schedules and background work still wait. ' +
       groupTools,
   },
 ];

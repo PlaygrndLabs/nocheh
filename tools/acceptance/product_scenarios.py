@@ -515,6 +515,38 @@ class ProductScenarios(Scenarios):
         self.gate('decided_summary_card_keeps_its_fold', edited['message']['text'].startswith(text) and edited['message'].get('entities') == entities,
                   entities=edited['message'].get('entities'))
 
+    def owner_freedom_opens_only_given_links(self):
+        # With "Do what I ask" on, a page the owner linked opens with no card, while an address the model built itself
+        # waits for a card that offers to always allow its site and says what that allows (ADR-0263). The built address
+        # is written in the marker as JSON escapes only, so the owner's message holds no link, site or word of it.
+        nonce = str(self.f.ids())
+        current = self.f.app('/v1/owner-autonomy')
+        enabled = self.f.app('/v1/owner-autonomy', {'mode': 'owner_requests_execute', 'expected_revision': current['revision'],
+                                                    'operation_id': 'scenario-links-'+nonce})
+
+        def rows(event_id):
+            return json.loads(self.f.query('nocheh_control', "SELECT coalesce(json_agg(json_build_object('id',id,'state',state,'free',free_read)),'[]') "
+                                           "FROM controlled_actions WHERE event_id='"+event_id+"'"))
+        try:
+            given = 'https://pages.example.test/GIVEN'+nonce
+            event_id, before = self.silent_turn(self.f.message(OWNER, 'Read '+given+' [[tool:mcp__nocheh__browser '+json.dumps({'url': given})
+                                                               +']] [[after:silent]]'), OWNER)
+            found = self.wait('given_link_recorded', lambda: rows(event_id), 60)
+            self.gate('given_link_opens_without_a_card', len(found) == 1 and found[0]['state'] != 'proposed' and found[0]['free'] == 'typed'
+                      and not self.cards(before, OWNER), rows=found)
+            built = 'https://pages.example.test/BUILT'+nonce+'?q=made-up'
+            event_id, before = self.silent_turn(self.f.message(OWNER, 'Look it up [[tool:mcp__nocheh__browser '
+                                                               + '{"url": "'+''.join('\\u%04x' % ord(char) for char in built)+'"}]] [[after:silent]]'), OWNER)
+            card = self.wait('built_address_card', lambda: self.cards(before, OWNER), 120)[0]
+            found = rows(event_id)
+            self.gate('built_address_waits', len(found) == 1 and found[0]['state'] == 'proposed' and found[0]['free'] is None, rows=found)
+            self.gate('card_offers_the_site_rule', [button['callback_data'][:2] for button in self.buttons(card)] == ['na', 'nc', 'nw', 'nd']
+                      and '“Always allow this site” lets Nocheh open any page there' in card['message']['text'], card=card['message']['text'][-400:])
+            self.press(card, 'reject')
+        finally:
+            self.f.app('/v1/owner-autonomy', {'mode': 'approval_required', 'expected_revision': enabled['revision'],
+                                              'operation_id': 'scenario-links-reset-'+nonce})
+
     def forwarded_messages_are_not_the_owners_words(self):
         # A forwarded message reaches the model after Nocheh's own fixed line saying where it came from, and a typed one
         # never carries that line. A forwarded command never runs, even the owner's own earlier one (ADR-0250).
@@ -4985,7 +5017,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'removed_from_active_group_tells_owner_once', 'owner_adds_nocheh_on_at_once', 'off_group_turned_on_and_off_from_the_dashboard',
                  'menu_shown_to_nobody', 'stranger_in_private_gets_one_reply',
                  'send_to_stranger_refused', 'send_to_unselected_group_refused', 'send_to_allowed_person_private',
-                 'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'forwarded_messages_are_not_the_owners_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
+                 'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'owner_freedom_opens_only_given_links', 'forwarded_messages_are_not_the_owners_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'member_switched_off_in_a_group', 'member_posting_off_is_refused',
                  'member_who_left_a_group_is_not_reached_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
                  'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho',

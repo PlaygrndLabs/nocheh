@@ -2,6 +2,7 @@ import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {HttpError,object} from '../http.js';
 import {plainHost} from '../action-arguments.js';
+import {carriesData,dataLimit} from '../link-check.js';
 import {canonical} from '../archive.js';
 import {parentSpace} from '../spaces.js';
 import type {OwnerIds} from '../assistant-policy.js';
@@ -22,6 +23,11 @@ const approvals:NotionApproval[]=['changes','everything','nothing'];
 const reads=new Set(['notion-search','notion-fetch','notion-get-comments','notion-get-users','notion-get-user','notion-get-self','notion-get-teams',
   'notion-query-data-sources','notion-query-database-view']);
 export const notionReads=(tool:string)=>reads.has(tool);
+/** The Notion tools that read, save or edit the owner's pages, which Nothing asks me lets run without a card. Calendar,
+ *  AI agents, uploads and any tool Notion adds later reach other people or send more, and ask (ADR-0263). */
+const pageTools=new Set([...reads,'notion-create-pages','notion-update-page','notion-move-pages','notion-duplicate-page','notion-create-database',
+  'notion-update-database','notion-update-data-source','notion-create-view','notion-update-view','notion-create-comment','notion-delete-pages','notion-restore-pages']);
+export const notionPageTool=(tool:string)=>pageTools.has(tool);
 const notionId=/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const reference=/^(collection|view|user|discussion):\/\/(.+)$/i,queryKeys=new Set(['v','p','pvs','source']),plain=/^[\w-]{1,64}$/;
 /** An address in the owner's own Notion (ADR-0225): a raw id; a data source, view or user by id; a discussion by its ids;
@@ -34,6 +40,9 @@ export function notionAddress(value:string):boolean {
   if(!/^https:\/\//i.test(value)||value.indexOf('://')!==value.lastIndexOf('://'))return false;
   try {
     const url=new URL(value);
+    // Notion's own server fetches another address from its image and signed-file paths, so those are outside (ADR-0263).
+    let path=url.pathname;try{path=decodeURIComponent(path);}catch{/* an address with a broken escape is outside */return false;}
+    if(/^\/(?:image|signed)(?:\/|$)/i.test(path))return false;
     return ['notion.so','www.notion.so'].includes(url.hostname)&&plainHost(value,url)&&!url.username&&!url.password&&!url.port&&
       [...url.searchParams].every(([key,option])=>queryKeys.has(key)&&plain.test(option))&&(!url.hash||plain.test(url.hash.slice(1)));
   }catch{return false;}
@@ -46,7 +55,7 @@ const schemeLetter=/[a-z0-9+.-]/i,ends=/[\s"'`<>()[\]{},;|]/;
  *  however its slashes are written, and from each other `scheme:` followed by a slash or backslash, to the next stop. Tabs
  *  and newlines, which parsers drop, are dropped first. A web address with an `@` before its first slash is kept whole up
  *  to that slash, stops included, since a parser reads the host after the `@`. */
-function addresses(input:string):string[] {
+export function addresses(input:string):string[] {
   const text=input.replace(/[\t\n\r]/g,''),starts:{at:number;web:boolean}[]=[];
   for(const found of text.matchAll(/https?:|:[/\\]/gi)) {
     const web=found[0].length>2;let at=found.index!;
@@ -63,10 +72,36 @@ function addresses(input:string):string[] {
 /** Whether a read's input stays in the owner's Notion (ADR-0225): every value under an address key is an owner address, and
  *  so is every address written with a scheme anywhere else in it, keys included. Free text without one, such as a search
  *  query or a bare host name, is fine. */
-export function notionOwnInput(input:unknown,key=''):boolean {
-  if(typeof input==='string')return (!addressKeys.has(key)||notionAddress(input))&&addresses(input).every(notionAddress);
-  if(Array.isArray(input))return input.every(item=>notionOwnInput(item,key));
-  if(input&&typeof input==='object')return Object.entries(input).every(([name,value])=>notionOwnInput(name)&&notionOwnInput(value,name));
+export function notionOwnInput(input:unknown,key='',given:(address:string)=>boolean=()=>false):boolean {
+  const own=(address:string)=>notionAddress(address)||given(address);
+  if(typeof input==='string')return (!addressKeys.has(key)||own(input))&&addresses(input).every(own);
+  if(Array.isArray(input))return input.every(item=>notionOwnInput(item,key,given));
+  if(input&&typeof input==='object')return Object.entries(input).every(([name,value])=>notionOwnInput(name,'',given)&&notionOwnInput(value,name,given));
+  return true;
+}
+/** Whether an address stands in a text only as a plain link someone may click: a Markdown link, or bare text, never an
+ *  image, an attribute such as an embed's or a file's source, or a whole field such as a page's cover. Notion, or the
+ *  browser of whoever opens the page, fetches those by themselves. */
+function plainLink(text:string,address:string):boolean {
+  const line=text.replace(/[\t\n\r]/g,'');
+  if(line.trim()===address)return false;
+  let at=line.indexOf(address),seen=false;
+  for(;at>=0;at=line.indexOf(address,at+1)) {
+    seen=true;const before=line.slice(0,at);
+    if(/(?:=|<)\s*["']?$/.test(before))return false;
+    if(before.endsWith('](')&&/!\[[^\]]*\]\($/.test(before))return false;
+    if(!before.endsWith('](')&&!/(?:^|[\s(\[{,;])$/.test(before))return false;
+  }
+  return seen;
+}
+/** Whether a change Nothing asks me runs without a card leaves nothing to fetch outside the owner's Notion (ADR-0263):
+ *  every outside address in it is one the owner gave this turn, or a plain link of at most dataLimit characters with
+ *  no other address inside it. */
+export function notionSafeChange(input:unknown,given:(address:string)=>boolean,key=''):boolean {
+  if(typeof input==='string')return (!addressKeys.has(key)||notionAddress(input)||given(input))&&addresses(input).every(address=>
+    notionAddress(address)||given(address)||Array.from(address).length<=dataLimit&&!carriesData(address)&&plainLink(input,address));
+  if(Array.isArray(input))return input.every(item=>notionSafeChange(item,given,key));
+  if(input&&typeof input==='object')return Object.entries(input).every(([name,value])=>notionOwnInput(name)&&notionSafeChange(value,given,name));
   return true;
 }
 /** What a job run may fetch without asking, on top of `notionOwnInput`: a page by its raw id or notion.so address, or a data
@@ -108,16 +143,22 @@ export class NotionRepository {
  * the turn may use the setting at all. A job reads group text that anyone
  * there can write, so in a job only reads skip the card (ADR-0203). A read
  * whose input names an address outside the owner's Notion counts as a change,
- * in a live turn and in a job (ADR-0225).
+ * in a live turn and in a job (ADR-0225). Nothing asks me lets only the page tools run in a live turn, and only while
+ * nothing outside is fetched: an outside read of an address the owner gave this turn (`given`), and a change whose outside
+ * addresses are given or plain links (ADR-0263).
  */
 export async function notionAuthority(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null},
-  args:{operation?:string;tool?:string;input?:unknown},allowed:boolean):Promise<string|null> {
+  args:{operation?:string;tool?:string;input?:unknown},allowed:boolean,given:(address:string)=>boolean=()=>false):Promise<string|null> {
   if(principal.admin||principal.scope!==null||!turn.owner)throw new HttpError(403,'notion_owner_private_only');
   const row=(await db.query('SELECT enabled,approval,revision FROM owner_notion WHERE singleton FOR SHARE')).rows[0];
   if(!row?.enabled)throw new HttpError(409,'notion_not_enabled');
   if(!allowed||(principal.purpose??'assistant')!=='assistant')return null;
   const tool=String(args.tool??''),read=args.operation==='list'||notionReads(tool)&&notionOwnInput(args.input)&&(!turn.job||tool!=='notion-fetch'||notionJobFetch(args.input));
-  return row.approval==='nothing'&&!turn.job||row.approval!=='everything'&&read?'notion_setting:'+row.revision:null;
+  // Nothing asks me covers the page tools in a live turn: reads of the owner's Notion or of an address the owner gave, and
+  // changes that leave nothing outside to fetch (ADR-0263).
+  const nothing=row.approval==='nothing'&&!turn.job&&(args.operation==='list'||notionPageTool(tool)&&
+    (notionReads(tool)?notionOwnInput(args.input,'',given):notionSafeChange(args.input,given)));
+  return nothing||row.approval!=='everything'&&read?'notion_setting:'+row.revision:null;
 }
 
 /** What a newly asked private job's card offers in the owner's Notion: reads without asking, or nothing when Notion is off or

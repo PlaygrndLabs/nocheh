@@ -11,6 +11,7 @@ import {approvalAction,approvalCard,approvalLines,approvalTask,backgroundMemberT
 import {cardName,controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,visible,type Link,type OperationText} from '../action-text.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
 import {forwardOrigin,forwardedCommand} from '../forwarded.js';
+import {documentRule} from '../link-check.js';
 import {followUpLeft} from './action-continuations.js';
 import {evaluate} from '../security/store.js';
 import type {Effect} from '../security/contract.js';
@@ -31,13 +32,19 @@ type ListCard={id:string;fingerprint:string;members:[string,string][];long?:numb
 // Telegram allows 64 bytes of button data: a marker, the choice (approve, deny, stop a job, or approve and
 // allow here for a session or always, ADR-0214), and prefixes of the action ID and of the fingerprint of its exact content.
 const buttonData=/^n([adscw])([a-f0-9]{40})([a-f0-9]{16})$/;
-/** An operation's buttons: a web read can be allowed here for a session or always, an exact command always;
- * the rest, and a job's operations, are approved one by one. */
+/** An operation's buttons: a web read can be allowed here for a session or always, its site or, on a shared site, its
+ * document; an exact command always; another server's tool always, for short input; the rest, and a job's operations,
+ * are approved one by one (ADR-0214, ADR-0263). */
 const ruleButtons:Record<string,[ApprovalText,string][]>={
   browser:[['allow_once','a'],['allow_here','c'],['allow_always','w'],['reject','d']],
-  shell:[['allow_once','a'],['allow_command','w'],['reject','d']]};
+  document:[['allow_once','a'],['allow_here','c'],['allow_document','w'],['reject','d']],
+  shell:[['allow_once','a'],['allow_command','w'],['reject','d']],
+  mcp:[['allow_once','a'],['allow_tool','w'],['reject','d']]};
+/** What a rule of each kind lets Nocheh do on its own, said above the buttons. */
+const ruleWarnings:Record<string,ApprovalText>={browser:'site_note',document:'document_note',mcp:'tool_note'};
+const ruleKind=(row:{match_key:string|null;kind:string})=>row.kind==='browser'&&documentRule(row.match_key)?'document':row.kind;
 /** The rule buttons an operation's card may offer: none for a job's operation, a follow-up's, or one without a rule key (ADR-0214). */
-const ruleChoices=(row:{job_id:string|null;match_key:string|null;kind:string})=>!row.job_id&&row.match_key?ruleButtons[row.kind]??null:null;
+const ruleChoices=(row:{job_id:string|null;match_key:string|null;kind:string})=>!row.job_id&&row.match_key?ruleButtons[ruleKind(row)]??null:null;
 /** The Retry failed button under a problem notice in the owner's private chat. */
 export const retryButton='nr';
 /** The Answer privately button under the owner's answer in a group: `np` and its record's id (ADR-0249). */
@@ -358,7 +365,8 @@ export class ActionCommandRepository {
     const shown=operation(action,line);if(!shown)return null;
     // Room is kept for the line that says how it ended, and for the note above a chat rule's buttons. A summary never keeps
     // a card from Telegram: one that does not fit with it goes without it, before the note does.
-    const room=cardLimit-outcomeRoom,note=shared?'\n\n'+line.rule_note:'';
+    const warning=ruled&&ruleWarnings[ruleKind(row!)]?line[ruleWarnings[ruleKind(row!)]!]:'';
+    const room=cardLimit-outcomeRoom,note=[warning,shared?line.rule_note:''].filter(Boolean).map(text=>'\n\n'+text).join('');
     let card=linked(operationCard(texts.action,shown,origin),urls);
     if(card.text.length+note.length>room&&shown.summary) {
       const bare=operation({...action,summary:null},line);if(!bare)return null;
@@ -374,7 +382,7 @@ export class ActionCommandRepository {
     const code=action.error_code??(typeof action.result?.result?.error==='string'?action.result.result.error:null);
     // The executor runs only after its start is recorded, so an operation never started did not run.
     const started=!!(await this.tools.row(id)).started_at;
-    return {...card,fingerprint:action.fingerprint,state:action.state,code,started,resolution:action.resolution,line,rules:ruled&&(!shared||noted)};
+    return {...card,fingerprint:action.fingerprint,state:action.state,code,started,resolution:action.resolution,line,rules:ruled&&(!note||noted)};
   }
   private outcome(kind:ActionKind,state:string,line:Record<ApprovalText,string>,code:string|null=null,started=true,resolution:string|null=null) {
     if(state==='proposed')return null;

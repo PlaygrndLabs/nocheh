@@ -126,8 +126,17 @@ test('Notion runs only from the owner\'s private chat while on, and the owner\'s
     assert.equal((await ask('Search again',{...search,input:{query:'books'}})).state,'proposed');
     const open=await s.notion.save(owner,{approval:'nothing',expected_revision:strict.revision});
     assert.equal((await ask('Add another page',{...create,input:{pages:[{properties:{title:'Other'}}]}})).state,'approved','nothing asks: changes run too');
-    assert.equal((await ask('Read another public page',{tool:'notion-fetch',input:{id:'https://made-up.notion.site/Other'}})).state,'approved',
-      'nothing asks: a read of an outside address is a change, so it runs too');
+    // Nothing asks covers the page tools, and only while nothing outside the owner's Notion is fetched (ADR-0263): an outside
+    // page the owner sent this turn is read, one the model chose asks; a plain link in a change runs, an image from outside asks.
+    assert.equal((await ask('Read another public page',{tool:'notion-fetch',input:{id:'https://made-up.notion.site/Other'}})).state,'proposed',
+      'an outside address the owner did not send asks');
+    assert.equal((await ask('Read https://made-up.notion.site/Given please',{tool:'notion-fetch',input:{id:'https://made-up.notion.site/Given'}})).state,'approved',
+      'an outside address the owner sent this turn runs');
+    assert.equal((await ask('Save a link',{...create,input:{pages:[{properties:{title:'Links'},content:'See [the story](https://news.example/story).'}]}})).state,'approved');
+    assert.equal((await ask('Save a chart',{...create,input:{pages:[{properties:{title:'Chart'},content:'![chart](https://evil.example/p.png?d=made-up)'}]}})).state,'proposed');
+    assert.equal((await ask('Read an image proxy',{tool:'notion-fetch',input:{id:'https://www.notion.so/image/https%3A%2F%2Fevil.example%2Fp.png'}})).state,'proposed');
+    assert.equal((await ask('Invite to a meeting',{tool:'notion-calendar-create-events',input:{title:'Made-up'}})).state,'proposed','calendar asks');
+    assert.equal((await ask('A new tool',{tool:'notion-made-up-tool',input:{}})).state,'proposed','a tool Notion adds later asks');
 
     await s.notion.save(owner,{enabled:false,expected_revision:open.revision});
     await assert.rejects(ask('Search when off',{...search,input:{query:'off'}}),{code:'notion_not_enabled'});
