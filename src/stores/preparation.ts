@@ -1,13 +1,12 @@
 import type pg from 'pg';
 import {digest} from '../archive.js';
-import {allowedSender,type AssistantPolicy} from '../assistant-policy.js';
 import {guardChecks} from '../config.js';
 import {HttpError} from '../http.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
 import {AttachmentRepository} from './attachments.js';
 import {GuardRepository} from './guards.js';
-import {RECORDINGS,ReprocessingRepository,VOICE_ARCHIVED,VOICE_LIMIT_SECONDS,type DerivationEngine} from './reprocessing.js';
+import {RECORDINGS,ReprocessingRepository,VOICE_ARCHIVED,type DerivationEngine} from './reprocessing.js';
 import {SelectionRepository} from './selections.js';
 import type {SourceReference} from './archive.js';
 
@@ -17,25 +16,8 @@ const COMPANIONS=200,COMPANION_BYTES=120000;
 export class PreparationRepository {
   constructor(readonly attachments:AttachmentRepository,readonly reprocessing:ReprocessingRepository,
     readonly guards:GuardRepository,readonly selections:SelectionRepository,readonly transcription:DerivationEngine,readonly extraction:DerivationEngine,
-    readonly policy:()=>AssistantPolicy,readonly slots=guardChecks()){}
+    readonly slots=guardChecks()){}
   private get stores(){return this.attachments.stores;}
-
-  /** How much of a recording its first transcription reads (ADR-0251). Once Telegram access is set up (on, with an
-   *  owner), a recording captured live from Telegram whose sender is neither the owner nor allowed in that group is
-   *  transcribed up to its first VOICE_LIMIT_SECONDS; everything else, imports and restores included, is read whole.
-   *  The original audio is always kept, and a new reading from the dashboard reads all of it. A transcription already
-   *  requested keeps its configuration, so a grant or a change of settings between two tries cannot conflict with it. */
-  private async recordingConfiguration(eventId:string,operationId:string):Promise<Record<string,unknown>> {
-    const job=(await this.stores.control.query('SELECT configuration FROM reprocess_jobs WHERE id=$1',[digest('reprocess:'+operationId)])).rows[0];
-    if(job)return job.configuration as Record<string,unknown>;
-    const policy=this.policy();
-    if(!policy.enabled||!policy.owner_id)return {};
-    const intake=(await this.stores.control.query('SELECT transport FROM source_intakes WHERE event_id=$1',[eventId])).rows[0];
-    if(intake?.transport!=='capture')return {};
-    const event=(await this.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[eventId])).rows[0];
-    if(!event||event.origin!=='live'||event.channel!=='telegram'||event.kind!=='telegram_update')return {};
-    return allowedSender(policy,JSON.parse((event.payload as Buffer).toString()),event.scope)?{}:{first_seconds:VOICE_LIMIT_SECONDS};
-  }
 
   async status(eventId:string):Promise<Observation> {
     const source=await this.attachments.archive.captured(eventId);
@@ -98,9 +80,9 @@ export class PreparationRepository {
           JOIN derivative_selection_revisions r ON r.selection_id=s.id AND r.revision=s.active_revision
           WHERE s.artifact_id=$1 AND s.kind IN ('transcript','extracted_text','extraction_status') LIMIT 1`,[file.id])).rows[0];
         if(!selected) {
-          const recording=RECORDINGS.includes(manifest.kind),engine=recording?this.transcription:this.extraction;
-          const operation='initial:'+file.id+':'+digest(engine.name+':'+engine.version);
-          const request=await this.reprocessing.request(file,engine.name,engine.version,recording?await this.recordingConfiguration(eventId,operation):{},operation);
+          // Every file is read whole, whoever sent it (ADR-0264).
+          const engine=RECORDINGS.includes(manifest.kind)?this.transcription:this.extraction;
+          const request=await this.reprocessing.request(file,engine.name,engine.version,{},'initial:'+file.id+':'+digest(engine.name+':'+engine.version));
           const output=await this.reprocessing.run(request,detectorVersion,check,authority);
           if(output)try {await this.selections.activate(output,null,digest('initial-selection:'+output.id),'automatic');}
           catch(error){if(!(error instanceof HttpError)||error.code!=='derivative_selection_conflict')throw error;}
@@ -134,8 +116,7 @@ export class PreparationRepository {
       const job=jobs.get(digest('reprocess:'+operation(artifact)));
       if(!job) {
         if(requested>=limit)continue;
-        const file=await this.attachments.file(artifact);
-        await this.reprocessing.request(file,engine.name,engine.version,await this.recordingConfiguration(file.event.id,operation(artifact)),operation(artifact));requested++;
+        await this.reprocessing.request(await this.attachments.file(artifact),engine.name,engine.version,{},operation(artifact));requested++;
         continue;
       }
       if(job.state!=='done'||!job.derived_id)continue;

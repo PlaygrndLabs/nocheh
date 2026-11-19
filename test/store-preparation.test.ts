@@ -15,10 +15,6 @@ import {AttachmentRepository} from '../src/stores/attachments.js';
 import {PreparationRepository} from '../src/stores/preparation.js';
 import {CaptureCoordinator} from '../src/stores/capture.js';
 import {HttpError} from '../src/http.js';
-import type {AssistantPolicy} from '../src/assistant-policy.js';
-
-/** Telegram access not set up: every recording is read whole. */
-const unset=():AssistantPolicy=>({enabled:false,owner_id:null,group_ids:[]});
 
 test('preparation keeps manifests immutable and download state in control, with versioned guarded file output',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -33,7 +29,7 @@ test('preparation keeps manifests immutable and download state in control, with 
   let stt=0,downloads=0,quietFailure=false;
   const transcription:DerivationEngine={name:'fixture-asr',version:'1',outputKind:'transcript',async run(bytes){stt++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));if(quietFailure)throw new HttpError(422,'invalid_transcription_response');return 'Voice result';}};
   const extraction=documentExtraction(async()=>({state:'unsupported'})),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[transcription,extraction]);
-  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction,unset),authority={owner:'inngest' as const,epoch:1};
+  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,transcription,extraction),authority={owner:'inngest' as const,epoch:1};
   const event=(suffix:string,payload:Record<string,unknown>,origin:'live'|'import'='live'):Envelope=>({version:1,key:key+suffix,origin,bot_id:'fixture',
     kind:'telegram_update',scope:'123',source_id:key+suffix,revision:'1',occurred_at:null,text:null,payload:{message:{chat:{id:123,type:'private'},...payload}}});
   try {
@@ -121,7 +117,7 @@ test('different events prepare side by side up to the guard-check setting, and o
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),capture=new CaptureCoordinator(archive,stores.control);
   const root=await mkdtemp(join(tmpdir(),'nocheh-preparation-')),attachments=new AttachmentRepository(stores,archive,root),key='parallel:'+Date.now();
   const extraction=documentExtraction(async()=>({state:'unsupported'})),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[extraction]);
-  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,extraction,extraction,unset,2),authority={owner:'inngest' as const,epoch:1};
+  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,extraction,extraction,2),authority={owner:'inngest' as const,epoch:1};
   const event=(suffix:string):Envelope=>({version:1,key:key+suffix,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:key+suffix,
     revision:'1',occurred_at:null,text:null,payload:{message:{chat:{id:123,type:'private'},text:'Synthetic note '+suffix}}});
   let active=0,peak=0,release!:()=>void,bothActive!:()=>void;
@@ -153,7 +149,7 @@ test('an import checks a page of its messages for secrets in one call, and a mes
   const guards=new GuardRepository(stores,archive),selections=new SelectionRepository(stores,guards),capture=new CaptureCoordinator(archive,stores.control);
   const root=await mkdtemp(join(tmpdir(),'nocheh-preparation-')),attachments=new AttachmentRepository(stores,archive,root),key='batch:'+Date.now();
   const extraction=documentExtraction(async()=>({state:'unsupported'})),reprocessing=new ReprocessingRepository(stores,archive,derived,guards,root,[extraction]);
-  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,extraction,extraction,unset),authority={owner:'inngest' as const,epoch:1};
+  const preparation=new PreparationRepository(attachments,reprocessing,guards,selections,extraction,extraction),authority={owner:'inngest' as const,epoch:1};
   const event=(suffix:string,text:string,origin:'live'|'import'='import'):Envelope=>({version:1,key:key+suffix,origin,bot_id:'fixture',kind:'telegram_update',scope:'123',
     source_id:key+suffix,revision:'1',occurred_at:null,text:null,payload:{message:{chat:{id:123,type:'group'},text}}});
   const calls:{text:string;background:boolean}[]=[];

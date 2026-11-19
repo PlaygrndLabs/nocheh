@@ -1001,8 +1001,9 @@ request with seven fixes, each built and reviewed on its own
   command made unreadable, and every backup or off-site copy that fails, is skipped or leaves
   something out gives a notice ([backups](services/hermes/test_operations.py),
   [schedule](services/hermes/test_backup_schedule.py), [off-site](services/hermes/test_offsite.py)).
-- A photo is read once, at its largest size. A live recording from someone not allowed is
-  transcribed up to its first 15 minutes, cut by its decoded sound
+- A photo is read once, at its largest size ([archive](test/archive.test.ts)). Every recording
+  is transcribed whole, whoever sent it; the 15-minute cap for people not allowed was removed
+  by [ADR-0264](docs/adr/0264-groups-are-read-whole-from-everyone.md)
   ([voice](services/hermes/test_voice_text.py), [preparation](test/store-voice-transcription.test.ts)).
 - Member jobs are capped to the cent; a daily notice mark and a holding pause mark
   ([spend](test/store-member-job-spend.test.ts), [jobs](test/store-background-jobs.test.ts)).
@@ -3058,7 +3059,7 @@ Earlier upgrades are in [task history](docs/task-history.md).
 Security fixes, part 2 follow-ups ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)):
 about a week after installing, check `./bin/nocheh diagnose` for `hermes_page_script_reports`
 (none) and a passing tester run, then turn the Hermes page script policy from Report-Only to
-enforced in one commit. Later: a re-read of a cut recording when its sender is allowed, one
+enforced in one commit. Later: one
 shared name cleaner for cards, forwards and recall labels, and a notice when an off-site
 restore check fails.
 

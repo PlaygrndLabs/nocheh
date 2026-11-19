@@ -95,8 +95,8 @@ def synthetic_wav(seconds, rate=64):
     return out.getvalue()
 
 
-# The note a transcript of only the first 15 minutes ends with (src/stores/reprocessing.ts).
-FIRST_PART = '[Only the first 15 minutes of this recording were transcribed; its original audio is kept.]'
+# The note transcripts cut to 15 minutes ended with before ADR-0264; no transcript carries it now.
+OLD_FIRST_PART = '[Only the first 15 minutes of this recording were transcribed; its original audio is kept.]'
 
 
 class Failed(AssertionError):
@@ -942,26 +942,17 @@ class Scenarios:
             raise Failed('usage_unreadable:'+str(found.get('error')))
         return sum(row.get('audio_seconds') or 0 for row in rows if row.get('part') == 'transcription')
 
-    def long_voice_is_cut_for_people_not_allowed(self):
-        # A recording from someone the owner has not allowed in a group is transcribed up to its first 15 minutes,
-        # measured by its decoded sound, whatever length Telegram states; its original is kept whole. The owner's own
-        # recording of the same length is transcribed whole (ADR-0251).
+    def long_voice_is_read_whole_from_everyone(self):
+        # A long recording from someone the owner has not allowed in a group is transcribed whole, as everything in a
+        # group is read from everyone (ADR-0264); Telegram's stated length changes nothing.
         content = synthetic_wav(16*60)
         before = self.transcribed_seconds()
         _, event_id = self.voice(content, sender=PARTICIPANT, chat=GROUP, topic=27, duration=5, mime_type='audio/wav', extension='.wav')
-        self.finished(event_id, seconds=400)
+        self.finished(event_id, seconds=600)
         text = self.wait('stranger_voice_transcribed', lambda: self.transcript(event_id), 600, 5)
-        self.gate('stranger_voice_first_part_only', 'VOICEMARK77' in text and text.endswith(FIRST_PART), end=text[-120:])
+        self.gate('stranger_voice_whole', 'VOICEMARK77' in text and OLD_FIRST_PART not in text, end=text[-120:])
         spent = self.transcribed_seconds()-before
-        self.gate('at_most_15_minutes_sent', 899 <= spent <= 900.5, seconds=spent)
-        before = self.transcribed_seconds()
-        _, event_id = self.voice(content, duration=5, mime_type='audio/wav', extension='.wav')
-        row = self.finished(event_id, seconds=600)
-        self.gate('owner_voice_dispatch_closed', row['state'] in ('done', 'suppressed'), state=row['state'], error=row['error'])
-        text = self.wait('owner_voice_transcribed', lambda: self.transcript(event_id), 120)
-        self.gate('owner_voice_whole', 'VOICEMARK77' in text and FIRST_PART not in text, end=text[-120:])
-        spent = self.transcribed_seconds()-before
-        self.gate('owner_recording_sent_whole', spent >= 959, seconds=spent)
+        self.gate('stranger_recording_sent_whole', spent >= 959, seconds=spent)
 
     def photo_is_read(self):
         # A photo keeps its original bytes and is read once, at its largest size, by Hermes's vision tool with the
@@ -1286,7 +1277,7 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
 ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'hermes_is_locked_down', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
-         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'long_voice_is_cut_for_people_not_allowed', 'photo_is_read',
+         'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'long_voice_is_read_whole_from_everyone', 'photo_is_read',
          'files_upload_over_1mb', 'profiles_round_trip', 'no_refused_writes',
          'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_keeps_group_cards', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',
          'blocked_private_then_recovery', 'restart_preserves_receipts', 'granted_participant', 'storage_report', 'stage_timings']

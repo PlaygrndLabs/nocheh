@@ -9,10 +9,7 @@ A recording that fails because a write found no room in the memory /tmp or was r
 the locked-down container (ADR-0251) is no model call: it is counted for the owner's problem
 notice instead.
 
-With `first_seconds`, the child first cuts the recording to that much from its start and
-transcribes only the cut (ADR-0251). The cut is timed by the decoded samples, never by the
-length Telegram or the file states, since the sender sets both. The answer says whether the
-recording went on past the cut, and Nocheh adds the note that says so.
+Every recording is transcribed whole, whoever sent it (ADR-0264).
 """
 import base64
 import json
@@ -29,9 +26,6 @@ from . import usage
 LIMIT = 50 * 1024 * 1024
 TEXT_LIMIT = 1_000_000
 SECONDS = 600
-# The longest first part Nocheh asks for, and how long cutting it may take.
-FIRST_LIMIT = 86400
-CUT_SECONDS = 120
 MEMORY = 2 * 1024 * 1024 * 1024
 ROUTE = 'NOCHEH_TRANSCRIPTION_ROUTE_'
 KEY = 'NOCHEH_TRANSCRIPTION_KEY'
@@ -71,13 +65,6 @@ def transcribe(body):
         return {'state': 'too_large'}
     hint = {name: body.get(name) if isinstance(body.get(name), str) else '' for name in ('name', 'mime_type', 'kind')}
     hint['duration'] = body.get('duration') if type(body.get('duration')) in (int, float) and 0 <= body['duration'] < 10**6 else None
-    first = body.get('first_seconds')
-    if first is not None:
-        if type(first) is not int or not 1 <= first <= FIRST_LIMIT:
-            # A recording asked for in part is never read whole. The failure is counted, so the owner is told.
-            usage.record('transcription', {'calls': 1}, selected['model'], failed=True, provider=selected['provider'], reason='nocheh_error')
-            return {'state': 'failed', 'reason': 'nocheh_error'}
-        hint['first_seconds'] = first
 
     def bounded():
         import resource
@@ -113,8 +100,7 @@ def transcribe(body):
     if failure:
         usage.reader_failed('voice', failure)
         return {'state': 'failed', 'reason': 'nocheh_error'}
-    # A cut recording's length is never the sender's stated one: at most the part asked for.
-    seconds = result.get('seconds') if type(result.get('seconds')) in (int, float) else hint.get('first_seconds', hint['duration'])
+    seconds = result.get('seconds') if type(result.get('seconds')) in (int, float) else hint['duration']
     if result['state'] in ('done', 'silent', 'failed'):
         spent = {'calls': 1, 'audio_seconds': seconds or 0}
         price = price_per_minute()
@@ -124,7 +110,7 @@ def transcribe(body):
                      provider=selected['provider'], reason=result.get('reason'), cause=result.get('cause'))
     if result['state'] in ('done', 'silent'):
         usage.reader_done('voice')
-    return {key: value for key, value in result.items() if key in ('state', 'text', 'reason') or key == 'cut' and value is True}
+    return {key: value for key, value in result.items() if key in ('state', 'text', 'reason')}
 
 
 def suffix(hint):
@@ -144,21 +130,6 @@ def duration(path):
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     return value if math.isfinite(value) and value >= 0 else None
-
-
-def cut(path, seconds, target):
-    """The first `seconds` of a recording's first audio stream, as 16 kHz mono Opus at `target`. Its timestamps are
-    rebuilt from the decoded samples before the trim, and the output stops at `seconds` as well, so a stated or forged
-    length changes nothing. A round video's picture, subtitles and data are left out. Only local files are opened."""
-    command = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file', '-i', path,
-               '-map', '0:a:0', '-vn', '-sn', '-dn', '-map_metadata', '-1', '-map_chapters', '-1',
-               '-af', f'aresample=16000,asetpts=N/SR/TB,atrim=end={seconds}', '-t', str(seconds),
-               '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '32k', '-f', 'ogg', '-y', target]
-    try:
-        done = subprocess.run(command, capture_output=True, timeout=CUT_SECONDS, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return done.returncode == 0 and Path(target).is_file() and Path(target).stat().st_size > 0
 
 
 def reason(error):
@@ -186,34 +157,21 @@ def read(data, hint):
     kind = suffix(hint)
     if not kind:
         return {'state': 'unsupported'}
-    first = hint.get('first_seconds')
     with tempfile.TemporaryDirectory(prefix='voice-') as work:
         path = str(Path(work, 'voice' + kind))
         Path(path).write_bytes(data)
-        if first is not None:
-            shortened = str(Path(work, 'first.ogg'))
-            if not cut(path, first, shortened):
-                # Nothing reached the provider. The failure is counted, so the owner is told; the audio is kept whole.
-                return {'state': 'failed', 'reason': 'nocheh_error', 'cause': 'audio_cut', 'seconds': 0}
-            path = shortened
         seconds = duration(path)
         result = transcribe_audio(path)
-    went_on = {}
-    if first is not None:
-        # The cut is Nocheh's own file, so its length is measured. Unmeasured, it counts as the whole part asked for and
-        # as going on past it, so a transcript never claims to be whole when it might not be.
-        went_on = {'cut': True} if seconds is None or seconds >= first - 0.25 else {}
-        seconds = first if seconds is None else seconds
     text = result.get('transcript') if isinstance(result, dict) else None
     if isinstance(result, dict) and result.get('success') and isinstance(text, str) and text.strip():
         if len(text) > TEXT_LIMIT:
             text = text[:TEXT_LIMIT] + '\n\n[The rest of this recording is not included.]'
-        return {'state': 'done', 'text': text, 'seconds': seconds, **went_on}
+        return {'state': 'done', 'text': text, 'seconds': seconds}
     error = str(result.get('error') or '') if isinstance(result, dict) else ''
     if error.startswith('Unsupported format'):
         return {'state': 'unsupported'}
     if isinstance(result, dict) and result.get('success'):
-        return {'state': 'silent', 'seconds': seconds, **went_on}
+        return {'state': 'silent', 'seconds': seconds}
     return {'state': 'failed', 'reason': reason(error), 'cause': cause(error), 'seconds': seconds}
 
 
