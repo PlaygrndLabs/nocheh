@@ -108,6 +108,29 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError,'profile_path_denied'):answer_receipt(profile,{'frame':'f','question_event':'c'*64,'group':'“Team”'})
             self.assertEqual(listed(profile),{})
 
+    async def test_an_ask_about_a_member_keeps_when_it_ran_for_the_owners_notes(self):
+        # Step 4b: the Notes page dates the ask's own profile like a private answer's; the receipt names no member.
+        from .turn_process import ask_receipt
+        from .management import answer_receipt as listed
+        source='import sys,json; body=json.load(sys.stdin); print(json.dumps({"state":"done","text":"ok"}))'
+        ask='a'*32
+        with patch('services.hermes.turn_process.ask_receipt') as receipt:
+            result,_=await self.execute(source,extra={'member_read':{'ask':ask,'member':'“Mira Test”'},'text':'What did she say?'},
+                                        scope=Scope('42','42',False,'ask',member_read=ask))
+        self.assertEqual(result['state'],'done');receipt.assert_called_once()
+        with patch('services.hermes.turn_process.ask_receipt') as receipt:
+            await self.execute(source,extra={'text':'Hello'},scope=Scope('42','42',False,'group'))
+        receipt.assert_not_called()
+        with tempfile.TemporaryDirectory() as folder:
+            profile=Path(folder)
+            ask_receipt(profile)
+            self.assertEqual(list(json.loads((profile/'answer.json').read_text())),['at'])
+            saved=listed(profile)
+            self.assertEqual(list(saved),['answer_at'])
+            self.assertRegex(saved['answer_at'],r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$')
+            (profile/'answer.json').unlink();(profile/'answer.json').symlink_to(profile/'elsewhere.json')
+            with self.assertRaisesRegex(ValueError,'profile_path_denied'):ask_receipt(profile)
+
     async def test_stream_framing_and_failed_child(self):
         result,events=await self.execute('import sys,json,time; body=json.load(sys.stdin); assert body["channel"]=="browser"; assert body["memory_query"]=="original"; assert 0<body["turn_deadline_epoch"]-time.time()<=230; assert "nocheh:event:event" in body["text"]; print(json.dumps({"event":"message.delta","text":"hello"})); print(json.dumps({"state":"done","text":"hello"}))')
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')

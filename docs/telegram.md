@@ -52,9 +52,10 @@ the command line ([ADR-0244](adr/0244-owner-defaults-posts-and-machine-reports-s
 a member: the Members page refuses your own ID and warns if your account is ever
 linked to a member.
 
-Besides you, only your members may address Nocheh in a selected group. You add and
-manage them on the **Members** page ([members](#members)); no setting lists them,
-and there is no command for them.
+Besides you, only your members may address Nocheh in a selected group, and only
+they may talk to it in their own private chat ([member private chat](#member-private-chat)).
+You add and manage them on the **Members** page ([members](#members)); no setting
+lists them, and there is no command for them.
 
 Not allowed does not mean unheard. A message from a participant who is not
 allowed is still archived, seen by the next group reply as context, learned by
@@ -82,11 +83,13 @@ Each selected group/topic keeps its own Hermes notes and conversation history; b
 group's topics share Honcho recall and archive search (**Topic memory** in
 Settings › Telegram can keep each topic separate). Memory
 access supports isolated, approved and filtered derived sharing under ADR-0030;
-the owner DM may search registered native memory and the archive, except chats Nocheh does not serve. Unselected
+the owner DM may search registered native memory and the archive, except chats Nocheh does not serve and
+other people's private chats with Nocheh, members' included. Unselected
 chats and people who may not talk to Nocheh in a group cannot start a turn. Someone
 who addresses Nocheh in a selected group and may not talk there gets the owner's
 fixed reply without a model, at most once a UTC day per group, and so does anyone
-else who writes privately, at most once a UTC day;
+else who writes privately and may not talk there (a stranger, or a member who is
+paused or has private chat off), at most once a UTC day;
 messages from chats Nocheh does not serve are archived but never prepared. Bot
 senders, edits and historical replay do not trigger new replies.
 Every archive search hit and every message the assistant opens names who wrote
@@ -292,14 +295,20 @@ guard epoch.
   about them there: Seen here, Left the group (Telegram says), or Nothing from
   Telegram yet. **New here** marks a group Telegram has shown them in that has no
   switch saved yet; it only informs.
-- **Pause this member** stops everything they can do, in every group. **Remove**,
-  which asks first, takes the member away; their tasks and reminders stay.
+- **Private chat with Nocheh**, on by default: their own private chat with
+  Nocheh ([member private chat](#member-private-chat)). Group talk off does not
+  stop it.
+- **Pause this member** stops everything they can do, in every group and in their
+  private chat. **Remove**, which asks first, takes the member away; their tasks,
+  reminders and messages stay.
 - **Daily messages**: **Times each member may ask Nocheh a day**, beside the
   members list and saved with its own Save. Each member may start 200 turns a
-  UTC day across all groups by default, 1 to 10,000. A turn past it is not
-  started and uses no model, and the member gets **Reply to a member past the
-  daily limit** from Settings › Assistant › Built-in instructions, at most once a
-  UTC day per group. You are never counted.
+  UTC day across all groups and their private chat together by default, 1 to
+  10,000. A turn past it is not started and uses no model, and the member gets
+  **Reply to a member past the daily limit** from Settings › Assistant ›
+  Built-in instructions, at most once a UTC day per group, or **Reply to a member
+  past the daily limit, in private** once a UTC day in their private chat. You
+  are never counted.
 
 **Add a member** picks someone Nocheh has seen in your groups, with the groups they
 were seen in ticked, or takes a Telegram user ID, with every group Nocheh is in shown
@@ -322,10 +331,11 @@ confirmed on their own card still needs that just before it goes; a post your
 card approved keeps your word for the target group. A pause, a switch turned off
 or a leave also stops a member's job between the parts of its report. A member's
 first message in a group is enough to talk there, and shows them in it; until
-then, a post into that group from another one goes to your card. The bot asks
-Telegram nothing at runtime about who is a member, and a bot that is not a group admin
-sees joins and leaves only from Telegram's service messages, so a member who left
-quietly keeps their place until Telegram says so.
+then, a post into that group from another one goes to your card. A bot that is
+not a group admin sees joins and leaves only from Telegram's service messages, so
+in a group a member who left quietly keeps their place until Telegram says so.
+Only before a member's private turn does Nocheh ask Telegram whether they are
+still in their groups ([member private chat](#member-private-chat)).
 Making the bot an admin in your members' groups is recommended, not required.
 
 Someone who addresses Nocheh in a group and may not talk there, a stranger or a
@@ -350,6 +360,83 @@ is added to again later is a new group, on by default. An old
 `TELEGRAM_GROUP_ACCESS` line in `.env` is hidden in Settings, and no service reads
 it. Keeping it never asks for Apply; deleting it asks for one Apply, which changes
 nothing in the services ([deploy](deploy.md#upgrade-to-step-3)).
+
+## Member private chat
+
+A member also talks to Nocheh in their own private chat with it, while they are
+active and **Private chat with Nocheh** is on
+([ADR-0262](adr/0262-member-private-chat.md)). Group talk off does not stop it.
+Every message there addresses Nocheh and counts against the daily message cap
+with their group turns. A stranger, or a member who is paused, removed or has
+private chat off, gets **Reply to people who may not talk in private** at most
+once a UTC day, with no model.
+
+The private chat only reads. It reads that chat and the groups the member
+joined, across projects and groups in no project, with each group's whole
+history (reading only from when they joined is a later step). It searches,
+reads and pages the archive, searches long-term memory by plain search, and
+lists and reads tasks. It never posts, sends, starts a job, opens a web page,
+uses an outside tool, asks for an action, changes a task or keeps notes, and
+gets nothing shared or granted. It uses the groups default role and the
+**Members’ private chats** reply rules, which tell a member who asks that you can
+read the chat. No **Answer privately** button appears in any private chat.
+
+A group counts while Nocheh is on there, the member's switch there is not off,
+and Telegram has shown them in it within the last 30 days; any message or event
+of theirs there refreshes that. Before each private turn, Nocheh asks Telegram
+(`getChatMember`) about each such group it last confirmed more than 6 hours ago,
+and then, in the places left, about each group it has not confirmed for 30 days,
+oldest first, at most 10 in all.
+Left or removed: the group is no longer read, and the Members page shows they
+left. Still in: the check is recorded, and a group not confirmed for 30 days is
+read again. No clear answer changes nothing but moves that group behind the
+others for the next turns (a group not confirmed for 30 days is asked again after
+a day), and groups they read past the 10 are left out of that
+turn, its tool calls included. Where Telegram does not answer (a bot that is not
+an admin), a group not confirmed for 30 days is not read until they write there
+again.
+
+Tasks there are read only, one project at a time: each active project that holds
+a group they joined is one list, with the tasks set on that project and the
+tasks of those groups. Asked without a project when there are several, Nocheh
+names the lists to choose from. A group in no project has no tasks there.
+
+What the member may read is checked again on every read and tool call, so a
+pause, a removal, private chat off, or a group left or switched off applies to
+the next one, and a reply built on more than the member may now read is not
+sent. The member's turns run one at a time, in groups and privately alike. A
+member's group turn that waits for their private turn holds up no one else in
+that group: your turns and other members' there go on, and the group's replies
+still come in arrival order.
+
+Nothing in a member's private chat, or in any private chat that is not yours,
+is learned, sent to long-term memory, granted, suggested or shown to your own
+turns or to anyone else's, and no learning switch can change that; learning
+consent for such a message answers `learning_consent_member_chat`. You read
+these chats on the dashboard, in **Messages** under **Members’ chats**.
+
+### Asking about a member
+
+In your own private chat you can ask what a member said to Nocheh privately,
+naming them by the name Telegram shows for them or their @username. Nocheh
+first answers that the answer is coming. After that turn, one read-only turn
+reads that member's private chat, and only it, and its answer comes as a
+separate message in your chat that starts by naming the member's chat
+(**Answers about a member** in Settings › Assistant). The answer is then
+dropped: it is never learned, never kept in your ongoing conversation, and your
+later turns cannot read it, or its words when you reply quoting it.
+
+Only your own message, not a forward, and only when its own text names the
+member, can ask; a name two members share is refused, and one message asks
+about at most three members. A member who is paused, removed, has private chat
+off or never wrote to Nocheh cannot be asked about, and neither can a member who
+wrote to Nocheh from more than one Telegram account; Nocheh tells you which. The
+ask runs even when Nocheh chose not to answer your asking message. An ask waits
+up to 30 minutes; when the chat closes meanwhile, the member is removed, the time
+runs out, your asking turn fails, or no answer comes after a second try, you get
+one short notice instead, once. Its answer replies to your asking message. An ask
+shows under System › Background work with **Retry now** and **Cancel task**
+turned off: it closes on its own.
 
 ## Send records
 
@@ -418,12 +505,14 @@ send record's kind, which does not change.
 | `refusal` | the fixed reply to someone not allowed | no |
 | `notice` | a problem, import or memory notice, a group's line about a job, or the card and lines about a group someone added Nocheh to | no |
 | `reminder` | a task reminder | no |
+| `member_read` | the answer to your question about a member's private chat, only in your private chat | never |
 
 A message that is not learned is still archived and searchable, and is context
 when the owner replies to it; it never reaches the notes review, long-term memory
 or interpretations, and System › Background work shows its learning step as
 skipped ("Nocheh's own card, notice or reminder: kept, not learned"). The
-owner can turn learning on for one message, and that yes overrides the class.
+owner can turn learning on for one message, and that yes overrides the class,
+except for `member_read`, which no yes makes learnable.
 A route accepts only its own classes; an unknown class falls back to the
 route's default and never stops the send. Leaving a group sends no message, but
 runs under `notice` too, so nothing it returns could be learned. A message with no class, everything

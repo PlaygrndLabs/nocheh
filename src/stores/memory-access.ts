@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import {admin,type Reader} from '../access.js';
+import {admin,boundReader,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {groupSpace,groupWithTopics,recallCondition,recallScope,validateSpace} from '../spaces.js';
@@ -105,6 +105,9 @@ export class MemoryAccessRepository {
    * that confirm existed. It pauses until the owner shares it again through the confirm (ADR-0242). */
   private async unconfirmedPrivate(row:any,fact:Fact):Promise<boolean> {
     if(!await this.access.privateEvidence(fact.evidence))return false;
+    // A fact resting on a member's private chat, or on Nocheh's answer to the owner's ask about a member, is never
+    // shared, whatever was confirmed (step 4): it counts as never confirmed.
+    if(await this.access.memberChatEvidence(fact.evidence))return true;
     const artifact=(await this.stores.derived.query('SELECT provenance FROM derived_artifacts WHERE id=$1',[row.representation_reference.id])).rows[0];
     return artifact?.provenance?.private_evidence_confirmed!==true;
   }
@@ -116,8 +119,8 @@ export class MemoryAccessRepository {
     return {source_spaces,audience:recallScope(row.destination,this.access.policy().topic_memory),post_default};
   }
   async suggest(principal:Reader,query:string):Promise<{id:string}|null> {
-    // Never into a private chat, the owner's or anyone else's (ADR-0242).
-    if(principal.admin||principal.scope===null||!principal.space||!principal.turnEvent||!groupSpace(principal.space))return null;
+    // Never into a private chat, the owner's or anyone else's (ADR-0242), and never for a bound reader (step 4).
+    if(principal.admin||principal.scope===null||!principal.space||!principal.turnEvent||!groupSpace(principal.space)||boundReader(principal)!==null)return null;
     const setting=(await this.effective(principal.space)).effective;if(setting.suggestions==='off')return null;
     const scoped=await this.entities.connected(principal,query,8),seedIds=scoped.entities.slice(0,3).map(item=>item.entity.id);
     if(!seedIds.length){const effective=await this.projects.effective(principal.space);if(effective.project){const row=(await this.stores.control.query('SELECT id FROM memory_entities WHERE project_id=$1 AND state=\'active\'',[effective.project.id])).rows[0];if(row)seedIds.push(row.id);}}
@@ -274,6 +277,8 @@ export class MemoryAccessRepository {
     if(!groupSpace(destination))throw new HttpError(400,'memory_grant_private_destination');
     if(body.private_evidence_confirmed!==undefined&&typeof body.private_evidence_confirmed!=='boolean')throw new HttpError(400,'invalid_memory_grant');
     const privateSources=await this.access.privateEvidence(fact.evidence);
+    // A member's private chat, or Nocheh's answer to the owner's ask about a member, is never shared, even confirmed (step 4).
+    if(privateSources&&await this.access.memberChatEvidence(fact.evidence))throw new HttpError(409,'memory_grant_member_chat');
     if(body.private_evidence_confirmed!==true&&privateSources)throw new HttpError(409,'memory_grant_private_sources');
     const binding=await this.guards.state();
     if(principal.guard_epoch!==undefined&&(principal.guard_epoch!==binding.epoch||principal.generation!==binding.generation))throw new HttpError(409,'guard_context_changed');
@@ -346,7 +351,7 @@ export class MemoryAccessRepository {
   /** One grant into the reader's conversation, opened by its id (archive_read): only an active persistent grant the
    *  reader's conversation recalls, through the same checks as context() (validateGrant). */
   async open(principal:Reader,id:string) {
-    if(principal.admin||principal.scope===null||!principal.space||principal.answer!==undefined)throw new HttpError(403,'space_context_required');
+    if(principal.admin||principal.scope===null||!principal.space||boundReader(principal)!==null)throw new HttpError(403,'space_context_required');
     if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(404,'grant_not_found');
     await this.reconcile();
     const home=this.access.recall(principal)!,binding=await this.prepared.audience.assert(principal);
@@ -358,7 +363,10 @@ export class MemoryAccessRepository {
     await this.prepared.allow(principal,result);await this.prepared.audience.assert(principal);return result;
   }
   async context(principal:Reader,query:string) {
-    if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');string(query,2000);await this.reconcile();
+    if(principal.admin||principal.scope===null||!principal.space)throw new HttpError(403,'space_context_required');string(query,2000);
+    // A member's private chat and the owner's ask about a member are given no granted context (step 4).
+    const kind=boundReader(principal);if(kind==='member'||kind==='memberRead')return {sources:[]};
+    await this.reconcile();
     // Persistent grants to any conversation the principal recalls apply, so a group's topics share them. An answer reader
     // gets the asking group's grants, never grants into its own private chat (ADR-0249).
     const home=this.access.recall(principal)!;

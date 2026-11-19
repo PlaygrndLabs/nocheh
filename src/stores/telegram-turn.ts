@@ -1,8 +1,10 @@
 import type pg from 'pg';
-import type {Reader} from '../access.js';
+import {boundReader,type Reader} from '../access.js';
 import {canonical} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {HttpError} from '../http.js';
+import {readSetIds,type ReadSet} from '../spaces.js';
+import {memberChatClosed} from './member-reads.js';
 import {blockingPublications} from './publications.js';
 import type {ArchiveRepository} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
@@ -37,9 +39,18 @@ export function dispatchPayload(original:any,representation:any,text:string|null
 export async function currentTurn(deps:{archive:ArchiveRepository;access:SourceAccessRepository;guards:GuardRepository;turns:RuntimeTurnRepository},input:TurnInput):Promise<void> {
   await deps.guards.assertCurrent(input.binding);
   // A private answer built in this process still holds its open record, and reads exactly the groups it was given (ADR-0249).
-  if(input.principal.answer!==undefined) {
+  const kind=boundReader(input.principal);
+  if(kind==='answer') {
     const {reads:_given,...principal}=input.principal,bound=await deps.access.bindReads(principal);
     if(canonical(bound.reads)!==canonical(input.principal.reads??null))throw new HttpError(409,'private_answer_closed');
+  }
+  // A member's private turn, or the owner's ask about a member, still reads the chat it was built for and every group it
+  // was given (step 4): a chat closed since (paused, removed, private chat off) or a group it may no longer read withholds
+  // the reply. A group it may read now that it was not given changes nothing: the turn never read it.
+  else if(kind!==null) {
+    const {reads:_given,memberChat:_chat,...principal}=input.principal,bound=await deps.access.bindReads(principal);
+    if(!bound.memberChat||bound.memberChat!==input.principal.memberChat||!input.principal.reads||!bound.reads||
+      !readsWithin(input.principal.reads,bound.reads))throw new HttpError(409,memberChatClosed);
   }
   await deps.turns.binding(input.principal);
   const source=(await deps.archive.captured(input.principal.turnEvent!)).reference;
@@ -47,6 +58,14 @@ export async function currentTurn(deps:{archive:ArchiveRepository;access:SourceA
   const original=(await deps.archive.pool.query('SELECT payload,scope FROM events WHERE id=$1',[input.principal.turnEvent])).rows[0];
   if(!original||!conversationScope(deps.access.policy(),JSON.parse(original.payload.toString()),original.scope))throw new HttpError(403,'conversation_not_selected');
   await deps.guards.assertCurrent(input.binding);
+}
+
+/** Whether a read set `given` reads nothing `current` does not: the same home, and each of its ids (readSetIds) among
+ * current's. */
+export function readsWithin(given:ReadSet,current:ReadSet):boolean {
+  if(given.home!==current.home)return false;
+  const now=new Set(readSetIds(current));
+  return readSetIds(given).every(id=>now.has(id));
 }
 
 /** Inside the transaction that marks a turn running: the binding still holds and no guard publication is pending. */

@@ -59,7 +59,7 @@ test('someone Nocheh does not serve costs no download or model call, is never re
     assert.equal((await s.telegram.run(stranger.id,await epoch('telegram'))).state,'skipped');
     assert.deepEqual(await dispatch(stranger.id),{state:'suppressed',error_code:'not_allowed'});
     assert.deepEqual({...refusals.at(-1),event_id:undefined},{event_id:undefined,chat_id:'555',message_id:refusals.at(-1)!.message_id,user_id:'555',private:true,
-      reply:'Sorry, this is a private assistant. It only works for its owner.'});
+      reply:'Sorry, this is a private assistant. It only works for its owner and the people they add.'});
     const binding=await s.guards.state();
     assert.equal(await s.access.canRead(ownerTurn,stranger,binding),false,'the owner\'s own turns never read it back');
     assert.equal(await s.access.canRead(dashboard,stranger,binding),true,'the dashboard still shows it to the owner');

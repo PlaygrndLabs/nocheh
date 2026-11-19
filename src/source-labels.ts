@@ -2,7 +2,7 @@ import {fillLine,labelName,placeLabel,quotedName,type PlaceWords} from './chat-l
 import {chats,type ChatDirectory} from './chats.js';
 import {frameName,type Forward} from './forwarded.js';
 import type {ReminderText,SourceText} from './prompts.js';
-import type {SendClass} from './send-classes.js';
+import {unlearnedSendClasses,type SendClass} from './send-classes.js';
 import {bucketOf,isEventClass,type Bucket,type EventClass,type SourceFacts} from './source-facts.js';
 import {placeName} from './stores/recall-places.js';
 import {whoLabel,type NameKeys,type Names,type Who,type Words} from './task-reminder-text.js';
@@ -82,8 +82,10 @@ export const modelSourceWords={
   reads:{message:'the message it answered (another person\'s)',forward:'a forwarded message',file:'a file',recent:'recent group messages',
     reply:'the message it replied to',
     archive:'messages from other chats',web:'web pages',notion:'Notion',tools:'tool servers',commands:'command results',past:'past conversations',other:'other tools'},
+  /** member and unnamed_member (step 4): a member's own private chat with Nocheh, named only where the reader may read
+   *  it (the dashboard, and the owner's ask about that member, 4b). */
   places:{owner:'the owner\'s private chat',web:'the owner\'s web chat',group:'group “{name}”',unnamed_group:'a group',topic:' › topic “{name}”',
-    unnamed_topic:' › a topic',unknown:'a chat Nocheh can\'t name'},
+    unnamed_topic:' › a topic',unknown:'a chat Nocheh can\'t name',member:'“{name}”\'s private chat',unnamed_member:'a member\'s private chat'},
   /** A source tag's fixed words (ADR-0261, src/source-tags.ts): who · where · when, built by code, never by the model.
    *  A name someone chose is always in the quotes code adds. */
   tags:{owner:'the owner',nocheh:'Nocheh',person:'a person',named:'“{name}”',username:' (@{username})',saved_as:', saved as “{name}”',
@@ -412,8 +414,8 @@ export function honchoSource(part:HonchoPart):string {
   if(part.part==='file'){const name=frameName(part.name);return name?fillLine(words.file,{name}):words.file_unnamed;}
   if(part.part==='nocheh') {
     const cls=part.send_class??'reply';
-    if(['card','card_update','refusal','notice','reminder'].includes(cls))return words.unlearned;
-    return part.about_forward?words.about_forward:words[cls as Exclude<SendClass,'card'|'card_update'|'refusal'|'notice'|'reminder'>];
+    if(unlearnedSendClasses.has(cls))return words.unlearned;
+    return part.about_forward?words.about_forward:words[cls as Exclude<SendClass,'card'|'card_update'|'refusal'|'notice'|'reminder'|'member_read'>];
   }
   return words[part.part];
 }

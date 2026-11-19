@@ -6,6 +6,10 @@ const hex=(column:string)=>`${column} ~ '^[a-f0-9]{64}$'`;
 /** An app's own id: a Telegram chat or user id, a Slack team, channel or user id. Never a slash, so it is never
  * mistaken for an old topic value. */
 const appId=(column:string)=>`${column} ~ '^[A-Za-z0-9._:-]{1,128}$'`;
+/** Where a chat_memberships row's state came from: a member list, a join or leave update, a message, the owner, or (step
+ * 4) a membership check that Telegram answered (getChatMember), which also moves checked_at. */
+export const membershipSources=['listed','event','message','owner','checked'] as const;
+export type MembershipSource=typeof membershipSources[number];
 
 /**
  * Nocheh's chat records (ADR-0252), in the control store. Every table is created only if missing and nothing here
@@ -97,13 +101,22 @@ CREATE TABLE IF NOT EXISTS chat_memberships (
  chat_id text NOT NULL REFERENCES chats(id),
  account_id text NOT NULL REFERENCES chat_accounts(id),
  state text NOT NULL CHECK(state IN ('in','left')),
- source text NOT NULL CHECK(source IN ('listed','event','message','owner')),
+ source text NOT NULL CHECK(source IN (${list(membershipSources)})),
  since timestamptz NOT NULL DEFAULT now(),checked_at timestamptz,
  seen_seq numeric CHECK(seen_seq IS NULL OR seen_seq>=0),
  seen_bot text CHECK(seen_bot IS NULL OR ${appId('seen_bot')}),
  PRIMARY KEY(chat_id,account_id)
 );
 CREATE INDEX IF NOT EXISTS chat_memberships_account ON chat_memberships(account_id,state);
+-- 'checked' (step 4): Telegram answered a membership check (getChatMember) for the account. Widened once, so a later
+-- bootstrap neither locks chat_memberships nor checks its rows again.
+DO $$BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='chat_memberships'::regclass AND conname='chat_memberships_source_check'
+   AND pg_get_constraintdef(oid) LIKE '%''checked''%') THEN
+  ALTER TABLE chat_memberships DROP CONSTRAINT IF EXISTS chat_memberships_source_check;
+  ALTER TABLE chat_memberships ADD CONSTRAINT chat_memberships_source_check CHECK(source IN (${list(membershipSources)}));
+ END IF;
+END$$;
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS state_bot text CHECK(state_bot IS NULL OR ${appId('state_bot')});
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS state_at timestamptz;
 CREATE TABLE IF NOT EXISTS chat_state_events (

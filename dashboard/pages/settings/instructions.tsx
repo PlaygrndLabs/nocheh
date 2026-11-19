@@ -36,6 +36,16 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Added after the rules above when Nocheh answers a group question in the asker’s private chat, after a tap on Answer privately. Such an answer only reads.',
   },
   {
+    key: 'reply.member',
+    title: 'Members’ private chats',
+    hint: 'Added after the rules above when Nocheh replies to a member in their own private chat with it. There it only reads the groups they joined and their own chat, and shows those groups’ tasks without changing them. Keep the line that says you can read the chat: Nocheh never tells a member their chat is private from you.',
+  },
+  {
+    key: 'reply.member_read',
+    title: 'Your questions about a member',
+    hint: 'Added when Nocheh answers your question about what a member said in their own private chat with it. That answer reads only that member’s chat, comes as a separate message in your private chat and is not kept in your conversation.',
+  },
+  {
     key: 'memory.evidence',
     title: 'Using remembered facts',
     hint: 'Explains the remembered facts that come with each message.',
@@ -71,9 +81,19 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Sent in a group, as a reply, when a member asks Nocheh something after using up the daily messages you set on the Members page. At most once a UTC day in each group. No model is used.',
   },
   {
+    key: 'telegram.member_private_daily_limit',
+    title: 'Reply to a member past the daily limit, in private',
+    hint: 'Sent in a member’s private chat with Nocheh when they write after using up the daily messages you set on the Members page, which count their group and private messages together. At most once a UTC day. No model is used.',
+  },
+  {
     key: 'telegram.not_allowed_private',
-    title: 'Reply to strangers in private',
-    hint: 'Sent when anyone but you writes to Nocheh in a private chat, at most once a day per person. No model is used.',
+    title: 'Reply to people who may not talk in private',
+    hint: 'Sent when someone who may not talk to Nocheh privately writes to it in a private chat: someone who isn’t a member, or a member who is paused or has their private chat switched off. At most once a day per person. No model is used.',
+  },
+  {
+    key: 'members.local_laws',
+    title: 'Local laws line on the Members page',
+    hint: 'Shown only to you, at the top of the Members page: a reminder to check what your local laws allow before you read your members’ private chats with Nocheh. Never sent to anyone.',
   },
   {
     key: 'telegram.approval_card',
@@ -114,6 +134,16 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     key: 'telegram.private_answer_texts',
     title: 'Answer privately button and notices',
     hint: 'One “name: text” line each for the button under your answer in a group (button, up to 40 characters), the notice when the tap opens your private chat (open), and the short notices when someone else taps it (only_asker), it has expired (expired), it was already used (used), the project’s groups or the question changed (changed), a private chat link was meant for someone else (not_yours), or your private chat can’t be opened right now (retry). No model is used. A line you remove keeps its default.',
+  },
+  {
+    key: 'telegram.member_read',
+    title: 'Question about a member’s first line',
+    hint: 'Sent to the agent, not to the chat, before your question when you ask what a member said in their private chat with Nocheh. {member} is the name Telegram shows for them.',
+  },
+  {
+    key: 'telegram.member_read_texts',
+    title: 'Answers about a member',
+    hint: 'One “name: text” line each for the first line of the separate answer, which names the member’s chat it comes from (source), and the short notices in your private chat when that chat can’t be read now (closed) or no answer came (failed). {member} is the name Telegram shows for them. No model is used for the notices. A line you remove keeps its default.',
   },
   {
     key: 'tasks.reminder',

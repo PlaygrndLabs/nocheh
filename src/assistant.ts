@@ -58,7 +58,8 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,brain:Brain
       await client.query("UPDATE dispatches SET state='suppressed',error_code='invalid_source_message',updated_at=now() WHERE event_id=$1",[event.id]);
       return;
     }
-    if (!scope) {await client.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[event.id]);return;}
+    // A member's own private chat (step 4) is answered only by the storage dispatch, under a pass bound to that member.
+    if (!scope||scope.member!==undefined) {await client.query("UPDATE dispatches SET state='suppressed',error_code='conversation_not_selected',updated_at=now() WHERE event_id=$1",[event.id]);return;}
     const missing=await client.query("SELECT id FROM artifacts WHERE event_id=$1 AND state<>'ready' LIMIT 1",[event.id]);
     if (missing.rowCount) {await client.query("UPDATE dispatches SET error_code='waiting_for_attachments',next_attempt=now()+interval '30 seconds' WHERE event_id=$1",[event.id]);return;}
     const transcripts=await storedTranscripts(client,event.id);

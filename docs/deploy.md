@@ -124,6 +124,31 @@ then asks for one Apply, which changes nothing in the services. The
 ([telegram](telegram.md#members)). Making the bot an admin in your members' groups
 lets Nocheh see more joins and leaves; it is recommended, not required.
 
+### Upgrade to step 4
+
+Take a backup first ([ADR-0262](adr/0262-member-private-chat.md)). Step 4 lets
+members talk to Nocheh in their own private chat and lets you ask about what they
+said there.
+
+1. Rebuild and run every image from the same revision with `./bin/nocheh up` or
+   `update`; `deploy local` alone replaces only `nocheh-app`. `nocheh-app`, the
+   security broker, `nocheh-telegram` and Hermes all check the new pass claims
+   (`member`, `member_read`, `lane`), the bot answers the new
+   `telegram.member_status` op and accepts the `member_read` send class, so they
+   must all run this revision.
+2. Start the app first. Its start adds `members.private_chat` (on), the
+   `'checked'` membership source and the `owner_member_asks` table if they are
+   missing; nothing is copied or moved.
+
+Every existing member gets private chat on: from their next private message they
+are answered there, reading the groups they joined. Turn it off for a member on
+the **Members** page. Messages from members' private chats before the upgrade
+stay archived and are not answered. Members' private chats leave the default
+Messages list and appear under **Members’ chats**. Making the bot an admin in
+your members' groups helps Telegram answer the check made before a private
+turn; without it, a quiet member may lose a group after 30 days until they write
+there.
+
 See [service names, responsibilities, dashboards and workflow](services.md).
 Host services require Node 26.x; set `NOCHEH_NODE` when selecting a non-default executable.
 

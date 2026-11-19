@@ -293,7 +293,9 @@ turn's own message and answer stay.
   `source`. Without `fact` it lists the first 20 facts' numbers, `by` and
   tags, a forgotten one as `{n, unavailable:true}`. It opens only a turn's
   block or a recall's facts record, of the reader's own audience (the owner
-  reads any) in the current memory space, and never for a private answer.
+  reads any) in the current memory space, and never for a bound reader (a
+  private answer, a member's private chat or the owner's ask about a member,
+  [ADR-0262](0262-member-private-chat.md)).
 - **Retire = forget, for facts.** A fact does not open while a correction is
   running, once Honcho no longer holds it, or once its record rests on a
   retired message, by the same rule the retired route uses, so no fact of a

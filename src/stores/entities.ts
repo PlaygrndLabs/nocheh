@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import {admin,type Reader} from '../access.js';
+import {admin,boundReader,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import type {SourceReference} from './archive.js';
@@ -641,9 +641,10 @@ export class EntityRepository {
   }
   private async visible(principal:Reader,entity:MemoryEntity):Promise<boolean> {
     if(principal.admin||principal.scope===null)return true;
-    // An answer reader sees its record's project and the people of the groups frozen in it, never those of its own
-    // private chat (ADR-0249); without its record, only what it may read.
-    const answer=principal.answer!==undefined,reads=answer?principal.reads:undefined;
+    // A bound reader sees its record's project (an answer's; a member's and an ask's reads name none) and the people of
+    // its bound groups, never those of a private chat, its own or a member's (ADR-0249, step 4); without its binding,
+    // only what it may read.
+    const answer=boundReader(principal)!==null,reads=answer?principal.reads:undefined;
     if(entity.kind==='project'&&(answer?!!reads&&reads.project===entity.project_id&&
       (await this.stores.control.query("SELECT 1 FROM projects WHERE id=$1 AND state='active'",[entity.project_id])).rowCount===1:
       (await this.projects.effective(principal.space??principal.scope)).project?.id===entity.project_id))return true;

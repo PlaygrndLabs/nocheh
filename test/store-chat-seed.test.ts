@@ -117,6 +117,7 @@ const notChatColumns:Record<string,string>={
   'control.chat_state_events.chat_id':'a chat record','control.member_chats.chat_id':'a chat record (a member\'s switch for a group)',
   'control.members.group_talk':'a member permission','control.members.group_jobs':'a member permission',
   'control.members.group_post_other':'a member permission','control.members.group_tools':'a member permission',
+  'control.members.private_chat':'a member permission (private chat with Nocheh)',
   'control.chat_memberships.source':'how a membership was learned','control.chats.title_source':'where a chat name came from','control.chats.topic_key':'a topic key in its app',
   'control.chat_sends.chat':'the app\'s own chat id a send went to, as the gateway wrote it; chat_id holds the chat',
   'control.chat_sends.chat_id':'filled from the chat directory when the record is drained','control.chat_sends.topic':'the app\'s thread key of a send',

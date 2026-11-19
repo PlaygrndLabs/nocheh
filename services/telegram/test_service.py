@@ -29,6 +29,8 @@ BOT_ID = TOKEN.split(':')[0]
 NEW, NEW_TG, NEW_OLD = 'b' * 64, '-10077', '-77'
 # The served list as the app gives it: the owner's chat, GROUP with its General topic and topic 7 (old-shaped ids), NEW.
 TOPICS = [(GROUP + '/topic/1', GROUP, '1'), (GROUP + '/topic/7', GROUP, '7'), ('c' * 64, NEW, '5')]
+# A member (step 4): their id, and their own private chat, old-shaped (its Telegram id) and first seen after step 2b.
+MEMBER, MEMBER_CHAT, MEMBER_NEW, MEMBER_NEW_TG = 'd' * 64, '4567', 'e' * 64, '4568'
 
 
 def served_policy(enabled=True):
@@ -298,6 +300,93 @@ class ServiceTests(unittest.TestCase):
                 self.service.reply({**body, 'id': digest(event + ':2'), 'attempt': 2, **change})
         with self.assertRaises(ValueError):
             self.service.reply({**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, answer=answer, app=binding(GROUP))})
+        self.assertEqual(len(self.sent()), 1)
+
+    def member_policy(self):
+        """The served list with two members' own private chats open now (step 4): an old-shaped one, whose Nocheh id is its
+        Telegram id, and one first seen after step 2b."""
+        self.service.policy = self.policy = Policy.of(True, OWNER, [GROUP, (NEW, NEW_TG)], topics=TOPICS, old={NEW: [NEW_OLD]},
+                                                      members=[MEMBER_CHAT, (MEMBER_NEW, MEMBER_NEW_TG)])
+
+    def member_turn(self, number, chat=MEMBER_CHAT, space=None, **claims):
+        """A member's turn in their own private chat, with a member pass bound to it (and the member's lane)."""
+        body = self.turn(number, chat, text='Hi')
+        space = space or chat
+        claims = {'member': MEMBER, 'lane': MEMBER, **claims}
+        return {**body, 'archive_credential': credential(body['event_id'], space, space, app=binding(chat),
+                                                         **{key: value for key, value in claims.items() if value is not None})}
+
+    def test_a_members_pass_is_answered_only_in_that_members_own_private_chat(self):
+        self.member_policy()
+        self.assertEqual(self.service.presence(self.member_turn(30)), {'state': 'shown'})
+        self.assertEqual(self.service.reply(self.member_turn(30))['state'], 'done')
+        self.assertEqual(self.service.reply(self.member_turn(31, MEMBER_NEW_TG, MEMBER_NEW))['state'], 'done')
+        event = digest(f'telegram:{BOT_ID}:update:32')
+        refused = {
+            'a plain pass for the member chat': self.member_turn(32, member=None, lane=None),
+            'a member pass as the owner': {**self.member_turn(32), 'archive_credential': credential(event, None, MEMBER_CHAT, member=MEMBER, app=binding(MEMBER_CHAT))},
+            'another member\'s lane': self.member_turn(32, lane='e' * 64),
+            'a malformed member': self.member_turn(32, member='D' * 64, lane=None),
+            'a member and an answer': self.member_turn(32, answer='a' * 32),
+            'a member and an ask about a member': self.member_turn(32, member_read='a' * 32),
+            'reads carried in the pass': self.member_turn(32, reads=[GROUP]),
+            'a member chat carried in the pass': self.member_turn(32, memberChat=MEMBER_CHAT),
+            'the owner\'s chat': {**self.turn(32, text='x'), 'archive_credential': credential(event, OWNER, OWNER, member=MEMBER, app=binding(OWNER))},
+            'a group': {**self.turn(32, GROUP, text='x'), 'archive_credential': credential(event, GROUP, GROUP, member=MEMBER, app=binding(GROUP))},
+            # A stranger's chat, or a member's chat that closed, is not in the list: no pass is taken there.
+            'a chat the list does not mark': self.member_turn(32, '4999'),
+            'the button under a member\'s reply': {**self.member_turn(32), 'button': self.answer_button(event)},
+        }
+        for why, body in refused.items():
+            with self.subTest(why), self.assertRaises(ValueError):
+                self.service.reply(body)
+        self.assertEqual(len(self.sent()), 2)
+        # The member's chat is marked, never served: no card, refusal group or leave treats it as a group.
+        served = self.policy.current()
+        self.assertTrue(served.member_private(MEMBER_CHAT) and served.member_private(MEMBER_NEW))
+        self.assertFalse(served.served(MEMBER_CHAT) or served.group(MEMBER_CHAT) or served.is_owner(MEMBER_CHAT))
+        self.assertFalse(served.member_private(OWNER) or served.member_private(GROUP))
+
+    def test_a_lane_rides_only_on_a_group_pass_or_its_members_own_pass(self):
+        self.member_policy()
+        group = self.turn(33, GROUP, text='x')
+        self.assertEqual(self.service.reply({**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, lane=MEMBER, app=binding(GROUP))})['state'], 'done')
+        owner = self.turn(34, text='x')
+        for why, extra in {'on the owner\'s pass': {'lane': MEMBER}, 'malformed': {'lane': 'x'}}.items():
+            with self.subTest(why), self.assertRaises(ValueError):
+                self.service.reply({**owner, 'archive_credential': credential(owner['event_id'], None, OWNER, app=binding(OWNER), **extra)})
+        with self.assertRaises(ValueError):
+            self.service.reply({**owner, 'archive_credential': credential(owner['event_id'], OWNER, OWNER, answer='a' * 32, lane=MEMBER, app=binding(OWNER))})
+        self.assertEqual(len(self.sent()), 1)
+
+    def test_an_ask_about_a_member_is_answered_only_in_the_owners_chat_under_its_own_class(self):
+        from services.telegram import gateway
+        classes = []
+        def recorded(value, allowed, default):
+            classes.append(gateway.route_class.__wrapped__(value, allowed, default)); return classes[-1]
+        recorded.__wrapped__ = gateway.route_class
+        ask = 'f' * 32
+        # The worker's own key (askSendKey in src/stores/owner-member-ask-turns.ts): the asking message's source key with a
+        # continuation named by the ask.
+        body = self.turn(35, text='What Mira said')
+        source, event = body['dispatch_key'], body['event_id']
+        body = {**body, 'dispatch_key': source + ':continuation:' + digest('member-ask:' + ask)}
+        with patch.object(gateway, 'route_class', recorded):
+            self.assertEqual(self.service.reply({**body, 'archive_credential': credential(event, OWNER, OWNER, member_read=ask, app=binding(OWNER))})['state'], 'done')
+            self.assertEqual(classes, ['member_read'], 'an ask\'s answer is never sent as an ordinary reply')
+            group = self.turn(36, GROUP, text='x')
+            refused = {'as another class': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'send_class': 'reply',
+                                            'archive_credential': credential(event, OWNER, OWNER, member_read=ask, app=binding(OWNER))},
+                       'as the owner': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'archive_credential': credential(event, None, OWNER, member_read=ask, app=binding(OWNER))},
+                       'a malformed ask': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'archive_credential': credential(event, OWNER, OWNER, member_read='F' * 32, app=binding(OWNER))},
+                       'in a group': {**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, member_read=ask, app=binding(GROUP))},
+                       'the class without its pass': {**group, 'send_class': 'member_read'},
+                       'the class on the owner\'s own pass': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'send_class': 'member_read'},
+                       'a key not of the asking message': {**body, 'id': digest(event + ':2'), 'attempt': 2, 'dispatch_key': 'member-ask:' + ask,
+                                                           'archive_credential': credential(event, OWNER, OWNER, member_read=ask, app=binding(OWNER))}}
+            for why, change in refused.items():
+                with self.subTest(why), self.assertRaises(ValueError):
+                    self.service.reply(change)
         self.assertEqual(len(self.sent()), 1)
 
     def test_the_owners_turn_is_answered_only_in_the_owners_chat_never_in_a_topic_of_it(self):

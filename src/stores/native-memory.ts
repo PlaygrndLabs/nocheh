@@ -1,6 +1,6 @@
 import {randomBytes,randomUUID} from 'node:crypto';
 import type pg from 'pg';
-import {admin,type Reader} from '../access.js';
+import {admin,boundReader,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inspectRequest} from '../guard.js';
@@ -1151,8 +1151,8 @@ export class NativeMemoryRepository {
    * fails, the rest is kept and says so (forwards_unavailable), so the turn's parent counts it. */
   async context(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
-    // An answer reader reads long-term memory by plain search only: no summary or representation (ADR-0249).
-    if(!workspace||!principal.turnEvent||principal.answer!==undefined)return limited;
+    // A bound reader reads long-term memory by plain search only: no summary or representation (ADR-0249, step 4).
+    if(!workspace||!principal.turnEvent||boundReader(principal)!==null)return limited;
     try {
       const current=await this.current(workspace.id),audience=this.principalAudience(principal);
       if(await this.correcting(current))return correcting;
@@ -1232,8 +1232,8 @@ export class NativeMemoryRepository {
   async recall(principal:Reader,query:string) {
     string(query,2000);
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
-    // Plain search only for an answer reader: the engine's answers cite no exact messages (ADR-0249).
-    if(!workspace||principal.answer!==undefined)return limited;
+    // Plain search only for a bound reader: the engine's answers cite no exact messages (ADR-0249, step 4).
+    if(!workspace||boundReader(principal)!==null)return limited;
     let corrections:Awaited<ReturnType<NativeMemoryRepository['relevantOwnerCorrections']>>=[];
     try {
       const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
@@ -1370,7 +1370,8 @@ export class NativeMemoryRepository {
    */
   async openFact(principal:Reader,recordId:string,n:number|null) {
     if(!/^[a-f0-9]{64}$/.test(recordId)||n!==null&&!(Number.isSafeInteger(n)&&n>=1&&n<=RECALL_FACT_LIMIT))throw factUnavailable();
-    if(principal.answer!==undefined)throw factUnavailable();
+    // Never for a bound reader: a private answer, a member's private chat or the owner's ask about a member (ADR-0262).
+    if(boundReader(principal)!==null)throw factUnavailable();
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding),retirements=this.contexts.access.retirements;
     if(!workspace||!this.tags||!this.engine.factExists||!this.engine.factsById||!retirements)throw factUnavailable();
     const current=await this.current(workspace.id),audience=principal.admin?'owner':this.principalAudience(principal);
@@ -1450,8 +1451,9 @@ export class NativeMemoryRepository {
     if(!workspace)return {ids:[],learned:false};
     const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
     const audience=principal.admin?'owner':this.principalAudience(principal),group=this.recallGroup(principal);
-    // An answer reader searches the sessions of every group frozen in its record, and no other (ADR-0249).
-    const set=!principal.admin&&principal.answer!==undefined?this.contexts.access.reads(principal)!:null,reads=set?readSetParam(set):null;
+    // A bound reader searches the sessions of every group of its bound reads, and no other (ADR-0249): a member's own
+    // private chat and an asked member's chat are never learned, so they have none (step 4).
+    const set=!principal.admin&&boundReader(principal)!==null?this.contexts.access.reads(principal)!:null,reads=set?readSetParam(set):null;
     const sessions=set?await this.provenance.readSetSessions(id,set,1000):audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};
     // The question is checked for secrets before it reaches the engine, as a recall question is.

@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import type {Reader} from '../access.js';
+import {boundReader,type Reader} from '../access.js';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {telegramMessage,telegramSenderName,telegramUsername} from '../chats-telegram.js';
@@ -8,7 +8,7 @@ import {HttpError} from '../http.js';
 import {sourceChat} from '../spaces.js';
 import {correctionTag,placeTag,shownFileName,sourceClock,sourceDetails,sourceMoment,sourceTag,tagName,unavailableTag,type Tag,type TagDetails,type TagReader,type TagSource} from '../source-tags.js';
 import type {SourceReference} from './archive.js';
-import type {SourceAccessRepository} from './access.js';
+import {boundChat,type SourceAccessRepository} from './access.js';
 import {ownerPeopleNames} from './entities.js';
 import type {GuardBinding} from './guards.js';
 import {bindingMoved,countMemoryStep,type NoteSourceRepository} from './note-sources.js';
@@ -34,8 +34,9 @@ function shownForward(original:unknown,shown:unknown) {
   const found=forwardFacts(original,shown&&typeof shown==='object'?shown:{});
   return found&&(shown&&typeof shown==='object'?found:{from:found.from,rawName:null});
 }
-/** Whether a reader reads as the owner: the owner's private chat, web chat and own jobs, never a private answer. */
-export const ownerReader=(principal:Reader)=>principal.admin||principal.scope===null&&principal.answer===undefined;
+/** Whether a reader reads as the owner: the owner's private chat, web chat and own jobs, never a bound reader (a private
+ *  answer, a member's private chat, the owner's ask about a member). */
+export const ownerReader=(principal:Reader)=>principal.admin||principal.scope===null&&boundReader(principal)===null;
 
 /**
  * Source tags for the sources a reader asked about (ADR-0261), built by code in a few batched reads: who may read each
@@ -158,7 +159,8 @@ export class SourceTagRepository {
     });
     // Chat and topic names once; anyone but the owner reads only the names Telegram showed.
     const names=await recallNames(this.stores,[...new Set(sources.map(source=>source.chat).filter((chat):chat is string=>chat!==null))],{shownOnly:!owner});
-    const reader:TagReader={owner,chat:owner?principal.space??ownerChat(policy):principal.space??principal.scope,zone,precision:options.precision??'minute'};
+    const reader:TagReader={owner,chat:owner?principal.space??ownerChat(policy):principal.space??principal.scope,zone,precision:options.precision??'minute',
+      member_chat:boundChat(principal)};
     // Compact: a person's @username only tells apart two senders the request shows by the same name.
     const key=(source:TagSource)=>tagName(source.sender.name).toLocaleLowerCase().replace(/\s+/g,''),handles=new Map<string,Set<string>>();
     if(options.compact)for(const source of sources) {

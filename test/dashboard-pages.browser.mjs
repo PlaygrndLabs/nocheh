@@ -2875,3 +2875,136 @@ test('pages fit a phone screen and the menu opens as a drawer', async () => {
   await page.getByRole('dialog').getByRole('link', {name: 'Settings'}).waitFor();
   await page.close();
 });
+
+test('a member’s private chat with Nocheh is its own switch, kept apart from group talk, and Pause says it stops', async () => {
+  const {page, problems} = await open('members?member=' + MIRA);
+  const posts = memberPosts(page);
+  await page.getByRole('heading', {name: 'Mira Chen', level: 2}).waitFor();
+  const toast = text => page.getByRole('status').filter({hasText: text}).last().waitFor();
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Private chat', exact: true})});
+  await card.getByText('Group talk off doesn’t stop it.').waitFor();
+  await card.getByText('You can read the chat under Messages › Members’ chats.', {exact: false}).waitFor();
+  const privateChat = 'Private chat with Nocheh';
+  const talk = 'Talk to Nocheh in groups they joined';
+  // Group talk off leaves the private chat switch as it is, and it can still be changed.
+  await page.getByRole('switch', {name: talk, checked: true}).click();
+  await toast('Mira Chen can’t talk to Nocheh now.');
+  assert.equal(await page.getByRole('switch', {name: privateChat, checked: true}).isEnabled(), true);
+  await page.getByRole('switch', {name: privateChat, checked: true}).click();
+  await toast('Mira Chen can’t talk to Nocheh privately now.');
+  const list = page.getByRole('navigation', {name: 'Members'});
+  await list
+    .getByRole('link', {name: /^Mira Chen/})
+    .getByText('Private chat off', {exact: false})
+    .waitFor();
+  await page.reload();
+  await page.getByRole('switch', {name: privateChat, checked: false}).click();
+  await toast('Mira Chen can talk to Nocheh privately.');
+  await page.getByRole('switch', {name: talk, checked: false}).click();
+  await page.getByRole('switch', {name: talk, checked: true}).waitFor();
+  assert.deepEqual(
+    posts.map(({path, body}) => [path, body.changes]),
+    [
+      ['/members/' + MIRA, {talk: false}],
+      ['/members/' + MIRA, {private_chat: false}],
+      ['/members/' + MIRA, {private_chat: true}],
+      ['/members/' + MIRA, {talk: true}],
+    ],
+  );
+  // Pause, and Remove, say the private chat stops too.
+  await page.getByText('in every group and in their private chat', {exact: false}).waitFor();
+  await page.getByText('Deletes them and their switches, and their private chat stops.', {exact: false}).waitFor();
+  await page.getByRole('switch', {name: 'Pause this member', checked: false}).click();
+  await page
+    .getByText('They can’t talk to Nocheh in any group or in their private chat with it', {exact: false})
+    .waitFor();
+  await page.getByRole('switch', {name: 'Pause this member', checked: true}).click();
+  await toast('Mira Chen is active again.');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the Members page shows the owner-only local laws line, from a text the owner can edit', async () => {
+  const {page, problems} = await open('members');
+  const line = page.getByTestId('members-local-laws');
+  await line.waitFor();
+  assert.equal(
+    (await line.textContent()).trim(),
+    "Before you read your members' private chats with Nocheh, check what your local laws allow.",
+  );
+  assert.equal(
+    await page
+      .locator('main')
+      .getByText(/\b(team|staff)\b/i)
+      .count(),
+    0,
+    'the owner’s words say member',
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Messages keeps members’ private chats out of the default list, under their own filter and by their name', async () => {
+  const {page, problems} = await open('messages');
+  const asked = 'Which night did the Aurora planning group pick for the tour?';
+  await page.getByText('Can you remind me what time the aurora tour starts on Friday?').first().waitFor();
+  assert.equal(await page.getByText(asked).count(), 0, 'not in the default list');
+  const chat = page.locator('#message-chat');
+  assert.equal(
+    (await chat.locator('option').first().textContent()).trim(),
+    'Your chats and groups',
+    'the default says what it holds',
+  );
+  const group = chat.locator('optgroup[label="Members’ chats"]');
+  await group.locator('option', {hasText: 'Mira Chen’s private chat · 2'}).waitFor({state: 'attached'});
+  assert.equal(await chat.locator(':scope > option', {hasText: 'Mira Chen’s private chat'}).count(), 0);
+  await chat.selectOption({label: 'Members’ chats'});
+  const rows = page.getByRole('list', {name: 'Messages'});
+  await rows.getByText(asked).first().waitFor();
+  await rows.getByText('Mira Chen’s private chat').first().waitFor();
+  assert.equal(await page.getByText('Can you remind me what time the aurora tour starts on Friday?').count(), 0);
+  assert.equal(new URL(page.url()).hash.includes('chat=%3Amembers'), true, page.url());
+  // Searching from the default list leaves the members’ chats out too.
+  await chat.selectOption({label: 'Your chats and groups'});
+  await page.locator('#message-search').fill('Aurora planning');
+  await page.locator('#message-search').press('Enter');
+  await page.getByRole('list', {name: 'Search results'}).or(page.getByText('No messages match')).first().waitFor();
+  assert.equal(await page.getByText(asked).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Notes names a member’s private chat and your question about a member as what they are, after your own chats', async () => {
+  const {page, problems} = await open('memory?view=notes');
+  const select = page.locator('#notes-profile');
+  await select.waitFor();
+  const labels = (await select.locator('option').allTextContents()).map(label => label.trim());
+  const day = await page.evaluate(() => new Date('2026-11-14T09:00:00+00:00').toLocaleDateString());
+  assert.equal(labels[0], 'Your private chat', 'the page opens on your own chat');
+  assert.deepEqual(labels.slice(-2), ['Your question about a member · ' + day, 'Member · Mira Chen']);
+  assert.equal(labels.filter(label => label === 'Mira Chen').length, 0, 'never shown as a bare chat name');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Settings lists the member private chat texts and the local laws line, each editable', async () => {
+  const {page, problems} = await open('settings?view=assistant');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  for (const title of [
+    'Members’ private chats',
+    'Reply to a member past the daily limit, in private',
+    'Reply to people who may not talk in private',
+    'Local laws line on the Members page',
+  ]) {
+    await card.getByText(title, {exact: true}).click();
+    assert.equal(await card.getByRole('textbox', {name: title}).isEditable(), true, title);
+  }
+  assert.match(await card.getByRole('textbox', {name: 'Members’ private chats'}).inputValue(), /the owner can read it/);
+  assert.match(
+    await card.getByRole('textbox', {name: 'Reply to people who may not talk in private'}).inputValue(),
+    /its owner and the people they add/,
+  );
+  await card.getByText('a member who is paused or has their private chat switched off', {exact: false}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});

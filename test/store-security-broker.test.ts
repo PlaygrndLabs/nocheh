@@ -123,6 +123,21 @@ test('three-store broker binds original and scheduled turns, isolates generation
       answering(path,status,error);
       assert.deepEqual(await relayed(path,{title:'Synthetic',destination:'current',text:'Synthetic'}),{status,body:{error:'scoped_archive_unavailable'}},path+' '+status+' '+error);
     }
+    // The owner's ask about a member (step 4b) goes on to storage from the owner's own private turn, with the refusals its
+    // tool explains; any other code stays opaque, and no other turn may ask.
+    const ask={member:'Mira Test',question:'What did she say?'};
+    answering('/v1/member-asks',409,'member_chat_several');
+    assert.deepEqual(await relayed('/v1/member-asks',ask),{status:409,body:{error:'member_chat_several'}});
+    answering('/v1/member-asks',404,'member_not_found');
+    assert.deepEqual(await relayed('/v1/member-asks',ask),{status:404,body:{error:'member_not_found'}});
+    answering('/v1/member-asks',409,'task_reminder_limit');
+    assert.deepEqual(await relayed('/v1/member-asks',ask),{status:409,body:{error:'scoped_archive_unavailable'}});
+    refuse=()=>null;
+    assert.deepEqual(await relayed('/v1/member-asks',ask),{status:200,body:{ok:true}});
+    assert.deepEqual(calls.at(-1),{url:'http://archive/v1/member-asks',body:ask});
+    const relays=calls.length,scoped=await request('/v1/member-asks',ask,credential({...actor,scope:'123'}));
+    assert.deepEqual({status:scoped.status,body:await scoped.json()},{status:403,body:{error:'owner_private_turn_required'}});
+    assert.equal(calls.length,relays,'a turn that is not the owner\'s own reaches nothing');
     refuse=()=>null;
     revocation=true;
     const streaming=await request('/v1/chat/completions',payload);await assert.rejects(streaming.text());

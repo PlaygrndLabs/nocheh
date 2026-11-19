@@ -11,13 +11,16 @@ const hex=(column:string)=>`${column} ~ '^[a-f0-9]{64}$'`;
  * in chat_accounts.
  *
  * - members: one per member, with Talk to Nocheh in groups they joined (group_talk) and its three sub-permissions, which
- *   keep their values while group_talk is off, and Tasks (read and write, or read only). 'paused' stops everything.
+ *   keep their values while group_talk is off, Tasks (read and write, or read only), and Private chat with Nocheh
+ *   (private_chat, step 4: on by default and independent of group_talk). 'paused' stops everything.
  *   Remove deletes the row: its member_chats and member_turns go with it, and its accounts are unlinked.
  * - member_chats: a member's switch for one group; a topic follows its group, so only group chats have rows. A group
  *   with no row counts as on.
  * - member_directory_state: the member revision, moved by every commit that changes what the member directory holds
  *   (bumpMemberRevision); carried_at, set once the lists in force before step 3 were carried; and the daily message cap.
- * - member_turns: the daily cap's count, one row per member turn, so a retry of the same event counts once.
+ * - member_turns: the daily cap's count, one row per member turn, so a retry of the same event counts once. On a
+ *   member's private turn, left_out holds the joined groups that turn leaves out (re-checks past the cap, step 4): every
+ *   read bound to that turn leaves them out too, and one with no list written reads nothing.
  */
 export const memberSchema=`
 CREATE TABLE IF NOT EXISTS members (
@@ -28,9 +31,12 @@ CREATE TABLE IF NOT EXISTS members (
  group_post_other boolean NOT NULL DEFAULT true,
  group_tools boolean NOT NULL DEFAULT true,
  tasks text NOT NULL DEFAULT 'write' CHECK(tasks IN (${list(memberTaskModes)})),
+ private_chat boolean NOT NULL DEFAULT true,
  added_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),
  revision integer NOT NULL DEFAULT 1 CHECK(revision>=1)
 );
+-- Step 4 (member private chat): every member, the ones added before it too, has private chat on.
+ALTER TABLE members ADD COLUMN IF NOT EXISTS private_chat boolean NOT NULL DEFAULT true;
 CREATE TABLE IF NOT EXISTS member_chats (
  member_id text NOT NULL REFERENCES members(id) ON DELETE CASCADE,
  chat_id text NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -63,6 +69,7 @@ CREATE TABLE IF NOT EXISTS member_turns (
  PRIMARY KEY(member_id,event_id)
 );
 CREATE INDEX IF NOT EXISTS member_turns_day ON member_turns(member_id,day);
+ALTER TABLE member_turns ADD COLUMN IF NOT EXISTS left_out text[];
 -- chat_accounts.member_id (chat-schema.ts) links a person to their member. Added once, so a later bootstrap neither
 -- locks chat_accounts nor checks its rows again.
 DO $$BEGIN

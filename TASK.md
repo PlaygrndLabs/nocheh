@@ -2,6 +2,89 @@
 
 <current>
 
+Members step 4: member private chat, and 4b: the owner asks about a member
+([ADR-0262](docs/adr/0262-member-private-chat.md); owner, 2026-11-12, approving the Members
+design, group talk off does not stop private chat; 2026-11-18: Q1 the answer about a member is a
+separate message, then dropped; Q2 member saved notes wait; Q3 "they can see tasks in both", read
+only). One branch: a contract, six parts and their integration.
+- Admission: `members.private_chat` (on by default, also for existing members), `privateTalks`,
+  `memberPrivate` and the `conversationScope` member branch; a stranger, or a member paused,
+  removed or with private chat off, gets the private fixed reply once a UTC day; the daily cap
+  counts group and private turns together, with its own private reply and key
+  ([admission](test/member-admission.test.ts), [schema](test/store-member-schema.test.ts),
+  [private](test/store-member-private.test.ts), [bot](services/telegram/test_approval_cards.py)).
+- Bound readers: the `member`, `member_read` and `lane` claims, `boundReader`, server-only
+  `memberChat` from `bindReads` on every request in the app and the broker, the 30-day stale rule
+  and the re-check (`telegram.member_status`, at most 10 a turn), the answer-only sites pinned
+  ([claims](test/member-claims.test.ts), [readers](test/member-bound-readers.test.ts),
+  [reads](test/store-member-reads.test.ts), [passes](services/telegram/test_service.py),
+  [check](services/telegram/test_approval_cards.py),
+  [Hermes](services/hermes/test_member_private.py)).
+- Privacy: `canRead` refuses other private chats and `member_read` sends to every reader but the
+  dashboard; owner recall's allowlist; never learned, consented, granted or suggested; read-only
+  routes, tools and effect sites; tasks one read-only view per project (D14)
+  ([reads](test/store-member-reads.test.ts), [private](test/store-member-private.test.ts),
+  [Hermes and lanes](services/hermes/test_member_private.py)).
+- 4b: `ask_member_chat`, the ask guard, `owner_member_asks` and its worker, one `member_read`
+  message in the owner's chat, never carried, pruned, its quotes hidden
+  ([guard](test/owner-member-asks.test.ts), [store](test/store-owner-member-asks.test.ts),
+  [Hermes](services/hermes/test_member_read.py), [turns](services/hermes/test_brain_turns.py),
+  [history](services/hermes/test_profile_history.py)).
+- Dashboard: the local laws line, **Private chat with Nocheh**, Messages' **Members’ chats**
+  filter (`private_chats`), Notes labels, six new editable texts
+  ([texts](test/dashboard-member-private.test.mjs), [filters](test/archive-filters.test.ts),
+  [list](test/store-member-messages.test.ts),
+  [pages](test/dashboard-pages.browser.mjs)).
+- Tester: fake `getChatMember`, MEMBERMARK canaries with the member's chat as their home, and nine
+  member private chat scenarios ([scenarios](tools/acceptance/product_scenarios.py),
+  [fake](test/test_telegram_mock_members.py), [seeding](test/test_tester_member_private.py),
+  [sweep](test/test_canary_sweep.py)).
+- Review fixes: Hermes takes a member's lane before the space's lane, so a member's group turn
+  waiting on their private turn holds no group and the owner's turns there go on; stale groups are
+  re-checked in the places the readable ones leave, groups past the cap are left out of tool reads
+  too (`member_turns.left_out`), and a late 'in' never undoes a newer leave; the ask's answer goes
+  under the asking message's continuation key, a refused reply fails once, a silent or unconfirmed
+  asking turn still runs the ask, any other end tells the owner once, an ask that expires while it
+  runs says so, a removed member's open ask tells the owner once, several accounts give
+  `member_chat_several`, the broker relays `/v1/member-asks`, and ask jobs offer no Cancel or
+  Retry; an ask's Notes label has its date; a task refusal names at most 50 projects (`more`);
+  `private_chats` splits in SQL from the store's chat rows; an import review keeps no learning yes
+  for member chats; `notesSender` refuses Nocheh's messages in member chats; the tester's 4b,
+  context probes and re-check searches pass against correct code
+  ([lanes](services/hermes/test_member_private.py), [rechecks](test/member-admission.test.ts),
+  [private](test/store-member-private.test.ts), [reads](test/store-member-reads.test.ts),
+  [asks](test/store-owner-member-asks.test.ts), [broker](test/store-security-broker.test.ts),
+  [tasks](test/knowledge-broker.test.ts), [list](test/store-member-messages.test.ts),
+  [notes](services/hermes/test_turn_process.py), [tester](test/test_tester_member_private.py)).
+
+  Checks on the integrated branch with the review fixes (2026-11-18): the build; node unit
+  tests (802: 540 pass, 258 skipped, and only the 4 workflow tests that also fail on main fail);
+  all 112 store test files (304 pass, 0 fail); the controlled-actions, managed-runs, sharing and
+  workflow-operations suites on the store fixture fail as on main; Python Telegram (157), Hermes
+  (1047, with the 2 environment errors that also occur on main) and the repository's Python tests
+  (172, 2 skipped); the dashboard build, format check and its tests (72 of 72); the browser tests
+  (67: 64 pass, and the 3 that also fail on main).
+  The whole full tester on fresh images, in five parts (2026-11-18/19): 45/45, 29/29, 25/25, 30/30
+  and 17/17, with the canary sweep ("a member's marks never left theirs"). Its first member round
+  found an ask's search calling the shared-facts route the ask may not use (fixed, with a unit
+  test in [mcp](test/mcp.test.ts)), and two leak checks that counted the owner's own recall query.
+  Merged main 1182097 (fact sources, ADR-0261 step 2): bound readers (a private answer, a member's
+  private chat, the owner's ask about a member) never open `nocheh:memory:` facts; the facts route is
+  in no bound route list and `openFact` refuses any bound reader
+  ([readers](test/member-bound-readers.test.ts), [facts](test/fact-opening.test.ts)). The suites were
+  run again on the merged branch (store 306/306; node unit only the 4 known; Python as before, and
+  `test_retired_source_leaves_tags` fails as on main), and the full tester ran the member scenarios with
+  main's five fact scenarios on fresh images: 22/22.
+  Pending: live acceptance on the owner's install after merge.
+  Left for later: a member with several accounts that have private chats is not asked about (the
+  owner is told so); `notesSender` does not tell `member_read` sends apart (`canLearn` and
+  `privateHold` refuse them first); reading a group only from when the member joined
+  (`read_from`); member saved notes; an own role per member chat; members' own **Answer
+  privately**.
+  Owner steps: take a backup and rebuild and run every image from the same revision
+  ([deploy](docs/deploy.md#upgrade-to-step-4)). Every member then has private chat on; turn it off
+  per member on **Members**. Members' chats are under Messages › **Members’ chats**.
+
 Members step 3: members in groups
 ([ADR-0260](docs/adr/0260-members-in-groups.md); owner, 2026-11-12, approving the Members
 design: members are allowed by default in the groups they are in, with a permission scope per
@@ -811,7 +894,8 @@ becomes your private memory"). One pull request of several commits
   learning setting; web-chat replies carry no class; no test covers Hermes counting a missing
   forwards block; a rule's recorded inputs are not checked against who is allowed there, only
   the messages it cites; an earlier read a turn restates in its own words is not counted;
-  Members step 4 must make `canLearn` check the chat is served before the owner's yes; a pin or
+  `canLearn` checking the chat is served before the owner's yes (step 4 does it for private chats
+  that are not the owner's, [ADR-0262](docs/adr/0262-member-private-chat.md)); a pin or
   quote handled before Nocheh's own message is archived, or after its capture failed, is labelled
   as someone else's (it fails closed), and its words, Nocheh's own account's, are cut from
   everything learned, except where the stored bot is not an account (an import), where it is

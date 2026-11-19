@@ -97,6 +97,14 @@ class ScriptedBrainTests(unittest.TestCase):
         self.assertEqual(self.brain.respond(blank),{'content':''})
         self.assertEqual(self.brain.respond(blank),{'content':'[brain] recovered E'})
 
+    def test_a_split_context_probe_looks_for_the_joined_mark_and_never_spells_it(self):
+        probe=message('user','[[context_split:MARK|-1]]')
+        present=self.brain.respond(request(message('user','remember MARK-1'),message('assistant','ok'),probe))
+        # An earlier probe of the same mark is no mention of it.
+        absent=self.brain.respond(request(probe,message('assistant','[brain] context_split MARK|-1 absent'),probe))
+        self.assertEqual((present['content'],absent['content']),('[brain] context_split MARK|-1 present','[brain] context_split MARK|-1 absent'))
+        self.assertNotIn('MARK-1',absent['content'])
+
     def test_any_tool_turn_markers_and_silence_after_a_tool(self):
         user=message('user','add it [[tool:mcp__nocheh__tasks {"action":"create","title":"Buy milk"}]] [[after:silent]]')
         self.assertEqual(self.brain.respond(request(user,tools=('mcp__nocheh__tasks',))),

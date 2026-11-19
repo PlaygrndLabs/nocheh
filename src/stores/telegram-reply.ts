@@ -1,4 +1,5 @@
 import {digest} from '../archive.js';
+import {HttpError} from '../http.js';
 import type {TurnReceipt} from '../brain/brain.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {TurnInput} from './telegram-turn.js';
@@ -50,13 +51,15 @@ export interface ReplyButton {text:string;data:string}
 /**
  * Send a done turn's reply. A follow-up notifies, as nobody watched it being typed. The answer is the bot's closed
  * receipt, `running` while it still sends, or null when the bot did not answer, so the same call is made again. The send
- * class says what kind of message it is, so memory can leave Nocheh's own cards out (ADR-0256).
+ * class says what kind of message it is, so memory can leave Nocheh's own cards out (ADR-0256). With `refused`, a
+ * request the bot refuses as malformed (400: nothing was sent, and the same request is refused again) comes back as a
+ * failed receipt (`reply_refused`) instead of null, so the caller stops asking.
  */
 export async function sendReply(call:RuntimeCall,target:ReturnType<typeof replyTarget>,dispatchKey:string,reply:{text:string;session_id:string},
-  options:{notify:boolean;presence:boolean;button?:ReplyButton;sendClass:SendClass}):Promise<Record<string,unknown>|null> {
-  const {button,sendClass,...rest}=options;
+  options:{notify:boolean;presence:boolean;button?:ReplyButton;sendClass:SendClass;refused?:boolean}):Promise<Record<string,unknown>|null> {
+  const {button,sendClass,refused,...rest}=options;
   try{return await call('telegram.reply',{...target,dispatch_key:dispatchKey,text:reply.text,session_id:reply.session_id,...rest,send_class:sendClass,...(button?{button}:{})},30000);}
-  catch{return null;}
+  catch(error){return refused&&error instanceof HttpError&&error.status===400?{state:'failed',error_code:'reply_refused'}:null;}
 }
 
 /** Withdraw a reply that has not gone out yet; one already sent keeps its receipt. */

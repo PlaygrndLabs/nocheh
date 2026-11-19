@@ -2,7 +2,7 @@ import {createServer,type IncomingMessage,type ServerResponse} from 'node:http';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
-import {currentReader,assertAudience,type Reader} from '../access.js';
+import {boundReader,currentReader,assertAudience,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,json,readJson,object} from '../http.js';
 import {manifest,fingerprint,type Effect,type Decision} from './contract.js';
@@ -17,7 +17,7 @@ import {RuntimeTurnRepository} from '../stores/turns.js';
 import {assertPrivateAnswerRoute} from '../stores/private-answers.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
-import {actionErrors,jobErrors,taskErrors} from '../mcp/tools.js';
+import {actionErrors,askErrors,jobErrors,taskErrors} from '../mcp/tools.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {longFetch} from '../long-fetch.js';
 
@@ -37,7 +37,7 @@ export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prep
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered|grants)\/[a-f0-9]{64}|memory\/learned\/[a-f0-9]{64}\/[1-9][0-9]{0,8}|memory\/notes\/[a-f0-9]{12}|memory\/facts\/[a-f0-9]{64}(?:\/[1-9][0-9]{0,2})?|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions(?:\/[a-f0-9]{64})?|telegram\/destinations)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|member-asks|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
@@ -100,13 +100,24 @@ const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted']);
 /** What a machine command may be told, as services/hermes/machine_box.py names it: a refusal or a failure on the machine's side. */
 export {machineErrors};
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
-async function refusalCode(response:Response,max=4096):Promise<string|null> {
+async function refusalCode(response:Response,max=4096):Promise<string|null> {return (await refusalBody(response,max))?.code??null;}
+/** A refusal's code and, for task_project_required (D14), the lists it names: each a project id and a name, nothing else,
+ * and whether there are more. */
+async function refusalBody(response:Response,max=4096):Promise<{code:string|null;projects?:{id:string;name:string}[];more?:true}|null> {
   const chunks=[];let size=0;
   try {
     if(response.body)for await(const part of response.body){size+=part.length;if(size>max)return null;chunks.push(Buffer.from(part));}
-    const code=object(JSON.parse(Buffer.concat(chunks).toString())).error;return typeof code==='string'?code:null;
+    const body=object(JSON.parse(Buffer.concat(chunks).toString())),code=typeof body.error==='string'?body.error:null;
+    const projects=code==='task_project_required'&&Array.isArray(body.projects)&&body.projects.length<=50&&body.projects.every(item=>item&&typeof item==='object'&&
+      typeof item.id==='string'&&/^[a-f0-9]{64}$/.test(item.id)&&typeof item.name==='string'&&item.name.length<=200)?
+      (body.projects as {id:string;name:string}[]).map(item=>({id:item.id,name:item.name})):undefined;
+    return {code,...(projects?{projects,...(body.more===true?{more:true as const}:{})}:{})};
   }catch{return null;}
 }
+/** How much of a task refusal is read: 50 project entries with names of 200 UTF-16 units, each escaped as \uXXXX. */
+const TASK_REFUSAL_BYTES=128*1024;
+/** A refusal that names what to ask instead (TaskProjectRequired's lists, D14). */
+class DetailedRefusal extends HttpError {constructor(status:number,code:string,readonly details:Record<string,unknown>){super(status,code);}}
 async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
   if(!response.ok){await response.body?.cancel();throw new HttpError(response.status>=400&&response.status<500?response.status:503,'security_upstream_unavailable');}
   const chunks=[];let size=0;
@@ -126,6 +137,7 @@ export function brokerServer(options:BrokerOptions) {
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
     if(res.headersSent){res.destroy();return;}
     json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'security_service_unavailable',
+      ...(error instanceof DetailedRefusal?error.details:{}),
       ...(error instanceof ProviderFailure&&Number.isInteger(error.providerStatus)&&error.providerStatus>=100&&error.providerStatus<=599?{provider_status:error.providerStatus}:{})});
   });});
   async function handle(req:IncomingMessage,res:ServerResponse) {
@@ -139,11 +151,12 @@ export function brokerServer(options:BrokerOptions) {
       if(!box||!authorization.startsWith('Bearer ')||!boxTokenValid(authorization.slice(7)))throw new HttpError(403,'box_token_required');
       await options.assertReady?.();return json(res,200,await box.live());
     }
-    // An answer reader is bound to its record on every call, or refused without one, and reaches read routes only (ADR-0249).
-    // A pass for a topic the app recorded a moment ago is read once this service's chat directory has looked again (ADR-0252).
-    const parsed=await currentReader(req,options.token);
-    if(parsed.answer!==undefined&&!options.storage?.bindReads)throw new HttpError(409,'private_answer_closed');
-    const principal=parsed.answer!==undefined?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
+    // A bound reader (an answer, a member's private chat, the owner's ask about a member) is bound to its record on every
+    // call, or refused without one, and reaches its read routes only (ADR-0249, ADR-0262). A pass for a topic the app
+    // recorded a moment ago is read once this service's chat directory has looked again (ADR-0252).
+    const parsed=await currentReader(req,options.token),bound=boundReader(parsed);
+    if(bound!==null&&!options.storage?.bindReads)throw new HttpError(409,bound==='answer'?'private_answer_closed':'member_chat_closed');
+    const principal=bound!==null?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
     assertPrivateAnswerRoute(principal,req.method,path);
     await afterPending(job,async()=>options.assertReady?.());
     // Nocheh's data tools: each call comes back to this broker's own routes with the turn's pass, so it meets every check below (ADR-0233).
@@ -201,7 +214,9 @@ export function brokerServer(options:BrokerOptions) {
       if(copy||scopedRoute(req.method??'',relay)) {
         // Only the box route reads whole texts; no other read can ask for them.
         if(!copy&&url.searchParams.has('full'))url.searchParams.delete('full');
-        const tasks=/^\/v1\/owner\/tasks(?:\/|$)/.test(relay),knowledge=relay.startsWith('/v1/knowledge/')||relay.startsWith('/v1/owner/');
+        // The owner's ask about a member (step 4b) is the owner's live private turn's too, read as the owner's memory.
+        const tasks=/^\/v1\/owner\/tasks(?:\/|$)/.test(relay),ask=relay==='/v1/member-asks';
+        const knowledge=relay.startsWith('/v1/knowledge/')||relay.startsWith('/v1/owner/')||ask;
         // Fixed scoped routes keep runtime tools away from owner credentials.
         // Storage independently verifies a current live owner-private turn.
         if(knowledge&&!tasks&&(!binding.owner||binding.job||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');
@@ -221,8 +236,13 @@ export function brokerServer(options:BrokerOptions) {
           // why it did not run, also when the machine could not be reached; a proposal, that the owner turned its tool off here;
           // a message request, that its chat is not one Nocheh serves; a task change, why a reminder time was not saved.
           const codes=relay.startsWith('/v1/jobs/')&&response.status<500?jobErrors:exec?machineErrors:relay==='/v1/tools/propose'&&response.status<500?proposeErrors:
-            relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:null;
-          const code=codes&&response.status>=400?await refusalCode(response):(await response.body?.cancel(),null);
+            relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:ask&&response.status<500?askErrors:null;
+          // A task refusal may name up to 50 projects (D14): read within a bound that fits 50 names of 200 characters, each
+          // escaped in JSON at worst.
+          const refused=codes&&response.status>=400?await refusalBody(response,tasks?TASK_REFUSAL_BYTES:4096):(await response.body?.cancel(),null),code=refused?.code??null;
+          // A member's private chat that did not name a project hears which lists it may choose (D14).
+          if(tasks&&code==='task_project_required'&&refused?.projects)
+            throw new DetailedRefusal(response.status,code,{projects:refused.projects,...(refused.more?{more:true}:{})});
           throw new HttpError(response.status,code&&codes!.has(code)?code:'scoped_archive_unavailable');
         }
         // A box page holds at most 600,000 characters of message texts, which stays well within 8 MiB.

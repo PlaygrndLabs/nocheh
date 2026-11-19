@@ -33,7 +33,7 @@ const close=async(server:Server)=>{server.closeAllConnections();await new Promis
 test('the data tools keep their names, closed schemas and engine-neutral words',()=>{
   // The brain sees each one as mcp__nocheh__<name>, one for one with the plugin tool nocheh_<name> it replaces (ADR-0233).
   assert.deepEqual(mcpTools.map(item=>item.name),['archive_search','archive_read','archive_page','memory_search','memory_recall','action_request','background_job',
-    'telegram_destinations','shell','browser','mcp','owner_read','tasks','notion','action_status','knowledge_inspect','knowledge_propose','knowledge_status']);
+    'telegram_destinations','shell','browser','mcp','ask_member_chat','owner_read','tasks','notion','action_status','knowledge_inspect','knowledge_propose','knowledge_status']);
   for(const item of mcpTools) {
     assert.equal(item.inputSchema.type,'object',item.name);assert.equal(item.inputSchema.additionalProperties,false,item.name);
     // No memory engine's name and no old plugin tool name reaches the brain.
@@ -92,7 +92,7 @@ test('the MCP endpoint speaks JSON-only Streamable HTTP without sessions',async(
     assert.deepEqual((await rpc({jsonrpc:'2.0',method:'notifications/initialized'})),{status:202,body:null});
     assert.deepEqual((await rpc({jsonrpc:'2.0',id:5,method:'ping'},{'mcp-protocol-version':'2025-11-25'})).body,{jsonrpc:'2.0',id:5,result:{}});
     const listed=(await rpc({jsonrpc:'2.0',id:'list',method:'tools/list'})).body.result.tools;
-    assert.equal(listed.length,18);assert.deepEqual(Object.keys(listed[0]),['name','description','inputSchema']);
+    assert.equal(listed.length,19);assert.deepEqual(Object.keys(listed[0]),['name','description','inputSchema']);
     const called=await rpc({jsonrpc:'2.0',id:6,method:'tools/call',params:{name:'archive_search',arguments:{query:'Friday',scope:'private'}}});
     assert.deepEqual(called.body,{jsonrpc:'2.0',id:6,result:{content:[{type:'text',text:JSON.stringify({sources:[],filter_status:null})}],isError:false}});
     assert.deepEqual(seen.map(call=>call.path),['/v1/imports/pending','/v1/search?q=Friday&limit=5'],'the model never chooses the scope');
@@ -236,6 +236,11 @@ test('search says when history is still importing, and adds shared facts only fo
   assert.equal(owner.calls.length,2,'the owner reads the whole archive, without shared facts');
   // A failed status check never blocks the search itself.
   assert.deepEqual((await run('archive_search',{query:'Friday'},fake(call=>call.path.includes('pending')?new Status(503):[]).context)).sources,[]);
+  // An ask about a member searches only the bound member chat: no import status, no shared facts.
+  pending=[{messages:40000,ready_percent:42}];
+  const ask=fake(answer,{scope:'1',admin:false,space:'1',memberRead:'c'.repeat(32)});
+  assert.deepEqual(await run('archive_search',{query:'Friday'},ask.context),{sources:[{id:'nocheh:source:'+ID}],filter_status:null});
+  assert.deepEqual(ask.calls.map(call=>call.path),['/v1/search?q=Friday&limit=5']);
 });
 
 test('a chat is read page by page and found by meaning through the bound scope',async()=>{

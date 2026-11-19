@@ -1,7 +1,7 @@
 """Fixture-only HTTP Bot API subset, with real PTB parsing and durable queue state.
 
 Contract: https://core.telegram.org/bots/api#getupdates, #sendmessage, #getfile,
-#editmessagetext, #answercallbackquery, #setmessagereaction and #leavechat.
+#editmessagetext, #answercallbackquery, #setmessagereaction, #leavechat and #getchatmember.
 Unknown methods are recorded and rejected; this is not a Telegram implementation.
 """
 import asyncio
@@ -27,12 +27,27 @@ ADMIN_RIGHTS=('can_manage_chat','can_delete_messages','can_manage_video_chats','
               'can_change_info','can_invite_users','can_post_stories','can_edit_stories','can_delete_stories')
 
 
-def chat_member(user,status):
-    """A ChatMember of `user` with one of the statuses a bot's own status takes: left, member, administrator or kicked."""
+# https://core.telegram.org/bots/api#chatmemberrestricted: what a restricted person may still do, all off here.
+RESTRICTED_RIGHTS=('can_send_messages','can_send_audios','can_send_documents','can_send_photos','can_send_videos','can_send_video_notes',
+                   'can_send_voice_notes','can_send_polls','can_send_other_messages','can_add_web_page_previews','can_change_info',
+                   'can_invite_users','can_pin_messages','can_manage_topics','can_edit_tag','can_react_to_messages')
+MEMBER_STATUSES=('creator','administrator','member','restricted','left','kicked')
+
+
+def chat_member(user,status,is_member=True):
+    """A ChatMember of `user`: left, member, administrator or kicked, the statuses a bot's own status takes, or creator,
+    or restricted, which is still in the group when `is_member` (https://core.telegram.org/bots/api#chatmember)."""
     if status=='administrator':return {'status':status,'user':user,'can_be_edited':False,'is_anonymous':False,**{right:False for right in ADMIN_RIGHTS}}
     if status=='kicked':return {'status':status,'user':user,'until_date':0}
     if status in ('left','member'):return {'status':status,'user':user}
+    if status=='creator':return {'status':status,'user':user,'is_anonymous':False}
+    if status=='restricted':return {'status':status,'user':user,'is_member':bool(is_member),'until_date':0,**{right:False for right in RESTRICTED_RIGHTS}}
     raise ValueError('fixture_member_status')
+
+
+def person_user(user_id):
+    """A synthetic Telegram User for a person id, as the tester's messages name their senders."""
+    return {'id':int(user_id),'is_bot':False,'first_name':'Synthetic '+str(int(user_id))}
 
 
 def bot_status(update_id,chat,by,old='left',new='member',date=None):
@@ -171,7 +186,7 @@ class TelegramMock:
         for item in updates:
             chat=(item.get('message') or item.get('edited_message') or item.get('my_chat_member') or {}).get('chat') or {}
             if isinstance(chat.get('title'),str) and type(chat.get('id')) is int:titles[str(chat['id'])]=chat['title']
-            self.track(item)
+            self.track(item);self.track_people(item)
         self.save();self.changed.set();return {'queued':len(self.state['updates']),'last_update_id':self.state['last_update_id']}
 
     def track(self,update):
@@ -180,6 +195,38 @@ class TelegramMock:
         if not isinstance(change,dict) or (change.get('new_chat_member') or {}).get('user',{}).get('id')!=BOT['id']:return
         chat=change.get('chat') or {}
         if type(chat.get('id')) is int:self.state.setdefault('members',{})[str(chat['id'])]={'status':change['new_chat_member'].get('status'),'chat':chat}
+
+    def track_people(self,update):
+        """Keep what Telegram knows of people in groups, for getChatMember: someone who writes in a group or is added is a
+        member there, a left_chat_member left, and a chat_member update sets their new status. A bot's messages (an
+        anonymous admin's, a channel's) name nobody."""
+        people,users=self.state.setdefault('people',{}),self.state.setdefault('users',{})
+        def keep(chat,user,status,is_member=True):
+            if not isinstance(user,dict) or type(user.get('id')) is not int or user.get('is_bot'):return
+            users[str(user['id'])]=user
+            if type(chat) is int and chat<0:people[f'{chat}:{user["id"]}']={'status':status,'is_member':is_member,'user':user}
+        message=update.get('message') or update.get('edited_message')
+        if isinstance(message,dict):
+            chat=(message.get('chat') or {}).get('id')
+            if isinstance(message.get('left_chat_member'),dict):keep(chat,message['left_chat_member'],'left')
+            else:
+                for user in message.get('new_chat_members') or []:keep(chat,user,'member')
+                if message.get('from') is not None and not message.get('sender_chat'):keep(chat,message['from'],'member')
+        change=update.get('chat_member')
+        if isinstance(change,dict):
+            new=change.get('new_chat_member') or {}
+            if new.get('status') in MEMBER_STATUSES:keep((change.get('chat') or {}).get('id'),new.get('user'),new['status'],new.get('is_member',True))
+
+    def chat_member_of(self,chat,user):
+        """getChatMember's answer: (status, body). A person Telegram showed in the group has their last status there;
+        someone it knows but never saw there has left; someone it never saw at all is no user it can find."""
+        known=self.state.get('members',{}).get(str(chat)) or {}
+        if known.get('status') in ('left','kicked'):return self.error(403,'Forbidden: bot is not a member of the supergroup chat')
+        found=self.state.get('people',{}).get(f'{chat}:{user}')
+        if found:return 200,chat_member(found['user'],found['status'],found.get('is_member',True))
+        seen=self.state.get('users',{}).get(str(user))
+        if seen:return 200,chat_member(seen,'left')
+        return self.error(400,'Bad Request: user not found')
 
     def next_update_id(self):
         """The id of an update the fake sends on its own: after every update queued so far, and never a multiple of ten,
@@ -195,8 +242,18 @@ class TelegramMock:
 
     def configure(self,body):
         """Bounded synthetic files/faults; reject malformed control atomically."""
-        if not isinstance(body,dict) or set(body)-{'files','faults','chats'}:raise ValueError('invalid_fixture_control')
+        if not isinstance(body,dict) or set(body)-{'files','faults','chats','chat_members'}:raise ValueError('invalid_fixture_control')
         files=dict(self.state['files']);faults=list(self.state['faults']);chats=dict(self.state.get('chats',{}))
+        people=dict(self.state.get('people',{}));users=dict(self.state.get('users',{}))
+        # A person's status in a group as Telegram would now answer getChatMember, such as someone removed while the bot
+        # missed the service message. A later message of theirs there shows them in again, as it would.
+        for row in body.get('chat_members',[]):
+            if (not isinstance(row,dict) or set(row)-{'chat_id','user_id','status','is_member'} or type(row.get('chat_id')) is not int
+                    or row['chat_id']>=0 or type(row.get('user_id')) is not int or row['user_id']<=0 or row.get('status') not in MEMBER_STATUSES
+                    or ('is_member' in row and (row['status']!='restricted' or type(row['is_member']) is not bool))):raise ValueError('invalid_fixture_chat_member')
+            user=users.get(str(row['user_id'])) or person_user(row['user_id'])
+            users[str(row['user_id'])]=user
+            people[f'{row["chat_id"]}:{row["user_id"]}']={'status':row['status'],'is_member':row.get('is_member',True),'user':user}
         for row in body.get('chats',[]):
             if (not isinstance(row,dict) or set(row)-{'id','type','title','username','is_forum','migrate_to_chat_id'} or type(row.get('id')) is not int
                     or row.get('type') not in ('group','supergroup','private','channel')):raise ValueError('invalid_fixture_chat')
@@ -212,7 +269,7 @@ class TelegramMock:
             files[row['file_id']]=row
         for row in body.get('faults',[]):
             if (not isinstance(row,dict) or set(row)-{'method','code','description','parameters'}
-                    or row.get('method') not in ('sendMessage','getFile','getUpdates','leaveChat')
+                    or row.get('method') not in ('sendMessage','getFile','getUpdates','leaveChat','getChatMember')
                     or type(row.get('code')) is not int or not 400<=row['code']<=599
                     or not isinstance(row.get('description'),str) or len(row['description'])>200):raise ValueError('invalid_fixture_fault')
             parameters=row.get('parameters',{})
@@ -227,9 +284,9 @@ class TelegramMock:
             elif parameters:raise ValueError('invalid_fixture_fault')
             faults.append(row)
         if len(files)>100 or len(faults)>20:raise ValueError('fixture_control_limit')
-        if len(chats)>50:raise ValueError('fixture_control_limit')
-        self.state.update(files=files,faults=faults,chats=chats);self.save()
-        return {'files':len(files),'faults':len(faults),'chats':len(chats)}
+        if len(chats)>50 or len(people)>2000:raise ValueError('fixture_control_limit')
+        self.state.update(files=files,faults=faults,chats=chats,people=people,users=users);self.save()
+        return {'files':len(files),'faults':len(faults),'chats':len(chats),'chat_members':len(people)}
 
     @staticmethod
     def markup(data):
@@ -365,6 +422,14 @@ class TelegramMock:
                     parameters={'migrate_to_chat_id':chat['migrate_to_chat_id']})
             # ChatFullInfo requires these fields; they carry no fixture meaning.
             result={'accent_color_id':0,'max_reaction_count':11,**{key:value for key,value in chat.items() if key in ('id','type','title','username','is_forum')}}
+        elif method=='getChatMember':
+            # https://core.telegram.org/bots/api#getchatmember: a person's status in a group the bot is in, as the
+            # fixture saw it or the tester set it. A private chat has no members to ask about.
+            try:chat,user=int(data.get('chat_id')),int(data.get('user_id'))
+            except (TypeError,ValueError):return self.error(400,'Bad Request: chat not found')
+            if chat>=0:return self.error(400,'Bad Request: chat member status can\'t be requested in a private chat')
+            status,result=self.chat_member_of(chat,user)
+            if status!=200:return status,result
         elif method=='sendChatAction':
             # https://core.telegram.org/bots/api#sendchataction: a status shown for up to five seconds.
             if data.get('action') not in ('typing','upload_photo','record_video','upload_video','record_voice','upload_voice',

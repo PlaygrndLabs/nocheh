@@ -23,8 +23,8 @@ import yaml
 from .isolated_profile import database_path
 from .scopes import Scopes
 
-# One default folder per audience. A later member-chat step adds its own key; until then every turn that is not the
-# owner's private chat falls back to the groups default (ADR-0244).
+# One default folder per audience. Every turn that is not the owner's private chat reads the groups default (ADR-0244),
+# a member's own private chat included: it has no role of its own (step 4, ADR-0262).
 DEFAULTS = {'owner': 'nocheh-default', 'group': 'nocheh-default-groups'}
 ROLE_LIMIT = 20000
 SKILL_LIMIT = 30

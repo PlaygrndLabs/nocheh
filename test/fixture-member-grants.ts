@@ -32,7 +32,7 @@ export function grantedMembers(grants:GroupGrants,options:GrantOptions={}):Membe
   const members:MemberRow[]=[],accounts=[],memberChats=[],presence=[];
   for(const person of people) {
     const account=accountIdFor('telegram',person),id=memberIdFor(account);
-    members.push({id,state:'active',group_talk:true,group_jobs:true,group_post_other:true,group_tools:true,tasks:'write',...options.changes?.[person]});
+    members.push({id,state:'active',group_talk:true,group_jobs:true,group_post_other:true,group_tools:true,tasks:'write',private_chat:true,...options.changes?.[person]});
     accounts.push({account_id:account,member_id:id});
     for(const group of groups) {
       memberChats.push({member_id:id,chat_id:group,enabled:on(person,group)});

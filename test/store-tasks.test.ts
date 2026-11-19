@@ -24,7 +24,7 @@ import {grantMembers} from './fixture-member-grants.js';
 const asMembers=(restore:()=>void,people:readonly string[]=['456','457','458'])=>{
   const accounts=people.map(id=>accountIdFor('telegram',id));
   const back=installMembersForTest({members:accounts.map(account=>({id:memberIdFor(account),state:'active' as const,group_talk:true,group_jobs:true,
-    group_post_other:true,group_tools:true,tasks:'write' as const})),accounts:accounts.map(account=>({account_id:account,member_id:memberIdFor(account)})),
+    group_post_other:true,group_tools:true,tasks:'write' as const,private_chat:true})),accounts:accounts.map(account=>({account_id:account,member_id:memberIdFor(account)})),
     chats:[],presence:[],owner_account:accountIdFor('telegram','123')});
   return ()=>{back();restore();};
 };

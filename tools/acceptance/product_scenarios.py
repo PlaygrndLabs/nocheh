@@ -47,7 +47,14 @@ TEAM_TOPIC, TEAM_NAME = 31, 'Team plans'
 STRANGER, STRANGER_NAME = 880, 'STRANGERNAME61'
 # Someone the owner never allowed anywhere, who adds Nocheh to a group of theirs (ADR-0253).
 ADDER = 881
-PRIVATE_NOT_ALLOWED = 'Sorry, this is a private assistant. It only works for its owner.'
+PRIVATE_NOT_ALLOWED = 'Sorry, this is a private assistant. It only works for its owner and the people they add.'
+# The fixed, editable reply in a member's private chat over the daily message cap, which counts their group and private
+# turns together, at most once a UTC day (src/prompts.ts telegram.member_private_daily_limit).
+PRIVATE_DAILY_LIMIT = 'Sorry, you have reached today\'s limit of messages to me, in your groups and here together. You can write again tomorrow.'
+# The topic member private chat scenarios post group messages in, and the owner's tool that asks about a member's
+# private chat (step 4b), with arguments {member: the name Telegram shows for them, question}.
+PRIVATE_TOPIC = 50
+ASK_TOOL = 'mcp__nocheh__ask_member_chat'
 # The made-up machine of the machine job scenarios: an SSH server on the fixture's default network, the network
 # nocheh-machines uses (deploy/acceptance/vm-fixture.Dockerfile). The tester's own image, built like its browser's.
 VM_SERVICE, VM_NAME, VM_LOGIN, VM_HOME = 'vm-fixture', 'build-vm', 'nocheh', '/home/nocheh'
@@ -2313,17 +2320,23 @@ class ProductScenarios(Scenarios):
     def private_canaries_never_left_the_owner(self):
         # The last check of a run: no private mark planted by private_chat_stays_out_of_groups is in anything the fake
         # Telegram sent outside the owner's private chat: a message, an edit, a button, or the answer to someone else's
-        # press. The marks never get a card, so any one found is a leak. Without saved marks the sweep fails.
+        # press. A MEMBERMARK planted in a member's own private chat (member_private_chat_stays_with_the_member) is in
+        # nothing sent outside that chat, but for the one message that answered the owner's ask about that member
+        # (step 4b): not in a group, another member's chat, or any other owner message. The marks never get a card, so
+        # any one found is a leak. Without saved marks the sweep fails.
         path = self.f.directory/canaries.FILE
         self.gate('canaries_saved', path.exists(), file=path.name)
         planted = canaries.load(self.f.directory)
+        where = canaries.places(planted)
         state = self.f.telegram()
         # The sweep reads the same state that shows the marks where they belong.
-        seen = [hit for hit in canaries.leaks(state, planted['marks'], None) if hit['chat'] == planted['owner']]
-        self.gate('marks_seen_in_the_owner_chat', bool(seen), marks=len(planted['marks']), seen=len(seen))
-        found = canaries.leaks(state, planted['marks'], planted['owner'])
+        seen = [hit for hit in canaries.leaks(state, planted['marks'], None) if hit['chat'] == where[hit['mark']]['home']]
+        self.gate('marks_seen_in_the_owner_chat', any(hit['chat'] == planted['owner'] for hit in seen), marks=len(planted['marks']), seen=len(seen))
+        members = {place['home'] for place in where.values() if place['home'] != planted['owner']}
+        self.gate('member_marks_seen_in_their_own_chat', members <= {hit['chat'] for hit in seen}, homes=len(members))
+        found = canaries.leaks(state, planted['marks'], planted['owner'], where)
         self.current['observed'] = {'marks': len(planted['marks']), 'messages': len(state.get('sent', [])), 'leaks': found[:20]}
-        self.gate('no_private_mark_outside_the_owner_chat', not found,
+        self.gate('no_private_mark_outside_its_own_chat', not found,
                   leaks=[{**hit, 'held': planted['marks'].get(hit['mark'])} for hit in found[:10]])
 
     def inbox_never_asks_about_the_owner(self):
@@ -4302,6 +4315,554 @@ class ProductScenarios(Scenarios):
                                                                                                    str(telegram_mock.CHANNEL_BOT['id']))],
                   people=[row.get('telegram_id') for row in people])
 
+    # A member's own private chat with Nocheh (step 4) and the owner asking about it (step 4b), ADR-0262 -------------
+
+    def private_turn(self, person, text):
+        """The member `person` writes to Nocheh in their own private chat (its Telegram id is theirs) and gets one reply."""
+        return self.turn(self.f.message(person, text, sender=person), person)
+
+    def private_search(self, person, word, silent=False):
+        """What archive_search found for `person` in their own private chat, as the scripted model saw it (raw text).
+        `silent` sends no reply: one quoting the hits is kept in the member's chat, which they read whole, so a later
+        search would still find a group's mark in it after the group is no longer read."""
+        if silent:
+            self.silent_turn(self.f.message(person, 'پیدا کن [[search:'+word+']] [[after:silent]]', sender=person), person)
+        else:
+            self.private_turn(person, 'پیدا کن [[search:'+word+']]')
+        found = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'
+                 and event.get('argument') == word]
+        return found[-1]['result'] if found else ''
+
+    def said_in_group(self, person, group, text):
+        """`person` says `text` in a group, addressing nobody: kept, unanswered, and it shows them in that group."""
+        self.turn(self.f.message(group, text, sender=person, topic=PRIVATE_TOPIC, mention=False), group, PRIVATE_TOPIC, expect_reply=False)
+        chat = self.f.chat(group)
+        self.wait('telegram_shows_them_in_the_group', lambda: self.member_presence(person, chat) == 'in', 60)
+
+    def fixed_private_reply(self, person, text, expected, label):
+        """`person` writes privately twice and gets `expected` once, with no model turn for either message."""
+        before, brain = len(self.f.sent()), len(self.f.brain())
+        marks = []
+        for attempt in range(2):
+            mark = 'FIXEDMARK'+str(self.f.ids())
+            marks.append(mark)
+            update = self.f.message(person, text+' [[turn:'+mark+']]', sender=person)
+            self.f.inject(update)
+            row = self.finished(self.captured(update))
+            self.gate(label+'_no_model_turn_'+str(attempt), row['state'] in ('suppressed', 'cancelled'), state=row['state'], error=row['error'])
+            if attempt == 0:
+                self.wait(label+'_fixed_reply_sent', lambda: [row for row in self.new(before) if row['message']['chat']['id'] == person], 120)
+        time.sleep(5)
+        replies = [row for row in self.new(before) if row['message']['chat']['id'] == person]
+        self.gate(label+'_one_fixed_reply_a_day', len(replies) == 1 and replies[0]['message']['text'] == expected,
+                  count=len(replies), text=replies[0]['message']['text'][:200] if replies else None)
+        self.gate(label+'_never_reached_a_model', not [event for event in self.f.brain()[brain:] if event.get('argument') in marks])
+
+    @contextlib.contextmanager
+    def groups_in_projects(self, layout):
+        """Projects for one scenario, as the owner sets them on the dashboard: {name: Telegram group ids}; yields {name:
+        project}. Each group leaves its project again after, as later scenarios expect; a failure to do that fails a
+        scenario that passed."""
+        number = str(self.f.ids())
+        made, assignments = {}, []
+        failed = False
+        try:
+            for index, (name, groups) in enumerate(layout.items()):
+                made[name] = self.f.app('/v1/projects', {'name': name, 'description': '', 'state': 'active', 'expected_revision': 0,
+                                                         'operation_id': 'scenario-projects-'+number+'-'+str(index)})
+                for group in groups:
+                    chat = self.f.chat(group)
+                    own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(chat, safe=''))['own_assignment']
+                    assignments.append((chat, self.f.app('/v1/projects/assignments', {
+                        'space_id': chat, 'project_id': made[name]['id'], 'mode': 'assigned', 'expected_revision': own['revision'] if own else 0,
+                        'operation_id': 'scenario-projects-assign-'+number+'-'+chat[-12:]})))
+            self.memory_settled()
+            yield made
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            problems = []
+            for chat, assignment in assignments:
+                try:
+                    self.f.app('/v1/projects/assignments', {'space_id': chat, 'mode': 'none', 'expected_revision': assignment['revision'],
+                                                            'operation_id': 'scenario-projects-unassign-'+number+'-'+chat[-12:]})
+                except Exception as error:
+                    problems.append(type(error).__name__+':'+str(error)[:200])
+            if assignments:
+                self.memory_settled()
+            if problems:
+                self.current['cleanup_problems'] = problems
+                if not failed:
+                    raise Failed('cleanup_failed')
+
+    def member_private_chat_reads_joined_groups(self):
+        # A member in groups of two projects and in a group of none reads all three from their own private chat, and
+        # nothing else: not a group they never joined, not the owner's private chat (step 4, ADR-0262). Its tasks are read
+        # only, one project's list at a time (D14): asked without a project, the tool names the two lists to choose
+        # from; each list holds only the tasks of the groups they joined; a task of a group they never joined or the owner's
+        # own task is not found; adding one is refused. A message to a group is refused too, with no card. OTHER_GROUP and
+        # NEW_GROUP (which the member never joins) are in project A, THIRD_GROUP in B; GROUP stays in none.
+        person, number = self.fresh_person(), str(self.f.ids())
+        word = 'JOINEDWORD'+number
+        marks = {group: 'JOINEDMARK'+number+'g'+str(index) for index, group in enumerate((GROUP, OTHER_GROUP, THIRD_GROUP, NEW_GROUP))}
+        owner_mark = 'JOINEDMARK'+number+'owner'
+        item = self.add_member(person, (GROUP, OTHER_GROUP, THIRD_GROUP))
+        try:
+            self.new_group_chat()
+            for group in (GROUP, OTHER_GROUP, THIRD_GROUP):
+                self.said_in_group(person, group, 'برنامه‌ی هفته '+word+' '+marks[group])
+            self.turn(self.f.message(NEW_GROUP, 'برنامه‌ی هفته '+word+' '+marks[NEW_GROUP], mention=False), NEW_GROUP, expect_reply=False)
+            self.turn(self.f.message(OWNER, 'یادداشت خودم '+word+' '+owner_mark), OWNER)
+            found = self.private_search(person, word)
+            self.current['observed'] = {'search': found[:600]}
+            self.gate('reads_each_joined_group', all(marks[group] in found for group in (GROUP, OTHER_GROUP, THIRD_GROUP)),
+                      found=canaries.found(found, set(marks.values()) | {owner_mark}))
+            self.gate('reads_no_group_it_never_joined_nor_the_owners_chat', marks[NEW_GROUP] not in found and owner_mark not in found)
+            with self.groups_in_projects({'Joined A '+number: (OTHER_GROUP, NEW_GROUP), 'Joined B '+number: (THIRD_GROUP,)}) as made:
+                first, second = made['Joined A '+number], made['Joined B '+number]
+                titles = {key: 'Joined task '+number+key for key in ('a', 'unjoined', 'b', 'personal')}
+                tasks = {}
+                for key, chat in (('a', OTHER_GROUP), ('unjoined', NEW_GROUP), ('b', THIRD_GROUP), ('personal', OWNER)):
+                    added = self.task_tool({'action': 'add', 'title': titles[key]}, chat=chat)
+                    tasks[key] = added.get('task', added).get('id')
+                self.gate('tasks_added', all(tasks.values()), tasks=tasks)
+                unscoped = self.task_tool({'action': 'list'}, chat=person, sender=person)
+                named = {row.get('id'): row.get('name') for row in unscoped.get('projects') or [] if isinstance(row, dict)}
+                self.gate('a_list_without_a_project_names_the_two', unscoped.get('error') == 'task_project_required'
+                          and set(named) == {first['id'], second['id']} and all(named.values()), result=str(unscoped)[:400])
+                listed = {key: json.dumps(self.task_tool({'action': 'list', 'scope': project['id'], 'state': 'all'}, chat=person, sender=person),
+                                          ensure_ascii=False) for key, project in (('a', first), ('b', second))}
+                self.gate('each_list_holds_its_joined_groups_tasks', titles['a'] in listed['a'] and titles['b'] in listed['b']
+                          and titles['b'] not in listed['a'] and titles['a'] not in listed['b'], lists={key: value[:300] for key, value in listed.items()})
+                self.gate('a_list_never_holds_an_unjoined_groups_or_the_owners_task',
+                          not any(titles[key] in value for key in ('unjoined', 'personal') for value in listed.values()))
+                for key in ('unjoined', 'personal', 'a'):
+                    got = self.task_tool({'action': 'get', 'id': tasks[key]}, chat=person, sender=person)
+                    if key == 'a':
+                        self.gate('reads_a_joined_groups_task', titles['a'] in json.dumps(got, ensure_ascii=False), result=str(got)[:300])
+                    else:
+                        self.gate(key+'_task_not_found', got.get('error') == 'task_not_found' and titles[key] not in json.dumps(got, ensure_ascii=False),
+                                  result=str(got)[:300])
+                mark = 'Not added '+number
+                added = self.task_tool({'action': 'add', 'title': mark, 'scope': first['id']}, chat=person, sender=person)
+                # Nocheh's MCP server runs tasks only to list and read for a member's chat (src/mcp/server.ts).
+                self.gate('adding_a_task_is_refused', added.get('error') == 'tool_unavailable', result=str(added)[:300])
+                self.gate('nothing_added', mark not in json.dumps(self.task_tool({'action': 'list', 'scope': first['id'], 'state': 'all'},
+                                                                                  chat=person, sender=person), ensure_ascii=False))
+            wording = 'از چت خصوصی READONLYSEND'+number
+            before = len(self.f.sent())
+            self.silent_turn(self.f.message(person, 'بفرست [[action:'+self.f.chat(GROUP)+'|'+wording+']] [[after:silent]]', sender=person), person)
+            # Refused when asked, or never offered: either way no card and nothing sent.
+            result = self.tool_final('mcp__nocheh__action_request', 'READONLYSEND'+number)
+            time.sleep(3)
+            self.gate('a_send_is_refused_with_no_card', not self.approval_cards(before)
+                      and not [row for row in self.new(before) if wording in (row['message'].get('text') or '')], result=result)
+        finally:
+            self.remove_member(item)
+
+    def member_private_chat_with_group_talk_off(self):
+        # Group talk off stops a member talking to Nocheh in groups, not their private chat: there they are answered and
+        # still read the group (the owner's design, ADR-0262).
+        person, number = self.fresh_person(), str(self.f.ids())
+        word, mark = 'TALKOFFWORD'+number, 'TALKOFFMARK'+number
+        item = self.add_member(person, (GROUP,))
+        try:
+            self.said_in_group(person, GROUP, 'یادداشت گروه '+word+' '+mark)
+            item = self.change_member(self.member_item(person), talk=False)
+            self.gate('group_talk_off', item['permissions']['talk'] is False and item['permissions'].get('private_chat') is True, member=item)
+            self.gate('private_chat_still_reads_the_group', mark in self.private_search(person, word))
+        finally:
+            self.remove_member(item)
+
+    def member_private_chat_off_or_paused_gets_fixed_reply(self):
+        # A paused member, and one whose private chat the owner switched off, get the stranger's fixed reply in their
+        # private chat, once a UTC day, and no model turn. Switched back on, they are answered at once, with no restart.
+        # Two members new to the fixture, so a second run the same day still gets each fixed reply once.
+        paused, off = self.fresh_person(), self.fresh_person()
+        items = [self.add_member(paused, (GROUP,)), self.add_member(off, (GROUP,))]
+        try:
+            items[0] = self.change_member(items[0], state='paused')
+            items[1] = self.change_member(items[1], private_chat=False)
+            self.gate('private_chat_switched_off', items[1]['permissions'].get('private_chat') is False and items[1]['state'] == 'active', member=items[1])
+            self.fixed_private_reply(paused, 'سلام، هستی؟', PRIVATE_NOT_ALLOWED, 'paused')
+            self.fixed_private_reply(off, 'سلام، هستی؟', PRIVATE_NOT_ALLOWED, 'private_chat_off')
+            starts = self.service_starts()
+            items[1] = self.change_member(self.member_item(off), private_chat=True)
+            self.private_turn(off, 'حالا جواب می‌دهی؟')
+            self.nothing_restarted(starts)
+        finally:
+            for item in items:
+                self.remove_member(item)
+
+    def member_private_over_the_daily_cap(self):
+        # The daily message cap counts a member's group and private turns together: with the cap at 1, a member answered
+        # in GROUP gets the private limit text, once a UTC day, and no model turn when they then write privately.
+        capped = self.fresh_person()
+        cap = self.members_api()['daily_messages']
+        cap = 200 if cap == 1 else cap
+        item = self.add_member(capped, (GROUP,))
+        try:
+            self.members_api('/settings', {'operation_id': self.operation_id('member-settings'), 'daily_messages': 1})
+            self.turn(self.f.message(GROUP, 'سلام', sender=capped, topic=PRIVATE_TOPIC), GROUP, PRIVATE_TOPIC)
+            self.fixed_private_reply(capped, 'یک سؤال دیگر', PRIVATE_DAILY_LIMIT, 'over_the_cap')
+        finally:
+            self.members_api('/settings', {'operation_id': self.operation_id('member-settings'), 'daily_messages': cap})
+            self.remove_member(item)
+
+    @staticmethod
+    def rule_words(text, other):
+        """A stretch of a reply rule's text that the other rule lacks, to look for in what a turn's model sees: one line,
+        no placeholder or bracket, at most 60 characters; None when there is none."""
+        for line in sorted((line.strip() for line in (text or '').splitlines()), key=len, reverse=True):
+            part = re.sub(r'[\[\]{}]', ' ', line).split('  ')[0].strip()[:60].strip()
+            if len(part) >= 20 and part not in (other or ''):
+                return part
+        return None
+
+    def profiles_of(self, member):
+        """The Hermes profiles whose receipt (space.json) names `member`, and whether any of them, or any profile at all
+        that names a member, says it is the owner's."""
+        script = ('import json,os,pathlib,sys\n'
+                  "root=pathlib.Path(os.environ['HERMES_HOME'])/'profiles'\n"
+                  'rows=[]\n'
+                  "for p in sorted(root.glob('nocheh-*')):\n"
+                  '  try:v=json.loads((p/"space.json").read_text())\n'
+                  '  except Exception:continue\n'
+                  "  if v.get('member'):rows.append({'name':p.name,'member':v.get('member'),'owner':v.get('owner')})\n"
+                  'print(json.dumps(rows))\n')
+        output = self.hermes_exec('python', '-c', script).strip()
+        rows = json.loads(output.splitlines()[-1]) if output else []
+        return [row for row in rows if row['member'] == member], [row for row in rows if row['owner'] is not False]
+
+    def owner_and_member_never_swap_profiles(self):
+        # The owner never runs as a member's profile and a member never as the owner's: a member's private turn sees the
+        # member's reply rules and never the owner's, nor the owner's default role; the owner's turn never sees the
+        # member's rules. Every Hermes profile that names a member says it is not the owner's.
+        person, number = self.fresh_person(), str(self.f.ids())
+        item = self.add_member(person, (GROUP,))
+        role_mark = 'ROLEMARK'+number
+        dashboard = persona = role = None
+        try:
+            prompts = self.f.app('/v1/prompts')
+            texts = {**prompts['defaults'], **(prompts.get('texts') or {})}
+            member_rule = self.rule_words(texts.get('reply.member'), texts.get('reply.owner'))
+            owner_rule = self.rule_words(texts.get('reply.owner'), texts.get('reply.member'))
+            self.gate('rules_told_apart', bool(member_rule and owner_rule), member=member_rule, owner=owner_rule)
+            dashboard = self.dashboard()
+            persona = dashboard.get('/memory/persona?scope=default')
+            role = dashboard.post('/memory/persona', {'scope': 'default', 'role': 'You help the owner with private errands. '+role_mark,
+                                                      'skills': persona['skills'], 'revision': persona['revision']})
+            seen = {}
+            for name, chat, sender, mark in (('member_rule_in_member_turn', person, person, member_rule), ('owner_rule_in_member_turn', person, person, owner_rule),
+                                             ('owner_role_in_member_turn', person, person, role_mark), ('member_rule_in_owner_turn', OWNER, OWNER, member_rule),
+                                             ('owner_rule_in_owner_turn', OWNER, OWNER, owner_rule)):
+                _, text = self.turn(self.f.message(chat, 'چه می‌بینی؟ [[context:'+mark+']]', sender=sender), chat)
+                seen[name] = text.endswith(' present')
+            self.current['observed'] = {'seen': seen}
+            self.gate('member_turn_runs_as_the_member', seen['member_rule_in_member_turn'] and not seen['owner_rule_in_member_turn']
+                      and not seen['owner_role_in_member_turn'], seen=seen)
+            self.gate('owner_turn_runs_as_the_owner', seen['owner_rule_in_owner_turn'] and not seen['member_rule_in_owner_turn'], seen=seen)
+            own, owners = self.profiles_of(item['id'])
+            self.gate('member_profile_is_marked_and_not_the_owners', bool(own) and not owners, own=own, owners=owners)
+        finally:
+            if persona:
+                dashboard.post('/memory/persona', {'scope': 'default', 'role': persona['role'], 'skills': persona['skills'],
+                                                   'revision': (role or persona)['revision']})
+            self.remove_member(item)
+
+    def plant_profiles(self, member, note, ask_note):
+        """Native notes Nocheh never sent anywhere: `note` in the member's own profile, and `ask_note` in a made-up profile
+        shaped as an owner's ask about a member (step 4b) that was never pruned, current like the owner's own. Returns
+        the made-up profile's name and whether both were planted."""
+        script = ('import json,os,pathlib,secrets,sys\n'
+                  "root=pathlib.Path(os.environ['HERMES_HOME'])/'profiles'\n"
+                  'member,note,ask=sys.argv[1:4]\n'
+                  'def meta(p):\n'
+                  '  try:return json.loads((p/"space.json").read_text())\n'
+                  '  except Exception:return None\n'
+                  "found=[p for p in sorted(root.glob('nocheh-*')) if p.is_dir() and not p.is_symlink()]\n"
+                  "own=[p for p in found if (meta(p) or {}).get('member')==member]\n"
+                  "owner=[p for p in found if (meta(p) or {}).get('owner') is True]\n"
+                  'def add(p,text):\n'
+                  "  m=p/'memories';m.mkdir(exist_ok=True);f=m/'MEMORY.md'\n"
+                  "  old=f.read_text() if f.exists() else ''\n"
+                  "  f.write_text(old+('\\n§\\n' if old.strip() else '')+text+'\\n')\n"
+                  "if own:add(max(own,key=lambda p:(p/'space.json').stat().st_mtime),'The member keeps a private note '+note+'.')\n"
+                  "name=None\n"
+                  'if owner:\n'
+                  "  base=meta(max(owner,key=lambda p:(p/'space.json').stat().st_mtime))\n"
+                  "  name='nocheh-'+secrets.token_hex(12);p=root/name;p.mkdir(mode=0o700)\n"
+                  "  (p/'space.json').write_text(json.dumps({**base,'owner':False,'member_read':secrets.token_hex(16),'logical_profile':None}))\n"
+                  "  add(p,'The ask read a private note '+ask+'.')\n"
+                  "print(json.dumps({'member':bool(own),'ask':name}))\n")
+        output = self.hermes_exec('python', '-c', script, member, note, ask_note).strip()
+        return json.loads(output.splitlines()[-1]) if output else {}
+
+    def remove_profile(self, name):
+        if name and re.fullmatch(r'nocheh-[a-f0-9]{24}', name):
+            self.hermes_exec('sh', '-c', 'rm -rf "$HERMES_HOME/profiles/$1"', 'sh', name)
+
+    def owner_side_holds_none(self, marks):
+        """Where the owner's side could hold a member's marks: Honcho (messages and conclusions), long-term memory
+        writes, Inbox suggestions, fact grants and requests, sharing previews and learned facts. Returns each place that
+        holds one, with the marks."""
+        held = {}
+        for mark in marks:
+            for table, condition in (('messages', ''), ('documents', ' AND deleted_at IS NULL')):
+                count = self.honcho("SELECT count(*) FROM "+table+" WHERE content LIKE '%"+mark+"%'"+condition)
+                if count not in ('', '0'):
+                    held.setdefault('honcho_'+table, []).append(mark)
+        for name, path in (('suggestions', '/v1/entities/suggestions'), ('grants', '/v1/memory-access/grants'),
+                           ('requests', '/v1/memory-access/requests'), ('previews', '/v1/sharing/previews'), ('learned', '/v1/learned')):
+            answer = self.f.app(path, allow_error=True)
+            found = canaries.found(json.dumps(answer.get('body'), ensure_ascii=False), marks)
+            if found:
+                held[name] = found
+        return held
+
+    def member_private_chat_stays_with_the_member(self):
+        # What a member says in their own private chat, and what Nocheh answers there, stays there (step 4): MEMBERMARKs
+        # in the member's message, Nocheh's reply, a note planted in the member's profile and in an unpruned profile of
+        # an owner's ask never show in a group's read (the owner's or the member's own turn there), another member's
+        # private chat, the owner's turns (search, recall, chat list, context) before any ask, Honcho, long-term memory,
+        # Inbox suggestions, fact grants, sharing previews or learned facts. The member's own search finds them (the
+        # positive control). The marks are saved with the member's chat as their home, for private_canaries_never_left_the_owner.
+        # The member's message holds one more, `kept`, which no owner message ever names whole: owner_asks_about_a_member
+        # probes the owner's next turn for it, which no earlier owner message can make present. The owner's context is
+        # probed for each mark before any owner message names it (recall does), without naming it whole (context_probe).
+        # A second member new to the fixture has a mark of their own there too, for owner_asks_about_a_member.
+        first, second, number = self.fresh_person(), self.fresh_person(), str(self.f.ids())
+        word = 'MEMBERWORD'+number
+        said, replied, note, ask_note, kept = ('MEMBERMARK'+number+suffix for suffix in ('said', 'reply', 'note', 'ask', 'kept'))
+        other = 'MEMBERMARK'+number+'other'
+        marks = [said, replied, note, ask_note, kept]
+        items = [self.add_member(first, (GROUP,)), self.add_member(second, (GROUP,))]
+        planted = {}
+        self.member_canary = None
+        try:
+            canaries.save(self.f.directory, {said: 'member private message', replied: "Nocheh's reply in a member's private chat",
+                                             note: "native note in a member's profile", ask_note: "unpruned owner's ask profile",
+                                             kept: 'member private message the owner never names'}, OWNER, home=first)
+            canaries.save(self.f.directory, {other: "another member's private message"}, OWNER, home=second)
+            said_event, _ = self.private_turn(first, 'کد کمد من '+word+' است. '+said+' '+kept)
+            _, text = self.private_turn(first, 'یادت باشد [[turn:'+replied+']]')
+            self.gate('nochehs_reply_holds_its_mark', replied in text, reply=text[:200])
+            self.private_turn(second, 'کد کمد من '+word+' است. '+other)
+            self.gate('member_finds_their_own_words', said in self.private_search(first, word))
+            planted = self.plant_profiles(items[0]['id'], note, ask_note)
+            self.gate('notes_planted_on_disk', planted.get('member') is True and bool(planted.get('ask')), planted=planted)
+            self.wait('honcho_queue_drained', lambda: self.honcho('SELECT count(*) FROM queue WHERE NOT processed') == '0', 600)
+            self.memory_settled()
+            held = []
+            # Groups: the owner's turn and the member's own turn in GROUP.
+            for sender in (OWNER, first):
+                for directive, tool in (('[[search:'+word+']]', 'mcp__nocheh__archive_search'), ('[[recall:'+word+']]', 'mcp__nocheh__memory_recall')):
+                    _, reply = self.turn(self.f.message(GROUP, 'کد کمد؟ '+directive, sender=sender, topic=PRIVATE_TOPIC), GROUP, PRIVATE_TOPIC)
+                    result = [event for event in self.f.brain() if event.get('tool') == tool and event['phase'] == 'final'][-1]['result']
+                    held += [{'where': 'group', 'sender': sender, 'tool': tool, 'mark': mark} for mark in canaries.found(reply+'\n'+result, marks)]
+            # Another member's private chat.
+            found = self.private_search(second, word)
+            held += [{'where': 'other_member', 'mark': mark} for mark in canaries.found(found, marks)]
+            self.gate('other_member_finds_their_own', other in found)
+            # The owner's own turns, before any ask.
+            _, reply = self.turn(self.f.message(OWNER, 'کد کمد؟ [[search:'+word+']]'), OWNER)
+            held += [{'where': 'owner_search', 'mark': mark} for mark in canaries.found(reply+'\n'+self.newest_tool_result_text('mcp__nocheh__archive_search'), marks+[other])]
+            for mark in marks:
+                _, reply = self.turn(self.f.message(OWNER, 'چه می‌بینی؟ '+self.context_probe(mark)), OWNER)
+                if reply.endswith(' present'):
+                    held.append({'where': 'owner_context', 'mark': mark})
+            # Checked before the owner's recall below names the marks in the owner's own messages (which Honcho rightly
+            # keeps); `kept` and `other`, which no owner message names, are checked again at the end.
+            places = self.owner_side_holds_none(marks+[other])
+            for mark in marks:
+                if mark != kept:
+                    # The owner's recall finds its own query in the owner's chat history (the [[recall:...]] message and
+                    # the tool call naming it); that echo is the owner's words, not the member's, so it is left out.
+                    recall = re.sub(r'(?:recall:|query\W*)'+re.escape(mark)+r'(?![0-9])', '', json.dumps(self.recalled(OWNER, mark), ensure_ascii=False))
+                    held += [{'where': 'owner_recall', 'mark': found} for found in canaries.found(recall, marks+[other])]
+            self.turn(self.f.message(OWNER, 'گفتگوها [[owner:conversations]]'), OWNER)
+            listing = self.newest_tool_result_text('mcp__nocheh__owner_read')
+            self.gate('owner_chat_list_hides_member_chats', '"'+str(first)+'"' not in listing and '"'+str(second)+'"' not in listing, excerpt=listing[:300])
+            # Learning, memory and what the owner reviews.
+            receipts = self.f.query('nocheh_control', "SELECT count(*) FROM memory_ingestion_receipts WHERE source_reference->>'id'='"+said_event+"'")
+            self.gate('never_written_to_long_term_memory', receipts == '0', receipts=receipts)
+            later = self.owner_side_holds_none([kept, other])
+            for name, found in later.items():
+                places[name] = sorted(set(places.get(name, []))|set(found))
+            self.current['observed'] = {'held': held, 'places': places}
+            self.gate('member_marks_never_left_the_members_side', not held, held=held[:10])
+            self.gate('owner_side_places_hold_none', not places, places=places)
+            # The dashboard still shows the owner the chat (Messages › Members' chats).
+            listed = self.f.conversations()
+            self.gate('dashboard_lists_the_member_chat', any(any(label.get('external') == str(first) for label in row.get('app_ids') or []) for row in listed))
+            self.member_canary = {'member': first, 'name': items[0].get('name') or 'Synthetic '+str(first), 'word': word, 'said': said,
+                                  'kept': kept, 'other': other, 'second': second, 'items': items}
+        finally:
+            self.remove_profile(planted.get('ask'))
+            if self.member_canary is None:
+                for item in items:
+                    self.remove_member(item)
+
+    @staticmethod
+    def context_probe(mark):
+        """A probe of whether `mark` is in a turn's context that never names it whole ([[context_split]]): neither the
+        owner's probe nor the answer echoing it is a mention of the mark, so no probe makes a later one present and the
+        last sweep finds no leak in the answer."""
+        middle = len(mark)//2
+        return '[[context_split:'+mark[:middle]+'|'+mark[middle:]+']]'
+
+    def newest_tool_result_text(self, name):
+        found = [event for event in self.f.brain() if event.get('tool') == name and event['phase'] == 'final']
+        return found[-1]['result'] if found else ''
+
+    @staticmethod
+    def ask_text(name, word):
+        """The owner's own message that names the member and asks about their chat: the scripted model calls the ask
+        tool, whose question makes the ask's turn search that member's chat for `word`, and then answers with the tool's
+        result: the asking turn ends done and the ask runs after it. The question's closing brackets are escaped in the
+        tool's JSON so the owner's own directive ends where the tool call does."""
+        question = 'What did they say about the locker? [[search:'+word+']]'
+        arguments = json.dumps({'member': name, 'question': question}, ensure_ascii=False).replace(']]', '\\u005d\\u005d')
+        return 'What did '+name+' say about the locker? [[tool:'+ASK_TOOL+' '+arguments+']]'
+
+    def owner_asks_about_a_member(self):
+        # Step 4b: the owner asks in their own chat about a member, by the name Telegram shows for them. The answer comes
+        # as a separate message in the owner's chat that may quote that member's chat, and only theirs: never another
+        # member's chat or a group. The asking turn answers first, saying the answer is coming, and the ask runs after it.
+        # Then the answer is dropped: the owner's next turn does not see it (probed for the mark no owner message ever
+        # named) and the owner's recall finds none of it. The answer's message is saved as the one place outside the
+        # member's chat the marks may show.
+        # It reuses the members and marks of member_private_chat_stays_with_the_member, run just before, and removes them.
+        planted = getattr(self, 'member_canary', None)
+        self.gate('member_marks_planted_first', bool(planted))
+        group_mark = 'MEMBERMARK'+str(self.f.ids())+'group'
+        try:
+            self.turn(self.f.message(GROUP, 'کد کمد گروه '+planted['word']+' '+group_mark, topic=PRIVATE_TOPIC, mention=False), GROUP, PRIVATE_TOPIC,
+                      expect_reply=False)
+            update = self.f.message(OWNER, self.ask_text(planted['name'], planted['word']))
+            before = len(self.f.sent())
+            self.f.inject(update)
+            event_id = self.captured(update)
+            dispatch = self.finished(event_id)
+            self.gate('asking_turn_done', dispatch['state'] == 'done', state=dispatch['state'], error=dispatch['error'])
+            self.wait('asking_turn_replied', lambda: [row for row in self.new(before) if row['message']['chat']['id'] == OWNER
+                                                      and ASK_TOOL+':' in shown(row['message'].get('text'))], 120)
+            queued = self.newest_tool_result_text(ASK_TOOL)
+            try:
+                queued = json.loads(queued)
+            except ValueError:
+                pass
+            self.gate('ask_queued', isinstance(queued, dict) and queued.get('queued') is True, result=str(queued)[:300])
+            answers = self.wait('separate_answer_in_the_owner_chat', lambda: [row for row in self.new(before) if row['message']['chat']['id'] == OWNER
+                                                                                and planted['said'] in (row['message'].get('text') or '')], 600)
+            homes = canaries.load(self.f.directory).get('homes', {})
+            canaries.shown(self.f.directory, [mark for mark, place in homes.items() if place['home'] == planted['member']],
+                           OWNER, [row['message']['message_id'] for row in answers])
+            text = '\n'.join(row['message'].get('text') or '' for row in answers)
+            search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'
+                      and event.get('argument') == planted['word']][-1]['result']
+            self.current['observed'] = {'event': event_id, 'answer': text[:400], 'search': search[:400]}
+            self.gate('answer_is_no_card', not [row for row in answers if self.is_card(row)])
+            self.gate('answer_holds_the_mark_the_owner_never_named', planted['kept'] in text)
+            self.gate('ask_reads_only_that_members_chat', planted['other'] not in text + search and group_mark not in text + search,
+                      found=canaries.found(text+'\n'+search, {planted['other'], group_mark}))
+            _, reply = self.turn(self.f.message(OWNER, 'و بعد؟ '+self.context_probe(planted['kept'])), OWNER)
+            self.gate('answer_dropped_from_the_next_turn', reply.endswith(' absent'), reply=reply[:200])
+            # The owner's recall echoes its own query (see member_private_chat_stays_with_the_member); that is left out.
+            recall = re.sub(r'(?:recall:|query\W*)'+re.escape(planted['said'])+r'(?![0-9])', '',
+                            json.dumps(self.recalled(OWNER, planted['said']), ensure_ascii=False))
+            self.gate('owner_recall_never_reads_the_ask', not canaries.found(recall, [planted['said']]), excerpt=recall[:300])
+        finally:
+            for item in (planted or {}).get('items', []):
+                self.remove_member(item)
+            self.member_canary = None
+
+    def member_chat_is_never_a_sharing_source(self):
+        # A member's private chat is never a sharing rule's source or destination (ADR-0242, ADR-0262): the owner's save
+        # is refused and nothing is kept.
+        person = self.fresh_person()
+        item = self.add_member(person, (GROUP,))
+        try:
+            self.private_turn(person, 'سلام')
+            chat, group = self.f.chat(person), self.f.chat(GROUP)
+            for name, sources, destination in (('source', [chat], group), ('destination', [group], chat)):
+                result = self.f.app('/v1/sharing/rules', {'name': 'Member chat '+name, 'sources': sources, 'destination': destination, 'enabled': True,
+                                                          'mode': 'filtered', 'expected_revision': 0, 'operation_id': self.operation_id('sharing-'+name)},
+                                    allow_error=True)
+                self.gate('member_chat_refused_as_'+name, result['status'] == 400 and 'sharing_private_chat' in json.dumps(result['body']),
+                          status=result['status'], body=result['body'])
+            rules = json.dumps(self.f.app('/v1/sharing/rules'))
+            self.gate('no_rule_names_the_chat', chat not in rules)
+        finally:
+            self.remove_member(item)
+
+    def age_presence(self, person, group, interval):
+        """Make what Telegram last said of `person` in a group (a Telegram id) as old as `interval` (a Postgres interval)."""
+        item, chat = self.member_item(person), self.f.chat(group)
+        self.f.query('nocheh_control', "UPDATE chat_memberships SET checked_at=now()-interval '"+interval+"' WHERE chat_id='"+chat
+                     + "' AND account_id='"+item['account_id']+"'")
+
+    def presence_row(self, person, group):
+        item, chat = self.member_item(person), self.f.chat(group)
+        raw = self.f.query('nocheh_control', "SELECT json_build_object('state',state,'source',source,'fresh',checked_at>now()-interval '1 hour') "
+                           "FROM chat_memberships WHERE chat_id='"+chat+"' AND account_id='"+item['account_id']+"'")
+        return json.loads(raw) if raw else None
+
+    def member_checks(self, person, group):
+        """How many times the bot asked the fake Telegram whether `person` is in a group (getChatMember)."""
+        return len([call for call in self.f.telegram()['calls'] if call['method'] == 'getChatMember'
+                    and str(call['parameters'].get('chat_id')) == str(group) and str(call['parameters'].get('user_id')) == str(person)])
+
+    def member_private_chat_rechecks_old_presence(self):
+        # Before a member's private turn, a joined group whose presence is more than 6 hours old is asked of Telegram
+        # (getChatMember, D5): removed there while Nocheh missed the service message, the group is no longer read and the
+        # Members list says they left; still in, it is read and the check is recorded; Telegram not answering changes
+        # nothing within 30 days; past 30 days with no answer the group is not read. Its searches send no reply, so a later
+        # search finds a group's mark only in the group.
+        person, number = self.fresh_person(), str(self.f.ids())
+        word = 'RECHECKWORD'+number
+        marks = {GROUP: 'RECHECKMARK'+number+'a', OTHER_GROUP: 'RECHECKMARK'+number+'b'}
+        item = self.add_member(person, (GROUP, OTHER_GROUP))
+        try:
+            for group in (GROUP, OTHER_GROUP):
+                self.said_in_group(person, group, 'یادداشت '+word+' '+marks[group])
+            found = self.private_search(person, word, silent=True)
+            self.gate('reads_both_to_start_with', all(mark in found for mark in marks.values()), found=canaries.found(found, set(marks.values())))
+            # Removed from OTHER_GROUP while the bot missed it.
+            self.age_presence(person, OTHER_GROUP, '7 hours')
+            self.f.control({'chat_members': [{'chat_id': OTHER_GROUP, 'user_id': person, 'status': 'kicked'}]})
+            asked = self.member_checks(person, OTHER_GROUP)
+            found = self.private_search(person, word, silent=True)
+            self.gate('asked_telegram_about_the_old_presence', self.member_checks(person, OTHER_GROUP) > asked)
+            self.gate('removed_group_no_longer_read', marks[GROUP] in found and marks[OTHER_GROUP] not in found,
+                      found=canaries.found(found, set(marks.values())))
+            self.wait('listed_as_left', lambda: self.member_presence(person, self.f.chat(OTHER_GROUP)) == 'left', 60)
+            # Still in GROUP: the check is recorded and the group read.
+            self.age_presence(person, GROUP, '7 hours')
+            asked = self.member_checks(person, GROUP)
+            found = self.private_search(person, word, silent=True)
+            row = self.presence_row(person, GROUP)
+            self.gate('still_in_is_recorded_as_checked', self.member_checks(person, GROUP) > asked and row == {'state': 'in', 'source': 'checked', 'fresh': True},
+                      row=row)
+            self.gate('group_still_read', marks[GROUP] in found)
+            # Telegram does not answer (the bot is no admin there): nothing changes within 30 days.
+            self.age_presence(person, GROUP, '8 hours')
+            self.f.control({'faults': [{'method': 'getChatMember', 'code': 400, 'description': 'Bad Request: member list is inaccessible'}]})
+            found = self.private_search(person, word, silent=True)
+            row = self.presence_row(person, GROUP)
+            self.gate('no_answer_changes_nothing', marks[GROUP] in found and row and row['state'] == 'in' and not row['fresh'], row=row)
+            # Past 30 days with no answer, the group is not read.
+            self.age_presence(person, GROUP, '31 days')
+            self.f.control({'faults': [{'method': 'getChatMember', 'code': 400, 'description': 'Bad Request: member list is inaccessible'}]})
+            found = self.private_search(person, word, silent=True)
+            self.gate('presence_older_than_30_days_is_not_read', marks[GROUP] not in found, found=canaries.found(found, set(marks.values())))
+        finally:
+            # A fault the bot never used would answer a later check of someone else; it is recorded, not cleared.
+            if any(fault['method'] == 'getChatMember' for fault in self.f.telegram().get('faults', [])):
+                self.current['unused_fault'] = 'getChatMember'
+            self.remove_member(item)
+
     # Owner dashboard session ------------------------------------------------------------------------
 
     def dashboard(self):
@@ -4342,4 +4903,10 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit', 'machine_job_runs_after_one_approval', 'machine_job_refused_for_members_and_stopped',
                  'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
-                 'memory_search_model_change_rebuilds_memory', 'private_canaries_never_left_the_owner']
+                 'memory_search_model_change_rebuilds_memory',
+                 # A member's own private chat (step 4) and the owner's ask about it (step 4b), ADR-0262; the ask needs the marks
+                 # the scenario before it planted, and the sweep after them reads both.
+                 'member_private_chat_reads_joined_groups', 'member_private_chat_with_group_talk_off', 'member_private_chat_off_or_paused_gets_fixed_reply',
+                 'member_private_over_the_daily_cap', 'owner_and_member_never_swap_profiles', 'member_chat_is_never_a_sharing_source',
+                 'member_private_chat_rechecks_old_presence', 'member_private_chat_stays_with_the_member', 'owner_asks_about_a_member',
+                 'private_canaries_never_left_the_owner']

@@ -12,7 +12,7 @@ is prepared again for the new epoch.
 Once a newer profile exists, earlier-epoch profiles of the same chat are
 removed after they have been idle for a while, so hidden or corrected content
 does not stay behind in conversations that are no longer used. A private
-answer's own profile is removed once no answer can run in it any more.
+answer's own profile, and the owner's ask about a member's, is removed once nothing can run in it any more.
 """
 import fcntl
 import json
@@ -51,8 +51,10 @@ def _logical(receipt):
 
 
 def _same_chat(current,other):
-    """Same chat, owner flag, installation and logical profile; reviews share the assistant profile, filtering does not."""
-    keys=('space','owner','generation')+(() if current.get('generation') else ('revision',))
+    """Same chat, owner flag, member, installation and logical profile; reviews share the assistant profile, filtering
+    does not. A member's private chat carries only that member's own conversation (step 4), and the owner's ask about a
+    member is never anyone's (step 4b)."""
+    keys=('space','owner','member','member_read','generation')+(() if current.get('generation') else ('revision',))
     kind=lambda value:'filter' if value.get('purpose')=='filter' else 'assistant'
     return all(current.get(key)==other.get(key) for key in keys) and _logical(current)==_logical(other) and kind(current)==kind(other)
 
@@ -185,7 +187,8 @@ def prune_answers(profile,now=None):
     for other in profile.parent.iterdir():
         if other==profile or other.is_symlink() or not other.is_dir():continue
         receipt=_receipt(other)
-        if not receipt or not isinstance(receipt.get('answer'),str) or not receipt['answer']:continue
+        # The owner's ask about a member (step 4b) is one such profile too: one ask, never carried, never opened again.
+        if not receipt or not any(isinstance(receipt.get(key),str) and receipt[key] for key in ('answer','member_read')):continue
         if _remove(other,now,ANSWER_IDLE_SECONDS):removed.append(other.name)
     return removed
 

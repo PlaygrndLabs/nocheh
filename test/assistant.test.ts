@@ -176,6 +176,10 @@ test('the owner\'s notes take a Telegram update only from an allowed sender, Noc
   assert.equal(notesSender(policy,event('telegram_update',{update_id:4,message:{message_id:8,chat:{id:-20,type:'supergroup'},from:{id:1000001,is_bot:true},
     sender_chat:{id:-20,type:'supergroup'}}})),'sender_not_allowed','an anonymous admin');
   assert.equal(notesSender(policy,event('telegram_delivered_message',{message:{message_id:9,chat:{id:-20,type:'supergroup'}}})),'review','Nocheh\'s own message');
+  assert.equal(notesSender(policy,event('telegram_delivered_message',{message:{message_id:9,chat:{id:123,type:'private'}}},'123')),'review','in the owner\'s chat');
+  // Never Nocheh's message in someone else's private chat (a member's, step 4), nor in a chat the directory does not know.
+  assert.equal(notesSender(policy,event('telegram_delivered_message',{message:{message_id:9,chat:{id:456,type:'private'}}},'456')),'sender_not_allowed','in another person\'s chat');
+  assert.equal(notesSender(policy,event('telegram_delivered_message',{message:{message_id:9,chat:{id:777,type:'private'}}},'777')),'sender_not_allowed','in an unknown chat');
   assert.equal(notesSender(policy,event('browser_input',{text:'hi'},'123','browser')),'review','the owner\'s web chat');
   assert.equal(notesSender(policy,event('browser_delivered_message',{},'123','browser')),'review','Nocheh\'s answer there');
   for(const [kind,channel] of [['telegram_desktop_message','telegram'],['telegram_wire','telegram'],['browser_input','telegram'],['telegram_update','browser'],
