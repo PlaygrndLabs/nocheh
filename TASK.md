@@ -72,7 +72,9 @@ only). One branch: a contract, six parts and their integration.
   private chat, the owner's ask about a member) never open `nocheh:memory:` facts; the facts route is
   in no bound route list and `openFact` refuses any bound reader
   ([readers](test/member-bound-readers.test.ts), [facts](test/fact-opening.test.ts)). The suites were
-  run again on the merged branch; `test_retired_source_leaves_tags` fails as on main.
+  run again on the merged branch (store 306/306; node unit only the 4 known; Python as before, and
+  `test_retired_source_leaves_tags` fails as on main), and the full tester ran the member scenarios with
+  main's five fact scenarios on fresh images: 22/22.
   Pending: live acceptance on the owner's install after merge.
   Left for later: a member with several accounts that have private chats is not asked about (the
   owner is told so); `notesSender` does not tell `member_read` sends apart (`canLearn` and
