@@ -11,6 +11,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {noteRef} from '../src/stores/note-sources.js';
+import {readSet} from '../src/spaces.js';
 import {fixtureServices} from './fixture-brain.js';
 
 /**
@@ -114,6 +115,12 @@ test('a note names its day in the reader\'s zone and its ref opens only what thi
     await assert.rejects(s.sources.noteEntry(reader(A,A,bob2.id),noteRef(notes.review.key)),{code:'note_not_found'});
     await assert.rejects(s.sources.noteEntry(general,'0'.repeat(12)),{code:'note_not_found'});
     await assert.rejects(s.sources.noteEntry(reader(A,A,bob1.id,{answer:digest('answer')}),noteRef(notes.review.key)),{code:'scoped_turn_required'});
+    // Nor for a member's private chat or the owner's ask about a member (ADR-0262): neither keeps notes, and the ask shares
+    // its turn's message with the owner's asking turn, whose refs open the owner's private words.
+    await assert.rejects(s.sources.noteEntry(reader('123','123',ownerPrivate.id,{memberRead:'c'.repeat(32),reads:readSet({home:'123'}),memberChat:'4567'}),
+      noteRef(notes.review.key)),{code:'scoped_turn_required'});
+    await assert.rejects(s.sources.noteEntry(reader('4567','4567',bob1.id,{member:'d'.repeat(64),reads:readSet({home:'4567',whole:[A]}),memberChat:'4567'}),
+      noteRef(notes.review.key)),{code:'scoped_turn_required'});
     // A retired message is no longer opened.
     await s.retirements.set({admin:true,scope:null},bob2.id,{retired:true,expected_revision:0,operation_id:key+':retire'});
     binding=await s.guards.state();

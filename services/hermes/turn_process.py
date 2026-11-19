@@ -259,7 +259,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     reply=reply_block(body.get('reply'))
     if reply:
         # The message this one replies to, named and quoted, before its text: after the speaker line in a group, first in
-        # the owner's chat, where retiring that message finds it in stored history (retired_history.py).
+        # the owner's chat and a member's own (step 4), where retiring that message finds it in stored history
+        # (retired_history.py).
         text = reply + '\n' + text
     if group:
         # Who spoke and when stays out of the memory query; the model and native history see it.

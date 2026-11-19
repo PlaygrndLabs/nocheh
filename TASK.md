@@ -205,7 +205,10 @@ again; Hermes's own code is unchanged.
   the speaker line (first in the owner's chat) as `[Replying to, by=…: <tag>] (source …)`, up to
   200 characters of the reader's copy unframed, `[End of replied-to message]`, built from the
   read's own relations, `readable()` and one tag request (`SourceRepository.repliedTo`), never
-  payload ids; a reply to Nocheh reads `by=nocheh`; owner, group and private-answer turns;
+  payload ids; a reply to Nocheh reads `by=nocheh`; owner, group and private-answer turns, and a
+  member's private chat (first, as that member reads; never a `member_read` answer, never the ask
+  about a member, [store](test/store-member-private.test.ts),
+  [Hermes](services/hermes/test_member_private.py));
   recent messages carry `[In reply to, by=…]` parts without text, looked up at once; a forum
   topic's opening is never a reply ([unit](test/telegram-reply-frame.test.ts),
   [store](test/store-telegram-reply.test.ts), [Hermes](services/hermes/test_turn_process.py)).

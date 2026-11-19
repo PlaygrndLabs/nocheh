@@ -338,8 +338,15 @@ turn's own message and answer stay.
   and id are the line's own, both limits hold and the text is one line, and
   always unframes the text, since it may be someone else's words. The owner's,
   a group's and a private answer's turns get it (a private answer quotes what
-  its question replies to, read under the answer's own access); a command's
-  fixed reply runs no model and gets none.
+  its question replies to, read under the answer's own access), and so does a
+  member's own private chat (ADR-0262), first as in the owner's chat and read
+  as that member reads: their own chat and the groups their chat reads, never
+  the owner's chat or another private chat, and the member's own text after it
+  is unframed. A reply to Nocheh's answer to an ask about a member (send class
+  `member_read`) gives no block, since no reader but the dashboard reads that
+  answer. The owner's ask about a member gets none: its frame is Nocheh's own
+  and its reader reads only that member's chat. A command's fixed reply runs
+  no model and gets none.
 - **Recent messages say what they reply to.** A recent group message that
   replies to another carries, on its own line after its speaker line,
   `[In reply to, by=<by>: <tag>] (source nocheh:event:<id>)`: who · where ·
@@ -395,7 +402,9 @@ turn's own message and answer stay.
   note's writer read (a review's batch, first message first, or the message a
   turn answered) in `note_lookups`, added if missing, merged for the same turn
   and pruned after 7 days. `archive_read {note:'<ref>'}` opens them only in that
-  turn, never for a private answer: up to 5, each tagged and read-checked, an
+  turn, never for a bound reader (a private answer, a member's private chat or
+  the owner's ask about a member, which shares its turn's message with the
+  owner's asking turn; ADR-0262): up to 5, each tagged and read-checked, an
   unreadable one left out with no count. A ref that is not the note's own key
   prefix is dropped by Hermes, and refs that could not be kept leave the labels
   without refs and are counted as the `note_refs` memory problem.

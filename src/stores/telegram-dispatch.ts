@@ -424,7 +424,9 @@ export class TelegramDispatchRepository {
   /**
    * The message a turn's own message replies to, as its reply block (replyBlock), from the reply relation the message's
    * read already returned and the reader's own access check (SourceRepository.repliedTo); null when it replies to
-   * nothing this reader may read, or only to its forum topic's opening.
+   * nothing this reader may read, or only to its forum topic's opening. A member's private turn asks as that member,
+   * bound to their own chat (memberPrincipal), so it never quotes the owner's chat or another private chat; no reader
+   * but the dashboard reads Nocheh's answer to an ask about a member (ADR-0262).
    */
   private async replyOf(principal:Reader,id:string,payload:unknown,read:{relationships:{targets:{kind:string;references:SourceReference[]}[]}}) {
     const targets=read.relationships.targets.filter(target=>target.kind==='reply_to').flatMap(target=>target.references);
