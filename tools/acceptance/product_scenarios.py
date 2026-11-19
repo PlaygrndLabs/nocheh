@@ -690,14 +690,20 @@ class ProductScenarios(Scenarios):
 
     def dashboard_note(self, mark):
         """The note holding the mark on the owner's Notes page (Memory › Assistant notes, the owner's own profile), as the
-        dashboard reads it: its label, day and originals."""
+        dashboard reads it: its label, day and originals. The owner's chat has a profile per installation epoch, each
+        listed as "Your private chat", and the canonical one listed first holds nothing once turns run by epoch, so each
+        of the owner's own profiles is read, newest first, as the owner would pick them."""
         dashboard = self.dashboard()
         profiles = dashboard.get('/memory/profiles')
-        profile = next((item for item in profiles.get('history_profiles') or profiles.get('profiles') or [] if item.get('owner')), None)
-        if profile is None:
-            return None
-        view = dashboard.get('/memory?'+urllib.parse.urlencode({'scope': profile['scope'], 'profile': profile['profile']}))
-        return next((entry for note in view.get('memories') or [] for entry in note.get('entries') or [] if mark in str(entry.get('text'))), None)
+        owned = [item for item in profiles.get('history_profiles') or profiles.get('profiles') or []
+                 if item.get('owner') and item.get('exists') is not False
+                 and not (item.get('private_answer') or item.get('member') or item.get('member_read'))]
+        for profile in sorted(owned, key=lambda item: item.get('guard_epoch') or 0, reverse=True):
+            view = dashboard.get('/memory?'+urllib.parse.urlencode({'scope': profile['scope'], 'profile': profile['profile']}))
+            entry = next((entry for note in view.get('memories') or [] for entry in note.get('entries') or [] if mark in str(entry.get('text'))), None)
+            if entry is not None:
+                return entry
+        return None
 
     @staticmethod
     def recalled_notes(result, mark):

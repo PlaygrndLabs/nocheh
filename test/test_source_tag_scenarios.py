@@ -591,12 +591,19 @@ class OwnerDashboard:
         if url.path == '/memory/originals':
             return {'originals': [self.original(event_id, self.fault != 'labels_missing') for event_id in query['id']]}
         if url.path == '/memory/profiles':
-            return {'profiles': [{'scope': self.i.chat(OWNER), 'profile': 'default', 'owner': True}]}
+            # As Hermes lists them on an installation with guard epochs: the owner's canonical profile first, which no
+            # turn writes to, then one profile per epoch, the newest holding the notes; a private answer is never the owner's.
+            owner = self.i.chat(OWNER)
+            return {'profiles': [{'scope': owner, 'profile': 'canonical', 'owner': True, 'exists': False}],
+                    'history_profiles': [{'scope': owner, 'profile': 'canonical', 'owner': True, 'exists': False},
+                                         {'scope': owner, 'profile': 'epoch-5', 'owner': True, 'exists': True, 'guard_epoch': 5},
+                                         {'scope': owner, 'profile': 'answer', 'owner': False, 'exists': True, 'guard_epoch': 11, 'private_answer': True},
+                                         {'scope': owner, 'profile': 'epoch-11', 'owner': True, 'exists': True, 'guard_epoch': 11}]}
         if url.path == '/memory':
             entries = [{'target': 'memory', 'text': note['text'], 'from': note['from'], 'label': note['label'],
                         'day': None if self.fault == 'notes_undated' else note['day'],
                         'originals': [] if self.fault == 'notes_unlinked' else [self.original(source) for source in note['sources'] if source]}
-                       for note in self.i.notes]
+                       for note in self.i.notes] if query['profile'] == ['epoch-11'] else []
             return {'memories': [{'name': 'MEMORY.md', 'exists': True, 'text': '', 'citations': [], 'entries': entries}], 'sessions': []}
         raise AssertionError('unexpected dashboard route '+path)
 
