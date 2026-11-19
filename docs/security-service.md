@@ -200,6 +200,21 @@ notes written from them, like a retired turn message. Owner recall asks Hermes's
 search only for a hit's own snippet and time, never the neighbouring rows'
 `context`.
 
+Long-term memory facts carry source lines built the same way, never by the
+model ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)
+step 2). A fact's messages are mapped only through receipts that are done, not
+retired and in the reader's own audience; one that does not map counts as
+another person's words and is never shown. `by=owner` needs every message to be
+the owner's own typing and cited. Only the model-written summary and fact lines
+pass the guard; each line must come back with its own number and time, or the
+block reads as before and the failure is counted as `source_tags`. A fact opens
+by its record and number only for its own audience (the owner reads any), in the
+current memory space, never for a private answer, never while memory is being
+corrected, once memory no longer holds it, or once any of its stored sources
+(or, for a fact whose sources may be incomplete, any message of its session) is
+retired. The retired route reports such records in `retired_records`, so Hermes
+withholds the stored rows that cite them.
+
 
 For an existing installation, stop Hermes and its native writers before running
 `python3 -m tools.operations.security.security_profiles /absolute/path/to/hermes --hermes-stopped`.

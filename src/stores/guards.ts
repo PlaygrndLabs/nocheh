@@ -288,6 +288,23 @@ export class GuardRepository {
     return {revisions:rows.slice(0,50),next:rows.length>50?rows[49].revision:null};
   }
 
+  /** Several guarded copies in one query, checked against the binding once before and once after, as read() does for one;
+   *  a copy that is not ready yet maps to null (read's guard_preparation_pending). */
+  async readMany(ids:readonly string[],binding:GuardBinding):Promise<Map<string,unknown|null>> {
+    const found=new Map<string,unknown|null>();
+    if(!ids.length)return found;
+    await this.assertCurrent(binding);
+    const rows=(await this.stores.derived.query(`SELECT s.id,s.input,s.state,r.content FROM guard_sources s
+      LEFT JOIN guard_revisions r ON r.source_id=s.id AND r.revision=s.active_revision WHERE s.id=ANY($1::text[])`,[[...new Set(ids)]])).rows;
+    const byId=new Map(rows.map(row=>[row.id as string,row]));
+    for(const id of ids) {
+      const row=byId.get(id);
+      if(!row||binding.mode==='on'&&(row.state!=='ready'||!row.content)){found.set(id,null);continue;}
+      found.set(id,JSON.parse((binding.mode==='on'?row.content:row.input).toString()));
+    }
+    await this.assertCurrent(binding);return found;
+  }
+
   async read(id:string,binding:GuardBinding):Promise<{value:unknown;revision:number|null}> {
     await this.assertCurrent(binding);
     const row=(await this.stores.derived.query(`SELECT s.input,s.active_revision,s.state,r.content FROM guard_sources s

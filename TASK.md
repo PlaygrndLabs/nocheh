@@ -185,6 +185,55 @@ members live in the control store and are managed on the Members page.
   bot an admin in members' groups is recommended. Your own web and tool requests in groups no
   longer show a card; ask if you want that back.
 
+Memory step 2: recalled facts name their source
+([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md) step 2;
+owner, 2026-11-17: track the source of each fact before the MVP; built on the same three
+recommended answers as step 1). No Honcho code or setting changes; peer cards and dreams stay off
+and nothing is learned again.
+- Engine: `facts()`, `factsById()`, `factExists()`, `mostDerived()`, `citationCoverage()` and
+  the summary's message, on Honcho's stock conclusion list, refusing an answer about another
+  participant, session or level; Nocheh's Honcho plugin gives uncited facts their batch (at most
+  8 messages, `messages_truncated`, never complete) and can count citation coverage (called
+  from step 4) ([engine](test/memory-engine.test.ts), [plugin](services/honcho/test_provenance.py)).
+- Sources: one receipts query for the reader's audience, the fact's own person first, `by`
+  `owner` only for exact, whole all-owner facts; a fact that is not exact rests on messages
+  Honcho never names, so it reads `person` and, when it names only its own person's messages,
+  `learned in <where> on <when>` with no sender; the source line on a person's, forward's or
+  file's message first ([rules](test/fact-sources.test.ts)).
+- A turn's memory: up to 100 facts a block as `n. HH:MM fact` under code-built source lines,
+  only model text guarded and every line checked, within 20,000 characters, named by its record,
+  whose unguarded parent keeps every source (never pruned); prose with `source_tags_unavailable`,
+  counted once, when facts or tags can't be read; exact only without a summary; a failed plugin
+  counted; the owner's profile rebuilt with Honcho's own pick
+  ([unit](test/fact-sources.test.ts), [store](test/store-fact-sources.test.ts)).
+- `memory_recall`: answer and facts named by their records, 12 facts listed with two tagged
+  sources each, up to 200 stored; `archive_read nocheh:memory:<id> fact=<n>` opens a fact for its
+  own audience and refuses while correcting, after its conclusion is gone, or for any fact of a
+  record the retired route reports;
+  the retired route lists `retired_records` and Hermes withholds rows citing them
+  ([unit](test/fact-opening.test.ts), [store](test/store-fact-opening.test.ts),
+  [Hermes](services/hermes/test_retired_history.py)).
+- Tester: `recalled_fact_opens_its_original`, `fact_about_bob_names_bob` (the fake deriver now
+  learns an answer to another person's marked question, citing both), `recall_facts_carry_sources`,
+  `forward_fact_names_its_origin`, `per_turn_memory_stays_small` and the facts part of
+  `retired_source_leaves_tags`, each seen to fail at its gate on a fake without the fix; the
+  scripted model's `[[memory_blocks:]]` reports a turn's blocks
+  ([scenarios](test/test_source_tag_scenarios.py), [model](test/test_scripted_brain.py)).
+  Checks (2026-11-18): the build; node unit tests (448: 393 pass, 51 skipped, and only the 4
+  workflow tests that also fail on main fail); the whole store suite (801 pass; only the files
+  that also fail on main fail: controlled-actions, managed-runs, sharing, workflow-operations and
+  assistant's untranscribed voice); Python Hermes (1030, with the 2 environment errors that also
+  occur on main), Telegram (152) and the repository's Python tests (158, 2 skipped); the Honcho
+  provenance tests (19 of 19 with a stand-in for SQLAlchemy).
+  Pending:
+  - The full tester on images: the step 2 scenarios have only run against the fake. Recall lists
+    12 facts, so `recall_facts_carry_sources` and the facts part of `retired_source_leaves_tags`
+    ask as GUEST, whose few facts come first.
+  - A live look at a turn's source lines and an opened fact in a group and in the owner's chat.
+  - Citation coverage is counted but shown nowhere until step 4.
+  - The privacy scan before a push.
+  Left for later: step 3 (replies in the turn, notes refs) and step 4 (dashboard).
+
 Memory step 1: search hits and opened messages name their source
 ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md); owner,
 2026-11-17: track the source of each fact, not only history without its thread and relations,

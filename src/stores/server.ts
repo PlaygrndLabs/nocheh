@@ -450,6 +450,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // A grant and an owner-corrected entry opened by archive_read (ADR-0261); neither is a private answer's route.
     const grant=path.match(/^\/v1\/memory\/grants\/([a-f0-9]{64})$/);
     if(grant&&req.method==='GET')return result(await s.memoryAccess.open(principal,grant[1]!),true);
+    // A recalled fact opened by archive_read nocheh:memory:<record> fact=<n> (ADR-0261); not a private answer's route.
+    const fact=path.match(/^\/v1\/memory\/facts\/([a-f0-9]{64})(?:\/([1-9][0-9]{0,2}))?$/);
+    if(fact&&req.method==='GET') {
+      if(!principal.admin)await s.turns.binding(principal);
+      return result(await s.memory.openFact(principal,fact[1]!,fact[2]===undefined?null:Number(fact[2])),true);
+    }
     const learnedEntry=path.match(/^\/v1\/memory\/learned\/([a-f0-9]{64})\/([1-9][0-9]{0,8})$/);
     if(learnedEntry&&req.method==='GET')return result(await s.sources.learnedEntry(principal,learnedEntry[1]!,Number(learnedEntry[2])),true);
     if(path==='/v1/memory/recall'&&req.method==='POST') {

@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+import unittest.mock
 from unittest.mock import AsyncMock, patch
 
 from .retired_history import NOTE_DELIMITER, SUMMARY_WITHHELD, withheld_ids, withhold_retired
@@ -498,6 +499,68 @@ class RetiredHistoryReviewTests(unittest.TestCase):
         # Written inside a message's text, the same words are escaped in the JSON and cite it as any id does.
         typed=json.dumps({'items':[{'source':'nocheh:event:'+BOB,'text':'"reply_source":"nocheh:event:'+REPLIED+'"'}]},separators=(',',':'))
         self.assertEqual(sorted(plan(rows[:2]+[{**rows[2],'content':typed}]+rows[3:],Lookup(retired=(REPLIED,),answered=()))[1]),[3])
+
+
+# Records of long-term memory a turn read (ADR-0261): a recall's answer and its facts, and the messages each rests on.
+ANSWER_RECORD,FACTS_RECORD,SHOWN,UNLISTED,TURN2='6'*64,'7'*64,'8'*64,'9'*64,'0'*64
+
+
+class RecordLookup(Lookup):
+    """Storage's answer as /internal/sources/retired gives it (source-retirement.ts historyRetirements): a record is
+    retired, and listed in retired_records, when any message its stored evidence names is retired, listed in the row or
+    not."""
+    def __init__(self,retired,records):
+        super().__init__(retired=retired,answered=());self.records=records
+
+    def __call__(self,event_ids):
+        value=super().__call__(event_ids)
+        records=sorted(record for record in event_ids if record in self.records and self.records[record]&self.retired)
+        return {**value,'retired':sorted(set(value['retired'])|set(records)),'retired_records':records}
+
+
+class RetiredRecordTests(unittest.TestCase):
+    def test_a_recall_and_the_fact_opened_from_it_leave_history_when_one_of_its_sources_is_retired(self):
+        """recall, then archive_read fact=3, in this turn and the next; the fact's third source, never listed in any row,
+        is retired: every row that read the record goes, and the answers stay."""
+        from .retired_history import plan
+        recalled=json.dumps({'sources':[{'source':'nocheh:memory:'+ANSWER_RECORD,'facts_source':'nocheh:memory:'+FACTS_RECORD,
+            'kind':'memory_inference','text':'Bob gave his PIN.','exact_citations':False,
+            'facts':[{'n':1,'text':'Bob likes tea','exact':True,'by':'person','sources':[{'source':'nocheh:event:'+SHOWN,'tag':'“Bob” · group “GP1”','by':'person'}],'more':0}],
+            'evidence_count':3,'limitations':[]}]})
+        opened=json.dumps({'source':'nocheh:memory:'+FACTS_RECORD,'fact':3,'text':'Bob PIN is 4321','exact':True,'by':'person','at':None,'sources':[],'more':0})
+        read=call('mcp__nocheh__archive_read',{'id':'nocheh:memory:'+FACTS_RECORD,'fact':3})
+        rows=[{'id':1,'session_id':'p','role':'user','content':'what is Bob\'s PIN?'+marker(TURN),'timestamp':1,'tool_calls':None},
+              {'id':2,'session_id':'p','role':'assistant','content':'','timestamp':2,'tool_calls':call('mcp__nocheh__memory_recall',{'query':'PIN'})},
+              {'id':3,'session_id':'p','role':'tool','content':recalled,'timestamp':3,'tool_calls':None},
+              {'id':4,'session_id':'p','role':'assistant','content':'','timestamp':4,'tool_calls':read},
+              {'id':5,'session_id':'p','role':'tool','content':opened,'timestamp':5,'tool_calls':None},
+              {'id':6,'session_id':'p','role':'assistant','content':'Bob said so.','timestamp':6,'tool_calls':None,'reasoning':'the PIN is 4321'},
+              {'id':7,'session_id':'p','role':'user','content':'are you sure?'+marker(TURN2),'timestamp':7,'tool_calls':None},
+              {'id':8,'session_id':'p','role':'assistant','content':'','timestamp':8,'tool_calls':read},
+              {'id':9,'session_id':'p','role':'tool','content':opened,'timestamp':9,'tool_calls':None},
+              {'id':10,'session_id':'p','role':'assistant','content':'Yes.','timestamp':10,'tool_calls':None}]
+        records={ANSWER_RECORD:{SHOWN},FACTS_RECORD:{SHOWN,UNLISTED}}
+        self.assertEqual(plan(rows,RecordLookup((UNLISTED,),{}))[1],{},'no row names the retired message itself')
+        changes=plan(rows,RecordLookup((UNLISTED,),records))[1]
+        self.assertEqual(sorted(changes),[3,4,5,6,8,9],'the recall row, both calls that opened the fact and their results')
+        withheld='[Tool result withheld; its source was retired: nocheh:memory:'+FACTS_RECORD+']'
+        self.assertEqual([changes[row]['content'] for row in (3,5,9)],[withheld]*3,'each notice names the record by its memory ID')
+        self.assertEqual(json.loads(changes[4]['tool_calls'])[0]['function'],{'name':'mcp__nocheh__archive_read','arguments':'{}'})
+        self.assertEqual(changes[6],{'reasoning':None},'the delivered answer stays without its reasoning')
+        # A source both records rest on names both, each as a record.
+        both=plan(rows,RecordLookup((SHOWN,),records))[1]
+        self.assertEqual(both[3]['content'],'[Tool result withheld; its source was retired: nocheh:memory:'+ANSWER_RECORD+', nocheh:memory:'+FACTS_RECORD+
+                         ', nocheh:event:'+SHOWN+']')
+
+    def test_storage_without_retired_records_is_read_as_before(self):
+        from .retired_history import service_lookup
+        answer={'revision':'1:x','retired':[],'answered':{}}
+        for value,valid in ((answer,True),({**answer,'retired_records':[]},True),({**answer,'retired_records':'x'},False)):
+            response=unittest.mock.MagicMock();response.read.return_value=json.dumps(value).encode()
+            response.__enter__=lambda self:self;response.__exit__=lambda *args:False
+            with patch('urllib.request.urlopen',return_value=response),patch('services.hermes.environment.secret',return_value='token'):
+                if valid:self.assertEqual(service_lookup([TURN]),value)
+                else:self.assertRaises(RuntimeError,service_lookup,[TURN])
 
 
 class OwnerRecallBeforeTheNextTurnTests(unittest.TestCase):

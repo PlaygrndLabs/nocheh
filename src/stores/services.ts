@@ -132,7 +132,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const schedules=new ScheduleRepository(access,derived,options.detectorVersion,detect);
   const sourcePortability=new SourcePortabilityRepository(capture,attachments),derivativePortability=new DerivativePortabilityRepository(stores,archive);
   const browserDelivery=new BrowserDeliveryRepository(options.dataDir,options.serviceToken??'');
-  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect,noteSources);
+  const memory=new NativeMemoryRepository(contexts,derived,prepared,provenance,options.memoryEngine,detect,noteSources,tags);
   const shared=new SharingContentRepository(access,derived,prepared,selections,learned,sharing,options.runtime,detect,options.serviceToken??'');
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's asks about a member (step 4b): recorded only from a live owner-private turn, answered by their own worker.

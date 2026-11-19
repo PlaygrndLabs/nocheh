@@ -125,7 +125,8 @@ test('summary retention removes only spent Honcho context summaries and their gu
     assert.equal((await client.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');
     await client.query(`CREATE SCHEMA ${schema}`);await client.query(`SET search_path=${schema}`);
     // Column subsets of the derived schema used by summary retention.
-    await client.query(`CREATE TABLE derived_artifacts(id text PRIMARY KEY,kind text NOT NULL,operation_id text UNIQUE NOT NULL,created_at timestamptz NOT NULL);
+    await client.query(`CREATE TABLE derived_artifacts(id text PRIMARY KEY,kind text NOT NULL,operation_id text UNIQUE NOT NULL,created_at timestamptz NOT NULL,
+        provenance jsonb NOT NULL DEFAULT '{}');
       ${derivedGuardSchema}
       CREATE TABLE runtime_prepared_inputs(id text PRIMARY KEY,source_id text NOT NULL REFERENCES guard_sources(id))`);
     const ago=(hours:number)=>new Date(Date.now()-hours*3600000);
@@ -134,7 +135,9 @@ test('summary retention removes only spent Honcho context summaries and their gu
       await client.query(`INSERT INTO derived_artifacts VALUES($1,'memory_result',$2,$3)`,['r'+n,'native-context:w:1:'+n,ago(hours)]);
       if(bounded)await client.query(`INSERT INTO derived_artifacts VALUES($1,'memory_context',$2,$3)`,['b'+n,'native-context:w:1:'+n+':bounded',ago(hours)]);
     };
-    for(const [n,hours,bounded] of [['1',48,true],['2',47,true],['3',48,true],['4',0.1,true],['5',48,false],['6',48,true]] as const)await rebuild(n,hours,bounded);
+    for(const [n,hours,bounded] of [['1',48,true],['2',47,true],['3',48,true],['4',0.1,true],['5',48,false],['6',48,true],['7',48,true]] as const)await rebuild(n,hours,bounded);
+    // A block of facts: the model opens its facts by its id from stored history, and a retired source is found through it.
+    await client.query(`UPDATE derived_artifacts SET provenance='{"configuration":{"facts_digest":"d"}}' WHERE id='b7'`);
     await client.query(`INSERT INTO derived_artifacts VALUES('recall','memory_result','native-recall-output:x',$1)`,[ago(48)]);
     for(const n of ['1','6']) {
       const source='derived_artifacts:b'+n;
@@ -145,8 +148,8 @@ test('summary retention removes only spent Honcho context summaries and their gu
     }
     await client.query("INSERT INTO runtime_prepared_inputs VALUES('in','derived_artifacts:b6')");
     assert.deepEqual(await expireMemorySummaries(client,ago(1),0),{memory_contexts:3,memory_results:4});
-    assert.deepEqual((await client.query('SELECT id FROM derived_artifacts ORDER BY 1')).rows.map(row=>row.id),['b4','b6','r4','r6','recall'],
-      'a recent read, a summary still referenced and other memory results stay');
+    assert.deepEqual((await client.query('SELECT id FROM derived_artifacts ORDER BY 1')).rows.map(row=>row.id),['b4','b6','b7','r4','r6','r7','recall'],
+      'a recent read, a summary still referenced, a block of facts with its raw output and other memory results stay');
     assert.deepEqual((await client.query('SELECT id FROM guard_sources ORDER BY 1')).rows.map(row=>row.id),['derived_artifacts:b6']);
     assert.equal((await client.query('SELECT count(*)::int AS count FROM guard_revisions')).rows[0].count,1);
     assert.deepEqual(await expireMemorySummaries(client,ago(1),0),{memory_contexts:0,memory_results:0},'a repeated pass is a no-op');

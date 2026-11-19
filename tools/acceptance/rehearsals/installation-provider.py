@@ -28,7 +28,7 @@ class ScriptedBrain:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|turn|notes|note_from|memory_about)(?::([^\]]*))?\]\]')
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|turn|notes|note_from|memory_about|memory_blocks)(?::([^\]]*))?\]\]')
     # A notes review (its one tool is memory) that reads [[review-note:TEXT]] in a message saves TEXT as a native note,
     # as a model notes what it read, so a scenario sees which messages a review read and how the note is labelled.
     REVIEW_NOTE = re.compile(r'\[\[review-note:([^\]]{1,300})\]\]')
@@ -278,6 +278,15 @@ class ScriptedBrain:
             about = sorted({str(block.get('about') or 'none') for block in self.memory_blocks(body) if argument and argument in str(block.get('text'))})
             self.record(directive=kind, argument=argument, phase='final', present=bool(about), about=about)
             return {'content': '[brain] memory_about ' + argument + ' ' + (','.join(about) or 'absent')}
+        if kind == 'memory_blocks':
+            # The turn's long-term memory blocks as the model reads them (ADR-0261): what Nocheh's code names each block by,
+            # what it is about, whether its facts cite their messages, what it could not say, and its text, so a scenario
+            # reads its source lines and fact numbers. Present when a block holds the argument.
+            blocks = [{'source': block.get('source'), 'about': block.get('about'), 'exact_citations': block.get('exact_citations'),
+                       'limitations': block.get('limitations'), 'text': str(block.get('text') or '')[:40000]} for block in self.memory_blocks(body)]
+            present = bool(argument) and any(argument in block['text'] for block in blocks)
+            self.record(directive=kind, argument=argument, phase='final', present=present, blocks=blocks)
+            return {'content': '[brain] memory_blocks ' + argument + (' present' if present else ' absent')}
         if kind in ('context', 'context_split'):
             earlier = '\n'.join(self.text(message.content) for message in body.messages
                                 if message is not messages[index])
@@ -347,6 +356,9 @@ class PrivacyCanary:
     # Honcho's deriver prompt (src/deriver/prompts.py) and its message wrapper.
     LEARN = 'extract **explicit atomic facts**'
     TARGET = re.compile(r'<message idx="([0-9]+)" peer="([^"]*)" target="true"[^>]*>(.*?)</message>', re.S)
+    # Every message of a learning batch: the target peer's, and others' given as context (H:src/deriver/prompts.py).
+    MESSAGE = re.compile(r'<message idx="([0-9]+)" peer="([^"]*)" target="(true|false)"[^>]*>(.*?)</message>', re.S)
+    ANSWERED = re.compile(r'LEARNMARK[0-9]+')
     DETECTOR = 'Find secret values in the supplied data.'
     # Nocheh's own learning prompt (prompts.ts learning.interpret).
     INTERPRET = 'Interpret permitted conversation evidence silently.'
@@ -380,11 +392,18 @@ class PrivacyCanary:
 
     def learned(self, text):
         """Honcho's learning of messages with a private mark or a learn mark: one conclusion for each, which quotes its mark
-        and cites it."""
+        and cites it. A target message with no mark that answers another peer's message holding a learn mark, the message
+        just before it, is learned as a conclusion about the target peer that cites both, the answer first and then the
+        question it answers, as Honcho's deriver prompt asks (H:src/deriver/prompts.py:81; fact_about_bob_names_bob)."""
         if self.LEARN not in text:
             return None
         explicit = [{'source_indices': [int(found[1])], 'content': found[2] + ' keeps a private Friday routine ' + mark[0]}
                     for found in self.TARGET.finditer(text) for mark in [self.LEARNED.search(found[3])] if mark]
+        batch = self.MESSAGE.findall(text)
+        explicit += [{'source_indices': [int(answer[0]), int(question[0])], 'content': answer[1] + ' answered a question about ' + mark[0]}
+                     for question, answer in zip(batch, batch[1:])
+                     if answer[2] == 'true' and question[2] == 'false' and question[1] != answer[1] and not self.LEARNED.search(answer[3])
+                     for mark in [self.ANSWERED.search(question[3])] if mark]
         return json.dumps({'explicit': explicit}) if explicit else None
 
     def probe(self, body, texts):

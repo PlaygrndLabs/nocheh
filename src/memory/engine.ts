@@ -23,6 +23,17 @@ export type ForgetStep={done:boolean;removed:number};
 /** `exactCitations` per fact: true when it cites the writes it came from, false when only its whole learning batch
  * is known, null when it brings no writes. */
 export type EngineTrace={facts:{id:string;parents:string[];deleted:boolean;exactCitations:boolean|null}[];writes:{id:string;receipt:string}[];limitations:string[]};
+/** One fact as the engine stores it, with the writes it came from as the engine's write ids (`EngineWrite.id`).
+ * `exact` is true when the engine cited those writes, in citation order; false when they are only part of the
+ * batch it learned the fact from; null when no write is known. `complete` only when `writes` are every write it cites
+ * (a batch never is: it leaves out the other peers' writes the fact may rest on).
+ * `derived` counts how often the engine learned the fact again; `createdAt` is when the engine stored it. */
+export type EngineFact={id:string;content:string;session:string|null;writes:string[];exact:boolean|null;complete:boolean;
+  derived:number;createdAt:string};
+/** A page of facts. `limitations` name what the engine could not say, such as a fact's batch it could not read. */
+export type EngineFactPage={facts:EngineFact[];next:string|null;limitations:string[]};
+/** How many of a space's learned facts cite their writes, know only their learning batch, or neither. */
+export type EngineCoverage={explicit:number;cited:number;batchOnly:number;none:number};
 
 export type MemoryEngine={
   /** Stable engine id, such as `honcho`. */
@@ -58,7 +69,9 @@ export type MemoryEngine={
 
   // Read. A list of sessions limits a read to them; none means the whole space (the owner).
   /** Start-of-turn context: the session's summary, and what is known about the subject when one is named. */
-  context(space:string,session:string,options:{subject:string|null;limitToSession:boolean;tokens:number}):Promise<{summary:string;subject:string}>;
+  context(space:string,session:string,options:{subject:string|null;limitToSession:boolean;tokens:number}):Promise<{summary:string;subject:string;
+    /** The engine's id for the last write the summary covers; null without a summary. */
+    summaryMessage:string|null}>;
   /** What is known about a participant across the space. The owner audience only. */
   profile(space:string,participant:string):Promise<string>;
   /** Answer a question about a participant. `evidence` lists the facts the engine read while answering.
@@ -74,6 +87,22 @@ export type MemoryEngine={
   forgetSpace(space:string):Promise<ForgetStep>;
   /** Which writes the named facts came from; absent when the engine cannot tell. */
   trace?(space:string,facts:string[]):Promise<EngineTrace>;
+
+  // Facts with the writes they came from; absent when the engine cannot list them. Each reads only what a participant
+  // learned about itself, and a list of sessions limits it to facts learned in them.
+  /** Facts newest first, a page at a time: `cursor` is null for the first page, then the page's `next`. */
+  facts?(space:string,participant:string,options:{sessions:string[]|null;size:number;cursor:string|null;batches?:boolean}):Promise<EngineFactPage>;
+  /** The batch writes of listed facts that cite none, for a list read with `batches:false`, once the facts are chosen.
+   *  Fills them in place and gives the limitations. */
+  factBatches?(space:string,facts:EngineFact[]):Promise<string[]>;
+  /** The named facts that still exist, in the order named. */
+  factsById?(space:string,participant:string,ids:string[],options:{sessions:string[]|null}):Promise<{facts:EngineFact[];limitations:string[]}>;
+  /** Whether a fact still exists; a correction deletes the facts it replaces. */
+  factExists?(space:string,participant:string,id:string):Promise<boolean>;
+  /** Facts learned more than once, most often first and then newest. `complete` is false when there were more than it reads. */
+  mostDerived?(space:string,participant:string,options:{sessions:string[]|null;batches?:boolean}):Promise<{facts:EngineFact[];complete:boolean;limitations:string[]}>;
+  /** Counts only, for the owner's dashboard. */
+  citationCoverage?(space:string):Promise<EngineCoverage>;
 };
 
 /** Error codes every engine uses, so Nocheh can act on them without knowing the engine. */

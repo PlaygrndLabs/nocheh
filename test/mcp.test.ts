@@ -335,7 +335,7 @@ test('an archived message opens with its source and its thread, within 16,000 ch
   assert.equal(idle.calls.length,0);
   assert.deepEqual(await run('archive_read',{id:'nocheh:grant:'+ID},fake(()=>new Status(403)).context),{error:'archive_source_unavailable'},'a private answer gets none');
   assert.match(tool('archive_read').description,/reply_to \(the message it replies to\)/);
-  assert.deepEqual(Object.keys((tool('archive_read').inputSchema as any).properties),['id','replies','chain']);
+  assert.deepEqual(Object.keys((tool('archive_read').inputSchema as any).properties),['id','fact','replies','chain']);
 });
 
 test('background jobs are started, listed and stopped through the bound scope',async()=>{
