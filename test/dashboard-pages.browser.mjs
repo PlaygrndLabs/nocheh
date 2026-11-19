@@ -2981,6 +2981,12 @@ test('Notes names a member’s private chat and your question about a member as 
   const labels = (await select.locator('option').allTextContents()).map(label => label.trim());
   const day = await page.evaluate(() => new Date('2026-11-14T09:00:00+00:00').toLocaleDateString());
   assert.equal(labels[0], 'Your private chat', 'the page opens on your own chat');
+  assert.equal(labels[1], 'Your private chat · earlier notes', 'an earlier setup’s notes come after, named as such');
+  assert.equal(
+    await select.inputValue(),
+    'fixture-owner',
+    'opens on the current notes, not the earlier setup listed first',
+  );
   assert.deepEqual(labels.slice(-2), ['Your question about a member · ' + day, 'Member · Mira Chen']);
   assert.equal(labels.filter(label => label === 'Mira Chen').length, 0, 'never shown as a bare chat name');
   assert.deepEqual(problems, []);

@@ -811,7 +811,10 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/data/'+id+'/guarded/history')return json(res,200,url.searchParams.has('revision')?{revision:1,content:{text:source.event.text}}:{revisions:[{revision:1,author:'automatic',created_at:new Date().toISOString()}],next:null});
   if(route==='/memory/profiles'){const current=[{owner:true,scope:'42',profile},{owner:false,scope:'-10042',profile:'fixture-group'}];
    // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
-   return json(res,200,{profiles:current,history_profiles:[...current,{owner:false,scope:'42',profile:'nocheh-'+'a1'.repeat(12),private_answer:true,
+   // After a reinstall: an earlier setup's notes for the private chat, listed first by Hermes; the page still opens on
+   // the current one (latest) and names this one as earlier.
+   const earlier={owner:true,scope:'42',profile:'nocheh-'+'99'.repeat(12),exists:true,guard_epoch:1,latest:false};
+   return json(res,200,{profiles:current,history_profiles:[earlier,...current.map(p=>({...p,exists:true,latest:true})),{owner:false,scope:'42',profile:'nocheh-'+'a1'.repeat(12),private_answer:true,
     answer_group:'“Aurora planning” › Iceland planning',answer_at:'2026-11-12T10:00:00+00:00'},{owner:false,scope:'42',profile:'nocheh-'+'b2'.repeat(12),private_answer:true},
     // Step 4: Mira's own private chat, and the owner's question about a member (4b), each its own profile.
     {owner:false,scope:'73',profile:'nocheh-'+'c3'.repeat(12),member:true},{owner:false,scope:'42',profile:'nocheh-'+'d4'.repeat(12),member_read:true,answer_at:'2026-11-14T09:00:00+00:00'}]});}

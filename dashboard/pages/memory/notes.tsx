@@ -26,22 +26,8 @@ import {Drawer} from '../../ui/overlay';
 import {noteDayText, type NoteEntry} from '../../lib/memory-sources';
 import {OriginalList} from '../../lib/originals';
 import {useChats} from './shared';
+import {earlierSuffix, notesProfiles, type Profile} from './notes-profiles';
 
-type Profile = {
-  scope: string;
-  profile: string;
-  owner?: boolean;
-  revision?: number;
-  private_answer?: boolean;
-  /** Where a private answer was asked, as its first line names it, and when it ran (ADR-0249). */
-  answer_group?: string;
-  answer_at?: string;
-  /** A member's own private chat with Nocheh (step 4): its scope is that chat. Never the owner's. */
-  member?: boolean;
-  /** Your question about a member, answered from their private chat in your chat (step 4b): its own profile, never
-   * carried into your conversation. */
-  member_read?: boolean;
-};
 /** One note, with where it came from in your words (ADR-0257); `from` is the fixed kind its colour is keyed on, and
  * `day` and `originals` the day it names and the messages its writer read (ADR-0261 step 4). */
 type Entry = NoteEntry;
@@ -102,19 +88,17 @@ export function Notes() {
   const chats = useChats();
   const profiles = useResource<{profiles: Profile[]; history_profiles?: Profile[]}>('/memory/profiles', 60000);
   const listed = profiles.data?.history_profiles ?? profiles.data?.profiles ?? [];
-  const list = [
-    ...listed.filter(p => !p.member && !p.member_read),
-    ...listed.filter(p => p.member_read),
-    ...listed.filter(p => p.member && !p.member_read),
-  ];
-  const profile = list.find(p => p.profile === chosen) ?? list[0] ?? null;
+  const {list, first} = notesProfiles(listed);
+  const profile = list.find(p => p.profile === chosen) ?? first;
   // Each private answer has its own profile in your private chat, named by where it was asked, as its first line names
   // it, and the day it ran; one without that receipt by a short tail of its name.
   // A member's private chat and your questions about a member are named as what they are (step 4), and listed after
-  // your own chat and the groups, so a member's chat is never the one a page opens on.
+  // your own chat and the groups, so a member's chat is never the one a page opens on; it opens on your private chat's
+  // current notes, never an earlier setup's (notesProfiles).
   const label = (p: Profile) =>
-    memberProfileLabel(p, chats.name) ??
-    (p.private_answer ? answerLabel(p) : p.owner ? 'Your private chat' : chats.name(p.scope));
+    (memberProfileLabel(p, chats.name) ??
+      (p.private_answer ? answerLabel(p) : p.owner ? 'Your private chat' : chats.name(p.scope))) +
+    earlierSuffix(p, list);
   const memory = useResource<MemoryView>(
     profile ? '/memory?' + new URLSearchParams({scope: profile.scope, profile: profile.profile}) : null,
     30000,

@@ -58,10 +58,12 @@ def dispatch(root, model, policy, body):
         from .native_memory import registered_profiles
         import json
         historical={p['profile']:p for p in profiles}
+        meta,at={},{}
         for path in registered_profiles(root):
             marker=path/'space.json'
             if marker.is_symlink():raise ValueError('profile_path_denied')
             metadata=json.loads(marker.read_text()) if marker.exists() else {}
+            meta[path.name]=metadata;at[path.name]=marker.stat().st_mtime if marker.exists() else 0
             historical[path.name]={'scope':metadata.get('space',historical.get(path.name,{}).get('scope',path.name)),
                                    'profile':path.name,'owner':metadata.get('owner',False),'revision':metadata.get('revision',0),
                                    'guard_epoch':metadata.get('guard_epoch',0),'exists':True,
@@ -74,7 +76,28 @@ def dispatch(root, model, policy, body):
                                    # by when it ran, as its receipt keeps it.
                                    **({'member_read':True,**{key:value for key,value in answer_receipt(path).items() if key=='answer_at'}}
                                       if metadata.get('member_read') else {})}
-        return {'profiles':profiles,'history_profiles':list(historical.values())}
+        listed=list(historical.values())
+        # A chat keeps one profile per setup (installation, policy revision and guard epoch), so after a reinstall the
+        # same chat is listed more than once. The newest one that exists is the one its turns use now; the dashboard opens
+        # on it and names the others as earlier ones. A reinstall starts its guard epochs again at 1, so the installation
+        # whose profiles were used last comes first (each turn rewrites its space.json), then the epoch and revision.
+        # Only a chat's own profile can be its current notes: never a private answer, an ask about a member, or a named
+        # profile beside it.
+        used={}
+        for name,metadata in meta.items():
+            generation=metadata.get('generation') or '';used[generation]=max(used.get(generation,0),at[name])
+        def own(entry):
+            metadata=meta.get(entry['profile'],{})
+            return (not entry.get('private_answer') and not entry.get('member_read') and metadata.get('purpose','assistant')!='filter'
+                    and (metadata.get('logical_profile') or '') in ('',Scopes.profile(entry['scope'])))
+        newest={}
+        for entry in listed:
+            if not entry.get('exists') or not own(entry):continue
+            rank=(used.get(meta.get(entry['profile'],{}).get('generation') or '',0),entry.get('guard_epoch',0),entry.get('revision',0))
+            if entry['scope'] not in newest or rank>newest[entry['scope']][0]:newest[entry['scope']]=(rank,entry['profile'])
+        for entry in listed:
+            if own(entry) and entry['scope'] in newest:entry['latest']=newest[entry['scope']][1]==entry['profile']
+        return {'profiles':profiles,'history_profiles':listed}
     if action == 'prompts':
         from .prompts import DEFAULTS, LIMIT
         return {'defaults': DEFAULTS, 'limit': LIMIT}
