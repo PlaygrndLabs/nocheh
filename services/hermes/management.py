@@ -1,6 +1,7 @@
 """Owner-only native profile inspection; every request selects an allowed chat."""
 import hashlib
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from .scopes import Scopes
 from .profile_config import configure_profile, inspect_profile
@@ -158,9 +159,39 @@ def dispatch(root, model, policy, body):
                 'truncated': len(str(m.get('content') or '')) > 20000} for m in messages[:50]]
             if len(messages) > 50: result['next_offset'] = offset + 50
         else:
-            sessions = db.search_sessions(limit=51, offset=offset)
-            result['sessions'] = [{k: s.get(k) for k in ('id', 'title', 'source', 'started_at', 'ended_at', 'model')}
-                                  for s in sessions[:50]]
-            if len(sessions) > 50: result['next_offset'] = offset + 50
+            limit = body.get('limit', 50)
+            if type(limit) is not int or not 1 <= limit <= 50: raise ValueError('invalid_limit')
+            # Hermes's own session list: no empty sessions, no hidden ones (a memory review hides its own), and a
+            # conversation that went on after its history was shortened listed once, by its latest part.
+            sessions = db.list_sessions_rich(limit=limit + 1, offset=offset, min_message_count=1, order_by_last_active=True)
+            result['sessions'] = [session_row(s) for s in sessions[:limit]]
+            if len(sessions) > limit: result['next_offset'] = offset + limit
     finally: db.close()
     return result
+
+
+ARCHIVE_SOURCE = '[Archive source: nocheh:event:'
+WHOLE_SOURCE = re.compile(r'\s*\[Archive source: nocheh:event:[a-f0-9]{64}\]')
+
+
+def without_archive_source(preview):
+    """A first message without the archive source Nocheh adds at its end, whole or cut short by the preview."""
+    text = WHOLE_SOURCE.sub('', preview)
+    for start in [m.start() for m in re.finditer(r'\[', text)]:
+        tail = text[start:].removesuffix('...')
+        if ARCHIVE_SOURCE.startswith(tail) or tail.startswith(ARCHIVE_SOURCE) and re.fullmatch(r'[a-f0-9]*', tail[len(ARCHIVE_SOURCE):]):
+            return text[:start].rstrip()
+    return text.strip()
+
+
+def session_row(session):
+    """One past conversation as the dashboard lists it: its title, its first message without the archive source
+    Nocheh adds, when it started and last went on, and how many messages it has."""
+    def when(value):
+        return (datetime.fromtimestamp(value, timezone.utc).isoformat().replace('+00:00', 'Z')
+                if isinstance(value, (int, float)) and value > 0 else None)
+    preview = without_archive_source(str(session.get('preview') or ''))
+    return {'id': session.get('id'), 'title': session.get('title') or '', 'preview': preview,
+            'source': session.get('source') or '', 'started_at': when(session.get('started_at')),
+            'last_active': when(session.get('last_active') or session.get('started_at')),
+            'messages': session.get('message_count') or 0}

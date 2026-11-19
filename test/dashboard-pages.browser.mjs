@@ -1771,6 +1771,32 @@ test('Notes names a private answer’s profile by where it was asked and the day
   await page.close();
 });
 
+test('Notes lists past conversations as a table, each named by its title or first message, a page at a time', async () => {
+  const {page, problems} = await open('memory?view=notes');
+  const table = page.getByRole('table', {name: 'Past conversations'});
+  const chat = table.getByRole('row').filter({hasText: 'Private chat'});
+  await chat.getByText('Where can we see the northern lights?').waitFor();
+  // A conversation without a title is named by its first message, never "Untitled".
+  await table.getByRole('button', {name: 'Planning a stargazing trip'}).waitFor();
+  assert.equal(await page.getByText(/Untitled/).count(), 0);
+  assert.equal(await table.getByRole('row').count(), 11, 'a header and ten conversations');
+  await page.getByRole('button', {name: 'Older', exact: true}).click();
+  await table.getByRole('button', {name: 'Older question 9'}).waitFor();
+  assert.equal(await table.getByRole('row').count(), 3);
+  await page.getByRole('button', {name: 'Newer', exact: true}).click();
+  // Working notes are a table too, each note with where it came from.
+  const notes = page.getByRole('table', {name: 'General notes'});
+  await notes
+    .getByRole('row')
+    .filter({hasText: 'Alice is planning a trip to Iceland.'})
+    .getByText(/forwarded/)
+    .waitFor();
+  await table.getByRole('button', {name: 'Planning a stargazing trip'}).click();
+  await page.getByRole('dialog', {name: 'Planning a stargazing trip'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('turning automatic organizing on is what lets it create projects, with no separate switch', async () => {
   const {page, problems} = await open('memory?view=projects');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Automatic organizing'})});
@@ -3133,7 +3159,7 @@ test('Long-term lists facts newest first with their sources, by chat or person, 
 test('Notes shows the day each note names and links its original messages, never a retired one', async () => {
   const {page, problems} = await open('memory?view=notes');
   const notes = page.locator('section', {has: page.getByRole('heading', {name: 'General notes'})});
-  const own = notes.getByRole('listitem').filter({hasText: 'Synthetic memory: interested in astronomy.'}).first();
+  const own = notes.getByRole('row').filter({hasText: 'Synthetic memory: interested in astronomy.'}).first();
   const day = await page.evaluate(() =>
     new Date(2026, 10, 12).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}),
   );
@@ -3142,7 +3168,7 @@ test('Notes shows the day each note names and links its original messages, never
   await links.getByRole('link', {name: 'Original message 1'}).waitFor();
   assert.equal(await linksTo(links, sourceIds.tour), 1);
   assert.equal(await linksTo(links, sourceIds.packing), 1);
-  const forward = notes.getByRole('listitem').filter({hasText: 'Alice is planning a trip to Iceland.'}).first();
+  const forward = notes.getByRole('row').filter({hasText: 'Alice is planning a trip to Iceland.'}).first();
   await forward.getByText('Original message 2 · Hidden from assistant', {exact: true}).waitFor();
   assert.equal(await linksTo(forward, sourceIds.photo), 0);
   assert.equal(await linksTo(forward, sourceIds.booking), 1);
@@ -3256,7 +3282,7 @@ test('Long-term’s filters: the chosen person stays chosen while searching, and
 
 test('a note Nocheh wrote while answering names its day once, in its own words', async () => {
   const {page, problems} = await open('memory?view=notes');
-  const turn = page.getByRole('listitem').filter({hasText: 'Prefers short answers.'}).first();
+  const turn = page.getByRole('row').filter({hasText: 'Prefers short answers.'}).first();
   await turn.getByText('Nocheh’s note from your private chat on 2026-11-12', {exact: true}).waitFor();
   const day = await page.evaluate(() =>
     new Date(2026, 10, 12).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}),

@@ -32,6 +32,35 @@ class ManagementTests(unittest.TestCase):
             (profile_path(root,'123',policy)/'memories/MEMORY.md').symlink_to(root/'profiles'/Scopes.profile('-30')/'memories/MEMORY.md')
             with self.assertRaises(ValueError):call(action='memory',scope='123')
 
+    def test_past_conversations_leave_out_empty_and_hidden_sessions_and_name_each_one(self):
+        # A memory review hides its own session and an empty one has nothing to read; neither is a past conversation.
+        # Each listed one carries its title, its first message without Nocheh's archive source, and when it went on.
+        from hermes_state import SessionDB
+        policy=Scopes({'enabled':True},Served.of('123'))
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);profile=profile_path(root,'123',policy);profile.mkdir(parents=True)
+            db=SessionDB(profile/'state.db')
+            db.create_session('nocheh-chat',source='telegram');db.set_session_title('nocheh-chat','Private chat')
+            db.append_message('nocheh-chat',role='user',content='Plan the trip\n\n[Archive source: nocheh:event:'+'a'*64+']')
+            db.append_message('nocheh-chat',role='assistant',content='Sure.')
+            db.create_session('browser-1',source='browser');db.append_message('browser-1',role='user',content='What did I save?')
+            db.create_session('review-1',source='telegram');db.append_message('review-1',role='user',content='review text')
+            db.set_session_hidden('review-1',True)
+            db.create_session('empty-1',source='telegram')
+            db.close()
+            call=lambda **body:dispatch(root,'test-model',policy,body)
+            rows={row['id']:row for row in call(action='memory',scope='123')['sessions']}
+            self.assertEqual(set(rows),{'nocheh-chat','browser-1'})
+            chat=rows['nocheh-chat']
+            self.assertEqual((chat['title'],chat['preview'],chat['source'],chat['messages']),('Private chat','Plan the trip','telegram',2))
+            self.assertTrue(chat['last_active'].endswith('Z'));self.assertTrue(chat['started_at'].endswith('Z'))
+            self.assertEqual((rows['browser-1']['title'],rows['browser-1']['preview']),('','What did I save?'))
+            first=call(action='memory',scope='123',limit=1);self.assertEqual(len(first['sessions']),1);self.assertEqual(first['next_offset'],1)
+            second=call(action='memory',scope='123',limit=1,offset=1);self.assertEqual(len(second['sessions']),1);self.assertIsNone(second['next_offset'])
+            self.assertNotEqual(first['sessions'][0]['id'],second['sessions'][0]['id'])
+            for limit in (0,51,'5'):
+                with self.assertRaises(ValueError):call(action='memory',scope='123',limit=limit)
+
     def test_each_note_is_listed_on_its_own_with_what_was_recorded_about_who_wrote_it(self):
         # Storage puts each note's record in the owner's words (ADR-0257); a file Hermes could not read lists no notes,
         # and the page shows it whole.
