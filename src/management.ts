@@ -428,7 +428,8 @@ export async function startManagement() {
       if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'brain.manage',request:{action:'profiles'}}));
       if (req.method === 'GET' && ['/memory','/memory/preferences'].includes(route)) {
         return json(res,200,await python({operation:'brain.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
-          scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0)}}));
+          scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0),
+          ...(url.searchParams.has('limit')?{limit:Number(url.searchParams.get('limit'))}:{})}}));
       }
       if (req.method === 'POST' && route === '/memory/preferences') return exclusive('writer-start',async()=>{
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');

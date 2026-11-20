@@ -2,6 +2,18 @@
 
 <current>
 
+Memory › Assistant notes: past conversations and working notes as tables (owner, 2026-11-19:
+"what are these untitled conversations?" and "avoid scrolling as much as possible and use
+tables instead, everywhere").
+- Cause: the page listed every native session, including each memory review's hidden, empty
+  one, as "Untitled conversation". It now reads Hermes's own session list (`list_sessions_rich`:
+  no empty or hidden sessions, a continued conversation once), ten a page, each with its title,
+  first message (without the archive source line), where it ran and when it last went on.
+- Working notes are a table, eight a page: note, and where it came from.
+- Checks: [unit](services/hermes/test_management.py), browser
+  (`test/dashboard-pages.browser.mjs`, the Notes tests). Pending: the same look on the owner's
+  data after merge; a table-first plan for the other dashboard pages.
+
 Security fixes part 5: only addresses no model built open without a card
 ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md); owner,
 2026-11-14 "all yes" on the review's fixes 2 and 7 and the Notion item; 2026-11-19: any outside
