@@ -90,7 +90,9 @@ export function LongTerm() {
   const budgetEditable = attached && !!memory.data?.connection.verified;
   // A link to one chat's or one person's facts opens on the facts.
   const chosen = useParam('tab');
-  const filtered = !!useParam('chat') || !!useParam('about');
+  const chat = useParam('chat'),
+    about = useParam('about');
+  const filtered = !!chat || !!about;
   const tab = subTabs.find(id => id === chosen) ?? (filtered ? 'facts' : 'status');
   return (
     <>

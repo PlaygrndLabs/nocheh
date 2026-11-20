@@ -688,8 +688,9 @@ test('the sealed box switch saves with the job limits in either order, and again
 test('a custom provider is checked, added and saved from one dialog', async () => {
   // Providers have their own sub-tab; with one already added the page opens on Models.
   const {page, problems} = await open('settings?view=models');
-  await page.getByRole('tab', {name: 'Models', selected: true}).waitFor();
-  await page.getByRole('tab', {name: 'Providers'}).click();
+  const subTabs = page.getByRole('tablist', {name: 'Model settings'});
+  await subTabs.getByRole('tab', {name: 'Models', selected: true}).waitFor();
+  await subTabs.getByRole('tab', {name: 'Providers'}).click();
   await page.getByRole('button', {name: 'Add provider'}).first().click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('radio', {name: /Custom/}).click();
@@ -725,7 +726,7 @@ test('a custom provider is checked, added and saved from one dialog', async () =
   await bar.getByText('No unsaved changes').waitFor();
   assert.equal(await page.getByText(/Nocheh login|CPA/).count(), 0);
   // Every model is picked from a dropdown of the provider's models, and any other name can still be typed.
-  await page.getByRole('tab', {name: 'Models'}).click();
+  await subTabs.getByRole('tab', {name: 'Models'}).click();
   const mainModel = page.locator('#main-model');
   await mainModel.locator('option', {hasText: 'gpt-5.6-sol'}).waitFor({state: 'attached'});
   assert.equal(await mainModel.evaluate(element => element.tagName), 'SELECT');
@@ -2210,7 +2211,7 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
   );
   assert.ok(!targets.some(target => /Weekend notes|Book swap|Choir practice/.test(target)), targets.join());
   // Settings lists no groups: each one is turned on or off in Chats.
-  await page.goto(origin + '/#settings?view=telegram');
+  await page.goto(origin + '/#settings?view=telegram&tab=groups');
   await page.getByText('Add Nocheh to a group yourself in Telegram', {exact: false}).waitFor();
   assert.equal(await page.getByText('Groups Nocheh is on in').count(), 0);
   assert.deepEqual(problems, []);
@@ -2459,6 +2460,40 @@ test('usage shows calls, tokens and cost, and never prices an unknown cost as fr
   await page.getByRole('table', {name: 'Usage by part'}).getByText('67% cached').waitFor();
   await page.getByRole('radiogroup', {name: 'Period'}).getByText('Today').click();
   assert.equal(new URL(page.url()).hash, '#usage?days=1');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Usage, Messages and Inbox › History are tables of ten rows a page', async () => {
+  // Recent replies have their own sub-tab of Usage.
+  const {page, problems} = await open('usage?tab=replies');
+  const replies = page.getByRole('table', {name: 'Recent replies'});
+  await replies.locator('tbody tr').first().waitFor();
+  assert.equal(await replies.locator('tbody tr').count(), 10);
+  await page.getByRole('button', {name: 'Older'}).click();
+  await settles(replies.locator('tbody tr'), 2);
+  assert.equal(await page.getByRole('table', {name: 'Usage by part'}).count(), 0, 'one sub-tab at a time');
+
+  // Messages: ten a page, the reply beside its message, and the next page starts after the last one shown.
+  await page.goto(origin + '/#messages');
+  const messages = page.getByRole('table', {name: 'Messages'});
+  await messages.getByRole('button', {name: /^Open the assistant’s reply: The tour leaves at 21:30/}).waitFor();
+  assert.equal(await messages.locator('tbody tr').count(), 10);
+  const shown = await messages.locator('tbody tr td:first-child').allInnerTexts();
+  await page.getByRole('button', {name: 'Older'}).click();
+  await page.getByText('Newest first · page 2').waitFor();
+  const older = await messages.locator('tbody tr td:first-child').allInnerTexts();
+  assert.ok(older.length > 0 && older.every(text => !shown.includes(text)), 'no message on two pages');
+  await page.getByRole('button', {name: 'Newer'}).click();
+  await settles(messages.locator('tbody tr'), 10);
+
+  // Inbox › History: each kind is one table on its own sub-tab, and a row keeps its sub-tab when it opens.
+  await page.goto(origin + '/#inbox?view=history');
+  await page.getByRole('table', {name: 'Actions'}).getByRole('link', {name: 'Send a Telegram message'}).waitFor();
+  await page.getByRole('tab', {name: 'Assistant runs'}).click();
+  await page.getByRole('table', {name: 'Assistant runs'}).getByRole('link', {name: 'Morning aurora check'}).click();
+  await page.getByRole('dialog').waitFor();
+  assert.match(new URL(page.url()).hash, /^#inbox\?view=history&tab=runs&run=/);
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -2979,7 +3014,7 @@ test('the owner reads where group web pages and outside tools skip the card, and
   await page
     .getByText('Commands still ask you, Notion is never used in a group, and each chat’s tool switches still apply.')
     .waitFor();
-  await page.goto(origin + '/#settings?view=telegram');
+  await page.goto(origin + '/#settings?view=telegram&tab=groups');
   const groups = page.locator('section', {has: page.getByRole('heading', {name: 'In groups'})});
   assert.equal(await groups.getByRole('link', {name: 'Members'}).getAttribute('href'), '#members');
   assert.equal(await groups.getByRole('link', {name: 'Chats'}).getAttribute('href'), '#chats');
