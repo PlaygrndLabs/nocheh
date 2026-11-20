@@ -153,7 +153,17 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'tasks.reminder_texts',
     title: 'Reminder lines: who set it and where',
-    hint: 'Reminders that members set in a group start with a 👤 line naming who and where. Theirs that come due together in one group arrive as one message, at most one message per group every 10 minutes, so with many due at once the last can come tens of minutes late (about 10 minutes per further message). Nothing is dropped. Your own reminders arrive at their time. One “name: text” line each: you and person, person_gone or unnamed_person for who; set_by for who set it and where ({who}, {place}); written_by with field_title, field_notes and field_due for who last wrote the task elsewhere; closed_by for who closed it; merged and more_waiting for the header and the last line of a merged message ({count}, {place}); note_line, the mark before each line of a person’s notes ({line}); and removed_in_group, the notice when a message from you in a group removed reminders set elsewhere. {place} uses the chat words from “Approval buttons and results”. A line you remove keeps its default; keep the values in braces in these lines, as Nocheh fills them in.',
+    hint: 'Reminders that members set in a group start with a 👤 line naming who and where. Theirs that come due together in one group arrive as one message, at most one message per group every 10 minutes, so with many due at once the last can come tens of minutes late (about 10 minutes per further message). Nothing is dropped. Your own reminders arrive at their time. One “name: text” line each: you and person, person_gone or unnamed_person for who; set_by for who set it and where ({who}, {place}); written_by with field_title, field_notes and field_due for who last wrote the task elsewhere; closed_by for who closed it; merged and more_waiting for the header and the last line of a merged message ({count}, {place}); note_line, the mark before each line of a person’s notes ({line}); place_app, the place “the members’ app” for reminders a member set there; and removed_in_group, the notice when a message from you in a group removed reminders set elsewhere. {place} uses the chat words from “Approval buttons and results”. A line you remove keeps its default; keep the values in braces in these lines, as Nocheh fills them in.',
+  },
+  {
+    key: 'members.reminder',
+    title: 'Task reminder to a member',
+    hint: 'Sent to a member’s own private chat with Nocheh when a reminder they set is due, in a group or in the members’ app. {title} is the task, {due} its due day in your task time zone, {list} its project and {notes} its notes. A line whose value is missing is left out. It starts with lines from “Reminder lines to a member”.',
+  },
+  {
+    key: 'members.reminder_texts',
+    title: 'Reminder lines to a member',
+    hint: 'One “name: text” line each for a reminder a member gets: set_by, the line saying they set it themselves, and note_line, the mark before each line of the task’s notes ({line}). These lines never name who wrote or closed the task, or where. A line you remove keeps its default; keep the values in braces.',
   },
   {
     key: 'memory.source_texts',

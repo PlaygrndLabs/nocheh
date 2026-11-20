@@ -1,17 +1,23 @@
 """Fixture-only HTTP Bot API subset, with real PTB parsing and durable queue state.
 
 Contract: https://core.telegram.org/bots/api#getupdates, #sendmessage, #getfile,
-#editmessagetext, #answercallbackquery, #setmessagereaction, #leavechat and #getchatmember.
+#editmessagetext, #answercallbackquery, #setmessagereaction, #leavechat, #getchatmember and #setchatmenubutton.
 Unknown methods are recorded and rejected; this is not a Telegram implementation.
+
+It also signs Mini App launch data as Telegram does (https://core.telegram.org/bots/webapps#validating-data-for-third-party-use),
+with a key pair the tester makes for each fixture in place of Telegram's own (ADR-0265 D2): nocheh-app and
+nocheh-miniapp check it with the public half, which they honour only in the fixture.
 """
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import os
 import re
 import time
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote, urlencode
 
 TOKEN='123456:synthetic'
 # The bot as other updates show it, and as getMe describes it (https://core.telegram.org/bots/api#user).
@@ -84,6 +90,48 @@ def press(update_id,message,data,by):
             'data':data,'message':message}}
 
 
+# The fake's private launch key: 64 hex characters, an Ed25519 seed the tester makes for each fixture
+# (telegram_rehearsal.py). Only model-fixture, where the fake runs, holds it; nocheh-app and nocheh-miniapp get the public
+# half as TELEGRAM_LAUNCH_PUBLIC_KEY.
+LAUNCH_KEY_ENV='NOCHEH_TELEGRAM_FIXTURE_LAUNCH_KEY'
+# https://core.telegram.org/bots/webapps#webappinitdata: chat_type is absent from the menu button, 'sender' from a link in
+# the user's own chat with the bot, and a group's or channel's type from anywhere else.
+LAUNCH_CHAT_TYPES=('sender','private','group','supergroup','channel')
+
+
+def launch_public_key(seed_hex):
+    """The public half (64 hex characters) of an Ed25519 launch key given as its 32-byte seed in hex."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    key=Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex))
+    return key.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw).hex()
+
+
+def new_launch_key():
+    """A new launch key seed, in hex."""
+    return os.urandom(32).hex()
+
+
+def launch_data(user,auth_date,seed_hex,bot_id=None,chat_type=None,query_id=None,token=TOKEN):
+    """Launch data (Telegram.WebApp.initData) for a Telegram User `user`, signed as Telegram signs it for third parties: an
+    Ed25519 signature over "<bot id>:WebAppData\n" and every field but hash and signature as key=value, sorted by key and
+    joined by line breaks, in base64url without padding. `hash` is the bot-token HMAC Telegram adds as well
+    (https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app), over every field but itself. The
+    values are percent-encoded as Telegram sends them."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    fields={'auth_date':str(int(auth_date)),'query_id':query_id or 'AAF'+base64.urlsafe_b64encode(os.urandom(12)).decode().rstrip('='),
+            'user':json.dumps(user,ensure_ascii=False,separators=(',',':'))}
+    if chat_type is not None:
+        if chat_type not in LAUNCH_CHAT_TYPES:raise ValueError('invalid_fixture_launch')
+        fields['chat_type']=chat_type
+        if chat_type!='sender':fields['chat_instance']=str(int.from_bytes(os.urandom(6),'big'))
+    signed=str(BOT['id'] if bot_id is None else int(bot_id))+':WebAppData\n'+'\n'.join(key+'='+fields[key] for key in sorted(fields))
+    fields['signature']=base64.urlsafe_b64encode(Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed_hex)).sign(signed.encode())).decode().rstrip('=')
+    secret=hmac.new(b'WebAppData',token.encode(),hashlib.sha256).digest()
+    fields['hash']=hmac.new(secret,'\n'.join(key+'='+fields[key] for key in sorted(fields)).encode(),hashlib.sha256).hexdigest()
+    return urlencode(list(fields.items()),quote_via=quote)
+
+
 # https://core.telegram.org/bots/api#reactiontypeemoji: the only emoji a bot may react with.
 REACTIONS=frozenset('👍 👎 ❤ 🔥 🥰 👏 😁 🤔 🤯 😱 🤬 😢 🎉 🤩 🤮 💩 🙏 👌 🕊 🤡 🥱 🥴 😍 🐳 ❤️‍🔥 🌚 🌭 💯 🤣 ⚡ 🍌 🏆 💔 🤨 😐 🍓 🍾 💋 '
                     '🖕 😈 😴 😭 🤓 👻 👨‍💻 👀 🎃 🙈 😇 😨 🤝 ✍ 🤗 🫡 🎅 🎄 ☃ 💅 🤪 🗿 🆒 💘 🙉 🦄 😘 💊 🙊 😎 👾 🤷‍♂️ 🤷 🤷‍♀️ 😡'.split())
@@ -147,6 +195,21 @@ def markdown_v2(source):
     return ''.join(text),sorted((entity for entity in entities if entity['length']>0),key=lambda entity:(entity['offset'],-entity['length']))
 
 
+def menu_button(text,url):
+    """A Web App menu button, as Settings Apply sets one (https://core.telegram.org/bots/api#menubuttonwebapp)."""
+    return {'type':'web_app','text':text,'web_app':{'url':url}}
+
+
+def menu_button_valid(button):
+    """A MenuButton Telegram accepts: the default, the command list, or a Web App with a text and an https address
+    (https://core.telegram.org/bots/api#menubutton)."""
+    if not isinstance(button,dict) or button.get('type') not in ('default','commands','web_app'):return False
+    if button['type']!='web_app':return set(button)=={'type'}
+    app=button.get('web_app')
+    return (set(button)=={'type','text','web_app'} and isinstance(button.get('text'),str) and 1<=len(button['text'])<=64
+            and isinstance(app,dict) and set(app)=={'url'} and isinstance(app.get('url'),str) and app['url'].startswith('https://'))
+
+
 class TelegramMock:
     def __init__(self,state):
         if os.environ.get('NOCHEH_INSTALLATION_FIXTURE')!='1':raise ValueError('explicit_fixture_required')
@@ -157,6 +220,30 @@ class TelegramMock:
             # Menus an earlier native Hermes left behind: the default one and a forum group's own.
             'commands':{json.dumps([scope,''],sort_keys=True):[{'command':'status','description':'Show status'}]
                         for scope in ({'type':'default'},{'type':'chat','chat_id':-10042})}}
+
+    def launch(self,body):
+        """Launch data for a person, as Telegram would hand it to the Mini App they opened (POST /fixture/telegram/launch):
+        {user_id, auth_date?, chat_type?, first_name?, language_code?, bot_id?, other_key?}. The user is the one Telegram
+        knows from updates, or a synthetic one. `auth_date` defaults to now; `bot_id` signs for another bot and
+        `other_key` with a key nobody checks with, for the refusals. Nothing of it is kept."""
+        if not isinstance(body,dict) or set(body)-{'user_id','auth_date','chat_type','first_name','language_code','bot_id','other_key'}:raise ValueError('invalid_fixture_launch')
+        seed=os.environ.get(LAUNCH_KEY_ENV,'')
+        if not re.fullmatch(r'[0-9a-f]{64}',seed):raise LookupError('fixture_launch_key_missing')
+        user_id,auth_date=body.get('user_id'),body.get('auth_date',int(time.time()))
+        if type(user_id) is not int or user_id<=0 or type(auth_date) is not int or auth_date<=0:raise ValueError('invalid_fixture_launch')
+        user=dict(self.state.get('users',{}).get(str(user_id)) or person_user(user_id))
+        user={key:user[key] for key in ('id','first_name','last_name','username') if key in user}
+        if 'first_name' in body:
+            if not isinstance(body['first_name'],str) or not 1<=len(body['first_name'])<=64:raise ValueError('invalid_fixture_launch')
+            user['first_name']=body['first_name']
+        if 'language_code' in body:
+            if not isinstance(body['language_code'],str) or len(body['language_code'])>35:raise ValueError('invalid_fixture_launch')
+            user['language_code']=body['language_code']
+        user['allows_write_to_pm']=True
+        bot=body.get('bot_id')
+        if bot is not None and (type(bot) is not int or bot<=0):raise ValueError('invalid_fixture_launch')
+        if body.get('other_key') not in (None,True,False):raise ValueError('invalid_fixture_launch')
+        return {'init_data':launch_data(user,auth_date,new_launch_key() if body.get('other_key') else seed,bot,body.get('chat_type'))}
 
     def save(self):
         self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -242,8 +329,13 @@ class TelegramMock:
 
     def configure(self,body):
         """Bounded synthetic files/faults; reject malformed control atomically."""
-        if not isinstance(body,dict) or set(body)-{'files','faults','chats','chat_members'}:raise ValueError('invalid_fixture_control')
+        if not isinstance(body,dict) or set(body)-{'files','faults','drop_faults','chats','chat_members'}:raise ValueError('invalid_fixture_control')
         files=dict(self.state['files']);faults=list(self.state['faults']);chats=dict(self.state.get('chats',{}))
+        # Faults a scenario queued that the bot never used, dropped by method so they cannot answer a later scenario's call.
+        drop=body.get('drop_faults',[])
+        if not isinstance(drop,list) or not all(method in ('sendMessage','getFile','getUpdates','leaveChat','getChatMember') for method in drop):
+            raise ValueError('invalid_fixture_control')
+        faults=[fault for fault in faults if fault['method'] not in drop]
         people=dict(self.state.get('people',{}));users=dict(self.state.get('users',{}))
         # A person's status in a group as Telegram would now answer getChatMember, such as someone removed while the bot
         # missed the service message. A later message of theirs there shows them in again, as it would.
@@ -458,7 +550,26 @@ class TelegramMock:
             group=known.get('chat') or {'id':chat,'type':'supergroup',**({'title':title} if title else {})}
             self.emit(bot_status(self.next_update_id(),group,BOT_USER,known.get('status') or 'member','left'))
             self.state.setdefault('left',[]).append({'chat_id':chat,'at':time.time()});result=True
-        elif method=='setChatMenuButton':result=True
+        elif method in ('setChatMenuButton','getChatMenuButton'):
+            # https://core.telegram.org/bots/api#setchatmenubutton: a private chat's own button, or with no chat_id the
+            # default every private chat without its own shows. Each set is recorded in order, so the tester sees what
+            # Settings Apply set (ADR-0265 D11).
+            chat=data.get('chat_id')
+            if chat not in (None,''):
+                try:chat=int(chat)
+                except (TypeError,ValueError):return self.error(400,'Bad Request: chat not found')
+                if chat<=0:return self.error(400,'Bad Request: chat not found')
+            else:chat=None
+            buttons=self.state.setdefault('menu_buttons',{})
+            if method=='getChatMenuButton':result=buttons.get(str(chat) if chat is not None else 'default') or buttons.get('default') or {'type':'default'}
+            else:
+                button=data.get('menu_button') or {'type':'default'}
+                try:button=json.loads(button) if isinstance(button,str) else button
+                except ValueError:return self.error(400,'Bad Request: can\'t parse menu button JSON object')
+                if not menu_button_valid(button):return self.error(400,'Bad Request: invalid menu button specified')
+                buttons[str(chat) if chat is not None else 'default']=button
+                self.state.setdefault('menu_button_sets',[]).append({'chat_id':chat,'menu_button':button,'at':time.time()})
+                result=True
         elif method in ('setMyCommands','deleteMyCommands','getMyCommands'):
             # https://core.telegram.org/bots/api#setmycommands: one list per scope
             # and language; an absent scope is the default scope.
@@ -509,6 +620,12 @@ class TelegramMock:
 
         @app.get('/fixture/telegram')
         async def snapshot():return self.state
+
+        @app.post('/fixture/telegram/launch')
+        async def launch(request:Request):
+            try:return self.launch(await request.json())
+            except LookupError as error:return JSONResponse({'error':str(error)},status_code=409)
+            except (ValueError,TypeError):return JSONResponse({'error':'invalid_fixture_launch'},status_code=400)
 
         @app.post('/fixture/telegram/control')
         async def configure(request:Request):

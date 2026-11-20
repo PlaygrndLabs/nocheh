@@ -14,6 +14,7 @@ import {
   Pencil,
   Repeat as RepeatIcon,
   RotateCcw,
+  Smartphone,
   Tag,
   Trash2,
   User,
@@ -224,6 +225,11 @@ export function TaskRow({
           {task.origin === 'chat' && !compact && (
             <span className="inline-flex items-center gap-1">
               <MessageCircle className="size-3" aria-hidden /> Added in chat
+            </span>
+          )}
+          {task.origin === 'app' && !compact && (
+            <span className="inline-flex items-center gap-1">
+              <Smartphone className="size-3" aria-hidden /> Members’ app
             </span>
           )}
         </div>

@@ -230,7 +230,7 @@ class MiniAppSettingsTests(unittest.TestCase):
                 self.assertEqual(dispatch({'operation': 'mini_app.launch_check'}),
                                  {'bot_id': '5550002', 'owner_id': '4242', 'test_environment': True})
 
-    def test_apply_starts_the_mini_app_and_puts_it_on_the_owners_menu_button(self):
+    def test_apply_starts_the_mini_app_and_puts_it_on_the_menu_buttons(self):
         with tempfile.TemporaryDirectory() as folder:
             state = Path(folder); initialize(state); revision = self.telegram(state, TELEGRAM_BOT_NAMES='Nocheh,نوچه')
             calls = []
@@ -246,12 +246,58 @@ class MiniAppSettingsTests(unittest.TestCase):
                 self.assertEqual(apply(state)['mini_app'], 'shown')
                 up = run.call_args_list[-1].args[0]
                 self.assertEqual(up[-2:], ['nocheh-miniapp', 'nocheh-tunnel'])
-                self.assertEqual(calls[-1][0], 'setChatMenuButton')
-                self.assertEqual(calls[-1][1]['chat_id'], '4242')
-                self.assertEqual(json.loads(calls[-1][1]['menu_button']),
+                # Every private chat's default button opens the members' page; the owner's own chat keeps the owner's page,
+                # set after the default so it stands over it (ADR-0265 D11).
+                self.assertEqual([call[0] for call in calls], ['setChatMenuButton'] * 2)
+                self.assertNotIn('chat_id', calls[0][1])
+                self.assertEqual(json.loads(calls[0][1]['menu_button']),
+                                 {'type': 'web_app', 'text': 'Nocheh', 'web_app': {'url': 'https://nocheh.example.com/m/'}})
+                self.assertEqual(calls[1][1]['chat_id'], '4242')
+                self.assertEqual(json.loads(calls[1][1]['menu_button']),
                                  {'type': 'web_app', 'text': 'Nocheh', 'web_app': {'url': 'https://nocheh.example.com/'}})
+                # A changed address applies both again.
+                save(state, {'NOCHEH_MINI_APP_URL': 'https://tasks.example.com', 'CLOUDFLARE_TUNNEL_TOKEN': 'e' * 64}, view(state)['revision'])
+                del calls[:]
+                self.assertEqual(apply(state)['mini_app'], 'shown')
+                self.assertEqual([json.loads(call[1]['menu_button'])['web_app']['url'] for call in calls],
+                                 ['https://tasks.example.com/m/', 'https://tasks.example.com/'])
+                # Either call failing is reported.
+                del calls[:]
+                def refused(token, method, **params):
+                    calls.append((method, params)); return None if 'chat_id' not in params else True
+                with patch('tools.operations.installation.settings.telegram_api', side_effect=refused):
+                    self.assertEqual(apply(state)['mini_app'], 'failed')
+                self.assertEqual(len(calls), 2, 'the owner\'s button is still set when the default fails')
+                del calls[:]
                 save(state, {'NOCHEH_MINI_APP_URL': '', 'CLOUDFLARE_TUNNEL_TOKEN': ''}, view(state)['revision'])
                 self.assertEqual(apply(state)['mini_app'], 'removed')
-                # Turning it off stops the mini app and closes its tunnel.
+                # Turning it off stops the mini app and closes its tunnel, and both buttons go back to Telegram's default.
                 self.assertEqual(run.call_args_list[-1].args[0][-5:], ['rm', '-s', '-f', 'nocheh-miniapp', 'nocheh-tunnel'])
-                self.assertEqual(json.loads(calls[-1][1]['menu_button']), {'type': 'default'})
+                self.assertEqual([(call[1].get('chat_id'), json.loads(call[1]['menu_button'])) for call in calls],
+                                 [(None, {'type': 'default'}), ('4242', {'type': 'default'})])
+
+    def test_a_former_owners_chat_loses_the_owners_menu_button(self):
+        # After the owner changes, the former owner's chat keeps no button of its own: it falls back to the default,
+        # the members' page, so a former owner added as a member reaches it (ADR-0265 D11).
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); initialize(state); self.telegram(state)
+            calls = []
+            def bot(token, method, **params): calls.append((params.get('chat_id'), json.loads(params['menu_button']))); return True
+            with patch('tools.operations.installation.settings.subprocess.run') as run, \
+                    patch('tools.operations.installation.settings.refresh_honcho', return_value='unchanged'), \
+                    patch('tools.operations.installation.settings.telegram_api', side_effect=bot):
+                run.return_value.returncode = 0
+                save(state, {'NOCHEH_MINI_APP_URL': 'https://nocheh.example.com', 'CLOUDFLARE_TUNNEL_TOKEN': 'e' * 64}, view(state)['revision'])
+                self.assertEqual(apply(state)['mini_app'], 'shown')
+                self.assertEqual([chat for chat, _ in calls], [None, '4242'])
+                del calls[:]
+                save(state, {'TELEGRAM_OWNER_ID': '4343'}, view(state)['revision'], owner_change=True)
+                self.assertEqual(apply(state)['mini_app'], 'shown')
+                members, owner = {'type': 'web_app', 'text': 'Nocheh', 'web_app': {'url': 'https://nocheh.example.com/m/'}}, \
+                    {'type': 'web_app', 'text': 'Nocheh', 'web_app': {'url': 'https://nocheh.example.com/'}}
+                self.assertEqual(calls, [(None, members), ('4343', owner), ('4242', {'type': 'default'})])
+                # Applied once, it is not done again; nor when the owner stays the same.
+                del calls[:]
+                save(state, {'NOCHEH_MINI_APP_URL': 'https://tasks.example.com', 'CLOUDFLARE_TUNNEL_TOKEN': 'e' * 64}, view(state)['revision'])
+                self.assertEqual(apply(state)['mini_app'], 'shown')
+                self.assertEqual([chat for chat, _ in calls], [None, '4343'])

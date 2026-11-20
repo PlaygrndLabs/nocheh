@@ -227,6 +227,8 @@ services:
   nocheh-dashboard:
     <<: *management
     command: [dashboard]
+    # miniapp-back: the mini app reaches the dashboard for the owner's routes (ADR-0265 D3).
+    networks: [default, miniapp-back]
     ports:
       - "127.0.0.1:${NOCHEH_DASHBOARD_PORT:-8783}:${NOCHEH_DASHBOARD_PORT:-8783}"
     healthcheck:
@@ -517,7 +519,8 @@ services:
   nocheh-app:
     <<: *service
     stop_grace_period: 300s
-    networks: [default, memory, workflows]
+    # miniapp-back: the mini app reaches the members' app listener (8790) only (ADR-0265 D3).
+    networks: [default, memory, workflows, miniapp-back]
     environment:
       <<: *environment
       NOCHEH_SERVICE: nocheh-app
@@ -535,13 +538,19 @@ services:
       TELEGRAM_URL: http://nocheh-telegram:8784
       TELEGRAM_GROUP_REPLIES: ${TELEGRAM_GROUP_REPLIES:-addressed}
       TELEGRAM_BOT_NAMES: ${TELEGRAM_BOT_NAMES-Nocheh,نوچه}
+      # The members' app listener (8790, never published) checks Telegram's launch data again with the bot's public id
+      # and Telegram's public key, as the mini app does (ADR-0265 D2). Neither is a secret.
+      TELEGRAM_BOT_ID: ${TELEGRAM_BOT_ID:-}
+      TELEGRAM_TEST_ENVIRONMENT: ${TELEGRAM_TEST_ENVIRONMENT:-}
     ports: ["127.0.0.1:${NOCHEH_PORT:-8780}:8780"]
     depends_on:
       nocheh-db: {condition: service_healthy}
 
   # The Telegram mini app: the only part of Nocheh its tunnel can reach. It
   # holds no credentials and forwards a fixed set of owner routes to the
-  # dashboard after checking Telegram's signature on each request.
+  # dashboard after checking Telegram's signature on each request, and the
+  # members' page routes to nocheh-app's member listener (ADR-0265). It is on
+  # no network with the database, the machines or the Telegram bot.
   nocheh-miniapp:
     logging: *logging
     image: ${NOCHEH_IMAGES:-nocheh}-miniapp:local
@@ -560,7 +569,7 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    networks: [default, miniapp]
+    networks: [miniapp-back, miniapp]
     environment:
       TELEGRAM_BOT_ID: ${TELEGRAM_BOT_ID:-}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
@@ -569,6 +578,8 @@ services:
       NOCHEH_DASHBOARD_HOST: nocheh-dashboard
       NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:-8783}
       NOCHEH_MINI_APP_PORT: '8788'
+      # The members' app listener in nocheh-app, the only member route target.
+      NOCHEH_APP_URL: http://nocheh-app:8790
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -577,6 +588,7 @@ services:
       start_period: 10s
     depends_on:
       nocheh-dashboard: {condition: service_started}
+      nocheh-app: {condition: service_started}
 
   # Cloudflare's tunnel connector: an outbound connection only, no open port.
   # Its public hostname points to http://nocheh-miniapp:8788.
@@ -752,6 +764,10 @@ networks:
     internal: true
   # Shared only by the mini app and its tunnel, so the tunnel reaches nothing else.
   miniapp: {}
+  # The mini app's way in (ADR-0265 D3): only the mini app, the dashboard (the owner's routes) and nocheh-app (the
+  # members' app listener). No way out, and none of the other services.
+  miniapp-back:
+    internal: true
 
 secrets:
   honcho_database_password:

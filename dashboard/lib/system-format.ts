@@ -504,6 +504,7 @@ const sendReasons: Record<string, string> = {
   audience_changed: 'Blocked: wrong chat',
   reaction_unbound: 'Not tied to a current message',
   refused: 'Stopped by Nocheh’s own check',
+  reminder_skipped: 'Reminders set in the members’ app could not reach the member',
 };
 /** Why a send didn't go through, in short plain words; an unknown code shows as it is. A recovered leave says
  * Nocheh left, since the stage may have learned that from Telegram rather than from a retry. */
@@ -512,9 +513,12 @@ export function sendReason(row: {
   kind?: string;
   error_code?: string | null;
   recovered?: boolean;
+  detail?: string | null;
 }): string {
   const code = row.error_code;
   if (!code) return '';
+  // Reminders a member set in the members’ app that could not reach them: storage writes the day’s line itself.
+  if (code === 'reminder_skipped') return row.detail || sendReasons[code]!;
   // Not sent and rate limited is Nocheh's own flood window, not the app asking.
   const reason =
     code === 'rate_limited' && row.state === 'not_sent' ? 'Held back: too many at once' : (sendReasons[code] ?? code);

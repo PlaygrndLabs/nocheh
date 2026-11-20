@@ -149,6 +149,46 @@ your members' groups helps Telegram answer the check made before a private
 turn; without it, a quiet member may lose a group after 30 days until they write
 there.
 
+### Upgrade to step 5
+
+Take a backup first ([ADR-0265](adr/0265-member-mini-app.md)). Step 5 gives
+members their own app in Telegram and sends each member's reminders to that
+member.
+
+1. Rebuild and run every image from the same revision with `./bin/nocheh up` or
+   `update`; `deploy local` alone replaces only `nocheh-app`. The mini app image
+   serves the new members' page and forwards it to `nocheh-app`, which opens its
+   members' listener on port 8790 (never published) and answers the bot's new
+   `POST /internal/notices/authorize`; `nocheh-telegram` asks it before a reminder
+   goes into a member's chat, and the dashboard's Apply sets the new menu
+   buttons. A mixed set refuses rather than opens: an older bot never sends to a
+   member's chat, so those reminders wait.
+2. Compose adds one internal network, `miniapp-back`, shared only by
+   `nocheh-miniapp`, `nocheh-dashboard` and `nocheh-app`, and takes the mini app
+   off the `default` network. Each stack now makes about eight networks; check
+   the [address pools](#several-workspaces) if you run several workspaces.
+   `nocheh-app` now reads the public `TELEGRAM_BOT_ID` and
+   `TELEGRAM_TEST_ENVIRONMENT`, and `nocheh-miniapp` gets
+   `NOCHEH_APP_URL=http://nocheh-app:8790`; Compose sets these, and no secret is
+   added.
+3. Start the app first. Its start adds `members.reminders` (on),
+   `members.app_since`, `member_app_prefs`, `member_app_limits`,
+   `owner_task_version_key` (made with a random key on first use),
+   `owner_tasks.created_by_account`, the reminder columns `set_via`,
+   `deliver_chat` and `notice_digest`, `owner_task_writers.via`, and origin
+   `'app'` in the task checks, when missing; nothing is copied or moved.
+4. With the mini app set up, apply the settings once (Save in Settings ›
+   Telegram, or `./bin/nocheh config apply`). Apply sets the default menu button
+   of every private chat with the bot to the members' page (`/m/`) and keeps your
+   own chat's button on your page (`/`). Until then members have no button.
+
+Every existing member gets **Reminders to themselves** on. From the upgrade on,
+a reminder a member sets, in a group or the app, goes to their own private chat
+while they can be reached there. Group answers no longer name who a task is about,
+and name a person assigned only by their Telegram name, when you linked them in
+Memory › People to an account in that group; everyone else assigned is counted.
+Your own names for people never reach a group or a member. Strangers also see the menu button, and get a closed page.
+
 See [service names, responsibilities, dashboards and workflow](services.md).
 Host services require Node 26.x; set `NOCHEH_NODE` when selecting a non-default executable.
 
@@ -290,7 +330,7 @@ workspace stays stopped, and a `make dev` stack reloads by itself.
 
 <docker_address_pools>
 
-Each stack makes about seven internal Docker networks. Docker Desktop's default
+Each stack makes about eight internal Docker networks. Docker Desktop's default
 address pools run out after two or three stacks, and `up` then fails with
 "all predefined address pools have been fully subnetted". Add this to Docker
 Desktop › Settings › Docker Engine (or `/etc/docker/daemon.json` on Linux),

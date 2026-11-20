@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,memberReadLines,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
+import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,memberReadLines,memberReminderLines,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
 import {brainSummary} from '../src/brain/brain.js';
 import {fixtureBrain,type FakeCall} from './fixture-brain.js';
 
@@ -85,7 +85,7 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
     unnamed_person:'a member',set_by:'\u{1f464} Set by {who} in {place}',written_by:'\u270f\ufe0f Last written by {who} in {place}: {fields}',
     field_title:'title',field_notes:'notes',field_due:'due day',closed_by:'\u2611\ufe0f Closed by {who} in {place}',merged:'\u{1f514} {count} reminders set in {place}',
     more_waiting:'\u23f3 {count} more reminders set in {place} are due. They come in the next message; at most one message per group every 10 minutes.',
-    note_line:'\u2506 {line}',
+    note_line:'\u2506 {line}',place_app:'the members\u2019 app',
     removed_in_group:'\u{1f5d1}\ufe0f A message from you in {place} removed {count} reminders on {title} that were set elsewhere: {times}. If you did not mean to, add them again in the dashboard.'});
   // An empty line keeps its default; an edited one is used.
   assert.equal(reminderLines('set_by:\nyou: me').set_by,reminderLines('').set_by);assert.equal(reminderLines('you: me').you,'me');
@@ -100,7 +100,8 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
   assert.equal(promptProblem('telegram.approval_texts','sent: Sent!\ntopic: in a topic'),null,'lines a card has today keep their freedom');
   assert.equal(promptProblem('tasks.reminder_texts',reminderTexts),null);assert.equal(promptProblem('telegram.approval_texts',approvalTexts),null);
   for(const [key,required] of Object.entries(labeledPlaceholders))for(const [name,values] of Object.entries(required!)) {
-    const line=(key==='tasks.reminder_texts'?reminderLines(''):key==='memory.source_texts'?sourceLines(''):key==='telegram.member_read_texts'?memberReadLines(''):approvalLines(''))[name as never] as string|undefined;
+    const line=(key==='tasks.reminder_texts'?reminderLines(''):key==='memory.source_texts'?sourceLines(''):key==='telegram.member_read_texts'?memberReadLines(''):
+      key==='members.reminder_texts'?memberReminderLines(''):approvalLines(''))[name as never] as string|undefined;
     assert.ok(line&&values.every(value=>line.includes(value)),`${key} ${name}: its default keeps its values`);
   }
   // A stored text with such a line is still read, so the owner's other lines stay.

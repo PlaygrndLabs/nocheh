@@ -19,7 +19,8 @@ import time
 import traceback
 import urllib.parse
 from tools.paths import ROOT
-from tools.acceptance.telegram_rehearsal import (TELEGRAM_SERVICE, archived_delivery, telegram_health, validate_fixture,
+from tools.acceptance import canaries
+from tools.acceptance.telegram_rehearsal import (MINI_APP_SERVICE, TELEGRAM_SERVICE, archived_delivery, telegram_health, validate_fixture,
                                                  wait_telegram_connected)
 
 # Only the owner adds Nocheh to a group (ADR-0253). The owner adds it to GROUP and OTHER_GROUP when the fake Telegram
@@ -146,6 +147,55 @@ headers:{'content-type':'application/json','X-Hermes-Session-Token':process.env.
 const text=await response.text();if(!response.ok)throw Error('native_http_'+response.status+':'+text.slice(0,300));console.log(text);"""
         return json.loads(subprocess.check_output(self.command+['exec', '-T', 'nocheh-app', 'node', '--input-type=module', '-e', script,
             path, json.dumps(body), method or ''], text=True))
+
+    def mini(self, path, method='GET', body=None, headers=None):
+        """A call to the Telegram mini app's edge (nocheh-miniapp) as a phone makes it through the tunnel: run inside that
+        container, to its own port, with no Bearer and no service token. Returns {status, headers, text}; `headers` holds
+        the answer's cache-control and content-security-policy."""
+        self.mini_running()
+        script = """const [path,method,encoded,extra]=process.argv.slice(1),body=JSON.parse(encoded);
+const headers=JSON.parse(extra);if(body!==null)headers['content-type']='application/json';
+const response=await fetch('http://127.0.0.1:8788'+path,{method,headers,...(body===null?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(60000)});
+console.log(JSON.stringify({status:response.status,headers:{'cache-control':response.headers.get('cache-control'),
+'content-security-policy':response.headers.get('content-security-policy')},text:await response.text()}));"""
+        return json.loads(subprocess.check_output(self.command+['exec', '-T', MINI_APP_SERVICE, 'node', '--input-type=module', '-e', script,
+                                                                path, method, json.dumps(body), json.dumps(headers or {})], text=True))
+
+    def mini_running(self):
+        """The mini app's edge, started again when gone. The fixture runs it without the saved address and tunnel token that
+        turn the mini app on, so a settings Apply in an earlier scenario removes it, as Apply does on an install with the
+        mini app off."""
+        if MINI_APP_SERVICE not in self.manifest['services']:
+            raise Failed('mini_app_not_in_fixture: run telegram_rehearsal with --miniapp-image')
+        if not subprocess.check_output(self.command+['ps', '-q', MINI_APP_SERVICE], text=True).strip():
+            self.run('up', '-d', '--no-build', '--no-deps', '--wait', MINI_APP_SERVICE)
+
+    def mini_reaches(self, url):
+        """Whether the mini app's edge can open an address at all (any answer counts), from inside its container."""
+        self.mini_running()
+        script = """try{await fetch(process.argv[1],{signal:AbortSignal.timeout(10000)});console.log('true');}catch{console.log('false');}"""
+        return subprocess.check_output(self.command+['exec', '-T', MINI_APP_SERVICE, 'node', '--input-type=module', '-e', script, url],
+                                       text=True).strip() == 'true'
+
+    def launch(self, user, **options):
+        """Launch data the fake Telegram signs for the Telegram user `user`, as Telegram hands it to the Mini App they opened
+        from their menu button: auth_date (default now), chat_type, first_name, language_code, bot_id or other_key."""
+        return self.http('/fixture/telegram/launch', {'user_id': int(user), **options})['init_data']
+
+    def member_http(self, path, user=None, body=None, method=None, launch=None, label=None):
+        """A call of the members' page (/api/member<path>) through the mini app's edge, with launch data for `user` (or the
+        given `launch`) and nothing else: no Bearer, no session. Returns {status, body} with the JSON body, and keeps the
+        answer (never the launch data) in the fixture's mini-app-responses.jsonl for the HTTP canary sweep."""
+        launch = self.launch(user) if launch is None else launch
+        answer = self.mini('/api/member'+path, method or ('GET' if body is None else 'POST'), body, {'x-telegram-init-data': launch})
+        try:
+            parsed = json.loads(answer['text']) if answer['text'] else None
+        except ValueError:
+            parsed = {'raw': answer['text'][:500]}
+        canaries.log_http(self.directory, {'user': None if user is None else int(user), 'label': label, 'method': method or ('GET' if body is None else 'POST'),
+                                           'path': path.split('?', 1)[0], 'status': answer['status'], 'cache': answer['headers'].get('cache-control'),
+                                           'body': answer['text']})
+        return {'status': answer['status'], 'body': parsed, 'cache': answer['headers'].get('cache-control')}
 
     def telegram(self):
         return self.http('/fixture/telegram')

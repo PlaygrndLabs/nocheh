@@ -14,9 +14,15 @@ import {hostTransport} from '../workflows/host-transport.js';
 import {restoredInactive} from './lifecycle.js';
 import {servedPolicy} from './chats.js';
 import {startChatRecords} from './chat-seed.js';
+import {memberAppServer} from './member-app.js';
+import {MEMBER_APP_PORT} from '../member-app-wire.js';
+import {launchKey} from '../telegram-launch.js';
 
 // Turns and service calls that run a built-in instruction text carry the owner's replacements. Telegram calls go to
 // Nocheh's own bot (ADR-0235), the other helper services to the Hermes service.
+// The members' app checks Telegram's launch data with the public bot id and Telegram's key; a fixture key set where it
+// may not be honoured stops the app here, before anything starts (ADR-0265 D2).
+const memberBot=process.env.TELEGRAM_BOT_ID??'',memberKey=launchKey(process.env,memberBot);
 const config=settings(),pools=runtimeStoreGroups(),adapter=combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token})),call=withPrompts(runtimeCall(adapter),pools.api.control);
 // Chats are served as the chat directory holds them (ADR-0252): the owner adds Nocheh to a group or turns it on (ADR-0253).
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
@@ -30,11 +36,15 @@ const server=storageServer(services,config,call,()=>({...capture.status(),workfl
 transport?.attach(server);
 // Long-term memory is on by default once its engine's service (Honcho) is enabled; an owner's own attach or detach stands.
 if(config.honchoEnabled)void services.memory.attachByDefault().catch(error=>console.warn(JSON.stringify({event:'memory_default_attach_failed',code:error?.code??'unknown'})));
+// The members' app's own listener (ADR-0265 D3): only /v1/member-app/*, reached by nocheh-miniapp alone.
+const memberApp=memberAppServer({control:services.stores.control,tasks:services.tasks,policy:()=>services.access.policy(),call,dataDir:config.dataDir},
+  {botId:memberBot,key:memberKey});
+memberApp.listen(MEMBER_APP_PORT,config.host,()=>console.log(JSON.stringify({event:'member_app_ready',port:MEMBER_APP_PORT})));
 server.listen(config.port,config.host,()=>console.log(JSON.stringify({event:'ready',service:config.service,storage_layout:'original-only-v1',port:(server.address() as {port:number}).port})));
 let stopping=false;
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{
   if(stopping)return;stopping=true;
   transport?.close();stopChatRecords();
-  const closed=new Promise<void>(resolve=>server.close(()=>resolve()));
+  const closed=Promise.all([new Promise<void>(resolve=>server.close(()=>resolve())),new Promise<void>(resolve=>memberApp.close(()=>resolve()))]);
   void Promise.all([closed,capture.stop(),workflows.close()]).then(()=>pools.close()).catch(()=>{process.exitCode=1;});
 });

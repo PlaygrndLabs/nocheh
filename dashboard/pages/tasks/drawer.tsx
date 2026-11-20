@@ -43,6 +43,7 @@ import {ListField, PeopleField, TagsField, withPending} from './fields';
 import {
   actorName,
   day,
+  originPlace,
   priorityOf,
   repeatText,
   scopeName,
@@ -774,7 +775,11 @@ function RemindersField({
   return (
     <Field
       label="Reminders"
-      hint={'Sent to your private chat with Nocheh' + (zone ? `, at times in ${zone.replace(/_/g, ' ')}.` : '.')}
+      hint={
+        'Yours are sent to your private chat with Nocheh' +
+        (zone ? `, at times in ${zone.replace(/_/g, ' ')}` : '') +
+        '. One a member set in the members’ app goes to their own private chat.'
+      }
     >
       <div className="space-y-2">
         {reminders.map((item, index) => (
@@ -1251,7 +1256,7 @@ function Comments({task, readOnly}: {task: Detail; readOnly: boolean}) {
           <li key={comment.id} className="group space-y-0.5">
             <p className="flex items-center gap-2 text-xs text-muted">
               <span className="font-medium text-fg">{actorName(comment.author)}</span>
-              {comment.origin === 'chat' && 'in chat'} · {when(comment.created_at)}
+              {originPlace(comment.origin)} · {when(comment.created_at)}
               {!readOnly && (
                 <button
                   type="button"
@@ -1360,7 +1365,7 @@ function History({task, settings}: {task: Detail; settings: TaskSettings | undef
           <li key={entry.id} className="text-xs">
             <span className="text-muted">
               {when(entry.at)} · {actorName(entry.actor)}
-              {entry.origin === 'chat' ? ' in chat' : ''}
+              {originPlace(entry.origin) && ' ' + originPlace(entry.origin)}
             </span>
             <span className="block text-fg">{describe(entry.changes, settings).join('; ')}</span>
           </li>

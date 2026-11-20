@@ -139,9 +139,9 @@ test('reset setup restores only current configuration under a new generation and
 
 test('a snapshot restores its chats, app ids and members exactly, and decides what each value is from them',fixture,async()=>{
   const {stores,drop}=await freshStores(),project='a'.repeat(64),topic='-1001/topic/3',bob=chatIdFor('telegram','456');
-  // Bob is a paused member with tasks read only and private chat off, switched on in -1001 and off in NG2; the daily cap is 50.
+  // Bob is a paused member with tasks read only, private chat off and reminders to himself off, switched on in -1001 and off in NG2; the daily cap is 50.
   const member=memberIdFor(accountIdFor('telegram','456'));
-  const members={members:[{id:member,state:'paused',group_talk:true,group_jobs:false,group_post_other:true,group_tools:false,tasks:'read',private_chat:false}],
+  const members={members:[{id:member,state:'paused',group_talk:true,group_jobs:false,group_post_other:true,group_tools:false,tasks:'read',private_chat:false,reminders:false}],
     member_accounts:[{member_id:member,app:'telegram',external_id:'456'}],
     member_chats:[{member_id:member,chat_id:NG2,enabled:false},{member_id:member,chat_id:'-1001',enabled:true}],daily_messages:[{daily_messages:50}]};
   // Both families: an old-shaped group and its topic keep their Telegram values; NG2 has a digest id, an old and a current Telegram id.

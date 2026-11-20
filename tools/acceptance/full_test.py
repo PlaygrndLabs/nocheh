@@ -38,7 +38,10 @@ from tools.acceptance.owner_dashboard import FIXTURE_PASSWORD
 from tools.paths import ROOT
 
 IMAGES = {'services': 'nocheh-services:local', 'management': 'nocheh-management:local', 'postgres': 'nocheh-store-postgres:local',
-          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:3326373c', 'box': 'nocheh-box:local'}
+          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:3326373c', 'box': 'nocheh-box:local', 'miniapp': 'nocheh-miniapp:local'}
+# The Telegram mini app's edge joins the fixture only when the fake Telegram connects (telegram_rehearsal.py), without its
+# tunnel; the synthetic installation itself starts without it.
+LATER_IMAGES = ('miniapp',)
 BROWSER_IMAGE = 'nocheh-tester-browser:local'
 # The made-up machine the machine job scenarios work on over SSH (deploy/acceptance/vm-fixture.Dockerfile).
 VM_IMAGE = 'nocheh-tester-vm:local'
@@ -166,6 +169,13 @@ TITLES = {
     'member_private_chat_stays_with_the_member': 'A member\'s private chat stays there: no group, other member, your turns or memory',
     'owner_asks_about_a_member': 'You ask about a member: one separate answer from their chat only, then dropped',
     'private_canaries_never_left_the_owner': 'Private marks never left your private chat, and a member\'s never left theirs',
+    'owner_mini_app_still_works': 'Your own mini app still opens and reaches the dashboard, and the edge reaches nothing else',
+    'menu_button_on_apply': 'Apply sets the members\' page as every private chat\'s menu button, and your own chat keeps yours',
+    'member_app_tasks': 'In the members\' app a member sees only the tasks of the groups they joined, never your private side, and changes them only with write',
+    'member_app_ends_on_removal': 'Pausing, removing or signing out closes the members\' app at once, and older launches stay closed',
+    'member_app_drops_a_left_group': 'A group a member left without Nocheh hearing of it drops out of their app once Telegram is asked',
+    'member_app_reminder_goes_to_setter': 'A reminder a member sets in the app reaches only their own chat; with no way to reach them, none is set',
+    'member_app_never_leaks': 'No private mark is in any answer of the members\' app or any reminder a member got',
     'no_lingering_isolated_turns': 'Nothing left running afterwards', 'dashboard_pages': 'Every dashboard page opens',
 }
 
@@ -178,7 +188,9 @@ BUILDS = [('services', 'nocheh-services:tester', ['--target', 'runtime']),
           ('native', 'nocheh-hermes:tester', ['-f', 'deploy/hermes.Dockerfile',
                                                '--build-context', 'hermes_source=data/compat/upstreams/hermes-agent']),
           # The sealed job box, which the GitHub fetcher runs too; it uses no build arguments.
-          ('box', 'nocheh-box:tester', ['-f', 'deploy/box.Dockerfile'])]
+          ('box', 'nocheh-box:tester', ['-f', 'deploy/box.Dockerfile']),
+          # The Telegram mini app's edge and its pages (ADR-0265).
+          ('miniapp', 'nocheh-miniapp:tester', ['--target', 'mini-app'])]
 
 
 def build_images(log):
@@ -326,7 +338,8 @@ def main():
             setattr(args, role+'_image', tag)
     if fresh and all(row['passed'] for row in steps):
         start = lambda: step('start_synthetic_nocheh', [sys.executable, 'tools/acceptance/rehearsals/installation-rehearsal.py', '--directory', str(directory),
-                             '--keep', '--preview-port', str(free_port())]+[value for role in IMAGES for value in ('--'+role+'-image', getattr(args, role+'_image'))], log)
+                             '--keep', '--preview-port', str(free_port())]+[value for role in IMAGES if role not in LATER_IMAGES
+                                                                            for value in ('--'+role+'-image', getattr(args, role+'_image'))], log)
         steps.append(start())
         if not steps[-1]['passed'] and (directory/'fixture.json').exists():
             # A service can stop during a busy cloud start while a fresh start passes.
@@ -337,7 +350,8 @@ def main():
             directory.rename(directory.parent/first['directory'])
             steps[-1] = {**start(), 'first_start': first}
         if steps[-1]['passed']:
-            steps.append(step('connect_fake_telegram', [sys.executable, '-m', 'tools.acceptance.telegram_rehearsal', '--directory', str(directory)], log))
+            steps.append(step('connect_fake_telegram', [sys.executable, '-m', 'tools.acceptance.telegram_rehearsal', '--directory', str(directory),
+                                                        '--miniapp-image', args.miniapp_image], log))
     scenarios = []
     if all(row['passed'] for row in steps):
         summary, _ = run(directory, [name for name in order if name != 'dashboard_pages'], ProductScenarios)

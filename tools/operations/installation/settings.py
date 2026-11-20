@@ -235,7 +235,8 @@ def apply(state, progress=lambda step: None):
         honcho = refresh_honcho(state, values)
         memory = rebuild_memory(state, values, honcho)
         progress('telegram')
-        menu = mini_app.menu_button(values, telegram_api, shown_before=mini_app.enabled(before))
+        menu = mini_app.menu_button(values, telegram_api, shown_before=mini_app.enabled(before),
+                                    former_owner=before.get('TELEGRAM_OWNER_ID'))
         # A rebuild that did not start leaves the settings waiting to apply, so Apply tries it again.
         if memory != 'failed':
             temporary = directory / 'applied.tmp'

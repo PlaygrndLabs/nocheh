@@ -3,7 +3,7 @@ import {cardName,visible} from './action-text.js';
 import {blankName,calmMarks,fillLine,labelName,nameKey,placeLabel,quotedName,type PlaceWords} from './chat-labels.js';
 import {chatShortId,type ChatDirectory} from './chats.js';
 import {telegramUsername} from './chats-telegram.js';
-import {fillTemplate,type ReminderText} from './prompts.js';
+import {fillTemplate,type MemberReminderText,type ReminderText} from './prompts.js';
 
 /*
  * The text of a task reminder (ADR-0255). A reminder the owner set in their private chat or the dashboard, on a task
@@ -55,8 +55,9 @@ export function noteLines(notes:string,mark:string):string {
 /** Who set a reminder or wrote a field: the owner, or a person by their account (null when Nocheh could not tell
  * which) and the name Telegram showed for them then. */
 export interface Who {by:'owner'|'person';account:string|null;name:string|null}
-/** Who last wrote one field of a task anywhere but the owner's private chat or the dashboard, and where. */
-export interface Writer extends Who {field:'title'|'notes'|'due'|'closed';chat:string}
+/** Who last wrote one field of a task anywhere but the owner's private chat or the dashboard, and where: a chat, or the
+ * members' app (`via` 'app', step 5), which has no chat. */
+export interface Writer extends Who {field:'title'|'notes'|'due'|'closed';chat:string|null;via?:'chat'|'app'}
 /** What Telegram last told of an account: its name and public username. */
 export interface Person {display_name:string|null;username:string|null}
 /** What labels read: the chat directory, the members who reach a served group now (null when not known, so nobody
@@ -65,8 +66,9 @@ export interface Names {directory:ChatDirectory;allowed:ReadonlyMap<string,reado
 /** The owner's words: the reminder lines, the one set of chat words (the approval texts) and the reminder template. */
 export interface Words {lines:Record<ReminderText,string>;places:PlaceWords;template:string}
 /** One reminder with its task as a reminder shows it. `chat` is where it was set (null: the owner's private chat, the
- * dashboard, the API or a card); `due` is the due day in words, `list` the project's name. */
-export interface ReminderRow {id:string;at:number;setter:Who;chat:string|null;title:string;notes:string;due:string|null;list:string|null;
+ * dashboard, the API or a card, or, with `via` 'app', the members' app, step 5); `due` is the due day in words, `list` the
+ * project's name. */
+export interface ReminderRow {id:string;at:number;setter:Who;chat:string|null;via?:'chat'|'app';title:string;notes:string;due:string|null;list:string|null;
   closed:boolean;writers:readonly Writer[]}
 /** Name keys by who holds them: members now and people in the message, the owner's chat and the served groups and topics. */
 export type NameKeys=ReadonlyMap<string,ReadonlySet<string>>;
@@ -116,11 +118,14 @@ export function whoLabel(who:Who,words:Words,names:Names,keys:NameKeys):string {
     fillLine(words.places.name_id,{name:quotedName(shown.name),id:personShortId(who.account,names.directory)});
   return fillLine(names.allowed&&!names.allowed.has(who.account)?line.person_gone:line.person,{name});
 }
-/** A chat in the owner's chat words. */
-export const placeOf=(chat:string,words:Words,names:Names)=>placeLabel(chat,words.places,names.directory);
-/** "Set by {who} in {place}", for a reminder set anywhere but the owner's private chat or the dashboard; else null. */
-export function setByLine(row:{setter:Who;chat:string|null},words:Words,names:Names,keys:NameKeys):string|null {
-  return row.chat===null?null:fillLine(words.lines.set_by,{who:whoLabel(row.setter,words,names,keys),place:placeOf(row.chat,words,names)});
+/** A chat in the owner's chat words; the members' app (no chat, step 5) as place_app. */
+export const placeOf=(chat:string|null,words:Words,names:Names)=>chat===null?words.lines.place_app:placeLabel(chat,words.places,names.directory);
+/** Whether a reminder or a write came from the members' app (step 5): a person with no chat. */
+const fromApp=(row:{chat:string|null;via?:'chat'|'app'})=>row.via==='app'&&row.chat===null;
+/** "Set by {who} in {place}", for a reminder set anywhere but the owner's private chat or the dashboard ("in the members'
+ * app" for one a member set there, step 5); else null. */
+export function setByLine(row:{setter:Who;chat:string|null;via?:'chat'|'app'},words:Words,names:Names,keys:NameKeys):string|null {
+  return row.chat===null&&!fromApp(row)?null:fillLine(words.lines.set_by,{who:whoLabel(row.setter,words,names,keys),place:placeOf(row.chat,words,names)});
 }
 
 const fieldLines={title:'field_title',notes:'field_notes',due:'field_due'} as const;
@@ -133,16 +138,16 @@ const fieldLines={title:'field_title',notes:'field_notes',due:'field_due'} as co
 function parts(row:ReminderRow,words:Words,names:Names,keys:NameKeys,setBy:boolean):{lines:string[];body:string} {
   const line=words.lines,lines:string[]=[],who=(value:Who)=>whoLabel(value,words,names,keys);
   const set=setBy?setByLine(row,words,names,keys):null;if(set)lines.push(set);
-  const writers=new Map<string,{who:Who;chat:string;fields:string[]}>();
+  const writers=new Map<string,{who:Who;chat:string|null;fields:string[]}>();
   for(const field of ['title','notes','due'] as const)for(const writer of row.writers.filter(item=>item.field===field)) {
-    if(writer.chat===row.chat&&whoKey(writer)===whoKey(row.setter))continue;
-    const key=whoKey(writer)+'\n'+writer.chat,entry=writers.get(key)??{who:writer,chat:writer.chat,fields:[]};
+    if(writer.chat===row.chat&&fromApp(writer)===fromApp(row)&&whoKey(writer)===whoKey(row.setter))continue;
+    const key=whoKey(writer)+'\n'+(writer.chat??'app'),entry=writers.get(key)??{who:writer,chat:writer.chat,fields:[]};
     entry.fields.push(line[fieldLines[field]]);writers.set(key,entry);
   }
   for(const entry of writers.values())lines.push(fillLine(line.written_by,{who:who(entry.who),place:placeOf(entry.chat,words,names),fields:entry.fields.join(', ')}));
   const closer=row.closed?row.writers.find(item=>item.field==='closed'):undefined;
   if(closer)lines.push(fillLine(line.closed_by,{who:who(closer),place:placeOf(closer.chat,words,names)}));
-  const body=row.chat!==null||lines.length
+  const body=row.chat!==null||fromApp(row)||lines.length
     ?fillTemplate(words.template,{title:cardName(calmMarks(row.title),300),due:row.due,list:row.list,notes:row.notes?noteLines(row.notes,line.note_line)||null:null})
     :fillTemplate(words.template,{title:row.title,due:row.due,list:row.list,notes:row.notes?unitCut(row.notes,500):null});
   return {lines,body};
@@ -184,7 +189,7 @@ export function mergedReminder(rows:readonly ReminderRow[],words:Words,names:Nam
   const compose=(taken:readonly ReminderRow[],body?:string)=>{
     const sections=new Map<string,{row:ReminderRow;blocks:string[]}>();
     for(const row of [...taken].sort(byDue)) {
-      const key=whoKey(row.setter)+'\n'+row.chat,part=blocks.get(row.id)!,section=sections.get(key)??{row,blocks:[]};
+      const key=whoKey(row.setter)+'\n'+(row.chat??(fromApp(row)?'app':'')),part=blocks.get(row.id)!,section=sections.get(key)??{row,blocks:[]};
       section.blocks.push([...part.lines,body??part.body].join('\n'));sections.set(key,section);
     }
     const rest=rows.length-taken.length+waiting;
@@ -202,4 +207,24 @@ export function mergedReminder(rows:readonly ReminderRow[],words:Words,names:Nam
   // One reminder alone is too long: its body is cut so the lines around it stay whole.
   const room=limit-compose(taken,'').length-1,body=blocks.get(taken[0]!.id)!.body;
   return {text:wellFormed(room>0?compose(taken,unitCut(body,room)+ellipsis):unitCut(text,limit-1)+ellipsis),taken};
+}
+
+/** A member's words for a reminder of their own (step 5, ADR-0265 D9): the members.reminder template and the
+ * members.reminder_texts lines, which the owner edits like every bot text. */
+export interface MemberWords {template:string;lines:Record<MemberReminderText,string>}
+/**
+ * The reminder a member set, as it goes to their own private chat with Nocheh (step 5, ADR-0265 D9): the task's title on
+ * one line, its due day (written in the tasks' one time zone, as the task holds it), its project's name and its notes,
+ * every line of them marked, then the set_by line ("Set by you"), never cut. Nothing else: no line says who else wrote or
+ * closed the task or where, and no chat, group or person is named, because who last wrote a task is kept for the owner
+ * without regard to what this member sees now or when the task joined their board. Within `limit` UTF-16 units, the
+ * body cut with an ellipsis when it must be.
+ */
+export function memberReminderText(row:Pick<ReminderRow,'title'|'notes'|'due'|'list'>,words:MemberWords,limit=4000):string {
+  const body=fillTemplate(words.template,{title:cardName(calmMarks(row.title),300),due:row.due,list:row.list,
+    notes:row.notes?noteLines(row.notes,words.lines.note_line)||null:null});
+  const tail='\n\n'+words.lines.set_by;
+  if(body.length+tail.length<=limit)return wellFormed(body+tail);
+  const room=limit-tail.length-1;
+  return wellFormed(room>0?unitCut(body,room)+ellipsis+tail:unitCut(words.lines.set_by,limit));
 }

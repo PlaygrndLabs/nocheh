@@ -160,5 +160,55 @@ class SavedMarksTests(unittest.TestCase):
                 canaries.save(folder, {'PRIVATEMARK14': 'personal task'}, 124)
 
 
+class MemberAppSweepTests(unittest.TestCase):
+    """The members' app (ADR-0265) reads no chat, so any mark in any of its answers is a leak, a member's own included;
+    the reminders in members' own chats are swept for the app's marks and for people's Telegram names."""
+    MARKS = {'MEMBERMARK7said', 'PRIVATEMARK12', 'GP2MARK9', 'OWNERNAMEMARK9'}
+
+    def test_any_mark_in_any_answer_is_a_leak_and_a_clean_answer_is_not(self):
+        responses = [{'user': MEMBER, 'method': 'GET', 'path': '/tasks', 'status': 200, 'body': json.dumps({'tasks': [{'title': 'Seen APPSEEN9'}]})},
+                     {'user': MEMBER, 'method': 'GET', 'path': '/me', 'status': 200, 'body': '{"name":"MEMBERMARK7said"}'},
+                     {'user': MEMBER, 'method': 'GET', 'path': '/tasks/x', 'status': 404, 'body': {'error': 'GP2MARK9'}},
+                     {'user': 779, 'method': 'GET', 'path': '/me', 'status': 200, 'body': 'GP2MARK91 is another mark'}]
+        hits = canaries.leaks_http(responses, self.MARKS)
+        self.assertEqual([(hit['path'], hit['mark']) for hit in hits], [('/me', 'MEMBERMARK7said'), ('/tasks/x', 'GP2MARK9')])
+        self.assertEqual(canaries.leaks_http(responses[:1], self.MARKS), [])
+
+    def test_answers_and_marks_are_kept_and_never_pass_on_nothing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(FileNotFoundError, 'member_app_responses_missing'):
+                canaries.load_http(folder)
+            with self.assertRaisesRegex(FileNotFoundError, 'member_app_marks_missing'):
+                canaries.load_app_marks(folder)
+            canaries.log_http(folder, {'user': MEMBER, 'path': '/me', 'status': 200, 'body': '{}'})
+            canaries.log_http(folder, {'user': MEMBER, 'path': '/tasks', 'status': 200, 'body': '{"tasks":[]}'})
+            self.assertEqual([row['path'] for row in canaries.load_http(folder)], ['/me', '/tasks'])
+            self.assertEqual(oct((Path(folder)/canaries.HTTP_FILE).stat().st_mode & 0o777), '0o600')
+            canaries.save_app_marks(folder, {'GP2MARK9': 'GP2 task'}, {'APPSEEN9': 'GP1 task'})
+            value = canaries.save_app_marks(folder, {'PREJOINMARK9': 'comment'}, {})
+            self.assertEqual(value, canaries.load_app_marks(folder))
+            self.assertEqual(set(value['hidden']), {'GP2MARK9', 'PREJOINMARK9'})
+            with self.assertRaisesRegex(ValueError, 'member_app_marks_overlap'):
+                canaries.save_app_marks(folder, {'APPSEEN9': 'now hidden'}, {})
+
+    def test_reminders_in_members_chats_are_swept_on_what_they_read(self):
+        reminder = sent(MEMBER, '\u23f0 Pack the tent\n\U0001f4c1 App P1\n\n\U0001f464 Set by you', 41)
+        reminder['message']['from'] = {'id': 123456, 'is_bot': True, 'first_name': 'Synthetic'}
+        leaked = sent(779, '\u23f0 GP2MARK9 tent\n\U0001f464 Set by you', 42, edits=('\u23f0 tent, as Synthetic 778 said',))
+        other = [sent(MEMBER, 'A private reply that names GP2MARK9', 43), sent(OWNER, '\u23f0 GP2MARK9 for you', 44), sent(GROUP, '\u23f0 GP2MARK9', 45)]
+        found = canaries.leaks_reminders(state(sent=[reminder, leaked, *other]), self.MARKS | {'Synthetic'}, OWNER)
+        self.assertEqual(sorted((hit['message_id'], hit['mark']) for hit in found), [(42, 'GP2MARK9'), (42, 'Synthetic')])
+        self.assertEqual([row['message']['message_id'] for row in canaries.member_reminders(state(sent=[reminder, leaked, *other]), OWNER)], [41, 42])
+
+    def test_app_sweep_runs_after_every_app_scenario_next_to_the_private_sweep(self):
+        from tools.acceptance.full_test import TITLES
+        from tools.acceptance.product_scenarios import PRODUCT_ORDER, ProductScenarios
+        app = [name for name in PRODUCT_ORDER if name.startswith('member_app_') or name in ('owner_mini_app_still_works', 'menu_button_on_apply')]
+        self.assertEqual(app[-1], 'member_app_never_leaks')
+        self.assertEqual(PRODUCT_ORDER.index('member_app_never_leaks')+1, PRODUCT_ORDER.index('private_canaries_never_left_the_owner'))
+        self.assertLess(PRODUCT_ORDER.index('member_reminder_says_who_set_it'), PRODUCT_ORDER.index('member_app_never_leaks'))
+        self.assertTrue(all(hasattr(ProductScenarios, name) and name in TITLES for name in app))
+
+
 if __name__ == '__main__':
     unittest.main()

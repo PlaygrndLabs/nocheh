@@ -12,7 +12,9 @@ const hex=(column:string)=>`${column} ~ '^[a-f0-9]{64}$'`;
  *
  * - members: one per member, with Talk to Nocheh in groups they joined (group_talk) and its three sub-permissions, which
  *   keep their values while group_talk is off, Tasks (read and write, or read only), and Private chat with Nocheh
- *   (private_chat, step 4: on by default and independent of group_talk). 'paused' stops everything.
+ *   (private_chat, step 4: on by default and independent of group_talk), Reminders to themselves (reminders, step 5: on
+ *   by default) and app_since (step 5: when the member was added or last un-paused; a members' app launch from before
+ *   it is refused). 'paused' stops everything.
  *   Remove deletes the row: its member_chats and member_turns go with it, and its accounts are unlinked.
  * - member_chats: a member's switch for one group; a topic follows its group, so only group chats have rows. A group
  *   with no row counts as on.
@@ -21,6 +23,8 @@ const hex=(column:string)=>`${column} ~ '^[a-f0-9]{64}$'`;
  * - member_turns: the daily cap's count, one row per member turn, so a retry of the same event counts once. On a
  *   member's private turn, left_out holds the joined groups that turn leaves out (re-checks past the cap, step 4): every
  *   read bound to that turn leaves them out too, and one with no list written reads nothing.
+ * - member_app_prefs (step 5): the auth_date of the launch that last signed out of the members' app; every launch no newer than it is refused, on Telegram's clock on both sides.
+ * - member_app_limits (step 5): the members' app write counts, per 10-minute window and per UTC day.
  */
 export const memberSchema=`
 CREATE TABLE IF NOT EXISTS members (
@@ -32,11 +36,17 @@ CREATE TABLE IF NOT EXISTS members (
  group_tools boolean NOT NULL DEFAULT true,
  tasks text NOT NULL DEFAULT 'write' CHECK(tasks IN (${list(memberTaskModes)})),
  private_chat boolean NOT NULL DEFAULT true,
+ reminders boolean NOT NULL DEFAULT true,
+ app_since timestamptz NOT NULL DEFAULT now(),
  added_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),
  revision integer NOT NULL DEFAULT 1 CHECK(revision>=1)
 );
 -- Step 4 (member private chat): every member, the ones added before it too, has private chat on.
 ALTER TABLE members ADD COLUMN IF NOT EXISTS private_chat boolean NOT NULL DEFAULT true;
+-- Step 5 (members' app): "Reminders to themselves", on by default; and when the member was added or last un-paused,
+-- so a launch of the members' app from before then is refused (ADR-0265 D4).
+ALTER TABLE members ADD COLUMN IF NOT EXISTS reminders boolean NOT NULL DEFAULT true;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS app_since timestamptz NOT NULL DEFAULT now();
 CREATE TABLE IF NOT EXISTS member_chats (
  member_id text NOT NULL REFERENCES members(id) ON DELETE CASCADE,
  chat_id text NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -78,6 +88,19 @@ DO $$BEGIN
  END IF;
 END$$;
 CREATE INDEX IF NOT EXISTS chat_accounts_member ON chat_accounts(member_id) WHERE member_id IS NOT NULL;
+-- The members' app (step 5, ADR-0265). Both go with their member (a removal cascades) and stay out of the reset
+-- snapshot and the owner's record: a restored member opens the app again from the menu.
+CREATE TABLE IF NOT EXISTS member_app_prefs (
+ member_id text PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+ signed_out_auth_date timestamptz,
+ updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS member_app_limits (
+ member_id text PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+ window_start timestamptz NOT NULL DEFAULT now(),window_writes integer NOT NULL DEFAULT 0 CHECK(window_writes>=0),
+ day date NOT NULL DEFAULT (now() AT TIME ZONE 'UTC')::date,day_writes integer NOT NULL DEFAULT 0 CHECK(day_writes>=0),
+ updated_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 type Db=Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>;

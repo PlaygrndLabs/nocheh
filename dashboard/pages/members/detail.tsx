@@ -140,7 +140,10 @@ export function MemberDetail({
           <div className="flex flex-col gap-2 border-t border-line px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <p className="text-sm font-medium">Tasks</p>
-              <p className="text-[13px] text-muted">The tasks of the groups they talk in, and their reminders.</p>
+              <p className="text-[13px] text-muted">
+                {allowed.tasks === 'read' ? 'Read only' : 'Read and write'}, in groups and the members’ app: the tasks
+                of the groups they joined.
+              </p>
             </div>
             <Segmented
               label="Tasks"
@@ -159,7 +162,29 @@ export function MemberDetail({
               }
             />
           </div>
+          <Row
+            id="member-reminders"
+            title="Reminders to themselves"
+            hint={
+              allowed.tasks === 'read'
+                ? 'Needs Tasks read and write. Their switch is kept for when you give it back.'
+                : 'They set reminders on tasks, in groups and the members’ app, and Nocheh sends each to their private chat with it. Off, they can’t set any. With their private chat off, the app can’t set one, and one they set in a group comes to you.'
+            }
+            nested
+            checked={allowed.reminders}
+            disabled={busy || allowed.tasks === 'read'}
+            onChange={on =>
+              void change(
+                'reminders',
+                {reminders: on},
+                on ? `${name} can set reminders to themselves.` : `${name} can’t set reminders now.`,
+              )
+            }
+          />
         </div>
+        <p className="border-t border-line px-5 py-3 text-[13px] text-muted">
+          Members open the app from the menu button in their private chat with Nocheh.
+        </p>
       </Card>
       <Card>
         <CardHeader

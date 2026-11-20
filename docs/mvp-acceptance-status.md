@@ -205,6 +205,17 @@ the retirement gate remains pending after an inconclusive source test. [Decision
 
 <impact_review>
 
+The members' app ([ADR-0265](adr/0265-member-mini-app.md)) adds a page
+members open from the menu button of their private chat with Nocheh, a member
+listener on its own internal network, and reminders that go to whoever set
+them. It has automated store, unit, dashboard and browser coverage on synthetic
+data; its tester scenarios have not run, and it has no live run. It changes the
+owner's mini app only by moving its service to a new network and setting the
+menu buttons on Apply, so the owner's mini app sign-in needs one live recheck.
+Reminders the owner sets still reach the owner's private chat; a member's own
+reminder now reaches that member, which is a new live check. Other carried
+outcomes keep their dates and limits.
+
 The October 8 owner session ran on the source-watched operating stack after
 the simulation repairs. Three quick private texts, a voice note and two
 follow-ups were each answered exactly once, but four attempts were rejected
@@ -435,6 +446,11 @@ or the unattended release gate.
    missing or invalidated criterion. No provider cutover is authorized here.
 4. Sanitized history is published with an identical current tree; remote
    synchronization is available again for branches rebased onto it.
+5. After the members' app is merged and deployed: with a real member
+   account, open the app from the menu button of its private chat with Nocheh,
+   see only the tasks of that member's groups, set a reminder there and see it
+   arrive in that private chat; check that the owner's own menu button still
+   opens the owner's page and signs in.
 
 Historical ingestion is unapproved and is not required to repeat this test set.
 The deliberate-reset journal validator is not applicable to the clean development

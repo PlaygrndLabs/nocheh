@@ -1012,6 +1012,14 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     assert.match(last('answer').text,/^🚫 Not changed/,'the task is no longer as its card showed it');
     assert.deepEqual((await s.tasks.get(owner,made.id)).comments,[]);
 
+    // An assignee change shows the assignees as the list's chats will see them: one bound to no Telegram account in its
+    // groups is counted, never named by the owner's label, and nothing is called private (ADR-0265 D6).
+    const helper=digest(key+':helper');
+    await stores.control.query("INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person','Helper OWNERLABEL','active')",[helper]);
+    await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:(await s.tasks.get(owner,made.id)).revision,assignees:[helper]}));
+    assert.match(last('card').text,/\n\nTask: Cancel the venue\nAssigned to: 1 other person$/);
+    assert.ok(!last('card').text.includes('OWNERLABEL')&&!last('card').text.includes('🔒'),last('card').text);
+
     // Moving a personal task in names what stays private; Reject leaves it where it was.
     const own=await s.tasks.chatCreate(chat,{title:'Check the lights'});
     assert.equal(own.project_id,null,'a personal task is written at once');

@@ -20,7 +20,7 @@ export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_n
 export const actionErrors=new Set(['destination_not_served','member_post_not_allowed']);
 /** What a task change may be told about its reminders, so the person can be asked for another time (ADR-0255). The broker
  * relays exactly these. */
-export const taskErrors=new Set(['task_reminder_past','task_reminder_limit','invalid_task_reminders','invalid_task_reminder']);
+export const taskErrors=new Set(['task_reminder_past','task_reminder_limit','invalid_task_reminders','invalid_task_reminder','task_reminders_off']);
 /** What the owner must do first, for a refusal the brain cannot correct by itself. */
 const jobNotes:Record<string,string>={job_machine_not_found:'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '+
   'there until the test passes. In the owner\'s private chat action=status lists the machines and whether each is ready; a group never lists them, so ask the owner for the exact name.'};
@@ -300,7 +300,8 @@ async function ownerRead(args:Value,context:ToolContext) {
 const UNREAD='Nothing was changed: a reminder time could not be read. Send a list of times such as 2026-11-20T09:00.';
 const TASK_NOTES:Record<string,string>={task_reminder_past:'Nothing was changed: a new reminder must be in the future. Ask for a later time.',
   task_reminder_limit:'Nothing was changed: each person keeps at most 10 reminders of their own on a task, and one change adds at most 10. Remove one first.',
-  invalid_task_reminders:UNREAD,invalid_task_reminder:UNREAD};
+  invalid_task_reminders:UNREAD,invalid_task_reminder:UNREAD,
+  task_reminders_off:'Nothing was changed: the owner turned off reminders for this person, so they cannot set new ones. They can still remove their own.'};
 const taskFields=['title','notes','status','state','priority','start_on','start_time','due_on','due_time','repeat','parent','scope','group','people','assignees','tags',
   'properties','reminders','blocked_by','related','attachments'];
 const pick=(args:Value,keys:readonly string[])=>Object.fromEntries(keys.filter(key=>own(args,key)).map(key=>[key,args[key]]));
@@ -594,13 +595,18 @@ export const mcpTools:readonly McpTool[]=[
     'action=update needs id and the expected_revision from the latest list or get, plus the fields to change; lists such as tags, people, assignees, '+
     'blocked_by, related, attachments and reminders replace the whole list, null clears a field, state done finishes a task (a repeating task then makes '+
     'its next one), archived true archives it and trashed true moves it to the trash. action=comment adds text as a comment. '+
-    'reminders are times like 2030-01-04T09:00 in settings.time_zone and are sent to the owner\'s private chat. In a group, a list changes only reminders '+
+    'reminders are times like 2030-01-04T09:00 in settings.time_zone and each goes to whoever set it: the owner\'s to the owner\'s private chat, a '+
+    'member\'s to that member\'s own private chat with Nocheh (to the owner instead when it cannot reach them there). In a group, a list changes only reminders '+
     'people set; the owner\'s reminders stay even when left out. Each person keeps up to 10 of their own on a task. repeat is '+
     '{"every":1,"unit":"day|week|month|year","weekdays":[1,4],"from":"due|done"} (weekdays only with week, 0 is Sunday) or null. '+
     'In the owner private conversation every list is available; in a group or topic that belongs to a project only that group\'s own tasks (with its '+
     'topics\' tasks when they share memory) and the tasks set on the project itself (no group) are, never another group\'s tasks, and nothing else; '+
     'elsewhere none. In a project\'s chat a task shows only as it is on that project\'s board: comments and history only from when it joined its list or group, '+
-    'only the columns the owner shares with project chats, no attached archived messages and no outside IDs such as Notion\'s; nothing is missing by error. '+
+    'only the columns the owner shares with project chats, no attached archived messages and no outside IDs such as Notion\'s, never people or person '+
+    'columns, and assignees only by their Telegram name, for those the owner linked to a Telegram account in one of the groups that chat reaches, every '+
+    'other assignee only counted in assignees_other (say "N other people", never guess who); nothing is missing by error. In a member\'s private chat tasks are only read, one project\'s board at a time (scope names it), '+
+    'never personal tasks and never with a person filter; each task there has an opaque version instead of a revision, mine (the member made it, set '+
+    'a reminder on it or is one of its assignees), on_board_since, and reminders as the member\'s own still to come plus how many others, never whose. '+
     'In the owner private conversation, a change that a group would see (adding a task to a project\'s list, moving one into it or to a group in it, a comment on '+
     'one of its tasks, or changing anything on them but status, priority, start and due days and times, archive and trash) waits for the owner\'s card, '+
     'which shows every task under a task that moves in: the '+

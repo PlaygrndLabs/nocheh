@@ -3041,6 +3041,134 @@ test('Settings lists the member private chat texts and the local laws line, each
   await page.close();
 });
 
+/*
+ * The members' app (ADR-0265) at /m/, against the preview's in-memory member API (test/dashboard-preview-member.ts):
+ * Lena (201) reads and writes, Ravi (202) only reads, Sana (203) has her private chat off, Tom (204) is paused, Noor
+ * (205) is in no group, 42 is the owner.
+ */
+const memberLaunch = (id, {auth = Math.floor(Date.now() / 1000), language = 'en'} = {}) =>
+  new URLSearchParams({
+    user: JSON.stringify({id, first_name: 'Synthetic', language_code: language}),
+    auth_date: String(auth),
+    hash: '0'.repeat(64),
+  }).toString();
+const resetMembers = () => fetch(origin + '/__preview/member/reset', {method: 'POST'});
+/** The member page for one launch, recording errors, every member API answer and every storage key it touches. */
+async function openMember(id, options = {}) {
+  const page = options.page ?? (await browser.newPage({viewport: {width: 390, height: 844}}));
+  if (options.init) await page.addInitScript(options.init);
+  const problems = [],
+    answers = [];
+  if (!options.page) {
+    page.on('pageerror', error => problems.push('page error: ' + error.message));
+    page.on('console', message => {
+      if (message.type() === 'error' && !/Failed to load resource/.test(message.text()))
+        problems.push('console: ' + message.text());
+    });
+    page.on('response', async response => {
+      if (new URL(response.url()).pathname.startsWith('/api/member/'))
+        answers.push({
+          path: new URL(response.url()).pathname,
+          headers: await response.request().allHeaders(),
+          request: response.request().postData(),
+          body: await response.text().catch(() => ''),
+        });
+    });
+  }
+  // A page opened again loads afresh, as a new launch from the menu does (an address that differs only after # would not).
+  if (options.page) await page.goto('about:blank');
+  await page.goto(origin + '/m/#tgWebAppData=' + encodeURIComponent(memberLaunch(id, options)));
+  await page.waitForLoadState('networkidle');
+  return {page, problems, answers};
+}
+/** Waits for a list to settle on a count, after a filter reloads it. */
+async function settles(locator, expected) {
+  for (let tries = 0; tries < 50 && (await locator.count()) !== expected; tries++)
+    await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(await locator.count(), expected);
+}
+const memberTab = (page, name) => page.getByRole('navigation').getByRole('button', {name});
+
+test('the members’ app opens from the launch with four tabs, Chat greyed, no password, and a bare address', async () => {
+  await resetMembers();
+  const {page, problems, answers} = await openMember(201);
+  await page.getByRole('heading', {name: 'Tasks', level: 1}).waitFor();
+  assert.equal(new URL(page.url()).hash, '', 'the launch is gone from the address');
+  assert.deepEqual(
+    (await page.getByRole('navigation', {name: 'Main'}).getByRole('button').allInnerTexts()).map(text => text.trim()),
+    ['Tasks', 'Groups', 'Chat', 'Settings'],
+  );
+  assert.equal(await memberTab(page, 'Chat').getAttribute('aria-disabled'), 'true');
+  assert.equal(await page.locator('input[type=password]').count(), 0, 'no password');
+  // Greyed, it still says why when tapped.
+  await memberTab(page, 'Chat').click({force: true});
+  await page.getByText('Coming later.').waitFor();
+  // Every call goes to the members' API with the launch and nothing of the owner's.
+  assert.ok(answers.length > 0);
+  for (const {headers} of answers) {
+    assert.ok(headers['x-telegram-init-data']?.includes('auth_date='));
+    assert.equal(headers['x-nocheh-mini-session'], undefined);
+    assert.equal(headers.authorization, undefined);
+  }
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the members’ app shows only the member’s boards, with remembered project chips, filters and groups', async () => {
+  await resetMembers();
+  const {page, problems, answers} = await openMember(201);
+  const chips = page.getByRole('radiogroup', {name: 'Projects'});
+  await chips.getByRole('radio', {name: 'Studio launch', checked: true}).waitFor();
+  const list = page.getByRole('list', {name: 'Studio launch'});
+  await list.getByText('Print the launch posters').waitFor();
+  assert.equal(await list.getByRole('listitem').count(), 4);
+  // A title is text, never HTML.
+  await list.getByText('<img src=x onerror=alert(1)> Label the seed trays').waitFor();
+  assert.equal(await page.locator('img[src="x"]').count(), 0);
+  // Mine: the task Lena made or set a reminder on.
+  await page.getByRole('button', {name: 'Mine'}).click();
+  await settles(list.getByRole('listitem'), 1);
+  await list.getByRole('listitem').getByText('Print the launch posters').waitFor();
+  await page.getByRole('button', {name: 'Mine'}).click();
+  await page.getByRole('radio', {name: 'Done'}).click();
+  await page.getByText('Send the thank-you notes').click();
+  await page.getByRole('dialog').getByText('Finished by Ravi').waitFor();
+  await page.getByRole('dialog').getByRole('button', {name: 'Close'}).click();
+  await page.getByRole('radio', {name: 'Trash'}).click();
+  await page.getByText('Old flyer draft').waitFor();
+  await page.getByRole('radio', {name: 'Open'}).click();
+  await page.getByLabel('Tag').selectOption('Print');
+  await settles(list.getByRole('listitem'), 1);
+  // Another project, remembered on this phone for the next launch.
+  await chips.getByRole('radio', {name: 'Garden redesign'}).click();
+  await page.getByText('Measure the beds').waitFor();
+  assert.match(
+    await page.evaluate(() => JSON.parse(localStorage.getItem('nocheh.member-ui')).project),
+    /^[a-f0-9]{64}$/,
+  );
+  await openMember(201, {page});
+  await page
+    .getByRole('radiogroup', {name: 'Projects'})
+    .getByRole('radio', {name: 'Garden redesign', checked: true})
+    .waitFor();
+  // Groups: each with its board, and a tap opens that group's tasks.
+  await memberTab(page, 'Groups').click();
+  const groups = page.getByRole('list', {name: 'Groups'});
+  await groups.getByText('Studio launch · 3 open tasks').waitFor();
+  await groups.getByRole('listitem').filter({hasText: 'Weekend notes'}).getByText('No task board').waitFor();
+  await groups.getByRole('listitem').filter({hasText: 'Book club'}).getByText('Board closed').waitFor();
+  await groups.getByRole('button', {name: /Aurora planning/}).click();
+  await page
+    .getByRole('radiogroup', {name: 'Projects'})
+    .getByRole('radio', {name: 'Studio launch', checked: true})
+    .waitFor();
+  await page.getByText('Print the launch posters').waitFor();
+  // Nothing from a board the member doesn't reach ever reached the page.
+  assert.equal(answers.filter(({body}) => body.includes('HIDDENMARK')).length, 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 /** The preview's messages for ADR-0261 step 4 (test/dashboard-preview.ts, sourcesFixture). */
 const sourceIds = {
   tour: 'e1'.repeat(32),
@@ -3116,6 +3244,298 @@ test('a message in a topic shows its Topic and never Replies to, and a retired m
   await page.close();
 });
 
+test('the members’ app adds a task for a group or the whole project, comments, reminds, finishes and trashes', async () => {
+  await resetMembers();
+  const {page, problems, answers} = await openMember(201);
+  await page.getByRole('button', {name: 'New task'}).click();
+  const form = page.getByRole('dialog', {name: 'New task'});
+  // The member's own group by default, and the line says who will see it.
+  assert.equal(await form.getByLabel('Group').inputValue(), '-30001');
+  await form.getByText('Everyone in Aurora planning will see this task.').waitFor();
+  await form.getByLabel('Group').selectOption({label: 'Whole project'});
+  await form.getByText('Everyone in Studio launch’s groups will see this task.').waitFor();
+  await form.getByLabel('Group').selectOption({label: 'Aurora planning'});
+  await form.getByLabel('Title').fill('Hang the bunting');
+  await form.getByLabel('Tags').fill('Decor, Outside');
+  await form.getByRole('button', {name: 'Add task'}).click();
+  const drawer = page.getByRole('dialog', {name: 'Hang the bunting'});
+  await drawer.getByText('Made by Lena', {exact: false}).waitFor();
+  await drawer.getByText('Decor, Outside').waitFor();
+  const created = answers.find(({path, request}) => path === '/api/member/tasks' && request);
+  assert.deepEqual(JSON.parse(created.request), {
+    operation_id: JSON.parse(created.request).operation_id,
+    project: JSON.parse(created.request).project,
+    title: 'Hang the bunting',
+    group: '-30001',
+    tags: ['Decor', 'Outside'],
+  });
+  // A comment, as plain text.
+  await drawer.getByLabel('Write a comment').fill('Bring the <b>ladder</b>.');
+  await drawer.getByRole('button', {name: 'Send'}).click();
+  await drawer.getByText('Bring the <b>ladder</b>.').waitFor();
+  // Remind me, at a time in the phone's own zone.
+  await drawer.getByRole('button', {name: 'Remind me'}).click();
+  await drawer.getByLabel('Remind me at').fill('2030-01-04T09:00');
+  await drawer.getByRole('button', {name: 'Set', exact: true}).click();
+  await drawer.getByRole('list', {name: 'Reminders'}).getByRole('listitem').waitFor();
+  // Finish, then Reopen; then the trash and back.
+  await drawer.getByRole('button', {name: 'Finish'}).click();
+  await drawer.getByRole('button', {name: 'Reopen'}).click();
+  await drawer.getByRole('button', {name: 'Finish'}).waitFor();
+  await drawer.getByRole('button', {name: 'Move to trash'}).click();
+  await drawer.getByText('In the trash').waitFor();
+  await drawer.getByRole('button', {name: 'Restore'}).click();
+  await drawer.getByRole('button', {name: 'Move to trash'}).waitFor();
+  // The reminder went with the phone's own offset, never as a bare wall-clock time.
+  const reminder = answers.find(({request}) => request?.includes('"reminders"'));
+  assert.match(JSON.parse(reminder.request).patch.reminders[0], /^2030-01-04T09:00:00(?:[+-]\d{2}:\d{2})$/);
+  assert.deepEqual(problems, []);
+  await page.close();
+  await resetMembers();
+});
+
+test('the members’ app reloads a task someone else changed, and says so', async () => {
+  await resetMembers();
+  const {page, problems, answers} = await openMember(201);
+  await page.getByText('Print the launch posters').click();
+  const drawer = page.getByRole('dialog', {name: 'Print the launch posters'});
+  await drawer.getByText('Use the matte paper.').waitFor();
+  const id = await drawer.locator('[data-task]').getAttribute('data-task');
+  await fetch(origin + '/__preview/member/touch/' + id, {method: 'POST'});
+  await drawer.getByRole('button', {name: 'Edit'}).click();
+  await drawer.getByLabel('Title').fill('Print the posters on A2');
+  await drawer.getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('dialog').getByText('Someone changed this task. Here is the new version.').waitFor();
+  await page.getByRole('dialog', {name: 'Print the launch posters (changed)'}).waitFor();
+  assert.ok(answers.some(({path, body}) => path.endsWith('/tasks/' + id) && body.includes('"conflict"')));
+  assert.deepEqual(problems, []);
+  await page.close();
+  await resetMembers();
+});
+
+test('the members’ app with read access only shows no buttons and says why', async () => {
+  await resetMembers();
+  const {page, problems} = await openMember(202);
+  await page.getByText('You can read these tasks. The owner can let you change them.').first().waitFor();
+  assert.equal(await page.getByRole('button', {name: 'New task'}).count(), 0);
+  assert.equal(await page.getByRole('radiogroup', {name: 'Projects'}).count(), 0, 'one project, no chips');
+  await page.getByText('Print the launch posters').click();
+  const drawer = page.getByRole('dialog', {name: 'Print the launch posters'});
+  await drawer.getByText('Use the matte paper.').waitFor();
+  for (const name of ['Edit', 'Finish', 'Move to trash', 'Remind me', 'Send', 'Change', 'Remove'])
+    assert.equal(await drawer.getByRole('button', {name, exact: true}).count(), 0, name);
+  assert.equal(await drawer.getByLabel('Write a comment').count(), 0);
+  // Others' reminders are a count, never names.
+  await drawer.getByText('3 other reminders').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the members’ app hides Remind me with one line when reminders can’t reach the member', async () => {
+  await resetMembers();
+  const {page, problems} = await openMember(203);
+  await page.getByText('Print the launch posters').click();
+  const drawer = page.getByRole('dialog', {name: 'Print the launch posters'});
+  await drawer.getByRole('button', {name: 'Finish'}).waitFor();
+  assert.equal(await drawer.getByRole('button', {name: 'Remind me'}).count(), 0);
+  await drawer.getByText('Reminders can’t reach you: your private chat with Nocheh is off.').waitFor();
+  await drawer.getByRole('button', {name: 'Close'}).click();
+  await memberTab(page, 'Settings').click();
+  await page.getByText('Reminders are off for you: Your private chat with Nocheh is off.').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the members’ app still removes the member’s own reminders when new ones can’t reach them', async () => {
+  await resetMembers();
+  const {page, problems} = await openMember(203);
+  await page.getByText('Print the launch posters').click();
+  const drawer = page.getByRole('dialog', {name: 'Print the launch posters'});
+  const id = await drawer.locator('[data-task]').getAttribute('data-task');
+  await drawer.getByRole('button', {name: 'Close'}).click();
+  // Two reminders Sana set before her private chat with Nocheh was turned off.
+  for (let index = 0; index < 2; index++)
+    await fetch(origin + '/__preview/member/remind/' + id + '/203', {method: 'POST'});
+  await page.getByText('Print the launch posters').click();
+  const mine = drawer.getByRole('list', {name: 'Reminders'});
+  await settles(mine.getByRole('listitem'), 2);
+  assert.equal(await drawer.getByRole('button', {name: 'Change'}).count(), 0, 'no new time can be set');
+  assert.equal(await drawer.getByRole('button', {name: 'Remind me'}).count(), 0);
+  await mine.getByRole('button', {name: 'Remove'}).first().click();
+  await page.getByText('Reminder removed.').waitFor();
+  await settles(mine.getByRole('listitem'), 1);
+  await drawer.getByRole('button', {name: 'Close'}).click();
+  // Settings › My reminders removes the other.
+  await memberTab(page, 'Settings').click();
+  const listed = page.getByRole('list', {name: 'My reminders'});
+  await settles(listed.getByRole('listitem'), 1);
+  await listed.getByRole('button', {name: 'Remove'}).click();
+  await page.getByText('You have no reminders waiting.').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+  await resetMembers();
+});
+
+test('the members’ app adds a subtask where its parent is, with no group to choose', async () => {
+  await resetMembers();
+  const {page, problems, answers} = await openMember(201);
+  await page.getByRole('button', {name: 'New task'}).click();
+  const form = page.getByRole('dialog', {name: 'New task'});
+  assert.equal(await form.getByLabel('Group').inputValue(), '-30001');
+  // Under a task set on the whole project: the group goes, and the line says who sees it.
+  await form.getByLabel('Under task').selectOption({label: 'Book the venue'});
+  assert.equal(await form.getByLabel('Group').count(), 0);
+  await form.getByText('Everyone in Studio launch’s groups will see this task.').waitFor();
+  await form.getByLabel('Title').fill('Sign the venue contract');
+  await form.getByRole('button', {name: 'Add task'}).click();
+  await page.getByRole('dialog', {name: 'Sign the venue contract'}).waitFor();
+  const created = JSON.parse(answers.find(({path, request}) => path === '/api/member/tasks' && request).request);
+  assert.equal('group' in created, false, 'the parent decides the group');
+  assert.match(created.parent, /^[a-f0-9]{64}$/);
+  assert.deepEqual(problems, []);
+  await page.close();
+  await resetMembers();
+});
+
+test('the members’ app shows a group filter it opened from the Groups tab, so it can be cleared', async () => {
+  await resetMembers();
+  const {page, problems} = await openMember(201);
+  await memberTab(page, 'Groups').click();
+  await page
+    .getByRole('list', {name: 'Groups'})
+    .getByRole('button', {name: /Aurora planning/})
+    .click();
+  const list = page.getByRole('list', {name: 'Studio launch'});
+  await list.getByText('Print the launch posters').waitFor();
+  // Lena has one group on this board, yet the filter shows, and the whole project's task is a choice away.
+  const filter = page.getByRole('combobox', {name: 'Group'});
+  assert.equal(await filter.inputValue(), '-30001');
+  assert.equal(await list.getByText('Book the venue').count(), 0);
+  await filter.selectOption({label: 'All groups'});
+  await list.getByText('Book the venue').waitFor();
+  assert.equal(
+    await page.getByRole('combobox', {name: 'Group'}).count(),
+    0,
+    'with no filter on, one group needs no filter',
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the members’ app follows only http(s) links and shows the rest as text', async () => {
+  await resetMembers();
+  const {page, problems} = await openMember(201);
+  await page.getByText('Book the venue').click();
+  const drawer = page.getByRole('dialog', {name: 'Book the venue'});
+  assert.equal(await drawer.getByRole('link', {name: 'Venue page'}).getAttribute('href'), 'https://example.com/venue');
+  await drawer.getByText('Not a web link').waitFor();
+  assert.equal(await drawer.getByRole('link', {name: 'Not a web link'}).count(), 0);
+  assert.equal(await page.locator('a[href^="javascript:"]').count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the members’ app is closed to strangers and paused members, asks for a new launch, and stops for the owner', async () => {
+  await resetMembers();
+  for (const [who, options, heading] of [
+    [204, {}, 'This app is closed for you'],
+    [999, {}, 'This app is closed for you'],
+    [201, {auth: Math.floor(Date.now() / 1000) - 2 * 3600}, 'Open me again from the menu button'],
+    [42, {}, 'This page is for members'],
+  ]) {
+    const {page, problems} = await openMember(who, options);
+    await page.getByRole('heading', {name: heading}).waitFor();
+    await page.getByRole('button', {name: 'Close'}).waitFor();
+    // Nothing of the visit is kept, and nothing about tasks is shown.
+    assert.deepEqual(
+      await page.evaluate(() => [
+        sessionStorage.getItem('nocheh.member-launch'),
+        localStorage.getItem('nocheh.member-ui'),
+      ]),
+      [null, null],
+      String(who),
+    );
+    assert.equal(await page.getByRole('navigation', {name: 'Main'}).count(), 0);
+    assert.deepEqual(problems, [], String(who));
+    await page.close();
+  }
+  // Opened outside Telegram: no launch at all.
+  const page = await browser.newPage({viewport: {width: 390, height: 844}});
+  await page.goto(origin + '/m/');
+  await page.getByRole('heading', {name: 'Open this from Telegram'}).waitFor();
+  await page.close();
+});
+
+test('the members’ app signs out on every phone, clears only its own keys and never reads the owner’s', async () => {
+  await resetMembers();
+  // The owner's own mini app keys on the same phone, and a record of every key the page touches.
+  const init = () => {
+    if (location.protocol !== 'http:') return;
+    if (!sessionStorage.getItem('test.seeded')) {
+      localStorage.setItem('nocheh.mini-session', 'owner-phone-token');
+      sessionStorage.setItem('nocheh.telegram-launch', 'owner-launch');
+      sessionStorage.setItem('test.seeded', '1');
+    }
+    window.__touched = [];
+    for (const name of ['getItem', 'setItem', 'removeItem']) {
+      const real = Storage.prototype[name];
+      Storage.prototype[name] = function (key, ...rest) {
+        window.__touched.push(key);
+        return real.call(this, key, ...rest);
+      };
+    }
+  };
+  // Opened on this phone ten minutes ago; another phone opened the app five minutes ago.
+  const auth = Math.floor(Date.now() / 1000) - 600;
+  const {page, problems} = await openMember(201, {auth, init});
+  await page.getByRole('heading', {name: 'Tasks', level: 1}).waitFor();
+  assert.ok(await page.evaluate(() => sessionStorage.getItem('nocheh.member-launch')));
+  await memberTab(page, 'Settings').click();
+  await page.getByText('Signs you out on every phone. Opening the app from the menu signs you in again.').waitFor();
+  await page.getByRole('button', {name: 'Sign out'}).click();
+  await page.getByRole('heading', {name: 'You are signed out'}).waitFor();
+  const touched = await page.evaluate(() => window.__touched.filter(key => key !== 'test.seeded'));
+  assert.deepEqual([...new Set(touched)].sort(), ['nocheh.member-launch', 'nocheh.member-ui']);
+  assert.deepEqual(
+    await page.evaluate(() => [
+      sessionStorage.getItem('nocheh.member-launch'),
+      localStorage.getItem('nocheh.member-ui'),
+      localStorage.getItem('nocheh.mini-session'),
+      sessionStorage.getItem('nocheh.telegram-launch'),
+    ]),
+    [null, null, 'owner-phone-token', 'owner-launch'],
+  );
+  // The same launch is refused now, and so is the other phone's, opened after it; one opened from the menu now works.
+  await openMember(201, {page, auth});
+  await page.getByRole('heading', {name: 'Open me again from the menu button'}).waitFor();
+  await openMember(201, {page, auth: auth + 300});
+  await page.getByRole('heading', {name: 'Open me again from the menu button'}).waitFor();
+  await openMember(201, {page, auth: auth + 600});
+  await page.getByRole('heading', {name: 'Tasks', level: 1}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+  await resetMembers();
+});
+
+test('the members’ app is in English only, whatever Telegram’s language, with no language setting', async () => {
+  await resetMembers();
+  const {page, problems, answers} = await openMember(201, {language: 'fa'});
+  await page.getByRole('heading', {name: 'Tasks', level: 1}).waitFor();
+  assert.deepEqual(await page.evaluate(() => [document.documentElement.dir, document.documentElement.lang]), [
+    'ltr',
+    'en',
+  ]);
+  await memberTab(page, 'Settings').click();
+  await page.getByRole('heading', {name: 'Settings', level: 1}).waitFor();
+  assert.equal(await page.getByText('Language', {exact: true}).count(), 0);
+  assert.equal(await page.getByText('Follow Telegram').count(), 0);
+  assert.equal(await page.getByRole('radio').count(), 0);
+  // Only the eight routes: nothing asks for or saves a language.
+  assert.equal(answers.filter(({path}) => /\/prefs/.test(path)).length, 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('Long-term lists facts newest first with their sources, by chat or person, under the coverage line', async () => {
   const {page, problems} = await open('memory?view=longterm');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Facts it learned'})});
@@ -3152,6 +3572,106 @@ test('Long-term lists facts newest first with their sources, by chat or person, 
   assert.equal((await texts()).length, 2);
   // Re-running or replacing long-term memory is where it was, and still asks first.
   await page.getByRole('heading', {name: 'Re-run or replace'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the members’ app shows assignees by Telegram name with the rest counted, and statuses and columns by name', async () => {
+  await resetMembers();
+  const {page, problems} = await openMember(201);
+  const list = page.getByRole('list', {name: 'Studio launch'});
+  const row = title => list.getByRole('listitem').filter({hasText: title});
+  // Rows: the owner's status names, and who does each task.
+  await row('Print the launch posters').getByText('At the printer').waitFor();
+  await row('Print the launch posters').getByText('Ravi, Sana and 2 other people').waitFor();
+  await row('Book the venue').getByText('1 other person').waitFor();
+  await row('Book the venue').getByText('Not started').waitFor();
+  assert.equal(await row('Label the seed trays').getByLabel('Assignees').count(), 0, 'nobody: nothing shown');
+  // The drawer names each shared column and its choices, never their ids.
+  await page.getByText('Print the launch posters').click();
+  const drawer = page.getByRole('dialog', {name: 'Print the launch posters'});
+  const facts = async () =>
+    Object.fromEntries(
+      await drawer
+        .locator('dl')
+        .first()
+        .evaluate(list =>
+          [...list.querySelectorAll('dt')].map(term => [
+            term.textContent.trim(),
+            term.nextElementSibling.textContent.trim(),
+          ]),
+        ),
+    );
+  await drawer.getByText('Use the matte paper.').waitFor();
+  const before = await facts();
+  assert.equal(before.Assignees, 'Ravi, Sana and 2 other people');
+  assert.equal(before['Paper size'], 'A2');
+  assert.equal(before.Rooms, 'Hall, Yard');
+  assert.equal(before['Signed off'], '✓');
+  assert.equal(before.Budget, undefined, 'an empty column is left out');
+  assert.equal(await drawer.getByText(/\b[co]-[a-z0-9]+\b/).count(), 0, 'no column or choice id');
+  await drawer.getByText('At the printer').waitFor();
+  // Edit: the owner's statuses and the shared columns, and only what changed is sent.
+  const sent = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/api/member/tasks/'))
+      sent.push(JSON.parse(request.postData() ?? '{}'));
+  });
+  await drawer.getByRole('button', {name: 'Edit'}).click();
+  assert.deepEqual(
+    (await drawer.getByLabel('Status').locator('option').allInnerTexts()).map(text => text.trim()),
+    ['Not started', 'At the printer', 'Wrapped up', 'Shelved'],
+  );
+  assert.deepEqual(
+    (await drawer.getByLabel('Paper size').locator('option').allInnerTexts()).map(text => text.trim()),
+    ['None', 'A2', 'A3'],
+  );
+  await drawer.getByLabel('Status').selectOption({label: 'Wrapped up'});
+  await drawer.getByLabel('Paper size').selectOption({label: 'A3'});
+  await drawer.getByLabel('Budget').fill('300');
+  await drawer.getByRole('group', {name: 'Rooms'}).getByLabel('Yard').uncheck();
+  await drawer.getByRole('button', {name: 'Save'}).click();
+  await drawer.getByText('Wrapped up').waitFor();
+  assert.deepEqual(sent.at(-1).patch, {
+    status: 's-done',
+    properties: {'c-budget': 300, 'c-size': 'o-a3', 'c-rooms': ['o-hall']},
+  });
+  const after = await facts();
+  assert.deepEqual([after['Paper size'], after.Rooms, after.Budget], ['A3', 'Hall', '300']);
+  await drawer.getByRole('button', {name: 'Close'}).click();
+  // New task: the first open status by default (not sent), and the shared columns.
+  await page.getByRole('button', {name: 'New task'}).click();
+  const form = page.getByRole('dialog', {name: 'New task'});
+  assert.equal(await form.getByLabel('Status').inputValue(), 's-todo');
+  await form.getByLabel('Title').fill('Hang the bunting');
+  await form.getByRole('group', {name: 'Rooms'}).getByLabel('Yard').check();
+  await form.getByLabel('Signed off').check();
+  const created = page.waitForRequest(
+    request => request.method() === 'POST' && new URL(request.url()).pathname === '/api/member/tasks',
+  );
+  await form.getByRole('button', {name: 'Add task'}).click();
+  const body = JSON.parse((await created).postData());
+  assert.equal(body.status, undefined);
+  assert.deepEqual(body.properties, {'c-rooms': ['o-yard'], 'c-signed': true});
+  const added = page.getByRole('dialog', {name: 'Hang the bunting'});
+  await added.getByText('Not started').waitFor();
+  assert.deepEqual(
+    (await added.locator('dl dt').allInnerTexts()).map(text => text.trim()),
+    ['Group', 'Rooms', 'Signed off'],
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+  await resetMembers();
+});
+
+test('the members’ app says when there is no board yet and no group', async () => {
+  await resetMembers();
+  const {page, problems} = await openMember(205);
+  await page
+    .getByText('No task boards yet. When the owner puts one of your groups in a project, its tasks show here.')
+    .waitFor();
+  await memberTab(page, 'Groups').click();
+  await page.getByText('You are not in any group that Nocheh serves.').waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -3276,6 +3796,77 @@ test('Long-term’s filters: the chosen person stays chosen while searching, and
   assert.equal(await chats.getByRole('option', {name: /Mira Chen/}).count(), 0);
   await card.getByPlaceholder('Search by name or Telegram ID').fill('Mira');
   await card.getByText('Other people’s private chats aren’t learned from, so they aren’t listed here.').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the owner sees Reminders to themselves under Tasks, and where the members’ app is', async () => {
+  const {page, problems} = await open('members?member=' + MIRA);
+  const posts = memberPosts(page);
+  await page.getByRole('heading', {name: 'Mira Chen', level: 2}).waitFor();
+  const toast = text => page.getByRole('status').filter({hasText: text}).last().waitFor();
+  const tasks = page.getByRole('radiogroup', {name: 'Tasks'});
+  if (await tasks.getByRole('radio', {name: 'Read only', checked: true}).count()) {
+    await tasks.getByRole('radio', {name: 'Read and write'}).click();
+    await toast('Mira Chen can read and change tasks.');
+  }
+  await page.getByText('Read and write, in groups and the members’ app', {exact: false}).waitFor();
+  await page.getByText('Members open the app from the menu button in their private chat with Nocheh.').waitFor();
+  const reminders = 'Reminders to themselves';
+  await page.getByRole('switch', {name: reminders, checked: true}).click();
+  await toast('Mira Chen can’t set reminders now.');
+  await page.getByRole('switch', {name: reminders, checked: false}).click();
+  await toast('Mira Chen can set reminders to themselves.');
+  // Read only: reminders can't be set, and the switch keeps its setting.
+  await tasks.getByRole('radio', {name: 'Read only'}).click();
+  await page.getByText('Read only, in groups and the members’ app', {exact: false}).waitFor();
+  assert.equal(await page.getByRole('switch', {name: reminders}).isDisabled(), true);
+  assert.equal(await page.getByRole('switch', {name: reminders}).getAttribute('aria-checked'), 'true');
+  await tasks.getByRole('radio', {name: 'Read and write'}).click();
+  await page.getByRole('switch', {name: reminders, checked: true}).waitFor();
+  assert.deepEqual(
+    posts.map(({body}) => body.changes).filter(changes => 'reminders' in changes),
+    [{reminders: false}, {reminders: true}],
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the Mini app card shows the owner’s and the members’ addresses and who gets the menu button', async () => {
+  const {page, problems} = await open('settings?view=telegram');
+  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Mini app', exact: true})});
+  await card.getByText('Your members get their own small app at its own address.', {exact: false}).waitFor();
+  await card.locator('#mini-app-url').fill('https://nocheh.example.com/');
+  const addresses = card.getByRole('definition');
+  assert.deepEqual(await addresses.allInnerTexts(), ['https://nocheh.example.com/', 'https://nocheh.example.com/m/']);
+  await card
+    .getByText(
+      'Every private chat with Nocheh gets the menu button. Only active members can open the app. Others see a closed page.',
+    )
+    .waitFor();
+  await card.locator('#mini-app-url').fill('');
+  assert.equal(await card.getByRole('definition').count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a task from the members’ app says so on its row, its comments and its history', async () => {
+  const {page, problems} = await open('tasks');
+  await page
+    .getByRole('radiogroup', {name: 'List'})
+    .getByRole('radio', {name: /Studio launch/})
+    .click();
+  const title = 'Label the seed trays';
+  const row = page.getByRole('listitem').filter({hasText: title});
+  await row.getByText('Members’ app').waitFor();
+  await row.getByRole('button', {name: `Edit “${title}”`}).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('list', {name: 'Comments'}).getByText('in the members’ app', {exact: false}).waitFor();
+  await dialog
+    .getByRole('list', {name: 'History'})
+    .getByText('Mira Chen in the members’ app', {exact: false})
+    .waitFor();
+  await dialog.getByText('Yours are sent to your private chat with Nocheh', {exact: false}).first().waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });

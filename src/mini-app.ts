@@ -1,40 +1,12 @@
 import {createServer,request,type IncomingMessage,type ServerResponse} from 'node:http';
-import {createPublicKey,verify,type KeyObject} from 'node:crypto';
 import {createReadStream} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {HttpError,json} from './http.js';
-
-/** Telegram's published Ed25519 keys for third-party validation of Mini App launch data. */
-export const TELEGRAM_KEYS={production:'e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d',
-  test:'40055058a4ee38156a06562e52eece92a771bcd8346a8c4615cb7376eddf72ec'} as const;
-const SPKI=Buffer.from('302a300506032b6570032100','hex');
-export const ed25519=(hex:string):KeyObject=>createPublicKey({key:Buffer.concat([SPKI,Buffer.from(hex,'hex')]),format:'der',type:'spki'});
-
-export type LaunchCheck={botId:string;ownerId:string;key:KeyObject;now?:number;maxAgeSeconds?:number};
-
-/**
- * Checks the launch data Telegram gives a Mini App, with Telegram's public key
- * and the public bot ID only: no bot token is needed. Only the owner, within
- * the allowed age, gets through.
- */
-export function verifyLaunch(raw:string,check:LaunchCheck):{user_id:string;auth_date:number} {
-  if(!raw||raw.length>8192)throw new HttpError(401,'telegram_launch_required');
-  const params=new URLSearchParams(raw),keys=[...params.keys()];
-  if(new Set(keys).size!==keys.length)throw new HttpError(401,'telegram_launch_invalid');
-  const signature=params.get('signature')??'';
-  if(!/^[A-Za-z0-9_-]{86}(?:==)?$/.test(signature))throw new HttpError(401,'telegram_launch_invalid');
-  const fields=[...params].filter(([key])=>key!=='hash'&&key!=='signature').sort(([a],[b])=>a<b?-1:a>b?1:0);
-  const data=check.botId+':WebAppData\n'+fields.map(([key,value])=>key+'='+value).join('\n');
-  if(!verify(null,Buffer.from(data),check.key,Buffer.from(signature,'base64url')))throw new HttpError(401,'telegram_launch_invalid');
-  const issued=Number(params.get('auth_date')),now=(check.now??Date.now())/1000;
-  if(!Number.isSafeInteger(issued)||issued>now+60||now-issued>(check.maxAgeSeconds??86400))throw new HttpError(401,'telegram_launch_expired');
-  let user:unknown;try{user=JSON.parse(params.get('user')??'');}catch{throw new HttpError(401,'telegram_launch_invalid');}
-  const id=String((user as {id?:unknown})?.id??'');
-  if(!/^[1-9]\d{0,18}$/.test(id)||id!==check.ownerId)throw new HttpError(403,'owner_required');
-  return {user_id:id,auth_date:issued};
-}
+import {launchKey,MEMBER_LAUNCH_MAX_AGE,verifyLaunch,verifyLaunchUser,type LaunchCheck} from './telegram-launch.js';
+import {MEMBER_APP_BODY_MAX,MEMBER_APP_CORE_PREFIX,MEMBER_APP_PAGE,MEMBER_APP_PUBLIC_PREFIX,MEMBER_APP_QUERY_MAX,MEMBER_LAUNCH_HEADER,memberAppErrors,
+  memberAppRoute} from './member-app-wire.js';
 
 /**
  * The owner routes the mini app may reach: home status, the Inbox and its
@@ -89,13 +61,38 @@ export class DashboardClient {
   }
 }
 
+/** Where the members' app's listener in nocheh-app is (NOCHEH_APP_URL, http://nocheh-app:8790). */
+export type AppTarget={host:string;port:number};
+/** Reads NOCHEH_APP_URL: a plain http address with a host and a port and nothing else, or null. */
+export function appTarget(value:string|undefined):AppTarget|null {
+  if(!value)return null;
+  try {
+    const url=new URL(value);
+    if(url.protocol!=='http:'||!url.hostname||url.username||url.password||url.search||url.hash||!['','/'].includes(url.pathname))return null;
+    return {host:url.hostname,port:Number(url.port||80)};
+  } catch {return null;}
+}
+
+/**
+ * Calls the members' app's own listener in nocheh-app for the member page (ADR-0265 D3). It sends only the launch data
+ * and the body, never a phone session, a cookie or a credential: nocheh-app checks the launch again and decides who the
+ * member is itself.
+ */
+export class AppClient {
+  constructor(readonly target:AppTarget){}
+  call(method:string,route:string,launch:string,body?:Buffer) {
+    return send(this.target,method,MEMBER_APP_CORE_PREFIX+route,{[MEMBER_LAUNCH_HEADER]:launch,...(body?{'content-type':'application/json'}:{})},body);
+  }
+}
+
 async function readBody(req:IncomingMessage,max=1024*1024):Promise<Buffer> {
   const chunks:Buffer[]=[];let size=0;
   for await(const chunk of req.iterator({destroyOnReturn:false})){const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk as string);size+=bytes.length;if(size>max)throw new HttpError(413,'body_too_large');chunks.push(bytes);}
   return Buffer.concat(chunks);
 }
 
-export type MiniAppOptions={check:Omit<LaunchCheck,'now'>;dashboard:DashboardClient;assets:string;now?:()=>number};
+/** `app` is the members' app's listener; without it every member route answers 503 member_app_unavailable. */
+export type MiniAppOptions={check:Omit<LaunchCheck,'now'>;dashboard:DashboardClient;app?:AppClient;assets:string;now?:()=>number};
 
 /** The phone sign-in routes of the dashboard, which holds the owner's password and every session. */
 class MiniAppSessions {
@@ -117,12 +114,16 @@ class MiniAppSessions {
 }
 const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; "+
   "frame-ancestors 'self' https://web.telegram.org https://webk.telegram.org https://webz.telegram.org";
+/** The member page shares the owner page's origin, so it also takes only Trusted Types into its DOM sinks: it never
+ * renders raw HTML (ADR-0265 D1). */
+const MEMBER_CSP=CSP+"; require-trusted-types-for 'script'";
 
 /**
  * The Telegram Mini App's own small server. It is the only part of Nocheh
  * that a tunnel exposes: it serves the mini app page and forwards a fixed set
  * of owner routes to the local dashboard after checking Telegram's signature
- * and the phone's password sign-in.
+ * and the phone's password sign-in. It also serves the members' page at `/m/`
+ * and forwards its fixed routes to nocheh-app's member listener (ADR-0265).
  */
 export function miniAppServer(options:MiniAppOptions) {
   const sessions=new MiniAppSessions(options.dashboard);
@@ -138,7 +139,7 @@ async function handle(options:MiniAppOptions,sessions:MiniAppSessions,req:Incomi
   const token=String(req.headers['x-nocheh-mini-session']??'').slice(0,100);
   // Signing in, checking and signing out: each still needs the owner's Telegram launch data.
   const own=['GET /api/mini/session','POST /api/mini/sign-in','POST /api/mini/sign-out'].includes(method+' '+path);
-  if(own||path.startsWith('/api/nocheh/')) {
+  if(own||path.startsWith('/api/nocheh/')||path.startsWith(MEMBER_APP_PUBLIC_PREFIX+'/')) {
     if(req.headers.origin&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
   if(own) {
@@ -152,6 +153,7 @@ async function handle(options:MiniAppOptions,sessions:MiniAppSessions,req:Incomi
     const pick=(key:string)=>value[key]!==undefined?{[key]:value[key]}:{};
     return json(res,status,{...pick('token'),...pick('error'),...pick('until'),...pick('tries_left')});
   }
+  if(path.startsWith(MEMBER_APP_PUBLIC_PREFIX+'/'))return member(options,req,res,url);
   if(path.startsWith('/api/nocheh/')) {
     const route=path.slice('/api/nocheh'.length);
     if(!miniAppRoute(method,route)||url.search.length>600)throw new HttpError(404,'not_found');
@@ -172,18 +174,49 @@ async function handle(options:MiniAppOptions,sessions:MiniAppSessions,req:Incomi
     res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-cache'});
     res.end(await readFile(join(options.assets,'mini.html')));return;
   }
-  const asset=path.match(/^\/assets\/(mini\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/);
+  // The members' page (ADR-0265 D1), with Trusted Types required.
+  if(path===MEMBER_APP_PAGE||path===MEMBER_APP_PAGE+'index.html') {
+    res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-cache','content-security-policy':MEMBER_CSP});
+    res.end(await readFile(join(options.assets,'member.html')));return;
+  }
+  const asset=path.match(/^\/assets\/(mini\.js|member\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/);
   if(!asset?.[1])throw new HttpError(404,'not_found');
-  res.writeHead(200,{'content-type':asset[1].endsWith('.css')?'text/css':'text/javascript','cache-control':'no-cache'});
+  res.writeHead(200,{'content-type':asset[1].endsWith('.css')?'text/css':'text/javascript','cache-control':'no-cache',
+    ...(asset[1]==='member.js'?{'content-security-policy':MEMBER_CSP}:{})});
   createReadStream(join(options.assets,asset[1])).on('error',()=>res.destroy()).pipe(res);
+}
+
+/**
+ * The member page's calls (ADR-0265): `/api/member/<route>` for MEMBER_APP_ROUTES only, a query on GET tasks only, a
+ * small body, and Telegram's launch data from anyone but the owner, at most an hour old (the owner gets 403
+ * member_required: the owner's own mini app is at `/`). Forwarded as `/v1/member-app/<route>` to nocheh-app's member
+ * listener, which checks the launch again and who the member is; never to the dashboard, and never with a session.
+ */
+async function member(options:MiniAppOptions,req:IncomingMessage,res:ServerResponse,url:URL) {
+  const method=req.method??'',route=url.pathname.slice(MEMBER_APP_PUBLIC_PREFIX.length),found=memberAppRoute(method,route);
+  if(!found||url.search&&found.name!=='tasks'||url.search.length>MEMBER_APP_QUERY_MAX)throw new HttpError(404,'not_found');
+  const launch=String(req.headers[MEMBER_LAUNCH_HEADER]??'');
+  let user:string;
+  try{user=verifyLaunchUser(launch,{botId:options.check.botId,key:options.check.key,maxAgeSeconds:MEMBER_LAUNCH_MAX_AGE,now:(options.now??Date.now)()}).user_id;}
+  catch{throw new HttpError(401,memberAppErrors.launchInvalid);}
+  if(user===options.check.ownerId)throw new HttpError(403,memberAppErrors.memberRequired);
+  if(!options.app)throw new HttpError(503,'member_app_unavailable');
+  const body=method==='POST'?await readBody(req,MEMBER_APP_BODY_MAX):undefined;
+  const result=await options.app.call(method,route+url.search,launch,body);
+  // Only the answer itself goes back: JSON, never stored, and no header nocheh-app might add.
+  res.writeHead(result.status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});
+  res.end(result.body);
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   const botId=process.env.TELEGRAM_BOT_ID??'',ownerId=process.env.TELEGRAM_OWNER_ID??'';
   if(!/^[1-9]\d{0,18}$/.test(botId)||!/^[1-9]\d{0,18}$/.test(ownerId))throw Error('mini_app_requires_telegram_bot_and_owner');
   const port=Number(process.env.NOCHEH_MINI_APP_PORT??8788),dashboardPort=Number(process.env.NOCHEH_DASHBOARD_PORT??8783);
-  const server=miniAppServer({check:{botId,ownerId,key:ed25519(process.env.TELEGRAM_TEST_ENVIRONMENT==='true'?TELEGRAM_KEYS.test:TELEGRAM_KEYS.production)},
-    dashboard:new DashboardClient({host:process.env.NOCHEH_DASHBOARD_HOST??'nocheh-dashboard',port:dashboardPort}),assets:join(process.cwd(),'dashboard/dist')});
+  // The members' app's listener in nocheh-app; without a valid address the member routes answer 503.
+  const app=appTarget(process.env.NOCHEH_APP_URL);
+  const server=miniAppServer({check:{botId,ownerId,key:launchKey(process.env,botId)},
+    dashboard:new DashboardClient({host:process.env.NOCHEH_DASHBOARD_HOST??'nocheh-dashboard',port:dashboardPort}),...(app?{app:new AppClient(app)}:{}),
+    assets:join(process.cwd(),'dashboard/dist')});
   server.listen(port,'0.0.0.0',()=>console.log(JSON.stringify({event:'mini_app_ready',port})));
   for(const signal of ['SIGTERM','SIGINT'] as const)process.once(signal,()=>server.close(()=>process.exit(0)));
 }

@@ -290,7 +290,11 @@ guard epoch.
   to their other groups** (they confirm each post with their own card) and **Web
   pages and outside tools (no approval)**.
 - **Tasks**: **Read and write**, or **Read only**, where they list and read the
-  tasks their group reaches and change nothing.
+  tasks their group reaches and change nothing. It counts in groups and in the
+  [members' app](#members-app) alike; write includes the trash. Under it,
+  **Reminders to themselves**, on by default and only with read and write: off,
+  they set no new reminder, in a group or the app (`task_reminders_off`), and can
+  still remove their own.
 - **Groups**: each of their groups with its switch and what Telegram last said
   about them there: Seen here, Left the group (Telegram says), or Nothing from
   Telegram yet. **New here** marks a group Telegram has shown them in that has no
@@ -334,8 +338,9 @@ first message in a group is enough to talk there, and shows them in it; until
 then, a post into that group from another one goes to your card. A bot that is
 not a group admin sees joins and leaves only from Telegram's service messages, so
 in a group a member who left quietly keeps their place until Telegram says so.
-Only before a member's private turn does Nocheh ask Telegram whether they are
-still in their groups ([member private chat](#member-private-chat)).
+Only before a member's private turn, and when they open the members' app or
+change a task there, does Nocheh ask Telegram whether they are still in their
+groups ([member private chat](#member-private-chat), [members' app](#members-app)).
 Making the bot an admin in your members' groups is recommended, not required.
 
 Someone who addresses Nocheh in a group and may not talk there, a stranger or a
@@ -438,6 +443,72 @@ one short notice instead, once. Its answer replies to your asking message. An as
 shows under System › Background work with **Retry now** and **Cancel task**
 turned off: it closes on its own.
 
+## Members' app
+
+Members have a small app of their own in Telegram
+([ADR-0265](adr/0265-member-mini-app.md)). Once the [mini app](#mini-app) is set
+up, every private chat with Nocheh has a menu button, labelled with the first of
+the names that address Nocheh, that opens the members' page at `<mini app address>/m/`; your own
+chat keeps your own mini app. Nothing asks for a password: Telegram signs the
+launch data, and both the mini app and `nocheh-app` check it on every call. A
+launch is good for an hour. Only a member who is active right now gets anything:
+a stranger, a guest, a paused or removed member, or an account linked to nobody
+sees "This app is closed for you. Ask the owner if this is a mistake." You see
+"This page is for members. Use your own menu button." A launch older than an
+hour, older than when the member was added or un-paused, or from before they
+signed out gets "Open me again from the menu button".
+
+The app has four tabs:
+
+- **Tasks**: one board per active project that holds a group they joined, with
+  project chips when there are several. A board shows the tasks set on the
+  project itself and those of their groups in it, never another group's, never
+  your personal tasks. Each task shows as it is on that board: comments and
+  history from when it joined, shared columns only, never your own names for
+  people, an assignee by their Telegram name only when you linked them in Memory ›
+  People to an account in one of the member's groups (every other one is counted
+  as other people, so a row reads "Sara, Omid and 2 other people"), its status and
+  shared columns by the names you gave them in Settings › Tasks, and "Made by" or
+  "Finished by", with Telegram names, only when that happened there. **New task**
+  and **Edit** offer your statuses and a field for each shared column. Filters: Mine (tasks they made, set a reminder on or are
+  assigned to), Open,
+  Done, Trash (a subtask trashed on its own shows there too), a group and a tag;
+  the group filter shows whenever one is on, so a group opened from **Groups** can
+  be cleared. A subtask goes where the task it is under is. With **Read and write** they add, edit, finish,
+  reopen, comment on, trash and restore any task they see, other people's
+  included, and set their own reminders with **Remind me**; deleting for good
+  stays yours. With **Read only** the drawer has no buttons and says "You can read
+  these tasks. The owner can let you change them." When someone changed a task in
+  between, the drawer says so and reloads it. A member may make 60 changes in 10
+  minutes and 500 a UTC day.
+- **Groups**: each group they are in that Nocheh serves, with its Telegram title,
+  its board and open tasks, "No task board" for a group in no project, or "Board
+  closed" for one whose project is not active.
+- **Chat**: greyed out, "Coming later."
+- **Settings**: where their reminders go, "Your private chat with Nocheh" or why they are off;
+  **My reminders** with Remove, which works with **Read and write** even while
+  new reminders can't reach them; and **Sign out**, which signs them out on every
+  phone where the app was opened before it, until they open it again from the menu.
+
+Groups count as in their [private chat](#member-private-chat), but the app reads
+only groups Telegram confirmed within 6 hours. When they open the app and before
+each change, Nocheh asks Telegram again about older ones, at most once per
+member every 10 minutes; a group Telegram cannot confirm drops out of the app.
+
+The page is in English only, with no language setting.
+
+**Remind me** works only with **Read and write**, **Reminders to themselves** on
+and their private chat with Nocheh on; a member who never wrote to Nocheh
+privately has no such chat yet. Otherwise it is hidden and one line says why. A
+reminder set in the app is theirs alone: groups never see it or remove it, and
+someone else's reminder at the same time never stands in for it. Their reminders go to their own private chat (see
+[Task reminders](#task-reminders)). The page shows times in the phone's time zone;
+reminder messages use the tasks' time zone.
+
+The app never reaches the dashboard, your routes or anything that acts for you:
+`nocheh-miniapp` forwards its calls only to its own listener in `nocheh-app`
+(port 8790), with no session or token.
+
 ## Send records
 
 Every request `nocheh-telegram` sends to Telegram leaves one record: each reply
@@ -483,8 +554,12 @@ or it left at the group's new ID after an upgrade. A cleared leave reads
 "Nocheh left". A leave Telegram refuses stays a problem, unless Nocheh later
 leaves that group for the same add. **Keep
 delivery logs** in Settings › Privacy & data removes old records too. The
-dashboard's own mini app menu button call does not pass the bot yet, so it has
-no record ([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md)).
+dashboard's own menu button calls (every private chat's default and your own) do
+not pass the bot yet, so they have no record
+([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md)). Reminders a member set in
+the members' app that could not reach them show as one line per member a day,
+`reminder_skipped`, with the count and why
+([ADR-0265](adr/0265-member-mini-app.md)).
 
 ## Send classes
 
@@ -504,7 +579,7 @@ send record's kind, which does not change.
 | `card_update` | a card's settle, a button answer or a notice edit | no |
 | `refusal` | the fixed reply to someone not allowed | no |
 | `notice` | a problem, import or memory notice, a group's line about a job, or the card and lines about a group someone added Nocheh to | no |
-| `reminder` | a task reminder | no |
+| `reminder` | a task reminder, in your private chat, or a member's own in theirs | no (never in a member's chat) |
 | `member_read` | the answer to your question about a member's private chat, only in your private chat | never |
 
 A message that is not learned is still archived and searchable, and is context
@@ -589,7 +664,8 @@ still learned
 
 The mini app shows Home, Inbox and Tasks inside Telegram. It opens from the
 button next to the message box in the owner's private chat with Nocheh. Only
-the owner's Telegram account gets in: every request carries the launch data
+the owner's Telegram account gets in (members have their own
+[members' app](#members-app) at `/m/` on the same address): every request carries the launch data
 Telegram signs, and the mini app checks that signature with Telegram's public
 key and the bot's public ID. Settings and System stay on the dashboard.
 
@@ -616,9 +692,11 @@ To turn it on:
    Save, then Apply.
 4. The mini app asks for the dashboard's password once on each phone.
 
-Apply starts the mini app and the tunnel and puts the mini app on the menu
-button of the owner's private chat. Clearing both fields and applying stops
-them and puts the usual menu button back. An installation that is not run with
+Apply starts the mini app and the tunnel, sets the default menu button of every
+private chat with the bot to the members' page, and puts your own mini app on
+the menu button of your private chat. After you change the owner's Telegram
+account, Apply gives the former owner's chat the default button back. Clearing
+both fields and applying stops them and puts the usual menu button back on both. An installation that is not run with
 `make dev` builds the mini app image once with `./bin/nocheh build` after Save and before the
 first Apply.
 
@@ -661,7 +739,20 @@ short ID the Chats page shows after the name
 
 ## Task reminders
 
-A task reminder goes to the owner's private chat at its time. One set by a
+A task reminder goes to whoever set it, at its time
+([ADR-0265](adr/0265-member-mini-app.md)). A member's goes to their own private
+chat with Nocheh, one message each, while they are active with **Reminders to
+themselves** and private chat on and the task is still on one of their boards.
+It shows the title, due day, project and notes (**Task reminder to a member**) and
+"👤 Set by you" (**Reminder lines to a member**), and never who else wrote or
+closed the task, or where. Before it sends into a member's chat, the bot asks the
+app once for that reminder, that chat and that exact text
+(`POST /internal/notices/authorize`); no other message goes to a member's chat
+that way. When the member cannot be reached there, one they set in a group comes
+to you as below, and one they set in the members' app is skipped, with a line in
+System › Health. A guest who is not a member keeps coming to you.
+
+The rest go to the owner's private chat. One set by a
 member, or by the owner in a group, starts with a line naming
 who set it and where ("👤 Set by … in …"), and a task someone last wrote or
 closed outside the owner's private chat and the dashboard says so too; a

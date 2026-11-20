@@ -84,7 +84,9 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
     memory_access_settings:configuration.memory_access_settings.length,chat_tool_settings:configuration.chat_tool_settings.length,
     chats:configuration.chats.length,chat_ids:configuration.chat_ids.length,chat_connections:chatApps.size,
     members:configuration.members.length,member_chats:configuration.member_chats.length,chat_accounts:configuration.member_accounts.length,
-    runtime_profiles:profileCount,owner_commands:profileCount,workflow_registry:profileCount*2,workflow_outbox:profileCount*2});
+    runtime_profiles:profileCount,owner_commands:profileCount,workflow_registry:profileCount*2,workflow_outbox:profileCount*2,
+    // The members' task version key is made by the first member read after the stores start, so it may already be there.
+    owner_task_version_key:[0,1]});
   const installed=(await stores.control.query('SELECT generation::text AS generation FROM installation WHERE singleton')).rows;
   if(!same(installed,[{generation}]))throw Error('reset_baseline_generation_changed');
   const guard=(await stores.control.query('SELECT epoch::int AS epoch,mode FROM guard_state WHERE singleton')).rows;

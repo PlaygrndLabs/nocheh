@@ -12,12 +12,14 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {startMembers,type MemberDirectoryLoader} from '../src/stores/members.js';
 import {fixtureServices} from './fixture-brain.js';
-import {GP1,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ID,NG1,NG1_TG,NG_GROUP_IDS,OWNER,P2,fixtureChats,fixtureDirectory,seedChats,
-  seedGroups,seedMembers} from './fixture-groups.js';
+import {ALI,CANARY_LABEL,GP1,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ACCOUNT,MEMBER_NG_ID,NG1,NG1_TG,NG_GROUP_IDS,OWNER,P2,fixtureChats,
+  fixtureDirectory,seedAssignee,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
 // A member's task calls are checked again against the member directory as of each call (step 3), in both fixture
-// families: the GP member in GP1 (old-shaped ids) and the NG member in NG1 (digest ids).
-test('a member paused or switched off mid-turn writes no task; a read-only member lists and reads but changes nothing',
+// families: the GP member in GP1 (old-shaped ids) and the NG member in NG1 (digest ids). A task a member adds keeps their
+// account (step 5: the members' app's "Mine"), and a group never reads the owner's names for people (ADR-0265 D6): an
+// assignee only by their Telegram name while in that group.
+test('a member paused or switched off mid-turn writes no task; a read-only member lists and reads but changes nothing; a group reads no names',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -43,7 +45,13 @@ test('a member paused or switched off mid-turn writes no task; a read-only membe
     await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1) ON CONFLICT(space_id) DO NOTHING",[NG1,P2]);
     loader=await startMembers(stores.control,()=>policy);
     await s.guards.reconcile();await s.guards.setMode('on');
-    for(const [raw,chat,person,id] of [[GP1,GP1,MEMBER_GP,MEMBER_GP_ID],[NG1_TG,NG1,MEMBER_NG,MEMBER_NG_ID]] as const) {
+    const named=digest(key+':named');
+    await stores.control.query("INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person','Owner name for them','active')",[named]);
+    // Ali, bound to his Telegram account and in GP1: GP1 reads him by his Telegram name, NG1 only counts him.
+    const ali=await seedAssignee(stores.control,CANARY_LABEL,ALI,'Ali T',[GP1]);
+    const settings=await s.tasks.settings(owner);
+    await s.tasks.saveSettings(owner,{revision:settings.revision,properties:[{id:'lead',name:'Lead',type:'person',shared:true},{id:'size',name:'Size',type:'number',shared:true}]});
+    for(const [raw,chat,person,id,account] of [[GP1,GP1,MEMBER_GP,MEMBER_GP_ID,MEMBER_GP_ACCOUNT],[NG1_TG,NG1,MEMBER_NG,MEMBER_NG_ID,MEMBER_NG_ACCOUNT]] as const) {
       const turn=async(text:string)=>actor((await capture(raw,person,text)).id,chat);
       const change=(name:string,changes:Record<string,unknown>)=>s.members.change(owner,id,{operation_id:key+':'+name+':'+person,changes});
       const unchanged=async(task:{id:string;revision:number})=>{
@@ -52,6 +60,7 @@ test('a member paused or switched off mid-turn writes no task; a read-only membe
       // Active, tasks read and write: the turn adds a task to its group's list, by the member's account.
       const hall=await s.tasks.chatCreate(await turn('Add a task to book the hall'),{title:'Book the hall'});
       assert.equal(hall.group_id,chat);assert.deepEqual(hall.created_by,{kind:'member',name:'Member'});
+      assert.equal((await stores.control.query('SELECT created_by_account FROM owner_tasks WHERE id=$1',[hall.id])).rows[0].created_by_account,account);
 
       // Paused by the owner while a turn is in flight: its next task call is refused and writes nothing.
       const paused=await turn('Mark the hall done');
@@ -87,7 +96,22 @@ test('a member paused or switched off mid-turn writes no task; a read-only membe
 
       // Read and write again: the same turn writes at once, with no reload of its own.
       await change('write',{tasks:'write'});
-      assert.equal((await s.tasks.chatUpdate(reader,hall.id,{expected_revision:hall.revision,state:'done'})).state,'done');
+      const closed=await s.tasks.chatUpdate(reader,hall.id,{expected_revision:hall.revision,state:'done'});
+      assert.equal(closed.state,'done');
+
+      // The owner names people on it: the group reads neither them, nor the owner's names for them, nor the person column,
+      // only the other shared column; an assignee in this group by their Telegram name, every other counted.
+      await s.tasks.update(owner,hall.id,{operation_id:key+':names:'+person,expected_revision:closed.revision,people:[named],assignees:[named,ali],properties:{Lead:[named],Size:4}});
+      const assignees=chat===GP1?[[{name:'Ali T'}],1]:[[],2];
+      const listed=(await s.tasks.chatList(await turn('Who does the hall?'),{state:'all'})).tasks.find((task:any)=>task.id===hall.id);
+      const seen=await s.tasks.chatGet(await turn('Who does the hall?'),hall.id);
+      for(const value of [listed,seen]){
+        assert.deepEqual([value.people,value.properties,value.created_by_account],[undefined,{size:4},undefined]);
+        assert.deepEqual([value.assignees,value.assignees_other],assignees,chat);
+        for(const word of ['Owner name for them',named,ali,'CANARY-LABEL'])assert.ok(!JSON.stringify(value).includes(word),word);
+      }
+      assert.deepEqual((await s.tasks.chatList(await turn('Which columns?'))).settings.properties.map((item:any)=>item.id),['size']);
+      assert.deepEqual((await s.tasks.get(owner,hall.id)).assignees.map((item:any)=>item.id).sort(),[named,ali].sort(),'the owner still reads them');
     }
   } finally {loader?.stop();restoreMembers();restoreChats();await stores.close();await rm(root,{recursive:true,force:true});}
 });

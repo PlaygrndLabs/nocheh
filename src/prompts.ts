@@ -3,7 +3,7 @@ import {admin,type Reader} from './access.js';
 import {HttpError,object} from './http.js';
 import type {RuntimeCall,RuntimeOperation} from './runtime.js';
 import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.js';
-import type {groupToolsTextLabels} from './member-wire.js';
+import type {groupToolsTextLabels,memberReminderTextLabels} from './member-wire.js';
 
 /**
  * Built-in instruction texts and the owner's replacements from Settings › Assistant.
@@ -16,12 +16,13 @@ export const promptKeys=['reply.common','reply.owner','reply.group','reply.priva
   'telegram.approval_task','telegram.approval_texts','telegram.action_continued','telegram.private_answer','telegram.private_answer_texts','tasks.reminder','tasks.reminder_texts','imports.ready','system.problems','system.problem_buttons','images.read',
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
   'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds','telegram.member_daily_limit','telegram.group_tools_texts',
-  'telegram.member_private_daily_limit','members.local_laws','reply.member_read','telegram.member_read','telegram.member_read_texts'] as const;
+  'telegram.member_private_daily_limit','members.local_laws','reply.member_read','telegram.member_read','telegram.member_read_texts',
+  'members.reminder','members.reminder_texts'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'telegram.member_read':['{member}'],'tasks.reminder':['{title}'],'system.problems':['{problems}'],
+  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'telegram.member_read':['{member}'],'tasks.reminder':['{title}'],'members.reminder':['{title}'],'system.problems':['{problems}'],
   'background.job':['{instruction}'],'background.card':['{instruction}'],'background.machine':['{steps}']};
 
 /** Sent in a group, without a model and at most once a UTC day per person and group, to someone who addressed Nocheh but
@@ -211,6 +212,7 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
     review_owner:['{place}'],review:['{sources}'],rules:['{place}'],rules_others:['{place}'],turn_own:['{place}','{date}'],turn:['{place}','{date}'],turn_read:['{place}','{date}','{read}'],
     job_turn:['{place}','{date}','{read}'],more:['{count}']},
   'telegram.member_read_texts':{source:['{member}'],closed:['{member}'],failed:['{member}']},
+  'members.reminder_texts':{note_line:['{line}']},
 };
 /** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
  *  Object property ('constructor', '__proto__') is just a line; a text with no such lines is not read at all. */
@@ -243,14 +245,26 @@ export const reminderTexts=['you: you','person: {name}, a member','person_gone: 
   'field_title: title','field_notes: notes','field_due: due day','closed_by: ☑\ufe0f Closed by {who} in {place}',
   'merged: 🔔 {count} reminders set in {place}',
   'more_waiting: ⏳ {count} more reminders set in {place} are due. They come in the next message; at most one message per group every 10 minutes.',
-  'note_line: ┆ {line}',
+  'note_line: ┆ {line}','place_app: the members’ app',
   'removed_in_group: 🗑\ufe0f A message from you in {place} removed {count} reminders on {title} that were set elsewhere: {times}. If you did not mean to, add them again in the dashboard.'].join('\n');
 export type ReminderText='you'|'person'|'person_gone'|'unnamed_person'|'set_by'|'written_by'|'field_title'|'field_notes'|'field_due'|'closed_by'|
-  'merged'|'more_waiting'|'note_line'|'removed_in_group';
+  'merged'|'more_waiting'|'note_line'|'place_app'|'removed_in_group';
 /** The reminder lines, with any line the owner removed or left empty, or stored without a value it must keep, taken
  * from the default. */
 export function reminderLines(text:string|undefined):Record<ReminderText,string> {
   return checkedLines('tasks.reminder_texts',reminderTexts,text) as Record<ReminderText,string>;
+}
+/** A task reminder sent to the member who set it, in their own private chat with Nocheh (step 5, members.reminder). A
+ * line whose value is missing is left out. {due} is in the one task time zone and {list} is the project's name. */
+export const memberReminder='⏰ {title}\n📅 {due}\n📁 {list}\n\n{notes}';
+/** The lines code adds to a member's own reminder (members.reminder_texts): who set it, always the member themselves,
+ * and the mark before each line of the task's notes. No line names who wrote or closed the task, or where. */
+export const memberReminderTexts=['set_by: 👤 Set by you','note_line: ┆ {line}'].join('\n');
+export type MemberReminderText=typeof memberReminderTextLabels[number];
+/** The member reminder lines, with any line the owner removed or left empty, or stored without a value it must keep,
+ * taken from the default. */
+export function memberReminderLines(text:string|undefined):Record<MemberReminderText,string> {
+  return checkedLines('members.reminder_texts',memberReminderTexts,text) as Record<MemberReminderText,string>;
 }
 /** Where each learned note came from, in the owner's words, as the Notes page shows it: one line per kind of message and
  * per kind of note. Code picks the line from Telegram's own fields and Nocheh's records, never from what a message
@@ -424,7 +438,8 @@ const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learni
   'background.member_spend':backgroundMemberSpend,'background.member_paused':backgroundMemberPaused,'background.member_texts':backgroundMemberTexts,
   'telegram.chat_adds':chatAddTexts,'telegram.member_daily_limit':memberDailyLimitReply,'telegram.group_tools_texts':groupToolsTexts,
   'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'members.local_laws':membersLocalLaws,
-  'telegram.member_read':memberReadFrame,'telegram.member_read_texts':memberReadTexts};
+  'telegram.member_read':memberReadFrame,'telegram.member_read_texts':memberReadTexts,
+  'members.reminder':memberReminder,'members.reminder_texts':memberReminderTexts};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

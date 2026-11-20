@@ -125,7 +125,7 @@ export async function memberView(db:Db,owner:string|null,only:string|null=null,w
   const groups=new Map<string,GroupRow>(groupRows.map(row=>[row.id as string,{chat_id:row.id,title:chatLabel(row,row.username,row.external_id),state:row.state}]));
   const isIn=(group:GroupRow|undefined)=>!!group&&!['left','removed','archived'].includes(group.state);
   const ref=(group:GroupRow):MemberGroupRef=>({chat_id:group.chat_id,title:group.title,state:group.state});
-  const memberRows=(await db.query(`SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,added_at FROM members
+  const memberRows=(await db.query(`SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,reminders,added_at FROM members
     WHERE $1::text IS NULL OR id=$1 ORDER BY added_at,id`,[only])).rows;
   const accountRows=(await db.query(`SELECT a.id,a.member_id,a.external_id,a.display_name,a.username FROM chat_accounts a
     WHERE a.member_id IS NOT NULL AND ($1::text IS NULL OR a.member_id=$1) ORDER BY a.id`,[only])).rows;
@@ -147,7 +147,8 @@ export async function memberView(db:Db,owner:string|null,only:string|null=null,w
     }).sort(byTitle);
     return {id:row.id,account_id:own?.id??'',state:row.state,name:own?.display_name??null,username:own?.username??null,telegram_id:own?.external_id??null,
       owner_linked:owner!==null&&accounts.some(account=>account.id===owner),added_at:new Date(row.added_at).toISOString(),
-      permissions:{talk:row.group_talk,jobs:row.group_jobs,post:row.group_post_other,tools:row.group_tools,tasks:row.tasks,private_chat:row.private_chat},
+      permissions:{talk:row.group_talk,jobs:row.group_jobs,post:row.group_post_other,tools:row.group_tools,tasks:row.tasks,private_chat:row.private_chat,
+        reminders:row.reminders},
       groups:memberGroups};
   });
   const people:MemberPerson[]=[];
@@ -253,7 +254,9 @@ export class Members implements MemberRepository {
         if(on.some(chat=>!seen.has(chat)))throw new HttpError(409,'member_group_not_seen');
       }
       const id=memberIdFor(account);
-      if(!(await db.query('INSERT INTO members(id) VALUES($1) ON CONFLICT DO NOTHING RETURNING id',[id])).rowCount)throw new HttpError(409,'member_exists');
+      // app_since: a members' app launch from before this add is refused, so a launch from before an earlier removal never
+      // comes back to life (ADR-0265 D4).
+      if(!(await db.query('INSERT INTO members(id,app_since) VALUES($1,now()) ON CONFLICT DO NOTHING RETURNING id',[id])).rowCount)throw new HttpError(409,'member_exists');
       await db.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1',[account,id]);
       await writeSwitches(db,id,request.groups);
       return result(db,owner,id,await bump(db));
@@ -274,10 +277,11 @@ export class Members implements MemberRepository {
       if(!row)throw new HttpError(404,'member_not_found');
       const c=request.changes;
       const next={state:c.state??row.state,group_talk:c.talk??row.group_talk,group_jobs:c.jobs??row.group_jobs,group_post_other:c.post??row.group_post_other,
-        group_tools:c.tools??row.group_tools,tasks:c.tasks??row.tasks,private_chat:c.private_chat??row.private_chat};
+        group_tools:c.tools??row.group_tools,tasks:c.tasks??row.tasks,private_chat:c.private_chat??row.private_chat,reminders:c.reminders??row.reminders};
+      // Un-pausing sets app_since, so a members' app launch from before it is refused (ADR-0265 D4); a permission change does not.
       if(Object.entries(next).some(([key,value])=>row[key]!==value))await db.query(`UPDATE members SET state=$2,group_talk=$3,group_jobs=$4,group_post_other=$5,group_tools=$6,
-        tasks=$7,private_chat=$8,revision=revision+1,updated_at=now() WHERE id=$1`,
-        [id,next.state,next.group_talk,next.group_jobs,next.group_post_other,next.group_tools,next.tasks,next.private_chat]);
+        tasks=$7,private_chat=$8,reminders=$9,app_since=CASE WHEN state='paused' AND $2='active' THEN now() ELSE app_since END,revision=revision+1,updated_at=now() WHERE id=$1`,
+        [id,next.state,next.group_talk,next.group_jobs,next.group_post_other,next.group_tools,next.tasks,next.private_chat,next.reminders]);
       if(c.groups) {
         const chats=Object.keys(c.groups),existing=new Set((await db.query('SELECT chat_id FROM member_chats WHERE member_id=$1 AND chat_id=ANY($2::text[])',
           [id,chats])).rows.map(item=>item.chat_id as string));

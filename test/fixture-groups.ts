@@ -1,5 +1,5 @@
 // Synthetic groups, projects and members shared by the Members tests (ADR-0247, ADR-0248, ADR-0249, ADR-0252, step 3,
-// step 4: members' private chats).
+// step 4: members' private chats, step 5: the members' app).
 // Never live values.
 import type pg from 'pg';
 import {digest} from '../src/archive.js';
@@ -8,6 +8,7 @@ import {accountIdFor,chatDirectory,chatIdFor,connectionIdFor,installChatsForTest
   type ChatSnapshot,type ChatState} from '../src/chats.js';
 import {legacyChat} from '../src/chats-telegram.js';
 import {memberDirectory,memberIdFor,type MemberDirectory,type MemberRow,type MemberSnapshot} from '../src/members.js';
+import {sourceObjectId} from '../src/source-model.js';
 
 /* Two families of chats, so no test hides a parsing site behind old-shaped ids:
  * - old-shaped chats, stored before step 2b, keep their Telegram value as their Nocheh id: OWNER, GP1-GP4, GP1_TOPIC,
@@ -172,22 +173,38 @@ export const MEMBER_GP_OFF_ID=memberIdFor(MEMBER_GP_OFF_ACCOUNT),MEMBER_NG_OFF_I
 export interface FixtureMembers extends MemberSnapshot {people:{id:string;app:'telegram';external_id:string}[]}
 const allOn=(id:string):MemberRow=>({id,state:'active',group_talk:true,group_jobs:true,group_post_other:true,group_tools:true,tasks:'write',
   private_chat:id!==MEMBER_GP_OFF_ID&&id!==MEMBER_NG_OFF_ID});
-/** Every fixture member as directory rows, each members row changed by `changes` (keyed by member id). */
-export function fixtureMembers(changes:Readonly<Record<string,Partial<Omit<MemberRow,'id'>>>>={}):FixtureMembers {
+/** Every fixture member as directory rows, each members row changed by `changes` (keyed by member id). `switches`
+ * changes or adds group switches (member id → group → enabled), such as MEMBER_APP_SWITCHES. */
+export function fixtureMembers(changes:Readonly<Record<string,Partial<Omit<MemberRow,'id'>>>>={},
+  options:{switches?:Readonly<Record<string,Readonly<Record<string,boolean>>>>}={}):FixtureMembers {
   const row=(id:string):MemberRow=>({...allOn(id),...changes[id],id});
+  const switches=new Map<string,{member_id:string;chat_id:string;enabled:boolean}>();
+  for(const item of [{member_id:MEMBER_GP_ID,chat_id:GP1,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP2,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP3,enabled:false},
+    {member_id:MEMBER_NG_ID,chat_id:NG1,enabled:true}])switches.set(item.member_id+' '+item.chat_id,item);
+  for(const [member,groups] of Object.entries(options.switches??{}))for(const [chat,enabled] of Object.entries(groups))
+    switches.set(member+' '+chat,{member_id:member,chat_id:chat,enabled});
   return {members:[row(MEMBER_GP_ID),row(MEMBER_NG_ID),row(MEMBER_GP_OFF_ID),row(MEMBER_NG_OFF_ID)],
     accounts:[{account_id:MEMBER_GP_ACCOUNT,member_id:MEMBER_GP_ID},{account_id:MEMBER_NG_ACCOUNT,member_id:MEMBER_NG_ID},
       {account_id:MEMBER_GP_OFF_ACCOUNT,member_id:MEMBER_GP_OFF_ID},{account_id:MEMBER_NG_OFF_ACCOUNT,member_id:MEMBER_NG_OFF_ID}],
-    chats:[{member_id:MEMBER_GP_ID,chat_id:GP1,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP2,enabled:true},{member_id:MEMBER_GP_ID,chat_id:GP3,enabled:false},
-      {member_id:MEMBER_NG_ID,chat_id:NG1,enabled:true}],
+    chats:[...switches.values()],
     presence:[{account_id:MEMBER_GP_ACCOUNT,chat_id:GP1,state:'in'},{account_id:MEMBER_GP_ACCOUNT,chat_id:GP2,state:'left'},
       {account_id:MEMBER_GP_ACCOUNT,chat_id:GP3,state:'in'},{account_id:MEMBER_GP_ACCOUNT,chat_id:UNSERVED,state:'in'},
       {account_id:MEMBER_NG_ACCOUNT,chat_id:NG1,state:'in'},{account_id:MEMBER_NG_ACCOUNT,chat_id:NG2,state:'in'}],
     owner_account:OWNER_ACCOUNT,daily_messages:200,revision:0,
     people:[MEMBER_GP,MEMBER_NG,MEMBER_GP_OFF,MEMBER_NG_OFF].map(account)};
 }
+/*
+ * The members' app's "Bob" case (step 5, ADR-0265): Mira (MEMBER_GP) with GP3 switched on. She is then in GP1 and GP3
+ * and has left GP2, all three in P1, so her one board is P1 reaching GP1 and GP3 (MEMBER_APP_REACH), never GP2
+ * (MEMBER_APP_HIDDEN); GP4 (no project) shows "No task board"; UNSERVED is never one of her groups. Seed it with
+ * seedMembers(memberAppMembers()), or seedMembers(memberAppMembers(changes)) with the members rows changed.
+ */
+export const MEMBER_APP_SWITCHES:Readonly<Record<string,Readonly<Record<string,boolean>>>>=Object.freeze({[MEMBER_GP_ID]:Object.freeze({[GP3]:true})});
+export const MEMBER_APP_REACH=[GP1,GP3] as const,MEMBER_APP_HIDDEN=GP2;
+export const memberAppMembers=(changes:Parameters<typeof fixtureMembers>[0]={}):FixtureMembers=>fixtureMembers(changes,{switches:MEMBER_APP_SWITCHES});
 /** The fixture member directory; install it with installMembersForTest. */
-export const fixtureMemberDirectory=(changes:Parameters<typeof fixtureMembers>[0]={}):MemberDirectory=>memberDirectory(fixtureMembers(changes));
+export const fixtureMemberDirectory=(changes:Parameters<typeof fixtureMembers>[0]={},options:Parameters<typeof fixtureMembers>[1]={}):MemberDirectory=>
+  memberDirectory(fixtureMembers(changes,options));
 
 /** Writes a fixture's members into a control database that already holds its chats (seedChats with both families):
  * the member people's accounts, the members rows linked from them, their group switches and Telegram's membership rows.
@@ -203,4 +220,29 @@ export async function seedMembers(db:Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'q
     [row.member_id,row.chat_id,row.enabled]);
   for(const row of fixture.presence)await db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source) VALUES($1,$2,$3,'message') ON CONFLICT DO NOTHING`,
     [row.chat_id,row.account_id,row.state]);
+}
+
+/** The owner's own label for a person in Memory › People (owner answer Q4): it must never reach a member or a group. */
+export const CANARY_LABEL='CANARY-LABEL Ali (client)';
+/** Synthetic Telegram people for assignee tests: Ali in GP1 (and NG1), Gus in GP2 only. */
+export const ALI='9101',GUS='9102';
+export const ALI_ACCOUNT=accountIdFor('telegram',ALI),GUS_ACCOUNT=accountIdFor('telegram',GUS);
+/**
+ * Seeds a person Telegram knows by `name`, in `groups` now (membership 'in'), unless the account is already there, and a
+ * Memory › People card the owner labelled `label`, bound exactly to that account's Telegram source identity when
+ * `telegram` is given (null: a card bound to nobody). Returns the card's id.
+ */
+export async function seedAssignee(db:Pick<pg.Pool,'query'>,label:string,telegram:string|null,name?:string|null,groups:readonly string[]=[]):Promise<string> {
+  const entity=digest('fixture:assignee:'+label);
+  await db.query(`INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person',$2,'active') ON CONFLICT(id) DO NOTHING`,[entity,label]);
+  if(telegram===null)return entity;
+  const account=accountIdFor('telegram',telegram);
+  await db.query(`INSERT INTO chat_accounts(id,connection_id,external_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[account,connectionIdFor('telegram'),telegram]);
+  if(name!==undefined)await db.query('UPDATE chat_accounts SET display_name=$2 WHERE id=$1',[account,name]);
+  for(const chat of groups)await db.query(`INSERT INTO chat_memberships(chat_id,account_id,state,source,checked_at) VALUES($1,$2,'in','message',now())
+    ON CONFLICT(chat_id,account_id) DO UPDATE SET state='in'`,[chat,account]);
+  const source=sourceObjectId({platform:'telegram',namespace:'bot-api',kind:'actor',external_id:telegram});
+  await db.query(`INSERT INTO memory_entity_bindings(id,entity_id,binding_kind,source_object_id,label,state) VALUES($1,$2,'source_identity',$3,'','exact')
+    ON CONFLICT(id) DO NOTHING`,[digest('fixture:binding:'+label),entity,source]);
+  return entity;
 }

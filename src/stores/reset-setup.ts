@@ -23,13 +23,13 @@ type SnapshotChat={id:string;app:ChatApp;kind:ChatRow['kind'];parent_id:string|n
 type SnapshotChatId={app:ChatApp;external_id:string;chat_id:string;state:ChatIdRow['state'];reason:'migrated'|'id_changed'|null};
 /** A member as a snapshot carries it: its permissions; its group switches and accounts are rows of their own. */
 type SnapshotMember={id:string;state:MemberState;group_talk:boolean;group_jobs:boolean;group_post_other:boolean;group_tools:boolean;tasks:MemberTasks;
-  private_chat:boolean};
+  private_chat:boolean;reminders:boolean};
 /** An account linked to a member, by its app id, so the restore makes the same account (ensureAccount) and links it. */
 type SnapshotMemberAccount={member_id:string;app:ChatApp;external_id:string};
 type SnapshotMemberChat={member_id:string;chat_id:string;enabled:boolean};
 /**
  * Version 3 (step 3) carries the chats and their app ids (ADR-0252), so every value names the same chat after the reset,
- * and the members: their permissions (private_chat too, step 4), the accounts linked to them, their group switches and the daily message cap. It
+ * and the members: their permissions (private_chat too, step 4, and reminders, step 5), the accounts linked to them, their group switches and the daily message cap. It
  * is the only version: a snapshot taken by an older version (v1, v2), or a runtime document that still lists groups or
  * who may talk in them, is refused (development mode).
  */
@@ -148,7 +148,7 @@ export function restoredChats(value:{chats?:SnapshotChat[]|undefined;chat_ids?:S
  * their group switches and the daily message cap.
  */
 export async function memberRows(control:pg.Pool|pg.PoolClient) {
-  const members=(await control.query('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat FROM members')).rows as SnapshotMember[];
+  const members=(await control.query('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,reminders FROM members')).rows as SnapshotMember[];
   const accounts=(await control.query(`SELECT a.member_id,n.app,a.external_id FROM chat_accounts a JOIN chat_connections n ON n.id=a.connection_id
     WHERE a.member_id IS NOT NULL`)).rows as SnapshotMemberAccount[];
   const switches=(await control.query('SELECT member_id,chat_id,enabled FROM member_chats')).rows as SnapshotMemberChat[];
@@ -166,9 +166,9 @@ export function sortedMembers(value:Pick<SetupSnapshot['configuration'],'members
 function snapshotMembers(c:Record<string,unknown>,directory:ChatDirectory):void {
   const ids=new Set<string>(),accounts=new Set<string>(),switches=new Set<string>();
   for(const item of c.members as unknown[]) {
-    const row=exact(item,['id','state','group_talk','group_jobs','group_post_other','group_tools','tasks','private_chat']),id=identifier(row.id,ID);
+    const row=exact(item,['id','state','group_talk','group_jobs','group_post_other','group_tools','tasks','private_chat','reminders']),id=identifier(row.id,ID);
     if(ids.has(id)||!(memberStates as readonly unknown[]).includes(row.state)||!(memberTaskModes as readonly unknown[]).includes(row.tasks)||
-      [row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.private_chat].some(value=>typeof value!=='boolean'))throw Error('reset_setup_snapshot_invalid');
+      [row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.private_chat,row.reminders].some(value=>typeof value!=='boolean'))throw Error('reset_setup_snapshot_invalid');
     ids.add(id);
   }
   for(const item of c.member_accounts as unknown[]) {
@@ -315,8 +315,8 @@ export async function restoreResetSetup(stores:StorePools,input:{snapshot:unknow
       same(existingMembers.daily_messages,[{daily_messages:DAILY_MESSAGES_DEFAULT}]);
     if(!same(existingMembers,desiredMembers)) {
       if(!untouched)throw Error('reset_setup_target_changed');
-      for(const row of desiredMembers.members)await db.query(`INSERT INTO members(id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[row.id,row.state,row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.tasks,row.private_chat]);
+      for(const row of desiredMembers.members)await db.query(`INSERT INTO members(id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,reminders)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[row.id,row.state,row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.tasks,row.private_chat,row.reminders]);
       for(const row of desiredMembers.member_accounts) {
         const account=await ensureAccount(db,await ensureConnection(db,row.app),{external:row.external_id},row.app);
         await db.query('UPDATE chat_accounts SET member_id=$2 WHERE id=$1 AND member_id IS NULL',[account,row.member_id]);
