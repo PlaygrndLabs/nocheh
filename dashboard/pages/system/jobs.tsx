@@ -1,6 +1,6 @@
 /**
  * Background jobs: long work the agent proposed and someone approved, such as
- * reading a whole chat. Shown live with each job's to-do list, with Stop, and
+ * reading a whole chat. Shown live as a table with Stop, each job's plan and to-do list in a drawer, and
  * what jobs members approved themselves spent today, with Pause and Resume; and
  * the owner's limits, spend marks and sealed box switch for them, saved with the
  * Save button at the top.
@@ -18,16 +18,20 @@ import {
   Button,
   Card,
   CardHeader,
-  Details,
+  Dot,
   Field,
   Input,
   LoadError,
   LoadingRows,
+  Pager,
   SettingRow,
   Switch,
+  Table,
+  Td,
+  Th,
   type Tone,
 } from '../../ui/core';
-import {useFeedback} from '../../ui/overlay';
+import {Drawer, useFeedback} from '../../ui/overlay';
 import {useChatNames} from '../messages/chat-names';
 
 type Todo = {content: string; status: string};
@@ -117,26 +121,19 @@ const jobError = (code: string) =>
         ? 'The job finished, but its report could not be delivered.'
         : code.replaceAll('_', ' ');
 
-/** The plan the owner approved for a machine job: open while it runs, folded once it ended. */
-function Plan({steps, open}: {steps: string[]; open: boolean}) {
-  const list = (
-    <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[13px]" aria-label="Plan">
-      {steps.map((step, index) => (
-        <li key={index} dir="auto">
-          {step}
-        </li>
-      ))}
-    </ol>
-  );
-  return open ? (
-    <div className="mt-2">
+/** The plan the owner approved for a machine job. */
+function Plan({steps}: {steps: string[]}) {
+  return (
+    <div>
       <p className="text-xs font-medium text-muted">Plan</p>
-      {list}
+      <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[13px]" aria-label="Plan">
+        {steps.map((step, index) => (
+          <li key={index} dir="auto">
+            {step}
+          </li>
+        ))}
+      </ol>
     </div>
-  ) : (
-    <Details className="mt-2" summary={`Plan, ${steps.length === 1 ? '1 step' : `${steps.length} steps`}`}>
-      {list}
-    </Details>
   );
 }
 
@@ -207,11 +204,35 @@ function TodoList({items}: {items: Todo[]}) {
   );
 }
 
+const JOBS = 10;
+
+/** Where a job reads and where it was asked, on its machine, and how long ago it last moved. */
+function whereLine(job: Job, chatName: (scope: string) => string): string {
+  return [
+    chatName(job.chat),
+    job.asked_in !== job.chat ? `asked in ${chatName(job.asked_in)}` : '',
+    job.machine ? `on ${job.machine.name}` : '',
+    job.finished_at
+      ? `ended ${ago(job.finished_at)}`
+      : job.started_at
+        ? `started ${ago(job.started_at)}`
+        : `asked ${ago(job.created_at)}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+const jobLabel = (job: Job): [string, Tone] =>
+  job.held ? ['Approved, waiting: member jobs paused', 'warn'] : (jobStates[job.state] ?? [job.state, 'neutral']);
+
 export function BackgroundJobs() {
   const jobs = useResource<{jobs: Job[]; members?: MemberSpend}>('/background-jobs', 5000);
   const chatName = useChatNames();
   const {confirm, toast} = useFeedback();
   const [busy, setBusy] = useState('');
+  const [page, setPage] = useState(0);
+  // The job open in the drawer, by id, so it keeps updating while it runs.
+  const [shown, setShown] = useState<string | null>(null);
   const stop = async (job: Job) => {
     const begun = started.has(job.state);
     const ok = await confirm({
@@ -252,6 +273,26 @@ export function BackgroundJobs() {
     }
   };
   const list = jobs.data?.jobs ?? [];
+  const last = Math.max(0, Math.ceil(list.length / JOBS) - 1);
+  const at = Math.min(page, last);
+  const detail = list.find(job => job.id === shown) ?? null;
+  const stopButton = (job: Job) =>
+    open.has(job.state) && (
+      <Button
+        size="sm"
+        variant="danger"
+        busy={busy === job.id}
+        aria-label={`Stop ${job.title ?? 'job'}`}
+        onClick={event => {
+          event.stopPropagation();
+          void stop(job);
+        }}
+      >
+        <Square aria-hidden /> Stop
+      </Button>
+    );
+  const problem = (job: Job) =>
+    (job.state === 'failed' || job.state === 'stopped') && job.error_code ? jobError(job.error_code) : '';
   return (
     <Card>
       <CardHeader
@@ -275,70 +316,119 @@ export function BackgroundJobs() {
             No jobs yet. When you ask for something big in Telegram, the assistant offers a job with its time and cost.
           </p>
         ) : (
-          <ul className="divide-y divide-line" aria-label="Background jobs">
-            {list.map(job => {
-              const [label, tone] = job.held
-                ? (['Approved, waiting: member jobs paused', 'warn'] as [string, Tone])
-                : (jobStates[job.state] ?? [job.state, 'neutral']);
-              const cleanup = job.machine ? cleanupLine(job.machine_cleanup, job.machine.name) : null;
-              return (
-                <li key={job.id} className="px-5 py-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium" dir="auto">
-                        {job.title ?? 'Job'}
-                      </p>
-                      <p className="text-xs text-muted">
-                        {chatName(job.chat)}
-                        {job.asked_in !== job.chat ? ` · asked in ${chatName(job.asked_in)}` : ''}
-                        {job.machine ? ` · on ${job.machine.name}` : ''} ·{' '}
-                        {job.finished_at
-                          ? `ended ${ago(job.finished_at)}`
-                          : job.started_at
-                            ? `started ${ago(job.started_at)}`
-                            : `asked ${ago(job.created_at)}`}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge tone={tone} dot>
-                        {label}
-                      </Badge>
-                      {open.has(job.state) && (
-                        <Button size="sm" variant="danger" busy={busy === job.id} onClick={() => void stop(job)}>
-                          <Square aria-hidden /> Stop
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  <p className="mt-1 text-[13px] text-muted" title={dateTime(job.created_at)}>
-                    {jobProgress(job)}
-                    {(job.state === 'failed' || job.state === 'stopped') && job.error_code
-                      ? ` · ${jobError(job.error_code)}`
-                      : ''}
-                  </p>
-                  {cleanup && (
-                    <p className={`mt-1 text-[13px] ${cleanup.tone === 'warn' ? 'text-warn' : 'text-muted'}`}>
-                      {cleanup.text}
-                    </p>
-                  )}
-                  {job.machine && job.steps?.length ? (
-                    <Plan steps={job.steps} open={open.has(job.state) || job.state === 'stopping'} />
-                  ) : null}
-                  {(open.has(job.state) || job.state === 'stopping') && <TodoList items={job.todo} />}
-                  {job.machine && job.started_at && (
-                    <a
-                      className="mt-2 inline-flex items-center gap-1 text-[13px] text-accent-text hover:underline"
-                      href={href('system', {view: 'machines', job: job.id})}
+          <>
+            <Table aria-label="Background jobs" className="max-sm:block">
+              <thead className="max-sm:sr-only">
+                <tr>
+                  <Th scope="col">Job</Th>
+                  <Th scope="col">Status</Th>
+                  <Th scope="col">Progress</Th>
+                  <Th scope="col">
+                    <span className="sr-only">Stop</span>
+                  </Th>
+                </tr>
+              </thead>
+              <tbody className="max-sm:block">
+                {list.slice(at * JOBS, at * JOBS + JOBS).map(job => {
+                  const [label, tone] = jobLabel(job);
+                  const cleanup = job.machine ? cleanupLine(job.machine_cleanup, job.machine.name) : null;
+                  const error = problem(job);
+                  return (
+                    <tr
+                      key={job.id}
+                      className="cursor-pointer hover:bg-subtle/60 max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:gap-x-3 max-sm:border-b max-sm:border-line max-sm:px-4 max-sm:py-2"
+                      onClick={() => setShown(job.id)}
                     >
-                      <ScrollText className="size-3.5" aria-hidden /> Commands it ran on {job.machine.name}
-                    </a>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                      <Td className="max-sm:w-full max-sm:border-0 max-sm:p-0">
+                        <button
+                          type="button"
+                          className="text-left font-medium hover:underline"
+                          dir="auto"
+                          onClick={() => setShown(job.id)}
+                        >
+                          {job.title ?? 'Job'}
+                        </button>
+                        <p className="text-xs text-muted">{whereLine(job, chatName)}</p>
+                      </Td>
+                      <Td className="text-[13px] whitespace-nowrap max-sm:border-0 max-sm:p-0 max-sm:py-1">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Dot tone={tone} />
+                          {label}
+                        </span>
+                      </Td>
+                      <Td
+                        className="text-[13px] text-muted max-sm:order-3 max-sm:w-full max-sm:border-0 max-sm:p-0"
+                        title={dateTime(job.created_at)}
+                      >
+                        {jobProgress(job)}
+                        {error && <span className="block">{error}</span>}
+                        {cleanup && (
+                          <span className={`block ${cleanup.tone === 'warn' ? 'text-warn' : ''}`}>{cleanup.text}</span>
+                        )}
+                      </Td>
+                      <Td className="py-1.5 text-right whitespace-nowrap max-sm:ml-auto max-sm:border-0 max-sm:p-0">
+                        {stopButton(job)}
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+            <Pager
+              page={at}
+              hasNext={at < last}
+              onPage={setPage}
+              summary={`${list.length === 1 ? '1 job' : `${list.length} jobs`} · open one to see its plan and to-do list`}
+            />
+          </>
         )}
       </div>
+      <Drawer
+        open={!!detail}
+        onOpenChange={next => !next && setShown(null)}
+        title={detail?.title ?? 'Job'}
+        description={detail ? whereLine(detail, chatName) : undefined}
+        footer={detail ? stopButton(detail) || undefined : undefined}
+      >
+        {detail && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={jobLabel(detail)[1]} dot>
+                {jobLabel(detail)[0]}
+              </Badge>
+              <span className="text-[13px] text-muted" title={dateTime(detail.created_at)}>
+                {jobProgress(detail)}
+              </span>
+            </div>
+            {problem(detail) && <p className="text-[13px] text-muted">{problem(detail)}</p>}
+            {detail.machine &&
+              (cleanup =>
+                cleanup && (
+                  <p className={`text-[13px] ${cleanup.tone === 'warn' ? 'text-warn' : 'text-muted'}`}>
+                    {cleanup.text}
+                  </p>
+                ))(cleanupLine(detail.machine_cleanup, detail.machine.name))}
+            {detail.machine && detail.steps?.length ? <Plan steps={detail.steps} /> : null}
+            {detail.todo.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted">To-do list</p>
+                <TodoList items={detail.todo} />
+              </div>
+            )}
+            {!detail.todo.length && !(detail.machine && detail.steps?.length) && (
+              <p className="text-[13px] text-muted">This job has no plan or to-do list.</p>
+            )}
+            {detail.machine && detail.started_at && (
+              <a
+                className="inline-flex items-center gap-1 text-[13px] text-accent-text hover:underline"
+                href={href('system', {view: 'machines', job: detail.id})}
+              >
+                <ScrollText className="size-3.5" aria-hidden /> Commands it ran on {detail.machine.name}
+              </a>
+            )}
+          </div>
+        )}
+      </Drawer>
     </Card>
   );
 }

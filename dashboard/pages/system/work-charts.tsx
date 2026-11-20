@@ -66,12 +66,12 @@ function Tip({
   );
 }
 
-function Panel({title, note, children, wide}: {title: string; note: string; children: ReactNode; wide?: boolean}) {
+function Panel({title, note, children}: {title: string; note: string; children: ReactNode}) {
   return (
-    <section className={wide ? 'lg:col-span-2' : undefined}>
+    <section>
       <h3 className="text-sm font-semibold">{title}</h3>
       <p className="text-xs text-muted">{note}</p>
-      <div className="mt-2 h-52" role="img" aria-label={title}>
+      <div className="mt-2 h-44" role="img" aria-label={title}>
         {children}
       </div>
     </section>
@@ -112,7 +112,6 @@ export default function WorkCharts({
     <>
       <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
         <Panel
-          wide
           title="Activity"
           note={
             hasActivity ? 'Tasks started and finished in each period.' : 'Nothing started or finished in this period.'
@@ -201,7 +200,7 @@ export default function WorkCharts({
           </ResponsiveContainer>
         </Panel>
         {counts && (
-          <section className="lg:col-span-2">
+          <section>
             <h3 className="text-sm font-semibold">Right now, by kind</h3>
             <p className="text-xs text-muted">
               {workload.length
@@ -211,7 +210,7 @@ export default function WorkCharts({
             {workload.length > 0 && (
               <div
                 className="mt-2"
-                style={{height: 40 + workload.length * 30}}
+                style={{height: Math.max(176, 40 + workload.length * 16)}}
                 role="img"
                 aria-label="Current work by kind"
               >
@@ -224,7 +223,7 @@ export default function WorkCharts({
                   >
                     <CartesianGrid stroke="var(--border)" horizontal={false} />
                     <XAxis type="number" allowDecimals={false} {...axis} />
-                    <YAxis type="category" dataKey="name" width={140} {...axis} />
+                    <YAxis type="category" dataKey="name" width={140} interval={0} {...axis} />
                     <Tooltip
                       cursor={{fill: 'var(--subtle)'}}
                       content={({active, payload, label}) =>
@@ -285,7 +284,7 @@ export default function WorkCharts({
           </section>
         )}
       </div>
-      <Details summary="Show as a table" className="mt-5">
+      <Details summary="Show as a table" className="mt-4">
         <Table aria-label="Background work history">
           <thead>
             <tr>

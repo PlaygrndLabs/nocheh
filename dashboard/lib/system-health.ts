@@ -214,7 +214,7 @@ export function issues(m: any): Issue[] {
       tone: work.failed ? 'bad' : 'warn',
       text: `${work.failed + work.retrying} background ${work.failed + work.retrying === 1 ? 'task' : 'tasks'} failed`,
       detail: work.retrying ? `${work.retrying} will be retried automatically.` : undefined,
-      link: href('system', {view: 'work', status: work.failed ? 'failed' : 'retryable_failed'}),
+      link: href('system', {view: 'work', tab: 'tasks', status: work.failed ? 'failed' : 'retryable_failed'}),
       action: 'Review',
     });
   if (work.uncertain)
@@ -222,7 +222,7 @@ export function issues(m: any): Issue[] {
       tone: 'warn',
       text: `${work.uncertain} ${work.uncertain === 1 ? 'task has' : 'tasks have'} an uncertain result`,
       detail: 'It may or may not have happened, so it won’t be repeated automatically.',
-      link: href('system', {view: 'work', status: 'ambiguous'}),
+      link: href('system', {view: 'work', tab: 'tasks', status: 'ambiguous'}),
       action: 'Review',
     });
   if (m.workflows?.unavailable)
@@ -237,7 +237,7 @@ export function issues(m: any): Issue[] {
       tone: 'warn',
       text: `${team.total - team.connected} background ${team.total - team.connected === 1 ? 'worker isn’t' : 'workers aren’t'} connected`,
       detail: 'Their work waits until they reconnect.',
-      link: href('system', {view: 'work'}),
+      link: href('system', {view: 'work', tab: 'tasks'}),
       action: 'Details',
     });
   const models: any[] = Array.isArray(m.model_problems) ? m.model_problems : [];

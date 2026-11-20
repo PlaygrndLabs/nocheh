@@ -250,7 +250,7 @@ export function exitBadge(code: number | null): {label: string; tone: Tone} | nu
 
 /** The machine log's query: one page of commands, newest first, before the cursor. */
 export function commandQuery(filters: {machine?: string; job?: string; all?: boolean; before?: number | null}): string {
-  const query = new URLSearchParams({limit: '25'});
+  const query = new URLSearchParams({limit: '10'});
   if (filters.machine) query.set('machine', filters.machine);
   if (filters.job) query.set('job', filters.job);
   if (filters.all) query.set('kind', 'all');

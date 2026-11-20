@@ -80,7 +80,7 @@ function Sends({filter}: {filter: Filter}) {
   const [pages, setPages] = useState<(string | null)[]>([null]);
   const before = pages.at(-1);
   const query = new URLSearchParams({
-    limit: '25',
+    limit: '10',
     ...(filter === 'problems' ? {filter} : {}),
     ...(before ? {before} : {}),
   });

@@ -2,6 +2,25 @@
 
 <current>
 
+System pages as tables and sub-tabs, step 4 of the table-first dashboard plan (owner,
+2026-11-19: "avoid scrolling as much as possible and use tables instead, everywhere";
+2026-11-20: "yes to all", which took charts on their own sub-tab so the first screen is tables).
+- Every System page fits one 1600x900 screen (Background work was 4.4 screens, Databases 2.3,
+  Health 1.9). A sub-tab here shows only its own panel: nothing on these pages is edited, and
+  charts can't draw while hidden.
+- Health: status (issues as a table), services and connections, storage (databases, local
+  folders, largest tables), diagnostics (latest Telegram messages, ten a page).
+- Background work: jobs (table, ten a page; a row opens a drawer with the plan, the to-do list
+  and the machine-log link), tasks (ten a page, with "Right now" and "Why work is waiting" as
+  small tables beside it), history (the four charts, two by two). Links to failed or uncertain
+  tasks open `tab=tasks`.
+- Backups: actions as one table (`ActionRow`, shared with Memory › Long-term memory) and
+  history as a table, ten a page. Sent to apps and Machine log show ten a page. Databases shows
+  twelve rows a page (`limit` on the database browser, 1 to 50).
+- Checks: [unit](test/test_database_browser.py), [unit](test/dashboard-machines.test.mjs),
+  browser (`test/dashboard-pages.browser.mjs`). Pending: step 5 (Usage, Inbox, Tasks, Chats
+  list, Members, Home, the other Settings tabs).
+
 Sub-tabs for the two longest pages, step 3 of the table-first dashboard plan (owner,
 2026-11-19: "avoid scrolling as much as possible and use tables instead, everywhere";
 2026-11-20: "yes to all", which took sub-tabs for long settings pages).
@@ -13,8 +32,7 @@ Sub-tabs for the two longest pages, step 3 of the table-first dashboard plan (ow
   carries a count while the group's project question is open (`useProjectUnanswered`).
 - Skills are a table with a drawer per skill; built-in instructions are a table, 12 a page,
   with a search box and a drawer per text. A failed save opens the row it is about.
-- Checks: browser (`test/dashboard-pages.browser.mjs`). Pending: steps 4 and 5 (System; the
-  remaining pages), one change each.
+- Checks: browser (`test/dashboard-pages.browser.mjs`).
 
 Memory pages as tables, step 2 of the table-first dashboard plan (owner, 2026-11-19: "avoid
 scrolling as much as possible and use tables instead, everywhere"; 2026-11-20: "yes to all").
@@ -32,8 +50,7 @@ scrolling as much as possible and use tables instead, everywhere"; 2026-11-20: "
 - A notes review deletes its own empty native session when it ends (Hermes's
   `delete_session_if_empty`), and hides one that holds anything.
 - Checks: [unit](services/hermes/test_native_memory.py), [unit](test/dashboard-memory-sources.test.mjs),
-  browser (`test/dashboard-pages.browser.mjs`). Pending: steps 3 to 5 of the plan (Settings ›
-  Assistant and the chat page; System; the remaining pages), one change each.
+  browser (`test/dashboard-pages.browser.mjs`).
 
 Members step 5: the members' app
 ([ADR-0265](docs/adr/0265-member-mini-app.md); owner, 2026-11-12, approving the Members design

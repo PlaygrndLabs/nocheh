@@ -462,6 +462,33 @@ export function Td({className, ...props}: React.ComponentProps<'td'>) {
   return <td className={cn('border-b border-line px-4 py-2.5 align-top', className)} {...props} />;
 }
 
+/** One action as a table row: its name, what it does, and the button that starts it. */
+export function ActionRow({
+  title,
+  detail,
+  children,
+}: {
+  title: React.ReactNode;
+  detail: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    // On a phone the name and its button share a line and what it does sits under them.
+    <tr className="max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:border-b max-sm:border-line max-sm:py-1.5">
+      <Th
+        scope="row"
+        className="bg-transparent align-top text-[13px] font-medium whitespace-normal text-fg max-sm:flex-1 max-sm:border-0 max-sm:py-1"
+      >
+        {title}
+      </Th>
+      <Td className="space-y-1.5 text-[13px] text-muted max-sm:order-3 max-sm:w-full max-sm:border-0 max-sm:pt-0 max-sm:pb-1">
+        {detail}
+      </Td>
+      <Td className="text-right whitespace-nowrap max-sm:border-0 max-sm:py-1">{children}</Td>
+    </tr>
+  );
+}
+
 /** Collapsible extra detail, closed by default. */
 export function Details({
   summary,
