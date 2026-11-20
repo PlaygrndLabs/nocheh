@@ -11,7 +11,8 @@ import {Plus, Trash2} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {useDraftSource} from '../../lib/drafts';
 import {refreshResources, useResource} from '../../lib/resource';
-import {Button, Card, CardHeader, Field, Input, LoadError, LoadingRows, Textarea} from '../../ui/core';
+import {Button, Card, CardHeader, Field, Input, LoadError, LoadingRows, Table, Td, Textarea, Th} from '../../ui/core';
+import {Drawer} from '../../ui/overlay';
 
 export type Skill = {name: string; description: string; body: string};
 type Persona = {scope: string; role: string; skills: Skill[]; revision: string};
@@ -66,6 +67,8 @@ export function RoleAndSkills({
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [revision, setRevision] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
+  // The skill open in the drawer, by its place in the list.
+  const [open, setOpen] = useState<number | null>(null);
   const currentRole = role ?? data?.role ?? '';
   const currentSkills = skills ?? data?.skills ?? [];
   const problems = personaProblems(currentRole, currentSkills);
@@ -77,6 +80,7 @@ export function RoleAndSkills({
     setSkills(null);
     setRevision(null);
     setChecked(false);
+    setOpen(null);
   };
   const editSkill = (index: number, change: Partial<Skill>) => {
     start();
@@ -88,7 +92,12 @@ export function RoleAndSkills({
     labels: [...(roleChanged ? ['Role (' + where + ')'] : []), ...(skillsChanged ? ['Skills (' + where + ')'] : [])],
     save: async () => {
       setChecked(true);
-      if (Object.keys(problems).length) throw new Error('Fix the marked role and skills fields, then save again.');
+      if (Object.keys(problems).length) {
+        // A failed save opens the skill it is about.
+        const bad = currentSkills.findIndex((_, index) => problems[index]);
+        if (bad >= 0) setOpen(current => (current !== null && problems[current] ? current : bad));
+        throw new Error('Fix the marked role and skills fields, then save again.');
+      }
       try {
         await apiPost('/memory/persona', {
           scope,
@@ -169,63 +178,74 @@ export function RoleAndSkills({
                   {problems.skills}
                 </p>
               )}
-              {!currentSkills.length && <p className="text-[13px] text-muted">No skills yet.</p>}
-              {currentSkills.map((skill, index) => (
-                <div key={index} className="space-y-3 rounded-lg border border-line p-3.5">
-                  <div className="grid gap-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto] sm:items-end">
-                    <Field label="Name" htmlFor={`skill-${scope}-${index}-name`}>
-                      <Input
-                        id={`skill-${scope}-${index}-name`}
-                        value={skill.name}
-                        placeholder="weekly-menu"
-                        autoCapitalize="none"
-                        spellCheck={false}
-                        onChange={event => editSkill(index, {name: event.target.value})}
-                      />
-                    </Field>
-                    <Field label="When to use it" htmlFor={`skill-${scope}-${index}-when`}>
-                      <Input
-                        id={`skill-${scope}-${index}-when`}
-                        dir="auto"
-                        value={skill.description}
-                        placeholder="When someone asks what to cook this week."
-                        onChange={event => editSkill(index, {description: event.target.value})}
-                      />
-                    </Field>
-                    <Button
-                      size="icon"
-                      aria-label={`Remove skill ${skill.name || index + 1}`}
-                      title="Remove this skill"
-                      onClick={() => {
-                        start();
-                        setSkills(currentSkills.filter((_, at) => at !== index));
-                      }}
-                    >
-                      <Trash2 aria-hidden />
-                    </Button>
-                  </div>
-                  <Field
-                    label="Instructions"
-                    htmlFor={`skill-${scope}-${index}-body`}
-                    error={checked ? problems[index] : undefined}
-                  >
-                    <Textarea
-                      id={`skill-${scope}-${index}-body`}
-                      dir="auto"
-                      rows={4}
-                      value={skill.body}
-                      placeholder="What Nocheh should do when this skill applies."
-                      onChange={event => editSkill(index, {body: event.target.value})}
-                    />
-                  </Field>
+              {!currentSkills.length ? (
+                <p className="text-[13px] text-muted">No skills yet.</p>
+              ) : (
+                <div className="overflow-hidden rounded-lg border border-line">
+                  <Table aria-label={'Skills in ' + where} className="table-fixed">
+                    <thead>
+                      <tr>
+                        <Th scope="col" className="w-2/5 sm:w-1/4">
+                          Name
+                        </Th>
+                        <Th scope="col">When to use it</Th>
+                        <Th scope="col" className="w-28">
+                          <span className="sr-only">Edit or remove</span>
+                        </Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentSkills.map((skill, index) => (
+                        <tr key={index} className="last:[&>td]:border-b-0">
+                          <Td className="font-mono text-[13px] break-words">
+                            {skill.name || <span className="font-sans text-muted">New skill</span>}
+                          </Td>
+                          <Td className="text-[13px] text-muted">
+                            <span className="line-clamp-2" dir="auto">
+                              {skill.description}
+                            </span>
+                            {checked && problems[index] && (
+                              <span className="block text-xs text-bad" role="alert">
+                                {problems[index]}
+                              </span>
+                            )}
+                          </Td>
+                          <Td className="py-1.5 text-right whitespace-nowrap">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label={`Edit skill ${skill.name || index + 1}`}
+                              onClick={() => setOpen(index)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={`Remove skill ${skill.name || index + 1}`}
+                              title="Remove this skill"
+                              onClick={() => {
+                                start();
+                                setOpen(null);
+                                setSkills(currentSkills.filter((_, at) => at !== index));
+                              }}
+                            >
+                              <Trash2 aria-hidden />
+                            </Button>
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
                 </div>
-              ))}
+              )}
               <Button
                 size="sm"
                 disabled={currentSkills.length >= LIMITS.skills}
                 onClick={() => {
                   start();
                   setSkills([...currentSkills, {name: '', description: '', body: ''}]);
+                  setOpen(currentSkills.length);
                 }}
               >
                 <Plus aria-hidden /> Add skill
@@ -234,6 +254,58 @@ export function RoleAndSkills({
           </div>
         )}
       </div>
+      <Drawer
+        open={open !== null && !!currentSkills[open]}
+        onOpenChange={next => !next && setOpen(null)}
+        title={(open !== null && currentSkills[open]?.name) || 'New skill'}
+        description={'A skill Nocheh may use in ' + where + '.'}
+        footer={
+          <>
+            <Button variant="primary" onClick={() => setOpen(null)}>
+              Done
+            </Button>
+            <p className="ml-auto self-center text-xs text-muted">Save from the top of the page.</p>
+          </>
+        }
+      >
+        {open !== null && currentSkills[open] && (
+          <div className="space-y-4">
+            <Field label="Name" htmlFor={`skill-${scope}-${open}-name`}>
+              <Input
+                id={`skill-${scope}-${open}-name`}
+                value={currentSkills[open].name}
+                placeholder="weekly-menu"
+                autoCapitalize="none"
+                spellCheck={false}
+                onChange={event => editSkill(open, {name: event.target.value})}
+              />
+            </Field>
+            <Field label="When to use it" htmlFor={`skill-${scope}-${open}-when`}>
+              <Input
+                id={`skill-${scope}-${open}-when`}
+                dir="auto"
+                value={currentSkills[open].description}
+                placeholder="When someone asks what to cook this week."
+                onChange={event => editSkill(open, {description: event.target.value})}
+              />
+            </Field>
+            <Field
+              label="Instructions"
+              htmlFor={`skill-${scope}-${open}-body`}
+              error={checked ? problems[open] : undefined}
+            >
+              <Textarea
+                id={`skill-${scope}-${open}-body`}
+                dir="auto"
+                rows={14}
+                value={currentSkills[open].body}
+                placeholder="What Nocheh should do when this skill applies."
+                onChange={event => editSkill(open, {body: event.target.value})}
+              />
+            </Field>
+          </div>
+        )}
+      </Drawer>
     </Card>
   );
 }

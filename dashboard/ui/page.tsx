@@ -102,3 +102,65 @@ export function Tabs<T extends string>({
     </div>
   );
 }
+
+/**
+ * Tabs inside one tab of a page, for a section too long for one screen; the choice is part of the address (`?tab=`).
+ * Every panel stays on the page, hidden, so an edit made in one is still there, and still saved, from another.
+ */
+export function SubTabs<T extends string>({
+  tabs,
+  value,
+  onChange,
+  label,
+}: {
+  tabs: TabItem<T>[];
+  value: T;
+  onChange: (id: T) => void;
+  label: string;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      className="flex max-w-full gap-0.5 overflow-x-auto rounded-lg border border-line bg-subtle p-0.5 [scrollbar-width:none] sm:inline-flex"
+    >
+      {tabs.map(tab => (
+        <button
+          key={tab.id}
+          role="tab"
+          type="button"
+          id={'subtab-' + tab.id}
+          aria-selected={value === tab.id}
+          aria-controls={'subpanel-' + tab.id}
+          onClick={() => onChange(tab.id)}
+          className={cn(
+            'flex h-8 shrink-0 items-center gap-2 rounded-md px-3 text-[13px] font-medium whitespace-nowrap transition-colors',
+            value === tab.id ? 'bg-surface text-fg shadow-card' : 'text-muted hover:text-fg',
+          )}
+        >
+          {tab.label}
+          {!!tab.count && (
+            <span className="tabular rounded-full bg-accent px-1.5 text-[11px] leading-5 font-semibold text-on-accent">
+              {tab.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One sub-tab's content: on the page whether shown or not, so its unsaved edits are kept. */
+export function SubPanel({id, current, children}: {id: string; current: string; children: React.ReactNode}) {
+  return (
+    <div
+      role="tabpanel"
+      id={'subpanel-' + id}
+      aria-labelledby={'subtab-' + id}
+      hidden={id !== current}
+      className="space-y-5"
+    >
+      {children}
+    </div>
+  );
+}

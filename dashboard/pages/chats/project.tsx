@@ -184,6 +184,16 @@ export function useJoinQuestion(group: string) {
   };
 }
 
+/** True while a served group has not said which project it joins, which its Project card asks. */
+export function useProjectUnanswered(chat: Chat, served: boolean): boolean {
+  const asks = served && chat.kind === 'group';
+  const effective = useResource<Effective>(
+    asks ? '/projects/effective?space=' + encodeURIComponent(chat.space_id) : null,
+  );
+  const {choices} = useProjectChoices(effective.data?.project);
+  return asks && !!effective.data && !answered(effective.data.own_assignment ?? null) && choices.length > 0;
+}
+
 export function ProjectCard({chat, served}: {chat: Chat; served: boolean}) {
   if (chat.kind === 'topic') return <TopicProject chat={chat} />;
   return <GroupProject chat={chat} served={served} />;

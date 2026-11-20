@@ -1,5 +1,5 @@
 import {useSyncExternalStore} from 'react';
-import {currentParams} from './routes';
+import {currentParams, setParams} from './routes';
 
 const subscribe = (listener: () => void) => {
   addEventListener('hashchange', listener);
@@ -29,4 +29,11 @@ export function useView<T extends string>(views: readonly T[]): [T, (view: T) =>
       location.hash = '#' + page + (next === views[0] ? '' : '?view=' + next);
     },
   ];
+}
+
+/** The selected sub-tab inside one tab of a page, from `?tab=`; the first when none or an unknown one is named. */
+export function useSubTab<T extends string>(tabs: readonly T[]): [T, (tab: T) => void] {
+  const tab = useParam('tab');
+  const current = tabs.includes(tab as T) ? (tab as T) : tabs[0]!;
+  return [current, next => setParams({tab: next === tabs[0] ? null : next})];
 }
