@@ -1,7 +1,9 @@
-/** One chat: where Nocheh answers, its members, what it remembers and may do, the tools it may use, and, for a group or topic, its project. */
+/** One chat, in four sub-tabs: where Nocheh answers and its members; its role and skills; what it may do and the tools it may use; what it remembers and, for a group or topic, its project. */
 import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
+import {useSubTab} from '../../lib/navigation';
+import {SubPanel, SubTabs} from '../../ui/page';
 import {
   appIdLabel,
   byTopicKey,
@@ -20,7 +22,7 @@ import {ShortId} from './chat-list';
 import {MemoryCard} from './memory';
 import {MembersHere} from './people';
 import {NochehHere} from './presence';
-import {PrivateChatProject, ProjectCard} from './project';
+import {PrivateChatProject, ProjectCard, useProjectUnanswered} from './project';
 import {RoleAndSkills} from './role-skills';
 import {chatHref, useChat, useChats, type Telegram} from './shared';
 import {ToolSwitches} from './tools';
@@ -47,6 +49,14 @@ export type ChatContext = {
   memory?: {availability?: string};
 };
 
+const tabs = [
+  {id: 'access', label: 'Access'},
+  {id: 'role', label: 'Role and skills'},
+  {id: 'tools', label: 'Tools and limits'},
+  {id: 'memory', label: 'Memory and project'},
+] as const;
+const tabIds = tabs.map(item => item.id);
+
 export function ChatDetail({space, telegram}: {space: string; telegram: Telegram}) {
   const chat = useChat(space);
   // What the chat is comes from the chat directory, never from its id (ADR-0252).
@@ -55,6 +65,9 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
   const parent = parentId ? parentChat : null;
   const {items, find, settled} = useChats();
   const context = useResource<ChatContext>('/conversations/context?space=' + encodeURIComponent(space));
+  const [tab, setTab] = useSubTab(tabIds);
+  // A served group that hasn't said which project it joins is asked on the last tab, which is marked.
+  const asks = useProjectUnanswered(chat, chat.kind === 'group' && isOn(chat));
   // A chat the directory doesn't know, or hasn't answered for yet, is no private chat, group or topic: nothing is
   // offered for it, as nothing is decided from its id.
   if (chat.kind === 'unknown') return <UnknownChat chat={chat} loading={!settled(space)} />;
@@ -132,52 +145,72 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
       {context.error && !context.data && (
         <LoadError what="this chat’s details" onRetry={() => void refreshResources()} />
       )}
-      <NochehHere chat={chat} parent={parent} telegram={telegram} />
-      {/* Who may talk in a group Nocheh is in, read-only: each member's switches are on the Members page. */}
-      {switchable(chat) && <MembersHere group={chat} telegram={telegram} />}
-      {(owner || on) && (
-        <RoleAndSkills
-          scope={space}
-          where={where}
-          audience={group ? 'group' : 'owner'}
-          description={
-            group
-              ? 'Only you set these. Every topic in this group uses them, on top of its project’s if it has one. Defaults for groups are in Settings › Assistant.'
-              : 'Only you set these. The default for your private chat is in Settings › Assistant; groups never use either.'
-          }
-        />
-      )}
-      {chat.kind === 'topic' && (
-        <p className="px-1 text-[13px] text-muted">
-          This topic uses its group’s role and skills.{' '}
-          <a href={chatHref(parentId ?? '')} className="font-medium text-accent-text hover:underline">
-            Open the group
-          </a>
-        </p>
-      )}
-      <MemoryCard chat={chat} telegram={telegram} context={context.data} />
-      <AllowedActions chat={chat} group={inGroup} context={context.data} />
-      {tools && (
-        <ToolSwitches
-          space={space}
-          parent={parentId ?? '*'}
-          title="Tools"
-          where={where}
-          description={
-            chat.kind === 'topic'
-              ? 'Only you set these. Default follows its group, one tool at a time.'
-              : group
-                ? 'Only you set these. Every topic in this group follows them unless it sets its own. Defaults are in Settings › Assistant.'
-                : 'Only you set these, for this chat and its topics. Defaults for every chat are in Settings › Assistant.'
-          }
-        />
-      )}
-      {inGroup ? (
-        <ProjectCard chat={chat} served={on} />
-      ) : (
-        <PrivateChatProject chat={chat} yours={chat.owner === true} />
-      )}
-      {forum && <TopicsCard group={chat} topics={topics} />}
+      {/* Four short screens instead of one long one; every panel stays on the page so its unsaved edits are kept. */}
+      <SubTabs
+        label="This chat"
+        tabs={tabs.map(item => ({...item, count: item.id === 'memory' && asks ? 1 : null}))}
+        value={tab}
+        onChange={setTab}
+      />
+      <SubPanel id="access" current={tab}>
+        <NochehHere chat={chat} parent={parent} telegram={telegram} />
+        {/* Who may talk in a group Nocheh is in, read-only: each member's switches are on the Members page. */}
+        {switchable(chat) && <MembersHere group={chat} telegram={telegram} />}
+        {forum && <TopicsCard group={chat} topics={topics} />}
+      </SubPanel>
+      <SubPanel id="role" current={tab}>
+        {owner || on ? (
+          <RoleAndSkills
+            scope={space}
+            where={where}
+            audience={group ? 'group' : 'owner'}
+            description={
+              group
+                ? 'Only you set these. Every topic in this group uses them, on top of its project’s if it has one. Defaults for groups are in Settings › Assistant.'
+                : 'Only you set these. The default for your private chat is in Settings › Assistant; groups never use either.'
+            }
+          />
+        ) : chat.kind === 'topic' ? (
+          <p className="px-1 text-[13px] text-muted">
+            This topic uses its group’s role and skills.{' '}
+            <a href={chatHref(parentId ?? '')} className="font-medium text-accent-text hover:underline">
+              Open the group
+            </a>
+          </p>
+        ) : (
+          <p className="px-1 text-[13px] text-muted">
+            {group
+              ? 'A group gets its own role and skills once Nocheh is on in it.'
+              : 'Only your own private chat has a role and skills of its own.'}
+          </p>
+        )}
+      </SubPanel>
+      <SubPanel id="tools" current={tab}>
+        <AllowedActions chat={chat} group={inGroup} context={context.data} />
+        {tools && (
+          <ToolSwitches
+            space={space}
+            parent={parentId ?? '*'}
+            title="Tools"
+            where={where}
+            description={
+              chat.kind === 'topic'
+                ? 'Only you set these. Default follows its group, one tool at a time.'
+                : group
+                  ? 'Only you set these. Every topic in this group follows them unless it sets its own. Defaults are in Settings › Assistant.'
+                  : 'Only you set these, for this chat and its topics. Defaults for every chat are in Settings › Assistant.'
+            }
+          />
+        )}
+      </SubPanel>
+      <SubPanel id="memory" current={tab}>
+        <MemoryCard chat={chat} telegram={telegram} context={context.data} />
+        {inGroup ? (
+          <ProjectCard chat={chat} served={on} />
+        ) : (
+          <PrivateChatProject chat={chat} yours={chat.owner === true} />
+        )}
+      </SubPanel>
     </div>
   );
 }

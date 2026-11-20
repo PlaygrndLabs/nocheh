@@ -2,6 +2,20 @@
 
 <current>
 
+Sub-tabs for the two longest pages, step 3 of the table-first dashboard plan (owner,
+2026-11-19: "avoid scrolling as much as possible and use tables instead, everywhere";
+2026-11-20: "yes to all", which took sub-tabs for long settings pages).
+- `SubTabs`/`SubPanel` (`dashboard/ui/page.tsx`) and `useSubTab` (`?tab=`): every panel stays
+  mounted and hidden, so unsaved edits survive a switch and the top Save still sends them.
+- Settings › Assistant: acting and role, tools and limits, background jobs, built-in
+  instructions (was about 7 screens).
+- A chat's page: access, role and skills, tools and limits, memory and project; the last tab
+  carries a count while the group's project question is open (`useProjectUnanswered`).
+- Skills are a table with a drawer per skill; built-in instructions are a table, 12 a page,
+  with a search box and a drawer per text. A failed save opens the row it is about.
+- Checks: browser (`test/dashboard-pages.browser.mjs`). Pending: steps 4 and 5 (System; the
+  remaining pages), one change each.
+
 Memory pages as tables, step 2 of the table-first dashboard plan (owner, 2026-11-19: "avoid
 scrolling as much as possible and use tables instead, everywhere"; 2026-11-20: "yes to all").
 - Step 1 (merged): Assistant notes lists past conversations and working notes as tables; the

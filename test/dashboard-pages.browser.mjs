@@ -56,6 +56,9 @@ const routes = [
   ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'machines', 'advanced'].map(
     view => ['settings?view=' + view, 'Settings'],
   ),
+  // The sub-tabs of the two longest pages.
+  ...['tools', 'jobs', 'instructions'].map(tab => ['settings?view=assistant&tab=' + tab, 'Settings']),
+  ...['role', 'tools', 'memory'].map(tab => ['chats?chat=-10042&tab=' + tab, 'Chats']),
 ];
 
 let server, browser;
@@ -109,6 +112,16 @@ async function open(hash, viewport = {width: 1440, height: 900}) {
   await page.waitForLoadState('networkidle');
   return {page, problems};
 }
+
+// A built-in instruction is found by name in its table, a page of them at a time, and edited in a drawer.
+async function instruction(page, title) {
+  await page.getByRole('searchbox', {name: 'Find an instruction'}).fill(title);
+  await page.getByRole('button', {name: 'Edit ' + title, exact: true}).click();
+  const drawer = page.getByRole('dialog', {name: title, exact: true});
+  await drawer.getByRole('textbox', {name: title, exact: true}).waitFor();
+  return drawer;
+}
+const done = drawer => drawer.getByRole('button', {name: 'Done'}).click();
 
 test('every page and tab opens with its heading and without errors', async () => {
   for (const [route, title] of routes) {
@@ -367,29 +380,42 @@ test('an apply the dashboard lost ends with a clear error and the Save button ba
 });
 
 test('a group’s role and skills are edited on its chat page and saved from the top of the page', async () => {
+  // A chat's page is four sub-tabs; the role and skills are the second.
   const {page, problems} = await open('chats?chat=-10042');
+  await page.getByRole('tab', {name: 'Role and skills'}).click();
+  assert.equal(new URL(page.url()).hash, '#chats?chat=-10042&tab=role');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Role and skills'})});
   await card.getByRole('textbox', {name: 'Role'}).fill('You help this group plan stargazing trips.');
+  // A skill is a row of the skills table, written in a drawer.
   await card.getByRole('button', {name: 'Add skill'}).click();
-  await card.getByRole('textbox', {name: 'Name'}).fill('Kp Forecast');
-  await card.getByRole('textbox', {name: 'When to use it'}).fill('When someone asks about tonight’s aurora.');
-  await card.getByRole('textbox', {name: 'Instructions'}).fill('Give the Kp index and the best viewing hour.');
+  await page.getByRole('dialog', {name: 'New skill'}).waitFor();
+  const skill = page.getByRole('dialog');
+  await skill.getByRole('textbox', {name: 'Name'}).fill('Kp Forecast');
+  await skill.getByRole('textbox', {name: 'When to use it'}).fill('When someone asks about tonight’s aurora.');
+  await skill.getByRole('textbox', {name: 'Instructions'}).fill('Give the Kp index and the best viewing hour.');
+  await done(skill);
   const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.getByText('2 unsaved changes').waitFor();
+  // An edit made on one sub-tab is kept, and saved, from another.
+  await page.getByRole('tab', {name: 'Access'}).click();
+  await bar.getByText('2 unsaved changes').waitFor();
   await bar.getByRole('button', {name: 'Save'}).click();
-  // A name Hermes cannot use is explained in place and nothing is saved.
-  await card.getByText('Name it with lower-case English letters').waitFor();
-  await card.getByRole('textbox', {name: 'Name'}).fill('kp-forecast');
+  // A name Hermes cannot use opens that skill and is explained in place; nothing is saved.
+  const bad = page.getByRole('dialog');
+  await bad.getByText('Name it with lower-case English letters').waitFor();
+  await bad.getByRole('textbox', {name: 'Name'}).fill('kp-forecast');
+  await done(bad);
   await bar.getByRole('button', {name: 'Try again'}).click();
   await bar.getByText('No unsaved changes').waitFor();
+  await page.goto(origin + '/#chats?chat=-10042&tab=role');
   await page.reload();
-  await card.getByRole('textbox', {name: 'Name'}).waitFor();
-  assert.equal(await card.getByRole('textbox', {name: 'Name'}).inputValue(), 'kp-forecast');
+  const row = card.getByRole('row').filter({hasText: 'kp-forecast'});
+  await row.getByText('When someone asks about tonight’s aurora.').waitFor();
   assert.equal(
     await card.getByRole('textbox', {name: 'Role'}).inputValue(),
     'You help this group plan stargazing trips.',
   );
-  const {page: topic} = await open('chats?chat=-10042%2Ftopic%2F7');
+  const {page: topic} = await open('chats?chat=-10042%2Ftopic%2F7&tab=role');
   await topic.getByText('This topic uses its group’s role and skills.').waitFor();
   assert.equal(await topic.getByRole('heading', {name: 'Role and skills'}).count(), 0);
   await topic.close();
@@ -405,12 +431,8 @@ test('the private chat and groups each start from their own default role and ski
   const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Role and skills in groups'})});
   await mine.getByText('Your private chat can use these.').waitFor();
   await groups.getByText('Every group and topic can use these.').waitFor();
-  assert.equal(await mine.getByRole('textbox', {name: 'Name'}).inputValue(), 'weekly-menu');
-  assert.equal(
-    await groups.getByRole('textbox', {name: 'Name'}).count(),
-    0,
-    'groups never start from the private chat’s skills',
-  );
+  await mine.getByRole('table', {name: 'Skills in your private chat'}).getByText('weekly-menu').waitFor();
+  assert.equal(await groups.getByRole('table').count(), 0, 'groups never start from the private chat’s skills');
   const saved = [];
   page.on('request', request => {
     if (request.method() === 'POST' && request.url().endsWith('/memory/persona'))
@@ -435,7 +457,7 @@ test('a page for a feature the connected assistant lacks says so instead of offe
   await page.route(/\/api\/nocheh\/memory\/persona\?/, route =>
     route.fulfill({status: 409, contentType: 'application/json', body: '{"error":"brain_capability_unavailable"}'}),
   );
-  await page.goto(origin + '/#chats?chat=-10042');
+  await page.goto(origin + '/#chats?chat=-10042&tab=role');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Role and skills'})});
   await card.getByText('The connected assistant can’t do this').waitFor();
   await card.getByText('It doesn’t offer the role and skills.').waitFor();
@@ -444,78 +466,83 @@ test('a page for a feature the connected assistant lacks says so instead of offe
 });
 
 test('a built-in instruction is replaced, checked and reset to the built-in text', async () => {
-  const {page, problems} = await open('settings?view=assistant');
+  const {page, problems} = await open('settings?view=assistant&tab=instructions');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
   const bar = page.getByRole('region', {name: 'Save changes'});
-  await card.getByText('Groups', {exact: true}).click();
-  await card.getByRole('textbox', {name: 'Groups'}).fill('Reply in Persian and stay quiet with [NO_REPLY] otherwise.');
-  await card.getByText('Learning from conversations').click();
-  await card.getByRole('textbox', {name: 'Learning from conversations'}).fill('Learn only decisions.');
+  // The instructions are a table, a page at a time, never one long list.
+  const table = card.getByRole('table', {name: 'Built-in instructions'});
+  assert.equal(await table.locator('tbody tr').count(), 12);
+  await card.getByRole('button', {name: 'Next'}).waitFor();
+  let drawer = await instruction(page, 'Groups');
+  await drawer
+    .getByRole('textbox', {name: 'Groups'})
+    .fill('Reply in Persian and stay quiet with [NO_REPLY] otherwise.');
+  await done(drawer);
+  drawer = await instruction(page, 'Learning from conversations');
+  await drawer.getByRole('textbox', {name: 'Learning from conversations'}).fill('Learn only decisions.');
+  await done(drawer);
   await bar.getByText('2 unsaved changes').waitFor();
   await bar.getByRole('button', {name: 'Save'}).click();
-  // The values Nocheh fills in cannot be dropped by mistake.
-  await card.getByText('Keep {trigger_id} and {citable_ids} in the text').waitFor();
-  await card
+  // The values Nocheh fills in cannot be dropped by mistake: the failed save opens the text it is about.
+  drawer = page.getByRole('dialog', {name: 'Learning from conversations'});
+  await drawer.getByText('Keep {trigger_id} and {citable_ids} in the text').waitFor();
+  await drawer
     .getByRole('textbox', {name: 'Learning from conversations'})
     .fill('Learn only decisions from {trigger_id} citing {citable_ids}.');
+  await done(drawer);
   await bar.getByRole('button', {name: 'Try again'}).click();
   await bar.getByText('No unsaved changes').waitFor();
   await page.reload();
-  await card.getByText('Changed').first().waitFor();
-  assert.equal(await card.getByText('Changed', {exact: true}).count(), 2);
-  await card.getByText('Groups', {exact: true}).click();
-  const groups = card.getByRole('listitem').filter({has: page.getByRole('textbox', {name: 'Groups'})});
-  await groups.getByRole('button', {name: 'Reset to built-in'}).click();
+  await table.getByText('Changed').first().waitFor();
+  assert.equal(await table.getByText('Changed', {exact: true}).count(), 2);
+  drawer = await instruction(page, 'Groups');
+  await drawer.getByRole('button', {name: 'Reset to built-in'}).click();
   assert.equal(
-    await card.getByRole('textbox', {name: 'Groups'}).inputValue(),
+    await drawer.getByRole('textbox', {name: 'Groups'}).inputValue(),
     'This is a shared space. For routine chatter return exactly [NO_REPLY].',
   );
-  await groups.getByText('Reset when saved').waitFor();
+  await drawer.getByText('Reset when saved').waitFor();
+  await done(drawer);
   await bar.getByRole('button', {name: 'Save'}).click();
   await bar.getByText('No unsaved changes').waitFor();
-  assert.equal(await card.getByText('Changed', {exact: true}).count(), 1);
+  await page.getByRole('searchbox', {name: 'Find an instruction'}).fill('');
+  assert.equal(await table.getByText('Changed', {exact: true}).count(), 1);
   assert.deepEqual(problems, []);
   await page.close();
 });
 
 test('the private answer’s rules, first line, button and notices are built-in instructions the owner can edit', async () => {
-  const {page, problems} = await open('settings?view=assistant');
-  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  const {page, problems} = await open('settings?view=assistant&tab=instructions');
+  const texts = {};
   for (const title of ['Private answers', 'Private answer’s first line', 'Answer privately button and notices']) {
-    await card.getByText(title, {exact: true}).click();
-    assert.equal(await card.getByRole('textbox', {name: title}).isEditable(), true, title);
+    const drawer = await instruction(page, title);
+    const box = drawer.getByRole('textbox', {name: title, exact: true});
+    assert.equal(await box.isEditable(), true, title);
+    texts[title] = await box.inputValue();
+    await done(drawer);
   }
-  assert.equal(
-    await card.getByRole('textbox', {name: 'Private answers'}).inputValue(),
-    'This is a private answer, in the private chat of the person who asked.',
-  );
-  assert.match(
-    await card.getByRole('textbox', {name: 'Private answer’s first line'}).inputValue(),
-    /\{group\}.*\{groups\}/,
-  );
-  assert.match(
-    await card.getByRole('textbox', {name: 'Answer privately button and notices'}).inputValue(),
-    /^button: 🔒 Answer privately$/m,
-  );
+  assert.equal(texts['Private answers'], 'This is a private answer, in the private chat of the person who asked.');
+  assert.match(texts['Private answer’s first line'], /\{group\}.*\{groups\}/);
+  assert.match(texts['Answer privately button and notices'], /^button: 🔒 Answer privately$/m);
   assert.deepEqual(problems, []);
   await page.close();
 });
 
 test('the reminder lines are a built-in instruction, and a line that drops a value Nocheh fills in is refused', async () => {
-  const {page, problems} = await open('settings?view=assistant');
-  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  const {page, problems} = await open('settings?view=assistant&tab=instructions');
   const bar = page.getByRole('region', {name: 'Save changes'});
   const title = 'Reminder lines: who set it and where';
-  await card.getByText(title, {exact: true}).click();
+  let drawer = await instruction(page, title);
   // Its description says so, and so does the text itself.
-  await card
+  await drawer
     .getByText(/at most one message per group every 10 minutes/)
     .first()
     .waitFor();
-  const box = card.getByRole('textbox', {name: title});
+  const box = drawer.getByRole('textbox', {name: title});
   const text = await box.inputValue();
   assert.match(text, /^set_by: 👤 Set by \{who\} in \{place\}$/m);
   await box.fill(text.replace('set_by: 👤 Set by {who} in {place}', 'set_by: 👤 Set by {who}'));
+  await done(drawer);
   await bar.getByRole('button', {name: 'Save'}).click();
   await page
     .getByRole('alert')
@@ -523,10 +550,13 @@ test('the reminder lines are a built-in instruction, and a line that drops a val
     .first()
     .waitFor();
   // The edit is kept until the owner puts the value back or discards it.
-  assert.match(await box.inputValue(), /^set_by: 👤 Set by \{who\}$/m);
+  drawer = await instruction(page, title);
+  assert.match(await drawer.getByRole('textbox', {name: title}).inputValue(), /^set_by: 👤 Set by \{who\}$/m);
+  await done(drawer);
   await bar.getByRole('button', {name: 'Discard'}).click();
   await bar.getByText('No unsaved changes').waitFor();
-  assert.equal(await box.inputValue(), text);
+  drawer = await instruction(page, title);
+  assert.equal(await drawer.getByRole('textbox', {name: title}).inputValue(), text);
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -590,7 +620,7 @@ test('discard drops unsaved edits', async () => {
 });
 
 test('the sealed box switch saves with the job limits in either order, and again after a change elsewhere', async () => {
-  const {page, problems} = await open('settings?view=assistant');
+  const {page, problems} = await open('settings?view=assistant&tab=jobs');
   const posts = [];
   page.on('request', request => {
     if (request.method() === 'POST' && request.url().includes('/background-jobs/settings'))
@@ -618,7 +648,7 @@ test('the sealed box switch saves with the job limits in either order, and again
     assert.equal(await minutes.inputValue(), next, order);
   }
   // Changed elsewhere meanwhile: the save is refused with the edit kept, and Try again saves over the new revision.
-  const other = await open('settings?view=assistant');
+  const other = await open('settings?view=assistant&tab=jobs');
   const otherBar = other.page.getByRole('region', {name: 'Save changes'});
   const wasOn = await on();
   const next = String(Number(await minutes.inputValue()) - 5);
@@ -1492,7 +1522,7 @@ test('a project shares nothing between its groups, and a group joins one only af
 
   // A group's card says it shares only the project's own tasks, and moving it asks first, naming the groups in the
   // other project.
-  const {page: chat, problems: chatProblems} = await open('chats?chat=-10042');
+  const {page: chat, problems: chatProblems} = await open('chats?chat=-10042&tab=memory');
   const card = chat.locator('section', {has: chat.getByRole('heading', {name: 'Project', exact: true})});
   await card
     .getByText('They share only the tasks set on the whole project: a group answer uses only that group.', {
@@ -1538,7 +1568,7 @@ test('a project shares nothing between its groups, and a group joins one only af
   await chat.close();
 
   // A topic's card only says which project it follows.
-  const {page: topic, problems: topicProblems} = await open('chats?chat=-10042%2Ftopic%2F7');
+  const {page: topic, problems: topicProblems} = await open('chats?chat=-10042%2Ftopic%2F7&tab=memory');
   const topicCard = topic.locator('section', {has: topic.getByRole('heading', {name: 'Project', exact: true})});
   await topicCard.locator('p', {hasText: 'Follows Aurora planning’s project: Aurora field guide.'}).waitFor();
   assert.equal(await topic.locator('#chat-project').count(), 0, 'a topic has no project of its own');
@@ -1559,7 +1589,10 @@ test('a project shares nothing between its groups, and a group joins one only af
     posted.push(route.request().postDataJSON());
     return route.fulfill({status: 200, contentType: 'application/json', body: '{"space_id":"-10042","mode":"none"}'});
   });
+  // The question is on the chat's last sub-tab, which is marked while it waits.
   await unanswered.goto(origin + '/#chats?chat=-10042');
+  const marked = unanswered.getByRole('tab', {name: 'Memory and project 1'});
+  await marked.click();
   const question = unanswered.getByRole('status').filter({hasText: 'Which project does this group join?'});
   await question.waitFor();
   await question.getByRole('button', {name: 'None'}).click();
@@ -1593,7 +1626,7 @@ test('a project shares nothing between its groups, and a group joins one only af
     followingPosted.push(body);
     return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({...body, revision: 4})});
   });
-  await following.goto(origin + '/#chats?chat=-10042');
+  await following.goto(origin + '/#chats?chat=-10042&tab=memory');
   const asked = following.getByRole('status').filter({hasText: 'Which project does this group join?'});
   await asked.getByRole('button', {name: 'None'}).click();
   await following.getByRole('status').filter({hasText: 'Joins no project.'}).waitFor();
@@ -1863,7 +1896,7 @@ test('the owner’s private chat stays out of sharing rules and projects', async
   await rules.close();
 
   // The owner's chat page offers no project, and clears one an older setting still names.
-  const {page: own, problems: ownProblems} = await open('chats?chat=42');
+  const {page: own, problems: ownProblems} = await open('chats?chat=42&tab=memory');
   const older = own.getByRole('status').filter({hasText: 'An older setting puts this chat in a project'});
   await older.getByText('Nocheh ignores the setting that puts it in Aurora field guide.', {exact: false}).waitFor();
   assert.equal(await own.locator('#chat-project').count(), 0);
@@ -2823,14 +2856,14 @@ test('the owner reads where group web pages and outside tools skip the card, and
     .getByText('Except web pages and outside tools other than Notion asked for in a group', {exact: false})
     .waitFor();
   // A group's Allowed actions with nothing allowed names the exceptions and what still waits; the private chat has none.
-  await page.goto(origin + '/#chats?chat=-10073');
+  await page.goto(origin + '/#chats?chat=-10073&tab=tools');
   const allowed = page.locator('section', {has: page.getByRole('heading', {name: 'Allowed actions'})});
   const groupAllowed =
     'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, and a message for this chat asked for here goes out without one. Commands still wait for your approval in the Inbox.';
   await allowed.getByText(groupAllowed).waitFor();
   assert.equal(await allowed.getByText('Anything else waits', {exact: false}).count(), 0);
   const privateAllowed = 'Nothing without asking. Each action waits for your approval in the Inbox.';
-  await page.goto(origin + '/#chats?chat=42');
+  await page.goto(origin + '/#chats?chat=42&tab=tools');
   await allowed.getByText(privateAllowed).waitFor();
   // A topic of the owner's private chat is no group: no member talks there, so nothing skips the card.
   const ownerTopic = '42/topic/9';
@@ -2855,7 +2888,7 @@ test('the owner reads where group web pages and outside tools skip the card, and
       await route.fulfill({response: answer, json: {...body, items: [...body.items, topic], total: body.total + 1}});
     },
   );
-  await page.goto(origin + '/#chats?chat=' + encodeURIComponent(ownerTopic));
+  await page.goto(origin + '/#chats?chat=' + encodeURIComponent(ownerTopic) + '&tab=tools');
   await page.reload();
   await allowed.getByText('Permissions belong to the whole private chat.').waitFor();
   await allowed.getByText(privateAllowed).waitFor();
@@ -2874,21 +2907,24 @@ test('the owner reads where group web pages and outside tools skip the card, and
 });
 
 test('Settings lists the member texts and no group access setting, and Background jobs has no daily job count', async () => {
-  const {page, problems} = await open('settings?view=assistant');
-  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  const {page, problems} = await open('settings?view=assistant&tab=instructions');
   for (const title of [
     'Reply to people who may not talk in a group',
     'Reply to a member past the daily limit',
     'Tool runs a group allows without a card',
   ]) {
-    await card.getByText(title, {exact: true}).click();
-    assert.equal(await card.getByRole('textbox', {name: title}).isEditable(), true, title);
+    const drawer = await instruction(page, title);
+    const box = drawer.getByRole('textbox', {name: title, exact: true});
+    assert.equal(await box.isEditable(), true, title);
+    if (title.startsWith('Tool runs')) assert.match(await box.inputValue(), /^allowed_follow_up: .+\nallowed: .+$/);
+    await done(drawer);
   }
-  assert.match(
-    await card.getByRole('textbox', {name: 'Tool runs a group allows without a card'}).inputValue(),
-    /^allowed_follow_up: .+\nallowed: .+$/,
-  );
-  await card.getByText(/reason_member_changed when the member who asked was paused or removed/).waitFor();
+  await page.getByRole('searchbox', {name: 'Find an instruction'}).fill('reason_member_changed');
+  await page
+    .getByRole('table', {name: 'Built-in instructions'})
+    .getByText(/reason_member_changed when the member who asked was paused or removed/)
+    .waitFor();
+  await page.getByRole('tab', {name: 'Background jobs'}).click();
   await page.locator('#job-minutes_limit').waitFor();
   assert.equal(await page.locator('#job-member_daily_jobs').count(), 0);
   assert.equal(await page.getByText('Jobs a member may start each day').count(), 0);
@@ -3037,23 +3073,24 @@ test('Notes names a member’s private chat and your question about a member as 
 });
 
 test('Settings lists the member private chat texts and the local laws line, each editable', async () => {
-  const {page, problems} = await open('settings?view=assistant');
-  const card = page.locator('section', {has: page.getByRole('heading', {name: 'Built-in instructions'})});
+  const {page, problems} = await open('settings?view=assistant&tab=instructions');
+  const texts = {};
   for (const title of [
     'Members’ private chats',
     'Reply to a member past the daily limit, in private',
     'Reply to people who may not talk in private',
     'Local laws line on the Members page',
   ]) {
-    await card.getByText(title, {exact: true}).click();
-    assert.equal(await card.getByRole('textbox', {name: title}).isEditable(), true, title);
+    const drawer = await instruction(page, title);
+    const box = drawer.getByRole('textbox', {name: title, exact: true});
+    assert.equal(await box.isEditable(), true, title);
+    texts[title] = await box.inputValue();
+    if (title === 'Reply to people who may not talk in private')
+      await drawer.getByText('a member who is paused or has their private chat switched off', {exact: false}).waitFor();
+    await done(drawer);
   }
-  assert.match(await card.getByRole('textbox', {name: 'Members’ private chats'}).inputValue(), /the owner can read it/);
-  assert.match(
-    await card.getByRole('textbox', {name: 'Reply to people who may not talk in private'}).inputValue(),
-    /its owner and the people they add/,
-  );
-  await card.getByText('a member who is paused or has their private chat switched off', {exact: false}).waitFor();
+  assert.match(texts['Members’ private chats'], /the owner can read it/);
+  assert.match(texts['Reply to people who may not talk in private'], /its owner and the people they add/);
   assert.deepEqual(problems, []);
   await page.close();
 });

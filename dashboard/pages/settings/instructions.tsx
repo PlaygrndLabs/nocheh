@@ -1,14 +1,33 @@
 /**
  * "Built-in instructions": the texts Nocheh's code tells the models behind the
- * scenes. The owner can replace any of them; resetting brings back the built-in
- * text, which then follows future updates.
+ * scenes, as a table a page at a time. The owner can replace any of them in a
+ * drawer; resetting brings back the built-in text, which then follows future updates.
  */
-import {useEffect, useRef, useState} from 'react';
-import {ChevronRight, RotateCcw} from 'lucide-react';
+import {useState} from 'react';
+import {RotateCcw, Search} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {useDraftSource} from '../../lib/drafts';
 import {refreshResources, useResource} from '../../lib/resource';
-import {Badge, Button, Card, CardHeader, LoadError, LoadingRows, Textarea} from '../../ui/core';
+import {
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
+  Dot,
+  Input,
+  LoadError,
+  LoadingRows,
+  Pager,
+  Table,
+  Td,
+  Textarea,
+  Th,
+  type Tone,
+} from '../../ui/core';
+import {Drawer} from '../../ui/overlay';
+
+const PAGE = 12;
+const statusTone: Record<string, Tone> = {'Built-in': 'neutral', Changed: 'accent'};
 
 type Prompts = {
   revision: string;
@@ -294,6 +313,9 @@ export function BuiltInInstructions() {
   const [changes, setChanges] = useState<Record<string, string | null>>({});
   const [revision, setRevision] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
+  const [open, setOpen] = useState<string | null>(null);
+  const [typed, setTyped] = useState('');
+  const [page, setPage] = useState(0);
   const value = (key: string) =>
     changes[key] === null
       ? (data?.defaults[key] ?? '')
@@ -324,7 +346,12 @@ export function BuiltInInstructions() {
     labels: Object.keys(changes).map(key => 'Instruction: ' + title(key)),
     save: async () => {
       setChecked(true);
-      if (Object.keys(changes).some(problem)) throw new Error('Fix the marked instructions, then save again.');
+      // A failed save opens the text it is about.
+      const bad = Object.keys(changes).find(problem);
+      if (bad) {
+        setOpen(current => (current && problem(current) ? current : bad));
+        throw new Error('Fix the marked instructions, then save again.');
+      }
       try {
         await apiPost('/prompts', {
           texts: Object.fromEntries(
@@ -348,104 +375,186 @@ export function BuiltInInstructions() {
     discard: reset,
   });
 
+  const status = (key: string) =>
+    key in changes
+      ? changes[key] === null
+        ? 'Reset when saved'
+        : 'Not saved'
+      : data?.texts[key] !== undefined
+        ? 'Changed'
+        : 'Built-in';
+  const needle = typed.trim().toLowerCase();
+  const found = needle
+    ? instructions.filter(item => (item.title + ' ' + item.hint).toLowerCase().includes(needle))
+    : instructions;
+  const last = Math.max(0, Math.ceil(found.length / PAGE) - 1);
+  const at = Math.min(page, last);
+  const rows = found.slice(at * PAGE, (at + 1) * PAGE);
+  const editing = instructions.find(item => item.key === open);
+  const custom = (key: string) => (changes[key] === null ? false : key in changes || data?.texts[key] !== undefined);
+
   return (
     <Card>
       <CardHeader
         title="Built-in instructions"
         description="What Nocheh is told behind the scenes. Change any of them, or reset one to bring back the built-in text. No restart needed."
       />
-      <div className="mt-3 border-t border-line">
-        {prompts.error && !data ? (
-          <LoadError what="the instructions" error={prompts.error} className="m-5" />
-        ) : !data ? (
+      <div className="px-5 pb-3">
+        <div className="relative max-w-sm">
+          <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
+          <Input
+            type="search"
+            aria-label="Find an instruction"
+            className="pl-9"
+            placeholder="Find an instruction"
+            value={typed}
+            onChange={event => {
+              setTyped(event.target.value);
+              setPage(0);
+            }}
+          />
+        </div>
+      </div>
+      {prompts.error && !data ? (
+        <CardBody>
+          <LoadError what="the instructions" error={prompts.error} />
+        </CardBody>
+      ) : !data ? (
+        <CardBody>
           <LoadingRows rows={3} />
-        ) : (
-          <ul className="divide-y divide-line">
-            {instructions.map(({key, title, hint}) => {
-              const pending = key in changes;
-              const custom = changes[key] === null ? false : pending || data.texts[key] !== undefined;
+        </CardBody>
+      ) : !rows.length ? (
+        <CardBody>
+          <p className="text-[13px] text-muted">No instruction matches. Try other words.</p>
+        </CardBody>
+      ) : (
+        <Table aria-label="Built-in instructions">
+          <thead>
+            <tr>
+              <Th scope="col">Instruction</Th>
+              <Th scope="col">Status</Th>
+              <Th scope="col">
+                <span className="sr-only">Edit</span>
+              </Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({key, title, hint}) => {
+              const state = status(key);
               const error = checked ? problem(key) : null;
               return (
-                <Instruction
+                <tr
                   key={key}
-                  title={title}
-                  hint={hint}
-                  status={
-                    pending
-                      ? changes[key] === null
-                        ? 'Reset when saved'
-                        : 'Not saved'
-                      : custom
-                        ? 'Changed'
-                        : 'Built-in'
-                  }
-                  value={value(key)}
-                  limit={data.limit}
-                  error={error}
-                  custom={custom}
-                  onChange={text => edit(key, text)}
-                />
+                  onClick={() => setOpen(key)}
+                  className="cursor-pointer transition-colors hover:bg-subtle/60"
+                >
+                  <Td className="py-2">
+                    <span className="block text-[13px] font-medium">{title}</span>
+                    <span className="line-clamp-1 text-xs text-muted" title={hint}>
+                      {hint}
+                    </span>
+                    {error && (
+                      <span className="block text-xs text-bad" role="alert">
+                        {error}
+                      </span>
+                    )}
+                  </Td>
+                  <Td className="py-2 text-[13px] whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Dot tone={statusTone[state] ?? 'warn'} />
+                      {state}
+                    </span>
+                  </Td>
+                  <Td className="py-1.5 text-right">
+                    <Button size="sm" variant="ghost" aria-label={'Edit ' + title}>
+                      Edit
+                    </Button>
+                  </Td>
+                </tr>
               );
             })}
-          </ul>
+          </tbody>
+        </Table>
+      )}
+      {data && (
+        <Pager
+          page={at}
+          hasNext={at < last}
+          onPage={setPage}
+          summary={
+            found.length === instructions.length
+              ? `${instructions.length} instructions`
+              : `${found.length} of ${instructions.length} instructions`
+          }
+        />
+      )}
+      <Drawer
+        wide
+        open={!!editing && !!data}
+        onOpenChange={next => !next && setOpen(null)}
+        title={editing?.title ?? ''}
+        description={editing?.hint}
+        footer={
+          <>
+            <Button variant="primary" onClick={() => setOpen(null)}>
+              Done
+            </Button>
+            <Button disabled={!editing || !custom(editing.key)} onClick={() => editing && edit(editing.key, null)}>
+              <RotateCcw aria-hidden /> Reset to built-in
+            </Button>
+            <p className="ml-auto self-center text-xs text-muted">Save from the top of the page.</p>
+          </>
+        }
+      >
+        {editing && data && (
+          <InstructionText
+            title={editing.title}
+            status={status(editing.key)}
+            value={value(editing.key)}
+            limit={data.limit}
+            error={checked ? problem(editing.key) : null}
+            onChange={text => edit(editing.key, text)}
+          />
         )}
-      </div>
+      </Drawer>
     </Card>
   );
 }
 
-function Instruction(props: {
+function InstructionText(props: {
   title: string;
-  hint: string;
   status: string;
   value: string;
   limit: number;
   error: string | null;
-  custom: boolean;
-  onChange: (text: string | null) => void;
+  onChange: (text: string) => void;
 }) {
-  const {title, hint, status, value, limit, error, custom, onChange} = props;
-  const details = useRef<HTMLDetailsElement>(null);
-  // A failed save opens the text it is about; the owner closes it again.
-  useEffect(() => {
-    if (error && details.current) details.current.open = true;
-  }, [error]);
+  const {title, status, value, limit, error, onChange} = props;
   return (
-    <li>
-      <details ref={details} className="group">
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3 hover:bg-subtle [&::-webkit-details-marker]:hidden">
-          <ChevronRight className="size-4 shrink-0 text-muted transition-transform group-open:rotate-90" aria-hidden />
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium">{title}</span>
-            <span className="block text-xs text-muted">{hint}</span>
-          </span>
-          <Badge tone={status === 'Built-in' ? 'neutral' : status === 'Changed' ? 'accent' : 'warn'}>{status}</Badge>
-        </summary>
-        <div className="space-y-2 px-5 pb-4">
-          <Textarea
-            aria-label={title}
-            aria-invalid={!!error || undefined}
-            dir="auto"
-            rows={8}
-            value={value}
-            onChange={event => onChange(event.target.value)}
-          />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {error ? (
-              <p className="text-xs text-bad" role="alert">
-                {error}
-              </p>
-            ) : (
-              <p className="text-xs text-muted">
-                {value.length.toLocaleString()} of {limit.toLocaleString()} characters
-              </p>
-            )}
-            <Button size="sm" disabled={!custom} onClick={() => onChange(null)}>
-              <RotateCcw aria-hidden /> Reset to built-in
-            </Button>
-          </div>
-        </div>
-      </details>
-    </li>
+    <div className="space-y-2">
+      <Textarea
+        aria-label={title}
+        aria-invalid={!!error || undefined}
+        dir="auto"
+        rows={18}
+        value={value}
+        onChange={event => onChange(event.target.value)}
+      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {error ? (
+          <p className="text-xs text-bad" role="alert">
+            {error}
+          </p>
+        ) : (
+          <p className="text-xs text-muted">
+            {value.length.toLocaleString()} of {limit.toLocaleString()} characters
+          </p>
+        )}
+        <p className="flex items-center gap-1.5 text-xs text-muted">
+          <Dot tone={statusTone[status] ?? 'warn'} />
+          {status}
+        </p>
+      </div>
+    </div>
   );
 }

@@ -12,6 +12,8 @@ import {RoleAndSkills} from '../chats/role-skills';
 import {ToolSwitches} from '../chats/tools';
 import {BuiltInInstructions} from './instructions';
 import {BackgroundJobLimits} from '../system/jobs';
+import {useSubTab} from '../../lib/navigation';
+import {SubPanel, SubTabs} from '../../ui/page';
 
 /** The one thing in a group that never waits, whichever is chosen: a group's web pages and outside tools (step 3). */
 const groupTools =
@@ -259,31 +261,53 @@ function Limits() {
   );
 }
 
+const tabs = [
+  {id: 'role', label: 'Acting and role'},
+  {id: 'tools', label: 'Tools and limits'},
+  {id: 'jobs', label: 'Background jobs'},
+  {id: 'instructions', label: 'Built-in instructions'},
+] as const;
+const tabIds = tabs.map(tab => tab.id);
+
 export function AssistantSettings() {
+  // Four short screens instead of one long one. Every panel stays on the page, so an edit in one is kept, and saved
+  // from the top, while another is shown.
+  const [tab, setTab] = useSubTab(tabIds);
   return (
     <>
-      <OwnerFreedom />
-      <RoleAndSkills
-        scope="default"
-        title="Role and skills in your private chat"
-        where="your private chat"
-        description="Your private chat starts from these. Nocheh never uses them in a group. The role on your chat’s page in Chats replaces this one."
-      />
-      <RoleAndSkills
-        scope="default:groups"
-        title="Role and skills in groups"
-        where="groups"
-        description="Every group and topic starts from these. People in the group read the answers Nocheh writes with them. A project’s or a group’s own role replaces this one."
-      />
-      <ToolSwitches
-        space="*"
-        title="Tools in every chat"
-        where="every chat"
-        description="What Nocheh may use in every chat. A chat or topic can set its own on its page in Chats. No restart needed."
-      />
-      <Limits />
-      <BackgroundJobLimits />
-      <BuiltInInstructions />
+      <SubTabs label="Assistant settings" tabs={[...tabs]} value={tab} onChange={setTab} />
+      <SubPanel id="role" current={tab}>
+        <OwnerFreedom />
+        <div className="grid items-start gap-5 xl:grid-cols-2">
+          <RoleAndSkills
+            scope="default"
+            title="Role and skills in your private chat"
+            where="your private chat"
+            description="Your private chat starts from these. Nocheh never uses them in a group. The role on your chat’s page in Chats replaces this one."
+          />
+          <RoleAndSkills
+            scope="default:groups"
+            title="Role and skills in groups"
+            where="groups"
+            description="Every group and topic starts from these. People in the group read the answers Nocheh writes with them. A project’s or a group’s own role replaces this one."
+          />
+        </div>
+      </SubPanel>
+      <SubPanel id="tools" current={tab}>
+        <ToolSwitches
+          space="*"
+          title="Tools in every chat"
+          where="every chat"
+          description="What Nocheh may use in every chat. A chat or topic can set its own on its page in Chats. No restart needed."
+        />
+        <Limits />
+      </SubPanel>
+      <SubPanel id="jobs" current={tab}>
+        <BackgroundJobLimits />
+      </SubPanel>
+      <SubPanel id="instructions" current={tab}>
+        <BuiltInInstructions />
+      </SubPanel>
     </>
   );
 }
