@@ -5,7 +5,9 @@
  */
 import {useEffect, useRef, useState, type ReactNode} from 'react';
 import {apiPost} from '../../lib/api';
+import {useParam} from '../../lib/navigation';
 import {refreshResources, useResource} from '../../lib/resource';
+import {setParams} from '../../lib/routes';
 import {
   Badge,
   Button,
@@ -28,6 +30,7 @@ import {
   type Tone,
 } from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
+import {SubPanel, SubTabs} from '../../ui/page';
 import {LongTermFacts} from './longterm-facts';
 import {Rebuild} from './rebuild';
 import {CONFLICT_TEXT, Meter, errorWords, useCommand} from './shared';
@@ -77,25 +80,47 @@ const usd = (value: number) =>
     maximumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
   }).format(value);
 
+const subTabs = ['status', 'actions', 'facts'] as const;
+
 export function LongTerm() {
   const memory = useResource<MemoryStatus>('/memory/longterm', 10000);
   const service = useResource<ServiceStatus>('/honcho/status', 30000);
   const attached = !!memory.data?.connection.attached;
   // Spending limit changes still follow the server's accepted-memory rule.
   const budgetEditable = attached && !!memory.data?.connection.verified;
+  // A link to one chat's or one person's facts opens on the facts.
+  const chosen = useParam('tab');
+  const filtered = !!useParam('chat') || !!useParam('about');
+  const tab = subTabs.find(id => id === chosen) ?? (filtered ? 'facts' : 'status');
   return (
     <>
-      <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
-        <StatusCard memory={memory} service={service} />
-        <BudgetCard editable={budgetEditable} />
-      </div>
-      <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
-        {memory.data && <Rebuild revision={memory.data.connection.revision ?? 0} attached={attached} />}
-        {memory.data?.engine?.capabilities?.inspect && (
-          <Browse running={!!service.data?.running} workspace={memory.data.workspace?.id ?? ''} />
-        )}
-      </div>
-      {memory.data && <LongTermFacts />}
+      <SubTabs
+        label="Long-term memory"
+        value={tab}
+        onChange={next => setParams({tab: next})}
+        tabs={[
+          {id: 'status', label: 'Status and limits'},
+          {id: 'actions', label: 'Re-run and look'},
+          {id: 'facts', label: 'Facts it learned'},
+        ]}
+      />
+      <SubPanel id="status" current={tab}>
+        <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
+          <StatusCard memory={memory} service={service} />
+          <BudgetCard editable={budgetEditable} />
+        </div>
+      </SubPanel>
+      <SubPanel id="actions" current={tab}>
+        <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
+          {memory.data && <Rebuild revision={memory.data.connection.revision ?? 0} attached={attached} />}
+          {memory.data?.engine?.capabilities?.inspect && (
+            <Browse running={!!service.data?.running} workspace={memory.data.workspace?.id ?? ''} />
+          )}
+        </div>
+      </SubPanel>
+      <SubPanel id="facts" current={tab}>
+        {memory.data && <LongTermFacts />}
+      </SubPanel>
     </>
   );
 }

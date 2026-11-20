@@ -5,10 +5,13 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {CheckCircle2, KeyRound, Loader2, Pencil, Plus, Server, Trash2, XCircle} from 'lucide-react';
 import {apiPost} from '../../lib/api';
+import {useParam} from '../../lib/navigation';
+import {setParams} from '../../lib/routes';
 import {useSettings, type ProviderPart, type ProviderRow} from '../../lib/settings';
 import {cn} from '../../lib/utils';
-import {Badge, Button, Card, CardBody, CardHeader, Empty, Field, Input, Notice, Select} from '../../ui/core';
+import {Badge, Button, Card, CardHeader, Empty, Field, Input, Notice, Select, Table, Td, Th} from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
+import {SubPanel, SubTabs} from '../../ui/page';
 
 type Custom = {id: string; name: string; url: string};
 type Provider = ProviderRow & {unsaved?: boolean; newKey?: boolean};
@@ -175,6 +178,10 @@ export function ModelSettings() {
     );
   };
 
+  // Choosing models comes first once a provider exists; before that there is only a provider to add.
+  const param = useParam('tab');
+  const tab = param === 'models' || param === 'providers' ? param : added.length ? 'models' : 'providers';
+
   const nothingYet = !main && parts.every(part => !settings.value(part.provider_setting));
 
   return (
@@ -182,47 +189,72 @@ export function ModelSettings() {
       {nothingYet && (
         <Notice tone="warn" title="Nocheh can’t answer yet">
           {added.length
-            ? 'Choose a main model below, then save.'
+            ? 'Choose a main model on the Models tab, then save.'
             : 'Add a provider, choose its model, then save. Until then messages are kept and answered later.'}
         </Notice>
       )}
 
-      <Card>
-        <CardHeader
-          title="Providers"
-          description="Services Nocheh sends model requests to. Keys stay on your server and are never shown again."
-          action={
-            <Button variant="primary" disabled={busy} onClick={() => setEditing({mode: 'add'})}>
-              <Plus aria-hidden /> Add provider
-            </Button>
-          }
-        />
-        <CardBody className="pt-3">
+      <SubTabs
+        label="Model settings"
+        value={tab}
+        onChange={next => setParams({tab: next})}
+        tabs={[
+          {id: 'models', label: 'Models'},
+          {id: 'providers', label: 'Providers'},
+        ]}
+      />
+
+      <SubPanel id="providers" current={tab}>
+        <Card>
+          <CardHeader
+            className="pb-3"
+            title="Providers"
+            description="Services Nocheh sends model requests to. Keys stay on your server and are never shown again."
+            action={
+              <Button variant="primary" disabled={busy} onClick={() => setEditing({mode: 'add'})}>
+                <Plus aria-hidden /> Add provider
+              </Button>
+            }
+          />
           {added.length === 0 ? (
             <Empty icon={Server} title="No providers yet">
               Add OpenAI, Anthropic, or any OpenAI-compatible gateway with its address and key.
             </Empty>
           ) : (
-            <ul className="divide-y divide-line rounded-lg border border-line">
-              {added.map(provider => (
-                <ProviderItem
-                  key={provider.id}
-                  provider={provider}
-                  usedBy={usedBy(provider.id)}
-                  typedKey={
-                    provider.kind === 'custom' ? typedKeys[provider.id] : settings.changes[PRESET_KEY[provider.id]!]
-                  }
-                  busy={busy}
-                  onEdit={() => setEditing({mode: 'edit', provider})}
-                  onRemove={provider.kind === 'custom' ? () => void remove(provider) : undefined}
-                />
-              ))}
-            </ul>
+            <Table aria-label="Providers" className="max-sm:block [&>tbody]:max-sm:block">
+              <thead className="max-sm:sr-only">
+                <tr>
+                  <Th scope="col">Provider</Th>
+                  <Th scope="col">Connection</Th>
+                  <Th scope="col">Used for</Th>
+                  <Th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </Th>
+                </tr>
+              </thead>
+              <tbody className="[&>tr:last-child>*]:border-b-0">
+                {added.map(provider => (
+                  <ProviderItem
+                    key={provider.id}
+                    provider={provider}
+                    usedBy={usedBy(provider.id)}
+                    typedKey={
+                      provider.kind === 'custom' ? typedKeys[provider.id] : settings.changes[PRESET_KEY[provider.id]!]
+                    }
+                    busy={busy}
+                    onEdit={() => setEditing({mode: 'edit', provider})}
+                    onRemove={provider.kind === 'custom' ? () => void remove(provider) : undefined}
+                  />
+                ))}
+              </tbody>
+            </Table>
           )}
-        </CardBody>
-      </Card>
+        </Card>
+      </SubPanel>
 
-      <ModelChoices providers={added} name={name} />
+      <SubPanel id="models" current={tab}>
+        <ModelChoices providers={added} name={name} />
+      </SubPanel>
 
       {editing && (
         <ProviderDialog
@@ -276,20 +308,20 @@ function ProviderItem({
   );
   const listing = useModelList(request);
   return (
-    <li className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
-      <div className="min-w-0 flex-1">
+    <tr className="max-sm:flex max-sm:flex-col max-sm:border-b max-sm:border-line max-sm:py-2 max-sm:last:border-b-0 max-sm:[&>td]:border-0 max-sm:[&>td]:py-1">
+      <Td>
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-medium">{provider.name}</p>
           {provider.unsaved || provider.newKey ? <Badge tone="warn">Not saved yet</Badge> : null}
           {!provider.has_key && <Badge tone="bad">No key</Badge>}
         </div>
         <p className="truncate text-xs text-muted">{provider.url}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <ListingStatus listing={listing} />
-          <span className="text-xs text-muted">{usedBy.length ? 'Used for ' + usedBy.join(', ') : 'Not used yet'}</span>
-        </div>
-      </div>
-      <div className="-ml-2.5 flex gap-1 sm:ml-0">
+      </Td>
+      <Td>
+        <ListingStatus listing={listing} />
+      </Td>
+      <Td className="text-[13px] text-muted">{usedBy.length ? usedBy.join(', ') : 'Not used yet'}</Td>
+      <Td className="text-right whitespace-nowrap">
         <Button size="sm" variant="ghost" disabled={busy} onClick={onEdit} aria-label={`Edit ${provider.name}`}>
           <Pencil aria-hidden /> Edit
         </Button>
@@ -305,8 +337,8 @@ function ProviderItem({
             <Trash2 aria-hidden /> Remove
           </Button>
         )}
-      </div>
-    </li>
+      </Td>
+    </tr>
   );
 }
 
@@ -519,7 +551,7 @@ function ProviderDialog({
               </span>
             </label>
             {makeMain && (
-              <Field label="Model" htmlFor="provider-model">
+              <Field labelHidden label="Model" htmlFor="provider-model">
                 <ModelInput id="provider-model" value={model} onChange={setModel} listing={listing} />
               </Field>
             )}
@@ -660,14 +692,24 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
       <CardHeader
         title="Models"
         description="One main model is enough. Pick a different one for a part only if you want to."
+        className="pb-3"
       />
-      <div className="mt-3 border-t border-line">
-        <div className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
+      <div className="border-t border-line">
+        {/* Column headings for a wide screen; on a phone each field shows its own label. */}
+        <div
+          aria-hidden
+          className="hidden gap-3 border-b border-line bg-subtle/60 px-5 py-2 text-xs font-medium text-muted sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)]"
+        >
+          <span>Part</span>
+          <span>Provider</span>
+          <span>Model</span>
+        </div>
+        <div className="grid gap-3 px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
           <div>
             <p className="text-sm font-medium">Main model</p>
             <p className="text-[13px] text-muted">Used for every part below that says “Same as main”.</p>
           </div>
-          <Field label="Provider" htmlFor="main-provider">
+          <Field labelHidden label="Provider" htmlFor="main-provider">
             <Select
               id="main-provider"
               value={main}
@@ -677,7 +719,12 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
               {providerOptions(providers.length ? 'Choose a provider' : 'Add a provider first')}
             </Select>
           </Field>
-          <Field label="Model" htmlFor="main-model" error={main && !mainModel ? 'Enter a model name.' : undefined}>
+          <Field
+            labelHidden
+            label="Model"
+            htmlFor="main-model"
+            error={main && !mainModel ? 'Enter a model name.' : undefined}
+          >
             <ModelInput
               id="main-model"
               value={mainModel}
@@ -691,14 +738,14 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
         {parts.map(part => (
           <PartRow key={part.id} part={part} providers={providers} name={name} providerOptions={providerOptions} />
         ))}
-        <div className="grid gap-3 border-t border-line px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
+        <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
           <div>
             <p className="text-sm font-medium">Memory search</p>
             <p className="text-[13px] text-muted">
               Makes memory searchable. Needs OpenAI or a gateway that offers the same embedding models.
             </p>
           </div>
-          <Field label="Provider" htmlFor="embedding-provider">
+          <Field labelHidden label="Provider" htmlFor="embedding-provider">
             <Select
               id="embedding-provider"
               value={embeddingProvider}
@@ -721,6 +768,7 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
             </Select>
           </Field>
           <Field
+            labelHidden
             label="Model"
             htmlFor="embedding-model"
             hint={
@@ -747,7 +795,7 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
             </Select>
           </Field>
         </div>
-        <div className="grid gap-3 border-t border-line px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
+        <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
           <div>
             <p className="text-sm font-medium">Voice notes</p>
             <p className="text-[13px] text-muted">
@@ -757,6 +805,7 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
             </p>
           </div>
           <Field
+            labelHidden
             label="Provider"
             htmlFor="voice-provider"
             hint={voiceKey === false ? 'This provider has no key yet, so voice notes are only archived.' : undefined}
@@ -782,7 +831,7 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
                 ))}
             </Select>
           </Field>
-          <Field label="Model" htmlFor="voice-model" hint="Price per hour of audio, from OpenAI.">
+          <Field labelHidden label="Model" htmlFor="voice-model" hint="Price per hour of audio, from OpenAI.">
             <Select
               id="voice-model"
               value={voiceModel}
@@ -825,12 +874,12 @@ function PartRow({
   const mainModel = settings.value('NOCHEH_MODEL');
   const own = part.defaults?.[effective];
   return (
-    <div className="grid gap-3 border-t border-line px-5 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-start">
+    <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
       <div>
         <p className="text-sm font-medium">{text.title}</p>
         <p className="text-[13px] text-muted">{text.hint}</p>
       </div>
-      <Field label="Provider" htmlFor={part.id + '-provider'}>
+      <Field labelHidden label="Provider" htmlFor={part.id + '-provider'}>
         <Select
           id={part.id + '-provider'}
           value={chosen}
@@ -840,7 +889,7 @@ function PartRow({
           {providerOptions(main ? `Same as main (${name(main)})` : 'Same as main')}
         </Select>
       </Field>
-      <Field label="Model" htmlFor={part.id + '-model'}>
+      <Field labelHidden label="Model" htmlFor={part.id + '-model'}>
         <ModelInput
           id={part.id + '-model'}
           value={model}

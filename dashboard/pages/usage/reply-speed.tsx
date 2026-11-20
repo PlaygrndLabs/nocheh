@@ -5,12 +5,11 @@
  */
 import {useState} from 'react';
 import {ArrowUpRight, Timer} from 'lucide-react';
-import {useParam} from '../../lib/navigation';
 import {useResource} from '../../lib/resource';
 import {href, setParams} from '../../lib/routes';
 import {dateTime, duration, stageName, timingCategories, timingCategory} from '../../lib/system-format';
 import {cn} from '../../lib/utils';
-import {Badge, Button, Card, CardHeader, Empty, LoadError, LoadingRows, Notice, Table, Td, Th} from '../../ui/core';
+import {Badge, Card, CardHeader, Empty, LoadError, LoadingRows, Notice, Pager, Table, Td, Th} from '../../ui/core';
 import {Drawer} from '../../ui/overlay';
 import {LinkButton} from '../../ui/link-button';
 
@@ -84,11 +83,14 @@ const Kind = ({category}: {category: string}) => {
   return <Badge tone={kind.tone}>{kind.label}</Badge>;
 };
 
+const NoReplies = () => (
+  <Empty icon={Timer} title="No replies measured yet">
+    Timing appears here after Nocheh answers a message in Telegram.
+  </Empty>
+);
+
+/** How long a reply takes and which stages the time goes to. */
 export function ReplySpeed({summary, error}: {summary: TimingSummary | null; error: boolean}) {
-  const selected = useParam('reply');
-  const [all, setAll] = useState(false);
-  const recent = summary?.recent ?? [];
-  const shown = all ? recent : recent.slice(0, 8);
   return (
     <Card>
       <CardHeader
@@ -106,10 +108,8 @@ export function ReplySpeed({summary, error}: {summary: TimingSummary | null; err
           </div>
         ) : !summary ? (
           <LoadingRows rows={3} />
-        ) : !summary.messages && !recent.length ? (
-          <Empty icon={Timer} title="No replies measured yet">
-            Timing appears here after Nocheh answers a message in Telegram.
-          </Empty>
+        ) : !summary.messages && !summary.recent.length ? (
+          <NoReplies />
         ) : (
           <>
             <div className="grid gap-4 px-5 pb-4 sm:grid-cols-[auto_1fr] sm:gap-8">
@@ -155,71 +155,108 @@ export function ReplySpeed({summary, error}: {summary: TimingSummary | null; err
                 <tbody>
                   {summary.stages.map(stage => (
                     <tr key={stage.stage}>
-                      <Td className="sm:min-w-44">
+                      <Td className="py-2 sm:min-w-44">
                         {stageName(stage.stage)}
                         <span className="mt-1 block sm:hidden">
                           <Kind category={stage.category} />
                         </span>
                       </Td>
-                      <Td className="hidden sm:table-cell">
+                      <Td className="hidden py-2 sm:table-cell">
                         <Kind category={stage.category} />
                       </Td>
-                      <Td className="tabular text-right whitespace-nowrap">{duration(stage.ms_p50)}</Td>
-                      <Td className="tabular text-right whitespace-nowrap">{duration(stage.ms_p95)}</Td>
-                      <Td className="tabular hidden text-right text-muted sm:table-cell">{stage.messages}</Td>
+                      <Td className="tabular py-2 text-right whitespace-nowrap">{duration(stage.ms_p50)}</Td>
+                      <Td className="tabular py-2 text-right whitespace-nowrap">{duration(stage.ms_p95)}</Td>
+                      <Td className="tabular hidden py-2 text-right text-muted sm:table-cell">{stage.messages}</Td>
                     </tr>
                   ))}
                 </tbody>
               </Table>
             )}
-            <p className="px-5 pt-3 text-xs text-muted">
+            <p className="px-5 py-3 text-xs text-muted">
               {Object.entries(timingCategories)
                 .filter(([id]) => id !== 'unmeasured')
                 .map(([id, kind]) => `${kind.label}: ${kindNote[id]}`)
                 .join(' · ')}
             </p>
-
-            {recent.length > 0 && (
-              <div className="mt-4 border-t border-line">
-                <h3 className="px-5 pt-4 text-sm font-semibold">Recent replies</h3>
-                <ul className="mt-2">
-                  {shown.map(item => (
-                    <li key={item.event_id}>
-                      <button
-                        type="button"
-                        onClick={() => setParams({reply: item.event_id})}
-                        className="flex w-full items-center gap-3 border-t border-line px-5 py-2.5 text-left text-sm first:border-t-0 hover:bg-subtle"
-                      >
-                        <span className="min-w-0 flex-1 truncate">{dateTime(item.started_at)}</span>
-                        {item.complete === false && <Badge>Incomplete</Badge>}
-                        <span
-                          className={cn(
-                            'tabular w-20 text-right font-medium',
-                            slow(item.reply_ms, summary) && 'text-warn',
-                          )}
-                        >
-                          {duration(item.reply_ms)}
-                        </span>
-                        <span aria-hidden className="text-muted">
-                          ›
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                {recent.length > 8 && (
-                  <div className="px-5 py-3">
-                    <Button variant="link" size="sm" onClick={() => setAll(!all)}>
-                      {all ? 'Show fewer' : `Show all ${recent.length}`}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
           </>
         )}
       </div>
-      <ReplyDrawer id={selected} />
+    </Card>
+  );
+}
+
+const REPLIES = 10;
+
+/** The latest replies, ten a page; a row opens that reply's timing. */
+export function RecentReplies({summary, error}: {summary: TimingSummary | null; error: boolean}) {
+  const [page, setPage] = useState(0);
+  const recent = summary?.recent ?? [];
+  const shown = recent.slice(page * REPLIES, (page + 1) * REPLIES);
+  return (
+    <Card>
+      <CardHeader title="Recent replies" description="Open a reply to see where its time went." />
+      <div className="mt-3">
+        {error && !summary ? (
+          <div className="px-5 pb-5">
+            <LoadError what="reply timing" />
+          </div>
+        ) : !summary ? (
+          <LoadingRows rows={3} />
+        ) : !recent.length ? (
+          <NoReplies />
+        ) : (
+          <>
+            <Table aria-label="Recent replies">
+              <thead>
+                <tr>
+                  <Th scope="col">Message arrived</Th>
+                  <Th scope="col">Note</Th>
+                  <Th scope="col" className="text-right">
+                    Not measured
+                  </Th>
+                  <Th scope="col" className="text-right">
+                    Reply time
+                  </Th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map(item => (
+                  <tr key={item.event_id} className="hover:bg-subtle">
+                    <Td>
+                      <button
+                        type="button"
+                        onClick={() => setParams({reply: item.event_id})}
+                        className="font-medium hover:underline"
+                      >
+                        {dateTime(item.started_at)}
+                      </button>
+                    </Td>
+                    <Td className="text-muted">
+                      {item.complete === false ? 'Incomplete' : slow(item.reply_ms, summary) ? 'Slower than usual' : ''}
+                    </Td>
+                    <Td className="tabular text-right whitespace-nowrap text-muted">{duration(item.unmeasured_ms)}</Td>
+                    <Td
+                      className={cn(
+                        'tabular text-right font-medium whitespace-nowrap',
+                        slow(item.reply_ms, summary) && 'text-warn',
+                      )}
+                    >
+                      {duration(item.reply_ms)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <Pager
+              page={page}
+              hasNext={(page + 1) * REPLIES < recent.length}
+              onPage={setPage}
+              summary={`${recent.length} replies`}
+              labels={['Newer', 'Older']}
+            />
+          </>
+        )}
+      </div>
     </Card>
   );
 }
@@ -234,7 +271,7 @@ const kindNote: Record<string, string> = {
 const slow = (ms: number | null, summary: TimingSummary) =>
   ms != null && summary.reply_ms_p95 != null && ms >= summary.reply_ms_p95;
 
-function ReplyDrawer({id}: {id: string | null}) {
+export function ReplyDrawer({id}: {id: string | null}) {
   const valid = !!id && /^[a-f0-9]{64}$/.test(id);
   const {data, error} = useResource<Breakdown>(valid ? '/workflows/timings/' + id : null);
   const max = Math.max(1, ...(data?.stages ?? []).map(stage => stage.ms));
