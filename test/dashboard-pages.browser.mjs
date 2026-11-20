@@ -506,7 +506,11 @@ test('the reminder lines are a built-in instruction, and a line that drops a val
   const bar = page.getByRole('region', {name: 'Save changes'});
   const title = 'Reminder lines: who set it and where';
   await card.getByText(title, {exact: true}).click();
-  await card.getByText(/at most one message per group every 10 minutes/).waitFor();
+  // Its description says so, and so does the text itself.
+  await card
+    .getByText(/at most one message per group every 10 minutes/)
+    .first()
+    .waitFor();
   const box = card.getByRole('textbox', {name: title});
   const text = await box.inputValue();
   assert.match(text, /^set_by: 👤 Set by \{who\} in \{place\}$/m);
@@ -515,6 +519,7 @@ test('the reminder lines are a built-in instruction, and a line that drops a val
   await page
     .getByRole('alert')
     .filter({hasText: 'A “name: text” line lost a value in braces that Nocheh fills in'})
+    .first()
     .waitFor();
   // The edit is kept until the owner puts the value back or discards it.
   assert.match(await box.inputValue(), /^set_by: 👤 Set by \{who\}$/m);
@@ -531,30 +536,41 @@ test('long-term memory is re-run or replaced only after the owner sees what it w
   await status.getByText('Engine: Honcho').waitFor();
   await page.getByRole('heading', {name: 'What it remembers'}).waitFor();
   const card = page.locator('section').filter({has: page.getByRole('heading', {name: 'Re-run or replace'})});
-  await card.getByText('3 learning tasks failed.').waitFor();
-  await card.getByRole('button', {name: 'Retry failed learning'}).click();
+  // The three actions are rows of one table, so the page needs no scrolling to reach them.
+  const actions = card.getByRole('table', {name: 'Re-run or replace'});
+  assert.deepEqual(
+    (await actions.getByRole('rowheader').allTextContents()).map(text => text.trim()),
+    ['Retry failed learning', 'Re-learn chats', 'Replace long-term memory'],
+  );
+  await actions.getByText('3 learning tasks failed.').waitFor();
+  await actions.getByRole('button', {name: 'Retry failed learning'}).click();
   await page.getByRole('status').filter({hasText: 'Running 3 learning tasks again.'}).waitFor();
-  await card.getByText('Nothing has failed.').waitFor();
-  assert.equal(await card.getByRole('button', {name: 'Retry failed learning'}).isDisabled(), true);
+  await actions.getByText('Nothing has failed.').waitFor();
+  assert.equal(await actions.getByRole('button', {name: 'Retry failed learning'}).isDisabled(), true);
 
-  await card.getByText('180 saved messages from 5 conversations will be sent again.').waitFor();
-  await card.getByRole('radio', {name: 'Chosen chats'}).click();
-  assert.equal(await card.getByRole('button', {name: 'Re-learn'}).isDisabled(), true, 'a chat must be chosen first');
-  await card.getByRole('searchbox', {name: 'Chats to re-learn'}).fill('-10042');
-  await card.getByRole('listbox', {name: 'Chats to re-learn'}).getByRole('option').first().click();
-  await card.getByText('12 saved messages from 1 conversation will be sent again.').waitFor();
-  await card.getByRole('button', {name: 'Re-learn'}).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByText(/learns again from 12 saved messages/).waitFor();
-  await dialog.getByRole('button', {name: 'Re-learn'}).click();
+  // Re-learn opens a dialog that says what it forgets and sends before its button works.
+  await actions.getByRole('button', {name: 'Re-learn…'}).click();
+  const relearn = page.getByRole('dialog', {name: 'Re-learn chats'});
+  await relearn.getByText(/every chat and learns again from 180 saved messages from 5 conversations/).waitFor();
+  await relearn.getByRole('radio', {name: 'Chosen chats'}).click();
+  const start = relearn.getByRole('button', {name: 'Re-learn', exact: true});
+  assert.equal(await start.isDisabled(), true, 'a chat must be chosen first');
+  await relearn.getByRole('searchbox', {name: 'Chats to re-learn'}).fill('-10042');
+  await relearn.getByRole('listbox', {name: 'Chats to re-learn'}).getByRole('option').first().click();
+  await relearn.getByText(/these chats and learns again from 12 saved messages from 1 conversation/).waitFor();
+  await start.click();
   await page.getByRole('status').filter({hasText: 'Re-learning 12 saved messages.'}).waitFor();
+  await relearn.waitFor({state: 'detached'});
 
-  await card.getByText('Up to 212 saved messages you allowed it to learn will be sent again.').waitFor();
-  const replace = card.getByRole('button', {name: 'Replace long-term memory'});
+  await actions.getByRole('button', {name: 'Replace…'}).click();
+  const replacing = page.getByRole('dialog', {name: 'Replace long-term memory'});
+  await replacing.getByText('Up to 212 saved messages you allowed it to learn will be sent again.').waitFor();
+  const replace = replacing.getByRole('button', {name: 'Replace long-term memory'});
   assert.equal(await replace.isDisabled(), true, 'replacing waits for the typed confirmation');
-  await card.getByLabel('Type “replace” to confirm').fill('replace');
+  await replacing.getByLabel('Type “replace” to confirm').fill('replace');
   await replace.click();
   await page.getByRole('status').filter({hasText: 'It is learning your saved messages again.'}).waitFor();
+  await replacing.waitFor({state: 'detached'});
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -1800,7 +1816,7 @@ test('Notes lists past conversations as a table, each named by its title or firs
 test('turning automatic organizing on is what lets it create projects, with no separate switch', async () => {
   const {page, problems} = await open('memory?view=projects');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Automatic organizing'})});
-  const row = card.getByRole('listitem').filter({hasText: 'Organize the travel group'});
+  const row = card.getByRole('row').filter({hasText: 'Organize the travel group'});
   await row.waitFor();
   assert.equal(await row.getByText('may create projects', {exact: false}).count(), 0);
   await row.getByRole('button', {name: 'Edit'}).click();
@@ -3540,9 +3556,9 @@ test('Long-term lists facts newest first with their sources, by chat or person, 
   const {page, problems} = await open('memory?view=longterm');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Facts it learned'})});
   await card.getByText('412 exact · 96 learned with other messages · 7 none', {exact: true}).waitFor();
-  const facts = card.getByRole('list', {name: 'Facts', exact: true});
+  const facts = card.getByRole('table', {name: 'Facts', exact: true});
   const texts = async () =>
-    (await facts.locator(':scope > li > p:first-child').allTextContents()).map(text => text.trim());
+    (await facts.locator('tbody > tr > td:first-child').allTextContents()).map(text => text.trim());
   await facts.getByText('Mira took photos from the ridge.').waitFor();
   assert.deepEqual(await texts(), [
     'The aurora tour leaves from the harbour car park.',
@@ -3550,10 +3566,10 @@ test('Long-term lists facts newest first with their sources, by chat or person, 
     'Mira wants to check the Kp forecast before the trip.',
     'Mira took photos from the ridge.',
   ]);
-  const photo = facts.getByRole('listitem').filter({hasText: 'Mira took photos from the ridge.'}).first();
+  const photo = facts.getByRole('row').filter({hasText: 'Mira took photos from the ridge.'}).first();
   await photo.getByText('Hidden from assistant', {exact: false}).waitFor();
   assert.equal(await linksTo(photo, sourceIds.photo), 0, 'a retired original is never linked');
-  const forecast = facts.getByRole('listitem').filter({hasText: 'Mira wants to check the Kp forecast'}).first();
+  const forecast = facts.getByRole('row').filter({hasText: 'Mira wants to check the Kp forecast'}).first();
   await forecast.getByText('“Mira Chen” in “Aurora planning” › Iceland planning', {exact: false}).waitFor();
   assert.equal(await linksTo(forecast, sourceIds.forecast), 1);
   // About one person, then within one group and its topics.
@@ -3692,6 +3708,9 @@ test('Notes shows the day each note names and links its original messages, never
   await forward.getByText('Original message 2 · Hidden from assistant', {exact: true}).waitFor();
   assert.equal(await linksTo(forward, sourceIds.photo), 0);
   assert.equal(await linksTo(forward, sourceIds.booking), 1);
+  // A note's words are shown without the ids of Nocheh's own records it carries.
+  await notes.getByText('The lunch poll now offers tacos on Friday.', {exact: true}).waitFor();
+  assert.equal(await notes.getByText(/nocheh:event:|conv 4200042/).count(), 0);
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -3779,7 +3798,7 @@ test('Long-term’s filters: the chosen person stays chosen while searching, and
   const {page, problems} = await open('memory?view=longterm&about=' + '1'.repeat(64));
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Facts it learned'})});
   const person = card.locator('#facts-person');
-  await card.getByRole('list', {name: 'Facts', exact: true}).getByText('Mira took photos from the ridge.').waitFor();
+  await card.getByRole('table', {name: 'Facts', exact: true}).getByText('Mira took photos from the ridge.').waitFor();
   await card.getByRole('searchbox', {name: 'Search people'}).fill('Devon');
   await card.locator('#facts-person option', {hasText: 'Devon'}).waitFor({state: 'attached'});
   assert.equal(await person.inputValue(), '1'.repeat(64));
@@ -3788,7 +3807,10 @@ test('Long-term’s filters: the chosen person stays chosen while searching, and
     ['Anyone', 'Devon', 'Mira Chen'],
   );
   // Mira's private chat with Nocheh is hers: long-term memory never learns from it, so it isn't a choice here.
+  // The chats open under the search box only while it is in use, so the list takes no room on the page.
   const chats = card.getByRole('listbox', {name: 'In chat'});
+  assert.equal(await chats.count(), 0);
+  await card.getByPlaceholder('Search by name or Telegram ID').click();
   await chats
     .getByRole('option', {name: /^Aurora planning/})
     .first()

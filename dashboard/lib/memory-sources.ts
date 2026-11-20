@@ -217,3 +217,28 @@ export function noteDayText(day: string | null | undefined, locale?: string): st
     year: 'numeric',
   });
 }
+
+// An id Nocheh's own records use, as a note may carry it: a message ("nocheh:event:" and its hex, whole or cut) or a
+// conversation number, with a word that only leads to it.
+const NOTE_ID =
+  /(?:\b(?:in|from|per|see|via)\s+)?(?:nocheh:event:[a-f0-9]{4,64}(?:…|\.{3})?|\bconv(?:ersation)?\.?\s*(?:id\s*)?[:#]?\s*-?\d{5,})/gi;
+// Brackets left holding only the ids' labels and separators, and a "Source:" label left with nothing after it.
+const NOTE_EMPTY = /\s*[[(](?:[\s,;·|&-]|\b(?:and|archive|sources?|refs?|evidence|ids?)\b:?)*[\])]/gi;
+const NOTE_LABEL = /[\s,;–—-]*\b(?:archive\s+)?(?:sources?|refs?|evidence)\s*:\s*(?:(?:,|;|and\b)\s*)*(?=[.\n]|$)/gi;
+
+/**
+ * A note's words as the dashboard shows them: without the ids of Nocheh's own records, which the note keeps so its
+ * original messages can be linked (they show as links beside it). A note that is only ids is shown as it is.
+ */
+export function noteWords(text: string): string {
+  const words = text
+    .replace(NOTE_ID, '')
+    .replace(NOTE_EMPTY, '')
+    .replace(NOTE_LABEL, '')
+    .replace(/(?:\s*[,;])+(\s*[,;.)\]])/g, '$1')
+    .replace(/[ \t]+([,.;:)\]])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t,;]+$/gm, '')
+    .trim();
+  return words || text.trim();
+}

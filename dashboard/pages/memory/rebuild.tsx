@@ -1,6 +1,7 @@
 /**
  * Memory › Long-term › Re-run: run failed learning again, re-learn chats from
- * their saved messages, or replace long-term memory with a new one. Each shows
+ * their saved messages, or replace long-term memory with a new one. The three
+ * actions are rows of one table; re-learn and replace open a dialog that shows
  * what it would send before anything is sent.
  */
 import {useState, type ReactNode} from 'react';
@@ -16,8 +17,11 @@ import {
   LoadingRows,
   Notice,
   Segmented,
+  Table,
+  Td,
+  Th,
 } from '../../ui/core';
-import {useFeedback} from '../../ui/overlay';
+import {Dialog, useFeedback} from '../../ui/overlay';
 import {ChatPicker} from '../chats/chat-picker';
 import {CONFLICT_TEXT, useCommand} from './shared';
 
@@ -33,6 +37,7 @@ const CONFIRM_WORD = 'replace';
 const count = (value: number, one: string, many: string) => `${value.toLocaleString()} ${value === 1 ? one : many}`;
 
 export function Rebuild({revision, attached}: {revision: number; attached: boolean}) {
+  const [open, setOpen] = useState<'relearn' | 'replace' | null>(null);
   const [scope, setScope] = useState<'all' | 'chosen'>('all');
   const [chats, setChats] = useState<string[]>([]);
   const chosen = scope === 'chosen' ? chats : [];
@@ -43,6 +48,7 @@ export function Rebuild({revision, attached}: {revision: number; attached: boole
   );
   const budget = useResource<Budget>('/honcho/budget', 15000);
   const data = estimate.data;
+  const close = () => setOpen(null);
   const cost = (
     <>
       Each message is learned again by the memory model. That costs money and uses this month’s memory thinking requests
@@ -58,12 +64,54 @@ export function Rebuild({revision, attached}: {revision: number; attached: boole
         title="Re-run or replace"
         description="Make long-term memory learn again from your saved messages. Your messages themselves never change, and retired messages are always left out."
       />
-      <CardBody className="space-y-4">
-        {estimate.error && <LoadError what="what this would send" onRetry={() => void refreshResources()} />}
-        {!data && !estimate.error && <LoadingRows rows={3} />}
-        {data && (
-          <>
-            <Retry failed={data.failed_learning} attached={attached} />
+      {estimate.error && (
+        <CardBody>
+          <LoadError what="what this would send" onRetry={() => void refreshResources()} />
+        </CardBody>
+      )}
+      {!data && !estimate.error && (
+        <CardBody>
+          <LoadingRows rows={3} />
+        </CardBody>
+      )}
+      {data && (
+        <>
+          <Table aria-label="Re-run or replace" className="max-sm:block">
+            <thead className="max-sm:sr-only">
+              <tr>
+                <Th scope="col">Action</Th>
+                <Th scope="col">What it does</Th>
+                <Th scope="col">
+                  <span className="sr-only">Run</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody className="max-sm:block">
+              <Retry failed={data.failed_learning} attached={attached} />
+              <Action
+                title="Re-learn chats"
+                detail="Long-term memory forgets what it learned from the chats you choose and learns them again from their saved messages."
+              >
+                <Button size="sm" disabled={!attached} onClick={() => setOpen('relearn')}>
+                  Re-learn…
+                </Button>
+              </Action>
+              <Action
+                title="Replace long-term memory"
+                detail="Starts a new long-term memory and deletes the current one completely, including everything it learned."
+              >
+                <Button size="sm" variant="danger" onClick={() => setOpen('replace')}>
+                  Replace…
+                </Button>
+              </Action>
+            </tbody>
+          </Table>
+          <Dialog
+            open={open === 'relearn'}
+            onOpenChange={next => !next && close()}
+            title="Re-learn chats"
+            description="A group includes its topics. While it re-learns, replies use notes and message search."
+          >
             <Relearn
               estimate={data.relearn}
               attached={attached}
@@ -72,21 +120,39 @@ export function Rebuild({revision, attached}: {revision: number; attached: boole
               chats={chats}
               setChats={setChats}
               cost={cost}
+              done={close}
             />
-            <Replace saved={data.replace.saved_messages} revision={revision} cost={cost} />
-          </>
-        )}
-      </CardBody>
+          </Dialog>
+          <Dialog
+            open={open === 'replace'}
+            onOpenChange={next => !next && close()}
+            title="Replace long-term memory"
+            description="Until the new one is ready, replies use notes and message search."
+          >
+            <Replace saved={data.replace.saved_messages} revision={revision} cost={cost} done={close} />
+          </Dialog>
+        </>
+      )}
     </Card>
   );
 }
 
-function Section({title, children}: {title: string; children: ReactNode}) {
+/** One action as a table row: its name, what it does, and the button that starts it. */
+function Action({title, detail, children}: {title: string; detail: ReactNode; children: ReactNode}) {
   return (
-    <section className="space-y-3 rounded-xl border border-line p-4">
-      <h3 className="text-sm font-medium">{title}</h3>
-      {children}
-    </section>
+    // On a phone the name and its button share a line and what it does sits under them.
+    <tr className="max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:border-b max-sm:border-line max-sm:py-1.5">
+      <Th
+        scope="row"
+        className="bg-transparent align-top text-[13px] font-medium whitespace-normal text-fg max-sm:flex-1 max-sm:border-0 max-sm:py-1"
+      >
+        {title}
+      </Th>
+      <Td className="space-y-1.5 text-[13px] text-muted max-sm:order-3 max-sm:w-full max-sm:border-0 max-sm:pt-0 max-sm:pb-1">
+        {detail}
+      </Td>
+      <Td className="text-right whitespace-nowrap max-sm:border-0 max-sm:py-1">{children}</Td>
+    </tr>
   );
 }
 
@@ -121,23 +187,28 @@ function Retry({failed, attached}: {failed: number | null; attached: boolean}) {
       );
   };
   return (
-    <Section title="Retry failed learning">
-      <p className="text-[13px] text-muted">
-        Learning that failed, for example while the memory model couldn’t be reached, runs again on the messages
-        long-term memory already has. Nothing is sent again.
-      </p>
-      <p className="text-[13px]">
-        {failed === null
-          ? 'Couldn’t check for failed learning right now.'
-          : failed
-            ? `${count(failed, 'learning task', 'learning tasks')} failed.`
-            : 'Nothing has failed.'}
-      </p>
-      <Problem error={command.error} />
-      <Button busy={command.busy} disabled={!attached || !failed} onClick={() => void retry()}>
+    <Action
+      title="Retry failed learning"
+      detail={
+        <>
+          <p>
+            Learning that failed runs again on the messages long-term memory already has. Nothing is sent again.{' '}
+            <span className="text-fg">
+              {failed === null
+                ? 'Couldn’t check for failed learning right now.'
+                : failed
+                  ? `${count(failed, 'learning task', 'learning tasks')} failed.`
+                  : 'Nothing has failed.'}
+            </span>
+          </p>
+          <Problem error={command.error} />
+        </>
+      }
+    >
+      <Button size="sm" busy={command.busy} disabled={!attached || !failed} onClick={() => void retry()}>
         Retry failed learning
       </Button>
-    </Section>
+    </Action>
   );
 }
 
@@ -149,6 +220,7 @@ function Relearn({
   chats,
   setChats,
   cost,
+  done,
 }: {
   estimate: Estimate['relearn'];
   attached: boolean;
@@ -157,6 +229,7 @@ function Relearn({
   chats: string[];
   setChats: (value: string[]) => void;
   cost: ReactNode;
+  done: () => void;
 }) {
   const feedback = useFeedback();
   const command = useCommand();
@@ -166,36 +239,19 @@ function Relearn({
     'conversation',
     'conversations',
   )}`;
+  // The dialog is the confirmation: it names what is forgotten and what is sent before the button works.
   const relearn = async () => {
-    if (
-      !(await feedback.confirm({
-        title: scope === 'all' ? 'Re-learn every chat?' : 'Re-learn the chosen chats?',
-        body: (
-          <div className="space-y-2">
-            <p>
-              Long-term memory forgets what it learned from {scope === 'all' ? 'every chat' : 'these chats'} and learns
-              again from {summary}.
-            </p>
-            <p>{cost}</p>
-          </div>
-        ),
-        confirm: 'Re-learn',
-      }))
-    )
-      return;
     const result = await command.run<Estimate['relearn']>(
       '/memory/longterm/rebuild',
       scope === 'all' ? {} : {spaces: chats},
     );
-    if (result) feedback.toast(`Re-learning ${count(result.messages, 'saved message', 'saved messages')}.`);
+    if (result) {
+      feedback.toast(`Re-learning ${count(result.messages, 'saved message', 'saved messages')}.`);
+      done();
+    }
   };
   return (
-    <Section title="Re-learn chats">
-      <p className="text-[13px] text-muted">
-        Long-term memory forgets what it learned from the chosen chats and learns them again from their saved messages,
-        dated by when they were sent. A group includes its topics. While it re-learns, replies use notes and message
-        search. Messages are learned again in the form they were first learned in.
-      </p>
+    <div className="space-y-3">
       <Segmented
         label="Which chats"
         value={scope}
@@ -209,20 +265,32 @@ function Relearn({
       {ready && (
         <p className="text-[13px]">
           {estimate.messages
-            ? `${summary} will be sent again.`
+            ? `Long-term memory forgets what it learned from ${
+                scope === 'all' ? 'every chat' : 'these chats'
+              } and learns again from ${summary}, dated by when they were sent.`
             : 'Long-term memory holds nothing from these chats yet.'}
         </p>
       )}
-      {ready && estimate.messages > 0 && <p className="text-xs text-muted">{cost}</p>}
+      {ready && estimate.messages > 0 && (
+        <p className="text-xs text-muted">{cost} Messages are learned again in the form they were first learned in.</p>
+      )}
       <Problem error={command.error} />
-      <Button busy={command.busy} disabled={!attached || !ready || !estimate.messages} onClick={() => void relearn()}>
-        Re-learn
-      </Button>
-    </Section>
+      <div className="flex justify-end gap-2">
+        <Button onClick={done}>Cancel</Button>
+        <Button
+          variant="primary"
+          busy={command.busy}
+          disabled={!attached || !ready || !estimate.messages}
+          onClick={() => void relearn()}
+        >
+          Re-learn
+        </Button>
+      </div>
+    </div>
   );
 }
 
-function Replace({saved, revision, cost}: {saved: number; revision: number; cost: ReactNode}) {
+function Replace({saved, revision, cost, done}: {saved: number; revision: number; cost: ReactNode; done: () => void}) {
   const feedback = useFeedback();
   const command = useCommand();
   const [from, setFrom] = useState<'archive' | 'empty'>('archive');
@@ -234,20 +302,16 @@ function Replace({saved, revision, cost}: {saved: number; revision: number; cost
       from_archive: from === 'archive',
     });
     if (result) {
-      setTyped('');
       feedback.toast(
         from === 'archive'
           ? 'Long-term memory replaced. It is learning your saved messages again.'
           : 'Long-term memory replaced. It learns from new messages.',
       );
+      done();
     }
   };
   return (
-    <Section title="Replace long-term memory">
-      <p className="text-[13px] text-muted">
-        Starts a new long-term memory and deletes the current one completely, including everything it learned. Until the
-        new one is ready, replies use notes and message search.
-      </p>
+    <div className="space-y-3">
       <Segmented
         label="The new memory"
         value={from}
@@ -281,9 +345,12 @@ function Replace({saved, revision, cost}: {saved: number; revision: number; cost
         />
       </Field>
       <Problem error={command.error} />
-      <Button variant="danger" busy={command.busy} disabled={!confirmed} onClick={() => void replace()}>
-        Replace long-term memory
-      </Button>
-    </Section>
+      <div className="flex justify-end gap-2">
+        <Button onClick={done}>Cancel</Button>
+        <Button variant="danger" busy={command.busy} disabled={!confirmed} onClick={() => void replace()}>
+          Replace long-term memory
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -2,6 +2,25 @@
 
 <current>
 
+Memory pages as tables, step 2 of the table-first dashboard plan (owner, 2026-11-19: "avoid
+scrolling as much as possible and use tables instead, everywhere"; 2026-11-20: "yes to all").
+- Step 1 (merged): Assistant notes lists past conversations and working notes as tables; the
+  "Untitled conversation" rows were each memory review's hidden, empty native session.
+- Long-term memory: status and monthly limits are two tables side by side (limits change in a
+  dialog); retry, re-learn and replace are one table of three actions, re-learn and replace
+  opening a dialog that is the confirmation; facts are a table, ten a page over the server's
+  25; the chat filter opens under its search box (`ChatPicker` `compact`).
+- Facts and Projects (projects, automatic organizing, recent suggestions) are tables; People
+  lists names side by side.
+- Notes: the page shows a note's words without ids of Nocheh's own records (`noteWords`). The
+  review instruction keeps the `nocheh:event:` ids, because a note's original-message links are
+  read from them, and writes no other id.
+- A notes review deletes its own empty native session when it ends (Hermes's
+  `delete_session_if_empty`), and hides one that holds anything.
+- Checks: [unit](services/hermes/test_native_memory.py), [unit](test/dashboard-memory-sources.test.mjs),
+  browser (`test/dashboard-pages.browser.mjs`). Pending: steps 3 to 5 of the plan (Settings ›
+  Assistant and the chat page; System; the remaining pages), one change each.
+
 Members step 5: the members' app
 ([ADR-0265](docs/adr/0265-member-mini-app.md); owner, 2026-11-12, approving the Members design
 with a members' mini app for tasks; 2026-11-19, the owner's answers to Q1-Q4): Q1 write includes
@@ -83,18 +102,6 @@ shows them, with Telegram names. One branch: a contract, five parts and their in
   Left for later: a per-member time zone (C2) and a second menu button (C1) were cut.
   Owner steps: take a backup and rebuild and run every image from the same revision, then apply
   settings once so the menu buttons are set ([deploy](docs/deploy.md#upgrade-to-step-5)).
-
-Memory › Assistant notes: past conversations and working notes as tables (owner, 2026-11-19:
-"what are these untitled conversations?" and "avoid scrolling as much as possible and use
-tables instead, everywhere").
-- Cause: the page listed every native session, including each memory review's hidden, empty
-  one, as "Untitled conversation". It now reads Hermes's own session list (`list_sessions_rich`:
-  no empty or hidden sessions, a continued conversation once), ten a page, each with its title,
-  first message (without the archive source line), where it ran and when it last went on.
-- Working notes are a table, eight a page: note, and where it came from.
-- Checks: [unit](services/hermes/test_management.py), browser
-  (`test/dashboard-pages.browser.mjs`, the Notes tests). Pending: the same look on the owner's
-  data after merge; a table-first plan for the other dashboard pages.
 
 Security fixes part 5: only addresses no model built open without a card
 ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md); owner,

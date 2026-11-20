@@ -19,6 +19,7 @@ const {
   factBadge,
   factsReasonText,
   noteDayText,
+  noteWords,
   originalLookups,
   originalsById,
   originalView,
@@ -169,4 +170,23 @@ test('a note’s day reads as a date, and a malformed one is not shown', () => {
   assert.equal(noteDayText('2026-11-19', 'en-GB'), '19 Nov 2026');
   assert.equal(noteDayText('2026-11-19T00:00', 'en-GB'), null);
   assert.equal(noteDayText(null), null);
+});
+
+test('a note’s words are shown without the ids of Nocheh’s own records', () => {
+  const event = 'nocheh:event:' + hex('ab');
+  for (const [text, words] of [
+    ['Alice prefers tea (' + event + ').', 'Alice prefers tea.'],
+    ['The trip is booked. Source: ' + event, 'The trip is booked.'],
+    ['The trip is booked [Archive source: ' + event + ']', 'The trip is booked'],
+    ['Likes hiking (conv 129882197, ' + event + ')', 'Likes hiking'],
+    ['Booked in conv 129882197. Hotels are open.', 'Booked. Hotels are open.'],
+    ['Two sources (' + event + ', nocheh:event:' + hex('cd') + ') agree.', 'Two sources agree.'],
+    ['Cut short: nocheh:event:abcdef12…', 'Cut short:'],
+    ['First line ' + event + '\nSecond line, from ' + event, 'First line\nSecond line'],
+    ['Call 5551234567 about order 20261119.', 'Call 5551234567 about order 20261119.'],
+    ['The conversation with 12 people went well.', 'The conversation with 12 people went well.'],
+  ])
+    assert.equal(noteWords(text), words);
+  // A note that is nothing but ids keeps its text, so the row is never empty.
+  assert.equal(noteWords(event), event);
 });

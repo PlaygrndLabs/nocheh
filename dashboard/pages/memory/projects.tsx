@@ -4,7 +4,7 @@
  * only that group, and a topic always follows its group's project (ADR-0247, ADR-0248).
  */
 import {useState} from 'react';
-import {ChevronRight, FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
+import {FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
 import {OriginalNames} from '../../lib/originals';
@@ -16,6 +16,7 @@ import {
   Card,
   CardBody,
   CardHeader,
+  Dot,
   Empty,
   Field,
   Input,
@@ -23,7 +24,10 @@ import {
   LoadingRows,
   Notice,
   Switch,
+  Table,
+  Td,
   Textarea,
+  Th,
   type Tone,
 } from '../../ui/core';
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
@@ -124,50 +128,64 @@ export function Projects() {
             </Button>
           }
         />
-        <CardBody className="pt-3">
-          {list.error && <LoadError className="mb-3" what="projects" onRetry={() => void refreshResources()} />}
-          {!list.data && !list.error ? (
+        {list.error && (
+          <CardBody>
+            <LoadError what="projects" onRetry={() => void refreshResources()} />
+          </CardBody>
+        )}
+        {!list.data && !list.error ? (
+          <CardBody>
             <LoadingRows rows={3} />
-          ) : list.data && sorted.length === 0 ? (
-            <Empty icon={FolderKanban} title="No projects yet">
-              Create a project, then add the chats that belong to it.
-            </Empty>
-          ) : (
-            <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
+          </CardBody>
+        ) : list.data && sorted.length === 0 ? (
+          <Empty icon={FolderKanban} title="No projects yet">
+            Create a project, then add the chats that belong to it.
+          </Empty>
+        ) : (
+          <Table aria-label="Projects">
+            <thead>
+              <tr>
+                <Th scope="col">Project</Th>
+                <Th scope="col" className="max-sm:hidden">
+                  What it is for
+                </Th>
+                <Th scope="col">Chats</Th>
+              </tr>
+            </thead>
+            <tbody>
               {sorted.map(project => {
                 const count = chatCount(project.id);
+                const archived = project.state === 'archived';
                 return (
-                  <li key={project.id}>
-                    <button
-                      type="button"
-                      onClick={() => setParams({project: project.id})}
-                      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-subtle/60 focus-visible:bg-subtle/60 focus-visible:outline-none"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={
-                            'block truncate text-sm font-medium ' + (project.state === 'archived' ? 'text-muted' : '')
-                          }
-                        >
-                          {project.name}
-                        </span>
-                        {project.description && (
-                          <span className="mt-0.5 block truncate text-[13px] text-muted">{project.description}</span>
-                        )}
-                      </span>
-                      {project.state === 'archived' ? (
-                        <Badge>Archived</Badge>
-                      ) : (
-                        <Badge>{count === 1 ? '1 chat' : `${count} chats`}</Badge>
+                  <tr
+                    key={project.id}
+                    onClick={() => setParams({project: project.id})}
+                    className="cursor-pointer transition-colors hover:bg-subtle/60"
+                  >
+                    <Td>
+                      <button
+                        type="button"
+                        className={
+                          'text-left text-sm font-medium focus-visible:underline focus-visible:outline-none ' +
+                          (archived ? 'text-muted' : '')
+                        }
+                      >
+                        {project.name}
+                      </button>
+                      {project.description && (
+                        <p className="mt-0.5 text-[13px] text-muted sm:hidden">{project.description}</p>
                       )}
-                      <ChevronRight className="size-4 shrink-0 text-muted" aria-hidden />
-                    </button>
-                  </li>
+                    </Td>
+                    <Td className="text-[13px] text-muted max-sm:hidden">{project.description}</Td>
+                    <Td className="text-[13px] whitespace-nowrap text-muted">
+                      {archived ? 'Archived' : count === 1 ? '1 chat' : `${count} chats`}
+                    </Td>
+                  </tr>
                 );
               })}
-            </ul>
-          )}
-        </CardBody>
+            </tbody>
+          </Table>
+        )}
       </Card>
 
       <AutoOrganize />
@@ -608,78 +626,129 @@ function AutoOrganize() {
           </Button>
         }
       />
-      <CardBody className="space-y-4 pt-3">
-        {delegations.error && <LoadError what="automatic organizing" onRetry={() => void refreshResources()} />}
-        {!delegations.data && !delegations.error ? (
+      {delegations.error && (
+        <CardBody>
+          <LoadError what="automatic organizing" onRetry={() => void refreshResources()} />
+        </CardBody>
+      )}
+      {!delegations.data && !delegations.error ? (
+        <CardBody>
           <LoadingRows rows={2} />
+        </CardBody>
+      ) : (
+        delegations.data &&
+        (list.length === 0 ? (
+          <Empty icon={Sparkles} title="Off" className="py-6">
+            Nocheh only suggests changes. Allow it in chosen chats to create projects without asking.
+          </Empty>
         ) : (
-          delegations.data &&
-          (list.length === 0 ? (
-            <Empty icon={Sparkles} title="Off" className="py-6">
-              Nocheh only suggests changes. Allow it in chosen chats to create projects without asking.
-            </Empty>
-          ) : (
-            <ul className="divide-y divide-line rounded-lg border border-line">
+          <Table aria-label="Automatic organizing">
+            <thead>
+              <tr>
+                <Th scope="col">Where it is allowed</Th>
+                <Th scope="col">Status</Th>
+                <Th scope="col" className="max-sm:hidden">
+                  Chats
+                </Th>
+                <Th scope="col">
+                  <span className="sr-only">Edit</span>
+                </Th>
+                <Th scope="col">On</Th>
+              </tr>
+            </thead>
+            <tbody>
               {list.map(item => {
                 const state = delegationState(item);
+                const covers =
+                  (item.scopes.length === 1 ? '1 chat' : `${item.scopes.length} chats`) +
+                  (item.expires_at ? ' · until ' + new Date(item.expires_at).toLocaleDateString() : '');
                 return (
-                  <li key={item.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">{item.name}</span>
-                        <Badge tone={state.tone} dot>
-                          {state.label}
-                        </Badge>
-                      </span>
-                      <span className="mt-0.5 block text-[13px] text-muted">
-                        {item.scopes.length === 1 ? '1 chat' : `${item.scopes.length} chats`}
-                        {item.expires_at ? ' · until ' + new Date(item.expires_at).toLocaleDateString() : ''}
-                      </span>
+                  <tr key={item.id}>
+                    <Td>
+                      <p className="text-sm font-medium">{item.name}</p>
+                      <p className="mt-0.5 text-[13px] text-muted sm:hidden">{covers}</p>
                       {item.scopes.some(chats.notGroup) && (
-                        <span className="mt-0.5 block text-xs text-warn">
+                        <p className="mt-0.5 text-xs text-warn">
                           Covers a private chat. Nocheh skips it; edit to remove it.
-                        </span>
+                        </p>
                       )}
-                    </span>
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(item)}>
-                      Edit
-                    </Button>
-                    <Switch
-                      label={'Automatic organizing: ' + item.name}
-                      checked={item.enabled && !item.expired}
-                      disabled={command.busy || !!item.expired}
-                      onChange={value => void toggle(item, value)}
-                    />
-                  </li>
+                    </Td>
+                    <Td className="text-[13px] whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Dot tone={state.tone} />
+                        {state.label}
+                      </span>
+                    </Td>
+                    <Td className="text-[13px] whitespace-nowrap text-muted max-sm:hidden">{covers}</Td>
+                    <Td className="py-1.5 text-right">
+                      <Button size="sm" variant="ghost" onClick={() => setEditing(item)}>
+                        Edit
+                      </Button>
+                    </Td>
+                    <Td>
+                      <Switch
+                        label={'Automatic organizing: ' + item.name}
+                        checked={item.enabled && !item.expired}
+                        disabled={command.busy || !!item.expired}
+                        onChange={value => void toggle(item, value)}
+                      />
+                    </Td>
+                  </tr>
                 );
               })}
-            </ul>
-          ))
-        )}
-        {command.error && <Notice tone="bad">{command.error}</Notice>}
-        {recent.length > 0 && (
-          <div>
-            <h3 className="mb-2 text-[13px] font-medium text-muted">Recent suggestions and changes</h3>
-            <ul className="space-y-2">
+            </tbody>
+          </Table>
+        ))
+      )}
+      {command.error && (
+        <CardBody>
+          <Notice tone="bad">{command.error}</Notice>
+        </CardBody>
+      )}
+      {recent.length > 0 && (
+        <>
+          <h3 className="px-5 pt-4 pb-2 text-[13px] font-medium text-muted">Recent suggestions and changes</h3>
+          <Table aria-label="Recent suggestions and changes">
+            <thead className="sr-only">
+              <tr>
+                <Th scope="col">Change</Th>
+                <Th scope="col">When</Th>
+                <Th scope="col">Status</Th>
+                <Th scope="col">Open</Th>
+              </tr>
+            </thead>
+            <tbody>
               {recent.map(item => (
-                <li key={item.id} className="flex flex-wrap items-center gap-2 text-[13px]">
-                  <span className="min-w-0 flex-1 truncate">{item.proposal?.reason || 'Organizing change'}</span>
-                  <span className="text-xs text-muted">{when(item.created_at)}</span>
-                  {item.state !== 'review' && (
-                    <Badge tone={item.state === 'applied' ? 'good' : item.state === 'failed' ? 'bad' : 'neutral'}>
-                      {proposalState(item.state)}
-                    </Badge>
-                  )}
-                  <a className="font-medium text-accent-text hover:underline" href={decisionLink('knowledge', item.id)}>
-                    {item.state === 'review' ? 'Review' : 'Open'}
-                  </a>
-                </li>
+                <tr key={item.id} className="text-[13px]">
+                  <Td className="border-t border-b-0">{item.proposal?.reason || 'Organizing change'}</Td>
+                  <Td className="border-t border-b-0 text-xs whitespace-nowrap text-muted max-sm:hidden">
+                    {when(item.created_at)}
+                  </Td>
+                  <Td className="border-t border-b-0 whitespace-nowrap">
+                    {item.state === 'review' ? (
+                      <span className="text-muted">Waiting for you</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Dot tone={item.state === 'applied' ? 'good' : item.state === 'failed' ? 'bad' : 'neutral'} />
+                        {proposalState(item.state)}
+                      </span>
+                    )}
+                  </Td>
+                  <Td className="border-t border-b-0 text-right">
+                    <a
+                      className="font-medium text-accent-text hover:underline"
+                      href={decisionLink('knowledge', item.id)}
+                    >
+                      {item.state === 'review' ? 'Review' : 'Open'}
+                    </a>
+                  </Td>
+                </tr>
               ))}
-            </ul>
-          </div>
-        )}
-        {proposals.error && <p className="text-xs text-muted">Couldn’t load recent suggestions.</p>}
-      </CardBody>
+            </tbody>
+          </Table>
+        </>
+      )}
+      {proposals.error && <p className="px-5 py-3 text-xs text-muted">Couldn’t load recent suggestions.</p>}
       {editing && <DelegationDialog item={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
     </Card>
   );

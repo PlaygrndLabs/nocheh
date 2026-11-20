@@ -843,7 +843,7 @@ const server=createServer((req,res)=>{void(async()=>{
     // Step 4: the day each names and the messages its writer read (a retired one is never linked).
     entries:[{target:'memory',text:'Synthetic memory: interested in astronomy.',from:'owner',label:'Your own messages in your private chat',...sourcesFixture.notes.own},
       {target:'memory',text:'Alice is planning a trip to Iceland.',from:'forward',label:'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”',...sourcesFixture.notes.forward},
-      {target:'memory',text:'The lunch poll now offers tacos on Friday.',from:'forward',label:'Nocheh’s notes review of a message holding someone else’s words, such as a shared checklist or poll, that you pinned in your private chat'}]},
+      {target:'memory',text:'The lunch poll now offers tacos on Friday (conv 4200042, nocheh:event:'+'c'.repeat(64)+').',from:'forward',label:'Nocheh’s notes review of a message holding someone else’s words, such as a shared checklist or poll, that you pinned in your private chat'}]},
     {name:'USER.md',exists:true,text:'Prefers short answers.',citations:[],entries:[{target:'user',text:'Prefers short answers.',from:'turn',label:'Nocheh’s note from your private chat on 2026-11-12',...sourcesFixture.notes.turn}]}],...previewSessions(url),messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[]});
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));

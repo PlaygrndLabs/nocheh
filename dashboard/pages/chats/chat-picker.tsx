@@ -23,6 +23,7 @@ export function ChatPicker({
   groupsOnly,
   wholeGroups,
   noOthersPrivate,
+  compact,
 }: {
   label: string;
   value: string[];
@@ -35,9 +36,12 @@ export function ChatPicker({
   wholeGroups?: boolean;
   /** Leave out other people's private chats (and their topics), which long-term memory never learns from. */
   noOthersPrivate?: boolean;
+  /** The list of chats opens under the search box while it is in use, instead of always taking room on the page. */
+  compact?: boolean;
 }) {
   const id = useId();
   const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
   const deferred = useDeferredValue(query.trim());
   const resource = useResource<Directory>(
     '/conversations?limit=100' + (deferred ? '&q=' + encodeURIComponent(deferred) : ''),
@@ -59,12 +63,13 @@ export function ChatPicker({
   const toggle = (space: string) => {
     if (value.includes(space)) onChange(value.filter(item => item !== space));
     else onChange(multiple ? [...value, space] : [space]);
+    if (!multiple) setOpen(false);
   };
   // A search that found only chats this picker can't take says why.
   const refused = (resource.data?.items ?? []).filter(row => !exclude.includes(row.space_id) && !allowed(row));
 
   return (
-    <div className="space-y-2">
+    <div className={compact ? 'space-y-1.5' : 'space-y-2'}>
       <label htmlFor={id} className="text-[13px] font-medium">
         {label}
       </label>
@@ -91,55 +96,72 @@ export function ChatPicker({
           ))}
         </ul>
       )}
-      <Input
-        id={id}
-        type="search"
-        value={query}
-        disabled={disabled}
-        placeholder="Search by name or Telegram ID"
-        onChange={event => setQuery(event.target.value)}
-      />
-      <div className="max-h-48 overflow-y-auto rounded-lg border border-line">
-        {resource.error && !resource.data ? (
-          <p className="px-3 py-2 text-[13px] text-warn">Chats couldn’t be loaded. Try again shortly.</p>
-        ) : !resource.data ? (
-          <p className="px-3 py-2 text-[13px] text-muted">Loading…</p>
-        ) : (
-          <ul role="listbox" aria-label={label} aria-multiselectable={multiple || undefined}>
-            {rows.map(row => {
-              const chosen = value.includes(row.space_id);
-              return (
-                <li key={row.space_id} role="option" aria-selected={chosen}>
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => toggle(row.space_id)}
-                    className={cn(
-                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-subtle',
-                      chosen && 'bg-accent-soft',
-                    )}
-                  >
-                    <span className="min-w-0 flex-1 truncate" dir="auto">
-                      {display(row)}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted">{kindLabel(row)}</span>
-                    <Check className={cn('size-4 shrink-0 text-accent-text', !chosen && 'invisible')} aria-hidden />
-                  </button>
-                </li>
-              );
-            })}
-            {!rows.length && (
-              <li className="px-3 py-2 text-[13px] text-muted">
-                {deferred && refused.length && wholeGroups
-                  ? 'Only whole groups can be chosen here. A topic follows its group, and a private chat never joins.'
-                  : deferred && refused.length && groupsOnly
-                    ? 'Only groups and topics can be chosen here, never a private chat.'
-                    : deferred && refused.length && noOthersPrivate
-                      ? 'Other people’s private chats aren’t learned from, so they aren’t listed here.'
-                      : 'No chats match. Search by name or Telegram ID.'}
-              </li>
+      <div
+        className="relative"
+        onBlur={event => !event.currentTarget.contains(event.relatedTarget) && setOpen(false)}
+        onKeyDown={event => event.key === 'Escape' && setOpen(false)}
+      >
+        <Input
+          id={id}
+          type="search"
+          value={query}
+          disabled={disabled}
+          placeholder="Search by name or Telegram ID"
+          onFocus={() => setOpen(true)}
+          onChange={event => {
+            setQuery(event.target.value);
+            setOpen(true);
+          }}
+        />
+        {(!compact || open) && (
+          <div
+            className={cn(
+              'max-h-48 overflow-y-auto rounded-lg border border-line',
+              compact && 'absolute inset-x-0 top-full z-20 mt-1 bg-surface shadow-lg',
             )}
-          </ul>
+          >
+            {resource.error && !resource.data ? (
+              <p className="px-3 py-2 text-[13px] text-warn">Chats couldn’t be loaded. Try again shortly.</p>
+            ) : !resource.data ? (
+              <p className="px-3 py-2 text-[13px] text-muted">Loading…</p>
+            ) : (
+              <ul role="listbox" aria-label={label} aria-multiselectable={multiple || undefined}>
+                {rows.map(row => {
+                  const chosen = value.includes(row.space_id);
+                  return (
+                    <li key={row.space_id} role="option" aria-selected={chosen}>
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => toggle(row.space_id)}
+                        className={cn(
+                          'flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-subtle',
+                          chosen && 'bg-accent-soft',
+                        )}
+                      >
+                        <span className="min-w-0 flex-1 truncate" dir="auto">
+                          {display(row)}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted">{kindLabel(row)}</span>
+                        <Check className={cn('size-4 shrink-0 text-accent-text', !chosen && 'invisible')} aria-hidden />
+                      </button>
+                    </li>
+                  );
+                })}
+                {!rows.length && (
+                  <li className="px-3 py-2 text-[13px] text-muted">
+                    {deferred && refused.length && wholeGroups
+                      ? 'Only whole groups can be chosen here. A topic follows its group, and a private chat never joins.'
+                      : deferred && refused.length && groupsOnly
+                        ? 'Only groups and topics can be chosen here, never a private chat.'
+                        : deferred && refused.length && noOthersPrivate
+                          ? 'Other people’s private chats aren’t learned from, so they aren’t listed here.'
+                          : 'No chats match. Search by name or Telegram ID.'}
+                  </li>
+                )}
+              </ul>
+            )}
+          </div>
         )}
       </div>
       {hint && <p className="text-xs text-muted">{hint}</p>}

@@ -41,6 +41,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn("rules Nocheh learned in that chat, including from other people's messages, and is not the owner's own words",DEFAULTS['memory.evidence'])
         self.assertIn('do not copy the records line into notes',DEFAULTS['memory.notes_review'])
         self.assertIn('nocheh:event:<id>',DEFAULTS['memory.notes_review'])
+        self.assertIn('Write no other id',DEFAULTS['memory.notes_review'])
 
     def test_management_reports_the_defaults_for_the_dashboard(self):
         from .management import dispatch

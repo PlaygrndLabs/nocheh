@@ -21,10 +21,13 @@ import {
   SettingRow,
   Skeleton,
   Switch,
+  Table,
+  Td,
   Technical,
+  Th,
   type Tone,
 } from '../../ui/core';
-import {useFeedback} from '../../ui/overlay';
+import {Dialog, useFeedback} from '../../ui/overlay';
 import {LongTermFacts} from './longterm-facts';
 import {Rebuild} from './rebuild';
 import {CONFLICT_TEXT, Meter, errorWords, useCommand} from './shared';
@@ -82,28 +85,39 @@ export function LongTerm() {
   const budgetEditable = attached && !!memory.data?.connection.verified;
   return (
     <>
-      <StatusCard memory={memory} service={service} />
-      <BudgetCard editable={budgetEditable} />
-      {memory.data && <Rebuild revision={memory.data.connection.revision ?? 0} attached={attached} />}
+      <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
+        <StatusCard memory={memory} service={service} />
+        <BudgetCard editable={budgetEditable} />
+      </div>
+      <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
+        {memory.data && <Rebuild revision={memory.data.connection.revision ?? 0} attached={attached} />}
+        {memory.data?.engine?.capabilities?.inspect && (
+          <Browse running={!!service.data?.running} workspace={memory.data.workspace?.id ?? ''} />
+        )}
+      </div>
       {memory.data && <LongTermFacts />}
-      {memory.data?.engine?.capabilities?.inspect && (
-        <Browse running={!!service.data?.running} workspace={memory.data.workspace?.id ?? ''} />
-      )}
     </>
   );
 }
 
+/** One line of the status table: what is checked, how it stands, and what that means. */
 function StatusRow({label, tone, value, detail}: {label: string; tone: Tone; value: string; detail?: ReactNode}) {
   return (
-    <div className="rounded-xl border border-line px-4 py-3 sm:p-4">
-      <div className="flex items-center justify-between gap-3 sm:block">
-        <p className="text-[13px] text-muted">{label}</p>
-        <Badge tone={tone} dot className="text-[13px] sm:mt-1.5">
+    // On a phone the check and its status share a line and what it means sits under them.
+    <tr className="max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:border-b max-sm:border-line max-sm:py-1.5">
+      <Th
+        scope="row"
+        className="bg-transparent text-[13px] font-normal text-fg max-sm:flex-1 max-sm:border-0 max-sm:py-1"
+      >
+        {label}
+      </Th>
+      <Td className="whitespace-nowrap max-sm:border-0 max-sm:py-1">
+        <Badge tone={tone} dot>
           {value}
         </Badge>
-      </div>
-      {detail && <div className="mt-2 text-xs text-muted">{detail}</div>}
-    </div>
+      </Td>
+      <Td className="text-xs text-muted max-sm:w-full max-sm:border-0 max-sm:pt-0 max-sm:pb-1">{detail}</Td>
+    </tr>
   );
 }
 
@@ -135,11 +149,7 @@ function StatusCard({
           {memory.error ? (
             <LoadError what="long-term memory" onRetry={() => void refreshResources()} />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Skeleton className="h-20" />
-              <Skeleton className="h-20" />
-              <Skeleton className="h-20" />
-            </div>
+            <Skeleton className="h-48" />
           )}
         </CardBody>
       </Card>
@@ -214,224 +224,276 @@ function StatusCard({
           )
         }
       />
-      <CardBody className="space-y-5">
-        {memory.error && <LoadError what="the latest status" onRetry={() => void refreshResources()} />}
-        <div className="grid gap-3 sm:grid-cols-3">
+      {memory.error && (
+        <div className="px-5 pb-3">
+          <LoadError what="the latest status" onRetry={() => void refreshResources()} />
+        </div>
+      )}
+      <Table aria-label="Long-term memory status" className="table-fixed max-sm:block">
+        <thead className="max-sm:sr-only">
+          <tr>
+            <Th scope="col" className="w-2/5 sm:w-1/4">
+              Check
+            </Th>
+            <Th scope="col" className="sm:w-1/4">
+              Status
+            </Th>
+            <Th scope="col">What it means</Th>
+          </tr>
+        </thead>
+        <tbody className="max-sm:block">
           <StatusRow label="Connected" tone={connected[0]} value={connected[1]} detail={connected[2]} />
           <StatusRow label="Up to date" tone={fresh[0]} value={fresh[1]} detail={fresh[2]} />
           <StatusRow label="Usable" tone={usable[0]} value={usable[1]} detail={usable[2]} />
-        </div>
-
-        <div className="space-y-3 rounded-xl bg-subtle/60 p-4">
-          {!attached && (
-            <fieldset className="space-y-0.5">
-              <legend className="mb-1 text-[13px] font-medium">When connecting</legend>
-              <label className="-mx-2 flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-subtle">
-                <input
-                  type="checkbox"
-                  className="size-4 shrink-0 accent-accent"
-                  checked={history}
-                  onChange={event => setHistory(event.target.checked)}
-                />
-                <span>Include older history you already agreed to share</span>
-              </label>
-              <label className="-mx-2 flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-subtle">
-                <input
-                  type="checkbox"
-                  className="size-4 shrink-0 accent-accent"
-                  checked={catchUp}
-                  onChange={event => setCatchUp(event.target.checked)}
-                />
-                <span>Catch up on messages that arrived while it was disconnected</span>
-              </label>
-              <p className="text-xs text-muted">
-                This doesn’t allow learning from anything you haven’t already allowed.
-              </p>
-            </fieldset>
+          <ServiceChecks service={service} />
+        </tbody>
+      </Table>
+      <CardBody className="space-y-3">
+        {!attached && (
+          <fieldset className="space-y-0.5">
+            <legend className="mb-1 text-[13px] font-medium">When connecting</legend>
+            <label className="-mx-2 flex min-h-9 cursor-pointer items-center gap-3 rounded-md px-2 py-1 text-sm hover:bg-subtle">
+              <input
+                type="checkbox"
+                className="size-4 shrink-0 accent-accent"
+                checked={history}
+                onChange={event => setHistory(event.target.checked)}
+              />
+              <span>Include older history you already agreed to share</span>
+            </label>
+            <label className="-mx-2 flex min-h-9 cursor-pointer items-center gap-3 rounded-md px-2 py-1 text-sm hover:bg-subtle">
+              <input
+                type="checkbox"
+                className="size-4 shrink-0 accent-accent"
+                checked={catchUp}
+                onChange={event => setCatchUp(event.target.checked)}
+              />
+              <span>Catch up on messages that arrived while it was disconnected</span>
+            </label>
+            <p className="text-xs text-muted">This doesn’t allow learning from anything you haven’t already allowed.</p>
+          </fieldset>
+        )}
+        {command.error && (
+          <Notice
+            tone={command.error === CONFLICT_TEXT ? 'warn' : 'bad'}
+            action={
+              command.error === CONFLICT_TEXT && (
+                <Button size="sm" onClick={() => void refreshResources().then(command.clear)}>
+                  Reload
+                </Button>
+              )
+            }
+          >
+            {command.error}
+          </Notice>
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Technical value={data} />
+          {attached ? (
+            <Button variant="danger" size="sm" busy={command.busy} onClick={() => void change(false)}>
+              Disconnect
+            </Button>
+          ) : (
+            <Button variant="primary" busy={command.busy} onClick={() => void change(true)}>
+              Connect long-term memory
+            </Button>
           )}
-          {command.error && (
-            <Notice
-              tone={command.error === CONFLICT_TEXT ? 'warn' : 'bad'}
-              action={
-                command.error === CONFLICT_TEXT && (
-                  <Button size="sm" onClick={() => void refreshResources().then(command.clear)}>
-                    Reload
-                  </Button>
-                )
-              }
-            >
-              {command.error}
-            </Notice>
-          )}
-          <div className="flex flex-wrap items-center gap-3">
-            {attached ? (
-              <Button variant="danger" busy={command.busy} onClick={() => void change(false)}>
-                Disconnect
-              </Button>
-            ) : (
-              <Button variant="primary" busy={command.busy} onClick={() => void change(true)}>
-                Connect long-term memory
-              </Button>
-            )}
-          </div>
         </div>
-
-        <ServiceChecks service={service} />
-        <Technical value={data} />
       </CardBody>
     </Card>
   );
 }
 
+/** The memory service's own checks, as rows of the status table. */
 function ServiceChecks({service}: {service: {data: ServiceStatus | null; error: string}}) {
-  if (service.error && !service.data)
-    return <p className="text-[13px] text-muted">Couldn’t check the memory service.</p>;
-  if (!service.data) return <LoadingRows rows={1} />;
-  const rows: [string, boolean, string, string?][] = [
-    ['Memory service', service.data.running, service.data.running ? 'Running' : 'Stopped'],
+  if (!service.data)
+    return (
+      <tr>
+        <Td colSpan={3} className="text-[13px] text-muted">
+          {service.error ? 'Couldn’t check the memory service.' : 'Checking the memory service…'}
+        </Td>
+      </tr>
+    );
+  const rows: [string, boolean, string, ReactNode][] = [
+    [
+      'Memory service',
+      service.data.running,
+      service.data.running ? 'Running' : 'Stopped',
+      'The program that stores and learns.',
+    ],
     [
       'Model for memory',
       service.data.reasoning_provider_configured,
       service.data.reasoning_provider_configured ? 'Chosen' : 'Not chosen',
-      '#settings?view=models',
+      service.data.reasoning_provider_configured ? (
+        'The model that learns facts from messages.'
+      ) : (
+        <a className="text-accent-text hover:underline" href="#settings?view=models">
+          Choose
+        </a>
+      ),
     ],
     [
       'Key for memory search',
       service.data.embedding_credential,
       service.data.embedding_credential ? 'Added' : 'Missing',
+      'Lets memory find facts by meaning.',
     ],
   ];
   return (
-    <ul className="flex flex-wrap gap-x-6 gap-y-2 text-[13px]">
-      {rows.map(([label, ok, value, link]) => (
-        <li key={label} className="flex items-center gap-2">
-          <span className="text-muted">{label}</span>
-          <Badge tone={ok ? 'good' : 'warn'}>{value}</Badge>
-          {!ok && link && (
-            <a className="text-accent-text hover:underline" href={link}>
-              Choose
-            </a>
-          )}
-        </li>
+    <>
+      {rows.map(([label, ok, value, detail]) => (
+        <StatusRow key={label} label={label} tone={ok ? 'good' : 'warn'} value={value} detail={detail} />
       ))}
-    </ul>
+    </>
   );
 }
 
+/** This month's two limits as one small table; each limit is changed in its own dialog. */
 function BudgetCard({editable}: {editable: boolean}) {
   const budget = useResource<Budget>('/honcho/budget', 15000);
   const data = budget.data;
+  const [editing, setEditing] = useState<'search' | 'thinking' | null>(null);
+  const monthly = data?.mode === 'monthly';
   return (
-    <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
-      <Card>
-        <CardHeader
-          title="Spending limit for memory search"
-          description="Memory search is billed per use. Nocheh stops searching for the month at this limit."
-        />
-        <CardBody className="space-y-4">
-          {budget.error && <LoadError what="the spending limit" onRetry={() => void refreshResources()} />}
-          {!data && !budget.error && <LoadingRows rows={2} />}
-          {data && (
-            <>
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="tabular text-2xl font-semibold tracking-tight">
-                    {usd(data.counted_toward_cap_usd)}
-                    <span className="text-sm font-normal text-muted"> of {usd(data.limit_usd)} this month</span>
+    <Card>
+      <CardHeader
+        title="Limits this month"
+        description="Memory search is billed per use and stops at its limit. Memory thinking is a count of requests, not money."
+      />
+      {budget.error && (
+        <div className="px-5 pb-3">
+          <LoadError what="the limits" onRetry={() => void refreshResources()} />
+        </div>
+      )}
+      {!data && !budget.error && <LoadingRows rows={2} />}
+      {data && (
+        <>
+          <Table aria-label="Limits this month" className="table-fixed">
+            <thead>
+              <tr>
+                <Th scope="col">Limit</Th>
+                <Th scope="col">Used</Th>
+                <Th scope="col" className="w-24">
+                  <span className="sr-only">Change</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <Th scope="row" className="bg-transparent align-top text-[13px] font-normal whitespace-normal text-fg">
+                  Memory search spending
+                </Th>
+                <Td className="space-y-1.5">
+                  <p className="tabular text-sm">
+                    <span className="font-semibold">{usd(data.counted_toward_cap_usd)}</span>
+                    <span className="text-muted"> of {usd(data.limit_usd)}</span>
                   </p>
-                  <p className="text-[13px] text-muted">{usd(data.remaining_usd)} left</p>
-                </div>
-                {data.limit_usd > 0 && (
-                  <Meter
-                    value={(100 * data.counted_toward_cap_usd) / data.limit_usd}
-                    tone={
-                      data.remaining_usd <= 0
-                        ? 'bad'
-                        : data.counted_toward_cap_usd / data.limit_usd > 0.8
-                          ? 'warn'
-                          : 'accent'
-                    }
-                    label="Spending limit used"
-                  />
-                )}
-                <p className="text-xs text-muted">
-                  Estimated cost so far: {usd(data.estimated_embedding_cost_usd)} for{' '}
-                  {data.embedding_requests.toLocaleString()} searches ({data.embedding_tokens.toLocaleString()} tokens
-                  reported). This is an estimate, not your provider’s bill.
-                </p>
-                {!!data.embedding_unreported_requests && (
-                  <p className="text-xs text-warn">
-                    {data.embedding_unreported_requests.toLocaleString()}{' '}
-                    {data.embedding_unreported_requests === 1 ? 'search came' : 'searches came'} back without a usage
-                    report, so each still counts its full reserved amount.
+                  {data.limit_usd > 0 && (
+                    <Meter
+                      value={(100 * data.counted_toward_cap_usd) / data.limit_usd}
+                      tone={
+                        data.remaining_usd <= 0
+                          ? 'bad'
+                          : data.counted_toward_cap_usd / data.limit_usd > 0.8
+                            ? 'warn'
+                            : 'accent'
+                      }
+                      label="Spending limit used"
+                    />
+                  )}
+                  <p className="text-xs text-muted">{usd(data.remaining_usd)} left</p>
+                </Td>
+                <Td className="text-right">
+                  {monthly && editable && (
+                    <Button size="sm" onClick={() => setEditing('search')}>
+                      Change
+                    </Button>
+                  )}
+                </Td>
+              </tr>
+              <tr>
+                <Th scope="row" className="bg-transparent align-top text-[13px] font-normal whitespace-normal text-fg">
+                  Memory thinking requests
+                </Th>
+                <Td className="space-y-1.5">
+                  <p className="tabular text-sm">
+                    <span className="font-semibold">{data.reasoning_requests.toLocaleString()}</span>
+                    <span className="text-muted">
+                      {data.reasoning_request_limit === null
+                        ? ' requests, no limit'
+                        : ` of ${data.reasoning_request_limit.toLocaleString()}`}
+                    </span>
                   </p>
-                )}
-                {(!!data.released_error_holds_usd || !!data.legacy_error_exposure_unverified_usd) && (
-                  <p className="text-xs text-muted">
-                    {usd(data.released_error_holds_usd ?? 0)} reserved for failed searches was given back this month
-                    {data.legacy_error_exposure_unverified_usd
-                      ? `; ${usd(data.legacy_error_exposure_unverified_usd)} of older failures can’t be checked and isn’t counted as spending`
-                      : ''}
-                    .
-                  </p>
-                )}
-              </div>
-              {data.mode === 'monthly' && editable ? (
-                <LimitForm budget={data} />
-              ) : (
-                <p className="text-[13px] text-muted">
-                  {data.mode === 'monthly'
-                    ? 'Connect long-term memory to change the limit.'
-                    : `A fixed trial limit of ${usd(data.limit_usd)} applies until long-term memory is accepted.`}
-                </p>
-              )}
-            </>
-          )}
-        </CardBody>
-      </Card>
-      <Card>
-        <CardHeader
-          title="Memory thinking"
-          description="How often long-term memory asked the memory model this month. A count, not money."
-        />
-        <CardBody className="space-y-2">
-          {!data && !budget.error && <LoadingRows rows={1} />}
-          {data && (
-            <>
-              <p className="tabular text-2xl font-semibold tracking-tight">
-                {data.reasoning_requests.toLocaleString()}
-                <span className="text-sm font-normal text-muted">
-                  {' '}
-                  {data.reasoning_request_limit === null
-                    ? 'requests'
-                    : `of ${data.reasoning_request_limit.toLocaleString()} requests`}
-                </span>
+                  {data.reasoning_request_limit !== null && data.reasoning_remaining_requests !== null && (
+                    <>
+                      <Meter
+                        value={(100 * data.reasoning_requests) / data.reasoning_request_limit}
+                        tone={data.reasoning_remaining_requests <= 0 ? 'bad' : 'accent'}
+                        label="Thinking requests used"
+                      />
+                      <p className="text-xs text-muted">{data.reasoning_remaining_requests.toLocaleString()} left</p>
+                    </>
+                  )}
+                </Td>
+                <Td className="text-right">
+                  {editable && (
+                    <Button size="sm" onClick={() => setEditing('thinking')}>
+                      Change
+                    </Button>
+                  )}
+                </Td>
+              </tr>
+            </tbody>
+          </Table>
+          <CardBody className="space-y-1.5 text-xs text-muted">
+            <p>
+              Estimated search cost so far: {usd(data.estimated_embedding_cost_usd)} for{' '}
+              {data.embedding_requests.toLocaleString()} searches ({data.embedding_tokens.toLocaleString()} tokens
+              reported). This is an estimate, not your provider’s bill.
+            </p>
+            {!!data.embedding_unreported_requests && (
+              <p className="text-warn">
+                {data.embedding_unreported_requests.toLocaleString()}{' '}
+                {data.embedding_unreported_requests === 1 ? 'search came' : 'searches came'} back without a usage
+                report, so each still counts its full reserved amount.
               </p>
-              {data.reasoning_request_limit !== null && data.reasoning_remaining_requests !== null ? (
-                <>
-                  <Meter
-                    value={(100 * data.reasoning_requests) / data.reasoning_request_limit}
-                    tone={data.reasoning_remaining_requests <= 0 ? 'bad' : 'accent'}
-                    label="Thinking requests used"
-                  />
-                  <p className="text-xs text-muted">
-                    {data.reasoning_remaining_requests.toLocaleString()} left. Resets each month.
-                  </p>
-                </>
-              ) : (
-                <p className="text-xs text-muted">No limit. Turn one on below to cap requests each month.</p>
-              )}
-              {editable ? (
-                <ThinkingLimitForm budget={data} />
-              ) : (
-                <p className="text-[13px] text-muted">Connect long-term memory to set a limit.</p>
-              )}
-            </>
-          )}
-          {budget.error && !data && <p className="text-[13px] text-muted">Couldn’t load the request count.</p>}
-        </CardBody>
-      </Card>
-    </div>
+            )}
+            {(!!data.released_error_holds_usd || !!data.legacy_error_exposure_unverified_usd) && (
+              <p>
+                {usd(data.released_error_holds_usd ?? 0)} reserved for failed searches was given back this month
+                {data.legacy_error_exposure_unverified_usd
+                  ? `; ${usd(data.legacy_error_exposure_unverified_usd)} of older failures can’t be checked and isn’t counted as spending`
+                  : ''}
+                .
+              </p>
+            )}
+            {!monthly ? (
+              <p>A fixed trial limit of {usd(data.limit_usd)} applies until long-term memory is accepted.</p>
+            ) : (
+              !editable && <p>Connect long-term memory to change the limits.</p>
+            )}
+            {monthly && <p>Both reset each month.</p>}
+          </CardBody>
+          <Dialog
+            open={editing === 'search'}
+            onOpenChange={open => !open && setEditing(null)}
+            title="Spending limit for memory search"
+            description="Nocheh stops searching memory for the month at this limit."
+          >
+            <LimitForm budget={data} />
+          </Dialog>
+          <Dialog
+            open={editing === 'thinking'}
+            onOpenChange={open => !open && setEditing(null)}
+            title="Memory thinking limit"
+            description="How often long-term memory may ask the memory model each month."
+          >
+            <ThinkingLimitForm budget={data} />
+          </Dialog>
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -466,7 +528,7 @@ function ThinkingLimitForm({budget}: {budget: Budget}) {
   };
   return (
     <form
-      className="space-y-3 border-t border-line pt-4"
+      className="space-y-3"
       onSubmit={event => {
         event.preventDefault();
         void save();
@@ -538,7 +600,7 @@ function LimitForm({budget}: {budget: Budget}) {
   };
   return (
     <form
-      className="space-y-3 border-t border-line pt-4"
+      className="space-y-3"
       onSubmit={event => {
         event.preventDefault();
         void save();
