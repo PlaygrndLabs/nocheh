@@ -157,6 +157,15 @@ function memberRoute(route:string,body:unknown):unknown {
   memberRevision++;return {revision:memberRevision,member:memberItem(member)};
  });
 }
+/** Past conversations of a notes profile, latest first, a page at a time as Hermes lists them: one titled after its chat
+ * with its first message, one named only by its first message, and older ones to page through. */
+const PREVIEW_SESSIONS=[{id:'fixture-session',title:'Private chat',preview:'Where can we see the northern lights?',source:'telegram',started_at:'2026-11-18T08:00:00Z',last_active:'2026-11-19T20:00:00Z',messages:14},
+  {id:'fixture-browser',title:'',preview:'Planning a stargazing trip',source:'browser',started_at:'2026-11-17T09:00:00Z',last_active:'2026-11-17T09:30:00Z',messages:4},
+  ...Array.from({length:10},(_,i)=>({id:'fixture-older-'+i,title:'',preview:'Older question '+(i+1),source:'scheduler',started_at:`2026-11-0${Math.floor(i/2)+1}T10:00:00Z`,last_active:`2026-11-0${Math.floor(i/2)+1}T10:05:00Z`,messages:2}))];
+function previewSessions(url:URL){
+  const offset=Number(url.searchParams.get('offset')??0),limit=Number(url.searchParams.get('limit')??50);
+  return {sessions:PREVIEW_SESSIONS.slice(offset,offset+limit),next_offset:offset+limit<PREVIEW_SESSIONS.length?offset+limit:null};
+}
 const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLock(join(tmpdir(),'nocheh-preview-'+randomUUID(),'lock.json')),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
 await initialize(pool);
 await ownerLock.create('preview-password');
@@ -835,7 +844,7 @@ const server=createServer((req,res)=>{void(async()=>{
     entries:[{target:'memory',text:'Synthetic memory: interested in astronomy.',from:'owner',label:'Your own messages in your private chat',...sourcesFixture.notes.own},
       {target:'memory',text:'Alice is planning a trip to Iceland.',from:'forward',label:'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”',...sourcesFixture.notes.forward},
       {target:'memory',text:'The lunch poll now offers tacos on Friday.',from:'forward',label:'Nocheh’s notes review of a message holding someone else’s words, such as a shared checklist or poll, that you pinned in your private chat'}]},
-    {name:'USER.md',exists:true,text:'Prefers short answers.',citations:[],entries:[{target:'user',text:'Prefers short answers.',from:'turn',label:'Nocheh’s note from your private chat on 2026-11-12',...sourcesFixture.notes.turn}]}],sessions:[{id:'fixture-session',title:'Planning a stargazing trip',source:'browser'}],messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[],next_offset:null});
+    {name:'USER.md',exists:true,text:'Prefers short answers.',citations:[],entries:[{target:'user',text:'Prefers short answers.',from:'turn',label:'Nocheh’s note from your private chat on 2026-11-12',...sourcesFixture.notes.turn}]}],...previewSessions(url),messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[]});
   if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
   if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));
   if(route==='/prompts')return json(res,200,prompts);

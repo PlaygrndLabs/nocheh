@@ -3,26 +3,30 @@
  * conversations for one chat profile. Read only.
  */
 import {useEffect, useState} from 'react';
-import {MessageSquareText, NotebookPen, Search} from 'lucide-react';
+import {MessageSquareText, NotebookPen} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
 import {refreshResources, useResource} from '../../lib/resource';
 import {
-  Badge,
   Button,
   Card,
   CardBody,
   CardHeader,
+  Dot,
   Empty,
   Field,
-  Input,
   LoadError,
   LoadingRows,
   Notice,
+  Pager,
   Select,
+  Table,
+  Td,
+  Th,
   type Tone,
 } from '../../ui/core';
 import {Drawer} from '../../ui/overlay';
+import {ago, dateTime} from '../../lib/system-format';
 import {noteDayText, type NoteEntry} from '../../lib/memory-sources';
 import {OriginalList} from '../../lib/originals';
 import {useChats} from './shared';
@@ -32,8 +36,19 @@ import {earlierSuffix, notesProfiles, type Profile} from './notes-profiles';
  * `day` and `originals` the day it names and the messages its writer read (ADR-0261 step 4). */
 type Entry = NoteEntry;
 type Note = {name: string; exists: boolean; text: string; truncated?: boolean; citations: unknown[]; entries?: Entry[]};
-type Session = {id: string; title: string; source: string};
-type MemoryView = {memories: Note[]; sessions: Session[]};
+/** One past conversation: its title, its first message, where it ran, and when it started and last went on. */
+type Session = {
+  id: string;
+  title: string;
+  preview?: string;
+  source: string;
+  started_at?: string | null;
+  last_active?: string | null;
+  messages?: number;
+};
+type MemoryView = {memories: Note[]; sessions: Session[]; next_offset?: number | null};
+/** Past conversations listed on one page of the table. */
+const PAGE = 10;
 type Message = {id: string; role: string; content: unknown; truncated?: boolean};
 
 const noteTitle: Record<string, string> = {'MEMORY.md': 'General notes', 'USER.md': 'About you'};
@@ -59,7 +74,29 @@ const sourceLabel: Record<string, string> = {
   browser: 'Browser chat',
   cli: 'Terminal',
   cron: 'Scheduled',
+  scheduler: 'Scheduled',
+  background: 'Background job',
 };
+
+/** A conversation's name: its title, else its first message, else what it is. */
+export function sessionName(s: Session): string {
+  return s.title.trim() || s.preview?.trim() || 'Conversation without text';
+}
+
+/** When a conversation last went on: how long ago within a week, its day after that. */
+export function sessionDay(value: string | null | undefined, now = Date.now()): string {
+  if (!value) return '—';
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return '—';
+  return now - time < 7 * 86400000
+    ? ago(value, now)
+    : new Date(time).toLocaleDateString(undefined, {dateStyle: 'medium'});
+}
+
+/** Where a conversation ran, in words; nothing for a kind Nocheh doesn't name. */
+export function sessionWhere(source: string): string {
+  return sourceLabel[source] ?? '—';
+}
 
 /**
  * A member's private chat by the member's name, and your question about a member by when it ran; each is marked as
@@ -99,15 +136,21 @@ export function Notes() {
     (memberProfileLabel(p, chats.name) ??
       (p.private_answer ? answerLabel(p) : p.owner ? 'Your private chat' : chats.name(p.scope))) +
     earlierSuffix(p, list);
-  const memory = useResource<MemoryView>(
-    profile ? '/memory?' + new URLSearchParams({scope: profile.scope, profile: profile.profile}) : null,
+  const memoryQuery = profile
+    ? new URLSearchParams({scope: profile.scope, profile: profile.profile, limit: String(PAGE)})
+    : null;
+  const memory = useResource<MemoryView>(memoryQuery ? '/memory?' + memoryQuery : null, 30000);
+  // The first page comes with the notes; a later one on its own, so the notes stay in place while paging.
+  const [page, setPage] = useState(0);
+  useEffect(() => setPage(0), [profile?.profile]);
+  const later = useResource<MemoryView>(
+    memoryQuery && page > 0 ? '/memory?' + memoryQuery + '&offset=' + page * PAGE : null,
     30000,
   );
+  const conversations = page > 0 ? later : memory;
   // Messages from people not allowed where they wrote stay out of your notes; the reviews list counts them.
   const reviews = useResource<{kept_out?: number}>('/memory/reviews', 60000);
   const keptOut = reviews.data?.kept_out ?? 0;
-  const [query, setQuery] = useState('');
-  useEffect(() => setQuery(''), [profile?.profile]);
   // A group's USER.md is what Nocheh noted about the people there, not about you.
   const title = (name: string) =>
     name === 'USER.md' && profile?.member
@@ -115,9 +158,7 @@ export function Notes() {
       : name === 'USER.md' && profile && !profile.owner && !profile.private_answer
         ? 'About people here'
         : (noteTitle[name] ?? name);
-  const sessions = (memory.data?.sessions ?? []).filter(s =>
-    (s.title || s.id).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
-  );
+  const sessions = conversations.data?.sessions ?? [];
 
   if (profiles.error && !profiles.data)
     return <LoadError what="chat profiles" error={profiles.error} onRetry={() => void refreshResources()} />;
@@ -157,7 +198,7 @@ export function Notes() {
         </p>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[3fr_2fr]">
+      <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
         <Card>
           <CardHeader
             title="Working notes"
@@ -171,24 +212,7 @@ export function Notes() {
                 <section key={note.name}>
                   <h3 className="mb-1.5 text-sm font-semibold">{title(note.name)}</h3>
                   {note.entries?.length ? (
-                    <ul className="max-h-[28rem] space-y-2 overflow-auto rounded-lg bg-subtle p-3">
-                      {note.entries.map((entry, index) => (
-                        <li key={index} className="space-y-1">
-                          <p className="text-[13px] leading-relaxed break-words whitespace-pre-wrap" dir="auto">
-                            {entry.text}
-                          </p>
-                          <Badge
-                            tone={fromTone[entry.from] ?? 'neutral'}
-                            dot
-                            title={entry.label}
-                            className="whitespace-normal"
-                          >
-                            {entry.label}
-                          </Badge>
-                          <NoteSources entry={entry} />
-                        </li>
-                      ))}
-                    </ul>
+                    <NotesTable label={title(note.name)} entries={note.entries} />
                   ) : note.exists && note.text ? (
                     <pre
                       className="max-h-[28rem] overflow-auto rounded-lg bg-subtle p-3 font-sans text-[13px] leading-relaxed break-words whitespace-pre-wrap"
@@ -207,57 +231,149 @@ export function Notes() {
         </Card>
 
         <Card>
-          <CardHeader title="Past conversations" description="What the assistant said in this chat." />
-          <CardBody className="space-y-3">
-            {(memory.data?.sessions.length ?? 0) > 6 && (
-              <div className="relative">
-                <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
-                <Input
-                  type="search"
-                  aria-label="Search conversations"
-                  className="pl-9"
-                  placeholder="Search titles"
-                  value={query}
-                  onChange={event => setQuery(event.target.value)}
-                />
-              </div>
-            )}
-            {!memory.data && !memory.error ? (
-              <LoadingRows rows={3} />
-            ) : memory.data && sessions.length === 0 ? (
-              <Empty
-                icon={MessageSquareText}
-                title={query ? 'No matching conversations' : 'No conversations yet'}
-                className="py-6"
-              >
-                {query ? 'Try other words.' : 'They appear after the assistant answers in this chat.'}
-              </Empty>
-            ) : (
-              <ul className="-mx-2 space-y-0.5">
-                {sessions.map(item => (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      onClick={() => setParams({session: item.id})}
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-subtle"
-                    >
-                      <span className="min-w-0 flex-1 truncate">{item.title || 'Untitled conversation'}</span>
-                      <Badge>{sourceLabel[item.source] ?? item.source}</Badge>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardBody>
+          <CardHeader
+            title="Past conversations"
+            description="What the assistant said in this chat, latest first. Open one to read it."
+          />
+          {conversations.error && (
+            <div className="px-5 pb-3">
+              <LoadError
+                what="past conversations"
+                error={conversations.error}
+                onRetry={() => void refreshResources()}
+              />
+            </div>
+          )}
+          {!conversations.data && !conversations.error ? (
+            <LoadingRows rows={3} />
+          ) : conversations.data && sessions.length === 0 ? (
+            <Empty icon={MessageSquareText} title={page ? 'Nothing older' : 'No conversations yet'} className="py-6">
+              {page ? 'Go back to the latest conversations.' : 'They appear after the assistant answers in this chat.'}
+            </Empty>
+          ) : (
+            sessions.length > 0 && (
+              <Table aria-label="Past conversations" className="table-fixed">
+                <thead>
+                  <tr>
+                    <Th scope="col">Conversation</Th>
+                    <Th scope="col" className="hidden w-32 sm:table-cell lg:hidden 2xl:table-cell">
+                      Where
+                    </Th>
+                    <Th scope="col" className="w-32">
+                      Last active
+                    </Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.map(item => (
+                    <tr key={item.id} className="hover:bg-subtle/60">
+                      <Td className="min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => setParams({session: item.id})}
+                          className="block w-full min-w-0 text-left"
+                        >
+                          <span className="block truncate font-medium hover:underline" dir="auto">
+                            {sessionName(item)}
+                          </span>
+                          {item.title.trim() && item.preview?.trim() && (
+                            <span className="block truncate text-xs text-muted" dir="auto">
+                              {item.preview}
+                            </span>
+                          )}
+                        </button>
+                      </Td>
+                      <Td className="hidden text-muted sm:table-cell lg:hidden 2xl:table-cell">
+                        {sessionWhere(item.source)}
+                      </Td>
+                      <Td
+                        className="whitespace-nowrap text-muted"
+                        title={
+                          dateTime(item.last_active) +
+                          (item.messages ? ` · ${item.messages} message${item.messages === 1 ? '' : 's'}` : '')
+                        }
+                      >
+                        {sessionDay(item.last_active)}
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            )
+          )}
+          <Pager
+            page={page}
+            hasNext={conversations.data?.next_offset != null}
+            labels={['Newer', 'Older']}
+            onPage={setPage}
+          />
         </Card>
       </div>
 
       <Conversation
         profile={profile}
         session={session}
-        title={memory.data?.sessions.find(s => s.id === session)?.title}
+        title={(() => {
+          const open = sessions.find(s => s.id === session);
+          return open && sessionName(open);
+        })()}
       />
     </>
+  );
+}
+
+/** Notes listed on one page of a working-notes table. */
+const NOTES_PAGE = 8;
+
+/** One notes file as a table: each note with where it came from, a page at a time. */
+function NotesTable({label, entries}: {label: string; entries: Entry[]}) {
+  const [page, setPage] = useState(0);
+  const pages = Math.ceil(entries.length / NOTES_PAGE);
+  useEffect(() => setPage(current => Math.min(current, Math.max(0, pages - 1))), [pages]);
+  const rows = entries.slice(page * NOTES_PAGE, (page + 1) * NOTES_PAGE);
+  return (
+    <div className="overflow-hidden rounded-lg border border-line">
+      <Table aria-label={label} className="table-fixed">
+        <thead>
+          <tr>
+            <Th scope="col">Note</Th>
+            <Th scope="col" className="hidden w-2/5 sm:table-cell">
+              Where it came from
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((entry, index) => (
+            // On a phone each note's source sits under it, not beside it.
+            <tr key={page * NOTES_PAGE + index} className="block border-b border-line last:border-b-0 sm:table-row">
+              <Td
+                className="block border-b-0 pb-1 text-[13px] leading-relaxed break-words whitespace-pre-wrap sm:table-cell sm:pb-2.5"
+                dir="auto"
+              >
+                {entry.text}
+              </Td>
+              <Td className="block space-y-1 border-b-0 pt-0 sm:table-cell sm:pt-2.5">
+                <p className="flex items-baseline gap-1.5 text-xs text-muted" title={entry.label}>
+                  <Dot tone={fromTone[entry.from] ?? 'neutral'} className="size-1.5 translate-y-[-1px]" />
+                  <span className="min-w-0 break-words">{entry.label}</span>
+                </p>
+                <NoteSources entry={entry} />
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+      {pages > 1 && (
+        <div className="border-t border-line">
+          <Pager
+            page={page}
+            hasNext={page + 1 < pages}
+            onPage={setPage}
+            summary={`${entries.length} notes · page ${page + 1} of ${pages}`}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
