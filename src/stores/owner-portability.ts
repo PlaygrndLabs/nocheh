@@ -212,9 +212,10 @@ export class OwnerPortabilityRepository {
     if(table==='chat_tool_settings')return Object.fromEntries(Object.entries(row).map(([key,value])=>
       [key,['shell','browser','mcp'].includes(key)?(value===false?false:null):key==='revision'?1:value]));
     // A name a person wrote for themselves stays out (labels read the name their account has here); a merged message's
-    // id and the tries of a send belong to the installation that sent it.
+    // id, the tries of a send, and the chat and text digest a member's reminder was being sent with (step 5) belong to the
+    // installation that sent it.
     if(table==='owner_task_reminders') {
-      const due=Date.parse(String(row.remind_at)),cleared={...row,set_by_name:null,batch_id:null,tries:0};
+      const due=Date.parse(String(row.remind_at)),cleared={...row,set_by_name:null,batch_id:null,tries:0,deliver_chat:null,notice_digest:null};
       if(row.state==='sending'||row.state==='uncertain'||row.state==='pending'&&!(due>Date.now()))return {...cleared,state:'skipped'};
       return cleared;
     }

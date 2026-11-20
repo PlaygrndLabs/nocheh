@@ -5,6 +5,20 @@ import {Badge, Card, CardHeader, Input, Notice, Segmented, SettingRow, Switch} f
 import {LinkButton} from '../../ui/link-button';
 import {FindIdButton, FoundPeople, useFindTelegramId} from './telegram-id';
 
+/** The two pages the mini app's address serves: the owner's at `/` and the members' at `/m/` (ADR-0265); null for an
+ * empty or unreadable address. */
+export function miniAppAddresses(value: string): {owner: string; members: string} | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    const base = url.origin + url.pathname.replace(/\/+$/, '');
+    return {owner: base + '/', members: base + '/m/'};
+  } catch {
+    return null;
+  }
+}
+
 export const telegramKeys = [
   'TELEGRAM_ENABLED',
   'TELEGRAM_BOT_TOKEN',
@@ -46,6 +60,7 @@ export function TelegramSettings() {
   const findable = !!token?.configured && !s.changed('TELEGRAM_BOT_TOKEN');
   const tunnel = s.field('CLOUDFLARE_TUNNEL_TOKEN');
   const miniApp = s.value('NOCHEH_MINI_APP_URL');
+  const addresses = miniAppAddresses(miniApp);
   return (
     <>
       {!enabled && (
@@ -330,7 +345,7 @@ export function TelegramSettings() {
       <Card>
         <CardHeader
           title="Mini app"
-          description="Home, Inbox and Tasks on your phone, from the button next to the message box in your private chat with Nocheh. Only your Telegram account can open it, with your Nocheh password; Settings and System stay here."
+          description="Home, Inbox and Tasks on your phone, from the button next to the message box in your private chat with Nocheh. Only your Telegram account can open it, with your Nocheh password; Settings and System stay here. Your members get their own small app at its own address."
           className="pb-3"
         />
         <div className="border-t border-line">
@@ -344,7 +359,7 @@ export function TelegramSettings() {
             description={
               miniApp
                 ? 'The public address your Cloudflare tunnel sends to the mini app.'
-                : 'Leave empty to keep the mini app off.'
+                : 'Leave empty to keep the mini app off, for you and your members.'
             }
             htmlFor="mini-app-url"
           >
@@ -357,6 +372,26 @@ export function TelegramSettings() {
               onChange={e => s.set('NOCHEH_MINI_APP_URL', e.target.value.trim())}
             />
           </SettingRow>
+          {addresses && (
+            <SettingRow
+              title="Addresses"
+              description="Every private chat with Nocheh gets the menu button. Only active members can open the app. Others see a closed page."
+            >
+              <dl
+                className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px]"
+                aria-label="Mini app addresses"
+              >
+                <dt className="text-muted">Yours</dt>
+                <dd className="truncate font-mono" dir="ltr">
+                  {addresses.owner}
+                </dd>
+                <dt className="text-muted">Members’ app</dt>
+                <dd className="truncate font-mono" dir="ltr">
+                  {addresses.members}
+                </dd>
+              </dl>
+            </SettingRow>
+          )}
           <SettingRow
             title={
               <>

@@ -12,6 +12,14 @@ in the owner's chat only in the separate message that answers the owner's ask ab
 holds and looks for each mark outside where it may show. Nothing on the owner's private side reaches a group or a
 member without a card in the private chat that names who will see it, and no planted mark ever gets such a card, so
 a mark anywhere else is a leak.
+
+The members' app (step 5, ADR-0265) reads no chat at all, so its answers are swept whole: every answer the tester's
+member_http got is kept in mini-app-responses.jsonl, and `member_app_never_leaks` fails on any saved mark in any of them,
+a member's own MEMBERMARK included, and on the app's own marks (member-app-marks.json): a task title of a group the
+member never joined (GP2MARK), the owner's personal task (PERSONALMARK), and on a task the member does see, a private
+column's value (OWNERCOLMARK), the owner's name for the person assigned (OWNERNAMEMARK) and a comment from before the task
+joined the board (PREJOINMARK). The reminders that reached members' own chats are swept for the same marks and for
+people's Telegram names.
 """
 import json
 import re
@@ -165,4 +173,88 @@ def leaks(state, marks, owner, where=None):
         parameters = call.get('parameters') or {}
         reached = pressers.get(str(parameters.get('callback_query_id'))) if call.get('method') == 'answerCallbackQuery' else chat_of(parameters)
         scan('call', reached, parameters, parameters=parameters, method=call.get('method'))
+    return hits
+
+
+# The members' app's answers, one JSON object a line, and its own marks.
+HTTP_FILE = 'mini-app-responses.jsonl'
+APP_MARKS_FILE = 'member-app-marks.json'
+
+
+def log_http(directory, row):
+    """Keep one answer of the members' app: {user, label, method, path, status, cache, body}. Never the launch data."""
+    path = Path(directory)/HTTP_FILE
+    with path.open('a') as file:
+        file.write(json.dumps(row, ensure_ascii=False, sort_keys=True)+'\n')
+    path.chmod(0o600)
+
+
+def load_http(directory):
+    """Every answer kept so far; none fails, as the sweep never passes on nothing."""
+    path = Path(directory)/HTTP_FILE
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
+    if not rows:
+        raise FileNotFoundError('member_app_responses_missing: the members\' app scenarios keep them earlier in the same run')
+    return rows
+
+
+def save_app_marks(directory, hidden, visible):
+    """Add the members' app's marks: `hidden` ({mark: what holds it}) must show in no answer of the app and no member's
+    reminder; `visible` ({mark: what holds it}) are the positive controls a member does see."""
+    path = Path(directory)/APP_MARKS_FILE
+    known = json.loads(path.read_text()) if path.exists() else {'hidden': {}, 'visible': {}}
+    if set(hidden) & set(visible) or set(hidden) & set(known['visible']) or set(visible) & set(known['hidden']):
+        raise ValueError('member_app_marks_overlap')
+    value = {'hidden': {**known['hidden'], **hidden}, 'visible': {**known['visible'], **visible}}
+    write(path, value)
+    return value
+
+
+def load_app_marks(directory):
+    path = Path(directory)/APP_MARKS_FILE
+    if not path.exists():
+        raise FileNotFoundError('member_app_marks_missing: member_app_tasks plants them earlier in the same run')
+    value = json.loads(path.read_text())
+    if (not isinstance(value, dict) or not isinstance(value.get('hidden'), dict) or not value['hidden'] or not isinstance(value.get('visible'), dict)
+            or not value['visible'] or set(value['hidden']) & set(value['visible'])):
+        raise ValueError('member_app_marks_invalid')
+    return value
+
+
+def leaks_http(responses, marks):
+    """Each answer of the members' app that holds a mark: there is no place in the app where any may show. Pure; an empty
+    list is a clean sweep."""
+    hits = []
+    for row in responses:
+        body = row.get('body')
+        text = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, sort_keys=True)
+        hits.extend({'where': 'http', 'user': row.get('user'), 'method': row.get('method'), 'path': row.get('path'), 'status': row.get('status'),
+                     'mark': mark} for mark in found(text, marks))
+    return hits
+
+
+def member_reminders(state, owner):
+    """The reminders the fake Telegram delivered to a person's own private chat (not the owner's): a message starting
+    with the reminder sign, or carrying the line that the member set it themselves."""
+    rows = []
+    for row in state.get('sent', []):
+        message = row['message']
+        chat, text = message['chat']['id'], message.get('text') or ''
+        if chat > 0 and chat != int(owner) and (text.startswith('\u23f0') or 'Set by you' in text):
+            rows.append(row)
+    return rows
+
+
+def leaks_reminders(state, marks, owner):
+    """Each reminder in a member's own chat whose text holds a mark, such as a task title of a group they never joined,
+    the owner's name for a person, a comment from before the task joined the board, or anyone's Telegram name (the
+    fixture's people and groups are all called "Synthetic ..."). Pure."""
+    hits = []
+    for row in member_reminders(state, owner):
+        message = row['message']
+        # Only what the member reads: the text as sent and as each edit set it, not the sender's own name on the message.
+        texts = [message.get('text') or '', (row.get('parameters') or {}).get('text') or '']
+        texts += [(edit.get('parameters') or {}).get('text') or '' for edit in row.get('edits', [])]
+        for mark in found('\n'.join(filter(None, texts)), marks):
+            hits.append({'where': 'reminder', 'chat': message['chat']['id'], 'message_id': message.get('message_id'), 'mark': mark})
     return hits

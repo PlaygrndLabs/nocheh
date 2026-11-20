@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import hashlib
 import json
 import re
 import threading
@@ -20,7 +21,7 @@ from time import perf_counter
 from services.durable import canonical, digest, immutable_file
 from . import settings
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, SEND_ANSWERS, SEND_CLASS
-from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, check_leave_policy,
+from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, check_leave_policy, check_notice_policy,
                      delivery_failure, leave_check, no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
 from .sends import GONE, route_class
 
@@ -53,6 +54,12 @@ def topic_of(value):
     if isinstance(value, str) and value.isascii() and value.isdigit() and value[0] != '0' and len(value) <= 16: value = int(value)
     if type(value) is not int or not 0 < value <= 9007199254740991: raise ValueError('invalid_topic')
     return value
+
+
+def member_notice_shape(body):
+    """Whether a notice has the only shape a member's own private chat takes (step 5): a task reminder, with no topic,
+    buttons or edit."""
+    return body.get('send_class')=='reminder' and body.get('topic') in (None,'') and body.get('buttons') is None and body.get('edit') is None
 
 
 class Presence:
@@ -618,11 +625,19 @@ class TelegramService:
     async def send_notice(self, body):
         """A task reminder or a problem notice in the owner's private chat. No model runs;
         the text is the owner's template filled in by storage, sent at most once.
-        With edit, a notice this service sent is edited in place instead, such as to mark a cleared problem."""
+        With edit, a notice this service sent is edited in place instead, such as to mark a cleared problem.
+
+        Step 5 (ADR-0265 D10): one more place, a task reminder into the own private chat of the member who set it. Only
+        send_class 'reminder', no topic, no buttons, no edit, a chat the app's served list marks as a member's own private
+        chat that is open now, and only after core's one-time yes for this id, this chat and this exact text
+        (check_notice_policy). Every other chat is refused before anything is sent."""
         chat=str(body.get('chat_id') or '')
-        # Only the owner's private chat, where it is in Telegram now (ADR-0252).
+        # The owner's private chat, where it is in Telegram now (ADR-0252); without one, nothing goes anywhere.
         owner=(await asyncio.to_thread(self.policy.current)).owner_external()
-        if not HEX.fullmatch(str(body.get('id',''))) or not owner or chat!=owner:raise ValueError('notice_chat_not_allowed')
+        if not HEX.fullmatch(str(body.get('id',''))) or not owner or not chat:raise ValueError('notice_chat_not_allowed')
+        member=chat!=owner
+        # A member's chat takes only a task reminder, with no topic, buttons or edit: anything else is refused at once.
+        if member and not member_notice_shape(body):raise ValueError('notice_chat_not_allowed')
         text=body.get('text')
         if not isinstance(text,str) or not text.strip() or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_notice')
         markup=notice_buttons(body.get('buttons'))
@@ -634,6 +649,20 @@ class TelegramService:
             receipt=self.receipts/(name+'.result')
             if receipt.exists():return {key:value for key,value in json.loads(receipt.read_bytes()).items() if key!='message_id'}
             if (self.receipts/(name+'.intent')).exists():return {'state':'ambiguous'}
+            if member:
+                # The member's chat and core's yes are checked only now, after the receipts: a resend of one that went
+                # is answered above even when the chat is no longer open to it, and the yes, which core gives once, is
+                # spent only on a send that is about to happen.
+                if not await self.member_notice_chat(body,chat):raise ValueError('notice_chat_not_allowed')
+                asked=self.receipts/(name+'.asked')
+                earlier=asked.exists()
+                if not earlier:await asyncio.to_thread(immutable_file,self.receipts,name+'.asked',canonical({'notice_id':body['id']}))
+                allowed=await asyncio.to_thread(check_notice_policy,{'id':body['id'],'chat':chat,'text_digest':hashlib.sha256(text.encode('utf-8')).hexdigest()})
+                if allowed is None:return {'state':'not_started','error_code':'notice_check_unavailable'}
+                # A no after an ask whose answer never came may be that yes, spent: nothing was sent, but whether core
+                # gave it cannot be told, so it is unclear rather than refused.
+                if allowed is not True and earlier:return {'state':'ambiguous','error_code':'notice_answer_lost'}
+                if allowed is not True:raise ValueError('notice_chat_not_allowed')
             await asyncio.to_thread(immutable_file,self.receipts,name+'.intent',canonical({'notice_id':body['id']}))
             token,kind=DISPATCH_KEY.set('notice:'+body['id']),SEND_CLASS.set(route_class(body.get('send_class'),NOTICE_CLASSES,'notice'))
             check=OUTBOUND_CHECK.set(outbound_check(chat,None,lambda:True,markup=markup))
@@ -653,6 +682,17 @@ class TelegramService:
             message=getattr(sent,'message_id',None) if result['state']=='done' else None
             await asyncio.to_thread(immutable_file,self.receipts,name+'.result',canonical({**result,**({'message_id':message} if isinstance(message,int) else {})}))
             return result
+
+    async def member_notice_chat(self, body, chat):
+        """Whether a notice may even ask core about `chat`, a chat that is not the owner's (step 5): a task reminder, no
+        topic, no buttons, no edit, to a chat that the app's served list knows as a private chat and marks as a member's
+        own private chat open now, read again once when the list does not hold it yet."""
+        if not member_notice_shape(body):return False
+        def member_private(served):
+            local=served.resolve(chat)
+            return local is not None and served.member_private(local) and not served.is_owner(local) and served.kind(local)=='private'
+        served=await asyncio.to_thread(self.policy.current,None,60.0,member_private)
+        return member_private(served) and served.owner_external()!=chat
 
     def leave(self, body):
         return self.call(self.leave_chat(body))

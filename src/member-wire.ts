@@ -18,8 +18,10 @@ export type MemberPresence='in'|'left';
 export const DAILY_MESSAGES_DEFAULT=200,DAILY_MESSAGES_MIN=1,DAILY_MESSAGES_MAX=10000;
 
 /** A member's permissions as stored: the sub-permissions keep their values while talk is off. `private_chat` is "Private
- * chat with Nocheh" (step 4, members.private_chat): on by default, and independent of talk. */
-export interface MemberPermissions {talk:boolean;jobs:boolean;post:boolean;tools:boolean;tasks:MemberTasks;private_chat:boolean}
+ * chat with Nocheh" (step 4, members.private_chat): on by default, and independent of talk. `reminders` is "Reminders to
+ * themselves" (step 5, members.reminders), nested under Tasks read and write: on by default; off, the member sets no
+ * reminder in a group or the members' app (403 task_reminders_off). */
+export interface MemberPermissions {talk:boolean;jobs:boolean;post:boolean;tools:boolean;tasks:MemberTasks;private_chat:boolean;reminders:boolean}
 /** A group Nocheh is in (a group chat whose state is not left, removed or archived), for the add flows. */
 export interface MemberGroupRef {chat_id:string;title:string|null;state:ChatState}
 /**
@@ -48,7 +50,7 @@ export interface MemberList {revision:number;daily_messages:number;groups:Member
 export interface MemberAddRequest {operation_id:string;account_id:string|null;telegram_id:string|null;groups:Record<string,boolean>}
 /** The changes POST /v1/members/:id may carry; at least one. `groups` switches groups on (true) or off (false). */
 export interface MemberChanges {state?:MemberState;talk?:boolean;jobs?:boolean;post?:boolean;tools?:boolean;tasks?:MemberTasks;private_chat?:boolean;
-  groups?:Record<string,boolean>}
+  reminders?:boolean;groups?:Record<string,boolean>}
 /** POST /v1/members/:id: change a member. */
 export interface MemberChangeRequest {operation_id:string;changes:MemberChanges}
 /** POST /v1/members/:id/remove. */
@@ -85,3 +87,13 @@ export const memberPrivateTextKeys={reply:'reply.member',privateDailyLimit:'tele
 /** The line telegram.approval_texts gains: why a member's approved send or tool run did not happen (the member was
  * paused, removed, or their group or permission switched off). */
 export const memberChangedReason='reason_member_changed';
+/**
+ * The editable texts step 5 adds (the members' app). src/prompts.ts holds their defaults; Settings › Assistant lists them.
+ * - reminder: a prompt key, a task reminder sent to the member who set it, in their own private chat with Nocheh.
+ * - reminderTexts: a prompt key of labeled lines ('name: text') under it; its labels are memberReminderTextLabels.
+ * tasks.reminder_texts gains the line place_app, the place "the members' app" in the owner's reminder lines.
+ */
+export const memberAppTextKeys={reminder:'members.reminder',reminderTexts:'members.reminder_texts'} as const;
+/** The lines of members.reminder_texts: who set it (always the member: "Set by you"), and the mark before each line of
+ * the task's notes. No line names a writer, a closer or a place. */
+export const memberReminderTextLabels=['set_by','note_line'] as const;

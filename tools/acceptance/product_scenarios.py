@@ -2807,66 +2807,79 @@ class ProductScenarios(Scenarios):
                     raise Failed('cleanup_failed')
 
     def member_reminder_says_who_set_it(self):
-        # Reminders say who set them (ADR-0255). GROUP joins a project for this scenario. The owner's reminder A on a
-        # project task, set on the dashboard, stays when MEMBER's list in TEAM_TOPIC leaves it out, and arrives at its time
-        # as before, with no line above it. MEMBER's reminder on that task and GUEST's on a task of their own, due in the
-        # same minute, reach the owner's private chat naming each as a member and where they set it, at
-        # most one message for the group every 10 minutes. The exact merge is the store test's; here every row must be
-        # sent before the scenario ends.
+        # Reminders say who set them (ADR-0255) and reach the one who set them (ADR-0265 D9). GROUP joins a project for
+        # this scenario. The owner's reminder A on a project task, set on the dashboard, stays when MEMBER's list in
+        # TEAM_TOPIC leaves it out, and arrives at its time as before, with no line above it. MEMBER, whose private chat
+        # with Nocheh is open, gets their own reminder on that task there, saying only "Set by you": no place, no name, and
+        # nothing of it reaches the owner. GUEST, whose private chat is off, sets one on a task of their own in TEAM_TOPIC due
+        # in the same minute; it reaches the owner's private chat naming them as a member and where they set it, at most one
+        # message for the group every 10 minutes. The exact merge is the store test's; here every row must be sent before
+        # the scenario ends.
         number = str(self.f.ids())
         mark_x, mark_y = 'WHOSETX'+number, 'WHOSETY'+number
         tasks, rows = [], {}
-        with self.group_in_project('Reminder setters '+number) as project:
-            try:
-                # People's two reminders share one minute, so they are due together; the owner's comes a minute later.
-                base = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-                people_at, owner_at = self.minute(base+timedelta(minutes=5)), self.minute(base+timedelta(minutes=6))
-                before = len(self.f.sent())
-                created = self.f.app('/v1/tasks', {'operation_id': 'scenario-reminder-setters-task-'+number, 'title': 'Pack the tent '+mark_x,
-                                                   'scope': project['id'], 'reminders': [owner_at]})
-                task_x = created.get('task', created)['id']
-                tasks.append(task_x)
-                detail = self.f.app('/v1/tasks/'+task_x)
-                changed = self.task_tool({'action': 'update', 'id': task_x, 'expected_revision': detail.get('task', detail)['revision'], 'reminders': [people_at]},
-                                         chat=GROUP, topic=TEAM_TOPIC, sender=MEMBER)
-                self.gate('member_told_the_owners_reminder_stays', bool(changed.get('reminders_kept')), result=str(changed)[:400])
-                self.gate('owners_reminder_survives_the_member_edit', self.reminder_rows([task_x]) == 'owner:pending,person:pending',
-                          rows=self.reminder_rows([task_x]))
-                added = self.task_tool({'action': 'add', 'title': 'Bring the lamp '+mark_y, 'reminders': [people_at]}, chat=GROUP, sender=GUEST)
-                task_y = added.get('task', added).get('id')
-                self.gate('guest_task_added', bool(task_y), result=str(added)[:300])
-                tasks.append(task_y)
-                # The owner's view names who set each reminder, in the words Telegram will show.
-                detail = self.f.app('/v1/tasks/'+task_x)
-                reminders = detail.get('task', detail).get('reminders') or []
-                by_owner = [item for item in reminders if item.get('set_by') == 'owner']
-                by_person = [item for item in reminders if item.get('set_by') == 'person']
-                self.gate('owner_view_names_who_set_it', len(by_owner) == 1 and by_owner[0].get('source') is None and len(by_person) == 1
-                          and 'Set by' in (by_person[0].get('source') or '') and ', a member' in (by_person[0].get('source') or ''),
-                          reminders=reminders)
+        # MEMBER's private chat is open and Telegram showed them in GROUP lately, so their reminder can reach them.
+        self.said_in_group(MEMBER, GROUP, 'سلام '+number)
+        self.private_turn(MEMBER, 'سلام، یادآوری‌هایم را اینجا بفرست')
+        self.change_member(self.member_item(GUEST), private_chat=False)
+        try:
+            with self.group_in_project('Reminder setters '+number) as project:
+                try:
+                    # People's two reminders share one minute, so they are due together; the owner's comes a minute later.
+                    base = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+                    people_at, owner_at = self.minute(base+timedelta(minutes=5)), self.minute(base+timedelta(minutes=6))
+                    before = len(self.f.sent())
+                    created = self.f.app('/v1/tasks', {'operation_id': 'scenario-reminder-setters-task-'+number, 'title': 'Pack the tent '+mark_x,
+                                                       'scope': project['id'], 'reminders': [owner_at]})
+                    task_x = created.get('task', created)['id']
+                    tasks.append(task_x)
+                    detail = self.f.app('/v1/tasks/'+task_x)
+                    changed = self.task_tool({'action': 'update', 'id': task_x, 'expected_revision': detail.get('task', detail)['revision'],
+                                              'reminders': [people_at]}, chat=GROUP, topic=TEAM_TOPIC, sender=MEMBER)
+                    self.gate('member_told_the_owners_reminder_stays', bool(changed.get('reminders_kept')), result=str(changed)[:400])
+                    self.gate('owners_reminder_survives_the_member_edit', self.reminder_rows([task_x]) == 'owner:pending,person:pending',
+                              rows=self.reminder_rows([task_x]))
+                    added = self.task_tool({'action': 'add', 'title': 'Bring the lamp '+mark_y, 'reminders': [people_at]}, chat=GROUP, topic=TEAM_TOPIC,
+                                           sender=GUEST)
+                    task_y = added.get('task', added).get('id')
+                    self.gate('guest_task_added', bool(task_y), result=str(added)[:300])
+                    tasks.append(task_y)
+                    # The owner's view names who set each reminder, in the words Telegram will show.
+                    detail = self.f.app('/v1/tasks/'+task_x)
+                    reminders = detail.get('task', detail).get('reminders') or []
+                    by_owner = [item for item in reminders if item.get('set_by') == 'owner']
+                    by_person = [item for item in reminders if item.get('set_by') == 'person']
+                    self.gate('owner_view_names_who_set_it', len(by_owner) == 1 and by_owner[0].get('source') is None and len(by_person) == 1
+                              and 'Set by' in (by_person[0].get('source') or '') and ', a member' in (by_person[0].get('source') or ''),
+                              reminders=reminders)
 
-                def settled():
-                    rows['now'] = self.reminder_rows(tasks)
-                    return rows['now'] == 'owner:sent,person:sent,person:sent'
-                self.wait('every_reminder_sent', settled, 1500, 5)
-                time.sleep(3)
-                about = [row for row in self.replies(before, OWNER) if mark_x in (row['message'].get('text') or '') or mark_y in (row['message'].get('text') or '')]
-                mine = [row['message']['text'] for row in about if 'Set by' not in row['message']['text']]
-                theirs = sorted((row for row in about if 'Set by' in row['message']['text']), key=lambda row: row['message']['date'])
-                texts = [row['message']['text'] for row in theirs]
-                self.current['observed'] = {'people_messages': [text[:600] for text in texts]}
-                self.gate('owners_reminder_arrives_as_before', len(mine) == 1 and mine[0].startswith('⏰ Pack the tent '+mark_x)
-                          and not any(sign in mine[0] for sign in ('\U0001f464', '✏', '☑')), owner=mine)
-                self.gate('people_reminders_name_who_set_them', bool(texts) and all(', a member' in text for text in texts)
-                          and sum(text.count('Set by') for text in texts) == 2, texts=[text[:300] for text in texts])
-                self.gate('each_people_reminder_once', sum(text.count(mark_x) for text in texts) == 1 and sum(text.count(mark_y) for text in texts) == 1)
-                self.gate('member_reminder_names_the_topic', any('›' in text for text in texts), texts=[text[:300] for text in texts])
-                dates = [row['message']['date'] for row in theirs]
-                self.gate('at_most_one_message_per_group_in_10_minutes', all(later-earlier >= 595 for earlier, later in zip(dates, dates[1:])), dates=dates)
-            except Exception:
-                if rows:
-                    self.current.setdefault('observed', {})['reminders'] = rows.get('now')
-                raise
+                    def settled():
+                        rows['now'] = self.reminder_rows(tasks)
+                        return rows['now'] == 'owner:sent,person:sent,person:sent'
+                    self.wait('every_reminder_sent', settled, 1500, 5)
+                    time.sleep(3)
+                    about = [row for row in self.replies(before, OWNER) if mark_x in (row['message'].get('text') or '') or mark_y in (row['message'].get('text') or '')]
+                    mine = [row['message']['text'] for row in about if 'Set by' not in row['message']['text']]
+                    theirs = sorted((row for row in about if 'Set by' in row['message']['text']), key=lambda row: row['message']['date'])
+                    texts = [row['message']['text'] for row in theirs]
+                    members = [row['message']['text'] for row in self.replies(before, MEMBER) if mark_x in (row['message'].get('text') or '')]
+                    self.current['observed'] = {'people_messages': [text[:600] for text in texts], 'member_messages': [text[:600] for text in members]}
+                    self.gate('owners_reminder_arrives_as_before', len(mine) == 1 and mine[0].startswith('⏰ Pack the tent '+mark_x)
+                              and not any(sign in mine[0] for sign in ('\U0001f464', '✏', '☑')), owner=mine)
+                    self.gate('members_reminder_reaches_them_only', len(members) == 1 and members[0].startswith('⏰ Pack the tent '+mark_x)
+                              and 'Set by you' in members[0] and '›' not in members[0] and ', a member' not in members[0] and 'Synthetic' not in members[0]
+                              and not any(mark_x in text for text in texts), member=members)
+                    self.gate('guests_reminder_names_who_set_it', len(texts) == 1 and ', a member' in texts[0] and texts[0].count('Set by') == 1
+                              and texts[0].count(mark_y) == 1, texts=[text[:300] for text in texts])
+                    self.gate('guests_reminder_names_the_topic', '›' in texts[0], texts=[text[:300] for text in texts])
+                    dates = [row['message']['date'] for row in theirs]
+                    self.gate('at_most_one_message_per_group_in_10_minutes', all(later-earlier >= 595 for earlier, later in zip(dates, dates[1:])), dates=dates)
+                except Exception:
+                    if rows:
+                        self.current.setdefault('observed', {})['reminders'] = rows.get('now')
+                    raise
+        finally:
+            self.change_member(self.member_item(GUEST), private_chat=True)
 
     def reminder_with_split_emoji_arrives(self):
         # Notes are cut at 500 characters. A cut inside an emoji used to leave half a character, which Telegram refuses;
@@ -4996,10 +5009,406 @@ class ProductScenarios(Scenarios):
             found = self.private_search(person, word, silent=True)
             self.gate('presence_older_than_30_days_is_not_read', marks[GROUP] not in found, found=canaries.found(found, set(marks.values())))
         finally:
-            # A fault the bot never used would answer a later check of someone else; it is recorded, not cleared.
+            # A fault the bot never used would answer a later check of someone else (the 31-day check asks nothing while the
+            # 8-hour failure waits out its retry): it is recorded, then dropped.
             if any(fault['method'] == 'getChatMember' for fault in self.f.telegram().get('faults', [])):
                 self.current['unused_fault'] = 'getChatMember'
+                self.f.control({'drop_faults': ['getChatMember']})
             self.remove_member(item)
+
+    # The members' app: a Telegram Mini App on the members' menu button (step 5), ADR-0265 ------------------------------
+
+    def member_app(self, label, path, user=None, body=None, status=200, error=None, **options):
+        """One call of the members' page through the mini app's edge, as a member's phone makes it, gated on its status,
+        on `error` when given, and on the answer never being stored. Returns the answer's JSON."""
+        result = self.f.member_http(path, user, body, label=label, **options)
+        found = result['body'] if isinstance(result['body'], dict) else {}
+        self.gate(label, result['status'] == status and result['cache'] == 'no-store' and (error is None or found.get('error') == error),
+                  status=result['status'], cache=result['cache'], error=found.get('error'))
+        return result['body']
+
+    @staticmethod
+    def app_query(**fields):
+        return '?'+urllib.parse.urlencode(fields)
+
+    def app_titles(self, person, project, **filters):
+        """Every title on one of the member's boards, open and done, as one text."""
+        titles = []
+        for state in ('open', 'done'):
+            page = self.member_app('board_listed_'+state, '/tasks'+self.app_query(project=project, state=state, **filters), person)
+            titles += [task.get('title') or '' for task in page.get('tasks') or []]
+        return '\n'.join(titles)
+
+    def owner_task(self, title, project=None, group=None, **fields):
+        """A task the owner makes on the dashboard: on a project's list (with one of its groups, or on the whole project),
+        or personal. Returns its id."""
+        body = {'operation_id': self.operation_id('owner-task'), 'title': title, **fields}
+        if project:
+            body['scope'] = project
+        if group is not None:
+            body['group'] = self.f.chat(group)
+        created = self.f.app('/v1/tasks', body)
+        return created.get('task', created)['id']
+
+    def owner_detail(self, task):
+        detail = self.f.app('/v1/tasks/'+task)
+        return detail.get('task', detail)
+
+    @contextlib.contextmanager
+    def task_columns(self, number):
+        """Two text columns of the owner's for one scenario: 'ownercol<n>' only the owner sees and 'sharedcol<n>' a project's
+        chats and members see too. The owner's columns are put back after."""
+        before = self.f.app('/v1/tasks/settings')
+        private, shared = 'ownercol'+number, 'sharedcol'+number
+        columns = [{'id': private, 'name': 'Owner note '+number, 'type': 'text', 'options': [], 'shared': False},
+                   {'id': shared, 'name': 'Shared note '+number, 'type': 'text', 'options': [], 'shared': True}]
+        saved = self.f.app('/v1/tasks/settings', {'properties': list(before.get('properties') or [])+columns, 'revision': before['revision']})
+        try:
+            yield private, shared
+        finally:
+            now = self.f.app('/v1/tasks/settings')
+            self.f.app('/v1/tasks/settings', {'properties': [item for item in now.get('properties') or [] if item.get('id') not in (private, shared)],
+                                              'revision': now.get('revision', saved.get('revision'))})
+
+    def owner_person(self):
+        """A person the owner's memory knows: an active one, or the one the scripted learning suggests from GROUP (Shirin),
+        confirmed as the owner confirms an Inbox card."""
+        people = lambda: [row for row in self.f.app('/v1/entities?kind=person').get('entities') or [] if row.get('state', 'active') == 'active']
+        if not people():
+            pending = lambda: [row for row in self.f.app('/v1/entities/suggestions').get('suggestions') or [] if row.get('name') == 'Shirin']
+            if not pending():
+                self.turn(self.f.message(GROUP, 'با شیرین صحبت کردم', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
+            card = self.wait('person_suggested', pending, 600)[0]
+            self.f.app('/v1/entities/'+card['id']+'/decide', {'decision': 'confirm', 'expected_revision': card['revision'],
+                                                              'operation_id': self.operation_id('entity-confirm')})
+        return self.wait('person_known', people, 60)[0]
+
+    @contextlib.contextmanager
+    def owner_named(self, mark):
+        """The owner's name for a person in their memory, set to `mark` for one scenario and put back after; yields the
+        person's entity id."""
+        person = self.owner_person()
+        renamed = self.f.app('/v1/entities/'+person['id']+'/rename', {'name': mark, 'expected_revision': person['revision'],
+                                                                       'operation_id': self.operation_id('entity-rename')})
+        try:
+            yield person['id']
+        finally:
+            self.f.app('/v1/entities/'+person['id']+'/rename', {'name': person['name'], 'expected_revision': renamed['revision'],
+                                                                 'operation_id': self.operation_id('entity-rename-back')})
+
+    def owner_mini_app_still_works(self):
+        # The mini app's edge moved to its own network with the dashboard and nocheh-app (ADR-0265 D3). The owner's page
+        # still opens at `/`, the members' page at `/m/` with Trusted Types required, and the owner's launch still reaches the
+        # dashboard's sign-in check, which a member's launch never does. The edge reaches nocheh-app's member listener and
+        # nothing outside its network: not the fake Telegram, the Telegram service or the database.
+        page = self.f.mini('/')
+        self.gate('owner_page_opens', page['status'] == 200 and '<' in page['text']
+                  and 'require-trusted-types-for' not in (page['headers'].get('content-security-policy') or ''), status=page['status'])
+        members = self.f.mini('/m/')
+        self.gate('members_page_opens_with_trusted_types', members['status'] == 200
+                  and "require-trusted-types-for 'script'" in (members['headers'].get('content-security-policy') or ''), status=members['status'])
+        owner = self.f.mini('/api/mini/session', headers={'x-telegram-init-data': self.f.launch(OWNER)})
+        state = (json.loads(owner['text']) if owner['text'].startswith('{') else {}).get('state')
+        self.gate('owner_launch_reaches_the_dashboard', owner['status'] == 200 and state in ('signed_in', 'signed_out', 'no_password')
+                  and owner['headers'].get('cache-control') == 'no-store', status=owner['status'], state=state)
+        member = self.f.mini('/api/mini/session', headers={'x-telegram-init-data': self.f.launch(MEMBER)})
+        self.gate('member_launch_refused_on_the_owners_routes', member['status'] == 403 and 'owner_required' in member['text'], status=member['status'])
+        nothing = self.f.mini('/api/mini/session')
+        self.gate('no_launch_refused', nothing['status'] == 401, status=nothing['status'])
+        self.member_app('owner_refused_in_the_members_app', '/me', OWNER, status=403, error='member_required')
+        self.gate('edge_reaches_the_member_listener', self.f.mini_reaches('http://nocheh-app:8790/health'))
+        # Both answer HTTP on the fixture's default network, so a failed fetch means the edge cannot reach them at all.
+        for name, url in (('fake_telegram', 'http://model-fixture:8317/fixture/telegram'), ('telegram_service', 'http://nocheh-telegram:8784/health')):
+            self.gate('edge_cannot_reach_'+name, not self.f.mini_reaches(url))
+
+    def menu_button_on_apply(self):
+        # Settings Apply puts the mini app on the menu buttons (ADR-0265 D11): the members' page `/m/` as the default of
+        # every private chat with the bot, set first, then the owner's own page `/` on the owner's chat over it. Turned off,
+        # both go back to Telegram's default. Apply calls api.telegram.org itself, which the fixture cannot reach, so this
+        # runs the same step Apply runs with the fixture's values, against the fake Telegram.
+        from tools.acceptance.telegram_rehearsal import MINI_APP_URL
+        from tools.operations.installation import mini_app
+        values = {'TELEGRAM_ENABLED': 'true', 'TELEGRAM_BOT_TOKEN': telegram_mock.TOKEN, 'TELEGRAM_OWNER_ID': str(OWNER),
+                  'TELEGRAM_BOT_NAMES': 'Nocheh', 'NOCHEH_MINI_APP_URL': MINI_APP_URL, 'CLOUDFLARE_TUNNEL_TOKEN': 'fixture-tunnel-token-'+'0'*32}
+        mini_app.validate(values)
+
+        def bot_api(token, method, **params):
+            return self.f.http('/bot'+token+'/'+method, params)['result']
+        before = len(self.f.telegram().get('menu_button_sets') or [])
+        self.gate('menu_buttons_shown', mini_app.menu_button(values, bot_api, shown_before=False) == 'shown')
+        sets = (self.f.telegram().get('menu_button_sets') or [])[before:]
+        address = lambda row: ((row.get('menu_button') or {}).get('web_app') or {}).get('url')
+        self.current['observed'] = {'sets': [{'chat': row['chat_id'], 'url': address(row)} for row in sets]}
+        self.gate('default_is_the_members_page_set_first', len(sets) == 2 and sets[0]['chat_id'] is None and address(sets[0]) == MINI_APP_URL+'/m/')
+        self.gate('owners_chat_keeps_the_owners_page', sets[1]['chat_id'] == OWNER and address(sets[1]) == MINI_APP_URL+'/')
+        self.gate('a_members_chat_shows_the_members_page', ((bot_api(values['TELEGRAM_BOT_TOKEN'], 'getChatMenuButton', chat_id=MEMBER).get('web_app') or {})
+                                                            .get('url')) == MINI_APP_URL+'/m/')
+        off = {key: value for key, value in values.items() if key not in ('NOCHEH_MINI_APP_URL', 'CLOUDFLARE_TUNNEL_TOKEN')}
+        self.gate('menu_buttons_removed', mini_app.menu_button(off, bot_api, shown_before=True) == 'removed')
+        sets = (self.f.telegram().get('menu_button_sets') or [])[before+2:]
+        self.gate('both_back_to_the_default', [(row['chat_id'], row['menu_button']) for row in sets] == [(None, {'type': 'default'}), (OWNER, {'type': 'default'})],
+                  sets=sets)
+
+    def member_app_tasks(self):
+        # A member like Mira, in GP1 (GROUP) and GP3 (THIRD_GROUP) of project P1 and in NG1 (NEW_GROUP) of no project,
+        # opens the members' app from their menu button (ADR-0265). P1 also holds GP2 (OTHER_GROUP), where the owner ticked
+        # them but Telegram never showed them. They see the tasks of GP1, GP3 and the whole of P1, never GP2's or the owner's
+        # personal ones, and on a task the owner moved onto GP1's board never the owner's private column, the owner's name
+        # for the person assigned, or a comment from before it joined the board. With write they add, finish, trash and
+        # restore and comment, never with a stale version or a refused field; with read they read only. Launch data from the
+        # owner, a stranger, a group or another key is refused. The marks are saved for member_app_never_leaks.
+        person, number = self.fresh_person(), str(self.f.ids())
+        hidden = {'GP2MARK'+number: 'a task title of a group the member never joined', 'PERSONALMARK'+number: 'the owner\'s personal task',
+                  'OWNERCOLMARK'+number: 'a private column on a task the member sees', 'OWNERNAMEMARK'+number: 'the owner\'s name for the person assigned',
+                  'PREJOINMARK'+number: 'a comment from before the task joined the board'}
+        seen = {name: 'APPSEEN'+name+'x'+number for name in ('gp1', 'gp3', 'p1', 'moved', 'shared', 'postjoin', 'made')}
+        canaries.save_app_marks(self.f.directory, hidden, {mark: name for name, mark in seen.items()})
+        gp2, personal, ownercol, ownername, prejoin = hidden
+        self.new_group_chat()
+        item = self.add_member(person, (GROUP, OTHER_GROUP, THIRD_GROUP, NEW_GROUP))
+        try:
+            for group in (GROUP, THIRD_GROUP, NEW_GROUP):
+                self.said_in_group(person, group, 'سلام همه '+number)
+            with self.groups_in_projects({'App P1 '+number: (GROUP, OTHER_GROUP, THIRD_GROUP)}) as made, self.task_columns(number) as (private, shared), \
+                    self.owner_named(ownername) as named:
+                project = made['App P1 '+number]['id']
+                tasks = {'gp1': self.owner_task('Plan the trip '+seen['gp1'], project, GROUP), 'gp3': self.owner_task('Book seats '+seen['gp3'], project, THIRD_GROUP),
+                         'p1': self.owner_task('Whole trip '+seen['p1'], project), 'gp2': self.owner_task('Other group '+gp2, project, OTHER_GROUP),
+                         'personal': self.owner_task('My own '+personal)}
+                # A personal task with a private and a shared column, a person assigned and a comment, moved onto GP1's board.
+                moved = self.owner_task('Moved in '+seen['moved'], properties={private: ownercol, shared: seen['shared']}, assignees=[named])
+                self.f.app('/v1/tasks/'+moved+'/comments', {'operation_id': self.operation_id('owner-comment'), 'text': 'Before '+prejoin})
+                self.f.app('/v1/tasks/'+moved, {'operation_id': self.operation_id('owner-move'), 'expected_revision': self.owner_detail(moved)['revision'],
+                                                'scope': project, 'group': self.f.chat(GROUP)})
+                self.f.app('/v1/tasks/'+moved+'/comments', {'operation_id': self.operation_id('owner-comment'), 'text': 'After '+seen['postjoin']})
+                tasks['moved'] = moved
+                # Who may open it at all.
+                self.member_app('owner_refused', '/me', OWNER, status=403, error='member_required')
+                self.member_app('stranger_closed', '/me', self.fresh_person(), status=403, error='member_app_closed')
+                self.member_app('group_launch_refused', '/me', launch=self.f.launch(person, chat_type='group'), status=401, error='member_app_launch_invalid')
+                self.member_app('other_key_refused', '/me', launch=self.f.launch(person, other_key=True), status=401, error='member_app_launch_invalid')
+                self.member_app('other_bot_refused', '/me', launch=self.f.launch(person, bot_id=654321), status=401, error='member_app_launch_invalid')
+                self.member_app('hour_old_launch_refused', '/me', launch=self.f.launch(person, auth_date=int(time.time())-3700), status=401,
+                                error='member_app_launch_invalid')
+                # What they see.
+                me = self.member_app('me_read', '/me', person)
+                boards = {row.get('id'): row.get('board') for row in me.get('groups') or []}
+                expected = {self.f.chat(GROUP): 'open', self.f.chat(THIRD_GROUP): 'open', self.f.chat(NEW_GROUP): 'none'}
+                self.gate('their_joined_groups_only', boards == expected, boards=boards)
+                self.gate('their_one_board', [row.get('id') for row in me.get('projects') or []] == [project] and me.get('mode') == 'write',
+                          me={key: me.get(key) for key in ('mode', 'reminders')})
+                self.gate('no_owner_clock_or_people', not {'time_zone', 'owner', 'members', 'people'} & set(me))
+                titles = self.app_titles(person, project)
+                self.gate('sees_gp1_gp3_and_p1', all(seen[name] in titles for name in ('gp1', 'gp3', 'p1', 'moved')), found=canaries.found(titles, set(seen.values())))
+                self.gate('never_gp2_or_personal', not canaries.found(titles, {gp2, personal}))
+                listing = self.member_app('board_raw', '/tasks'+self.app_query(project=project), person)
+                rows = listing.get('tasks') or []
+                # The person the owner assigned shows by their own Telegram name when they are in one of the member's groups
+                # on this board, else is only counted; the owner's name for them never shows (ADR-0265 D6).
+                assigned = [(task.get('assignees') or [], task.get('assignees_other')) for task in rows if task.get('id') == moved]
+                self.gate('no_people_on_the_board', not any({'people', 'origin', 'external', 'revision'} & set(task) for task in rows)
+                          and all(task.get('assignees') == [] and task.get('assignees_other') == 0 for task in rows if task.get('id') != moved)
+                          and not canaries.found(json.dumps(listing, ensure_ascii=False), {ownername})
+                          and len(assigned) == 1 and len(assigned[0][0])+assigned[0][1] == 1
+                          and all(set(row) == {'name'} and row['name'] and ownername not in row['name'] for row in assigned[0][0]),
+                          assigned=assigned)
+                only = self.app_titles(person, project, group=self.f.chat(THIRD_GROUP))
+                self.gate('group_filter', seen['gp3'] in only and seen['gp1'] not in only)
+                self.member_app('person_filter_refused', '/tasks'+self.app_query(project=project, person='x'), person, status=400, error='task_filter_not_allowed')
+                for name in ('gp2', 'personal'):
+                    self.member_app(name+'_task_not_found', '/tasks/'+tasks[name], person, status=404)
+                detail = self.member_app('moved_task_opens', '/tasks/'+moved, person)
+                text = json.dumps(detail, ensure_ascii=False)
+                self.gate('moved_task_shows_what_joined_the_board', seen['postjoin'] in text and seen['shared'] in text and detail.get('on_board_since')
+                          and 'created_at' not in detail and 'created_by' not in detail)
+                self.gate('moved_task_keeps_the_owners_side', not canaries.found(text, {ownercol, ownername, prejoin}) and private not in detail.get('properties', {}))
+                # Their changes, with write.
+                operation = 'app-create-'+number
+                body = {'operation_id': operation, 'project': project, 'title': 'Bring maps '+seen['made']}
+                created = self.member_app('task_added', '/tasks', person, body)
+                again = self.member_app('add_replayed', '/tasks', person, body)
+                self.gate('added_once_as_mine', created.get('id') == again.get('id') and created.get('mine') is True
+                          and created.get('group') in (self.f.chat(GROUP), self.f.chat(THIRD_GROUP)),
+                          group=created.get('group'))
+                self.gate('owner_sees_it_came_from_the_app', self.owner_detail(created['id']).get('origin') == 'app')
+                first = self.member_app('gp1_task_opens', '/tasks/'+tasks['gp1'], person)
+                done = self.member_app('gp1_finished', '/tasks/'+tasks['gp1'], person, {'operation_id': 'app-done-'+number, 'expected_version': first['version'],
+                                                                                         'patch': {'state': 'done'}})
+                self.gate('finished', done.get('state') == 'done')
+                self.member_app('stale_version_refused', '/tasks/'+tasks['gp1'], person, {'operation_id': 'app-stale-'+number, 'expected_version': 'stale-'+number,
+                                                                                         'patch': {'title': 'Changed'}}, status=409, error='conflict')
+                version = self.member_app('gp3_task_opens', '/tasks/'+tasks['gp3'], person)['version']
+                trashed = self.member_app('gp3_trashed', '/tasks/'+tasks['gp3'], person, {'operation_id': 'app-trash-'+number, 'expected_version': version,
+                                                                                         'patch': {'trashed': True}})
+                restored = self.member_app('gp3_restored', '/tasks/'+tasks['gp3'], person, {'operation_id': 'app-restore-'+number,
+                                                                                           'expected_version': trashed['version'], 'patch': {'trashed': False}})
+                self.gate('trash_and_restore', trashed.get('trashed') is True and restored.get('trashed') is False)
+                commented = self.member_app('commented', '/tasks/'+tasks['p1']+'/comments', person, {'operation_id': 'app-comment-'+number, 'text': 'On my way'})
+                self.gate('comment_kept', any(row.get('body') == 'On my way' for row in commented.get('comment_list') or []))
+                self.member_app('comment_never_removed', '/tasks/'+tasks['p1']+'/comments', person, {'operation_id': 'app-remove-'+number,
+                                                                                                    'remove': commented['comment_list'][0]['id']}, status=403,
+                                error='task_field_not_allowed')
+                for field, value in (('assignees', [named]), ('scope', 'personal'), ('expected_revision', 1)):
+                    self.member_app(field+'_refused', '/tasks/'+tasks['p1'], person, {'operation_id': 'app-'+field.replace('_', '-')+'-'+number,
+                                                                                    'expected_version': commented['version'], 'patch': {field: value}},
+                                    status=403, error='task_field_not_allowed')
+                # Read only: everything reads, nothing writes, and no reminder can be set.
+                self.change_member(self.member_item(person), tasks='read')
+                me = self.member_app('read_only_me', '/me', person)
+                self.gate('read_only_shown', me.get('mode') == 'read' and me.get('reminders') == {'available': False, 'reason': 'read_only'}, mode=me.get('mode'))
+                self.gate('read_only_still_reads', seen['gp1'] in self.app_titles(person, project))
+                self.member_app('read_only_add_refused', '/tasks', person, {'operation_id': 'app-read-'+number, 'project': project, 'title': 'No'}, status=403,
+                                error='task_read_only')
+                self.member_app('read_only_comment_refused', '/tasks/'+tasks['p1']+'/comments', person, {'operation_id': 'app-read-comment-'+number, 'text': 'No'},
+                                status=403, error='task_read_only')
+                self.change_member(self.member_item(person), tasks='write')
+                self.gate('write_again', self.member_app('write_me', '/me', person).get('mode') == 'write')
+                # The positive control: the owner's own view holds every mark the member never saw.
+                owner_side = json.dumps([self.owner_detail(task) for task in (moved, tasks['gp2'], tasks['personal'])], ensure_ascii=False)
+                self.gate('owner_sees_every_mark', set(canaries.found(owner_side, set(hidden))) == set(hidden), found=canaries.found(owner_side, set(hidden)))
+        finally:
+            self.remove_member(item)
+
+    def member_app_ends_on_removal(self):
+        # The app closes on the next call (ADR-0265 D4): paused, the member gets 403 member_app_closed; un-paused, a launch
+        # from before is refused as old and a new one opens; signed out, every launch up to then is refused on every phone
+        # and a newer one opens; removed, closed; added again, a launch from before the add stays refused.
+        person = self.fresh_person()
+        item = self.add_member(person, (GROUP,))
+        try:
+            self.said_in_group(person, GROUP, 'سلام')
+            self.member_app('opens', '/me', person)
+            self.member_app('launch_from_before_the_add_refused', '/me', launch=self.f.launch(person, auth_date=int(time.time())-600), status=401,
+                            error='member_app_launch_old')
+            item = self.change_member(self.member_item(person), state='paused')
+            self.member_app('paused_closed', '/me', person, status=403, error='member_app_closed')
+            self.member_app('paused_reads_nothing', '/reminders', person, status=403, error='member_app_closed')
+            item = self.change_member(self.member_item(person), state='active')
+            self.member_app('launch_from_before_the_unpause_refused', '/me', launch=self.f.launch(person, auth_date=int(time.time())-120), status=401,
+                            error='member_app_launch_old')
+            self.member_app('unpaused_opens', '/me', person)
+            launch = self.f.launch(person)
+            self.member_app('signed_out', '/sign-out', body={}, launch=launch)
+            self.member_app('same_launch_signed_out', '/me', launch=launch, status=401, error='member_app_signed_out')
+            time.sleep(2)
+            self.member_app('new_launch_opens', '/me', person)
+            self.remove_member(item)
+            self.member_app('removed_closed', '/me', person, status=403, error='member_app_closed')
+            old = self.f.launch(person)
+            time.sleep(62)
+            item = self.add_member(person, (GROUP,))
+            self.member_app('launch_from_before_the_re_add_refused', '/me', launch=old, status=401, error='member_app_launch_old')
+            self.member_app('re_added_opens', '/me', person)
+        finally:
+            self.remove_member(item)
+
+    def member_app_drops_a_left_group(self):
+        # A member left GP1 (GROUP) while Nocheh missed it (D5). Opening the app asks Telegram about groups whose presence is
+        # more than 6 hours old: GROUP, where Telegram now says they left, drops out with its board and tasks, and
+        # OTHER_GROUP, where they still are, stays.
+        person, number = self.fresh_person(), str(self.f.ids())
+        item = self.add_member(person, (GROUP, OTHER_GROUP))
+        try:
+            for group in (GROUP, OTHER_GROUP):
+                self.said_in_group(person, group, 'سلام '+number)
+            with self.groups_in_projects({'App left '+number: (GROUP, OTHER_GROUP)}) as made:
+                project = made['App left '+number]['id']
+                left, kept = self.owner_task('Left board APPLEFT'+number, project, GROUP), self.owner_task('Kept board APPKEPT'+number, project, OTHER_GROUP)
+                # A board read asks Telegram nothing; it shows both while both are fresh.
+                titles = self.app_titles(person, project)
+                self.gate('both_boards_to_start_with', 'APPLEFT'+number in titles and 'APPKEPT'+number in titles)
+                for group in (GROUP, OTHER_GROUP):
+                    self.age_presence(person, group, '7 hours')
+                self.f.control({'chat_members': [{'chat_id': GROUP, 'user_id': person, 'status': 'left'}]})
+                asked = {group: self.member_checks(person, group) for group in (GROUP, OTHER_GROUP)}
+                me = self.member_app('opened_after_leaving', '/me', person)
+                self.gate('telegram_asked_about_both', all(self.member_checks(person, group) > asked[group] for group in (GROUP, OTHER_GROUP)))
+                ids = [row.get('id') for row in me.get('groups') or []]
+                self.gate('left_group_dropped', self.f.chat(GROUP) not in ids and self.f.chat(OTHER_GROUP) in ids, groups=len(ids))
+                self.member_app('left_groups_task_gone', '/tasks/'+left, person, status=404)
+                self.member_app('kept_groups_task_opens', '/tasks/'+kept, person)
+                self.wait('listed_as_left', lambda: self.member_presence(person, self.f.chat(GROUP)) == 'left', 60)
+        finally:
+            self.remove_member(item)
+
+    def member_app_reminder_goes_to_setter(self):
+        # A reminder a member sets in the app reaches only their own private chat, once, saying "Set by you" and nothing
+        # of where or who (ADR-0265 D9), and the owner's view names it as set in the members' app. With their private chat
+        # off the app says why and refuses a new one, and one already set is skipped at its time, never sent to the owner
+        # instead.
+        person, number = self.fresh_person(), str(self.f.ids())
+        mark, later = 'APPREMIND'+number, 'APPSKIP'+number
+        item = self.add_member(person, (GROUP,))
+        try:
+            self.said_in_group(person, GROUP, 'سلام '+number)
+            self.private_turn(person, 'سلام، این چت خصوصی من است')
+            with self.groups_in_projects({'App reminders '+number: (GROUP,)}) as made:
+                project = made['App reminders '+number]['id']
+                task, other = self.owner_task('Water the plants '+mark, project, GROUP), self.owner_task('Call the shop '+later, project, GROUP)
+                self.gate('reminders_available', self.member_app('me', '/me', person).get('reminders') == {'available': True})
+                before = len(self.f.sent())
+
+                def remind(name, target, minutes):
+                    at = (datetime.now(timezone.utc).replace(second=0, microsecond=0)+timedelta(minutes=minutes)).strftime('%Y-%m-%dT%H:%M+00:00')
+                    version = self.member_app(name+'_opened', '/tasks/'+target, person)['version']
+                    changed = self.member_app(name, '/tasks/'+target, person, {'operation_id': 'app-'+name.replace('_', '-')+'-'+number,
+                                                                             'expected_version': version, 'patch': {'reminders': [at]}})
+                    self.gate(name+'_shown_as_mine', len((changed.get('reminders') or {}).get('mine') or []) == 1)
+                    return at
+                at = remind('reminder_set', task, 2)
+                listed = self.member_app('reminders_listed', '/reminders', person)
+                rows = listed if isinstance(listed, list) else listed.get('reminders') or []
+                self.gate('listed_as_theirs', [(row.get('task') or {}).get('id') for row in rows] == [task], count=len(rows))
+                source = json.dumps(self.owner_detail(task).get('reminders') or [], ensure_ascii=False)
+                self.gate('owner_view_says_the_members_app', 'members’ app' in source, reminders=source[:400])
+                self.wait('reminder_sent', lambda: self.reminder_rows([task]) == 'person:sent', 600, 5)
+                time.sleep(3)
+                mine = [row['message']['text'] for row in self.new(before) if row['message']['chat']['id'] == person and mark in (row['message'].get('text') or '')]
+                self.current['observed'] = {'member': [text[:400] for text in mine], 'at': at}
+                self.gate('reached_the_member_once', len(mine) == 1 and mine[0].startswith('⏰') and 'Set by you' in mine[0]
+                          and '›' not in mine[0] and ', a member' not in mine[0] and 'Synthetic' not in mine[0], texts=mine)
+                self.gate('nothing_to_anyone_else', not [row for row in self.new(before) if row['message']['chat']['id'] != person
+                                                         and mark in (row['message'].get('text') or '')])
+                # Private chat off: the app says why, refuses a new reminder, and the one already set is skipped at its time.
+                remind('second_set', other, 2)
+                self.change_member(self.member_item(person), private_chat=False)
+                try:
+                    self.gate('private_chat_off_said', self.member_app('me_private_chat_off', '/me', person).get('reminders')
+                              == {'available': False, 'reason': 'private_chat_off'})
+                    version = self.member_app('third_opened', '/tasks/'+task, person)['version']
+                    self.member_app('new_reminder_refused', '/tasks/'+task, person, {'operation_id': 'app-third-'+number, 'expected_version': version,
+                                                                                    'patch': {'reminders': [self.minute(datetime.now(timezone.utc)+timedelta(minutes=30))]}},
+                                    status=409,
+                                    error='member_reminders_unavailable')
+                    self.wait('second_reminder_skipped', lambda: self.reminder_rows([other]) == 'person:skipped', 600, 5)
+                finally:
+                    self.change_member(self.member_item(person), private_chat=True)
+                time.sleep(3)
+                self.gate('skipped_one_sent_to_nobody', not [row for row in self.new(before) if later in (row['message'].get('text') or '')])
+        finally:
+            self.remove_member(item)
+
+    def member_app_never_leaks(self):
+        # The members' app sweep, next to private_canaries_never_left_the_owner: no answer the app gave anyone in this run
+        # holds a private mark (PRIVATEMARK, PROBEMARK, any member's MEMBERMARK, a member's own included) or one of the
+        # app's own (GP2MARK, PERSONALMARK, OWNERCOLMARK, OWNERNAMEMARK, PREJOINMARK); and no reminder that reached a
+        # member's own chat holds one, or anyone's Telegram name. The visible marks show up in the answers, so the sweep
+        # reads the right thing. Without saved answers or marks the sweep fails.
+        responses = canaries.load_http(self.f.directory)
+        marks = canaries.load_app_marks(self.f.directory)
+        private = canaries.load(self.f.directory)['marks'] if (self.f.directory/canaries.FILE).exists() else {}
+        everything = {**private, **marks['hidden']}
+        text = '\n'.join(row['body'] if isinstance(row.get('body'), str) else json.dumps(row.get('body'), ensure_ascii=False) for row in responses)
+        self.gate('visible_marks_seen', set(canaries.found(text, set(marks['visible']))) == set(marks['visible']),
+                  missing=sorted(set(marks['visible'])-set(canaries.found(text, set(marks['visible'])))))
+        found = canaries.leaks_http(responses, set(everything))
+        self.current['observed'] = {'responses': len(responses), 'marks': len(everything), 'leaks': found[:20]}
+        self.gate('no_mark_in_any_app_answer', not found, leaks=[{**hit, 'held': everything.get(hit['mark'])} for hit in found[:10]])
+        state = self.f.telegram()
+        reminders = canaries.member_reminders(state, OWNER)
+        self.gate('member_reminders_swept', bool(reminders), count=len(reminders))
+        found = canaries.leaks_reminders(state, set(everything) | {'Synthetic'}, OWNER)
+        self.gate('no_mark_or_name_in_a_member_reminder', not found, leaks=found[:10])
 
     # Owner dashboard session ------------------------------------------------------------------------
 
@@ -5049,4 +5458,8 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'member_private_chat_reads_joined_groups', 'member_private_chat_with_group_talk_off', 'member_private_chat_off_or_paused_gets_fixed_reply',
                  'member_private_over_the_daily_cap', 'owner_and_member_never_swap_profiles', 'member_chat_is_never_a_sharing_source',
                  'member_private_chat_rechecks_old_presence', 'member_private_chat_stays_with_the_member', 'owner_asks_about_a_member',
+                 # The members' app (step 5), ADR-0265; its sweep reads every answer the scenarios before it got, and the
+                 # reminders scenario 5 and the app's own sent to members' chats.
+                 'owner_mini_app_still_works', 'menu_button_on_apply', 'member_app_tasks', 'member_app_ends_on_removal', 'member_app_drops_a_left_group',
+                 'member_app_reminder_goes_to_setter', 'member_app_never_leaks',
                  'private_canaries_never_left_the_owner']

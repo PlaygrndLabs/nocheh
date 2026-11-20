@@ -15,7 +15,8 @@ import {ownerStoragePath} from './stores/owner-api.js';
 import {ManagementMaintenance} from './management-maintenance.js';
 import {DashboardLiveUpdates} from './dashboard-live.js';
 import {OwnerLock} from './owner-lock.js';
-import {miniAppRoute,verifyLaunch,ed25519,TELEGRAM_KEYS} from './mini-app.js';
+import {miniAppRoute} from './mini-app.js';
+import {verifyLaunch,ed25519,TELEGRAM_KEYS} from './telegram-launch.js';
 import {MAX_REPORT_BYTES,ScriptReportLog} from './csp-reports.js';
 import {githubReturn} from './github-return.js';
 

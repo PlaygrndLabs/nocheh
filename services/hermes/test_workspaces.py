@@ -572,7 +572,7 @@ class ComposeTests(Machine):
         self.assertEqual(facts(personal), {
             'project': 'nocheh',
             'images': ['nocheh-hermes:local', 'nocheh-management:local', 'nocheh-miniapp:local', 'nocheh-services:local', 'nocheh-store-postgres:local'],
-            'networks': ['nocheh-agent', 'nocheh-memory', 'nocheh_default', 'nocheh_honcho-egress', 'nocheh_honcho-isolated', 'nocheh_miniapp', 'nocheh_workflows'],
+            'networks': ['nocheh-agent', 'nocheh-memory', 'nocheh_default', 'nocheh_honcho-egress', 'nocheh_honcho-isolated', 'nocheh_miniapp', 'nocheh_miniapp-back', 'nocheh_workflows'],
             'volumes': ['nocheh_honcho_database', 'nocheh_honcho_redis', 'nocheh_postgres_data'],
             'ports': [8780, 8782, 8783, 8785], 'bot': '878001',
             'turns': 'nocheh-hermes:local', 'boxes': 'nocheh-box:local', 'tools': 'nocheh-tools:local'})
@@ -581,10 +581,22 @@ class ComposeTests(Machine):
             'images': ['nocheh-acme-hermes:local', 'nocheh-acme-management:local', 'nocheh-acme-miniapp:local', 'nocheh-acme-services:local',
                        'nocheh-acme-store-postgres:local'],
             'networks': ['nocheh-acme-agent', 'nocheh-acme-memory', 'nocheh-acme_default', 'nocheh-acme_honcho-egress', 'nocheh-acme_honcho-isolated',
-                         'nocheh-acme_miniapp', 'nocheh-acme_workflows'],
+                         'nocheh-acme_miniapp', 'nocheh-acme_miniapp-back', 'nocheh-acme_workflows'],
             'volumes': ['nocheh-acme_honcho_database', 'nocheh-acme_honcho_redis', 'nocheh-acme_postgres_data'],
             'ports': [8790, 8792, 8793, 8795], 'bot': '879001',
             'turns': 'nocheh-acme-hermes:local', 'boxes': 'nocheh-acme-box:local', 'tools': 'nocheh-acme-tools:local'})
+        # The mini app is on its tunnel's network and on miniapp-back only: an internal network it shares with the dashboard
+        # (the owner's routes) and nocheh-app (the members' app listener), never the database, machines or bot (ADR-0265 D3).
+        for manifest in (personal, acme):
+            on = lambda network: sorted(name for name, service in manifest['services'].items() if network in (service.get('networks') or {}))
+            self.assertEqual(sorted(manifest['services']['nocheh-miniapp']['networks']), ['miniapp', 'miniapp-back'])
+            self.assertEqual(on('miniapp-back'), ['nocheh-app', 'nocheh-dashboard', 'nocheh-miniapp'])
+            self.assertEqual(on('miniapp'), ['nocheh-miniapp', 'nocheh-tunnel'])
+            self.assertTrue(manifest['networks']['miniapp-back'].get('internal'))
+            self.assertEqual(manifest['services']['nocheh-miniapp']['environment']['NOCHEH_APP_URL'], 'http://nocheh-app:8790')
+            self.assertNotIn('TELEGRAM_LAUNCH_PUBLIC_KEY', json.dumps(manifest), 'the fixture launch key is never in compose')
+            self.assertNotIn(8790, [int(port['target']) for service in manifest['services'].values() for port in service.get('ports', [])],
+                             'the members\' app listener is never published')
         self.assertEqual(acme['services']['nocheh-tunnel']['labels'],
                          {'com.nocheh.tunnel-id': '00000000-0000-4000-8000-000000000001', 'com.nocheh.mini-app-host': 'nocheh-acme.example.com'})
         # A test run's project names its own networks and memory volumes, so its `down --volumes` removes only its own.

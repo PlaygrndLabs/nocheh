@@ -3,7 +3,8 @@ import {OwnerAutonomyRepository} from './owner-autonomy.js';
 import {NotionRepository} from './notion.js';
 import {ChatToolSettingsRepository} from './chat-tools.js';
 import {TaskRepository,type TaskActor,type TaskView} from './tasks.js';
-import {readSet,readSetGroups,readSetOf,recallScope,servedGroups} from '../spaces.js';
+import {readSetGroups,readSetOf,recallScope,servedGroups} from '../spaces.js';
+import {memberTaskViews as memberTaskViewsOf} from './member-task-views.js';
 import {PromptRepository} from '../prompts.js';
 import {TelegramChatRepository} from './telegram-chats.js';
 import {TelegramTopicRepository} from './telegram-topics.js';
@@ -166,13 +167,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   // tasks; a reader without its binding has no view.
   const memberTaskViews=async(principal:Reader):Promise<TaskView[]>=>{
     if(!principal.reads||!principal.memberChat)throw new HttpError(409,'member_chat_closed');
-    const groups=readSetGroups(principal.reads);if(!groups.length)return [];
-    const rows=(await stores.control.query<{group:string;project:string;name:string}>(`SELECT a.space_id AS group,p.id AS project,p.name FROM project_assignments a
-      JOIN projects p ON p.id=a.project_id AND p.state='active' WHERE a.space_id=ANY($1::text[]) AND a.mode='assigned' ORDER BY p.id,a.space_id`,[groups])).rows;
-    const byProject=new Map<string,{name:string;groups:string[]}>();
-    for(const row of rows){const found=byProject.get(row.project)??{name:row.name,groups:[]};found.groups.push(row.group);byProject.set(row.project,found);}
-    return [...byProject].map(([project,found])=>({project,name:found.name,
-      reach:readSet({home:found.groups[0]!,project,...(topicMemory()==='group'?{whole:found.groups}:{exact:found.groups})})}));
+    return memberTaskViewsOf(stores.control,readSetGroups(principal.reads),topicMemory());
   };
   // Who wrote in a member's private chat: that member, by their Telegram name, with their account (read only anyway).
   const privateSender=async(event:string):Promise<{actor:TaskActor;account:string|null}>=>{
@@ -192,7 +187,14 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     const {source}=await knowledge.liveGroupTurn(principal);
     // A member's private chat reads, and only reads, the tasks of each active project that holds one of their joined
     // groups, one view per project reaching only those groups; never every list (D14).
-    if(kind==='member')return {source,project:null,group:null,views:await memberTaskViews(principal),...await privateSender(source.reference.id),readOnly:true};
+    // Each task in the shape the members' app shows it (ADR-0265 D6): "mine" and the member's own reminders by any of
+    // their accounts, never people, assignees or the owner's time zone.
+    if(kind==='member'){
+      const views=await memberTaskViews(principal),from=await privateSender(source.reference.id);
+      const accounts=(await stores.control.query(`SELECT a.id FROM chats c JOIN chat_accounts o ON o.id=c.account_id AND o.member_id IS NOT NULL
+        JOIN chat_accounts a ON a.member_id=o.member_id WHERE c.id=$1 ORDER BY a.id`,[principal.memberChat])).rows.map(row=>row.id as string);
+      return {source,project:null,group:null,views,accounts,...from,readOnly:true};
+    }
     // An "Answer privately" answer reads only the tasks of the groups frozen in its record and of their project
     // itself, as the server bound them for this request, and changes nothing (ADR-0248, ADR-0249).
     if(kind==='answer'){

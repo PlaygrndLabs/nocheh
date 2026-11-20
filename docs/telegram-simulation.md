@@ -317,7 +317,37 @@ nothing within 30 days, and past 30 days the group is not read
 (`member_private_chat_rechecks_old_presence`; its searches send no reply, so a
 later search finds a group's mark only in the group). The sweep
 `private_canaries_never_left_the_owner` also checks that a member's marks never
-left that member's chat, except in the answer to the owner's ask. Before an add that expects a line, the tester moves earlier
+left that member's chat, except in the answer to the owner's ask. Members' app ([ADR-0265](adr/0265-member-mini-app.md)):
+when the fixture is given `--miniapp-image`, the mini app runs in it without its
+tunnel (the full test starts it once the fake Telegram connects). The fake
+Telegram signs launch data the way Telegram signs it for a Mini App opened from
+the menu button (`POST /fixture/telegram/launch`), with an Ed25519 key the tester
+makes for each fixture; only nocheh-app and nocheh-miniapp get its public half,
+and only as a fixture. It also records `setChatMenuButton` and answers
+`getChatMenuButton`. The tester calls the members' page from inside
+nocheh-miniapp, as a phone would through the tunnel, with launch data and nothing
+else, and keeps every answer in the fixture's `mini-app-responses.jsonl`. The
+scenarios cover the owner's page and sign-in still working beside the members'
+page, which asks for Trusted Types, and the edge reaching nothing but its own
+network (`owner_mini_app_still_works`); Apply setting the members' page as every
+private chat's menu button and then the owner's page on the owner's chat, and
+both going back to Telegram's default when turned off (`menu_button_on_apply`);
+a member seeing only the tasks of groups they joined and those groups'
+projects, never the owner's private columns or personal tasks, and the person
+the owner assigned, linked to no Telegram account, only counted, never by the
+owner's name for them, adding,
+finishing, trashing, restoring and commenting with write, reading only with
+read, and refused launches from the owner, a stranger, a group or another key
+(`member_app_tasks`); the app closing when the member is paused, signed out or
+removed (`member_app_ends_on_removal`); a group they left while Nocheh missed it
+dropping out after the Telegram re-check (`member_app_drops_a_left_group`); and
+a reminder set in the app reaching only the member's own chat, saying "Set by
+you", and skipped rather than sent to the owner when their private chat is off
+(`member_app_reminder_goes_to_setter`). `member_reminder_says_who_set_it` now
+also checks that a member's own reminder reaches them and one that cannot
+reaches the owner. The sweep `member_app_never_leaks` reads every saved answer
+and the reminders in members' own chats for any private mark and the app's own
+marks. These scenarios have not yet run in a full test. Before an add that expects a line, the tester moves earlier
 sent leave notes about other groups out of the last 24 hours, so earlier runs on
 a kept fixture never fill the cap on all lines; the group's own notes stay, so
 its own cap still holds. Dashboard calls sign

@@ -35,7 +35,8 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
     heartbeat:()=>storageHeartbeat(s.stores,config.service),
     // Stage timings are diagnostics with the same bounded retention as workflow history.
     timings:async()=>{if(Date.now()-timingsExpired<3600000)return;await expireStageTimings(s.stores.control);timingsExpired=Date.now();},
-    // Task reminders that are due go to the owner's private chat; a full batch is followed by the next one at once.
+    // Task reminders that are due go to whoever set them (ADR-0265 D9): the owner's to the owner's private chat, a member's to
+    // their own private chat; a full batch is followed by the next one at once.
     reminders:async()=>{if(Date.now()-remindersChecked<15000)return;if(await s.tasks.remind()<20)remindersChecked=Date.now();},
     // An import becomes ready once its messages are prepared; the owner hears about it once.
     imports:async()=>{if(Date.now()-importsChecked<30000)return;await s.imports.settle();importsChecked=Date.now();},

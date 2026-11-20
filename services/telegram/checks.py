@@ -259,6 +259,19 @@ def check_action_policy(body):
     except Exception:return False
 
 
+def check_notice_policy(body):
+    """Core's one-time yes for a task reminder into a member's own private chat (step 5, ADR-0265 D10): POST
+    /internal/notices/authorize with the notice id, the Telegram chat and the SHA-256 of the exact text. True when core
+    says allowed, False when it says no, None when it cannot be asked or its answer cannot be read (nothing is sent)."""
+    try:
+        request=urllib.request.Request(archive_url()+'/internal/notices/authorize',
+            data=canonical({'id':body['id'],'chat':body['chat'],'text_digest':body['text_digest']}),
+            headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
+        with urllib.request.urlopen(request,timeout=10) as response:allowed=json.loads(response.read(1024)).get('allowed')
+    except Exception:return None
+    return allowed if isinstance(allowed,bool) else None
+
+
 def check_leave_policy(body):
     """The app's last word on a leave (ADR-0253): True while the group whose Telegram id is `chat_id` is still pending
     from the add `id`, False once the owner turned it on or off or it was added again, None when the app cannot answer."""

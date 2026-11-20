@@ -53,7 +53,7 @@ export const chatSeedColumns:readonly SeedColumn[]=[
   column('control','organization_delegations','scopes','jsonb_array'),
   column('control','owner_task_activity','changes','task_change'),
   column('control','owner_task_reminder_batches','group_id'),
-  column('control','owner_task_reminders','set_in_chat_id'),column('control','owner_task_reminders','set_in_group_id'),
+  column('control','owner_task_reminders','set_in_chat_id'),column('control','owner_task_reminders','set_in_group_id'),column('control','owner_task_reminders','deliver_chat'),
   column('control','owner_task_requests','group_id'),column('control','owner_task_requests','chats','text_array'),
   column('control','owner_task_writers','chat_id'),column('control','owner_task_writers','group_id'),
   column('control','owner_tasks','group_id'),

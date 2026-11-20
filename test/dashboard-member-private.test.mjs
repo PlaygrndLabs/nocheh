@@ -67,6 +67,6 @@ test('every member and ask text the owner can edit is listed on Settings › Ass
   const {readFileSync} = await import('node:fs');
   const page = readFileSync('dashboard/pages/settings/instructions.tsx', 'utf8');
   for (const key of ['reply.member', 'telegram.member_private_daily_limit', 'telegram.not_allowed_private', 'members.local_laws',
-    'reply.member_read', 'telegram.member_read', 'telegram.member_read_texts'])
+    'reply.member_read', 'telegram.member_read', 'telegram.member_read_texts', 'members.reminder', 'members.reminder_texts'])
     assert.ok(page.includes(`key: '${key}'`), key);
 });

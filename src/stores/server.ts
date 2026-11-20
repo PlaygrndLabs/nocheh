@@ -47,7 +47,10 @@ import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
 import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
 import {memberPrivate,readSetGroups} from '../spaces.js';
+import {noticeAuthorizeRequest,type NoticeAuthorizeResponse} from '../notice-authorize.js';
+import {authorizeNotice} from './task-reminder-delivery.js';
 import type {hostTransport} from '../workflows/host-transport.js';
+import {MEMBER_APP_CORE_PREFIX} from '../member-app-wire.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
 export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>,capabilities:Readonly<Record<string,boolean>>={}) {
@@ -56,11 +59,20 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     const url=new URL(req.url??'/','http://local'),path=url.pathname;
     if(req.method==='GET'&&path==='/health')return json(res,200,{ok:true,service:config.service,storage_layout:'original-only-v1',
       databases:await storageHealth(s.stores),inactive:restoredInactive(config.dataDir),workers:status()});
+    // The members' app has its own listener (MEMBER_APP_PORT, ADR-0265 D3): never here, whatever the caller holds.
+    if(path===MEMBER_APP_CORE_PREFIX||path.startsWith(MEMBER_APP_CORE_PREFIX+'/'))throw new HttpError(404,'not_found');
     assertStorageActive(config.dataDir);
     if(transport?.handle(req,res))return;
     if(req.method==='POST'&&path==='/internal/actions/authorize') {
       authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
       return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
+    }
+    if(req.method==='POST'&&path==='/internal/notices/authorize') {
+      // nocheh-telegram asks before it sends a task reminder into a member's own private chat (ADR-0265 D10): core's
+      // one-time yes. A malformed body is a no, never an error the gateway could read as something else.
+      authorize(req,config.token);let request;
+      try{request=noticeAuthorizeRequest(await readJson(req,1024));}catch{return json(res,200,{allowed:false} satisfies NoticeAuthorizeResponse);}
+      return json(res,200,{allowed:await authorizeNotice(s.stores.control,request,await currentChats())} satisfies NoticeAuthorizeResponse);
     }
     if(req.method==='GET'&&path==='/internal/chats') {
       // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private

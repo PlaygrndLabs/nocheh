@@ -14,7 +14,7 @@ import re
 import subprocess
 import time
 from tools.paths import ROOT
-from tools.acceptance.telegram_mock import TOKEN,bot_status,press
+from tools.acceptance.telegram_mock import BOT,LAUNCH_KEY_ENV,TOKEN,bot_status,launch_public_key,new_launch_key,press
 
 # The real-model rehearsal's only egress, attached to the model relay alone.
 MODEL_EGRESS='model-egress'
@@ -28,6 +28,17 @@ TELEGRAM_STATE={'/telegram-state':'state/telegram','/data/spool':'state/spool'}
 # OTHER_GROUP and THIRD_GROUP). Only the owner adds Nocheh to a group (ADR-0253).
 OWNER=123
 GROUPS=(-10042,-10043,-10044)
+# The Telegram mini app (ADR-0265): its edge runs in the fixture without its tunnel, on its own internal network to the
+# dashboard and nocheh-app only, and the tester calls it from inside its own container. The address only makes the menu
+# buttons' addresses; nothing resolves it.
+MINI_APP_SERVICE='nocheh-miniapp'
+MINI_APP_NETWORK='miniapp-back'
+MINI_APP_URL='https://mini.fixture.invalid'
+# Launch data is checked with the fake Telegram's own key in the fixture (telegram_mock.launch_data): the public half,
+# honoured only beside NOCHEH_INSTALLATION_FIXTURE=1 and the fake bot's id (src/telegram-launch.ts launchKey), goes to
+# these two services alone; the private half stays with the fake. Neither is ever in docker-compose.yml.
+LAUNCH_PUBLIC_KEY='TELEGRAM_LAUNCH_PUBLIC_KEY'
+LAUNCH_CHECKERS=('nocheh-app',MINI_APP_SERVICE)
 
 
 def group_chat(chat):
@@ -85,6 +96,36 @@ def adopt(http,query,wait,number,chats=GROUPS,owner=OWNER):
     return number
 
 
+def mini_app_service(manifest,image,public_key):
+    """The mini app's edge as docker-compose.yml runs it, for the fixture: no tunnel and no port, only the network to the
+    dashboard (the owner's routes) and nocheh-app's member listener, the fake bot's id and the fixture's launch key."""
+    if MINI_APP_NETWORK not in manifest['networks']:raise ValueError('mini_app_network_missing')
+    dashboard=manifest['services']['nocheh-dashboard']
+    if MINI_APP_NETWORK not in (dashboard.get('networks') or {}) or MINI_APP_NETWORK not in (manifest['services']['nocheh-app'].get('networks') or {}):
+        raise ValueError('mini_app_network_missing')
+    return {'image':image,'command':['node','dist/src/mini-app.js'],'init':True,'restart':'no','read_only':True,'tmpfs':['/tmp'],
+            'cap_drop':['ALL'],'security_opt':['no-new-privileges:true'],'networks':{MINI_APP_NETWORK:None},
+            'environment':{'TELEGRAM_BOT_ID':str(BOT['id']),'TELEGRAM_OWNER_ID':str(OWNER),'TELEGRAM_TEST_ENVIRONMENT':'',
+                           'NOCHEH_DASHBOARD_HOST':'nocheh-dashboard','NOCHEH_DASHBOARD_PORT':str((dashboard.get('environment') or {}).get('NOCHEH_DASHBOARD_PORT') or 8783),
+                           'NOCHEH_MINI_APP_PORT':'8788','NOCHEH_APP_URL':'http://nocheh-app:8790',
+                           'NOCHEH_INSTALLATION_FIXTURE':'1',LAUNCH_PUBLIC_KEY:public_key},
+            'healthcheck':{'test':['CMD','node','-e',"fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"],
+                           'interval':'5s','timeout':'5s','retries':24},
+            'depends_on':{'nocheh-dashboard':{'condition':'service_started','required':True},'nocheh-app':{'condition':'service_started','required':True}}}
+
+
+def launch_keys(manifest,seed=None):
+    """Give the fake Telegram its private launch key (a kept one when the fixture already has one) and the services that
+    check launch data the public half, with the fake bot's id they need beside it. Returns the public half."""
+    provider=manifest['services']['model-fixture']['environment']
+    seed=seed or provider.get(LAUNCH_KEY_ENV) or new_launch_key()
+    provider[LAUNCH_KEY_ENV]=seed
+    public=launch_public_key(seed)
+    manifest['services']['nocheh-app']['environment'].update({LAUNCH_PUBLIC_KEY:public,'TELEGRAM_BOT_ID':str(BOT['id']),'NOCHEH_INSTALLATION_FIXTURE':'1'})
+    if MINI_APP_SERVICE in manifest['services']:manifest['services'][MINI_APP_SERVICE]['environment'][LAUNCH_PUBLIC_KEY]=public
+    return public
+
+
 def telegram_health(command):
     """The Telegram service's health, read from inside nocheh-app: the fixture publishes no port."""
     script="""const response=await fetch(process.argv[1],{signal:AbortSignal.timeout(30000)});
@@ -128,6 +169,15 @@ def validate_fixture(directory,info,manifest):
         if len(mounts)!=1 or mounts[0].get('type')!='bind' or Path(mounts[0]['source']).resolve()!=directory/source:raise ValueError('owned_native_state_required')
     # Only the Telegram service may hold the bot token: a second holder could poll beside it.
     if any(key.startswith('TELEGRAM_BOT_TOKEN') for key in native.get('environment') or {}):raise ValueError('telegram_token_outside_telegram_service')
+    # The fake's private launch key stays with the fake, and the public one goes only to the two services that check
+    # launch data, each in the fixture (ADR-0265 D2).
+    for name,service in manifest['services'].items():
+        environment=service.get('environment') or {}
+        if LAUNCH_KEY_ENV in environment and name!='model-fixture':raise ValueError('launch_key_outside_the_fake')
+        if LAUNCH_PUBLIC_KEY in environment and (name not in LAUNCH_CHECKERS or environment.get('NOCHEH_INSTALLATION_FIXTURE')!='1'):
+            raise ValueError('launch_key_outside_its_checkers')
+    mini=manifest['services'].get(MINI_APP_SERVICE)
+    if mini is not None and (set(mini.get('networks') or {})!={MINI_APP_NETWORK} or mini.get('volumes')):raise ValueError('isolated_fixture_required')
     return project
 
 
@@ -151,7 +201,9 @@ def archived_delivery(query,message,update_id):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--directory',type=Path,required=True)
     parser.add_argument('--verify-only',action='store_true')
-    parser.add_argument('--scenario',choices=('ordinary','faults-and-files'),default='ordinary');args=parser.parse_args()
+    parser.add_argument('--scenario',choices=('ordinary','faults-and-files'),default='ordinary')
+    parser.add_argument('--miniapp-image',help="The mini app's image (Dockerfile target mini-app); without it the fixture runs no mini app")
+    args=parser.parse_args()
     directory=args.directory.resolve()
     if not directory.is_relative_to(ROOT/'data/acceptance/results'):raise ValueError('owned_fixture_directory_required')
     info=json.loads((directory/'fixture.json').read_text());manifest=json.loads((directory/'compose.json').read_text())
@@ -205,14 +257,23 @@ if(!response.ok)throw Error('fixture_http_'+response.status);console.log(JSON.st
                 mount(bot,ROOT/'tools/acceptance'/name,'/workspace/tools/acceptance/'+name)
             bot['command']=['python','-m','tools.acceptance.telegram_runtime']
             bot['environment'].update(TELEGRAM_ENABLED='true',TELEGRAM_BOT_TOKEN=TOKEN,NOCHEH_INSTALLATION_FIXTURE='1')
+            # The mini app's edge without its tunnel, and the fixture's launch key for it and nocheh-app (ADR-0265).
+            if args.miniapp_image:
+                image=json.loads(subprocess.check_output(['docker','image','inspect',args.miniapp_image],text=True))[0]['Id']
+                manifest['services'][MINI_APP_SERVICE]=mini_app_service(manifest,image,'')
+            launch_keys(manifest)
+            validate_fixture(directory,info,manifest)
             for path in (directory/'compose.json',directory/'installation/docker-compose.yml'):
                 path.write_text(json.dumps(manifest));path.chmod(0o600)
             run('config','--quiet')
             run('stop','-t','60',TELEGRAM_SERVICE)
             prior_unknown=json.loads(state_path.read_text())['unknown'] if state_path.exists() else []
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait','model-fixture')
+            # nocheh-app checks members' launch data with the fixture's key from now on.
+            run('up','-d','--no-build','--no-deps','--force-recreate','--wait','nocheh-app')
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait','hermes')
             run('up','-d','--no-build','--no-deps','--force-recreate','--wait',TELEGRAM_SERVICE)
+            if args.miniapp_image:run('up','-d','--no-build','--no-deps','--force-recreate','--wait',MINI_APP_SERVICE)
         wait_telegram_connected(wait,command,'telegram_polling_connected')
         initial=http('/fixture/telegram')
         assert not initial['faults'],'previous fixture faults remain pending'

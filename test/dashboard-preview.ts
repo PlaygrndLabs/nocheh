@@ -28,6 +28,7 @@ import {matchesArchiveFilters} from '../src/archive-filters.js';
 import {archiveScopes,otherPrivate,parentSpace} from '../src/spaces.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
+import {memberAppPreview} from './dashboard-preview-member.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
 /*
  * The chat directory the preview serves (ADR-0252). Chats Nocheh knew before step 2b keep their stored value as their
@@ -87,11 +88,11 @@ const seenPeople:{telegram:string;name:string|null;username:string|null;presence
 const previewMember=(telegram:string,name:string|null,username:string|null,switches:[string,boolean][],presence:[string,'in'|'left'][],
  changes:Partial<Pick<PreviewMember,'state'|'permissions'|'added_at'>>={}):PreviewMember=>{const account=accountIdFor('telegram',telegram);
  return {id:memberIdFor(account),account,telegram,name,username,state:'active',added_at:'2026-11-10T09:00:00.000Z',
-  permissions:{talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true},switches:new Map(switches),presence:new Map(presence),...changes};};
+  permissions:{talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true,reminders:true},switches:new Map(switches),presence:new Map(presence),...changes};};
 const previewMembers:PreviewMember[]=[
  previewMember('73','Mira Chen','mira',[['-10042',true],['-10073',false]],[['-10042','in'],['-10073','in'],[UPGRADED,'in']]),
  previewMember('95',null,null,[['-10042',true]],[]),
- previewMember('84','Devon',null,[['-10073',true]],[['-10073','in']],{state:'paused',permissions:{talk:true,jobs:false,post:true,tools:true,tasks:'read',private_chat:true}}),
+ previewMember('84','Devon',null,[['-10073',true]],[['-10073','in']],{state:'paused',permissions:{talk:true,jobs:false,post:true,tools:true,tasks:'read',private_chat:true,reminders:true}}),
 ];
 let memberRevision=3,dailyMessages=200;
 const memberReceipts=new Map<string,{request:string;result:unknown}>();
@@ -145,13 +146,13 @@ function memberRoute(route:string,body:unknown):unknown {
  const request=memberChangeRequest(body);
  return memberCommand(request.operation_id,{id:one[1],...request},()=>{
   const member=previewMembers[at];if(!member)throw new HttpError(404,'member_not_found');
-  const {state,talk,jobs,post,tools,tasks,private_chat,groups}=request.changes;
+  const {state,talk,jobs,post,tools,tasks,private_chat,reminders,groups}=request.changes;
   for(const [chat,on] of Object.entries(groups??{})){
    if(!joined(chat))throw new HttpError(400,'member_group_invalid');
    if(on&&!member.switches.has(chat)&&member.presence.get(chat)!=='in')throw new HttpError(409,'member_group_not_seen');
   }
   if(state)member.state=state;
-  Object.assign(member.permissions,Object.fromEntries(Object.entries({talk,jobs,post,tools,tasks,private_chat}).filter(([,value])=>value!==undefined)));
+  Object.assign(member.permissions,Object.fromEntries(Object.entries({talk,jobs,post,tools,tasks,private_chat,reminders}).filter(([,value])=>value!==undefined)));
   for(const [chat,on] of Object.entries(groups??{}))member.switches.set(chat,on);
   memberRevision++;return {revision:memberRevision,member:memberItem(member)};
  });
@@ -206,6 +207,14 @@ await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,se
 await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by,set_by_account_id,set_by_name,set_in_chat_id,set_in_group_id) VALUES
   ($2,$1,date_trunc('minute',now())+interval '2 days 30 seconds','pending','person',$4,'Sam Rivera','-10042','-10042'),
   ($3,$1,date_trunc('minute',now())-interval '1 day','failed','person',$4,'Sam Rivera','-10042','-10042')`,[greenhouse.id,'e1'.repeat(32),'e2'.repeat(32),'a7'.repeat(32)]);
+// A task a member added in the members' app (ADR-0265), with a comment and a change from there, and a reminder Mira set
+// there for herself: the owner sees where each came from.
+const seedTrays=await tasks.create(taskOwner,{operation_id:'preview-9',title:'Label the seed trays',scope:studio,group:'-10042',tags:['Garden']});
+await pool.query(`UPDATE owner_tasks SET origin='app',created_by='{"kind":"member","name":"Mira Chen"}'::jsonb WHERE id=$1`,[seedTrays.id]);
+await pool.query(`INSERT INTO owner_task_comments(id,task_id,body,author,origin) VALUES($2,$1,'Trays are in the shed.','{"kind":"member","name":"Mira Chen"}'::jsonb,'app')`,[seedTrays.id,'e3'.repeat(32)]);
+await pool.query(`INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{"kind":"member","name":"Mira Chen"}'::jsonb,'app','{"tags":{"from":[],"to":["Garden"]}}'::jsonb)`,[seedTrays.id]);
+await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by,set_by_account_id,set_by_name,set_via) VALUES
+  ($2,$1,date_trunc('minute',now())+interval '3 days','pending','person',$3,'Mira Chen','app')`,[seedTrays.id,'e4'.repeat(32),accountIdFor('telegram','73')]);
 const client=await pool.connect();try{
  for(let i=0;i<90;i++){
   const family=(['browser','imports','tools','telegram','honcho','memory_review','preparation'] as const)[i%7]!;
@@ -712,6 +721,8 @@ const sourcesFixture=(()=>{
 async function scenario(){try{return (await readFile('/tmp/nocheh-ui-scenario','utf8')).trim();}catch{return 'normal';}}
 const server=createServer((req,res)=>{void(async()=>{
  const url=new URL(req.url||'/','http://fixture'),path=url.pathname;
+ // The members' app (ADR-0265): its page and its own API, in memory, before any owner session is looked at.
+ if(await memberAppPreview(req,res,url))return;
  if(req.method==='GET'&&path==='/'){
   const session=sessions.page(req);res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/`);
   res.setHeader('content-type','text/html');res.end((await readFile('dashboard/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`));return;

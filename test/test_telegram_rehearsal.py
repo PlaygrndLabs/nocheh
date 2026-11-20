@@ -1,5 +1,6 @@
 """The synthetic polling extension must not borrow an operating installation."""
 import copy
+import json
 import unittest
 from tools.paths import ROOT
 from tools.acceptance.telegram_rehearsal import validate_fixture
@@ -108,3 +109,58 @@ class ArchivedDeliveryTests(unittest.TestCase):
         self.assertIn('b'*64,seen[-1])
         with self.assertRaisesRegex(AssertionError,'differs'):
             archived_delivery(query,{**message,'text':'a reply that was never archived'},77)
+
+
+class MiniAppFixtureTests(unittest.TestCase):
+    """The members' app in the fixture (ADR-0265): its edge without a tunnel on its own internal network, and the fake
+    Telegram's launch key, private in the fake and public only in the two services that check launch data."""
+    def setUp(self):
+        from tools.acceptance.telegram_rehearsal import LAUNCH_CHECKERS
+        self.base=TelegramRehearsalOwnershipTests('test_only_matching_owned_fixture_is_admitted');self.base.setUp()
+        self.manifest=copy.deepcopy(self.base.manifest)
+        self.manifest['networks']['miniapp-back']={'internal':True,'name':self.base.project+'_miniapp-back'}
+        for name in LAUNCH_CHECKERS[:1]+('nocheh-dashboard',):
+            self.manifest['services'][name]={'environment':{'NOCHEH_INSTALLATION_FIXTURE':'1','NOCHEH_DASHBOARD_PORT':'18793'},
+                                             'networks':{'default':None,'miniapp-back':None}}
+
+    def prepared(self):
+        from tools.acceptance.telegram_rehearsal import MINI_APP_SERVICE,launch_keys,mini_app_service
+        manifest=copy.deepcopy(self.manifest)
+        manifest['services'][MINI_APP_SERVICE]=mini_app_service(manifest,'sha256:'+'c'*64,'')
+        return manifest,launch_keys(manifest)
+
+    def test_the_edge_runs_without_a_tunnel_and_the_key_halves_go_where_they_belong(self):
+        from tools.acceptance.telegram_mock import LAUNCH_KEY_ENV,launch_public_key
+        manifest,public=self.prepared()
+        self.assertEqual(validate_fixture(self.base.directory,self.base.info,manifest),self.base.project)
+        edge=manifest['services']['nocheh-miniapp']
+        self.assertEqual((edge['networks'],edge.get('ports'),edge['environment']['NOCHEH_APP_URL'],edge['environment']['NOCHEH_DASHBOARD_PORT']),
+                         ({'miniapp-back':None},None,'http://nocheh-app:8790','18793'))
+        seed=manifest['services']['model-fixture']['environment'][LAUNCH_KEY_ENV]
+        self.assertEqual(launch_public_key(seed),public)
+        for name in ('nocheh-app','nocheh-miniapp'):
+            environment=manifest['services'][name]['environment']
+            self.assertEqual((environment['TELEGRAM_LAUNCH_PUBLIC_KEY'],environment['TELEGRAM_BOT_ID'],environment['NOCHEH_INSTALLATION_FIXTURE']),
+                             (public,'123456','1'),name)
+        holders=[name for name,service in manifest['services'].items() if seed in json.dumps(service)]
+        self.assertEqual(holders,['model-fixture'])
+        from tools.acceptance.telegram_rehearsal import launch_keys
+        self.assertEqual(launch_keys(manifest),public,'a kept fixture keeps its key')
+
+    def test_a_key_in_another_service_or_outside_the_fixture_is_refused(self):
+        from tools.acceptance.telegram_mock import LAUNCH_KEY_ENV
+        manifest,public=self.prepared()
+        for change,code in ((lambda m:m['services']['hermes']['environment'].update(TELEGRAM_LAUNCH_PUBLIC_KEY=public),'launch_key_outside_its_checkers'),
+                            (lambda m:m['services']['nocheh-dashboard']['environment'].update(TELEGRAM_LAUNCH_PUBLIC_KEY=public),'launch_key_outside_its_checkers'),
+                            (lambda m:m['services']['nocheh-miniapp']['environment'].update(NOCHEH_INSTALLATION_FIXTURE='0'),'launch_key_outside_its_checkers'),
+                            (lambda m:m['services']['nocheh-app']['environment'].update({LAUNCH_KEY_ENV:'0'*64}),'launch_key_outside_the_fake'),
+                            (lambda m:m['services']['nocheh-miniapp'].update(networks={'miniapp-back':None,'default':None}),'isolated_fixture_required'),
+                            (lambda m:m['services']['nocheh-miniapp'].update(ports=['8788:8788']),'isolated_fixture_required')):
+            with self.subTest(code=code):
+                bad=copy.deepcopy(manifest);change(bad)
+                with self.assertRaisesRegex(ValueError,code):validate_fixture(self.base.directory,self.base.info,bad)
+
+    def test_an_installation_without_the_mini_app_network_gets_no_edge(self):
+        from tools.acceptance.telegram_rehearsal import mini_app_service
+        del self.manifest['networks']['miniapp-back']
+        with self.assertRaisesRegex(ValueError,'mini_app_network_missing'):mini_app_service(self.manifest,'sha256:'+'c'*64,'')

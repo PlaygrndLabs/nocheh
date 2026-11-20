@@ -12,7 +12,7 @@ import uuid
 from tools.acceptance import reset_protocol, reset_quiescence
 
 # Version 3 (step 3) carries the chats and their app ids (ADR-0252), so every value names the same chat after the reset,
-# and the members: their permissions (private_chat too, step 4), the accounts linked to them, their group switches and the daily message cap. It is
+# and the members: their permissions (private_chat too, step 4, and reminders, step 5), the accounts linked to them, their group switches and the daily message cap. It is
 # the only version: a snapshot taken by an older version (v1, v2) is refused (development mode), as the stores refuse it
 # (src/stores/reset-setup.ts).
 FORMAT = 'nocheh-reset-configuration-v3'
@@ -67,10 +67,10 @@ ORIGINAL = {
     'chat_ids': ("SELECT n.app,i.external_id,i.chat_id,i.state,i.reason FROM chat_ids i "
                  "JOIN chat_connections n ON n.id=i.connection_id ORDER BY n.app,i.external_id",
                  ('app', 'external_id', 'chat_id', 'state', 'reason')),
-    # The members (step 3): their permissions (private_chat too, step 4), each account linked to one by its app id (the restore makes the same
+    # The members (step 3): their permissions (private_chat too, step 4, and reminders, step 5), each account linked to one by its app id (the restore makes the same
     # account and links it), their group switches and the daily message cap. Never a name or what anyone wrote.
-    'members': ('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat FROM members ORDER BY id',
-                ('id', 'state', 'group_talk', 'group_jobs', 'group_post_other', 'group_tools', 'tasks', 'private_chat')),
+    'members': ('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,reminders FROM members ORDER BY id',
+                ('id', 'state', 'group_talk', 'group_jobs', 'group_post_other', 'group_tools', 'tasks', 'private_chat', 'reminders')),
     'member_accounts': ('SELECT a.member_id,n.app,a.external_id FROM chat_accounts a JOIN chat_connections n ON n.id=a.connection_id '
                         'WHERE a.member_id IS NOT NULL ORDER BY n.app,a.external_id', ('member_id', 'app', 'external_id')),
     'member_chats': ('SELECT member_id,chat_id,enabled FROM member_chats ORDER BY member_id,chat_id', ('member_id', 'chat_id', 'enabled')),
@@ -145,7 +145,7 @@ def _members(values, chats):
     caps = values['daily_messages']
     if (len(members) != len(values['members']) or
             any(not isinstance(row[name], bool) for row in values['members']
-                for name in ('group_talk', 'group_jobs', 'group_post_other', 'group_tools', 'private_chat')) or
+                for name in ('group_talk', 'group_jobs', 'group_post_other', 'group_tools', 'private_chat', 'reminders')) or
             any(row['member_id'] not in members for row in [*values['member_accounts'], *values['member_chats']]) or
             any(chats.kind(row['chat_id']) != 'group' or not isinstance(row['enabled'], bool) for row in values['member_chats']) or
             len(caps) != 1 or type(caps[0]['daily_messages']) is not int or not low <= caps[0]['daily_messages'] <= high):

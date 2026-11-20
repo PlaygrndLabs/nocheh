@@ -53,7 +53,8 @@ export type Task = {
   reminders: Reminder[];
   attachments: Attachment[];
   comments: number;
-  origin: 'dashboard' | 'chat' | 'repeat';
+  /** Where it was added: the dashboard, a chat with Nocheh, a repeat of a finished task, or the members' app (ADR-0265). */
+  origin: 'dashboard' | 'chat' | 'repeat' | 'app';
   created_by: Actor;
   finished_by: Actor | null;
   revision: number;
@@ -76,6 +77,10 @@ export type Detail = Omit<Task, 'subtasks' | 'comments'> & {
   /** How many tasks sit under it at every level, archived and in the trash too; a move takes them all. */
   descendants?: number;
 };
+
+/** Where a comment or a history entry was written, after its author: nothing for the dashboard. */
+export const originPlace = (origin: string): string =>
+  origin === 'chat' ? 'in chat' : origin === 'app' ? 'in the members’ app' : '';
 
 export type StatusCategory = 'not_started' | 'active' | 'done' | 'cancelled';
 export type TaskStatus = {id: string; name: string; category: StatusCategory; color: Tone};

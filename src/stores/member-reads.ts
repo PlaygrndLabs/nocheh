@@ -47,12 +47,40 @@ const openMemberChat=`SELECT c.id AS chat,m.id AS member FROM chats c JOIN chat_
   WHERE c.id=$1 AND c.kind='private' AND c.parent_id IS NULL AND c.id<>$2 AND m.state='active' AND m.private_chat
     AND NOT EXISTS(SELECT 1 FROM chats o WHERE o.id=$2 AND o.account_id=c.account_id)`;
 
+/** One group a member is in now (joinedGroups): when Telegram's newest 'in' row for one of their accounts there was last
+ * confirmed (the epoch when never), and whether that is within the freshness asked for. */
+export interface JoinedGroup {readonly chat:string;readonly checked_at:Date;readonly fresh:boolean}
+/**
+ * The groups member `member` is in now, sorted by chat id, for every reader of a member's groups: their private chat
+ * (memberReads, fresh within MEMBER_READ_STALE_DAYS) and the members' app (step 5, fresh within MEMBER_RECHECK_HOURS,
+ * reaching only the fresh ones). A group counts when it is a top-level group chat Nocheh serves (state active), the
+ * member's switch for it (member_chats.enabled) is not false, and the newest chat_memberships row of one of their accounts
+ * there says 'in'. `fresh` is whether that row was confirmed (checked_at) within `freshHours` (default
+ * MEMBER_READ_STALE_DAYS days). The owner's account never counts, even when linked to the member, and the member must be
+ * active; with no owner's private chat to tell the owner's account by (`owner`, default this process's chat directory),
+ * or a member that is not active, there are none. Never throws for an unknown member: an empty list.
+ */
+export async function joinedGroups(db:Db,member:string,options:{freshHours?:number;owner?:string|null}={}):Promise<readonly JoinedGroup[]> {
+  const owner=options.owner===undefined?ownerChatNow():options.owner,hours=options.freshHours;
+  if(typeof member!=='string'||!/^[a-f0-9]{64}$/.test(member)||owner===null||hours!==undefined&&!(Number.isFinite(hours)&&hours>=0))return [];
+  const window=hours===undefined?`${MEMBER_READ_STALE_DAYS} days`:`${hours*3600} seconds`;
+  const rows=(await db.query<{chat:string;checked_at:Date|null;fresh:boolean|null}>(`WITH accounts AS (SELECT a.id FROM chat_accounts a
+      JOIN members m ON m.id=a.member_id AND m.state='active' WHERE a.member_id=$1
+      AND NOT EXISTS(SELECT 1 FROM chats o WHERE o.id=$2 AND o.account_id=a.id)),
+    newest AS (SELECT DISTINCT ON (s.chat_id) s.chat_id,s.state,s.checked_at FROM chat_memberships s WHERE s.account_id IN (SELECT id FROM accounts)
+      ORDER BY s.chat_id,s.checked_at DESC NULLS LAST,s.since DESC)
+    SELECT n.chat_id AS chat,n.checked_at,n.checked_at>now()-$3::interval AS fresh FROM newest n WHERE n.state='in'
+      AND EXISTS(SELECT 1 FROM chats g WHERE g.id=n.chat_id AND g.kind='group' AND g.parent_id IS NULL AND g.state='active')
+      AND NOT EXISTS(SELECT 1 FROM member_chats w WHERE w.member_id=$1 AND w.chat_id=n.chat_id AND NOT w.enabled)`,[member,owner,window])).rows;
+  return rows.map(row=>Object.freeze({chat:row.chat,checked_at:row.checked_at??new Date(0),fresh:row.fresh===true}))
+    .sort((a,b)=>a.chat<b.chat?-1:a.chat>b.chat?1:0);
+}
+
 /**
  * The reads of `chat` when it is a member's own private chat that is open now, else null. A chat counts when it is a
  * chats row of kind private, not the owner's, whose account is linked to a member that is active with private_chat on.
- * Its groups are the served groups where member_chats.enabled is not false and the newest chat_memberships row of one
- * of the member's accounts says 'in' with checked_at within MEMBER_READ_STALE_DAYS. Group talk does not count.
- * Never throws for an unknown or closed chat: null, which callers refuse as memberChatClosed.
+ * Its groups are joinedGroups confirmed within MEMBER_READ_STALE_DAYS; the older ones are `stale`. Group talk does not
+ * count. Never throws for an unknown or closed chat: null, which callers refuse as memberChatClosed.
  *
  * `owner` is the owner's private chat (default: this process's chat directory); without one every chat is closed.
  */
@@ -62,19 +90,11 @@ export async function memberReads(db:Db,chat:string,owner:string|null=ownerChatN
   // know yet is asked of the store, which decides by its own rows.
   const known=chats().get(chat);
   if(known&&(known.kind!=='private'||known.owner))return null;
-  const rows=(await db.query<{chat:string;member:string;group:string|null;checked_at:Date|null;fresh:boolean|null}>(`WITH own AS (${openMemberChat}),
-    accounts AS (SELECT a.id FROM chat_accounts a JOIN own ON a.member_id=own.member
-      WHERE NOT EXISTS(SELECT 1 FROM chats o WHERE o.id=$2 AND o.account_id=a.id)),
-    newest AS (SELECT DISTINCT ON (s.chat_id) s.chat_id,s.state,s.checked_at FROM chat_memberships s WHERE s.account_id IN (SELECT id FROM accounts)
-      ORDER BY s.chat_id,s.checked_at DESC NULLS LAST,s.since DESC)
-    SELECT own.chat,own.member,n.chat_id AS group,n.checked_at,n.checked_at>now()-make_interval(days=>$3::int) AS fresh FROM own LEFT JOIN newest n ON n.state='in'
-      AND EXISTS(SELECT 1 FROM chats g WHERE g.id=n.chat_id AND g.kind='group' AND g.parent_id IS NULL AND g.state='active')
-      AND NOT EXISTS(SELECT 1 FROM member_chats w WHERE w.member_id=own.member AND w.chat_id=n.chat_id AND NOT w.enabled)`,
-    [chat,owner,MEMBER_READ_STALE_DAYS])).rows;
-  if(!rows.length)return null;
-  const sorted=(fresh:boolean)=>Object.freeze(rows.filter(row=>row.group!==null&&(row.fresh===true)===fresh)
-    .map(row=>Object.freeze({chat:row.group!,checked_at:row.checked_at??new Date(0)})).sort((a,b)=>a.chat<b.chat?-1:a.chat>b.chat?1:0));
-  return {member:rows[0]!.member,chat:rows[0]!.chat,groups:sorted(true),stale:sorted(false)};
+  const own=(await db.query<{chat:string;member:string}>(openMemberChat,[chat,owner])).rows[0];
+  if(!own)return null;
+  const groups=await joinedGroups(db,own.member,{owner});
+  const sorted=(fresh:boolean)=>Object.freeze(groups.filter(group=>group.fresh===fresh).map(group=>Object.freeze({chat:group.chat,checked_at:group.checked_at})));
+  return {member:own.member,chat:own.chat,groups:sorted(true),stale:sorted(false)};
 }
 
 /** What the owner's ask about a member reads (step 4b): the ask, the owner's message that asked it (`event`), its member
@@ -155,4 +175,30 @@ export async function recheckMemberGroups(control:pg.Pool,call:RuntimeCall,reads
     asked.delete(reads.member+' '+group);
   }
   return {past,moved};
+}
+
+/** The members' app asks Telegram about a member's groups again at most this often (ADR-0265 D4). */
+export const MEMBER_APP_RECHECK_MINUTES=10;
+/** When the members' app last asked about each member's groups in this process (member → ms). */
+const appRechecked=new Map<string,number>();
+/** Tests only: forgets when the members' app last asked, so the next call asks again. */
+export function forgetMemberAppRechecks():void {appRechecked.clear();}
+/**
+ * The members' app's group check (step 5, ADR-0265 D4): the app has no turn, so on `GET me` and before each write it asks
+ * Telegram again about the member's groups the way a private turn does (recheckMemberGroups: joined groups confirmed
+ * longer ago than MEMBER_RECHECK_HOURS, then the stale ones, at most MEMBER_RECHECK_LIMIT), at most once per member every
+ * MEMBER_APP_RECHECK_MINUTES in this process. It reads only the member's joined groups (joinedGroups); the app then reaches
+ * only the groups confirmed within MEMBER_RECHECK_HOURS, so a group Telegram cannot confirm drops out (fail closed).
+ * Returns whether it asked at all and whether any membership moved (the caller reloads the member directory).
+ */
+export async function recheckMemberAppGroups(control:pg.Pool,call:RuntimeCall,member:string,options:{owner?:string|null;now?:number}={}):Promise<{asked:boolean;moved:boolean}> {
+  const now=options.now??Date.now();
+  for(const [key,at] of appRechecked)if(now-at>=MEMBER_APP_RECHECK_MINUTES*60000||at>now)appRechecked.delete(key);
+  if(appRechecked.has(member))return {asked:false,moved:false};
+  appRechecked.set(member,now);
+  const groups=await joinedGroups(control,member,{owner:options.owner===undefined?ownerChatNow():options.owner});
+  if(!groups.length)return {asked:true,moved:false};
+  const split=(fresh:boolean)=>Object.freeze(groups.filter(group=>group.fresh===fresh).map(group=>Object.freeze({chat:group.chat,checked_at:group.checked_at})));
+  const {moved}=await recheckMemberGroups(control,call,{member,chat:'',groups:split(true),stale:split(false)},Date.now());
+  return {asked:true,moved};
 }

@@ -7,6 +7,7 @@ import {chatApps,type ChatApp,type ChatDirectory} from '../chats.js';
 import {HttpError} from '../http.js';
 import {syncDirectory} from '../storage.js';
 import {currentChats,type ChatRepository} from './chats.js';
+import type {ReminderRecord} from './tasks.js';
 
 /** One row per physical request a front door sent to a chat app, or refused itself. Content-free: codes and ids only. */
 export const chatSendSchema=`
@@ -215,14 +216,25 @@ export class ChatSendRepository {
    * A send Nocheh gave up on itself, with no front door record to say so: a task reminder Telegram refused, or never
    * confirmed after its tries (ADR-0255). One row per reference, so a repeat adds nothing; it shows in System › Health as
    * a problem of its kind. Its key is the front doors' shape, under its own channel and account words, so it never meets
-   * one of theirs.
+   * one of theirs. Step 5: app reminders a member set that could not reach them ('reminder_skipped') are one row per
+   * member per day (the reference names both); each pass adds its count to the row's status, which counts them, and the
+   * row's detail is the owner's line for the day's total.
    */
-  async recordLocal(send:{kind:'notice';chat:string|null;state:'failed'|'uncertain';status:number;error_code:'reminder_refused'|'reminder_unconfirmed';reference:string}):Promise<void> {
-    const directory=await currentChats().catch(()=>null);
+  async recordLocal(send:ReminderRecord):Promise<void> {
+    const directory=await currentChats().catch(()=>null),key='send:tasks:reminders:'+digest(send.reference).slice(0,32);
+    const chat=directory?sentTo(directory,'telegram',send.chat,null):null;
+    if(send.error_code==='reminder_skipped') {
+      if(!Number.isSafeInteger(send.count)||send.count<1)return;
+      await this.control.query(`INSERT INTO chat_sends(record_key,channel,account,at,kind,method,chat,state,status,error_code,reference,chat_id,detail)
+        VALUES($1,'telegram',NULL,now(),$2,'sendMessage',$3,$4,$5,'reminder_skipped',$6,$7,CASE WHEN $5::int=1 THEN $8 ELSE replace($9,'{count}',$5::text) END)
+        ON CONFLICT(record_key) DO UPDATE SET at=now(),status=chat_sends.status+excluded.status,
+          detail=replace($9,'{count}',(chat_sends.status+excluded.status)::text) WHERE chat_sends.error_code='reminder_skipped'`,
+        [key,send.kind,send.chat,send.state,send.count,send.reference,chat,send.detail.one,send.detail.many]);
+      return;
+    }
     await this.control.query(`INSERT INTO chat_sends(record_key,channel,account,at,kind,method,chat,state,status,error_code,reference,chat_id)
       VALUES($1,'telegram',NULL,now(),$2,'sendMessage',$3,$4,$5,$6,$7,$8) ON CONFLICT(record_key) DO NOTHING`,
-      ['send:tasks:reminders:'+digest(send.reference).slice(0,32),send.kind,send.chat,send.state,send.status,send.error_code,send.reference,
-        directory?sentTo(directory,'telegram',send.chat,null):null]);
+      [key,send.kind,send.chat,send.state,send.status,send.error_code,send.reference,chat]);
   }
 
   /** Remove one bounded batch of records sent before the cutoff. */

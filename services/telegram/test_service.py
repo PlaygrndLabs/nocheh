@@ -347,6 +347,85 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(served.served(MEMBER_CHAT) or served.group(MEMBER_CHAT) or served.is_owner(MEMBER_CHAT))
         self.assertFalse(served.member_private(OWNER) or served.member_private(GROUP))
 
+    def test_a_reminder_reaches_a_members_own_private_chat_only_after_cores_one_time_yes(self):
+        # Step 5 (ADR-0265 D10): a task reminder goes into the private chat of the member who set it, and only when core
+        # says yes to this id, this chat and this exact text, once.
+        self.member_policy()
+        asked, authorized, core = [], set(), {'up': True}
+        def check(body):
+            asked.append(body)
+            if not core['up']: return None
+            if body['id'] in authorized or body['id'] == 'f' * 64: return False
+            authorized.add(body['id']); return True
+        text = '⏰ Book the hall\n📁 P1\n\n👤 Set by you'
+        reminder = {'id': 'a' * 64, 'chat_id': MEMBER_CHAT, 'text': text, 'send_class': 'reminder'}
+        with patch('services.telegram.gateway.check_notice_policy', side_effect=check):
+            # Core says no: nothing is sent, and the refusal is final (a 400 storage never sends again).
+            with self.assertRaises(ValueError): self.service.notice({**reminder, 'id': 'f' * 64})
+            self.assertEqual(asked, [{'id': 'f' * 64, 'chat': MEMBER_CHAT, 'text_digest': hashlib.sha256(text.encode('utf-8')).hexdigest()}])
+            # Core cannot be asked: not started, nothing sent, so storage may route it again.
+            core['up'] = False
+            self.assertEqual(self.service.notice(reminder), {'state': 'not_started', 'error_code': 'notice_check_unavailable'})
+            self.assertEqual(self.sent(), [])
+            # Core says yes: it goes once, into the member's chat, as a reminder.
+            core['up'] = True
+            self.assertEqual(self.service.notice(reminder), {'state': 'done'})
+            self.assertEqual([(str(row['chat_id']), row['text']) for row in self.sent()], [(MEMBER_CHAT, text)])
+            # The same id again is answered from its receipt; core is not asked again.
+            count = len(asked)
+            self.assertEqual(self.service.notice(reminder), {'state': 'done'})
+            self.assertEqual(len(asked), count)
+            # A second use of the same id with its receipts gone: core's yes was spent, so it is refused.
+            for path in (self.root / 'spool/dispatch').glob('notice-' + 'a' * 64 + '.*'): path.unlink()
+            with self.assertRaises(ValueError): self.service.notice(reminder)
+            self.assertEqual(len(self.sent()), 1)
+            # A member chat the app's list marks, first seen after step 2b: its Telegram id.
+            self.assertEqual(self.service.notice({**reminder, 'id': 'b' * 64, 'chat_id': MEMBER_NEW_TG}), {'state': 'done'})
+            # Anything else to a chat that is not the owner's is refused before core is asked.
+            count = len(asked)
+            refused = {
+                'a problem notice': {**reminder, 'id': 'c' * 64, 'send_class': 'notice'},
+                'no class': {key: value for key, value in {**reminder, 'id': 'c' * 64}.items() if key != 'send_class'},
+                'a topic': {**reminder, 'id': 'c' * 64, 'topic': 7},
+                'buttons': {**reminder, 'id': 'c' * 64, 'buttons': [{'text': 'Open', 'url': 'https://example.test/open'}]},
+                'an edit': {**reminder, 'id': 'c' * 64, 'edit': True},
+                'a group': {**reminder, 'id': 'c' * 64, 'chat_id': GROUP},
+                'a chat the list does not mark': {**reminder, 'id': 'c' * 64, 'chat_id': '4999'},
+            }
+            for why, body in refused.items():
+                with self.subTest(why), self.assertRaises(ValueError): self.service.notice(body)
+            self.assertEqual(len(asked), count)
+            # The owner's chat works as before, with no question to core.
+            self.assertEqual(self.service.notice({'id': 'd' * 64, 'chat_id': OWNER, 'text': 'A problem.'}), {'state': 'done'})
+            self.assertEqual(self.service.notice({'id': 'e' * 64, 'chat_id': OWNER, 'text': text, 'send_class': 'reminder'}), {'state': 'done'})
+            self.assertEqual(len(asked), count)
+        self.assertEqual([str(row['chat_id']) for row in self.sent()], [MEMBER_CHAT, MEMBER_NEW_TG, OWNER, OWNER])
+
+    def test_a_members_reminder_whose_yes_was_lost_is_unclear_and_one_that_went_is_answered_from_its_receipt(self):
+        # A yes core gave whose answer never came: the next ask is refused, as the yes was spent, but nothing went, so the
+        # reminder is unclear rather than refused (a 400 would mark it failed, "Telegram refused it").
+        self.member_policy()
+        text = '⏰ Book the hall\n📁 P1\n\n👤 Set by you'
+        reminder = {'id': 'a' * 64, 'chat_id': MEMBER_CHAT, 'text': text, 'send_class': 'reminder'}
+        answers = iter([None, False])
+        with patch('services.telegram.gateway.check_notice_policy', side_effect=lambda body: next(answers)):
+            self.assertEqual(self.service.notice(reminder), {'state': 'not_started', 'error_code': 'notice_check_unavailable'})
+            self.assertEqual(self.service.notice(reminder), {'state': 'ambiguous', 'error_code': 'notice_answer_lost'})
+        self.assertEqual(self.sent(), [])
+        # One that went: its resend is answered from the receipt even when the member's chat is no longer open to it
+        # (paused, or their private chat off), and core is not asked again.
+        asked = []
+        with patch('services.telegram.gateway.check_notice_policy', side_effect=lambda body: asked.append(body) or True):
+            sent = {**reminder, 'id': 'b' * 64}
+            self.assertEqual(self.service.notice(sent), {'state': 'done'})
+            self.service.policy = self.policy = Policy.of(True, OWNER, [GROUP, (NEW, NEW_TG)], topics=TOPICS, old={NEW: [NEW_OLD]})
+            self.assertEqual(self.service.notice(sent), {'state': 'done'})
+            self.assertEqual(len(asked), 1)
+            # A new one to that chat is refused before core is asked.
+            with self.assertRaises(ValueError): self.service.notice({**reminder, 'id': 'c' * 64})
+            self.assertEqual(len(asked), 1)
+        self.assertEqual([str(row['chat_id']) for row in self.sent()], [MEMBER_CHAT])
+
     def test_a_lane_rides_only_on_a_group_pass_or_its_members_own_pass(self):
         self.member_policy()
         group = self.turn(33, GROUP, text='x')
@@ -579,6 +658,27 @@ class PolicyTests(unittest.TestCase):
         for bad in ({'chats': [{'id': 'x'}]}, {'epoch': -1}, {'chats': [{'id': 't', 'app': 'telegram', 'kind': 'topic', 'parent_id': 'missing', 'topic_key': '1',
                                                                       'state': 'active', 'app_ids': []}]}):
             with self.assertRaises(ValueError): Served(bad)
+
+    def test_core_is_asked_about_this_reminder_this_chat_and_this_text_alone(self):
+        # Step 5 (ADR-0265 D10): POST /internal/notices/authorize with the service token; only a yes or a no counts.
+        from services.durable import canonical
+        from services.telegram import checks
+        sent, answers = [], [b'{"allowed":true}', b'{"allowed":false}', b'{"allowed":"yes"}', OSError('down')]
+        class Response:
+            def __init__(self, body): self.body = body
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, _size): return self.body
+        def urlopen(request, timeout):
+            sent.append((request.full_url, request.get_method(), request.data, request.get_header('Authorization')))
+            answer = answers.pop(0)
+            if isinstance(answer, Exception): raise answer
+            return Response(answer)
+        body = {'id': 'a' * 64, 'chat': '4567', 'text_digest': 'b' * 64, 'extra': 1}
+        with patch.dict(os.environ, {'SERVICE_TOKEN': SECRET, 'ARCHIVE_URL': 'http://app.test'}), patch.object(checks.urllib.request, 'urlopen', urlopen):
+            self.assertEqual([checks.check_notice_policy(body) for _ in range(4)], [True, False, None, None])
+        self.assertEqual(sent[0], ('http://app.test/internal/notices/authorize', 'POST',
+                                   canonical({'id': 'a' * 64, 'chat': '4567', 'text_digest': 'b' * 64}), 'Bearer ' + SECRET))
 
 
 class DisabledTests(unittest.TestCase):

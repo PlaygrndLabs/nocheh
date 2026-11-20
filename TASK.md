@@ -2,6 +2,88 @@
 
 <current>
 
+Members step 5: the members' app
+([ADR-0265](docs/adr/0265-member-mini-app.md); owner, 2026-11-12, approving the Members design
+with a members' mini app for tasks; 2026-11-19, the owner's answers to Q1-Q4): Q1 write includes
+trash and restore, with no switch for other people's tasks;
+Q2 the page in English only, with no language choice, bot texts stay editable English owner texts;
+Q3 only members use the app, which follows **Tasks** even when private chat or **Reminders to
+themselves** is off, **Remind me** is hidden with one line saying why, non-members get the closed
+page, an app reminder that cannot reach its member is skipped
+with a Health line, and a group reminder that cannot reach its member goes to the owner as before;
+Q4 the owner's own names for people never reach a member or a group: in every project view an
+assignee shows by their Telegram name only while linked to a Telegram account in a group the view
+reaches, every other one counted as other people; "Made by" and "Finished by" only where the board
+shows them, with Telegram names. One branch: a contract, five parts and their integration.
+- Launch and listener: `verifyLaunchUser` (Ed25519 launch data, one hour, from the menu button or
+  the member's own chat only), the member listener on nocheh-app's port 8790 alone (8780 answers
+  404), its checks in order (no Bearer, launch, not the owner, member and app open, `app_since`,
+  sign out, Telegram re-check of groups older than 6 hours, write mode, 60 task writes in 10 minutes and
+  500 a UTC day), and the `miniapp-back` network
+  ([launch](test/member-mini-app.test.ts), [listener](test/store-member-app-server.test.ts),
+  [contract](test/member-app-contract.test.ts), [schema](test/store-member-app-schema.test.ts)).
+- Tasks: one board per active project of the member's joined groups, reaching only those groups
+  and shared with the private chat (`memberTaskViews`); no project view reads who a task is about,
+  the owner's names for people or person columns, now also in groups, and assignees only by
+  Telegram name (`assigneesSeen`); the page gets the board's statuses and shared columns; versions
+  under a key stored in the control database refuse a stale change (409); refused fields, trash
+  and restore, comments, `origin` 'app' ([store](test/store-member-app.test.ts),
+  [groups](test/store-member-tasks.test.ts), [private chat](test/store-member-reads.test.ts)).
+- Reminders: a reminder goes to whoever set it; a member's goes to their own private chat, with
+  core's one-time yes (`/internal/notices/authorize`), "Set by you" and no place, after the app's
+  group re-check and only with groups confirmed within 6 hours; one set in the
+  app that cannot reach them is skipped with a `reminder_skipped` Health line
+  ([store](test/store-member-reminders.test.ts), [text](test/task-reminder-text.test.ts),
+  [gateway](services/telegram/test_service.py)).
+- Menu button: Apply sets the members' page `/m/` as every private chat's default, then the
+  owner's page on the owner's chat ([apply](services/hermes/test_settings.py),
+  [installer](services/hermes/test_workspaces.py)).
+- Page and dashboard: the `/m/` page (four tabs, English only from one dictionary, assignees as
+  "Lena, Ravi and 2 other people", statuses and shared columns by the page's own `statuses` and
+  `columns` in rows, the drawer, New task and Edit, sign out), Members'
+  **Tasks** wording and **Reminders to themselves**, Settings' mini app addresses, the members'
+  app origin on Tasks ([dashboard](test/dashboard-member-app.test.mjs),
+  [pages](test/dashboard-pages.browser.mjs)).
+- Tester: the fake Telegram signs launch data and records menu buttons, the mini app runs in the
+  fixture, seven members' app scenarios and the `member_app_never_leaks` sweep
+  ([fake](test/test_telegram_mock_members.py), [rehearsal](test/test_telegram_rehearsal.py),
+  [sweep](test/test_canary_sweep.py), [scenarios](tools/acceptance/product_scenarios.py)).
+
+  Checks on the integrated branch (2026-11-19): the build and type checks; node unit tests (855:
+  585 pass, 266 skipped, and only the 4 workflow tests that also fail on main fail); all 118 store
+  test files (312 pass, 0 fail); Python Telegram (159), Hermes (1049, with the 2 environment
+  errors that also occur on main) and the repository's Python tests (192, 2 skipped, and
+  `test_retired_source_leaves_tags` fails as on main); the dashboard type check, format check and
+  its tests (77 of 77); the browser tests (81: 78 pass, and the 3 that also fail on main).
+  After the owner's answers (2026-11-19): node unit tests (865: 592 pass, 269 skipped, the same 4
+  workflow failures); the member, task and reset store test files (22 files, 59 pass); the
+  repository's Python tests (198, 2 skipped); the dashboard checks and its tests (79 of 79); the
+  browser tests (82: 79 pass, and the 3 that also fail on main).
+  After the review fixes (2026-11-19): the build and type checks; node unit tests (865: 592 pass,
+  269 skipped, the same 4 workflow failures); all 120 store test files (315 pass, 0 fail); Python
+  Telegram (160), Hermes (1064, 4 skipped, the same 2 environment errors), the repository's Python
+  tests (198, 2 skipped) and the review replay tool's (18); the dashboard checks and its tests (79
+  of 79); the browser tests (85: 82 pass, and the 3 that also fail on main). The four changed store
+  test files fail on the code before the fixes.
+  After merging main 2ec967a (2026-11-20; this ADR renumbered from 0263 to 0265): the build;
+  node unit tests (891: 616 pass, 271 skipped, the same 4 workflow failures); all 122 store test
+  files (317 pass, 0 fail); Python Telegram (160), Hermes (1066, 4 skipped, the same 2
+  environment errors), the repository's Python tests (199, 2 skipped) and the review replay
+  tool's (18); the dashboard type check and its tests (92 of 92); the format check flags only
+  main's `dashboard/pages/settings/connections.tsx`, as on main; the browser tests (94: 91
+  pass, and the 3 that also fail on main).
+  Full tester on images built from this branch (2026-11-20), every scenario in five parts plus
+  the dashboard pages: all pass. Two scenarios of one part first failed only because that part
+  ran without the `group_members` setup and passed with it; one tester fix came out of these runs
+  (a `getChatMember` fault an earlier scenario never used answered the left-group check, so the
+  fake Telegram now drops unused faults by method).
+  Pending: the tester does not check the skipped reminder's Health line; live acceptance on the
+  owner's install after merge, with a real member, the real menu button and a reminder set in the
+  app.
+  Left for later: a per-member time zone (C2) and a second menu button (C1) were cut.
+  Owner steps: take a backup and rebuild and run every image from the same revision, then apply
+  settings once so the menu buttons are set ([deploy](docs/deploy.md#upgrade-to-step-5)).
+
 Security fixes part 5: only addresses no model built open without a card
 ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md); owner,
 2026-11-14 "all yes" on the review's fixes 2 and 7 and the Notion item; 2026-11-19: any outside

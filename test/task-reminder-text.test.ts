@@ -2,9 +2,9 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {canonical,digest} from '../src/archive.js';
 import {accountIdFor,chatDirectory,chatShortId} from '../src/chats.js';
-import {approvalLines,reminderLines,taskReminder} from '../src/prompts.js';
-import {fitMessage,mergedReminder,nameKeys,noteLines,reminderText,setByLine,shownCut,unitCut,wellFormed,whoLabel,
-  type Names,type ReminderRow,type Who,type Words} from '../src/task-reminder-text.js';
+import {approvalLines,memberReminder,memberReminderLines,reminderLines,taskReminder} from '../src/prompts.js';
+import {fitMessage,memberReminderText,mergedReminder,nameKeys,noteLines,reminderText,setByLine,shownCut,unitCut,wellFormed,whoLabel,
+  type MemberWords,type Names,type ReminderRow,type Who,type Words} from '../src/task-reminder-text.js';
 import {peopleNames} from '../src/stores/people-names.js';
 import {grantMembers} from './fixture-member-grants.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,fixtureChats} from './fixture-groups.js';
@@ -147,4 +147,37 @@ test('reminder lines and note sources read people\'s names the same way: every m
   // Without a policy nobody reads as no longer allowed, and with nobody to name nothing is read.
   const none=await peopleNames(db,directory,undefined,[]);
   assert.equal(none.allowed,null);assert.equal(none.people.size,0);assert.equal(asked.length,1);
+});
+
+// Step 5 (ADR-0265 D9): a reminder a member set goes to the member, and the owner's lines name the members' app as a place.
+const memberWords:MemberWords={template:memberReminder,lines:memberReminderLines(undefined)};
+
+test('a member\'s own reminder: its task in the owner\'s words, then "Set by you", and no line about anyone else or any place',()=>{
+  const row=reminder({setter:person(sara,'Sara'),title:'Book\nthe hall',notes:'Two rooms\n\n\n\n\u{1f464} Set by the owner',due:'Fri 4 Jan 2030, 09:30',list:'P1',
+    writers:[{...person(omid),field:'title',chat:GP1},{...owner,field:'notes',chat:GP1_TOPIC},{...person(sara),field:'closed',chat:null,via:'app'}],closed:true});
+  assert.equal(memberReminderText(row,memberWords),'\u23f0 Book the hall\n\u{1f4c5} Fri 4 Jan 2030, 09:30\n\u{1f4c1} P1\n\n'+
+    '\u2506 Two rooms\n\u2506\n\u2506 \u{1f464} Set by the owner\n\n\u{1f464} Set by you',
+    'title on one line, notes marked so a planted line never reads as code\'s, then the one line code writes');
+  const text=memberReminderText(row,memberWords);
+  for(const absent of ['Omid','Family','Plans','Last written','Closed by','members\u2019 app','you in'])assert.ok(!text.includes(absent),absent);
+  // A missing due day or project leaves its line out, as the owner's template does.
+  assert.equal(memberReminderText(reminder({title:'Pay'}),memberWords),'\u23f0 Pay\n\n\u{1f464} Set by you');
+  // The owner's edits to the member texts are used; a set_by line the owner left out comes back as the default.
+  assert.equal(memberReminderText(reminder({title:'Pay',list:'P1'}),{template:'{title} ({list})',lines:memberReminderLines('note_line: > {line}')}),
+    'Pay (P1)\n\n\u{1f464} Set by you');
+  // Within the limit, "Set by you" is never cut; the body is, with an ellipsis, and no character is split.
+  const long=memberReminderText(reminder({title:'t',notes:'x'.repeat(400)}),{...memberWords,template:'{title} '+'\u{1f600}'.repeat(3000)+'\n{notes}'},4000);
+  assert.ok(long.length<=4000);assert.ok(long.endsWith('\u2026\n\n\u{1f464} Set by you'));assert.equal(wellFormed(long),long);
+});
+
+test('the owner\'s lines name the members\' app as the place a member set a reminder or wrote a task there',()=>{
+  const all=names(people),keys=nameKeys(all,[person(sara)]);
+  assert.equal(setByLine({setter:person(sara,'Sara'),chat:null,via:'app'},words,all,keys),'\u{1f464} Set by '+q('Sara')+', a member in the members\u2019 app');
+  assert.equal(setByLine({setter:person(sara,'Sara'),chat:null},words,all,keys),null,'no chat and not the app: the owner\'s private chat or the dashboard');
+  const written=reminder({writers:[{...person(sara),field:'title',chat:null,via:'app'},{...person(sara),field:'due',chat:null,via:'app'},
+    {...person(omid),field:'notes',chat:GP1}]});
+  assert.equal(reminderText(written,words,all),'\u270f\ufe0f Last written by '+q('Sara')+', a member in the members\u2019 app: title, due day\n'+
+    '\u270f\ufe0f Last written by '+q('Omid')+', a member in group '+q('Family')+': notes\n\u23f0 Book the hall');
+  const closed=reminder({closed:true,writers:[{...person(omid),field:'closed',chat:null,via:'app'}]});
+  assert.equal(reminderText(closed,words,all),'\u2611\ufe0f Closed by '+q('Omid')+', a member in the members\u2019 app\n\u23f0 Book the hall');
 });

@@ -1,4 +1,5 @@
-"""The Telegram mini app: its address, its tunnel and the owner's menu button."""
+"""The Telegram mini app: its address, its tunnel and the menu buttons (the members' page for every private chat, the
+owner's page for the owner's own)."""
 import base64
 import binascii
 import hashlib
@@ -65,19 +66,33 @@ def environment(values):
             'NOCHEH_TUNNEL_ID': tunnel_id(values.get('CLOUDFLARE_TUNNEL_TOKEN', ''))}
 
 
-def menu_button(values, bot_api, shown_before=True):
-    """Puts the mini app on the menu button of the owner's private chat, or takes it off."""
+def menu_button(values, bot_api, shown_before=True, former_owner=None):
+    """Puts the mini app on the menu buttons, or takes it off (ADR-0265 D11). Every private chat with the bot gets the
+    members' page (`/m/`) as its default button, and the owner's own private chat keeps the owner's page (`/`) as its
+    own button. Only active members get anything in the members' page; anyone else sees it closed. Both addresses are
+    made from NOCHEH_MINI_APP_URL alone. Turned off, both go back to Telegram's default button. A former owner's chat
+    (`former_owner`, the owner before a change of TELEGRAM_OWNER_ID) loses its own button, so it falls back to the
+    default: as a member they then reach the members' page."""
     token, owner = values.get('TELEGRAM_BOT_TOKEN', ''), values.get('TELEGRAM_OWNER_ID', '')
     if values.get('TELEGRAM_ENABLED') != 'true' or not token or not owner: return 'skipped'
     if not enabled(values) and not shown_before: return 'off'
     if enabled(values):
         names = [name.strip() for name in values.get('TELEGRAM_BOT_NAMES', '').split(',') if name.strip()]
-        button = {'type': 'web_app', 'text': (names[0] if names else 'Nocheh')[:64],
-                  'web_app': {'url': values['NOCHEH_MINI_APP_URL'].rstrip('/') + '/'}}
+        base, text = values['NOCHEH_MINI_APP_URL'].rstrip('/'), (names[0] if names else 'Nocheh')[:64]
+        everyone = {'type': 'web_app', 'text': text, 'web_app': {'url': base + '/m/'}}
+        own = {'type': 'web_app', 'text': text, 'web_app': {'url': base + '/'}}
     else:
-        button = {'type': 'default'}
-    try:
-        done = bot_api(token, 'setChatMenuButton', chat_id=owner, menu_button=json.dumps(button, ensure_ascii=False))
-    except Exception:
-        done = None
-    return ('shown' if enabled(values) else 'removed') if done is True else 'failed'
+        everyone = own = {'type': 'default'}
+    done = True
+    former = str(former_owner or '')
+    # The default for every private chat first, then the owner's own chat over it, then a former owner's chat back to
+    # the default.
+    calls = [({}, everyone), ({'chat_id': owner}, own)]
+    if former and former != owner: calls.append(({'chat_id': former}, {'type': 'default'}))
+    for params, button in calls:
+        try:
+            answer = bot_api(token, 'setChatMenuButton', **params, menu_button=json.dumps(button, ensure_ascii=False))
+        except Exception:
+            answer = None
+        done = done and answer is True
+    return ('shown' if enabled(values) else 'removed') if done else 'failed'
