@@ -27,7 +27,7 @@ import {
 } from '../../ui/core';
 import {Drawer} from '../../ui/overlay';
 import {ago, dateTime} from '../../lib/system-format';
-import {noteDayText, type NoteEntry} from '../../lib/memory-sources';
+import {noteDayText, noteWords, type NoteEntry} from '../../lib/memory-sources';
 import {OriginalList} from '../../lib/originals';
 import {useChats} from './shared';
 import {earlierSuffix, notesProfiles, type Profile} from './notes-profiles';
@@ -218,7 +218,7 @@ export function Notes() {
                       className="max-h-[28rem] overflow-auto rounded-lg bg-subtle p-3 font-sans text-[13px] leading-relaxed break-words whitespace-pre-wrap"
                       dir="auto"
                     >
-                      {note.text}
+                      {noteWords(note.text)}
                     </pre>
                   ) : (
                     <p className="text-[13px] text-muted">Nothing written yet.</p>
@@ -350,7 +350,7 @@ function NotesTable({label, entries}: {label: string; entries: Entry[]}) {
                 className="block border-b-0 pb-1 text-[13px] leading-relaxed break-words whitespace-pre-wrap sm:table-cell sm:pb-2.5"
                 dir="auto"
               >
-                {entry.text}
+                {noteWords(entry.text)}
               </Td>
               <Td className="block space-y-1 border-b-0 pt-0 sm:table-cell sm:pt-2.5">
                 <p className="flex items-baseline gap-1.5 text-xs text-muted" title={entry.label}>

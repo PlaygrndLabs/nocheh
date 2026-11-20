@@ -146,17 +146,18 @@ export function People() {
               : 'People appear here when Nocheh learns about them from chats it may learn from.'}
           </Empty>
         ) : (
-          <ul className="divide-y divide-line">
+          // A person here is only a name, so the names sit side by side instead of one long column.
+          <ul aria-label="People" className="grid gap-x-2 p-2 sm:grid-cols-2 xl:grid-cols-3">
             {people.map(entity => (
               <li key={entity.id}>
                 <button
                   type="button"
                   onClick={() => setParams({person: entity.id})}
-                  className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-subtle/60 focus-visible:bg-subtle/60 focus-visible:outline-none"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-subtle/60 focus-visible:bg-subtle/60 focus-visible:outline-none"
                 >
                   <span
                     aria-hidden
-                    className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-[13px] font-semibold text-accent-text"
+                    className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text"
                   >
                     {entity.name.trim().slice(0, 1).toUpperCase() || '?'}
                   </span>

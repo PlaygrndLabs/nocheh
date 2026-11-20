@@ -448,8 +448,10 @@ def run(body, emit=None, relay=None):
     finally:
         agent.close()
         if review:
-            # A memory review leaves an empty native session behind; Hermes's own hidden flag keeps it out of the session list.
-            with contextlib.suppress(Exception):database.set_session_hidden(session_id,True)
+            # A memory review leaves an empty native session behind: Hermes removes it, and one that holds anything is
+            # hidden instead, which keeps it out of every session list.
+            with contextlib.suppress(Exception):
+                if not database.delete_session_if_empty(session_id):database.set_session_hidden(session_id,True)
         database.close();restore_evidence();disconnect_data_tools()
 
 

@@ -10,14 +10,34 @@ import {
   coverageLine,
   factsReasonText,
   personOptions,
+  factBadge,
+  type Fact,
   type FactCoverage,
   type FactsPage,
   type Person,
 } from '../../lib/memory-sources';
-import {FactItem} from '../../lib/originals';
-import {Card, CardBody, CardHeader, Field, Input, LoadError, LoadingRows, Pager, Select} from '../../ui/core';
+import {OriginalList, sentAt} from '../../lib/originals';
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  Dot,
+  Field,
+  Input,
+  LoadError,
+  LoadingRows,
+  Pager,
+  Select,
+  Table,
+  Td,
+  Th,
+} from '../../ui/core';
 import {ChatPicker} from '../chats/chat-picker';
 import {useCursorPages, useDebounced} from './shared';
+
+const ROWS = 10;
+/** How many tables of ROWS one server page of 25 makes. */
+const PARTS = 3;
 
 export function LongTermFacts() {
   const chat = useParam('chat') ?? '';
@@ -38,6 +58,21 @@ export function LongTermFacts() {
     60000,
   );
   const counted = coverage.data?.coverage;
+  // The server hands facts 25 at a time; the table shows ROWS of them, so the page stays near one screen.
+  const filter = chat + '\u0000' + about;
+  const [part, setPart] = useState({filter, page: 0, index: 0});
+  const facts = page.data?.facts ?? [];
+  const parts = Math.max(1, Math.ceil(facts.length / ROWS));
+  const index = part.filter === filter && part.page === cursor.page ? Math.min(part.index, parts - 1) : 0;
+  const shown = facts.slice(index * ROWS, (index + 1) * ROWS);
+  const turn = (older: boolean) => {
+    if (older && index + 1 < parts) return setPart({filter, page: cursor.page, index: index + 1});
+    if (!older && index > 0) return setPart({filter, page: cursor.page, index: index - 1});
+    const next = cursor.page + (older ? 1 : -1);
+    cursor.go(next, page.data?.next);
+    // Stepping back lands on the last rows of the page before, which is where the owner came from.
+    setPart({filter, page: next, index: older ? 0 : PARTS});
+  };
   return (
     <Card>
       <CardHeader
@@ -54,53 +89,92 @@ export function LongTermFacts() {
             <p className="text-[13px] text-muted">{factsReasonText('unavailable', 'list')}</p>
           )
         )}
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid items-start gap-3 sm:grid-cols-3">
           <ChatPicker
             label="In chat"
             value={chat ? [chat] : []}
             onChange={ids => setParams({chat: ids[0] ?? null}, true)}
             noOthersPrivate
+            compact
           />
+          <Field label="Find a person" htmlFor="facts-person-search">
+            <Input
+              id="facts-person-search"
+              type="search"
+              aria-label="Search people"
+              placeholder="Search people by name"
+              value={typed}
+              onChange={event => setTyped(event.target.value)}
+            />
+          </Field>
           <Field label="About person" htmlFor="facts-person">
-            <div className="space-y-2">
-              <Input
-                type="search"
-                aria-label="Search people"
-                placeholder="Search people by name"
-                value={typed}
-                onChange={event => setTyped(event.target.value)}
-              />
-              <Select id="facts-person" value={about} onChange={event => setParams({about: event.target.value}, true)}>
-                <option value="">Anyone</option>
-                {options.map(person => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            <Select id="facts-person" value={about} onChange={event => setParams({about: event.target.value}, true)}>
+              <option value="">Anyone</option>
+              {options.map(person => (
+                <option key={person.id} value={person.id}>
+                  {person.name}
+                </option>
+              ))}
+            </Select>
           </Field>
         </div>
         {page.error && !page.data ? (
           <LoadError what="facts" error={page.error} onRetry={() => void refreshResources()} />
         ) : !page.data ? (
           <LoadingRows rows={3} />
-        ) : page.data.facts.length ? (
-          <ul className="space-y-2" aria-label="Facts">
-            {page.data.facts.map(fact => (
-              <FactItem key={fact.id} fact={fact} />
-            ))}
-          </ul>
         ) : (
-          <p className="text-[13px] text-muted">{factsReasonText(page.data.reason, 'list', !!page.data.next)}</p>
+          !facts.length && (
+            <p className="text-[13px] text-muted">{factsReasonText(page.data.reason, 'list', !!page.data.next)}</p>
+          )
         )}
       </CardBody>
+      {shown.length > 0 && (
+        <Table aria-label="Facts" className="max-sm:block">
+          <thead className="max-sm:sr-only">
+            <tr>
+              <Th scope="col">Fact</Th>
+              <Th scope="col">Learned</Th>
+              <Th scope="col">Where it came from</Th>
+            </tr>
+          </thead>
+          <tbody className="max-sm:block">
+            {shown.map(fact => (
+              <FactRow key={fact.id} fact={fact} />
+            ))}
+          </tbody>
+        </Table>
+      )}
       <Pager
-        page={cursor.page}
-        hasNext={!!page.data?.next}
-        onPage={next => cursor.go(next, page.data?.next)}
+        page={cursor.page * PARTS + index}
+        hasNext={index + 1 < parts || !!page.data?.next}
+        onPage={next => turn(next > cursor.page * PARTS + index)}
         labels={['Newer', 'Older']}
       />
     </Card>
+  );
+}
+
+/** One fact as a table row: its words, when it was learned and how its source is known, and its originals. On a
+ *  phone the cells stack. */
+function FactRow({fact}: {fact: Fact}) {
+  const badge = factBadge(fact);
+  return (
+    <tr className="max-sm:block max-sm:border-b max-sm:border-line max-sm:py-2">
+      <Td dir="auto" className="break-words max-sm:block max-sm:border-0 max-sm:py-1 sm:w-[38%]">
+        {fact.text}
+      </Td>
+      <Td className="space-y-1 text-xs text-muted max-sm:block max-sm:border-0 max-sm:py-1 sm:w-44">
+        <p>{sentAt(fact.learned_at)}</p>
+        {badge && (
+          <p className="flex items-center gap-1.5">
+            <Dot tone={badge.tone} />
+            {badge.label}
+          </p>
+        )}
+      </Td>
+      <Td className="max-sm:block max-sm:border-0 max-sm:py-1">
+        <OriginalList originals={fact.originals} more={fact.more} label="Where it came from" />
+      </Td>
+    </tr>
   );
 }

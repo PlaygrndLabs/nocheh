@@ -255,6 +255,12 @@ class FullNotesReviewTests(unittest.TestCase):
         self.assertNotIn('staged',results[-1])
         self.assertIn(NEW,saved);self.assertNotIn('Stale note 0:',saved);self.assertIn('Stale note 3:',saved)
         self.assertFalse((profile/'pending').exists(),'nothing is held for an approval no one can give')
+        # The review's own empty session is removed, so reviews leave no sessions behind.
+        from hermes_state import SessionDB
+        from .isolated_profile import database_path
+        db=SessionDB(database_path(profile),read_only=True)
+        try:self.assertIsNone(db.get_session('review-'+'a'*64))
+        finally:db.close()
 
     def test_a_refused_batch_on_full_notes_leaves_room_to_try_again(self):
         # At a live-sized prompt per call, a review that needs a second try (here a patch whose

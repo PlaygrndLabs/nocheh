@@ -19,8 +19,11 @@ import {
   Notice,
   Pager,
   Select,
+  Table,
+  Td,
   Technical,
   Textarea,
+  Th,
 } from '../../ui/core';
 import {Drawer, useFeedback} from '../../ui/overlay';
 import {
@@ -175,11 +178,21 @@ export function Facts() {
                 : 'Facts appear here as Nocheh learns from chats it is allowed to learn from.'}
           </Empty>
         ) : (
-          <ul className="divide-y divide-line">
-            {visible.map(item => (
-              <FactRow key={item.id} item={item} where={where(item)} onOpen={() => setParams({entry: item.id})} />
-            ))}
-          </ul>
+          <Table aria-label="Facts" className="max-sm:block">
+            <thead className="max-sm:sr-only">
+              <tr>
+                <Th scope="col">Fact</Th>
+                <Th scope="col">Learned in</Th>
+                <Th scope="col">Kind</Th>
+                <Th scope="col">Status</Th>
+              </tr>
+            </thead>
+            <tbody className="max-sm:block">
+              {visible.map(item => (
+                <FactRow key={item.id} item={item} where={where(item)} onOpen={() => setParams({entry: item.id})} />
+              ))}
+            </tbody>
+          </Table>
         )}
         <Pager
           page={paging.page}
@@ -201,13 +214,14 @@ export function Facts() {
   );
 }
 
-function FactBadges({item, where}: {item: Learned; where?: string}) {
+/** How sure a fact is, or what happened to it. `where` and the kind join it in the drawer, which has no columns. */
+function FactBadges({item, where, full = true}: {item: Learned; where?: string; full?: boolean}) {
   const learning = item.provenance?.learning ?? {};
   const sure = certainty[learning.uncertainty ?? ''];
   return (
     <div className="flex flex-wrap gap-1.5">
       {where && <Badge>{where}</Badge>}
-      <Badge>{kindLabel[item.kind] ?? 'Fact'}</Badge>
+      {full && <Badge>{kindLabel[item.kind] ?? 'Fact'}</Badge>}
       {item.retired && <Badge>Retired</Badge>}
       {!item.retired && item.author === 'owner' && <Badge tone="accent">Corrected by you</Badge>}
       {!item.retired && item.author !== 'owner' && item.active_revision > 1 && <Badge tone="accent">Revised</Badge>}
@@ -217,26 +231,31 @@ function FactBadges({item, where}: {item: Learned; where?: string}) {
   );
 }
 
+/** One fact as a table row; the whole row opens it. On a phone the cells stack. */
 function FactRow({item, where, onOpen}: {item: Learned; where: string; onOpen: () => void}) {
+  const cell = 'max-sm:block max-sm:border-0 max-sm:py-0.5';
   return (
-    <li>
-      <button
-        type="button"
-        onClick={onOpen}
-        className="block w-full px-5 py-3.5 text-left transition-colors hover:bg-subtle/60 focus-visible:bg-subtle/60 focus-visible:outline-none"
-      >
-        <p className="text-[13px] font-medium text-muted">{item.subject}</p>
-        <p
-          className={'mt-0.5 line-clamp-2 text-sm break-words ' + (item.retired ? 'text-muted line-through' : '')}
-          dir="auto"
-        >
-          {item.text}
-        </p>
-        <div className="mt-2">
-          <FactBadges item={item} where={where} />
-        </div>
-      </button>
-    </li>
+    <tr
+      onClick={onOpen}
+      className="cursor-pointer transition-colors hover:bg-subtle/60 max-sm:block max-sm:border-b max-sm:border-line max-sm:py-2"
+    >
+      <Td className={cell}>
+        <button type="button" className="block w-full text-left focus-visible:underline focus-visible:outline-none">
+          <span className="block text-xs font-medium text-muted">{item.subject}</span>
+          <span
+            className={'line-clamp-2 text-sm break-words ' + (item.retired ? 'text-muted line-through' : '')}
+            dir="auto"
+          >
+            {item.text}
+          </span>
+        </button>
+      </Td>
+      <Td className={cell + ' text-[13px] text-muted sm:w-56'}>{where}</Td>
+      <Td className={cell + ' text-[13px] text-muted sm:w-28'}>{kindLabel[item.kind] ?? 'Fact'}</Td>
+      <Td className={cell + ' sm:w-44'}>
+        <FactBadges item={item} full={false} />
+      </Td>
+    </tr>
   );
 }
 
