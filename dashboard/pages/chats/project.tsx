@@ -1,6 +1,6 @@
 /**
- * "Project": which project a group belongs to. A topic always follows its group's project, and a project grants no
- * access in a group: a group answer uses only that group (ADR-0247).
+ * "Project": which project a group belongs to. A topic always follows its group's project. While the project shares its
+ * group chats, an answer in any of its groups uses all of them (ADR-0267); otherwise only that group (ADR-0247).
  */
 import {useState} from 'react';
 import {useResource} from '../../lib/resource';
@@ -12,7 +12,7 @@ import {
   leaveTasksText,
   moveTasksText,
   otherGroupsText,
-  projectGroupsNote,
+  projectNote,
   projectTasksWarning,
   relatedGroupsHint,
 } from './rule-dialog';
@@ -24,6 +24,8 @@ export type Project = {
   state: string;
   /** The groups Nocheh serves that are in this project, as the server lists them. */
   groups?: string[];
+  /** "Share group chats": its groups read each other (ADR-0267). */
+  share_chats?: boolean;
   revision?: number;
 };
 type Assignment = {
@@ -63,7 +65,9 @@ export function JoinNotes({
   return (
     <div className="space-y-3">
       <p>{otherGroupsText(project.name, others)}</p>
-      <Notice tone="warn">{others.length ? `${projectGroupsNote} ${relatedGroupsHint}` : relatedGroupsHint}</Notice>
+      <Notice tone="warn">
+        {others.length ? `${projectNote(project.share_chats)} ${relatedGroupsHint}` : relatedGroupsHint}
+      </Notice>
       <p>{projectTasksWarning(name, [project.name])}</p>
     </div>
   );
@@ -303,7 +307,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
     <Card>
       <CardHeader
         title="Project"
-        description="A project gives its groups a role, skills and a task list. They share only the tasks set on the whole project: a group answer uses only that group."
+        description="A project gives its groups a role, skills and a task list. While it shares its group chats, an answer in any of its groups can use all of them."
       />
       <CardBody className="pt-3">
         {failed ? (
@@ -366,7 +370,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
                     .filter(group => group !== space)
                     .map(names),
                 )}{' '}
-                {projectGroupsNote}
+                {projectNote((choices.find(project => project.id === data.project!.id) ?? data.project).share_chats)}
               </p>
             )}
           </div>

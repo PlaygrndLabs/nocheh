@@ -3,7 +3,7 @@ import type {ReactNode} from 'react';
 import {Badge, Button, Details, Notice, Technical} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {knowledgeDecisionControls} from '../../lib/supervision';
-import {otherGroupsText, projectGroupsNote, projectTasksWarning, relatedGroupsHint} from '../chats/rule-dialog';
+import {otherGroupsText, projectTasksWarning, relatedGroupsHint, sharingProjectNote} from '../chats/rule-dialog';
 import {useChatDirectory} from '../../lib/chat-directory';
 import {OriginalNames} from '../../lib/originals';
 import {EvidenceLinks, Fact, Facts, ReviewDrawer, type ReviewState} from './review-drawer';
@@ -22,7 +22,7 @@ function ProjectGroupsNotice({projects, chat}: {projects: ProjectGroups[]; chat:
         ))}
       </ul>
       <p className="mt-2">
-        {projectGroupsNote} {relatedGroupsHint}
+        {sharingProjectNote} {relatedGroupsHint}
       </p>
     </Notice>
   );

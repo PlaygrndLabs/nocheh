@@ -1,4 +1,4 @@
-import {admin,boundReader,type Reader} from '../access.js';
+import {admin,boundReader,sharedReads,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inReadSet,inRecall,type RecallScope} from '../spaces.js';
@@ -218,8 +218,9 @@ export class LearnedMemoryRepository {
       if(!['conversation','project'].includes(row.scope_kind))throw new HttpError(404,'learned_memory_not_found');
     }
     else if(!principal.admin&&principal.scope!==null) {
-      const space=principal.space??principal.scope;
-      if(row.scope_kind==='conversation'&&!(recall?inRecall(recall,row.scope_id):row.scope_id===space))throw new HttpError(404,'learned_memory_not_found');
+      // A group reader whose project shares its group chats reads what was learned in any of the project's groups (ADR-0267).
+      const space=principal.space??principal.scope,shared=sharedReads(principal);
+      if(row.scope_kind==='conversation'&&!(shared?inReadSet(shared,row.scope_id):recall?inRecall(recall,row.scope_id):row.scope_id===space))throw new HttpError(404,'learned_memory_not_found');
       if(row.scope_kind==='project') {
         const effective=await new ProjectRepository(this.stores.control).effective(space);
         if(effective.project?.id!==row.scope_id||effective.project?.state!=='active')throw new HttpError(404,'learned_memory_not_found');

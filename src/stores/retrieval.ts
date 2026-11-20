@@ -1,4 +1,4 @@
-import {admin,boundReader,type Reader} from '../access.js';
+import {admin,boundReader,sharedReads,type Reader} from '../access.js';
 import {HttpError,string} from '../http.js';
 import {matchesArchiveFilters,privateChatsParams,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
@@ -98,10 +98,11 @@ export class SourceRepository {
   }
   /** The archive scopes a member's private chat, or the owner's ask about a member, searches (step 4): the groups of its
    *  reads and its bound chat, under every id each has had; null for any other reader (an answer included, whose own
-   *  /start is in the owner's chat), which searches everything and is narrowed by canRead alone. */
+   *  /start is in the owner's chat), which searches everything and is narrowed by canRead alone. A group reader whose
+   *  project shares its group chats searches the project's groups (ADR-0267). */
   private boundScopes(principal:Reader):string[]|null {
     const chat=boundChat(principal);
-    if(chat===null)return null;
+    if(chat===null){const shared=sharedReads(principal);return shared?archiveScopes(readSetGroups(shared)):null;}
     return archiveScopes([...readSetGroups(this.access.reads(principal)!),chat]);
   }
   /** Relations are shown within the conversations the principal recalls. */
@@ -109,6 +110,9 @@ export class SourceRepository {
     // A bound reader sees relations within its bound groups (an answer's frozen in its record, ADR-0249), and a member,
     // or the owner's ask about one, within that member's own chat too (step 4).
     if(boundReader(principal)!==null){const chat=boundChat(principal);return {kind:'reads',set:this.access.reads(principal)!,...(chat?{chat}:{})};}
+    // A group reader whose project shares its group chats sees relations within the project's groups (ADR-0267).
+    const shared=sharedReads(principal);
+    if(shared)return {kind:'reads',set:shared};
     const scope=this.access.recall(principal);
     return scope?{kind:'recall',scope}:{kind:'owner'};
   }
@@ -551,7 +555,9 @@ export class SourceRepository {
       if(chat!==mine&&!readSetGroups(reads).includes(chat))throw new HttpError(403,'conversation_not_permitted');
       return {chat,scopes:archiveScopes([chat]),from,to,binding};
     }
-    if(!owner&&input.chat&&input.chat!==principal.scope)throw new HttpError(403,'conversation_not_permitted');
+    // A group reader whose project shares its group chats may page any of the project's groups (ADR-0267).
+    const shared=sharedReads(principal);
+    if(!owner&&input.chat&&input.chat!==principal.scope&&!(shared&&readSetGroups(shared).includes(input.chat)))throw new HttpError(403,'conversation_not_permitted');
     // The owner's turns never page a private chat that is not the owner's (a member's or a stranger's); the dashboard
     // does (step 4).
     // A raw Telegram id is read under the chat it names, so it is told apart by that chat too.
@@ -559,7 +565,7 @@ export class SourceRepository {
       throw new HttpError(403,'conversation_not_permitted');
     // A topic is read with the rest of its group, as a group reader reads it.
     const space=principal.space?parentSpace(principal.space)??principal.space:null;
-    const chat=owner?input.chat||(principal.admin?'':space??ownerChat(this.access.policy())??''):principal.scope!;
+    const chat=owner?input.chat||(principal.admin?'':space??ownerChat(this.access.policy())??''):input.chat||principal.scope!;
     if(!chat)throw new HttpError(400,'conversation_required');
     // A chat is read under every id it has had, current and old, through chat_ids (ADR-0252). The owner may also name a
     // value no chat row holds (an unmapped import), read as it is; anyone else reads nothing of one.

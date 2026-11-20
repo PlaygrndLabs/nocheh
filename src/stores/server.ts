@@ -116,7 +116,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // on every request, and it reaches its read routes only (ADR-0249, ADR-0262). A pass naming a chat another process
     // recorded a moment ago (a new topic's first turn) is read again once this process's directory has looked again, as
     // the broker does (ADR-0252).
-    const parsed=await currentReader(req,config.token),principal=boundReader(parsed)===null?parsed:await s.access.bindReads(parsed);
+    // Every scoped reader's reads are bound for the request: a bound reader's own, and a group reader's project groups
+    // while its project shares its group chats (ADR-0267).
+    const parsed=await currentReader(req,config.token),principal=parsed.admin||parsed.scope===null?parsed:await s.access.bindReads(parsed);
     assertPrivateAnswerRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
     // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.

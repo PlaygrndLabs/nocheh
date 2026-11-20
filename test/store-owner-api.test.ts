@@ -110,7 +110,8 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal((await request(guardPath+'/revisions/'+guard.active_revision)).content.text,'Generated reading');
 
     const project=await request('/v1/projects',{name:key,description:'Synthetic',state:'active',expected_revision:0,operation_id:key+':project'});
-    assert.deepEqual(Object.keys(project).sort(),['description','id','name','revision','state'],'a project has no share box');
+    assert.deepEqual(Object.keys(project).sort(),['description','id','name','revision','share_chats','state'],'a project has no share box, only Share group chats');
+    assert.equal(project.share_chats,true,'a new project shares its group chats (ADR-0267)');
     for(const extra of [{sharing_enabled:false},{sharing_mode:'filtered'}])
       assert.deepEqual(await request('/v1/projects',{name:key+':box',description:'',state:'active',...extra,expected_revision:0,operation_id:key+':box:'+Object.keys(extra)[0]},400),
         {error:'unknown_policy_field'});
@@ -127,6 +128,10 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal(sharing.mode,'approved');assert.ok((await request('/v1/sharing/rules')).rules.some((r:any)=>r.id===sharing.id));
     const archived=await request('/v1/projects',{id:project.id,name:key,description:'Synthetic',state:'archived',expected_revision:project.revision,operation_id:key+':archive'});
     assert.equal(archived.state,'archived');assert.equal('sharing_enabled' in archived,false);
+    assert.equal(archived.share_chats,true,'a change that does not name Share group chats keeps it');
+    const quiet=await request('/v1/projects',{id:project.id,name:key,description:'Synthetic',state:'archived',share_chats:false,expected_revision:archived.revision,operation_id:key+':quiet'});
+    assert.equal(quiet.share_chats,false);
+    await request('/v1/projects',{id:project.id,name:key,description:'Synthetic',state:'archived',share_chats:'no',expected_revision:quiet.revision,operation_id:key+':badshare'},400);
 
     await services.guards.prepare(file.event,'fixture',services.detect);
     const origin=space+'1',groupEvent=(await services.capture.capture({...event,key:key+':group-source',scope:origin,source_id:'89',
