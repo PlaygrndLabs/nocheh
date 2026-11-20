@@ -314,6 +314,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         from .isolated_profile import prepare
         from .profile_config import inherited_config,read,preferences
         prepare(profile)
+        if scope.owner and not background and body.get('channel','telegram')=='telegram':
+            # The owner's chat schedule store, which the sealed reply may get to set schedules (ADR-0266).
+            from .scopes import Scopes
+            home=Path(profile).parent/Scopes.profile(scope.chat_id)
+            if home.is_dir() and not home.is_symlink() and not (home/'cron').is_symlink():(home/'cron').mkdir(exist_ok=True,mode=0o700)
         request.update(scoped_transport(body['archive_credential'],transport['api_mode']))
         if 'preferences' not in request:
             effective,_=inherited_config(profile,read(profile/'config.yaml'))

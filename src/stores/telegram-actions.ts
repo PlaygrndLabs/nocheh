@@ -46,6 +46,8 @@ const otherGroup=(scope:string,destination:string,directory:ChatDirectory=chats(
   const group=directory.groupOf(destination);return group!==null&&group!==directory.groupOf(scope);
 };
 /** The classes an action's send may carry (ADR-0256); the schema's CHECK holds the same list. */
+/** A scheduled run's answer that says there is nothing to send: Hermes's [SILENT] marker, or Nocheh's [NO_REPLY]. */
+export const silentResult=(text:string)=>/^\s*\[(SILENT|NO_REPLY)\]\s*$/i.test(text);
 export type ActionSendClass=Extract<SendClass,'approved_post'|'job_report'|'scheduled_run'|'notice'>;
 type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
   scope:string|null;space:string;profile:string;destination:string;fingerprint:string;text_hash:string;guard_revision:number|null;send_class:ActionSendClass};
@@ -158,11 +160,17 @@ export class TelegramActionRepository {
       result.producer!=='hermes'||result.producer_version!=='managed-scheduler-v2'||canonical(result.operation_reference)!==canonical(row.source_reference))
       throw new HttpError(409,'run_result_conflict');
     const output=JSON.parse(result.content.toString());if(output.state!=='done')return {state:'withheld',reason:'run_not_complete'};
-    const text=string(output.text,1000000);if(version.configuration.deliver!=='telegram'||!text.trim())return {state:'local'};
+    const text=string(output.text,1000000);
+    // A run with nothing new to say answers only [SILENT] (Hermes's marker) and sends nothing (ADR-0266).
+    if(version.configuration.deliver!=='telegram'||!text.trim()||silentResult(text))return {state:'local'};
     if(text.length>3500)return {state:'withheld',reason:'result_exceeds_telegram_limit'};
-    const audience:Reader={admin:false,scope:row.scope===ownerChat(this.access.policy())?null:row.scope,space:row.space_id,
+    const owner=row.scope===ownerChat(this.access.policy());
+    const audience:Reader={admin:false,scope:owner?null:row.scope,space:row.space_id,
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
-    return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text},'scheduled_run');
+    // The owner approved their private chat's schedules once (ADR-0266): each result goes there with no card. A group's
+    // result still waits for the owner's card.
+    return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text},'scheduled_run',
+      undefined,null,owner?'owner_scheduled_chat':undefined);
   }
   /** The person who wrote a live group turn, when they may talk to Nocheh there (the owner or a member who talks there);
    *  null for the owner's private chat. */
@@ -235,7 +243,8 @@ export class TelegramActionRepository {
       note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. Nocheh posts only in the owner\'s private chat and its topics, the owner\'s selected groups and their topics, and the private chats of the owner\'s members in those groups. A message to this same group is posted without approval; a member confirms their own message to another group from this list on a card, and a message to any other chat is shown to the owner to approve first.'};
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
-    source:SourceReference|OperationReference,input:Record<string,unknown>,sendClass:ActionSendClass,channel?:string,requester:string|null=null){
+    source:SourceReference|OperationReference,input:Record<string,unknown>,sendClass:ActionSendClass,channel?:string,requester:string|null=null,
+    standing?:'owner_scheduled_chat'){
     // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0252), and
     // either must be a chat Nocheh serves (ADR-0254). An unknown chat and one not served answer alike, so nothing is learned
     // by asking. A turn with no live Telegram message (a job, a schedule, the web chat) has no 'current': a bad request as
@@ -280,7 +289,9 @@ export class TelegramActionRepository {
       // always waits for its card in the private chat, which names that chat and shows the exact text (ADR-0244).
       const owner=ownerChat(this.access.policy()),toOwner=!!owner&&chatOf(destination)===owner;
       const group=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?this.groupRequest(principal,turn,destination,requester):null;
-      const autonomy=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?
+      // A scheduled result for the owner's own private chat: the owner approved that chat's schedules once (ADR-0266).
+      const autonomy=standing==='owner_scheduled_chat'?(toOwner&&row.state==='proposed'&&decision.outcome==='ask'?standing:null):
+        source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?
         (group==='owner_private_request'&&await followUpTurn(db,principal)?null:group)??(toOwner?await ownerAutonomyGrant(db,principal,turn):null):null;
       if(autonomy)decision=await evaluate(db,effect,autonomy);
       await recordEffect(db,effect,'proposed',decision,source);
@@ -291,6 +302,7 @@ export class TelegramActionRepository {
           VALUES($1,$2,$3,'approve',$4,$5) ON CONFLICT DO NOTHING`,['owner-autonomy:'+id,hash,id,revision,source]);
         await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
         await db.query('COMMIT');return {id,state:'approved',fingerprint,message:autonomy==='owner_private_request'?'Approved: this goes to the owner\'s own private chat, so it is being sent there now. Confirm in one short sentence without repeating the message.':
+          autonomy==='owner_scheduled_chat'?'Approved: a scheduled result for the owner\'s private chat; sending now.':
           autonomy!=='same_group_request'?'Approved by your own request under the owner freedom setting; sending now.':
           destination===principal.space?'Approved: you were asked here for a message to this same chat, so it is being posted now. Do not repeat or announce it; return [NO_REPLY] unless something else needs an answer.':
           'Approved: this is for the same group, so it is being posted there now. Confirm in one short sentence without repeating the message.'};

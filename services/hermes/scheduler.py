@@ -90,7 +90,7 @@ class Scheduler:
                             seconds=job['schedule']['minutes']*60
                             slots=int((at-date(due)).total_seconds()//seconds)+1
                             next_run=(date(due)+timedelta(seconds=seconds*slots)).isoformat()
-                        else:next_run=native.compute_next_run(job['schedule'],at.isoformat() if reason=='missed' else due)
+                        else:next_run=native.compute_next_run(job['schedule'],at.isoformat() if reason=='missed' else due,timezone=job)
                         if job['schedule']['kind']=='once':next_run=None
                         completed=(job.get('repeat') or {}).get('completed',0)+1
                         times=(job.get('repeat') or {}).get('times')
@@ -115,13 +115,35 @@ class Scheduler:
 
     def sync(self):
         from cron import jobs as native
+        failed=None
         for _,home,bound in profiles(self.admin):
             if not (home/'cron/jobs.json').exists():continue
             with store(home):
                 for job in inspect(home):
-                    if job.get('nocheh_workflow_synced'):continue
-                    if not job.get('nocheh_definition_version'):job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex})
-                    sync_job(self.call,job,home,bound)
+                    try:self.sync_one(native,job,home,bound)
+                    # One schedule the archive refuses does not hold back the others; the loop reports it.
+                    except Exception as error:failed=failed or error
+        if failed:raise failed
+
+    def sync_one(self,native,job,home,bound):
+        current=revision(job,home.name)
+        if job.get('nocheh_workflow_synced'):
+            if job.get('nocheh_synced_revision')==current:return
+            if not job.get('nocheh_synced_revision'):
+                native.update_job(job['id'],{'nocheh_synced_revision':current});return
+            # Hermes's own schedule tool changed it in a reply (ADR-0266): a new definition, captured before it may run.
+            job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex,'nocheh_registered':False,'nocheh_workflow_synced':False})
+        if not job.get('nocheh_definition_version'):job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex})
+        if job.get('deliver','local') not in ('local','telegram'):
+            # Hermes's tool names its own delivery targets; a schedule set in a chat sends to that chat.
+            job=native.update_job(job['id'],{'deliver':'telegram'})
+        job=sync_job(self.call,job,home,bound)
+        if not job.get('nocheh_create_id') and not job.get('nocheh_announced') and not job.get('nocheh_removed'):
+            # A schedule set by asking in the chat: Nocheh's own message there says so, with Pause and Delete (ADR-0266).
+            self.call('announce',{'scope':bound.chat_id,'profile':home.name,'job_id':job['id'],'name':job.get('name') or '',
+                'schedule':job.get('schedule_display') or (job.get('schedule') or {}).get('display') or '',
+                'timezone':job.get('timezone') if isinstance(job.get('timezone'),str) else None,'next_run_at':job.get('next_run_at')})
+            native.update_job(job['id'],{'nocheh_announced':True})
 
     def context(self,body,claim=False):
         if (self.root/'scheduler-inactive').exists():return {'state':'waiting'}

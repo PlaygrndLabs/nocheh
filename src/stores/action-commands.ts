@@ -7,7 +7,7 @@ import {allowedAccounts} from '../destinations.js';
 import {telegramAddress,telegramChat,telegramScopes} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import {approvalAction,approvalCard,approvalLines,approvalTask,backgroundMemberTexts,chatAddLines,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,type ApprovalText} from '../prompts.js';
+import {approvalAction,approvalCard,approvalLines,approvalTask,backgroundMemberTexts,chatAddLines,fillTemplate,labeledLines,ownerPrompts,privateAnswerLines,problemButtons,scheduleNoticeLines,type ApprovalText} from '../prompts.js';
 import {cardName,controls,cut,entityLimit,exactJson,fields,heading,linked,operationCard,operationText,visible,type Link,type OperationText} from '../action-text.js';
 import {retryFailedWorkflows} from './workflow-owner.js';
 import {forwardOrigin,forwardedCommand} from '../forwarded.js';
@@ -25,6 +25,7 @@ import type {TaskRepository} from './tasks.js';
 import type {PrivateAnswerRepository} from './private-answers.js';
 import {currentChats} from './chats.js';
 import {chatAddButton,type ChatAddChoice,type ChatAdds} from './chat-adds.js';
+import {scheduleButton,type ScheduleChoice,type ScheduleNotices} from './schedule-notices.js';
 
 type ActionKind='telegram'|'controlled'|'background'|'list'|'task';
 /** One card of a job's waiting changes, as frozen when it was sent. */
@@ -131,7 +132,7 @@ const listed=(action:{kind:string;arguments:Record<string,any>;summary?:string|n
 export class ActionCommandRepository {
   constructor(readonly access:SourceAccessRepository,readonly telegram:TelegramActionRepository,readonly tools:ControlledActionRepository,
     readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository,readonly tasks?:TaskRepository,readonly answers?:PrivateAnswerRepository,
-    readonly adds?:ChatAdds){}
+    readonly adds?:ChatAdds,readonly schedules?:ScheduleNotices){}
   private async approval(input:Record<string,unknown>,timeout=15000) {
     if(!this.call)return null;
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
@@ -675,6 +676,8 @@ export class ActionCommandRepository {
     if((query?.data===memberPause||query?.data===memberResume)&&typeof query.id==='string')return this.memberJobsPressed(query,query.data===memberPause);
     const added=typeof query?.data==='string'?chatAddButton.exec(query.data):null;
     if(added&&typeof query.id==='string')return this.chatAddPressed(query,added[1] as ChatAddChoice,added[2]!,source);
+    const schedule=typeof query?.data==='string'?scheduleButton.exec(query.data):null;
+    if(schedule&&typeof query.id==='string')return this.schedulePressed(query,schedule[1] as ScheduleChoice,schedule[2]!,schedule[3]!,source);
     const privately=typeof query?.data==='string'?answerButton.exec(query.data):null;
     if(privately&&typeof query.id==='string')return this.answerPressed(privately[1]!,query,source);
     if(!data||typeof query.id!=='string')return false;
@@ -840,6 +843,16 @@ export class ActionCommandRepository {
     let reply=lines.only_owner;
     // The owner's own press (their account), in their private chat (its chat id), as for Retry failed.
     if(owner&&policy.owner_id&&String(query.from?.id??'')===policy.owner_id&&telegramChat(chat)===owner)reply=this.adds?await this.adds.press(choice,event,source.id):lines.changed;
+    await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(reply).slice(0,200).join('')},10000);
+    return true;
+  }
+  /** Pause or Delete under the message after a reply set a schedule (ADR-0266): only the owner's press in their private
+   *  chat acts, as for Retry failed. */
+  private async schedulePressed(query:any,choice:ScheduleChoice,store:string,job:string,source:SourceReference):Promise<boolean> {
+    const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),owner=ownerChat(policy);
+    const lines=scheduleNoticeLines((await ownerPrompts(this.access.stores.control))['schedules.notice_texts']);
+    let reply=lines.only_owner;
+    if(owner&&policy.owner_id&&String(query.from?.id??'')===policy.owner_id&&telegramChat(chat)===owner)reply=this.schedules?await this.schedules.press(choice,store,job,source.id):lines.changed;
     await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(reply).slice(0,200).join('')},10000);
     return true;
   }

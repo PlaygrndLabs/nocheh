@@ -38,6 +38,7 @@ import {searchTagged} from './native-memory.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {currentChats,otherPrivateScopes} from './chats.js';
+import {scheduleChats,scheduleTurn} from './schedules.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
@@ -205,6 +206,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&path==='/v1/knowledge/context')return json(res,200,await s.knowledge.inspect(principal,Object.fromEntries(url.searchParams)));
     // The owner asks about a member's private chat with Nocheh (step 4b): only from the owner's own live turn, which the
     // repository checks first; the answer comes later as a separate message.
+    // Whether this reply may set schedules with Hermes's schedule tool (ADR-0266): only the owner's own live Telegram
+    // message in their private chat, not a forward. The schedules run in the owner's time zone.
+    if(req.method==='POST'&&path==='/v1/schedules/turn')return json(res,200,await scheduleTurn(s,principal));
     if(req.method==='POST'&&path==='/v1/member-asks')return json(res,200,await s.memberAsks.ask(principal,await readJson(req,16*1024)));
     if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
     const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
@@ -252,8 +256,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       admin(principal);
       const {action,...input}=object(await readJson(req,1024*1024)),writes=['changes','role','skills'].some(key=>key in input);
       const operation=({profiles:'listProfiles',memory:'readNotes',preferences:writes?'writeSettings':'readSettings',
-        persona:writes?'writePersona':'readPersona'} as Record<string,BrainOperation>)[string(action,20)];
+        persona:writes?'writePersona':'readPersona',schedules:'manageSchedules'} as Record<string,BrainOperation>)[string(action,20)];
       if(!operation)throw new HttpError(400,'unknown_management_action');
+      // The Schedules pages (ADR-0266): each schedule with the name of its chat as the owner sees it.
+      if(operation==='manageSchedules')return json(res,200,await scheduleChats(s.stores.control,ownerChat(s.access.policy()),await brainOperation(s.brain,operation)(input)));
       // Each note says where it came from in the owner's words; what Hermes recorded about it stays behind.
       const value=await brainOperation(s.brain,operation)(input);
       return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value,ids=>s.originals.originals(ids)):value);
@@ -274,6 +280,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(operation==='recover')return json(res,200,await s.scheduled.recoverExpired());
       if(operation==='runs')return json(res,200,await s.scheduled.history(body));
       if(operation==='delivery')return json(res,200,await s.actionCommands.offer('telegram',await s.scheduled.delivery(body) as Record<string,any>));
+      // A schedule a reply set in the owner's private chat, once captured: Nocheh's own message there (ADR-0266).
+      if(operation==='announce')return json(res,200,await s.scheduleNotices.announce(body));
       throw new HttpError(404,'not_found');
     }
     if(req.method==='POST'&&path.startsWith('/v1/background/')) {

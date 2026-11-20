@@ -10,12 +10,14 @@ import {MEMBER_APP_BODY_MAX,MEMBER_APP_CORE_PREFIX,MEMBER_APP_PAGE,MEMBER_APP_PU
 
 /**
  * The owner routes the mini app may reach: home status, the Inbox and its
- * decisions, tasks with the chats and people they point to, and the problems
+ * decisions, tasks with the chats and people they point to, schedules, and the problems
  * System › Health lists, with retrying failed work. Of settings only the
  * owner's own Telegram ID is read.
  */
 const routes:[string,RegExp][]=[
-  ['GET',/^\/(?:status|settings|decisions|tools\/actions|tasks|memory-access\/requests|conversations|entities|monitoring)$/],
+  ['GET',/^\/(?:status|settings|decisions|tools\/actions|tasks|schedules|memory-access\/requests|conversations|entities|monitoring)$/],
+  // Pause, Resume, Run now or Delete on a schedule (ADR-0266).
+  ['POST',/^\/schedules$/],
   ['POST',/^\/workflows\/retry-failed$/],
   ['GET',/^\/decisions\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64}$/],
   ['GET',/^\/(?:tools\/actions|knowledge\/proposals)\/[a-f0-9]{64}$/],

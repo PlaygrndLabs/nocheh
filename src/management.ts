@@ -427,6 +427,12 @@ export async function startManagement() {
         json(res,200,await python({operation:'honcho.budget.update',request:object(await readJson(req))})));
       if (req.method === 'POST' && route === '/honcho/read') return json(res, 200, await python({operation: 'honcho.read', args: object(await readJson(req)).args}));
       if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'brain.manage',request:{action:'profiles'}}));
+      // Every chat's schedules, and Pause, Resume, Run now or Delete on one (ADR-0266).
+      if (req.method === 'GET' && route === '/schedules') return json(res, 200, await python({operation:'brain.manage',request:{action:'schedules',operation:'list'}}));
+      if (req.method === 'POST' && route === '/schedules') {
+        const body=object(await readJson(req,4096));
+        return json(res,200,await python({operation:'brain.manage',request:{action:'schedules',operation:body.operation,profile:body.profile,job_id:body.job_id,request_id:body.request_id}}));
+      }
       if (req.method === 'GET' && ['/memory','/memory/preferences'].includes(route)) {
         return json(res,200,await python({operation:'brain.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
           scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0),

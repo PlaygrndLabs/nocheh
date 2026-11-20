@@ -46,6 +46,16 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Added when Nocheh answers your question about what a member said in their own private chat with it. That answer reads only that member’s chat, comes as a separate message in your private chat and is not kept in your conversation.',
   },
   {
+    key: 'reply.schedules',
+    title: 'Setting schedules',
+    hint: 'Added in your private chat: how Nocheh sets a schedule, such as a morning brief, when you ask for one.',
+  },
+  {
+    key: 'reply.scheduled',
+    title: 'Scheduled runs',
+    hint: 'Added when a schedule runs. Its answer is sent to its chat by itself; [SILENT] means there is nothing to send.',
+  },
+  {
     key: 'memory.evidence',
     title: 'Using remembered facts',
     hint: 'Explains the remembered facts that come with each message.',
@@ -249,6 +259,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     key: 'background.member_paused',
     title: 'Member jobs: paused by themselves',
     hint: 'Sent to your private chat, with a Resume button, when member jobs pause by themselves past your pause mark, until 00:00 UTC. {spent}, {mark} (the pause mark) and {members} are filled in as in the spend notice.',
+  },
+  {
+    key: 'schedules.notice_texts',
+    title: 'Schedules: when one is set in your chat',
+    hint: 'One “name: text” line each: set ({name}), when ({when}), next ({next}) and note are the lines of the message after a reply sets a schedule in your private chat; pause and delete are its buttons; paused and deleted answer a press; unnamed and no_next stand in for a missing name or next run; changed and only_owner answer a press that cannot act. A line you remove keeps its default.',
   },
   {
     key: 'telegram.chat_adds',

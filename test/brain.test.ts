@@ -72,11 +72,14 @@ test('Hermes keeps its own settings, persona, notes and schedules behind named o
   await plugged.readSettings!({scope:'default'});await plugged.listProfiles!({});await plugged.readNotes!({scope:'-20'});
   assert.deepEqual(await plugged.promptDefaults!(),{'reply.owner':'Text'});
   await plugged.recallNotes!({query:'q'});await plugged.reviewNotes!({id:'r',observe_only:true});await plugged.advanceSchedules!({job_id:'j'});
+  await plugged.manageSchedules!({operation:'list'});
   assert.deepEqual(seen.slice(1).map(row=>[row.path,row.body]),[
     ['/internal/manage',{scope:'default',action:'persona'}],['/internal/manage',{scope:'-20',role:'Family helper',skills:[],revision:'r',action:'persona'}],
     ['/internal/manage',{scope:'default',action:'preferences'}],['/internal/manage',{action:'profiles'}],['/internal/manage',{scope:'-20',action:'memory'}],
     ['/internal/manage',{action:'prompts'}],['/internal/memory/recall',{query:'q'}],['/internal/memory/review',{id:'r',observe_only:true}],
-    ['/internal/schedule/advance',{job_id:'j'}]]);
+    ['/internal/schedule/advance',{job_id:'j'}],['/internal/manage',{operation:'list',action:'schedules'}]]);
+  // A schedule the brain no longer has keeps its code, so a press or the Schedules page can say so (ADR-0266).
+  await assert.rejects(hermes(()=>Response.json({error:'cron_job_not_found'},{status:400})).plugged.manageSchedules!({operation:'pause'}),{code:'cron_job_not_found',status:400});
   await assert.rejects(hermes(()=>Response.json({defaults:{'reply.owner':1}})).plugged.promptDefaults!(),{code:brainErrors.invalid});
 });
 
@@ -86,8 +89,8 @@ test('a replacement brain offers only what it has, and Nocheh refuses the rest w
     startTurn:async ref=>{turns.push(ref.event_id);return {state:'queued'};},observeTurn:async()=>({state:'not_found'}),
     cancelTurn:async()=>({state:'cancelled'}),turnEvents:async()=>({events:[]}),status:async()=>({ok:true})};
   assert.deepEqual(brainSummary(minimal),{id:'fixture',name:'Fixture',capabilities:{telegram:false,browser:true,scheduler:false,background:false,
-    settings:false,persona:false,prompts:false,notes:false,recall:false,review:false,schedules:false}});
-  for(const name of ['readSettings','writePersona','recallNotes','reviewNotes','advanceSchedules'] as const)
+    settings:false,persona:false,prompts:false,notes:false,recall:false,review:false,schedules:false,schedule_list:false}});
+  for(const name of ['readSettings','writePersona','recallNotes','reviewNotes','advanceSchedules','manageSchedules'] as const)
     assert.throws(()=>brainOperation(minimal,name),{code:brainErrors.unsupported,status:409});
   assert.equal(turnChannel(minimal,'browser'),'browser');
   for(const channel of ['telegram','sms',undefined])assert.throws(()=>turnChannel(minimal,channel),{code:brainErrors.unsupported});

@@ -20,7 +20,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-scheduled-runs-')),base=Date.now(),token=digest('scheduled-'+base);
-  let failCompletion=false,mode='done',serial=0;const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>();
+  let failCompletion=false,mode='done',serial=0,answer='Scheduled answer fixture-secret';const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>();
   // The groups the owner serves, which a test turns off as the owner would; `deselect` turns them off as a run finishes.
   // Notices to the owner are kept apart: the bot sends each id once.
   let groups=['-123'],deselect=false;const notices:any[]=[];
@@ -43,7 +43,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const binding=await s.turns.binding(principal);assert.equal(binding.reference!.store,'control');assert.equal(binding.job,context.job_id);
     assert.equal((await s.scheduled.claim(context)).claimed,false);assert.deepEqual(await s.scheduled.prepare(context),{transcripts:[],files:[]});
     native.set(id,{state:'running'});if(mode==='running')return {state:'running'};
-    await s.scheduled.finish({event_id:id,actor:context.actor,state:'done',session:context.conversation,text:'Scheduled answer fixture-secret'});
+    await s.scheduled.finish({event_id:id,actor:context.actor,state:'done',session:context.conversation,text:answer});
     if(deselect){deselect=false;groups=[];}
     native.set(id,{state:'done'});if(mode==='ack_lost'){mode='done';throw Error('lost native acknowledgement');}return {state:'done'};
   };
@@ -76,6 +76,17 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.equal((await stores.control.query('SELECT send_class FROM telegram_action_requests WHERE id=$1',[proposal.id])).rows[0].send_class,'scheduled_run');
     assert.equal((await s.scheduled.history({profile:delivered.profile,job_id:delivered.job})).runs[0]!.native_session,contexts.get(delivered.event_id).conversation);
     await assert.rejects(s.telegramActions.requestScheduled({admin:false,scope:'-123'},delivered.event_id),{status:403});
+    // The owner's private chat: its results go there with no card, as a trusted scheduled send (ADR-0266); a run that
+    // answers only [SILENT] sends nothing. A schedule's own time zone is part of its definition.
+    const own=await capture({scope:'123',deliver:'telegram',timezone:'Asia/Tokyo'});await run(own.event_id);
+    const sent=await s.scheduled.delivery(own);assert.equal(sent.state,'approved');assert.ok('id' in sent);
+    const row=(await stores.control.query('SELECT state,send_class,destination FROM telegram_action_requests WHERE id=$1',[sent.id])).rows[0];
+    assert.deepEqual(row,{state:'approved',send_class:'scheduled_run',destination:'123'});
+    assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM security_events WHERE state='allowed' AND rule='owner_scheduled_chat'")).rows[0].n,1);
+    assert.equal(((await s.scheduled.delivery(own)) as {id?:string}).id,sent.id,'one send for the run');
+    answer='[SILENT]';const quiet=await capture({scope:'123',deliver:'telegram'});await run(quiet.event_id);
+    assert.deepEqual(await s.scheduled.delivery(quiet),{state:'local'});answer='Scheduled answer fixture-secret';
+    await assert.rejects(capture({timezone:'../../etc'}),{code:'invalid_schedule_definition'});
     const recovered=await capture();failCompletion=true;assert.equal((await run(recovered.event_id)).state,'waiting');
     const before=calls.length;assert.equal((await run(recovered.event_id)).state,'completed');assert.equal(calls.length,before,'durable derivative receipt repairs control without new native execution');
     const uncertain=await capture();mode='running';await run(uncertain.event_id);native.delete(uncertain.event_id);

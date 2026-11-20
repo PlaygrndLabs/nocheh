@@ -5,7 +5,8 @@ type Options={url:string;token:string;fetch?:typeof fetch};
 
 const states=new Set<TurnState>(['queued','waiting','running','not_found',...closedTurnStates]);
 /** Hermes's own refusals that the owner can act on, kept by their code. */
-const settingCodes=new Set(['configuration_conflict','unsupported_preference','profile_scope_denied','invalid_preference','invalid_persona']);
+const settingCodes=new Set(['configuration_conflict','unsupported_preference','profile_scope_denied','invalid_preference','invalid_persona',
+  'cron_job_not_found','cron_already_pending','cron_definition_not_captured','cron_operation_unavailable','cron_topic_scope_unavailable']);
 
 /** Hermes behind the brain socket (ADR-0234). Only this file knows Hermes's run, management and notes routes. */
 export function hermesBrain(options:Options):Brain {
@@ -62,5 +63,6 @@ export function hermesBrain(options:Options):Brain {
     recallNotes:input=>send('/internal/memory/recall',{...input},120000),
     reviewNotes:input=>send('/internal/memory/review',{...input},input.observe_only===true?10000:240000),
     advanceSchedules:input=>send('/internal/schedule/advance',{...input},20000),
+    manageSchedules:manage('schedules',true),
   };
 }

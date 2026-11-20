@@ -1,5 +1,5 @@
 /**
- * The Telegram Mini App: Home, Inbox, Tasks and Health on the owner's phone,
+ * The Telegram Mini App: Home, Inbox, Tasks, Schedules and Health on the owner's phone,
  * inside Telegram. It uses the same owner API and pages as the dashboard;
  * Settings and the rest of System stay on the dashboard at home. Each phone
  * signs in once with the owner's Nocheh password, the same as the dashboard's.
@@ -30,13 +30,15 @@ import {Page} from './ui/page';
 import {ActionDrawer, DecisionDrawer} from './pages/inbox/drawers';
 import {Waiting} from './pages/inbox/waiting';
 import Tasks, {day, type Task} from './pages/tasks';
+import Schedules from './pages/schedules';
 import {LogoMark} from './ui/logo';
 
-type MiniPage = 'home' | 'inbox' | 'tasks' | 'problems';
+type MiniPage = 'home' | 'inbox' | 'tasks' | 'schedules' | 'problems';
 const tabs: {id: MiniPage; title: string; Icon: React.ComponentType<{className?: string}>}[] = [
   {id: 'home', title: 'Home', Icon: Home},
   {id: 'inbox', title: 'Inbox', Icon: InboxIcon},
   {id: 'tasks', title: 'Tasks', Icon: ListChecks},
+  {id: 'schedules', title: 'Schedules', Icon: CalendarClock},
   {id: 'problems', title: 'Health', Icon: Activity},
 ];
 
@@ -390,7 +392,7 @@ function MiniInbox() {
 function MiniApp({launched}: {launched: boolean}) {
   const hash = useHash();
   const key = hash.replace(/^#/, '').split('?')[0];
-  const page: MiniPage = key === 'inbox' || key === 'tasks' || key === 'problems' ? key : 'home';
+  const page: MiniPage = key === 'inbox' || key === 'tasks' || key === 'schedules' || key === 'problems' ? key : 'home';
   const waiting = useInboxCount();
   if (!launched)
     return (
@@ -407,6 +409,7 @@ function MiniApp({launched}: {launched: boolean}) {
           {page === 'home' && <MiniHome />}
           {page === 'inbox' && <MiniInbox />}
           {page === 'tasks' && <Tasks />}
+          {page === 'schedules' && <Schedules />}
           {page === 'problems' && <MiniProblems />}
         </main>
         <nav aria-label="Main" className="flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
