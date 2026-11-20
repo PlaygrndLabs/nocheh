@@ -81,7 +81,7 @@ export default function Home() {
       text: [failed && `${failed} background tasks failed`, uncertain && `${uncertain} have an uncertain result`]
         .filter(Boolean)
         .join(', '),
-      link: href('system', {view: 'work'}),
+      link: href('system', {view: 'work', tab: 'tasks'}),
       action: 'Review',
     });
   const sends = sendIssue(m);

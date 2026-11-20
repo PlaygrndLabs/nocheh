@@ -159,7 +159,7 @@ def _status(state, db):
         return {**public, 'state': 'unavailable', 'detail': 'Database could not be reached'}
 
 
-def _rows_pg(state, db, schema, table, columns, sort, direction, filter_column, filter_text, offset):
+def _rows_pg(state, db, schema, table, columns, sort, direction, filter_column, filter_text, offset, limit=PAGE_SIZE):
     names = {column['name'] for column in columns}
     if sort and sort not in names or filter_column and filter_column not in names:
         raise ValueError('invalid_column')
@@ -172,11 +172,11 @@ def _rows_pg(state, db, schema, table, columns, sort, direction, filter_column, 
             filter_text.encode('utf-8').hex(), 'source.' + _identifier(filter_column))
     order = ' ORDER BY source.' + _identifier(sort or columns[0]['name']) + ' ' + direction.upper() + ' NULLS LAST'
     query = 'SELECT row_to_json(row) FROM (SELECT %s FROM %s.%s source%s%s LIMIT %d OFFSET %d) row' % (
-        selected, _identifier(schema), _identifier(table), where, order, PAGE_SIZE + 1, offset)
+        selected, _identifier(schema), _identifier(table), where, order, limit + 1, offset)
     return _pg(state, db, query)
 
 
-def _rows_sqlite(state, db, table, columns, sort, direction, filter_column, filter_text, offset):
+def _rows_sqlite(state, db, table, columns, sort, direction, filter_column, filter_text, offset, limit=PAGE_SIZE):
     names = {column['name'] for column in columns}
     if sort and sort not in names or filter_column and filter_column not in names:
         raise ValueError('invalid_column')
@@ -187,7 +187,7 @@ def _rows_sqlite(state, db, table, columns, sort, direction, filter_column, filt
     where = ' WHERE instr(lower(CAST(source.%s AS TEXT)),lower(?))>0' % _identifier(filter_column) if filter_column and filter_text else ''
     order = ' ORDER BY source.' + _identifier(sort or columns[0]['name']) + ' ' + direction.upper()
     query = 'SELECT %s FROM %s source%s%s LIMIT ? OFFSET ?' % (selected, _identifier(table), where, order)
-    parameters = ([filter_text] if where else []) + [PAGE_SIZE + 1, offset]
+    parameters = ([filter_text] if where else []) + [limit + 1, offset]
     with closing(_sqlite(state, db)) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(query, parameters)]
@@ -224,17 +224,24 @@ def view(state, request):
         raise ValueError('invalid_offset') from None
     if offset < 0 or offset > MAX_OFFSET:
         raise ValueError('invalid_offset')
+    # A page holds at most PAGE_SIZE rows; a caller may ask for fewer.
+    try:
+        limit = int(request.get('limit', PAGE_SIZE))
+    except (TypeError, ValueError):
+        raise ValueError('invalid_limit') from None
+    if limit < 1 or limit > PAGE_SIZE:
+        raise ValueError('invalid_limit')
     if db['engine'] == 'postgres':
         columns = _pg_columns(state, db, schema, table)
         if not columns:
             raise ValueError('table_not_found')
-        rows = _rows_pg(state, db, schema, table, columns, sort, direction, filter_column, filter_text, offset)
+        rows = _rows_pg(state, db, schema, table, columns, sort, direction, filter_column, filter_text, offset, limit)
     else:
         with closing(_sqlite(state, db)) as connection:
             columns = _sqlite_columns(connection, table)
         if not columns:
             raise ValueError('table_not_found')
-        rows = _rows_sqlite(state, db, table, columns, sort, direction, filter_column, filter_text, offset)
+        rows = _rows_sqlite(state, db, table, columns, sort, direction, filter_column, filter_text, offset, limit)
     return {'database': db['id'], 'schema': schema, 'table': table, 'columns': columns,
-            'rows': rows[:PAGE_SIZE], 'next_offset': offset + PAGE_SIZE if len(rows) > PAGE_SIZE and offset + PAGE_SIZE <= MAX_OFFSET else None,
+            'rows': rows[:limit], 'next_offset': offset + limit if len(rows) > limit and offset + limit <= MAX_OFFSET else None,
             'offset': offset, 'cell_limit': MAX_CELL}

@@ -63,6 +63,16 @@ class DatabaseBrowserTests(unittest.TestCase):
         self.assertIsNone(result['next_offset'])
         with self.assertRaisesRegex(ValueError, 'invalid_column'):
             database_browser.view(self.state, {**selected, 'sort': 'content; DROP TABLE messages'})
+        # A smaller page: one row, and where the next page starts.
+        first = database_browser.view(self.state, {**selected, 'sort': 'id', 'limit': '1'})
+        self.assertEqual([row['id'] for row in first['rows']], ['1'])
+        self.assertEqual(first['next_offset'], 1)
+        second = database_browser.view(self.state, {**selected, 'sort': 'id', 'limit': '1', 'offset': '1'})
+        self.assertEqual([row['id'] for row in second['rows']], ['2'])
+        self.assertIsNone(second['next_offset'])
+        for bad in ('0', '51', 'many'):
+            with self.assertRaisesRegex(ValueError, 'invalid_limit'):
+                database_browser.view(self.state, {**selected, 'limit': bad})
         with closing(sqlite3.connect(self.sqlite)) as connection:
             self.assertEqual(connection.execute('SELECT count(*) FROM messages').fetchone()[0], 2)
 

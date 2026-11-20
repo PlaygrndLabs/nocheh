@@ -1,18 +1,8 @@
 /** System › Backups: back up, restore, export, check and restart, with a history of past tasks. */
 import {useState, type ReactNode} from 'react';
-import {
-  Archive,
-  CloudUpload,
-  Download,
-  HardDriveDownload,
-  History,
-  RotateCcw,
-  ShieldCheck,
-  Stethoscope,
-  Undo2,
-} from 'lucide-react';
+import {Download, History} from 'lucide-react';
 import {apiPost, download} from '../../lib/api';
-import {useParam} from '../../lib/navigation';
+import {useParam, useSubTab} from '../../lib/navigation';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
 import {
@@ -27,20 +17,28 @@ import {
   serviceState,
 } from '../../lib/system-format';
 import {
+  ActionRow,
   Badge,
   Button,
   Card,
+  CardHeader,
+  Dot,
   Empty,
   Field,
   Input,
   LoadError,
   LoadingRows,
   Notice,
+  Pager,
   Select,
   Spinner,
+  Table,
+  Td,
   Technical,
+  Th,
 } from '../../ui/core';
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
+import {SubPanel, SubTabs} from '../../ui/page';
 
 type Job = {
   id: string;
@@ -143,6 +141,8 @@ function DownloadButton({job, size = 'sm'}: {job: Job; size?: 'sm' | 'md'}) {
   );
 }
 
+const subTabs = ['actions', 'history'] as const;
+
 export function BackupsView() {
   const jobs = useResource<Job[]>('/jobs', 5000);
   const listing = useResource<{
@@ -155,6 +155,7 @@ export function BackupsView() {
   const [busy, setBusy] = useState<Action | ''>('');
   const [problem, setProblem] = useState<{action: Action; text: string} | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [tab, setTab] = useSubTab(subTabs);
 
   const tasks = (Array.isArray(jobs.data) ? jobs.data : [])
     .filter(job => job.kind !== 'import')
@@ -202,53 +203,49 @@ export function BackupsView() {
     await start(action);
   };
 
-  const card = (
-    action: Action,
-    Icon: typeof Archive,
-    title: string,
-    text: string,
-    label: string,
-    extra?: ReactNode,
-    unavailable = false,
-  ) => {
+  /** One action as a table row: what it does and how its last run went, then its button. */
+  const row = (action: Action, title: string, text: string, label: string, extra?: ReactNode, unavailable = false) => {
     const last = latest(action);
     const state = last ? jobState(last.state) : null;
     return (
-      <Card key={action} className="flex flex-col p-5">
-        <div className="flex items-start gap-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-text">
-            <Icon className="size-[18px]" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold">{title}</h2>
-            <p className="mt-0.5 text-[13px] text-muted">{text}</p>
-          </div>
-        </div>
-        {extra}
-        {problem?.action === action && (
-          <Notice tone="bad" className="mt-3">
-            {problem.text}
-          </Notice>
-        )}
-        <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+      <ActionRow
+        key={action}
+        title={title}
+        detail={
+          <>
+            <p>{text}</p>
+            {extra}
+            {last && state && (
+              <p className="flex items-center gap-1.5 text-xs">
+                Last run {ago(last.created_at)}
+                <span className="inline-flex items-center gap-1.5 text-fg">
+                  <Dot tone={state.tone} />
+                  {state.label}
+                </span>
+              </p>
+            )}
+            {problem?.action === action && <Notice tone="bad">{problem.text}</Notice>}
+          </>
+        }
+      >
+        <span className="inline-flex items-center justify-end gap-2">
+          {last && isExport(last) && last.state === 'complete' && <DownloadButton job={last} />}
           {action === 'restore' ? (
-            <Button disabled={!!active || !backups.length} onClick={() => setRestoring(true)}>
+            <Button size="sm" disabled={!!active || !backups.length} onClick={() => setRestoring(true)}>
               {label}
             </Button>
           ) : (
-            <Button busy={busy === action} disabled={!!busy || !!active || unavailable} onClick={() => ask(action)}>
+            <Button
+              size="sm"
+              busy={busy === action}
+              disabled={!!busy || !!active || unavailable}
+              onClick={() => ask(action)}
+            >
               {label}
             </Button>
           )}
-          {last && isExport(last) && last.state === 'complete' && <DownloadButton job={last} />}
-          {last && state && (
-            <span className="flex items-center gap-1.5 text-xs text-muted">
-              Last {ago(last.created_at)}
-              <Badge tone={state.tone}>{state.label}</Badge>
-            </span>
-          )}
-        </div>
-      </Card>
+        </span>
+      </ActionRow>
     );
   };
 
@@ -260,105 +257,132 @@ export function BackupsView() {
         </Notice>
       )}
       {jobs.error && !jobs.data && <LoadError what="tasks" />}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {card(
-          'backup',
-          HardDriveDownload,
-          'Back up now',
-          'Saves messages, files, settings and the assistant’s state on this machine, including keys. The SSH keys of your machines in Settings › Machines stay out.',
-          'Back up now',
-          <>
-            {schedule && (
-              <p className="mt-3 text-xs text-muted">
-                {schedule.enabled
-                  ? `Every day at ${schedule.time} (${schedule.time_zone.replace(/_/g, ' ')}), keeping the last ${schedule.keep}.` +
-                    (schedule.next_at ? ` Next ${dateTime(schedule.next_at)}.` : '')
-                  : 'Automatic backups are off.'}{' '}
-                {schedule.skipped === 'low_disk' && 'The last one was skipped: not enough free disk space. '}
-                <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
-                  Change
-                </a>
-              </p>
-            )}
-            {schedule?.low_disk && (
-              <Notice tone="warn" className="mt-3">
-                Free disk space is low. Back up now still runs, but the backup may fill the disk.
-              </Notice>
-            )}
-            <BackupHealthNotice health={health} />
-          </>,
-        )}
-        {card(
-          'restore',
-          Undo2,
-          'Restore a backup',
-          'Opens a saved backup as a separate, switched-off copy so you can check it. Your current Nocheh keeps running.',
-          'Restore…',
-          <p className="mt-3 text-xs text-muted">
-            {listing.error && !listing.data
-              ? 'Saved backups couldn’t be listed.'
-              : !listing.data
-                ? 'Looking for saved backups…'
-                : backups.length
-                  ? `${backups.length} saved · newest ${dateTime(backups[0]!.created_at)}`
-                  : 'No backups saved yet.'}
-          </p>,
-        )}
-        {card(
-          'offsite',
-          CloudUpload,
-          'Off-site copy',
-          'Sends the newest backup, encrypted with your passphrase on this machine, to your own storage. The storage only sees scrambled data.',
-          'Send copy now',
-          offsite && (
-            <p className="mt-3 text-xs text-muted">
-              {offsiteSummary(offsite, !!latest('offsite') && running(latest('offsite')!))}{' '}
-              <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
-                {offsite.enabled ? 'Change' : 'Set up'}
-              </a>
-            </p>
-          ),
-          !offsite?.enabled || !backups.length,
-        )}
-        {card(
-          'offsite-check',
-          ShieldCheck,
-          'Test the off-site copy',
-          'Downloads the newest copy, opens it with your passphrase and checks every file. Nothing is restored.',
-          'Run test',
-          offsite?.enabled && <p className="mt-3 text-xs text-muted">{checkSummary(offsite)}</p>,
-          !offsite?.enabled,
-        )}
-        {card(
-          'export',
-          Archive,
-          'Export your archive',
-          'A ZIP of your original messages and files, to keep anywhere.',
-          'Prepare ZIP',
-        )}
-        {card(
-          'portable-export',
-          Archive,
-          'Export archive and memory',
-          'Adds the assistant’s notes and chat history. Keys and passwords are left out.',
-          'Prepare ZIP',
-        )}
-        {card(
-          'diagnose',
-          Stethoscope,
-          'Check services',
-          'Looks at every service and reports problems. Changes nothing.',
-          'Run check',
-        )}
-        {card(
-          'restart',
-          RotateCcw,
-          'Restart Nocheh',
-          'Restarts the assistant and workers. Replies pause for about a minute.',
-          'Restart…',
-        )}
-      </div>
-      <JobHistory tasks={tasks} loading={!jobs.data && !jobs.error} />
+      <SubTabs
+        label="Backups"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          {id: 'actions', label: 'Actions'},
+          {id: 'history', label: 'History'},
+        ]}
+      />
+      {tab === 'actions' && (
+        <SubPanel id="actions" current={tab}>
+          <Card className="overflow-hidden">
+            <Table aria-label="Backup and maintenance actions" className="max-sm:block">
+              <thead className="max-sm:sr-only">
+                <tr>
+                  <Th scope="col" className="w-52">
+                    Action
+                  </Th>
+                  <Th scope="col">What it does</Th>
+                  <Th scope="col">
+                    <span className="sr-only">Start</span>
+                  </Th>
+                </tr>
+              </thead>
+              <tbody className="[&>tr:last-child>*]:border-b-0 max-sm:block">
+                {row(
+                  'backup',
+                  'Back up now',
+                  'Saves messages, files, settings and the assistant’s state on this machine, including keys. The SSH keys of your machines in Settings › Machines stay out.',
+                  'Back up now',
+                  <>
+                    {schedule && (
+                      <p className="text-xs">
+                        {schedule.enabled
+                          ? `Every day at ${schedule.time} (${schedule.time_zone.replace(/_/g, ' ')}), keeping the last ${schedule.keep}.` +
+                            (schedule.next_at ? ` Next ${dateTime(schedule.next_at)}.` : '')
+                          : 'Automatic backups are off.'}{' '}
+                        {schedule.skipped === 'low_disk' && 'The last one was skipped: not enough free disk space. '}
+                        <a
+                          className="text-accent-text underline-offset-2 hover:underline"
+                          href="#settings?view=privacy"
+                        >
+                          Change
+                        </a>
+                      </p>
+                    )}
+                    {schedule?.low_disk && (
+                      <Notice tone="warn">
+                        Free disk space is low. Back up now still runs, but the backup may fill the disk.
+                      </Notice>
+                    )}
+                    <BackupHealthNotice health={health} />
+                  </>,
+                )}
+                {row(
+                  'restore',
+                  'Restore a backup',
+                  'Opens a saved backup as a separate, switched-off copy so you can check it. Your current Nocheh keeps running.',
+                  'Restore…',
+                  <p className="text-xs">
+                    {listing.error && !listing.data
+                      ? 'Saved backups couldn’t be listed.'
+                      : !listing.data
+                        ? 'Looking for saved backups…'
+                        : backups.length
+                          ? `${backups.length} saved · newest ${dateTime(backups[0]!.created_at)}`
+                          : 'No backups saved yet.'}
+                  </p>,
+                )}
+                {row(
+                  'offsite',
+                  'Off-site copy',
+                  'Sends the newest backup, encrypted with your passphrase on this machine, to your own storage. The storage only sees scrambled data.',
+                  'Send copy now',
+                  offsite && (
+                    <p className="text-xs">
+                      {offsiteSummary(offsite, !!latest('offsite') && running(latest('offsite')!))}{' '}
+                      <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
+                        {offsite.enabled ? 'Change' : 'Set up'}
+                      </a>
+                    </p>
+                  ),
+                  !offsite?.enabled || !backups.length,
+                )}
+                {row(
+                  'offsite-check',
+                  'Test the off-site copy',
+                  'Downloads the newest copy, opens it with your passphrase and checks every file. Nothing is restored.',
+                  'Run test',
+                  offsite?.enabled && <p className="text-xs">{checkSummary(offsite)}</p>,
+                  !offsite?.enabled,
+                )}
+                {row(
+                  'export',
+                  'Export your archive',
+                  'A ZIP of your original messages and files, to keep anywhere.',
+                  'Prepare ZIP',
+                )}
+                {row(
+                  'portable-export',
+                  'Export archive and memory',
+                  'Adds the assistant’s notes and chat history. Keys and passwords are left out.',
+                  'Prepare ZIP',
+                )}
+                {row(
+                  'diagnose',
+                  'Check services',
+                  'Looks at every service and reports problems. Changes nothing.',
+                  'Run check',
+                )}
+                {row(
+                  'restart',
+                  'Restart Nocheh',
+                  'Restarts the assistant and workers. Replies pause for about a minute.',
+                  'Restart…',
+                )}
+              </tbody>
+            </Table>
+          </Card>
+        </SubPanel>
+      )}
+      {tab === 'history' && (
+        <SubPanel id="history" current={tab}>
+          <JobHistory tasks={tasks} loading={!jobs.data && !jobs.error} />
+        </SubPanel>
+      )}
       <RestoreDialog
         open={restoring}
         onOpenChange={setRestoring}
@@ -381,7 +405,6 @@ function BackupHealthNotice({health}: {health: BackupHealth | undefined}) {
       {health.failed > 0 && (
         <Notice
           tone="bad"
-          className="mt-3"
           title={
             health.failed === 1 ? 'The last backup didn’t finish' : `The last ${health.failed} backups didn’t finish`
           }
@@ -396,7 +419,7 @@ function BackupHealthNotice({health}: {health: BackupHealth | undefined}) {
         </Notice>
       )}
       {health.unreadable > 0 && (
-        <Notice tone="warn" className="mt-3">
+        <Notice tone="warn">
           The newest backup left out {count(health.unreadable)} {health.unreadable === 1 ? 'entry' : 'entries'} that a
           command made unreadable in its workspace. Make them readable again to back them up.
           {paths.map((path, index) => (
@@ -491,63 +514,85 @@ function RestoreDialog({
   );
 }
 
+const HISTORY = 10;
+
 function JobHistory({tasks, loading}: {tasks: Job[]; loading: boolean}) {
-  const [all, setAll] = useState(false);
-  const shown = all ? tasks : tasks.slice(0, 8);
+  const [page, setPage] = useState(0);
+  const at = Math.min(page, Math.max(0, Math.ceil(tasks.length / HISTORY) - 1));
   return (
     <Card>
-      <div className="px-5 pt-4">
-        <h2 className="text-[15px] font-semibold">History</h2>
-        <p className="mt-0.5 text-[13px] text-muted">
-          Backups, exports, checks, restarts and settings changes being applied.
-        </p>
-      </div>
-      <div className="mt-3">
+      <CardHeader
+        title="History"
+        description="Backups, exports, checks, restarts and settings changes being applied."
+      />
+      <div className="mt-3 border-t border-line">
         {loading ? (
           <LoadingRows rows={3} />
         ) : !tasks.length ? (
           <Empty icon={History} title="Nothing here yet">
-            Tasks you start above, and settings you apply, are listed here with their result.
+            Tasks you start under Actions, and settings you apply, are listed here with their result.
           </Empty>
         ) : (
-          <ul>
-            {shown.map(job => {
-              const state = jobState(job.state);
-              return (
-                <li key={job.id} className="border-t border-line">
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setParams({job: job.id})}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setParams({job: job.id});
-                      }
-                    }}
-                    className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3 hover:bg-subtle/60 focus-visible:bg-subtle focus-visible:outline-none"
-                  >
-                    <div className="min-w-0 flex-1 basis-56">
-                      <p className="text-sm font-medium">{taskName(job)}</p>
-                      <p className="text-[13px] text-muted">{jobOutcome(job)}</p>
-                    </div>
-                    <span className="text-xs text-muted" title={dateTime(job.created_at)}>
-                      {ago(job.created_at)}
-                    </span>
-                    <Badge tone={state.tone}>{state.label}</Badge>
-                    {isExport(job) && job.state === 'complete' && <DownloadButton job={job} />}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {tasks.length > 8 && (
-          <div className="border-t border-line px-5 py-3">
-            <Button variant="link" size="sm" onClick={() => setAll(!all)}>
-              {all ? 'Show fewer' : `Show all ${tasks.length}`}
-            </Button>
-          </div>
+          <>
+            <Table aria-label="History" className="max-sm:block">
+              <thead className="max-sm:sr-only">
+                <tr>
+                  <Th scope="col">Task</Th>
+                  <Th scope="col">Result</Th>
+                  <Th scope="col">When</Th>
+                  <Th scope="col">Status</Th>
+                  <Th scope="col">
+                    <span className="sr-only">Download</span>
+                  </Th>
+                </tr>
+              </thead>
+              <tbody className="max-sm:block">
+                {tasks.slice(at * HISTORY, at * HISTORY + HISTORY).map(job => {
+                  const state = jobState(job.state);
+                  return (
+                    <tr
+                      key={job.id}
+                      className="cursor-pointer hover:bg-subtle/60 max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:gap-x-3 max-sm:border-b max-sm:border-line max-sm:px-4 max-sm:py-2"
+                      onClick={() => setParams({job: job.id})}
+                    >
+                      <Td className="max-sm:w-full max-sm:border-0 max-sm:p-0">
+                        <button
+                          type="button"
+                          className="text-left font-medium hover:underline"
+                          onClick={() => setParams({job: job.id})}
+                        >
+                          {taskName(job)}
+                        </button>
+                      </Td>
+                      <Td className="text-[13px] text-muted max-sm:w-full max-sm:border-0 max-sm:p-0">
+                        {jobOutcome(job)}
+                      </Td>
+                      <Td className="text-[13px] whitespace-nowrap text-muted max-sm:border-0 max-sm:p-0 max-sm:py-1">
+                        <time dateTime={job.created_at} title={dateTime(job.created_at)}>
+                          {ago(job.created_at)}
+                        </time>
+                      </Td>
+                      <Td className="text-[13px] whitespace-nowrap max-sm:border-0 max-sm:p-0">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Dot tone={state.tone} />
+                          {state.label}
+                        </span>
+                      </Td>
+                      <Td className="py-1.5 text-right whitespace-nowrap max-sm:ml-auto max-sm:border-0 max-sm:p-0">
+                        {isExport(job) && job.state === 'complete' && <DownloadButton job={job} />}
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+            <Pager
+              page={at}
+              hasNext={(at + 1) * HISTORY < tasks.length}
+              onPage={setPage}
+              summary={`${count(tasks.length)} ${tasks.length === 1 ? 'task' : 'tasks'} · open one for its details`}
+            />
+          </>
         )}
       </div>
     </Card>

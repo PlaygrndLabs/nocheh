@@ -59,6 +59,9 @@ const routes = [
   // The sub-tabs of the two longest pages.
   ...['tools', 'jobs', 'instructions'].map(tab => ['settings?view=assistant&tab=' + tab, 'Settings']),
   ...['role', 'tools', 'memory'].map(tab => ['chats?chat=-10042&tab=' + tab, 'Chats']),
+  ...['services', 'storage', 'diagnostics'].map(tab => ['system?tab=' + tab, 'System']),
+  ...['tasks', 'history'].map(tab => ['system?view=work&tab=' + tab, 'System']),
+  ['system?view=backups&tab=history', 'System'],
 ];
 
 let server, browser;
@@ -1208,16 +1211,16 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   assert.match(await drawer.textContent(), /Fingerprint of what it printed \(SHA-256\)Not known yet/);
   await drawer.getByRole('button', {name: 'Close'}).click();
 
-  // Background work shows the machine and the plan its card showed, and links to its commands.
+  // Background work lists the job with its machine; its drawer shows the plan its card showed and links to its commands.
   await page.goto(origin + '/#system?view=work');
-  const job = page
-    .getByRole('list', {name: 'Background jobs'})
-    .getByRole('listitem')
-    .filter({hasText: 'Set up the garden site on build-vm'});
-  await job.getByRole('list', {name: 'Plan'}).waitFor();
+  const jobs = page.getByRole('table', {name: 'Background jobs'});
+  const job = jobs.getByRole('row').filter({hasText: 'Set up the garden site on build-vm'});
+  await job.waitFor();
   assert.match(await job.textContent(), / · on build-vm · started /);
+  await job.getByRole('button', {name: 'Set up the garden site on build-vm', exact: true}).click();
+  const detail = page.getByRole('dialog', {name: 'Set up the garden site on build-vm'});
   assert.deepEqual(
-    (await job.getByRole('list', {name: 'Plan'}).getByRole('listitem').allTextContents()).map(text => text.trim()),
+    (await detail.getByRole('list', {name: 'Plan'}).getByRole('listitem').allTextContents()).map(text => text.trim()),
     [
       'Install git and the build tools',
       'Copy the project into ~/projects/garden-site',
@@ -1225,16 +1228,20 @@ test('a machine is added with its public key, tested, edited, turned off and rem
       'Start it and check that it answers on port 8080',
     ],
   );
+  assert.deepEqual(
+    (await detail.getByRole('list', {name: 'To-do list'}).getByRole('listitem').allTextContents()).map(text =>
+      text.trim(),
+    ),
+    ['Install git and the build tools', 'Copy the project into ~/projects/garden-site'],
+  );
+  await detail.getByRole('button', {name: 'Close'}).click();
   // Stop says that it ends the programs on the machine too; Cancel leaves the job running.
   await job.getByRole('button', {name: 'Stop'}).click();
   const stop = page.getByRole('dialog', {name: 'Stop this job?'});
   await stop.getByText('Nocheh also ends the programs it started on build-vm.', {exact: false}).waitFor();
   await stop.getByRole('button', {name: 'Cancel'}).click();
   // A machine job still waiting has run nothing there, and Stop says so.
-  const waiting = page
-    .getByRole('list', {name: 'Background jobs'})
-    .getByRole('listitem')
-    .filter({hasText: 'Rotate the logs on build-vm'});
+  const waiting = jobs.getByRole('row').filter({hasText: 'Rotate the logs on build-vm'});
   await waiting.getByRole('button', {name: 'Stop'}).click();
   await stop.getByText('The job is cancelled before it starts.', {exact: false}).waitFor();
   await stop.getByText('Nothing has run on build-vm yet.', {exact: false}).waitFor();
@@ -1242,13 +1249,13 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   assert.equal(await stop.getByText('ends the programs it started', {exact: false}).count(), 0);
   await stop.getByRole('button', {name: 'Cancel'}).click();
   // Programs Nocheh couldn't end are the owner's to end.
-  await page
-    .getByRole('list', {name: 'Background jobs'})
-    .getByRole('listitem')
+  await jobs
+    .getByRole('row')
     .filter({hasText: 'Build the photo gallery on build-vm'})
     .getByText('Nocheh couldn’t end its programs on build-vm. End them yourself.')
     .waitFor();
-  await job.getByRole('link', {name: 'Commands it ran on build-vm'}).click();
+  await job.getByRole('button', {name: 'Set up the garden site on build-vm', exact: true}).click();
+  await detail.getByRole('link', {name: 'Commands it ran on build-vm'}).click();
   await log.getByText('npm test 2>&1 | tail -n 40').waitFor();
   assert.equal(await page.getByRole('combobox', {name: 'Job'}).inputValue(), '9c'.repeat(32));
   assert.equal(await page.getByRole('combobox', {name: 'Machine'}).inputValue(), '');
@@ -2437,10 +2444,57 @@ test('usage shows calls, tokens and cost, and never prices an unknown cost as fr
   await page.close();
 });
 
+test('System pages are sub-tabs of tables: failed tasks open filtered, and a backup task opens from History', async () => {
+  const {page, problems} = await open('system');
+  // Health › Status lists what needs a look as a table; Review opens the Tasks sub-tab filtered to the failures.
+  const issue = page
+    .getByRole('table', {name: 'Things that need a look'})
+    .getByRole('row')
+    .filter({hasText: 'background tasks failed'});
+  await issue.getByRole('link', {name: 'Review'}).click();
+  await page.getByRole('tab', {name: 'Tasks', selected: true}).waitFor();
+  assert.match(new URL(page.url()).hash, /^#system\?view=work&tab=tasks&status=(failed|retryable_failed)$/);
+  const tasks = page.getByRole('table', {name: 'Background tasks'});
+  await tasks.locator('tbody tr').first().waitFor();
+  assert.ok((await tasks.locator('tbody tr').count()) <= 10);
+  assert.notEqual(await page.getByRole('combobox', {name: 'Status'}).inputValue(), '');
+  await page.getByRole('table', {name: 'Right now'}).getByRole('rowheader', {name: 'Running'}).waitFor();
+  // The charts sit on their own sub-tab; the choice is in the address.
+  await page.getByRole('tab', {name: 'History'}).click();
+  await page.getByRole('img', {name: 'Activity'}).waitFor();
+  assert.match(new URL(page.url()).hash, /tab=history/);
+  assert.equal(await tasks.count(), 0);
+
+  // Backups: every action is a table row, and past tasks are on the History sub-tab.
+  await page.goto(origin + '/#system?view=backups');
+  const actions = page.getByRole('table', {name: 'Backup and maintenance actions'});
+  assert.deepEqual(await actions.getByRole('rowheader').allTextContents(), [
+    'Back up now',
+    'Restore a backup',
+    'Off-site copy',
+    'Test the off-site copy',
+    'Export your archive',
+    'Export archive and memory',
+    'Check services',
+    'Restart Nocheh',
+  ]);
+  await page.getByRole('tab', {name: 'History'}).click();
+  const history = page.getByRole('table', {name: 'History'});
+  await history.getByRole('button', {name: 'Archive export'}).click();
+  const drawer = page.getByRole('dialog', {name: 'Archive export'});
+  await drawer.getByText('1,842 messages · 28 files').waitFor();
+  await drawer.getByRole('button', {name: 'Download ZIP'}).waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('sent to apps lists each send with its outcome, and Health opens the ones that failed', async () => {
   const {page, problems} = await open('system');
   // Health counts the last day's problems, leaving out expected no-ops and attempts a retry delivered, and opens them filtered.
-  const issue = page.getByRole('listitem').filter({hasText: '2 sends to chat apps failed in the last day'});
+  const issue = page
+    .getByRole('table', {name: 'Things that need a look'})
+    .getByRole('row')
+    .filter({hasText: '2 sends to chat apps failed in the last day'});
   await issue.getByText('Approval card: 1 · Reply: 1').waitFor();
   await issue.getByRole('link', {name: 'Review'}).click();
   await page.getByRole('tab', {name: 'Sent to apps 2', selected: true}).waitFor();
@@ -2463,8 +2517,6 @@ test('sent to apps lists each send with its outcome, and Health opens the ones t
   assert.equal(new URL(page.url()).hash, '#system?view=sends');
   await table.getByText('Reaction cleared').waitFor();
   for (const name of [
-    'Already up to date',
-    'Button press expired',
     'Reactions not allowed in this chat',
     'Formatting rejected; sent on a retry',
     'Blocked: wrong chat',
@@ -2481,9 +2533,19 @@ test('sent to apps lists each send with its outcome, and Health opens the ones t
     '#chats?chat=' + NEW_GROUP,
   );
   assert.equal(await table.getByText('Bot setup').count(), 0);
-  await page.getByRole('button', {name: 'Older'}).click();
+  // Ten sends a page: the older ones are a page away each.
+  const older = page.getByRole('button', {name: 'Older'});
+  await older.click();
+  for (const name of ['Already up to date', 'Button press expired']) await table.getByRole('cell', {name}).waitFor();
+  await older.click();
+  await page.getByText('Page 3 ·', {exact: false}).waitFor();
+  await older.click();
   await table.getByText('Bot setup').waitFor();
-  await page.getByRole('button', {name: 'Newer'}).click();
+  assert.equal(await older.isDisabled(), true);
+  for (const number of [3, 2, 1]) {
+    await page.getByRole('button', {name: 'Newer'}).click();
+    await page.getByText(`Page ${number} ·`, {exact: false}).waitFor();
+  }
   await table.getByText('Reaction cleared').waitFor();
   assert.deepEqual(problems, []);
   await page.close();

@@ -278,10 +278,10 @@ test('a stopped machine job says while its programs are ended, and when the owne
 test('addresses show as ssh would reach them, and the log asks for one page at a time', () => {
   assert.equal(endpoint(machine), 'nocheh@192.0.2.10:22');
   assert.equal(endpoint({...machine, address: 'fd00::10', port: 2222}), 'nocheh@[fd00::10]:2222');
-  assert.equal(commandQuery({}), '/machines/commands?limit=25');
+  assert.equal(commandQuery({}), '/machines/commands?limit=10');
   assert.equal(
     commandQuery({machine: machine.id, job: '9c'.repeat(32), all: true, before: 41}),
-    `/machines/commands?limit=25&machine=${machine.id}&job=${'9c'.repeat(32)}&kind=all&before=41`,
+    `/machines/commands?limit=10&machine=${machine.id}&job=${'9c'.repeat(32)}&kind=all&before=41`,
   );
-  assert.equal(commandQuery({all: false, before: null}), '/machines/commands?limit=25');
+  assert.equal(commandQuery({all: false, before: null}), '/machines/commands?limit=10');
 });

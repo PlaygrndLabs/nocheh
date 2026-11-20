@@ -41,7 +41,7 @@ type Rows = {
   cell_limit: number;
 };
 
-const PAGE = 50;
+const PAGE = 12;
 const path = (params: Record<string, string>) => '/database-browser?' + new URLSearchParams(params);
 const states: Record<string, {label: string; tone: Tone}> = {
   available: {label: 'Available', tone: 'good'},
@@ -93,7 +93,7 @@ export function DatabasesView() {
   return (
     <>
       <Card>
-        <div className="grid gap-4 px-5 py-4 md:grid-cols-3">
+        <div className="grid gap-4 px-5 py-3 md:grid-cols-3">
           <Field label="Database" htmlFor="db-select">
             <Select
               id="db-select"
@@ -220,6 +220,7 @@ function RowsCard({
     ...(sort ? {sort: sort.column, direction: sort.direction} : {}),
     ...(filter && column ? {filter_column: column, filter} : {}),
     offset: String(offset),
+    limit: String(PAGE),
   });
   const {data, error, loading} = useResource<Rows>(resource);
   const columns = data?.columns ?? [];
@@ -251,7 +252,43 @@ function RowsCard({
             : 'Loading rows…'
         }
         action={
-          <div className="flex items-center gap-2">
+          <>
+            <form onSubmit={apply} className="flex flex-wrap items-center gap-2">
+              <Select
+                aria-label="Column"
+                className="h-8 w-44 text-[13px]"
+                value={column}
+                onChange={e => {
+                  setColumn(e.target.value);
+                  if (!e.target.value) clear();
+                  else if (filter) setOffset(0);
+                }}
+              >
+                <option value="">Choose a column</option>
+                {columns.map(c => (
+                  <option key={c.name} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                aria-label="Contains"
+                type="search"
+                className="h-8 w-56 text-[13px]"
+                value={draft}
+                disabled={!column}
+                placeholder="Contains this text"
+                onChange={e => setDraft(e.target.value)}
+              />
+              <Button type="submit" size="sm" disabled={!column}>
+                <Search aria-hidden /> Filter
+              </Button>
+              {filter && (
+                <Button variant="ghost" size="sm" onClick={clear}>
+                  <X aria-hidden /> Clear
+                </Button>
+              )}
+            </form>
             <Badge tone={live === 'live' ? 'good' : 'warn'} dot>
               {live === 'live' ? 'Live' : live === 'connecting' ? 'Connecting…' : 'Live updates paused'}
             </Badge>
@@ -264,48 +301,10 @@ function RowsCard({
             >
               {!(loading && data) && <RefreshCw aria-hidden />}
             </Button>
-          </div>
+          </>
         }
       />
-      <form onSubmit={apply} className="flex flex-wrap items-end gap-2 px-5 pt-3">
-        <Field label="Column" htmlFor="db-filter-column" className="w-full sm:w-52">
-          <Select
-            id="db-filter-column"
-            value={column}
-            onChange={e => {
-              setColumn(e.target.value);
-              if (!e.target.value) clear();
-              else if (filter) setOffset(0);
-            }}
-          >
-            <option value="">Choose a column</option>
-            {columns.map(c => (
-              <option key={c.name} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Contains" htmlFor="db-filter-text" className="min-w-0 flex-1 basis-48">
-          <Input
-            id="db-filter-text"
-            type="search"
-            value={draft}
-            disabled={!column}
-            placeholder="Text in that column"
-            onChange={e => setDraft(e.target.value)}
-          />
-        </Field>
-        <Button type="submit" disabled={!column}>
-          <Search aria-hidden /> Filter
-        </Button>
-        {filter && (
-          <Button variant="ghost" onClick={clear}>
-            <X aria-hidden /> Clear
-          </Button>
-        )}
-      </form>
-      <div className="mt-4">
+      <div className="mt-3">
         {error && (
           <div className="px-5 pb-3">
             <LoadError what="rows" />

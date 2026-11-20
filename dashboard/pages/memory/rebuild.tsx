@@ -7,6 +7,7 @@
 import {useState, type ReactNode} from 'react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {
+  ActionRow,
   Button,
   Card,
   CardBody,
@@ -18,7 +19,6 @@ import {
   Notice,
   Segmented,
   Table,
-  Td,
   Th,
 } from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
@@ -88,22 +88,22 @@ export function Rebuild({revision, attached}: {revision: number; attached: boole
             </thead>
             <tbody className="max-sm:block">
               <Retry failed={data.failed_learning} attached={attached} />
-              <Action
+              <ActionRow
                 title="Re-learn chats"
                 detail="Long-term memory forgets what it learned from the chats you choose and learns them again from their saved messages."
               >
                 <Button size="sm" disabled={!attached} onClick={() => setOpen('relearn')}>
                   Re-learn…
                 </Button>
-              </Action>
-              <Action
+              </ActionRow>
+              <ActionRow
                 title="Replace long-term memory"
                 detail="Starts a new long-term memory and deletes the current one completely, including everything it learned."
               >
                 <Button size="sm" variant="danger" onClick={() => setOpen('replace')}>
                   Replace…
                 </Button>
-              </Action>
+              </ActionRow>
             </tbody>
           </Table>
           <Dialog
@@ -134,25 +134,6 @@ export function Rebuild({revision, attached}: {revision: number; attached: boole
         </>
       )}
     </Card>
-  );
-}
-
-/** One action as a table row: its name, what it does, and the button that starts it. */
-function Action({title, detail, children}: {title: string; detail: ReactNode; children: ReactNode}) {
-  return (
-    // On a phone the name and its button share a line and what it does sits under them.
-    <tr className="max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:border-b max-sm:border-line max-sm:py-1.5">
-      <Th
-        scope="row"
-        className="bg-transparent align-top text-[13px] font-medium whitespace-normal text-fg max-sm:flex-1 max-sm:border-0 max-sm:py-1"
-      >
-        {title}
-      </Th>
-      <Td className="space-y-1.5 text-[13px] text-muted max-sm:order-3 max-sm:w-full max-sm:border-0 max-sm:pt-0 max-sm:pb-1">
-        {detail}
-      </Td>
-      <Td className="text-right whitespace-nowrap max-sm:border-0 max-sm:py-1">{children}</Td>
-    </tr>
   );
 }
 
@@ -187,7 +168,7 @@ function Retry({failed, attached}: {failed: number | null; attached: boolean}) {
       );
   };
   return (
-    <Action
+    <ActionRow
       title="Retry failed learning"
       detail={
         <>
@@ -208,7 +189,7 @@ function Retry({failed, attached}: {failed: number | null; attached: boolean}) {
       <Button size="sm" busy={command.busy} disabled={!attached || !failed} onClick={() => void retry()}>
         Retry failed learning
       </Button>
-    </Action>
+    </ActionRow>
   );
 }
 

@@ -1,11 +1,12 @@
-/** System › Background work: what Nocheh is doing behind the scenes, its history, and each task's detail. */
+/** System › Background work: the assistant's jobs, the tasks behind the scenes with each one's detail, and their history. */
 import {lazy, Suspense, useState, type ReactNode} from 'react';
 import {ArrowUpRight, ListChecks} from 'lucide-react';
 import {apiPost} from '../../lib/api';
-import {useParam} from '../../lib/navigation';
+import {useParam, useSubTab} from '../../lib/navigation';
 import {refreshResources, useResource} from '../../lib/resource';
 import {href, setParams} from '../../lib/routes';
 import {workCounts, workers} from '../../lib/system-health';
+import {cn} from '../../lib/utils';
 import {
   ago,
   controlError,
@@ -27,7 +28,6 @@ import {
   Card,
   CardHeader,
   Empty,
-  Field,
   LoadError,
   LoadingRows,
   Notice,
@@ -35,38 +35,49 @@ import {
   Segmented,
   Select,
   Skeleton,
-  Stat,
   Table,
   Td,
   Technical,
   Th,
+  type Tone,
 } from '../../ui/core';
 import {Drawer, useFeedback} from '../../ui/overlay';
 import type {Metrics} from './work-charts';
 import {LinkButton} from '../../ui/link-button';
+import {SubPanel, SubTabs} from '../../ui/page';
 import {BackgroundJobs} from './jobs';
 
 const WorkCharts = lazy(() => import('./work-charts'));
 
 const sentence = (text: string) => (text ? text.charAt(0).toUpperCase() + text.slice(1) : '');
 
+const subTabs = ['jobs', 'tasks', 'history'] as const;
+
+function KindSelect({kind}: {kind: string}) {
+  return (
+    <Select
+      aria-label="Kind of work"
+      className="h-8 w-44 text-[13px]"
+      value={kind}
+      onChange={e => setParams({kind: e.target.value}, true)}
+    >
+      <option value="">All kinds</option>
+      {Object.entries(families).map(([id, label]) => (
+        <option key={id} value={id}>
+          {label}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
 export function WorkView() {
   const monitoring = useResource<any>('/monitoring', 10000);
   const health = monitoring.data?.workflows;
   const counts = workCounts(health);
-  const team = workers(health);
   const kind = useParam('kind') ?? '';
   const status = useParam('status') ?? '';
-  const reasons: any[] = Array.isArray(health?.waiting_reasons) ? health.waiting_reasons : [];
-  const show = (value: number) => (counts.available ? count(value) : '—');
-  const rows: {family: string; state: string; count: number}[] = counts.available ? health.counts : [];
-  const denied = rows.filter(row => row.state === 'denied').reduce((n, row) => n + row.count, 0);
-  const waitingByFamily: {family: string; count: number; oldest: string | null}[] = Array.isArray(
-    health?.waiting_families,
-  )
-    ? health.waiting_families
-    : [];
-  const backlog: number | null = typeof health?.outbox?.pending === 'number' ? health.outbox.pending : null;
+  const [tab, setTab] = useSubTab(subTabs);
   return (
     <>
       {monitoring.error && !monitoring.data && <LoadError what="background work" />}
@@ -80,105 +91,175 @@ export function WorkView() {
           Counts and failures are unknown right now. They will appear when the scheduler answers.
         </Notice>
       )}
-      <BackgroundJobs />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {!monitoring.data ? (
-          [0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-[92px] rounded-xl" />)
+      <SubTabs
+        label="Background work"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          {id: 'jobs', label: 'Jobs'},
+          {id: 'tasks', label: 'Tasks', count: counts.failed + counts.uncertain || null},
+          {id: 'history', label: 'History'},
+        ]}
+      />
+      {/* Only the open sub-tab is on the page: nothing here is edited, and charts can't draw while hidden. */}
+      {tab === 'jobs' && (
+        <SubPanel id="jobs" current={tab}>
+          <BackgroundJobs />
+        </SubPanel>
+      )}
+      {tab === 'tasks' && (
+        <SubPanel id="tasks" current={tab}>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+            <Runs key={kind + ':' + status} kind={kind} status={status} />
+            <div className="space-y-5 max-lg:order-first">
+              <RightNow health={health} loaded={!!monitoring.data} />
+              <Waiting health={health} />
+            </div>
+          </div>
+        </SubPanel>
+      )}
+      {tab === 'history' && (
+        <SubPanel id="history" current={tab}>
+          <History kind={kind} counts={counts.available ? health.counts : null} />
+        </SubPanel>
+      )}
+      <RunDrawer />
+    </>
+  );
+}
+
+/** A small table of a name, a line under it, and a figure at the right. */
+function Figures({
+  label,
+  rows,
+}: {
+  label: string;
+  rows: {name: string; hint?: ReactNode; value: ReactNode; tone?: Tone}[];
+}) {
+  return (
+    <Table aria-label={label}>
+      <tbody>
+        {rows.map(row => (
+          <tr key={row.name} className="last:[&>*]:border-b-0">
+            <Th scope="row" className="bg-transparent py-2 text-[13px] font-normal whitespace-normal text-fg">
+              {row.name}
+              {row.hint && <span className="block text-xs text-muted">{row.hint}</span>}
+            </Th>
+            <Td
+              className={cn(
+                'tabular py-2 text-right font-semibold whitespace-nowrap',
+                row.tone === 'bad' && 'text-bad',
+                row.tone === 'warn' && 'text-warn',
+              )}
+            >
+              {row.value}
+            </Td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
+/** The totals of every kind of work, whatever the list is filtered to. */
+function RightNow({health, loaded}: {health: any; loaded: boolean}) {
+  const counts = workCounts(health);
+  const team = workers(health);
+  const show = (value: number) => (counts.available ? count(value) : '—');
+  const rows: {family: string; state: string; count: number}[] = counts.available ? health.counts : [];
+  const denied = rows.filter(row => row.state === 'denied').reduce((n, row) => n + row.count, 0);
+  const backlog: number | null = typeof health?.outbox?.pending === 'number' ? health.outbox.pending : null;
+  return (
+    <Card>
+      <CardHeader
+        title="Right now"
+        description="Counts every kind of work."
+        action={
+          <LinkButton href="/inngest/runs" variant="ghost" size="sm" external>
+            Scheduler console <ArrowUpRight aria-hidden />
+          </LinkButton>
+        }
+      />
+      <div className="mt-3 border-t border-line">
+        {!loaded ? (
+          <LoadingRows rows={5} />
         ) : (
-          <>
-            <Stat label="Running" value={show(counts.running)} hint="Working on it now" />
-            <Stat
-              label="Waiting"
-              value={show(counts.queued + counts.waiting)}
-              hint={`${count(counts.queued)} queued · ${count(counts.waiting)} waiting on something`}
-              tone={counts.waiting ? 'warn' : undefined}
-            />
-            <Stat
-              label="Failed"
-              value={show(counts.failed + counts.retrying)}
-              hint={`${count(counts.retrying)} will retry · ${count(counts.uncertain)} uncertain`}
-              tone={counts.failed ? 'bad' : counts.retrying ? 'warn' : undefined}
-            />
-            <Stat
-              label="Last finished"
-              value={
-                <span className="text-lg">
-                  {counts.available && health?.last_success_at ? ago(health.last_success_at) : '—'}
-                </span>
-              }
-              hint={team.total ? `${team.connected} of ${team.total} workers connected` : 'No workers registered'}
-              tone={team.connected < team.total ? 'warn' : undefined}
-            />
-            <Stat
-              label="Backlog"
-              value={backlog === null ? '—' : count(backlog)}
-              hint={backlog === null ? 'Couldn’t be checked' : 'Not yet handed to the scheduler'}
-              tone={backlog ? 'warn' : undefined}
-            />
-          </>
+          <Figures
+            label="Right now"
+            rows={[
+              {name: 'Running', hint: 'Working on it now', value: show(counts.running)},
+              {
+                name: 'Waiting',
+                hint: `${count(counts.queued)} queued · ${count(counts.waiting)} waiting on something`,
+                value: show(counts.queued + counts.waiting),
+                tone: counts.waiting ? 'warn' : undefined,
+              },
+              {
+                name: 'Failed',
+                hint: `${count(counts.retrying)} will retry · ${count(counts.uncertain)} uncertain`,
+                value: show(counts.failed + counts.retrying),
+                tone: counts.failed ? 'bad' : counts.retrying ? 'warn' : undefined,
+              },
+              {
+                name: 'Last finished',
+                hint: team.total ? `${team.connected} of ${team.total} workers connected` : 'No workers registered',
+                value: counts.available && health?.last_success_at ? ago(health.last_success_at) : '—',
+                tone: team.connected < team.total ? 'warn' : undefined,
+              },
+              {
+                name: 'Backlog',
+                hint: backlog === null ? 'Couldn’t be checked' : 'Not yet handed to the scheduler',
+                value: backlog === null ? '—' : count(backlog),
+                tone: backlog ? 'warn' : undefined,
+              },
+            ]}
+          />
         )}
       </div>
       {counts.available && denied > 0 && (
-        <p className="text-[13px] text-muted">
+        <p className="border-t border-line px-5 py-3 text-xs text-muted">
           {count(denied)} {denied === 1 ? 'task was' : 'tasks were'} denied or refused. They are closed, not failed.
         </p>
       )}
+    </Card>
+  );
+}
 
-      {counts.queued + counts.waiting > 0 && reasons.length > 0 && (
-        <Card>
-          <CardHeader
-            title="Why work is waiting"
-            description={
-              health?.oldest_waiting ? `Oldest has waited since ${dateTime(health.oldest_waiting)}.` : undefined
-            }
-          />
-          <div className="mt-2 grid sm:grid-cols-2">
-            <ul aria-label="By reason" className="pb-2">
-              {reasons.slice(0, 5).map((row, index) => (
-                <li key={index} className="flex justify-between gap-3 border-t border-line px-5 py-2 text-sm">
-                  <span>{waitingReason(row)}</span>
-                  <span className="tabular font-medium">{count(row.count)}</span>
-                </li>
-              ))}
-            </ul>
-            <ul aria-label="By kind of work" className="pb-2 sm:border-l sm:border-line">
-              {waitingByFamily.slice(0, 5).map(row => (
-                <li key={row.family} className="flex justify-between gap-3 border-t border-line px-5 py-2 text-sm">
-                  <span>
-                    {familyName(row.family)}
-                    {row.oldest && <span className="block text-xs text-muted">Oldest: {ago(row.oldest)}</span>}
-                  </span>
-                  <span className="tabular font-medium">{count(row.count)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <p className="border-t border-line px-5 py-3 text-xs text-muted">
-            These count tasks, not messages: one message can start several tasks.
-          </p>
-        </Card>
-      )}
-
-      <div className="flex flex-wrap items-end gap-3">
-        <Field label="Kind of work" htmlFor="work-kind" className="w-full sm:w-60">
-          <Select id="work-kind" value={kind} onChange={e => setParams({kind: e.target.value}, true)}>
-            <option value="">All kinds</option>
-            {Object.entries(families).map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <p className="pb-2 text-xs text-muted">
-          Filters the history and the list below; the totals above always count everything.
-        </p>
+function Waiting({health}: {health: any}) {
+  const counts = workCounts(health);
+  const reasons: any[] = Array.isArray(health?.waiting_reasons) ? health.waiting_reasons : [];
+  const byFamily: {family: string; count: number; oldest: string | null}[] = Array.isArray(health?.waiting_families)
+    ? health.waiting_families
+    : [];
+  if (!(counts.queued + counts.waiting > 0 && reasons.length > 0)) return null;
+  return (
+    <Card>
+      <CardHeader
+        title="Why work is waiting"
+        description={health?.oldest_waiting ? `Oldest has waited since ${dateTime(health.oldest_waiting)}.` : undefined}
+      />
+      <div className="mt-3 border-t border-line">
+        <Figures
+          label="By reason"
+          rows={reasons.slice(0, 5).map(row => ({name: waitingReason(row), value: count(row.count)}))}
+        />
       </div>
-
-      <History kind={kind} counts={counts.available ? health.counts : null} />
-      <Runs key={kind + ':' + status} kind={kind} status={status} />
-      <RunDrawer />
-    </>
+      {byFamily.length > 0 && (
+        <div className="border-t border-line">
+          <Figures
+            label="By kind of work"
+            rows={byFamily.slice(0, 5).map(row => ({
+              name: familyName(row.family),
+              hint: row.oldest ? `Oldest: ${ago(row.oldest)}` : undefined,
+              value: count(row.count),
+            }))}
+          />
+        </div>
+      )}
+      <p className="border-t border-line px-5 py-3 text-xs text-muted">
+        These count tasks, not messages: one message can start several tasks.
+      </p>
+    </Card>
   );
 }
 
@@ -195,16 +276,19 @@ function History({kind, counts}: {kind: string; counts: any[] | null}) {
         title="History"
         description={`Times in ${timeZone()}. ${range === '24h' ? 'One bar per hour.' : 'One bar per 6 hours.'}`}
         action={
-          <Segmented
-            size="sm"
-            label="History period"
-            value={range}
-            onChange={setRange}
-            options={[
-              {value: '24h', label: '24 hours'},
-              {value: '7d', label: '7 days'},
-            ]}
-          />
+          <>
+            <KindSelect kind={kind} />
+            <Segmented
+              size="sm"
+              label="History period"
+              value={range}
+              onChange={setRange}
+              options={[
+                {value: '24h', label: '24 hours'},
+                {value: '7d', label: '7 days'},
+              ]}
+            />
+          </>
         }
       />
       <div className="px-5 py-4">
@@ -233,7 +317,7 @@ function Runs({kind, status}: {kind: string; status: string}) {
   const [pages, setPages] = useState<(string | null)[]>([null]);
   const after = pages.at(-1);
   const query = new URLSearchParams({
-    limit: '25',
+    limit: '10',
     ...(kind ? {family: kind} : {}),
     ...(status ? {state: status} : {}),
     ...(after ? {after} : {}),
@@ -247,6 +331,7 @@ function Runs({kind, status}: {kind: string; status: string}) {
         description="Newest first. Open one to see its steps, or retry or cancel it."
         action={
           <>
+            <KindSelect kind={kind} />
             <Select
               aria-label="Status"
               className="h-8 w-44 text-[13px]"
@@ -260,9 +345,6 @@ function Runs({kind, status}: {kind: string; status: string}) {
                 </option>
               ))}
             </Select>
-            <LinkButton href="/inngest/runs" variant="ghost" size="sm" external>
-              Scheduler console <ArrowUpRight aria-hidden />
-            </LinkButton>
           </>
         }
       />

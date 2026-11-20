@@ -443,7 +443,7 @@ const machineCommands:any[]=[];
   ['curl -fsS https://example.org/garden-site.tar.gz -o /tmp/site.tar.gz','command',null,0,'machine_unreachable'],['tar -xzf /tmp/site.tar.gz -C ~/projects/garden-site','command',0,0]];
  commands.forEach(([command,kind,exit,bytes,error],index)=>machineCommands.unshift(machineCommand(vm,{...(kind==='test'?{}:job),command,kind,exit_code:exit,output_bytes:bytes,
   state:error?'failed':'done',error_code:error??null,started_at:minutesAgo(40-index*3),finished_at:minutesAgo(40-index*3-0.4)})));
- for(let i=0;i<28;i++)machineCommands.unshift(machineCommand(vm,{...job,command:`sed -n '${i*40+1},${i*40+40}p' ~/projects/garden-site/src/app.js`,kind:i%4?'file':'command',output_bytes:900+i*13,
+ for(let i=0;i<8;i++)machineCommands.unshift(machineCommand(vm,{...job,command:`sed -n '${i*40+1},${i*40+40}p' ~/projects/garden-site/src/app.js`,kind:i%4?'file':'command',output_bytes:900+i*13,
   started_at:minutesAgo(6-i*0.2),finished_at:minutesAgo(6-i*0.2-0.05)}));
  machineCommands.unshift(machineCommand(vm,{...job,command:'npm test 2>&1 | tail -n 40',state:'running',exit_code:null,output_sha256:null,output_bytes:0,started_at:minutesAgo(0.3),finished_at:null}));}
 // Sent to apps: content-free send records, newest first, a few of them problems (synthetic, in memory).
@@ -797,10 +797,10 @@ const server=createServer((req,res)=>{void(async()=>{
    if(q.action==='tables')return json(res,200,{tables});
    if(!tables.some(t=>t.schema===q.schema&&t.name===q.table))throw new HttpError(400,'table_not_found');
    const columns=[{name:'id',type:'text'},{name:'channel',type:'text'},{name:'scope',type:'text'},{name:'text',type:'text'},{name:'received_at',type:'timestamp with time zone'}];
-   let rows:Record<string,string|null>[]=q.table==='events'?browserRows:[];const offset=Number(q.offset||0);
+   let rows:Record<string,string|null>[]=q.table==='events'?browserRows:[];const offset=Number(q.offset||0),limit=Number(q.limit||50);
    if(q.filter_column&&q.filter)rows=rows.filter(r=>String((r as any)[q.filter_column!]??'').toLowerCase().includes(q.filter!.toLowerCase()));
    if(q.sort)rows=[...rows].sort((a,b)=>String((a as any)[q.sort!]??'').localeCompare(String((b as any)[q.sort!]??''))*(q.direction==='desc'?-1:1));
-   return json(res,200,{database:db[0],schema:q.schema,table:q.table,columns,rows:rows.slice(offset,offset+50),next_offset:rows.length>offset+50?offset+50:null,offset,cell_limit:240});}
+   return json(res,200,{database:db[0],schema:q.schema,table:q.table,columns,rows:rows.slice(offset,offset+limit),next_offset:rows.length>offset+limit?offset+limit:null,offset,cell_limit:240});}
   if(/^\/exports\/[a-f0-9-]{36}\/download$/.test(route)){res.writeHead(200,{'content-type':'application/zip','content-disposition':'attachment; filename="nocheh-archive.zip"','cache-control':'no-store'});res.end(Buffer.from([0x50,0x4b,5,6,...Array(18).fill(0)]));return;}
   if(/^\/workflows\/[a-f0-9]{64}$/.test(route))return json(res,200,await workflowDetail(pool,route.split('/')[2]!));
   if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[],managed_runs:[{event_id:id,state:'done',created_at:new Date().toISOString(),channel:'browser',profile,scope:'42'},{event_id:voiceId,state:'failed',error_code:'provider_timeout',created_at:new Date(Date.now()-86400000).toISOString(),channel:'scheduler',job_id:'morning-check',job_name:'Morning aurora check',profile,scope:'42'}]},guard_mode:'on',services:[]});
