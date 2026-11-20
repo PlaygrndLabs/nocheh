@@ -63,6 +63,12 @@ test('the local laws line is the owner’s text, else the built-in one, and noth
   assert.equal(localLawsLine({texts: {}, defaults: {}}), null);
 });
 
+test('every schedule text the owner can edit is listed on Settings › Assistant (ADR-0266)', async () => {
+  const {readFileSync} = await import('node:fs');
+  const page = readFileSync('dashboard/pages/settings/instructions.tsx', 'utf8');
+  for (const key of ['reply.schedules', 'reply.scheduled', 'schedules.notice_texts']) assert.ok(page.includes(`key: '${key}'`), key);
+});
+
 test('every member and ask text the owner can edit is listed on Settings › Assistant', async () => {
   const {readFileSync} = await import('node:fs');
   const page = readFileSync('dashboard/pages/settings/instructions.tsx', 'utf8');

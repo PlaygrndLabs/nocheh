@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,memberReadLines,memberReminderLines,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
+import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,memberReadLines,memberReminderLines,scheduleNoticeLines,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
 import {brainSummary} from '../src/brain/brain.js';
 import {fixtureBrain,type FakeCall} from './fixture-brain.js';
 
@@ -101,7 +101,7 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
   assert.equal(promptProblem('tasks.reminder_texts',reminderTexts),null);assert.equal(promptProblem('telegram.approval_texts',approvalTexts),null);
   for(const [key,required] of Object.entries(labeledPlaceholders))for(const [name,values] of Object.entries(required!)) {
     const line=(key==='tasks.reminder_texts'?reminderLines(''):key==='memory.source_texts'?sourceLines(''):key==='telegram.member_read_texts'?memberReadLines(''):
-      key==='members.reminder_texts'?memberReminderLines(''):approvalLines(''))[name as never] as string|undefined;
+      key==='members.reminder_texts'?memberReminderLines(''):key==='schedules.notice_texts'?scheduleNoticeLines(''):approvalLines(''))[name as never] as string|undefined;
     assert.ok(line&&values.every(value=>line.includes(value)),`${key} ${name}: its default keeps its values`);
   }
   // A stored text with such a line is still read, so the owner's other lines stay.

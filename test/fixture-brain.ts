@@ -15,7 +15,7 @@ const replied=(ref:TurnRef,receipt:Record<string,unknown>):TurnReceipt=>
  * A brain for tests that hands each operation to a fake by name, with the body Hermes's run routes receive:
  * `run.start`, `run.resume` (observe only), `run.cancel`, `run.events`, `status`, `config.read`, `config.write`,
  * `persona.read`, `persona.write`, `prompts.defaults`, `profiles.list`, `memory.read`, `memory.recall`,
- * `memory.review` and `schedule.advance`.
+ * `memory.review`, `schedule.advance` and `schedules.manage`.
  */
 export function fixtureBrain(call:FakeCall,id='hermes'):Brain {
   const as=(operation:string)=>(input:Readonly<Record<string,unknown>>)=>call(operation,{...input});
@@ -28,7 +28,7 @@ export function fixtureBrain(call:FakeCall,id='hermes'):Brain {
     readSettings:as('config.read'),writeSettings:as('config.write'),readPersona:as('persona.read'),writePersona:as('persona.write'),
     promptDefaults:async()=>(await call('prompts.defaults',{})).defaults as Record<string,string>,
     listProfiles:as('profiles.list'),readNotes:as('memory.read'),recallNotes:as('memory.recall'),reviewNotes:as('memory.review'),
-    advanceSchedules:as('schedule.advance')};
+    advanceSchedules:as('schedule.advance'),manageSchedules:as('schedules.manage')};
 }
 
 /** The calls a turn makes on Nocheh's bot while it runs and answers. */

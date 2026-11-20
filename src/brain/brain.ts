@@ -83,6 +83,9 @@ export type Brain={
   reviewNotes?:Call;
   /** Bring the brain's own scheduled tasks forward, so Nocheh runs those that are due. */
   advanceSchedules?:Call;
+  /** The owner's Schedules pages (ADR-0266): `{operation:'list'}` lists every chat's schedules; `{operation, profile, job_id,
+   *  request_id}` pauses, resumes, runs now (`run`) or deletes one. */
+  manageSchedules?:Call;
 };
 
 /** Error codes every brain uses, so Nocheh can act on them without knowing the brain. */
@@ -101,7 +104,7 @@ export const brainRejected=()=>new HttpError(503,brainErrors.rejected);
 export const brainInvalid=()=>new HttpError(502,brainErrors.invalid);
 export const brainUnsupported=()=>new HttpError(409,brainErrors.unsupported);
 /** The brain's optional operations that take and answer plain records. */
-export type BrainOperation='readSettings'|'writeSettings'|'readPersona'|'writePersona'|'listProfiles'|'readNotes'|'recallNotes'|'reviewNotes'|'advanceSchedules';
+export type BrainOperation='readSettings'|'writeSettings'|'readPersona'|'writePersona'|'listProfiles'|'readNotes'|'recallNotes'|'reviewNotes'|'advanceSchedules'|'manageSchedules';
 /** An optional operation of the plugged-in brain, or `brain_capability_unavailable`. */
 export function brainOperation(brain:Brain,name:BrainOperation):Call {
   const operation=brain[name];if(!operation)throw brainUnsupported();
@@ -116,4 +119,4 @@ export function turnChannel(brain:Brain,channel:unknown):TurnChannel {
 export const brainSummary=(brain:Brain)=>({id:brain.id,name:brain.name,
   capabilities:{...Object.fromEntries(turnChannels.map(channel=>[channel,brain.channels.includes(channel)])),
     settings:!!brain.readSettings,persona:!!brain.readPersona,prompts:!!brain.promptDefaults,notes:!!brain.readNotes,
-    recall:!!brain.recallNotes,review:!!brain.reviewNotes,schedules:!!brain.advanceSchedules}});
+    recall:!!brain.recallNotes,review:!!brain.reviewNotes,schedules:!!brain.advanceSchedules,schedule_list:!!brain.manageSchedules}});

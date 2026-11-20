@@ -54,6 +54,31 @@ MACHINE_TOOLS=(BACKGROUND_TOOLS-{'memory'}-BOX_STRIPPED)|{'terminal','process_ma
 MACHINE_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal','file']
 
 
+# Hermes's own schedule tool, in a live reply in the owner's private chat only, with that chat's schedule store mounted
+# (ADR-0266). Its hooks keep it to what Nocheh runs; a job, a box, a machine, a review or a scheduled run never has it.
+SCHEDULE_TOOLS={'cronjob_manage'}
+SCHEDULE_TOOLSETS=TURN_TOOLSETS+['cronjob']
+
+
+def schedule_turn(body,profile,review=False,background=False,box=False,machine=False,answer=False,member=False,member_read=False):
+    """Whether this turn offers Hermes's schedule tool: the owner's own live Telegram turn, isolated, with the chat's
+    schedule store mounted, and Nocheh's word that the message is the owner's own (not forwarded). Fails closed."""
+    if (body.get('owner') is not True or body.get('channel','telegram')!='telegram' or review or background or box or machine
+            or answer or member or member_read or os.environ.get('NOCHEH_ISOLATED_TURN')!='1'):return False
+    store=Path(profile)/'cron'
+    if store.is_symlink() or not store.is_dir():return False
+    try:
+        from .archive_tools import request
+        rules=request('/v1/schedules/turn',{})
+    except Exception:return False
+    if not isinstance(rules,dict) or rules.get('allowed') is not True:return False
+    from services.hermes import schedule_gate
+    schedule_gate.bind(rules.get('time_zone'),rules.get('limit'),rules.get('count'))
+    # Hermes offers its schedule tool only in a messaging gateway's session, which this turn is.
+    os.environ['HERMES_GATEWAY_SESSION']='1'
+    return True
+
+
 class UnexpectedProfileTool(RuntimeError):
     def __init__(self,names):
         super().__init__('unexpected_profile_tool')
@@ -341,6 +366,7 @@ def run(body, emit=None, relay=None):
     if placement not in ('legacy','evidence'):raise ValueError('invalid_memory_context')
     restore_evidence=memory_evidence.install(memory if not review else None,body.get('note_sources') or {}) if placement=='evidence' else lambda:None
     if placement=='evidence':long_term='\n'+prompt('memory.evidence')
+    schedules=schedule_turn(body,profile,review,background,box,machine,answer,member,member_read)
     if background:
         # Each model call of the run, and its to-do list, go out as progress lines; the cost notice comes from them too.
         from services.hermes import job_progress
@@ -350,7 +376,7 @@ def run(body, emit=None, relay=None):
         if not review:connect_data_tools(body['archive_credential'],body['turn_deadline_epoch'],MEMBER_READ_DATA_TOOLS if member_read else ANSWER_DATA_TOOLS if answer or member else DATA_TOOLS)
         agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
             api_key=credentials.access_token,base_url=credentials.base_url,
-            enabled_toolsets=['memory'] if review else MEMBER_READ_TOOLSETS if member_read else MEMBER_TOOLSETS if member else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else TURN_TOOLSETS,
+            enabled_toolsets=['memory'] if review else MEMBER_READ_TOOLSETS if member_read else MEMBER_TOOLSETS if member else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else SCHEDULE_TOOLSETS if schedules else TURN_TOOLSETS,
             fallback_model=None,
             session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
             user_id=body['user_id'],chat_type='dm' if body['owner'] or answer or member or member_read else 'group',
@@ -359,7 +385,10 @@ def run(body, emit=None, relay=None):
             # A job run's budget ends at the job's soft deadline; Hermes's own notice at 80% of it asks for the report.
             run_budget_seconds=run_budget(body) if background else prefs['agent.run_budget_seconds'],
             reasoning_config=reasoning(credentials,prefs),ephemeral_system_prompt=(
-                (prompt('reply.common')+' '+prompt('reply.member_read') if member_read else reply(body.get('prompts'),body['owner'],answer,member))+long_term))
+                (prompt('reply.common')+' '+prompt('reply.member_read') if member_read else reply(body.get('prompts'),body['owner'],answer,member))+
+                # A scheduled run's result goes to its chat by itself; one with nothing to send answers [SILENT] (ADR-0266).
+                (' '+prompt('reply.scheduled') if body.get('channel')=='scheduler' else '')+
+                (' '+prompt('reply.schedules') if schedules else '')+long_term))
     except BaseException:
         disconnect_data_tools();raise
     # The turn's tools are set below; Hermes's refresh at the start of a turn would bring back a tool the turn dropped.
@@ -374,6 +403,7 @@ def run(body, emit=None, relay=None):
             from .native_memory import native_review
             return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))
         removed,allowed=turn_tools(background,box,machine,answer,member,member_read)
+        if schedules:allowed=allowed|SCHEDULE_TOOLS
         agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in removed]
         agent.valid_tool_names=set(agent.valid_tool_names)-removed
         verify_profile_tools(agent.valid_tool_names,allowed)

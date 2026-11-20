@@ -29,6 +29,7 @@ const pages = [
   ['home', 'Home'],
   ['inbox', 'Inbox'],
   ['tasks', 'Tasks'],
+  ['schedules', 'Schedules'],
   ['chats', 'Chats'],
   ['members', 'Members'],
   ['messages', 'Messages'],

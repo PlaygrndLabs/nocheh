@@ -33,7 +33,7 @@ test('owner runtime status names the plugged-in brain, reports Telegram polling 
     assert.equal((body.status as unknown as {service:string}).service,'hermes');
     assert.deepEqual((body as unknown as {capabilities:unknown}).capabilities,capabilities);
     assert.deepEqual((body as unknown as {brain:unknown}).brain,{id:'hermes',name:'Fixture brain',capabilities:{telegram:true,browser:true,scheduler:true,background:true,
-      settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:true}});
+      settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:true,schedule_list:true}});
     // A brain that does not answer is reported, not hidden.
     const down=storageServer({brain:{...brain,status:async()=>{throw Error('down');}}} as unknown as StorageServices,config,async()=>({}));
     await new Promise<void>(resolve=>down.listen(0,'127.0.0.1',resolve));

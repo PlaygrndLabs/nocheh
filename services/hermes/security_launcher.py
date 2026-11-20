@@ -44,8 +44,9 @@ def docker(method,path,body=None):
         return json.loads(raw) if raw else {}
     finally:client.close()
 
-def container_spec(profile,host_root,image,network,uid,gid,source_root=None,box=None,machine=False):
+def container_spec(profile,host_root,image,network,uid,gid,source_root=None,box=None,machine=False,schedules=None):
     if not re.fullmatch(r'nocheh-[a-f0-9]{24}',profile):raise ValueError('invalid_isolated_profile')
+    if schedules is not None and (not re.fullmatch(r'nocheh-[a-f0-9]{24}',schedules) or box is not None or machine):raise ValueError('invalid_schedule_store')
     if box is not None and not BOX_NAME.fullmatch(box):raise ValueError('invalid_job_box')
     # A job run on the owner's machine reaches it only through nocheh-security, as this turn: no mount, no network.
     if type(machine) is not bool or machine and box is not None:raise ValueError('invalid_job_machine')
@@ -58,6 +59,9 @@ def container_spec(profile,host_root,image,network,uid,gid,source_root=None,box=
     mounts=[{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':True} for name in CONFIGURATION]
     mounts += [{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':False} for name in DATA_DIRS]
     mounts += [{'Type':'bind','Source':str(root/profile/name),'Target':'/profile/'+name,'ReadOnly':False} for name in DATA_FILES]
+    # The owner's own reply in their private chat: the chat's Hermes schedule store, read-write (ADR-0266). Nocheh's
+    # scheduler captures each new or changed schedule there before it may run.
+    if schedules is not None:mounts.append({'Type':'bind','Source':str(root/schedules/'cron'),'Target':'/profile/cron','ReadOnly':False})
     if source_root is not None:
         # Source-watched development only: turns use the checkout's plugin code,
         # read-only, instead of the code baked into the pinned runtime image.
@@ -89,6 +93,15 @@ def validate_local_profile(profile,root=Path('/profiles')):
     for name in (*CONFIGURATION,*DATA_DIRS,*DATA_FILES):
         item=path/name
         if item.is_symlink() or not item.exists() or not item.resolve().is_relative_to(path.resolve()):raise ValueError('profile_mount_denied')
+
+def schedule_store(binding,boxed,machine,root=Path('/profiles')):
+    """The owner's chat schedule store a turn may write, or None: only the owner's own reply, never a job's run, a box or a machine."""
+    logical=binding.get('logical_profile')
+    if binding.get('owner') is not True or binding.get('job') is not None or boxed or machine:return None
+    if not isinstance(logical,str) or not re.fullmatch(r'nocheh-[a-f0-9]{24}',logical):return None
+    home=root/logical;store=home/'cron'
+    if home.is_symlink() or store.is_symlink() or not store.is_dir() or store.resolve().parent!=home.resolve() or home.resolve().parent!=root.resolve():return None
+    return logical
 
 def attach(identifier,body):
     client=DockerConnection()
@@ -597,7 +610,8 @@ class Handler(BaseHTTPRequestHandler):
                 # A box the sweep removed meanwhile is not mounted; Docker would recreate its volume empty.
                 if box and not running(box[0]):box=None
                 spec=container_spec(profile,self.server.host_profiles,self.server.image,self.server.network,int(os.environ['NOCHEH_UID']),int(os.environ['NOCHEH_GID']),
-                                    os.environ.get('NOCHEH_DEV_TURN_SOURCE') or None,box[1] if box else None,machine=machine)
+                                    os.environ.get('NOCHEH_DEV_TURN_SOURCE') or None,box[1] if box else None,machine=machine,
+                                    schedules=schedule_store(binding,boxed,machine))
                 identifier=docker('POST','/containers/create?name=nocheh-turn-'+uuid.uuid4().hex,spec)['Id']
                 # Cleared only when the turn ends by itself, with exit code 0, no kill and a done result.
                 if box:ABNORMAL.add(job)

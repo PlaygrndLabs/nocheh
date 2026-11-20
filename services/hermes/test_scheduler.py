@@ -143,6 +143,67 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(values['agent.reasoning_effort'],'high')
         self.assertEqual((home/'config.yaml').read_bytes(),before)
 
+    def asked(self,**fields):
+        """A schedule Hermes's own tool made in a reply (ADR-0266), straight in the chat's store."""
+        from cron import jobs as native
+        from .native_cron import profiles
+        _,home,_=next(profiles(self.admin))
+        with store(home):
+            job=native.create_job(prompt='Brief me',schedule='0 8 * * *',name='Morning brief',deliver='telegram',timezone='Asia/Tokyo',**fields)
+        return home,job
+
+    def test_a_schedule_set_by_asking_is_captured_announced_once_and_recaptured_when_hermes_changes_it(self):
+        from cron import jobs as native
+        home,job=self.asked()
+        self.scheduler.sync()
+        definitions=[body for route,body in self.calls if route=='definition'];announced=[body for route,body in self.calls if route=='announce']
+        self.assertEqual(len(definitions),1);self.assertEqual(definitions[0]['definition']['timezone'],'Asia/Tokyo')
+        self.assertEqual([(a['scope'],a['job_id'],a['name'],a['timezone']) for a in announced],[('42',job['id'],'Morning brief','Asia/Tokyo')])
+        stored=inspect(home)[0];version=stored['nocheh_definition_version']
+        self.assertTrue(stored['nocheh_registered'] and stored['nocheh_announced'])
+        self.calls.clear();self.scheduler.sync();self.assertEqual(self.calls,[],'nothing changed: nothing captured or announced again')
+        # Hermes's tool changes the prompt in place in a later reply: a new definition, captured before it may run.
+        with store(home):native.update_job(job['id'],{'prompt':'Brief me with the weather'})
+        self.scheduler.sync()
+        self.assertEqual([route for route,_ in self.calls],['definition'])
+        self.assertNotEqual(inspect(home)[0]['nocheh_definition_version'],version)
+        self.assertEqual(self.calls[0][1]['definition']['prompt'],'Brief me with the weather')
+
+    def test_a_schedule_with_hermes_delivery_target_sends_to_its_chat_and_one_refused_holds_back_no_other(self):
+        home,first=self.asked();_,second=self.asked()
+        from cron import jobs as native
+        with store(home):native.update_job(first['id'],{'deliver':'origin'})
+        original=self.call
+        def call(route,body):
+            if route=='definition' and body['job_id']==second['id']:raise OSError('refused')
+            return original(route,body)
+        self.scheduler.call=call
+        with self.assertRaises(OSError):self.scheduler.sync()
+        stored={job['id']:job for job in inspect(home)}
+        self.assertEqual(stored[first['id']]['deliver'],'telegram');self.assertTrue(stored[first['id']]['nocheh_registered'])
+        self.assertFalse(stored[second['id']].get('nocheh_registered'))
+
+    def test_a_schedule_set_from_the_command_line_gets_no_message(self):
+        self.create();self.scheduler.sync()
+        self.assertFalse([route for route,_ in self.calls if route=='announce'])
+
+    def test_the_schedules_pages_list_pause_run_and_delete(self):
+        from .native_cron import owner_schedules
+        home,job=self.asked();self.scheduler.sync()
+        listed=owner_schedules(self.admin,{'operation':'list'},self.call)['schedules']
+        self.assertEqual([(row['id'],row['profile'],row['scope'],row['name'],row['timezone'],row['set_in_chat'],row['enabled']) for row in listed],
+                         [(job['id'],home.name,'42','Morning brief','Asia/Tokyo',True,True)])
+        self.assertNotIn('prompt',listed[0],'the list never carries the prompt text')
+        paused=owner_schedules(self.admin,{'operation':'pause','profile':home.name,'job_id':job['id']},self.call)['schedule']
+        self.assertFalse(paused['enabled'])
+        owner_schedules(self.admin,{'operation':'resume','profile':home.name,'job_id':job['id']},self.call)
+        owner_schedules(self.admin,{'operation':'run','profile':home.name,'job_id':job['id'],'request_id':'press-one'},self.call)
+        self.assertEqual(inspect(home)[0]['nocheh_pending']['reason'],'manual')
+        with self.assertRaises(ValueError):owner_schedules(self.admin,{'operation':'pause','profile':home.name,'job_id':'../x'},self.call)
+        with self.assertRaises(ValueError):owner_schedules(self.admin,{'operation':'edit','profile':home.name,'job_id':job['id']},self.call)
+        self.assertEqual(owner_schedules(self.admin,{'operation':'delete','profile':home.name,'job_id':job['id']},self.call),{'ok':True})
+        self.assertEqual(owner_schedules(self.admin,{'operation':'list'},self.call)['schedules'],[])
+
     def migrate(self):
         from .managed_async import ManagedAsync
         original=self.call

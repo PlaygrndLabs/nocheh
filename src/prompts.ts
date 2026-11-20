@@ -17,7 +17,7 @@ export const promptKeys=['reply.common','reply.owner','reply.group','reply.priva
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
   'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds','telegram.member_daily_limit','telegram.group_tools_texts',
   'telegram.member_private_daily_limit','members.local_laws','reply.member_read','telegram.member_read','telegram.member_read_texts',
-  'members.reminder','members.reminder_texts'] as const;
+  'members.reminder','members.reminder_texts','reply.scheduled','reply.schedules','schedules.notice_texts'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
@@ -213,6 +213,7 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
     job_turn:['{place}','{date}','{read}'],more:['{count}']},
   'telegram.member_read_texts':{source:['{member}'],closed:['{member}'],failed:['{member}']},
   'members.reminder_texts':{note_line:['{line}']},
+  'schedules.notice_texts':{set:['{name}'],when:['{when}'],next:['{next}']},
 };
 /** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
  *  Object property ('constructor', '__proto__') is just a line; a text with no such lines is not read at all. */
@@ -429,6 +430,20 @@ export type PrivateAnswerText='button'|'open'|'only_asker'|'expired'|'used'|'cha
 export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerText,string> {
   return labeledLines(privateAnswerTexts,text) as Record<PrivateAnswerText,string>;
 }
+/** The message Nocheh posts in the owner's private chat when a reply set a schedule there with the brain's own schedule
+ * tool (ADR-0266), one "name: text" line each: set, when, next and note are its lines ({name}, {when}, {next}), with the pause and delete
+ * buttons; paused and deleted answer a press and are added under it; unnamed stands in for a schedule with no name and
+ * no_next for one with no next run; changed and only_owner answer a press that cannot act. Code writes it, never a model. */
+export const scheduleNoticeTexts=['set: ⏰ New schedule: {name}','when: 🔁 {when}','next: ⏭ Next run: {next}',
+  'note: Each result comes here, and a run with nothing new sends nothing. All schedules are on the Schedules page.',
+  'pause: ⏸ Pause','delete: 🗑 Delete','paused: ⏸ Paused. Resume it on the Schedules page.','deleted: 🗑 Deleted.',
+  'unnamed: a schedule','no_next: none','changed: This schedule changed or is gone. See the Schedules page.','only_owner: Only the owner can do this.'].join('\n');
+export type ScheduleNoticeText='set'|'when'|'next'|'note'|'pause'|'delete'|'paused'|'deleted'|'unnamed'|'no_next'|'changed'|'only_owner';
+/** The schedule notice lines, with any line the owner removed or left empty, or stored without a value it must keep, taken
+ * from the default. */
+export function scheduleNoticeLines(text:string|undefined):Record<ScheduleNoticeText,string> {
+  return checkedLines('schedules.notice_texts',scheduleNoticeTexts,text) as Record<ScheduleNoticeText,string>;
+}
 /** Texts Nocheh uses itself; the runtime never receives them. */
 const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learningPrompt,'telegram.not_allowed':notAllowedReply,'telegram.not_allowed_private':notAllowedPrivateReply,
   'telegram.approval_card':approvalCard,'telegram.approval_action':approvalAction,'telegram.approval_task':approvalTask,'telegram.approval_texts':approvalTexts,'telegram.action_continued':actionContinued,
@@ -439,7 +454,7 @@ const nochehTexts:Partial<Record<PromptKey,string>>={'learning.interpret':learni
   'telegram.chat_adds':chatAddTexts,'telegram.member_daily_limit':memberDailyLimitReply,'telegram.group_tools_texts':groupToolsTexts,
   'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'members.local_laws':membersLocalLaws,
   'telegram.member_read':memberReadFrame,'telegram.member_read_texts':memberReadTexts,
-  'members.reminder':memberReminder,'members.reminder_texts':memberReminderTexts};
+  'members.reminder':memberReminder,'members.reminder_texts':memberReminderTexts,'schedules.notice_texts':scheduleNoticeTexts};
 
 export const promptSchema=`
 CREATE TABLE IF NOT EXISTS owner_prompts (

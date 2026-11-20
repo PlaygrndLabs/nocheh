@@ -9,6 +9,8 @@ import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {GuardBinding} from './guards.js';
 import {OperationRepository} from './operations.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
+import {forwardedMessage} from './owner-member-asks.js';
+import {ownerTimeZone} from './task-settings.js';
 
 export const scheduleStorageSchema=`
 CREATE TABLE IF NOT EXISTS schedule_versions (
@@ -40,7 +42,10 @@ export class ScheduleRepository {
     if(entry.logical_profile!==profile||entry.scope!==scope||entry.space!==scope)throw new HttpError(403,'profile_scope_denied');return entry;
   }
   private document(value:unknown,profile:string):Record<string,unknown>&{prompt:string;execution_version:string}{
-    const body=object(value),keys=['profile','name','prompt','schedule','deliver','repeat','enabled','removed','preferences','execution_version'];
+    const body=object(value),keys=['profile','name','prompt','schedule','deliver','repeat','enabled','removed','preferences','execution_version','timezone'];
+    // A schedule's own time zone (ADR-0266): an IANA name, or none for the brain's own.
+    if(body.timezone!==undefined&&body.timezone!==null&&!(typeof body.timezone==='string'&&/^[A-Za-z0-9_+\-\/]{1,64}$/.test(body.timezone)))
+      throw new HttpError(400,'invalid_schedule_definition');
     if(Object.keys(body).some(k=>!keys.includes(k))||body.profile!==profile||typeof body.enabled!=='boolean'||typeof body.removed!=='boolean'||
       !['local','telegram'].includes(String(body.deliver))||body.repeat!==null&&(!Number.isSafeInteger(body.repeat)||Number(body.repeat)<1||Number(body.repeat)>10000))
       throw new HttpError(400,'invalid_schedule_definition');
@@ -151,4 +156,37 @@ export class ScheduleRepository {
       return {event_id:operation.id,state:missed?'cancelled':'captured',fire_reason:effective,duplicate:false};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{await releaseOperation(db,async()=>{if(held)await leaveFamily(db,'schedules');});}
   }
+}
+
+/** What a reply may do with Hermes's schedule tool (ADR-0266). */
+export interface ScheduleTurnRules {allowed:boolean;time_zone:string;limit:number|null;count:number|null}
+interface ScheduleTurnServices {
+  knowledge:{ownerTurn(principal:Reader):Promise<{source:{channel?:string;kind:string;origin:string;reference:{id:string}}}>};
+  stores:{archive:pg.Pool;control:pg.Pool};
+}
+/**
+ * Whether a reply may set the chat's schedules with Hermes's schedule tool: a live reply in the owner's private chat
+ * (ownerTurn, which refuses anything else) to the owner's own Telegram message, not a forward. A schedule runs in the
+ * owner's time zone (Settings › Tasks). Members are step 3: their own limit and count come with it.
+ */
+export async function scheduleTurn(s:ScheduleTurnServices,principal:Reader):Promise<ScheduleTurnRules> {
+  const {source}=await s.knowledge.ownerTurn(principal);
+  const refused={allowed:false,time_zone:'UTC',limit:null,count:null};
+  if(source.channel!=='telegram'||source.kind!=='telegram_update'||source.origin!=='live')return refused;
+  const original=(await s.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.reference.id])).rows[0];
+  let message:unknown=null;
+  try{message=original?(JSON.parse(original.payload.toString()) as {message?:unknown}).message:null;}catch{message=null;}
+  if(!message||typeof message!=='object'||forwardedMessage(message as Record<string,unknown>))return refused;
+  return {allowed:true,time_zone:await ownerTimeZone(s.stores.control),limit:null,count:null};
+}
+
+/** The Schedules pages' list (ADR-0266): each schedule with its chat as the owner sees it, the owner's private chat first
+ *  and then groups by their title; a group with no title shows none. Other answers pass through. */
+export async function scheduleChats(control:pg.Pool,owner:string|null|undefined,value:Record<string,unknown>):Promise<Record<string,unknown>> {
+  if(!Array.isArray(value.schedules))return value;
+  const scopes=[...new Set(value.schedules.map((item:any)=>String(item?.scope??'')))];
+  const titles=new Map((await control.query('SELECT id,title FROM chats WHERE id=ANY($1::text[])',[scopes])).rows.map(row=>[String(row.id),row.title as string|null]));
+  const schedules=value.schedules.map((item:any)=>({...item,owner_chat:item?.scope===owner,chat_title:item?.scope===owner?null:titles.get(String(item?.scope))??null}));
+  schedules.sort((a:any,b:any)=>Number(b.owner_chat)-Number(a.owner_chat)||String(a.chat_title??'').localeCompare(String(b.chat_title??''))||String(a.name).localeCompare(String(b.name)));
+  return {...value,schedules};
 }

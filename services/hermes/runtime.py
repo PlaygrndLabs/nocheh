@@ -164,7 +164,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as error:
             if self.path == '/internal/manage':
                 code = str(error) if str(error) in ('configuration_conflict', 'unsupported_preference',
-                    'profile_scope_denied', 'invalid_preference', 'invalid_persona') else 'invalid_management_request'
+                    'profile_scope_denied', 'invalid_preference', 'invalid_persona', 'cron_job_not_found', 'cron_already_pending',
+                    'cron_definition_not_captured', 'cron_operation_unavailable', 'cron_topic_scope_unavailable') else 'invalid_management_request'
                 return self.reply(409 if code == 'configuration_conflict' else 400, {'error': code})
             self.reply(400, {'error': 'invalid_request'})
         except (KeyError, TypeError):
@@ -217,6 +218,13 @@ class Handler(BaseHTTPRequestHandler):
             from .scopes import Scopes
             if body.get('observe_only') is True:return observe(PROFILE_HOME,Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')),body)
             return start(PROFILE_HOME,Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')),MODEL,resolve_credentials(),body)
+        if self.path == '/internal/manage' and body.get('action') == 'schedules':
+            # The owner's Schedules pages: Hermes's schedule stores, through the owner adapter the command line uses (ADR-0266).
+            from .scopes import Scopes
+            from .native_admin import Administration,audience_revision
+            from .native_cron import owner_schedules
+            policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
+            return owner_schedules(Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space)),body)
         if self.path == '/internal/manage':
             from .management import dispatch
             from .scopes import Scopes

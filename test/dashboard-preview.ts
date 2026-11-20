@@ -23,7 +23,7 @@ import {memberIdFor} from '../src/members.js';
 import type {MemberGroup,MemberGroupRef,MemberItem,MemberList,MemberPerson} from '../src/member-wire.js';
 import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from '../src/stores/member-api.js';
 import type {ChatState} from '../src/chat-wire.js';
-import {labeledPlaceholders,memberPrivateDailyLimitReply,memberReadFrame,memberReadTexts,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,sourceTexts} from '../src/prompts.js';
+import {labeledPlaceholders,memberPrivateDailyLimitReply,memberReadFrame,memberReadTexts,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,scheduleNoticeTexts,sourceTexts} from '../src/prompts.js';
 import {matchesArchiveFilters} from '../src/archive-filters.js';
 import {archiveScopes,otherPrivate,parentSpace} from '../src/spaces.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
@@ -291,7 +291,10 @@ const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpre
     'reply.member':'This is the private chat of a member the owner added. It only reads. If asked who can see this chat, say the owner can read it.',
     'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'telegram.not_allowed_private':notAllowedPrivateReply,'members.local_laws':membersLocalLaws,
     'reply.member_read':'This answers the owner\'s question about what a member said in their own private chat with Nocheh. It only reads that chat.',
-    'telegram.member_read':memberReadFrame,'telegram.member_read_texts':memberReadTexts} as Record<string,string>};
+    'telegram.member_read':memberReadFrame,'telegram.member_read_texts':memberReadTexts,
+    // Schedules set by asking (ADR-0266).
+    'reply.scheduled':'This run\'s answer is sent to this chat. Answer exactly [SILENT] if nothing is new.',
+    'reply.schedules':'Set schedules with cronjob_manage when the owner asks.','schedules.notice_texts':scheduleNoticeTexts} as Record<string,string>};
 const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
 const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
@@ -764,6 +767,7 @@ const server=createServer((req,res)=>{void(async()=>{
  if(route==='/owner-lock'&&req.method==='GET')return json(res,200,await ownerLock.status());
  if(route==='/owner-lock/password'&&req.method==='POST'){const body=await readJson(req) as any;const {token}=await ownerLock.changePassword(body.current,body.password);return json(res,200,{...await ownerLock.status(token),csrf:sessions.authorize(req).csrf});}
  if(route==='/owner-lock/sign-out-others'&&req.method==='POST'){await ownerLock.signOutOthers('');return json(res,200,await ownerLock.status());}
+ if(route==='/schedules'&&req.method==='POST'){await readJson(req);return json(res,200,{ok:true});}
  if(req.method==='GET'){
   if(route==='/health')return json(res,200,{ok:true});
   if(route==='/usage'){const days=Number(url.searchParams.get('days')||30),day=(ago:number)=>new Date(Date.now()-ago*864e5).toISOString().slice(0,10);
@@ -829,6 +833,13 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/data/'+voiceId+'/guarded')return json(res,200,{projections:[]});
   if(route==='/data/'+id+'/guarded')return json(res,200,{projections:[{id:'b'.repeat(64),source_id:id,kind:'events',state:'ready',active_revision:revision,author:revision>1?'owner':'automatic',content:{text:guarded,payload:{text:guarded}}}]});
   if(route==='/data/'+id+'/guarded/history')return json(res,200,url.searchParams.has('revision')?{revision:1,content:{text:source.event.text}}:{revisions:[{revision:1,author:'automatic',created_at:new Date().toISOString()}],next:null});
+  // Schedules (ADR-0266): one set by asking in the private chat, one paused group schedule from the command line.
+  if(route==='/schedules')return json(res,200,{schedules:[
+    {id:'a1b2c3d4e5f6',profile:'nocheh-'+'1'.repeat(24),scope:'42',name:'Morning brief',schedule:'0 8 * * 1-5',timezone:'Europe/Berlin',enabled:true,state:'scheduled',
+      next_run_at:new Date(Date.now()+36e5).toISOString(),last_run_at:new Date(Date.now()-864e5).toISOString(),last_status:'success',last_error:null,last_delivery_error:null,
+      running:false,pending:false,set_in_chat:true,owner_chat:true,chat_title:null},
+    {id:'0f9e8d7c6b5a',profile:'nocheh-'+'2'.repeat(24),scope:'-10042',name:'Weekly review',schedule:'0 17 * * 5',timezone:null,enabled:false,state:'paused',
+      next_run_at:null,last_run_at:null,last_status:null,last_error:null,last_delivery_error:null,running:false,pending:false,set_in_chat:false,owner_chat:false,chat_title:'Fixture group'}]});
   if(route==='/memory/profiles'){const current=[{owner:true,scope:'42',profile},{owner:false,scope:'-10042',profile:'fixture-group'}];
    // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
    // After a reinstall: an earlier setup's notes for the private chat, listed first by Hermes; the page still opens on
@@ -852,7 +863,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/longterm/rebuild'){const chosen=url.searchParams.getAll('space').length;
     return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
-  if(route==='/runtime')return json(res,200,{brain:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false}},
+  if(route==='/runtime')return json(res,200,{brain:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
     status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'guard.detect':true,'image.read':true,'usage.price':false}});
   if(route==='/graph'){
     const scope=url.searchParams.get('scope')??'*',all=scope==='*';

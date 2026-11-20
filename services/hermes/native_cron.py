@@ -46,7 +46,9 @@ def definition(job,profile):
     return {'profile':profile,'name':job.get('name'),'prompt':job['prompt'],'schedule':job['schedule'],
         'deliver':job.get('deliver','local'),'repeat':(job.get('repeat') or {}).get('times'),
         'enabled':job.get('enabled',True),'removed':job.get('nocheh_removed',False),
-        'preferences':job.get('nocheh_preferences',{}),'execution_version':job.get('nocheh_definition_version')}
+        'preferences':job.get('nocheh_preferences',{}),'execution_version':job.get('nocheh_definition_version'),
+        # A schedule set in a chat runs in the owner's time zone (ADR-0266); one without a zone in Hermes's own.
+        'timezone':job.get('timezone') if isinstance(job.get('timezone'),str) else None}
 
 
 def revision(job,profile):return hashlib.sha256(canonical(definition(job,profile))).hexdigest()
@@ -67,7 +69,8 @@ def sync_job(call,job,home,bound):
     job=native.update_job(job['id'],updates)
     call('definition',{'scope':bound.chat_id,'profile':home.name,'job_id':job['id'],'definition':definition(job,home.name),
         'workflow_cursor':workflow_cursor(job,home.name),'workflow_sequence':job['nocheh_workflow_revision']})
-    return native.update_job(job['id'],{'nocheh_registered':True,'nocheh_workflow_synced':True})
+    # The definition Nocheh captured: a later change Hermes makes itself (its schedule tool) differs from it (ADR-0266).
+    return native.update_job(job['id'],{'nocheh_registered':True,'nocheh_workflow_synced':True,'nocheh_synced_revision':revision(job,home.name)})
 
 
 def fields(body,model):
@@ -174,3 +177,40 @@ def manage(admin,path,method,query,body,headers,call=None):
         job=native.update_job(job['id'],{'nocheh_workflow_synced':False})
         job=sync_job(call,job,home,bound)
         return {'ok':True} if method=='DELETE' else annotate(job,home,name)
+
+
+SCHEDULE_ACTIONS={'pause':('POST','/pause'),'resume':('POST','/resume'),'run':('POST','/trigger'),'delete':('DELETE','')}
+
+
+def listed(job,name,bound):
+    """What the owner's Schedules pages show of a schedule: no prompt text, Hermes's own fields by their meaning."""
+    repeat=job.get('repeat') or {}
+    return {'id':job['id'],'profile':name,'scope':bound.chat_id,'space':bound.space,'name':job.get('name') or '',
+        'schedule':job.get('schedule_display') or (job.get('schedule') or {}).get('display') or '',
+        'timezone':job.get('timezone') if isinstance(job.get('timezone'),str) else None,
+        'enabled':bool(job.get('enabled',True)),'state':job.get('state') or ('scheduled' if job.get('enabled',True) else 'paused'),
+        'next_run_at':job.get('next_run_at'),'last_run_at':job.get('last_run_at'),'last_status':job.get('last_status'),
+        'last_error':job.get('last_error'),'last_delivery_error':job.get('last_delivery_error'),
+        'running':bool(job.get('nocheh_running')),'pending':bool(job.get('nocheh_pending')),
+        'set_in_chat':not job.get('nocheh_create_id'),'deliver':job.get('deliver','local'),
+        'repeat':{'times':repeat.get('times'),'completed':repeat.get('completed',0)},'created_at':job.get('created_at')}
+
+
+def owner_schedules(admin,body,call=None):
+    """The owner's Schedules pages (ADR-0266): every chat's schedules, or one schedule paused, resumed, run now or deleted,
+    through the same owner adapter as the command line."""
+    operation=body.get('operation')
+    if operation=='list':
+        found,seen=[],set()
+        for _,home,bound in profiles(admin):
+            if home.name in seen:continue
+            seen.add(home.name);found+=[listed(job,home.name,bound) for job in inspect(home) if not job.get('nocheh_removed')]
+        return {'schedules':found}
+    if operation not in SCHEDULE_ACTIONS:raise ValueError('cron_operation_unavailable')
+    job_id,profile=body.get('job_id'),body.get('profile')
+    if not isinstance(job_id,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',job_id):raise ValueError('cron_job_not_found')
+    if not isinstance(profile,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',profile):raise ValueError('profile_scope_denied')
+    method,suffix=SCHEDULE_ACTIONS[operation];request=body.get('request_id') or uuid.uuid4().hex
+    if not isinstance(request,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',request):raise ValueError('cron_request_identity_required')
+    result=manage(admin,'/api/cron/jobs/'+job_id+suffix,method,{'profile':[profile]},{} if method=='DELETE' else {'request_id':request},{},call)
+    return {'ok':True} if operation=='delete' else {'schedule':listed(result,profile,admin.binding(admin.profile(profile)[0]))}

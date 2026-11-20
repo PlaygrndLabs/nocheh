@@ -21,6 +21,10 @@ def register(ctx):
         ctx.register_hook('pre_tool_call', machine_box.tool_call)
         ctx.register_middleware('tool_execution', machine_box.tool_execution)
         ctx.register_terminal_environment_provider(machine_box.Provider())
+    # Hermes's own schedule tool, in the owner's private chat only: inert, and the tool refused, unless the turn binds it.
+    from services.hermes import schedule_gate
+    ctx.register_hook('pre_tool_call', schedule_gate.tool_call)
+    ctx.register_hook('transform_tool_result', schedule_gate.tool_result)
     # A background job run's counts, to-do list and cost notice; inert unless the run's turn binds it.
     from services.hermes import job_progress
     ctx.register_hook('post_api_request', job_progress.api_request)
