@@ -1,11 +1,11 @@
 /** Settings: short sections, each a tab in the address. Every edit is saved from the bottom save bar. */
 import {useSettings} from '../lib/settings';
-import {useView} from '../lib/navigation';
+import {useSubTab, useView} from '../lib/navigation';
 import {pageTabs, tabIds} from '../lib/page-tabs';
 import {LoadError, LoadingRows, Card} from '../ui/core';
-import {Page, Tabs} from '../ui/page';
+import {Page, SubPanel, SubTabs, Tabs} from '../ui/page';
 import {ModelSettings} from './settings/models';
-import {TelegramSettings, telegramKeys} from './settings/telegram';
+import {TelegramSettings, UnsavedDot, telegramKeys} from './settings/telegram';
 import {SpeedSettings, speedKeys} from './settings/speed';
 import {PrivacySettings, privacyKeys} from './settings/privacy';
 import {AssistantSettings} from './settings/assistant';
@@ -22,6 +22,32 @@ const modelKey = (key: string) =>
   /^NOCHEH_(PROVIDER|MODEL|PROVIDERS|PROVIDER_KEYS|(REPLY|MEMORY|GUARD|EMBEDDING)_(PROVIDER|MODEL))$/.test(key) ||
   key === 'OPENAI_API_KEY' ||
   key === 'ANTHROPIC_API_KEY';
+
+const connections = ['notion', 'github'] as const;
+
+/** Each outside service on its own sub-tab. Both stay on the page, so a sign-in that returns is finished whichever is open. */
+function Connections() {
+  const [tab, setTab] = useSubTab(connections);
+  return (
+    <>
+      <SubTabs
+        label="Connections"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          {id: 'notion', label: 'Notion'},
+          {id: 'github', label: 'GitHub'},
+        ]}
+      />
+      <SubPanel id="notion" current={tab}>
+        <ConnectionSettings />
+      </SubPanel>
+      <SubPanel id="github" current={tab}>
+        <GithubConnection />
+      </SubPanel>
+    </>
+  );
+}
 
 export default function Settings() {
   const [view, setView] = useView(views);
@@ -44,13 +70,7 @@ export default function Settings() {
   let body: React.ReactNode;
   if (view === 'assistant') body = <AssistantSettings />;
   else if (view === 'tasks') body = <TaskSettingsPanel />;
-  else if (view === 'connections')
-    body = (
-      <>
-        <ConnectionSettings />
-        <GithubConnection />
-      </>
-    );
+  else if (view === 'connections') body = <Connections />;
   else if (view === 'machines') body = <MachineSettings />;
   else if (!settings.data)
     body = settings.error ? (
@@ -86,7 +106,7 @@ export default function Settings() {
             label: (
               <>
                 {labels[id]}
-                {editedIn.has(id) && <span aria-label="(unsaved)" className="size-1.5 rounded-full bg-warn" />}
+                <UnsavedDot show={editedIn.has(id)} />
               </>
             ),
           }))}

@@ -127,68 +127,71 @@ export default function Home() {
 
   return (
     <Page title="Home">
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-4 px-5 py-5">
-          {headline ? (
-            <>
-              <span
-                className={cn(
-                  'grid size-11 shrink-0 place-items-center rounded-full',
-                  headline.tone === 'good' && 'bg-good-soft text-good',
-                  headline.tone === 'warn' && 'bg-warn-soft text-warn',
-                  headline.tone === 'bad' && 'bg-bad-soft text-bad',
-                )}
-              >
-                <HeadIcon className="size-6" aria-hidden />
-              </span>
-              <div>
-                <p className="text-lg font-semibold">{headline.text}</p>
-                <p className="text-sm text-muted">{headline.detail}</p>
+      {/* What needs the owner and what is left to set up sit side by side, so Today stays on the first screen. */}
+      <div className={cn('grid items-start gap-5', open.size > 0 && 'lg:grid-cols-2')}>
+        <Card className="overflow-hidden">
+          <div className="flex items-center gap-4 px-5 py-5">
+            {headline ? (
+              <>
+                <span
+                  className={cn(
+                    'grid size-11 shrink-0 place-items-center rounded-full',
+                    headline.tone === 'good' && 'bg-good-soft text-good',
+                    headline.tone === 'warn' && 'bg-warn-soft text-warn',
+                    headline.tone === 'bad' && 'bg-bad-soft text-bad',
+                  )}
+                >
+                  <HeadIcon className="size-6" aria-hidden />
+                </span>
+                <div>
+                  <p className="text-lg font-semibold">{headline.text}</p>
+                  <p className="text-sm text-muted">{headline.detail}</p>
+                </div>
+              </>
+            ) : (
+              <div className="w-full space-y-2">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="h-4 w-72" />
               </div>
-            </>
-          ) : (
-            <div className="w-full space-y-2">
-              <Skeleton className="h-6 w-48" />
-              <Skeleton className="h-4 w-72" />
-            </div>
+            )}
+          </div>
+          {items.length > 0 && (
+            <ul aria-label="What needs you" className="border-t border-line">
+              {items.map(item => (
+                <li key={item.text} className="border-b border-line last:border-b-0">
+                  <a href={item.link} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-subtle">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'size-2 shrink-0 rounded-full',
+                        item.tone === 'bad' ? 'bg-bad' : item.tone === 'warn' ? 'bg-warn' : 'bg-muted',
+                      )}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium">{item.text}</span>
+                      {item.detail && <span className="block text-xs text-muted">{item.detail}</span>}
+                    </span>
+                    <span className="hidden shrink-0 items-center gap-1 text-[13px] font-medium text-accent-text sm:flex">
+                      {item.action} <ArrowRight className="size-3.5" aria-hidden />
+                    </span>
+                    <ArrowRight className="size-4 shrink-0 text-muted sm:hidden" aria-hidden />
+                  </a>
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
-        {items.length > 0 && (
-          <ul aria-label="What needs you" className="border-t border-line">
-            {items.map(item => (
-              <li key={item.text} className="border-b border-line last:border-b-0">
-                <a href={item.link} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-subtle">
-                  <span
-                    aria-hidden
-                    className={cn(
-                      'size-2 shrink-0 rounded-full',
-                      item.tone === 'bad' ? 'bg-bad' : item.tone === 'warn' ? 'bg-warn' : 'bg-muted',
-                    )}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium">{item.text}</span>
-                    {item.detail && <span className="block text-xs text-muted">{item.detail}</span>}
-                  </span>
-                  <span className="hidden shrink-0 items-center gap-1 text-[13px] font-medium text-accent-text sm:flex">
-                    {item.action} <ArrowRight className="size-3.5" aria-hidden />
-                  </span>
-                  <ArrowRight className="size-4 shrink-0 text-muted sm:hidden" aria-hidden />
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-        {decisions.error && !decisions.data && (
-          <p className="flex items-center gap-2 border-t border-line px-5 py-3 text-xs text-muted">
-            <CircleDashed className="size-3.5" aria-hidden /> Waiting decisions couldn’t be checked.{' '}
-            <a className="font-medium text-accent-text hover:underline" href={href('inbox')}>
-              Open inbox
-            </a>
-          </p>
-        )}
-      </Card>
+          {decisions.error && !decisions.data && (
+            <p className="flex items-center gap-2 border-t border-line px-5 py-3 text-xs text-muted">
+              <CircleDashed className="size-3.5" aria-hidden /> Waiting decisions couldn’t be checked.{' '}
+              <a className="font-medium text-accent-text hover:underline" href={href('inbox')}>
+                Open inbox
+              </a>
+            </p>
+          )}
+        </Card>
 
-      {open.size > 0 && <GetStarted steps={setup} />}
+        {open.size > 0 && <GetStarted steps={setup} />}
+      </div>
 
       <div>
         <h2 className="mb-3 text-sm font-medium text-muted">Today</h2>

@@ -79,8 +79,14 @@ function canonicalPage(): PageId {
   return page;
 }
 // Notion's and GitHub's sign-ins return to `/?connect=…`; Settings › Connections finishes them.
-if (['notion', 'github'].includes(new URLSearchParams(location.search).get('connect') ?? ''))
-  history.replaceState(null, '', location.pathname + location.search + '#settings?view=connections');
+// Each service has its own sub-tab there, and Notion's is the first.
+const connecting = new URLSearchParams(location.search).get('connect') ?? '';
+if (['notion', 'github'].includes(connecting))
+  history.replaceState(
+    null,
+    '',
+    location.pathname + location.search + '#settings?view=connections' + (connecting === 'github' ? '&tab=github' : ''),
+  );
 canonicalPage();
 addEventListener('hashchange', canonicalPage);
 

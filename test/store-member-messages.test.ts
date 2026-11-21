@@ -59,6 +59,11 @@ test('the Messages list keeps members\' and strangers\' private chats under thei
     assert.deepEqual(await listed('private_chats=hide&scope='+MEMBER_GP),[],'a chosen chat still obeys the split');
     assert.deepEqual(await listed('scope='+MEMBER_GP),[memberGp],'one member\'s chat by itself');
     await get('/v1/data?private_chats=members',400);
+    // A page size: the dashboard asks for a page that fits a screen, and the page's last message is the cursor for the next.
+    const first=await get('/v1/data?limit=2');assert.equal(first.records.length,2);assert.equal(first.next,first.records[1].id);
+    const second=await get('/v1/data?limit=2&after='+first.next);assert.equal(second.records.length,2);
+    assert.equal(new Set([...first.records,...second.records].map((row:any)=>row.id)).size,4,'no message on two pages');
+    await get('/v1/data?limit=0',400);await get('/v1/data?limit=51',400);
     // Search obeys the same split.
     const searched=await get('/v1/search?q='+encodeURIComponent(word)+'&private_chats=hide');
     const hits=Array.isArray(searched)?searched:searched.results??searched.hits??[];

@@ -621,7 +621,9 @@ const messagesFixture=(()=>{
     &&(!split||matchesArchiveFilters({scope:m.scope},undefined,{kind:'',scope:'',reply:'',private_chats:split,private_scopes:others}))
     &&(!kind||kind==='incoming'&&['telegram_update','browser_input'].includes(m.kind)||kind==='assistant'&&m.kind.endsWith('_delivered_message'))
     &&(!reply||m.kind==='telegram_update'&&!m.payload.message_reaction&&(reply==='approval_pending'?m.action?.state==='proposed':reply==='not_started'?!m.state:m.state===reply))).map(row);
-   json(res,200,route==='/search'?rows:{records:rows,next:null});return true;
+   // Like the store: a page of `limit` messages after the cursor, and the last one's id as the next cursor.
+   const size=Number(url.searchParams.get('limit')??50),after=url.searchParams.get('after')??'',from=after?rows.findIndex(r=>r.id===after)+1:0,page=rows.slice(from,from+size);
+   json(res,200,route==='/search'?rows:{records:page,next:rows.length>from+size?page.at(-1)!.id:null});return true;
   }
   if(method==='GET'&&route==='/scopes'){const counts=new Map<string,number>();for(const m of list)counts.set(m.scope,(counts.get(m.scope)??0)+1);json(res,200,{scopes:[...counts].map(([scope,events])=>({scope,events})),next:null});return true;}
   const event=/^\/events\/([a-f0-9]{64})$/.exec(route);

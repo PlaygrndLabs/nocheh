@@ -1,11 +1,13 @@
 import {useState} from 'react';
 import {ExternalLink} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
+import {useSubTab} from '../../lib/navigation';
 import {adoptSavedSettings, useSettings, type SettingsView} from '../../lib/settings';
 import {operationError} from '../../lib/system-format';
 import {Button, Card, CardHeader, Input, Notice, Segmented, Select, SettingRow} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
-import {Unsaved} from './telegram';
+import {SubPanel, SubTabs} from '../../ui/page';
+import {Unsaved, UnsavedDot} from './telegram';
 import {PasswordSettings} from './password';
 
 const offsiteKeys = [
@@ -709,86 +711,122 @@ function Retention({setting, label}: {setting: string; label: string}) {
   );
 }
 
+const subTabs = ['password', 'records', 'offsite'] as const;
+const subTabNames = {password: 'Password and secrets', records: 'Records and backups', offsite: 'Off-site copies'};
+/** The settings on each sub-tab, so a sub-tab can show that it holds an unsaved edit. */
+const subTabKeys: Record<(typeof subTabs)[number], string[]> = {
+  password: ['NOCHEH_GUARD_MODE'],
+  records: privacyKeys.filter(key => key !== 'NOCHEH_GUARD_MODE' && !offsiteKeys.includes(key)),
+  offsite: offsiteKeys,
+};
+
 export function PrivacySettings() {
   const s = useSettings();
   const has = (key: string) => !!s.field(key);
+  const offsite = has('NOCHEH_OFFSITE');
+  const [open, setTab] = useSubTab(subTabs);
+  const tab = open === 'offsite' && !offsite ? 'password' : open;
   return (
     <>
-      <PasswordSettings />
-      <Card>
-        <CardHeader
-          title="Secret check"
-          description="Protects passwords and keys that appear in your messages."
-          className="pb-3"
-        />
-        <div className="border-t border-line">
-          <SettingRow
-            title={
+      <SubTabs
+        label="Privacy and data settings"
+        value={tab}
+        onChange={setTab}
+        tabs={subTabs
+          .filter(id => id !== 'offsite' || offsite)
+          .map(id => ({
+            id,
+            label: (
               <>
-                Hide secrets from the assistant
-                <Unsaved show={s.changed('NOCHEH_GUARD_MODE')} />
+                {subTabNames[id]}
+                <UnsavedDot show={subTabKeys[id].some(key => s.changed(key))} />
               </>
-            }
-            description={
-              s.value('NOCHEH_GUARD_MODE') === 'off'
-                ? 'Off: the assistant and memory use your original messages.'
-                : 'On: the assistant and memory use a copy with secrets removed. Originals are always kept unchanged.'
-            }
-          >
-            <div className="flex sm:justify-end">
-              <Segmented
-                label="Hide secrets from the assistant"
-                value={s.value('NOCHEH_GUARD_MODE') === 'off' ? 'off' : 'on'}
-                disabled={s.busy}
-                onChange={value => s.set('NOCHEH_GUARD_MODE', value)}
-                options={[
-                  {value: 'on', label: 'On'},
-                  {value: 'off', label: 'Off'},
-                ]}
-              />
-            </div>
-          </SettingRow>
-        </div>
-      </Card>
-      <Card>
-        <CardHeader
-          title="How long to keep records"
-          description="Your messages and files are always kept. These are only Nocheh’s own work records."
-          className="pb-3"
-        />
-        <div className="border-t border-line">
-          {has('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS') && (
+            ),
+          }))}
+      />
+      <SubPanel id="password" current={tab}>
+        <PasswordSettings />
+        <Card>
+          <CardHeader
+            title="Secret check"
+            description="Protects passwords and keys that appear in your messages."
+            className="pb-3"
+          />
+          <div className="border-t border-line">
             <SettingRow
-              htmlFor="NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS"
               title={
                 <>
-                  Work history
-                  <Unsaved show={s.changed('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS')} />
+                  Hide secrets from the assistant
+                  <Unsaved show={s.changed('NOCHEH_GUARD_MODE')} />
                 </>
               }
-              description="Background work runs and reply timings. Receipts are never deleted."
-            >
-              <Retention setting="NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS" label="Keep work history" />
-            </SettingRow>
-          )}
-          {has('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS') && (
-            <SettingRow
-              htmlFor="NOCHEH_HERMES_JOURNAL_RETENTION_DAYS"
-              title={
-                <>
-                  Delivery logs
-                  <Unsaved show={s.changed('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS')} />
-                </>
+              description={
+                s.value('NOCHEH_GUARD_MODE') === 'off'
+                  ? 'Off: the assistant and memory use your original messages.'
+                  : 'On: the assistant and memory use a copy with secrets removed. Originals are always kept unchanged.'
               }
-              description="Logs of replies the assistant finished sending, and the records of everything sent to chat apps. Unfinished replies are never deleted."
             >
-              <Retention setting="NOCHEH_HERMES_JOURNAL_RETENTION_DAYS" label="Keep delivery logs" />
+              <div className="flex sm:justify-end">
+                <Segmented
+                  label="Hide secrets from the assistant"
+                  value={s.value('NOCHEH_GUARD_MODE') === 'off' ? 'off' : 'on'}
+                  disabled={s.busy}
+                  onChange={value => s.set('NOCHEH_GUARD_MODE', value)}
+                  options={[
+                    {value: 'on', label: 'On'},
+                    {value: 'off', label: 'Off'},
+                  ]}
+                />
+              </div>
             </SettingRow>
-          )}
-        </div>
-      </Card>
-      {has('NOCHEH_BACKUP_SCHEDULE') && <BackupSettings />}
-      {has('NOCHEH_OFFSITE') && <OffsiteSettings />}
+          </div>
+        </Card>
+      </SubPanel>
+      <SubPanel id="records" current={tab}>
+        <Card>
+          <CardHeader
+            title="How long to keep records"
+            description="Your messages and files are always kept. These are only Nocheh’s own work records."
+            className="pb-3"
+          />
+          <div className="border-t border-line">
+            {has('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS') && (
+              <SettingRow
+                htmlFor="NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS"
+                title={
+                  <>
+                    Work history
+                    <Unsaved show={s.changed('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS')} />
+                  </>
+                }
+                description="Background work runs and reply timings. Receipts are never deleted."
+              >
+                <Retention setting="NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS" label="Keep work history" />
+              </SettingRow>
+            )}
+            {has('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS') && (
+              <SettingRow
+                htmlFor="NOCHEH_HERMES_JOURNAL_RETENTION_DAYS"
+                title={
+                  <>
+                    Delivery logs
+                    <Unsaved show={s.changed('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS')} />
+                  </>
+                }
+                description="Logs of replies the assistant finished sending, and the records of everything sent to chat apps. Unfinished replies are never deleted."
+              >
+                <Retention setting="NOCHEH_HERMES_JOURNAL_RETENTION_DAYS" label="Keep delivery logs" />
+              </SettingRow>
+            )}
+          </div>
+        </Card>
+        {has('NOCHEH_BACKUP_SCHEDULE') && <BackupSettings />}
+      </SubPanel>
+      {offsite && (
+        <SubPanel id="offsite" current={tab}>
+          <OffsiteSettings />
+        </SubPanel>
+      )}
     </>
   );
 }

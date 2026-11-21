@@ -1,17 +1,17 @@
 /**
- * Usage: what Nocheh costs and how fast it answers. Counts come from Nocheh's
- * own usage tracker (counts only, never content); a cost it can't price is
- * shown as unknown, never as zero.
+ * Usage: what Nocheh costs and how fast it answers, one sub-tab each so every
+ * view fits a screen. Counts come from Nocheh's own usage tracker (counts only,
+ * never content); a cost it can't price is shown as unknown, never as zero.
  */
 import {lazy, Suspense, useState, type ComponentProps} from 'react';
 import {Gauge} from 'lucide-react';
-import {useParam} from '../lib/navigation';
+import {useParam, useSubTab} from '../lib/navigation';
 import {useResource} from '../lib/resource';
 import {setParams} from '../lib/routes';
 import {compact, cost, count, duration, partName} from '../lib/system-format';
 import {cn} from '../lib/utils';
-import {Card, CardHeader, Empty, LoadError, Notice, Segmented, Skeleton, Stat, Table, Td, Th} from '../ui/core';
-import {Page} from '../ui/page';
+import {Card, CardHeader, Empty, LoadError, Segmented, Skeleton, Stat, Table, Td, Th} from '../ui/core';
+import {Page, SubPanel, SubTabs} from '../ui/page';
 import {
   addRow,
   cachedShare,
@@ -21,7 +21,7 @@ import {
   type Usage,
   type UsageRow,
 } from '../lib/system-usage';
-import {ReplySpeed, type TimingSummary} from './usage/reply-speed';
+import {RecentReplies, ReplyDrawer, ReplySpeed, type TimingSummary} from './usage/reply-speed';
 
 const DailyChart = lazy(() => import('./usage/daily-chart'));
 
@@ -31,10 +31,13 @@ const periods = [
   {value: '30', label: '30 days'},
 ] as const;
 type Period = (typeof periods)[number]['value'];
+const subTabs = ['cost', 'days', 'speed', 'replies'] as const;
 
 export default function UsagePage() {
   const param = useParam('days');
   const days: Period = periods.some(p => p.value === param) ? (param as Period) : '7';
+  const [tab, setTab] = useSubTab(subTabs);
+  const reply = useParam('reply');
   const usage = useResource<Usage>('/usage?days=' + days, 60000);
   const timings = useResource<TimingSummary>('/workflows/timings', 30000);
   const data = usage.data?.days === Number(days) ? usage.data : null;
@@ -68,75 +71,111 @@ export default function UsagePage() {
         />
       }
     >
-      {usage.error && <LoadError what="usage" onRetry={() => location.reload()} />}
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {data ? (
-          <>
-            <Stat
-              label="Cost"
-              value={all.calls ? cost(all) : '$0.00'}
-              hint={all.unknown ? 'Some calls can’t be priced' : 'Estimated from list prices'}
-            />
-            <Stat label="Model calls" value={count(all.calls)} hint={failures(all) || 'None failed'} />
-            <Stat
-              label="Tokens"
-              value={compact(all.input + all.output)}
-              hint={
-                `${compact(all.input)} in · ${compact(all.output)} out` +
-                (cachedShare(all) ? ` · ${cachedShare(all)}` : '')
-              }
-            />
-          </>
-        ) : (
-          [0, 1, 2].map(i => <Skeleton key={i} className="h-[92px] rounded-xl" />)
-        )}
-        {timings.data || timings.error ? (
-          <Stat
-            label="Median reply time"
-            value={timings.data ? duration(median) : '—'}
-            hint={
-              timings.data
-                ? timings.data.messages
-                  ? `Last ${timings.data.messages} replies`
-                  : 'No replies measured yet'
-                : 'Couldn’t be measured'
-            }
-          />
-        ) : (
-          <Skeleton className="h-[92px] rounded-xl" />
-        )}
-      </div>
-
-      {notes.length > 0 && (
-        <Notice tone="info" title="About these numbers">
-          <ul className="list-disc space-y-0.5 pl-4">
-            {notes.map(note => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </Notice>
+      <SubTabs
+        label="Usage"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          {id: 'cost', label: 'Cost'},
+          {id: 'days', label: 'Calls per day'},
+          {id: 'speed', label: 'Reply speed'},
+          {id: 'replies', label: 'Recent replies'},
+        ]}
+      />
+      {usage.error && (tab === 'cost' || tab === 'days') && (
+        <LoadError what="usage" onRetry={() => location.reload()} />
       )}
 
-      {data && days !== '1' && rows.length > 0 && (
-        <Card>
-          <CardHeader title="Calls per day" description="Days are counted in UTC." />
-          <div className="px-2 pt-2 pb-3 sm:px-4">
-            <Suspense fallback={<Skeleton className="h-48 w-full" />}>
-              <DailyChart rows={rows} since={data.since} today={data.today} />
-            </Suspense>
+      {tab === 'cost' && (
+        <SubPanel id="cost" current={tab}>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {data ? (
+              <>
+                <Stat
+                  label="Cost"
+                  value={all.calls ? cost(all) : '$0.00'}
+                  hint={all.unknown ? 'Some calls can’t be priced' : 'Estimated from list prices'}
+                />
+                <Stat label="Model calls" value={count(all.calls)} hint={failures(all) || 'None failed'} />
+                <Stat
+                  label="Tokens"
+                  value={compact(all.input + all.output)}
+                  hint={
+                    `${compact(all.input)} in · ${compact(all.output)} out` +
+                    (cachedShare(all) ? ` · ${cachedShare(all)}` : '')
+                  }
+                />
+              </>
+            ) : (
+              [0, 1, 2].map(i => <Skeleton key={i} className="h-[92px] rounded-xl" />)
+            )}
+            {timings.data || timings.error ? (
+              <Stat
+                label="Median reply time"
+                value={timings.data ? duration(median) : '—'}
+                hint={
+                  timings.data
+                    ? timings.data.messages
+                      ? `Last ${timings.data.messages} replies`
+                      : 'No replies measured yet'
+                    : 'Couldn’t be measured'
+                }
+              />
+            ) : (
+              <Skeleton className="h-[92px] rounded-xl" />
+            )}
           </div>
-        </Card>
+
+          <Breakdown data={data} loading={!data && !usage.error} notes={notes} />
+        </SubPanel>
       )}
 
-      <Breakdown data={data} loading={!data && !usage.error} />
+      {tab === 'days' && (
+        <SubPanel id="days" current={tab}>
+          <Card>
+            <CardHeader title="Calls per day" description="Days are counted in UTC." />
+            {!data ? (
+              !usage.error && (
+                <div className="px-5 pt-3 pb-5">
+                  <Skeleton className="h-72 w-full" />
+                </div>
+              )
+            ) : days === '1' ? (
+              <Empty icon={Gauge} title="Today is one day">
+                Choose 7 days or 30 days at the top to compare days.
+              </Empty>
+            ) : !rows.length ? (
+              <Empty icon={Gauge} title="No model calls in this period">
+                Calls appear here as Nocheh replies, checks messages for secrets and builds memory.
+              </Empty>
+            ) : (
+              <div className="px-2 pt-2 pb-3 sm:px-4">
+                <Suspense fallback={<Skeleton className="h-72 w-full" />}>
+                  <DailyChart rows={rows} since={data.since} today={data.today} />
+                </Suspense>
+              </div>
+            )}
+          </Card>
+        </SubPanel>
+      )}
 
-      <ReplySpeed summary={timings.data} error={!!timings.error} />
+      {tab === 'speed' && (
+        <SubPanel id="speed" current={tab}>
+          <ReplySpeed summary={timings.data} error={!!timings.error} />
+        </SubPanel>
+      )}
+
+      {tab === 'replies' && (
+        <SubPanel id="replies" current={tab}>
+          <RecentReplies summary={timings.data} error={!!timings.error} />
+        </SubPanel>
+      )}
+      <ReplyDrawer id={reply} />
     </Page>
   );
 }
 
-function Breakdown({data, loading}: {data: Usage | null; loading: boolean}) {
+function Breakdown({data, loading, notes}: {data: Usage | null; loading: boolean; notes: string[]}) {
   const [by, setBy] = useState<'part' | 'model'>('part');
   const rows = data?.rows ?? [];
   return (
@@ -178,6 +217,13 @@ function Breakdown({data, loading}: {data: Usage | null; loading: boolean}) {
           <ModelTable rows={rows} />
         )}
       </div>
+      {notes.length > 0 && (
+        <ul aria-label="About these numbers" className="space-y-1 border-t border-line px-5 py-3 text-xs text-muted">
+          {notes.map(note => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }

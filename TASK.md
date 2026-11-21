@@ -14,6 +14,24 @@ owner's own) ([ADR-0268](docs/adr/0268-notion-per-project-or-person.md)).
   MCP, Notion sign-in Python test, dashboard browser.
 - Next: step 3, GitHub per project. A member's private chat gets a project's Notion in step 5.
 
+Remaining pages as tables and sub-tabs, step 5 part 1 of the table-first dashboard plan (owner,
+2026-11-19: "avoid scrolling as much as possible and use tables instead, everywhere";
+2026-11-20: "yes to all").
+- These pages now fit one 1600x900 screen: Usage (was 2.6 screens), Settings › Telegram (1.9),
+  Tasks (1.4), Models (1.3), Connections (1.2), Machines and Privacy & data, Messages (1.4),
+  Inbox › History (1.4), Home (1.2), Memory › Long-term memory (1.6).
+- Usage: four sub-tabs; recent replies are a table, ten a page. Settings: sub-tabs inside
+  Telegram, Models, Privacy & data, Tasks and Connections; Machines and providers are tables;
+  a sub-tab with an unsaved setting is marked. A returning GitHub sign-in opens `tab=github`.
+- Messages: a table of ten a page with the reply in its own column (`limit` on the message
+  list, 1 to 50; the page ends on the tenth message shown, and the next page starts after it).
+  Inbox › History: three sub-tabs of tables. Home: attention and set-up steps side by side.
+  Long-term memory: three sub-tabs; `chat=` and `about=` links open the facts.
+- Layout only: no setting, rule or stored data changed.
+- Checks: browser (`test/dashboard-pages.browser.mjs`), [unit](test/store-member-messages.test.ts).
+  Pending: step 5 part 2 (Tasks 1.2 screens and its board 1.5, Chats list 1.0 and Sharing 1.2,
+  Memory › Assistant notes 1.1, Members).
+
 "Share group chats", step 1 of the shared and private connectors plan (owner, 2026-11-20: a
 project switch to freely share group data between the project's groups, on by default, for
 existing projects too) ([ADR-0267](docs/adr/0267-share-group-chats.md)).
@@ -43,8 +61,7 @@ System pages as tables and sub-tabs, step 4 of the table-first dashboard plan (o
   history as a table, ten a page. Sent to apps and Machine log show ten a page. Databases shows
   twelve rows a page (`limit` on the database browser, 1 to 50).
 - Checks: [unit](test/test_database_browser.py), [unit](test/dashboard-machines.test.mjs),
-  browser (`test/dashboard-pages.browser.mjs`). Pending: step 5 (Usage, Inbox, Tasks, Chats
-  list, Members, Home, the other Settings tabs).
+  browser (`test/dashboard-pages.browser.mjs`).
 
 Sub-tabs for the two longest pages, step 3 of the table-first dashboard plan (owner,
 2026-11-19: "avoid scrolling as much as possible and use tables instead, everywhere";

@@ -30,10 +30,10 @@ import {refreshResources, useResource} from '../../lib/resource';
 import {href} from '../../lib/routes';
 import {ago, dateTime} from '../../lib/system-format';
 import {
-  Badge,
   Button,
   Card,
   CardHeader,
+  Dot,
   Empty,
   Field,
   Input,
@@ -42,7 +42,10 @@ import {
   Notice,
   SettingRow,
   Switch,
+  Table,
+  Td,
   Textarea,
+  Th,
 } from '../../ui/core';
 import {LinkButton} from '../../ui/link-button';
 import {Dialog, useFeedback} from '../../ui/overlay';
@@ -262,26 +265,38 @@ export function MachineSettings() {
               project’s group can then work on it after you approve its plan.
             </Empty>
           ) : (
-            <ul className="divide-y divide-line border-t border-line" aria-label="Machines">
-              {data.machines.map(machine => (
-                <MachineRow
-                  key={machine.id}
-                  machine={machine}
-                  available={data.available}
-                  busy={busy}
-                  keyShown={shownKey === machine.id}
-                  onEnable={next => void setMachine(machine, next)}
-                  onTest={() => void test(machine)}
-                  onCopy={() => void copyCommand(machine)}
-                  onHideKey={() => setShownKey(null)}
-                  onEdit={() => setEditing(machine)}
-                  onTrust={() => void trust(machine)}
-                  onRemove={() => void remove(machine)}
-                />
-              ))}
-            </ul>
+            <Table aria-label="Machines" className="border-t border-line max-sm:block [&>tbody]:max-sm:block">
+              <thead className="max-sm:sr-only">
+                <tr>
+                  <Th scope="col">Machine</Th>
+                  <Th scope="col">State</Th>
+                  <Th scope="col">Use</Th>
+                  <Th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.machines.map(machine => (
+                  <MachineRow
+                    key={machine.id}
+                    machine={machine}
+                    available={data.available}
+                    busy={busy}
+                    keyShown={shownKey === machine.id}
+                    onEnable={next => void setMachine(machine, next)}
+                    onTest={() => void test(machine)}
+                    onCopy={() => void copyCommand(machine)}
+                    onHideKey={() => setShownKey(null)}
+                    onEdit={() => setEditing(machine)}
+                    onTrust={() => void trust(machine)}
+                    onRemove={() => void remove(machine)}
+                  />
+                ))}
+              </tbody>
+            </Table>
           )}
-          <p className="border-t border-line px-5 py-3 text-xs text-muted">
+          <p className="px-5 py-3 text-xs text-muted">
             {loginHint} Every command a job runs is in System ›{' '}
             <a className="underline" href={href('system', {view: 'machines'})}>
               Machine log
@@ -320,83 +335,86 @@ function MachineRow(props: {
   const state = machineStatus(machine);
   const error = state.tone === 'warn' ? machine.test_error : null;
   return (
-    <li className="px-5 py-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="flex flex-wrap items-center gap-2">
-            <span className="font-medium break-all">{machine.name}</span>
-            <Badge tone={state.tone} dot>
-              {state.label}
-            </Badge>
-          </p>
-          <p className="mt-0.5 font-mono text-[13px] break-all text-muted">{endpoint(machine)}</p>
-          <p className="mt-1 text-xs text-muted">
-            {machine.tested_at ? (
-              <>
-                Last good test <time title={dateTime(machine.tested_at)}>{ago(machine.tested_at)}</time>
-              </>
-            ) : (
-              'No good test yet'
-            )}
-            {machine.jobs > 0 && ` · ${machine.jobs === 1 ? '1 job works' : `${machine.jobs} jobs work`} on it`}
-          </p>
-          <p className="mt-0.5 text-xs text-muted">
-            Host key:{' '}
-            {machine.host_key ? (
-              <span className="font-mono break-all">{machine.host_key}</span>
-            ) : (
-              'trusted on the first good test'
-            )}
-          </p>
-          {error && <p className="mt-1 text-[13px] text-warn">{machineAdvice(error, machine.login)}</p>}
-        </div>
+    <tr className="max-sm:block max-sm:border-b max-sm:border-line max-sm:py-2 max-sm:[&>td]:block max-sm:[&>td]:border-0 max-sm:[&>td]:py-1">
+      <Td className="sm:w-[30%]">
+        <p className="font-medium break-all">{machine.name}</p>
+        <p className="mt-0.5 font-mono text-[13px] break-all text-muted">{endpoint(machine)}</p>
+        <p className="mt-0.5 text-xs text-muted">
+          Host key:{' '}
+          {machine.host_key ? (
+            <span className="font-mono break-all">{machine.host_key}</span>
+          ) : (
+            'trusted on the first good test'
+          )}
+        </p>
+      </Td>
+      <Td className="sm:w-[24%]">
+        <p className="flex items-center gap-2 text-[13px]">
+          <Dot tone={state.tone} />
+          {state.label}
+        </p>
+        <p className="mt-0.5 text-xs text-muted">
+          {machine.tested_at ? (
+            <>
+              Last good test <time title={dateTime(machine.tested_at)}>{ago(machine.tested_at)}</time>
+            </>
+          ) : (
+            'No good test yet'
+          )}
+          {machine.jobs > 0 && ` · ${machine.jobs === 1 ? '1 job works' : `${machine.jobs} jobs work`} on it`}
+        </p>
+        {error && <p className="mt-1 text-xs text-warn">{machineAdvice(error, machine.login)}</p>}
+      </Td>
+      <Td>
         <Switch
           label={'Use ' + machine.name}
           checked={machine.enabled}
           disabled={busy === 'enable:' + machine.id}
           onChange={props.onEnable}
         />
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="secondary"
-          busy={busy === 'test:' + machine.id}
-          disabled={!available}
-          onClick={props.onTest}
-        >
-          <PlugZap aria-hidden /> Test
-        </Button>
-        <Button size="sm" variant="ghost" onClick={props.onEdit}>
-          <Pencil aria-hidden /> Edit
-        </Button>
-        <Button size="sm" variant="ghost" onClick={props.onCopy}>
-          <Copy aria-hidden /> Copy setup command
-        </Button>
-        {machine.host_key && (
-          <Button size="sm" variant="ghost" busy={busy === 'trust:' + machine.id} onClick={props.onTrust}>
-            <KeyRound aria-hidden /> Trust a new host key
+      </Td>
+      <Td>
+        <div className="flex flex-wrap gap-x-1 gap-y-1.5 sm:justify-end">
+          <Button
+            size="sm"
+            variant="secondary"
+            busy={busy === 'test:' + machine.id}
+            disabled={!available}
+            onClick={props.onTest}
+          >
+            <PlugZap aria-hidden /> Test
           </Button>
-        )}
-        <LinkButton href={href('system', {view: 'machines', machine: machine.id})} variant="ghost">
-          <ScrollText aria-hidden /> Log
-        </LinkButton>
-        <Button size="sm" variant="ghost" busy={busy === 'remove:' + machine.id} onClick={props.onRemove}>
-          <Trash2 aria-hidden /> Remove
-        </Button>
-      </div>
-      {keyShown && (
-        <div className="mt-3 space-y-2">
-          <p className="text-[13px] text-muted">
-            This browser didn’t allow copying. Select the command and copy it. {setupLine(machine.login)}
-          </p>
-          <PublicKey value={setupCommand(machine.public_key)} label={'Setup command for ' + machine.name} />
-          <Button size="sm" variant="ghost" onClick={props.onHideKey}>
-            Hide the command
+          <Button size="sm" variant="ghost" onClick={props.onEdit}>
+            <Pencil aria-hidden /> Edit
+          </Button>
+          <Button size="sm" variant="ghost" onClick={props.onCopy}>
+            <Copy aria-hidden /> Copy setup command
+          </Button>
+          {machine.host_key && (
+            <Button size="sm" variant="ghost" busy={busy === 'trust:' + machine.id} onClick={props.onTrust}>
+              <KeyRound aria-hidden /> Trust a new host key
+            </Button>
+          )}
+          <LinkButton href={href('system', {view: 'machines', machine: machine.id})} variant="ghost">
+            <ScrollText aria-hidden /> Log
+          </LinkButton>
+          <Button size="sm" variant="ghost" busy={busy === 'remove:' + machine.id} onClick={props.onRemove}>
+            <Trash2 aria-hidden /> Remove
           </Button>
         </div>
-      )}
-    </li>
+        {keyShown && (
+          <div className="mt-3 space-y-2">
+            <p className="text-[13px] text-muted">
+              This browser didn’t allow copying. Select the command and copy it. {setupLine(machine.login)}
+            </p>
+            <PublicKey value={setupCommand(machine.public_key)} label={'Setup command for ' + machine.name} />
+            <Button size="sm" variant="ghost" onClick={props.onHideKey}>
+              Hide the command
+            </Button>
+          </div>
+        )}
+      </Td>
+    </tr>
   );
 }
 

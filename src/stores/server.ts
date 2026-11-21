@@ -563,7 +563,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const stateById=new Map(states.map(state=>[state.event_id,state]));
         const reviews=await actionReviews(s.stores.control,candidates.filter(row=>row.kind==='telegram_update').map(row=>row.id),'separated');
         const matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters,reviews.get(row.id)?.state));
-        const page=matched.slice(0,50);
+        // The dashboard asks for a page that fits one screen; the cursor is the last message returned, whatever the size.
+        const size=limit(url.searchParams.get('limit'),50,50),page=matched.slice(0,size);
         const retiredEvents=await s.retirements.retiredEvents(page.map(row=>row.id)),liveCopies=await s.retirements.liveCopies(page.map(row=>row.id));
         const [replyPreviews,transcriptPreviews,copies]=await Promise.all([
           archiveReplyPreviews(s.stores.archive,s.stores.control,page),archiveTranscriptPreviews(s.stores.derived,page),agentCopies(s.stores.derived,page.map(row=>row.id))]);
@@ -574,7 +575,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
           text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,original,artifact_kinds??[]),
           reaction_preview:reactionPreview(row.kind,original),
           reply_messages:replyPreviews.get(row.id)??[],transcript_preview:transcriptPreviews.get(row.id)??null};});
-        const next=matched.length>50?matched[49].id:filters.reply&&candidates.length===201?candidates.at(-1).id:null;
+        const next=matched.length>size?matched[size-1].id:filters.reply&&candidates.length===201?candidates.at(-1).id:null;
         return json(res,200,{records,next});
       }
       if(path==='/v1/status') {
