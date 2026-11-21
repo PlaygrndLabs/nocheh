@@ -59,7 +59,7 @@ export function MemoryCard({chat, telegram, context}: {chat: Chat; telegram: Tel
         <p className="text-sm">
           {recall}{' '}
           {chat.kind !== 'private' && (
-            <a href={rulesHref()} className="font-medium text-accent-text hover:underline">
+            <a href={rulesHref({tab: 'defaults'})} className="font-medium text-accent-text hover:underline">
               Change topic memory
             </a>
           )}

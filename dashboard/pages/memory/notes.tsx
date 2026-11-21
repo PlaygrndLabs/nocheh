@@ -1,10 +1,11 @@
 /**
  * Memory › Notes: the assistant's own working notes and its past
- * conversations for one chat profile. Read only.
+ * conversations for one chat profile, each on its own sub-tab. Read only, so
+ * only the open sub-tab is on the page.
  */
 import {useEffect, useState} from 'react';
 import {MessageSquareText, NotebookPen} from 'lucide-react';
-import {useParam} from '../../lib/navigation';
+import {useParam, useSubTab} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
 import {refreshResources, useResource} from '../../lib/resource';
 import {
@@ -26,6 +27,7 @@ import {
   type Tone,
 } from '../../ui/core';
 import {Drawer} from '../../ui/overlay';
+import {SubPanel, SubTabs} from '../../ui/page';
 import {ago, dateTime} from '../../lib/system-format';
 import {noteDayText, noteWords, type NoteEntry} from '../../lib/memory-sources';
 import {OriginalList} from '../../lib/originals';
@@ -52,6 +54,9 @@ const PAGE = 10;
 type Message = {id: string; role: string; content: unknown; truncated?: boolean};
 
 const noteTitle: Record<string, string> = {'MEMORY.md': 'General notes', 'USER.md': 'About you'};
+/** The sub-tabs: the two notes files, then the past conversations. A notes file with another name shows with the
+ * general notes. */
+const subTabs = ['general', 'about', 'conversations'] as const;
 // Your own messages only; Nocheh's own work; other people's words or what a turn read; nobody known.
 const fromTone: Record<string, Tone> = {
   owner: 'good',
@@ -159,6 +164,8 @@ export function Notes() {
         ? 'About people here'
         : (noteTitle[name] ?? name);
   const sessions = conversations.data?.sessions ?? [];
+  const [tab, setTab] = useSubTab(subTabs);
+  const files = (memory.data?.memories ?? []).filter(note => (note.name === 'USER.md') === (tab === 'about'));
 
   if (profiles.error && !profiles.data)
     return <LoadError what="chat profiles" error={profiles.error} onRetry={() => void refreshResources()} />;
@@ -174,141 +181,161 @@ export function Notes() {
 
   return (
     <>
-      <Field label="Chat" htmlFor="notes-profile" className="max-w-sm">
-        <Select
-          id="notes-profile"
-          value={profile?.profile ?? ''}
-          onChange={event => setParams({profile: event.target.value, session: null}, true)}
-        >
-          {list.map(p => (
-            <option key={p.profile} value={p.profile}>
-              {label(p)}
-            </option>
-          ))}
-        </Select>
-      </Field>
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <Field label="Chat" htmlFor="notes-profile" className="w-full max-w-sm">
+          <Select
+            id="notes-profile"
+            value={profile?.profile ?? ''}
+            onChange={event => setParams({profile: event.target.value, session: null}, true)}
+          >
+            {list.map(p => (
+              <option key={p.profile} value={p.profile}>
+                {label(p)}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <SubTabs
+          label="Assistant notes"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            {id: 'general', label: title('MEMORY.md')},
+            {id: 'about', label: title('USER.md')},
+            {id: 'conversations', label: 'Past conversations'},
+          ]}
+        />
+      </div>
       {memory.error && (
         <LoadError what="notes for this chat" error={memory.error} onRetry={() => void refreshResources()} />
       )}
-      {keptOut > 0 && (
-        <p className="text-[13px] text-muted">
-          {keptOut === 1
-            ? '1 message from a person not allowed there was kept out of your notes (it’s still in group memory).'
-            : `${keptOut} messages from people not allowed there were kept out of your notes (they’re still in group memory).`}
-        </p>
+
+      {tab !== 'conversations' && (
+        <SubPanel id={tab} current={tab}>
+          <Card>
+            <CardHeader
+              title={title(tab === 'about' ? 'USER.md' : 'MEMORY.md')}
+              description="What the assistant wrote down for itself. Check important points against the original messages."
+            />
+            {keptOut > 0 && (
+              <p className="px-5 pt-1 text-[13px] text-muted">
+                {keptOut === 1
+                  ? '1 message from a person not allowed there was kept out of your notes (it’s still in group memory).'
+                  : `${keptOut} messages from people not allowed there were kept out of your notes (they’re still in group memory).`}
+              </p>
+            )}
+            <CardBody className="space-y-5">
+              {!memory.data && !memory.error ? (
+                <LoadingRows rows={3} />
+              ) : (
+                files.map(note => (
+                  <section key={note.name}>
+                    <h3 className={files.length > 1 ? 'mb-1.5 text-sm font-semibold' : 'sr-only'}>
+                      {title(note.name)}
+                    </h3>
+                    {note.entries?.length ? (
+                      <NotesTable label={title(note.name)} entries={note.entries} />
+                    ) : note.exists && note.text ? (
+                      <pre
+                        className="rounded-lg bg-subtle p-3 font-sans text-[13px] leading-relaxed break-words whitespace-pre-wrap"
+                        dir="auto"
+                      >
+                        {noteWords(note.text)}
+                      </pre>
+                    ) : (
+                      <p className="text-[13px] text-muted">Nothing written yet.</p>
+                    )}
+                    {note.truncated && <p className="mt-1 text-xs text-muted">Showing the first part only.</p>}
+                  </section>
+                ))
+              )}
+            </CardBody>
+          </Card>
+        </SubPanel>
       )}
 
-      <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
-        <Card>
-          <CardHeader
-            title="Working notes"
-            description="What the assistant wrote down for itself. Check important points against the original messages."
-          />
-          <CardBody className="space-y-5">
-            {!memory.data && !memory.error ? (
-              <LoadingRows rows={3} />
-            ) : (
-              memory.data?.memories.map(note => (
-                <section key={note.name}>
-                  <h3 className="mb-1.5 text-sm font-semibold">{title(note.name)}</h3>
-                  {note.entries?.length ? (
-                    <NotesTable label={title(note.name)} entries={note.entries} />
-                  ) : note.exists && note.text ? (
-                    <pre
-                      className="max-h-[28rem] overflow-auto rounded-lg bg-subtle p-3 font-sans text-[13px] leading-relaxed break-words whitespace-pre-wrap"
-                      dir="auto"
-                    >
-                      {noteWords(note.text)}
-                    </pre>
-                  ) : (
-                    <p className="text-[13px] text-muted">Nothing written yet.</p>
-                  )}
-                  {note.truncated && <p className="mt-1 text-xs text-muted">Showing the first part only.</p>}
-                </section>
-              ))
+      {tab === 'conversations' && (
+        <SubPanel id="conversations" current={tab}>
+          <Card>
+            <CardHeader
+              title="Past conversations"
+              description="What the assistant said in this chat, latest first. Open one to read it."
+            />
+            {conversations.error && (
+              <div className="px-5 pb-3">
+                <LoadError
+                  what="past conversations"
+                  error={conversations.error}
+                  onRetry={() => void refreshResources()}
+                />
+              </div>
             )}
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader
-            title="Past conversations"
-            description="What the assistant said in this chat, latest first. Open one to read it."
-          />
-          {conversations.error && (
-            <div className="px-5 pb-3">
-              <LoadError
-                what="past conversations"
-                error={conversations.error}
-                onRetry={() => void refreshResources()}
-              />
-            </div>
-          )}
-          {!conversations.data && !conversations.error ? (
-            <LoadingRows rows={3} />
-          ) : conversations.data && sessions.length === 0 ? (
-            <Empty icon={MessageSquareText} title={page ? 'Nothing older' : 'No conversations yet'} className="py-6">
-              {page ? 'Go back to the latest conversations.' : 'They appear after the assistant answers in this chat.'}
-            </Empty>
-          ) : (
-            sessions.length > 0 && (
-              <Table aria-label="Past conversations" className="table-fixed">
-                <thead>
-                  <tr>
-                    <Th scope="col">Conversation</Th>
-                    <Th scope="col" className="hidden w-32 sm:table-cell lg:hidden 2xl:table-cell">
-                      Where
-                    </Th>
-                    <Th scope="col" className="w-32">
-                      Last active
-                    </Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map(item => (
-                    <tr key={item.id} className="hover:bg-subtle/60">
-                      <Td className="min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => setParams({session: item.id})}
-                          className="block w-full min-w-0 text-left"
-                        >
-                          <span className="block truncate font-medium hover:underline" dir="auto">
-                            {sessionName(item)}
-                          </span>
-                          {item.title.trim() && item.preview?.trim() && (
-                            <span className="block truncate text-xs text-muted" dir="auto">
-                              {item.preview}
-                            </span>
-                          )}
-                        </button>
-                      </Td>
-                      <Td className="hidden text-muted sm:table-cell lg:hidden 2xl:table-cell">
-                        {sessionWhere(item.source)}
-                      </Td>
-                      <Td
-                        className="whitespace-nowrap text-muted"
-                        title={
-                          dateTime(item.last_active) +
-                          (item.messages ? ` · ${item.messages} message${item.messages === 1 ? '' : 's'}` : '')
-                        }
-                      >
-                        {sessionDay(item.last_active)}
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            )
-          )}
-          <Pager
-            page={page}
-            hasNext={conversations.data?.next_offset != null}
-            labels={['Newer', 'Older']}
-            onPage={setPage}
-          />
-        </Card>
-      </div>
+            {!conversations.data && !conversations.error ? (
+              <LoadingRows rows={3} />
+            ) : conversations.data && sessions.length === 0 ? (
+              <Empty icon={MessageSquareText} title={page ? 'Nothing older' : 'No conversations yet'} className="py-6">
+                {page
+                  ? 'Go back to the latest conversations.'
+                  : 'They appear after the assistant answers in this chat.'}
+              </Empty>
+            ) : (
+              sessions.length > 0 && (
+                <div className="mt-3 border-t border-line">
+                  <Table aria-label="Past conversations" className="table-fixed">
+                    <thead>
+                      <tr>
+                        <Th scope="col">Conversation</Th>
+                        <Th scope="col" className="hidden w-40 sm:table-cell">
+                          Where
+                        </Th>
+                        <Th scope="col" className="hidden w-28 sm:table-cell">
+                          Messages
+                        </Th>
+                        <Th scope="col" className="w-32">
+                          Last active
+                        </Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sessions.map(item => (
+                        <tr key={item.id} className="hover:bg-subtle/60">
+                          <Td className="min-w-0 py-2">
+                            <button
+                              type="button"
+                              onClick={() => setParams({session: item.id})}
+                              className="flex w-full min-w-0 items-baseline gap-3 text-left"
+                            >
+                              <span className="min-w-0 shrink truncate font-medium hover:underline" dir="auto">
+                                {sessionName(item)}
+                              </span>
+                              {item.title.trim() && item.preview?.trim() && (
+                                <span className="min-w-0 flex-[1_1000_0%] truncate text-xs text-muted" dir="auto">
+                                  {item.preview}
+                                </span>
+                              )}
+                            </button>
+                          </Td>
+                          <Td className="hidden py-2 text-muted sm:table-cell">{sessionWhere(item.source)}</Td>
+                          <Td className="hidden py-2 text-muted sm:table-cell">{item.messages ?? '—'}</Td>
+                          <Td className="py-2 whitespace-nowrap text-muted" title={dateTime(item.last_active)}>
+                            {sessionDay(item.last_active)}
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              )
+            )}
+            <Pager
+              page={page}
+              hasNext={conversations.data?.next_offset != null}
+              labels={['Newer', 'Older']}
+              onPage={setPage}
+            />
+          </Card>
+        </SubPanel>
+      )}
 
       <Conversation
         profile={profile}
@@ -323,7 +350,7 @@ export function Notes() {
 }
 
 /** Notes listed on one page of a working-notes table. */
-const NOTES_PAGE = 8;
+const NOTES_PAGE = 7;
 
 /** One notes file as a table: each note with where it came from, a page at a time. */
 function NotesTable({label, entries}: {label: string; entries: Entry[]}) {

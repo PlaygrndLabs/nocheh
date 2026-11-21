@@ -3,6 +3,7 @@ import {ArrowLeft} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import {setParams} from '../../lib/routes';
 import {useSubTab} from '../../lib/navigation';
+import {cn} from '../../lib/utils';
 import {SubPanel, SubTabs} from '../../ui/page';
 import {
   appIdLabel,
@@ -18,7 +19,7 @@ import {
 } from '../../lib/chats-model';
 import {Button, Card, CardBody, CardHeader, LoadError} from '../../ui/core';
 import {AllowedActions} from './actions';
-import {ShortId} from './chat-list';
+import {ChatSwitch, ShortId} from './chat-list';
 import {MemoryCard} from './memory';
 import {MembersHere} from './people';
 import {NochehHere} from './presence';
@@ -91,57 +92,61 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
 
   return (
     <div className="space-y-4">
-      <Button variant="ghost" size="sm" className="-ml-2 lg:hidden" onClick={() => setParams({chat: null})}>
-        <ArrowLeft aria-hidden /> All chats
-      </Button>
-      <header className="min-w-0">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <h2 className="truncate text-lg font-semibold" dir="auto">
-            {owner ? 'Your private chat' : chatName(chat)}
-          </h2>
-          {short && <ShortId value={short} />}
-        </div>
-        <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-muted">
-          <span>
-            {chat.kind === 'topic' ? (
+      <div className="flex flex-wrap-reverse items-start justify-between gap-x-4 gap-y-2">
+        <header className="min-w-0">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h2 className="truncate text-lg font-semibold" dir="auto">
+              {owner ? 'Your private chat' : chatName(chat)}
+            </h2>
+            {short && <ShortId value={short} />}
+          </div>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-muted">
+            <span>
+              {chat.kind === 'topic' ? (
+                <>
+                  Topic in{' '}
+                  <a
+                    href={chatHref(parentId ?? '')}
+                    className="font-medium text-accent-text hover:underline"
+                    dir="auto"
+                  >
+                    {parent ? chatName(parent) : 'its group'}
+                  </a>
+                </>
+              ) : group ? (
+                topics.length ? (
+                  `Group · ${topics.length} ${topics.length === 1 ? 'topic' : 'topics'}`
+                ) : (
+                  'Group'
+                )
+              ) : (
+                'Private chat'
+              )}
+            </span>
+            {profile && (
               <>
-                Topic in{' '}
-                <a href={chatHref(parentId ?? '')} className="font-medium text-accent-text hover:underline" dir="auto">
-                  {parent ? chatName(parent) : 'its group'}
+                <span aria-hidden>·</span>
+                <a
+                  href={profile.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-accent-text hover:underline"
+                  dir="ltr"
+                >
+                  {profile.handle}
                 </a>
               </>
-            ) : group ? (
-              topics.length ? (
-                `Group · ${topics.length} ${topics.length === 1 ? 'topic' : 'topics'}`
-              ) : (
-                'Group'
-              )
-            ) : (
-              'Private chat'
             )}
-          </span>
-          {profile && (
-            <>
-              <span aria-hidden>·</span>
-              <a
-                href={profile.href}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-accent-text hover:underline"
-                dir="ltr"
-              >
-                {profile.handle}
-              </a>
-            </>
-          )}
-          {label && (
-            <>
-              <span aria-hidden>·</span>
-              <span className="font-mono text-xs">{label}</span>
-            </>
-          )}
-        </p>
-      </header>
+            {label && (
+              <>
+                <span aria-hidden>·</span>
+                <span className="font-mono text-xs">{label}</span>
+              </>
+            )}
+          </p>
+        </header>
+        <BackToChats selected={space} />
+      </div>
       {context.error && !context.data && (
         <LoadError what="this chat’s details" onRetry={() => void refreshResources()} />
       )}
@@ -153,10 +158,15 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         onChange={setTab}
       />
       <SubPanel id="access" current={tab}>
-        <NochehHere chat={chat} parent={parent} telegram={telegram} />
-        {/* Who may talk in a group Nocheh is in, read-only: each member's switches are on the Members page. */}
-        {switchable(chat) && <MembersHere group={chat} telegram={telegram} />}
-        {forum && <TopicsCard group={chat} topics={topics} />}
+        {/* Side by side on a wide screen: where Nocheh stands and the topics, then who may talk here. */}
+        <div className={cn('grid items-start gap-5', switchable(chat) && 'lg:grid-cols-2')}>
+          <div className="min-w-0 space-y-5">
+            <NochehHere chat={chat} parent={parent} telegram={telegram} />
+            {forum && <TopicsCard group={chat} topics={topics} />}
+          </div>
+          {/* Who may talk in a group Nocheh is in, read-only: each member's switches are on the Members page. */}
+          {switchable(chat) && <MembersHere group={chat} telegram={telegram} />}
+        </div>
       </SubPanel>
       <SubPanel id="role" current={tab}>
         {owner || on ? (
@@ -204,13 +214,27 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
         )}
       </SubPanel>
       <SubPanel id="memory" current={tab}>
-        <MemoryCard chat={chat} telegram={telegram} context={context.data} />
-        {inGroup ? (
-          <ProjectCard chat={chat} served={on} />
-        ) : (
-          <PrivateChatProject chat={chat} yours={chat.owner === true} />
-        )}
+        <div className={cn('grid items-start gap-5', inGroup && 'lg:grid-cols-2')}>
+          <MemoryCard chat={chat} telegram={telegram} context={context.data} />
+          {inGroup ? (
+            <ProjectCard chat={chat} served={on} />
+          ) : (
+            <PrivateChatProject chat={chat} yours={chat.owner === true} />
+          )}
+        </div>
       </SubPanel>
+    </div>
+  );
+}
+
+/** Back to the table of chats, and the way straight to another chat. */
+function BackToChats({selected}: {selected: string}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2 max-sm:w-full max-sm:justify-between">
+      <Button variant="ghost" size="sm" onClick={() => setParams({chat: null, tab: null})}>
+        <ArrowLeft aria-hidden /> All chats
+      </Button>
+      <ChatSwitch selected={selected} />
     </div>
   );
 }
@@ -218,14 +242,14 @@ export function ChatDetail({space, telegram}: {space: string; telegram: Telegram
 function UnknownChat({chat, loading}: {chat: Chat; loading: boolean}) {
   return (
     <div className="space-y-4">
-      <Button variant="ghost" size="sm" className="-ml-2 lg:hidden" onClick={() => setParams({chat: null})}>
-        <ArrowLeft aria-hidden /> All chats
-      </Button>
-      <header className="min-w-0">
-        <h2 className="truncate text-lg font-semibold" dir="auto">
-          {loading ? 'Loading…' : chatName(chat)}
-        </h2>
-      </header>
+      <div className="flex flex-wrap-reverse items-start justify-between gap-x-4 gap-y-2">
+        <header className="min-w-0">
+          <h2 className="truncate text-lg font-semibold" dir="auto">
+            {loading ? 'Loading…' : chatName(chat)}
+          </h2>
+        </header>
+        <BackToChats selected={chat.space_id} />
+      </div>
       <Card>
         <CardHeader title="Nocheh here" />
         <CardBody className="pt-2 text-sm">

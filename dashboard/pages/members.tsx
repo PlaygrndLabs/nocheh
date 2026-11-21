@@ -1,7 +1,7 @@
 /**
  * Members: the people who may talk to Nocheh in your groups and in their own private chat with it, and what each may do
  * there (steps 3 and 4). A line only the owner sees reminds them to check local laws before reading members' chats. The
- * list sits beside the open member on wide screens; on a phone the member opens full width. Every switch here saves at
+ * members are a table; a member opens in its place, with the way back and to any other member. Every switch here saves at
  * once, so the page has no Save bar; the daily cap has its own Save. What a change answers shows at once, until the list
  * reloads with it.
  */
@@ -10,7 +10,6 @@ import {Contact, Scale, UserPlus} from 'lucide-react';
 import {useParam} from '../lib/navigation';
 import {refreshResources} from '../lib/resource';
 import {setParams} from '../lib/routes';
-import {cn} from '../lib/utils';
 import {Button, Card, Empty, LoadError} from '../ui/core';
 import {Page} from '../ui/page';
 import {AddMember} from './members/add';
@@ -47,25 +46,35 @@ export default function MembersPage() {
         </p>
       )}
       {list.error && !data && <LoadError what="members" onRetry={() => void refreshResources()} />}
-      <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
-        <div className={cn('space-y-5 lg:sticky lg:top-6', selected && 'hidden lg:block')}>
-          <MemberList list={data} loading={!data && !list.error} selected={selected} known={known} />
-          {data && <DailyMessages value={data.daily_messages} onSaved={answered} />}
-        </div>
-        <div className={cn('min-w-0', !selected && 'hidden lg:block')}>
-          {member ? (
-            <MemberDetail key={member.id} member={member} known={known} onSaved={answered} />
-          ) : (
+      {selected ? (
+        member ? (
+          <MemberDetail
+            key={member.id}
+            member={member}
+            members={data?.members ?? []}
+            known={known}
+            onSaved={answered}
+          />
+        ) : (
+          data && (
             <Card>
-              <Empty icon={Contact} title={selected && data ? 'This member isn’t here any more' : 'Choose a member'}>
-                {selected && data
-                  ? 'They were removed. Choose another member, or add them again.'
-                  : 'See where they may talk to Nocheh, what they may do, and pause or remove them.'}
+              <Empty icon={Contact} title="This member isn’t here any more">
+                They were removed. Choose another member, or add them again.
+                <span className="mt-3 block">
+                  <Button size="sm" onClick={() => setParams({member: null, tab: null})}>
+                    All members
+                  </Button>
+                </span>
               </Empty>
             </Card>
-          )}
+          )
+        )
+      ) : (
+        <div className="space-y-5">
+          <MemberList list={data} loading={!data && !list.error} known={known} />
+          {data && <DailyMessages value={data.daily_messages} onSaved={answered} />}
         </div>
-      </div>
+      )}
       {adding && data && (
         <AddMember
           list={data}
