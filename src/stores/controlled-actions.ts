@@ -1,7 +1,8 @@
 import {blockingPublications} from './publications.js';
 import {followUpTurn,ownerAutonomyGrant} from './owner-autonomy.js';
 import {followUpLeft} from './action-continuations.js';
-import {notionAuthority,notionChatProject} from './notion.js';
+import {notionAuthority} from './notion.js';
+import {activeChatProject} from './projects.js';
 import {chatToolAllowed} from './chat-tools.js';
 import {ownerApprovedJob,relaunchedRun} from './background-jobs.js';
 import type pg from 'pg';
@@ -128,7 +129,7 @@ export class ControlledActionRepository {
     // A Notion call from a group or topic that names no connection uses its project's (ADR-0268); the owner's private chat's
     // uses the owner's own. The name is part of what is checked, recorded and approved.
     if('connection' in raw&&!('project' in raw)&&principal.scope!==null) {
-      const project=await notionChatProject(this.control,principal.space??principal.scope);
+      const project=await activeChatProject(this.control,principal.space??principal.scope);
       if(project)raw=actionArguments(body.kind,{...raw,project});
     }
     if('connection' in raw)await notionAuthority(this.control,principal,turn,raw,false);

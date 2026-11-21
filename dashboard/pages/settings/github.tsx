@@ -1,6 +1,7 @@
 /**
  * Settings › Connections › GitHub: Nocheh's own GitHub App and the repository copies that
  * background jobs approved in the private chat may read in their sealed box (ADR-0209, ADR-0210).
+ * Each repository is the owner's own or linked to one project, whose groups may use it (ADR-0269).
  * Connect GitHub sends the owner to GitHub, which creates the app and then asks which repositories
  * it may read, and brings them back here. The app's key never comes back and never reaches a box.
  * Every control acts at once. Copy has its own busy state, and Remove and Disconnect never wait
@@ -22,6 +23,7 @@ import {
   LoadError,
   LoadingRows,
   Notice,
+  Select,
   SettingRow,
 } from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
@@ -40,6 +42,8 @@ type Copied = {
   copied_at: string;
   missing: boolean;
 };
+type RepoLink = {repo: string; project_id: string};
+type ProjectChoice = {id: string; name: string; state: string};
 type GithubApp = {name: string; account: string; install_url: string; settings_url: string};
 type GithubStatus = {
   connected: boolean;
@@ -175,6 +179,8 @@ export function GithubConnection() {
   // The app Disconnect forgot, so the card can point to where it is deleted on GitHub.
   const [forgotten, setForgotten] = useState<GithubApp | null>(null);
   useGithubReturn((message, failed) => (failed ? setProblem(message) : feedback.toast(message)));
+  const links = useResource<{repos: RepoLink[]}>('/github-projects', 30000);
+  const projects = useResource<{projects: ProjectChoice[]; next: string | null}>('/projects?after=', 30000);
 
   const act = async (name: string, work: () => Promise<void>) => {
     setBusy(name);
@@ -271,6 +277,15 @@ export function GithubConnection() {
     const key = copy.repo.toLowerCase();
     named.set(key, {...(named.get(key) ?? {name: copy.repo}), copy});
   }
+  const linked = new Map((links.data?.repos ?? []).map(link => [link.repo, link.project_id]));
+  const active = (projects.data?.projects ?? []).filter(project => project.state === 'active');
+  const link = (repo: string, project: string) =>
+    act('link:' + repo, async () => {
+      await apiPost('/github-projects', {repo, project: project || null});
+      feedback.toast(
+        project ? 'Linked to ' + (active.find(p => p.id === project)?.name ?? 'the project') : 'Yours only now',
+      );
+    });
   const rows = [...named.values()].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   // A Copy of a name with no row yet shows its progress by the field it was typed in.
   const copyingName = copyingRow(
@@ -285,7 +300,7 @@ export function GithubConnection() {
       <CardHeader
         id="github-title"
         title="GitHub"
-        description="Let background jobs you approve in your private chat read a copy of a repository and its history. The copy goes into the job’s sealed box; no GitHub key ever does."
+        description="Let background jobs you approve read a copy of a repository and its history. The copy goes into the job’s sealed box; no GitHub key ever does. A repository linked to a project can also be used in that project’s groups."
         action={
           data.reconnect ? (
             <Badge tone="warn" dot>
@@ -418,7 +433,27 @@ export function GithubConnection() {
                               : `${saved.branch} at ${saved.commit.slice(0, 7)}, copied ${ago(saved.copied_at)}, ${megabytes(saved.bytes)} MB, ${saved.files.toLocaleString('en-US')} files`}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Select
+                        aria-label={'Who uses ' + row.name}
+                        className="h-8 w-auto text-[13px]"
+                        value={linked.get(row.name.toLowerCase()) ?? ''}
+                        disabled={busy === 'link:' + row.name}
+                        onChange={event => void link(row.name, event.target.value)}
+                      >
+                        <option value="">You only</option>
+                        {active.map(project => (
+                          <option key={project.id} value={project.id}>
+                            Project: {project.name}
+                          </option>
+                        ))}
+                        {(() => {
+                          const id = linked.get(row.name.toLowerCase());
+                          return id && !active.some(project => project.id === id) ? (
+                            <option value={id}>An archived project</option>
+                          ) : null;
+                        })()}
+                      </Select>
                       {data.connected && (
                         <Button
                           size="sm"
@@ -477,6 +512,98 @@ export function GithubConnection() {
             </div>
           )}
         </div>
+      </div>
+    </Card>
+  );
+}
+
+/** A project's GitHub repositories in its drawer (ADR-0269): linked by name, used in its groups' code jobs and lookups.
+ *  Each change saves at once, as the page's Save sits behind the drawer. */
+export function ProjectGithub({project}: {project: {id: string; name: string}}) {
+  const status = useResource<GithubStatus>('/connections/github');
+  const links = useResource<{repos: RepoLink[]}>('/github-projects', 30000);
+  const feedback = useFeedback();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [choice, setChoice] = useState('');
+  const save = async (repo: string, linked: boolean) => {
+    setBusy(repo);
+    setProblem(null);
+    try {
+      await apiPost('/github-projects', {repo, project: linked ? project.id : null});
+      feedback.toast(linked ? repo + ' is linked to this project' : repo + ' is yours only now');
+      setChoice('');
+    } catch (e) {
+      setProblem(failureWords(e));
+    } finally {
+      setBusy(null);
+      await refreshResources().catch(() => {});
+    }
+  };
+  const all = links.data?.repos ?? [];
+  const mine = all.filter(link => link.project_id === project.id).map(link => link.repo);
+  const taken = new Set(all.map(link => link.repo));
+  const names = new Map<string, string>();
+  for (const listed of status.data?.listed ?? []) names.set(listed.name.toLowerCase(), listed.name);
+  for (const copy of status.data?.copies ?? []) names.set(copy.repo.toLowerCase(), copy.repo);
+  const free = [...names.entries()].filter(([key]) => !taken.has(key)).sort((a, b) => a[0].localeCompare(b[0]));
+  return (
+    <Card aria-labelledby={'project-github-' + project.id}>
+      <CardHeader
+        id={'project-github-' + project.id}
+        title="GitHub for this project"
+        description="Code jobs you start in this project’s groups read only these repositories. Other projects and groups in no project never use them."
+      />
+      <div className="mt-3 grid gap-3 border-t border-line px-5 py-4">
+        {problem && <Notice tone="bad">{problem}</Notice>}
+        {!status.data?.connected && (
+          <p className="text-[13px] text-muted">
+            Connect GitHub in Settings › Connections › GitHub first.{' '}
+            <a className="underline" href="#settings?view=connections&tab=github">
+              Open it
+            </a>
+          </p>
+        )}
+        {mine.length ? (
+          <ul className="divide-y divide-line" aria-label="This project’s repositories">
+            {mine.map(repo => (
+              <li key={repo} className="flex items-center justify-between gap-2 py-2">
+                <span className="truncate font-medium">{names.get(repo) ?? repo}</span>
+                <Button size="sm" variant="ghost" busy={busy === repo} onClick={() => void save(repo, false)}>
+                  <Unplug aria-hidden /> Unlink
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-[13px] text-muted">No repository is linked to this project yet.</p>
+        )}
+        {free.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              aria-label="Repository to link"
+              className="h-8 w-auto text-[13px]"
+              value={choice}
+              onChange={event => setChoice(event.target.value)}
+            >
+              <option value="">Choose a repository</option>
+              {free.map(([key, name]) => (
+                <option key={key} value={name}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!choice}
+              busy={busy === choice}
+              onClick={() => void save(choice, true)}
+            >
+              Link
+            </Button>
+          </div>
+        )}
       </div>
     </Card>
   );

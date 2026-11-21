@@ -2,6 +2,16 @@
 
 <current>
 
+A project's GitHub repositories, step 3 part 1 of the shared and private connectors plan
+(owner, 2026-11-20: GitHub connects to a project, never a group)
+([ADR-0269](docs/adr/0269-github-per-project.md)).
+- `github_projects` links a repository by name to a project. Settings › Connections › GitHub has
+  a picker per repository; each project's drawer has "GitHub for this project".
+- The owner's own box job asked in a project's group reads only that project's copies, checked
+  again while it runs. Unlinking withdraws group jobs not started and takes a running one's box.
+- Checks: [store](test/store-job-repo-project.test.ts), job repo store test, dashboard browser.
+- Next: part 2, live GitHub lookups in the project's replies (owner, 2026-11-21: "if needed").
+
 Notion per project or owner, step 2 of the shared and private connectors plan (owner,
 2026-11-20: a service connects to a project or a person; the owner's Notion becomes the
 owner's own) ([ADR-0268](docs/adr/0268-notion-per-project-or-person.md)).

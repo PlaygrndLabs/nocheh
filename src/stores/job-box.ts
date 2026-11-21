@@ -8,6 +8,7 @@ import {boxExpires,boxJob,boxOpen,repoKept} from './background-jobs.js';
 import {validFromEpoch} from './guards.js';
 import type {SourceRepository} from './retrieval.js';
 import {ownerIds} from '../assistant-policy.js';
+import {activeChatProject} from './projects.js';
 
 /** What the launcher needs for a run's sealed box: the job's chat and period from its row, the guard binding
  *  a filled copy stays good for, and when the box must be gone. A job that pinned a GitHub copy also names that copy:
@@ -25,7 +26,8 @@ export function boxTokenValid(given:unknown,token=process.env.NOCHEH_BOX_TOKEN):
 }
 
 /**
- * The sealed box of a job the owner asked for and approved in their private chat: Hermes's own terminal,
+ * The sealed box of a job the owner asked for and approved in their private chat, or in a project's group to read one of
+ * that project's GitHub copies (ADR-0269): Hermes's own terminal,
  * file and code tools run there, with a read-only copy of the job's chat that passed the secret check.
  * Nocheh decides which runs get a box and what the copy holds; the launcher only follows the binding.
  */
@@ -47,8 +49,14 @@ export class JobBoxRepository {
   async live() {
     const guard=await this.access.guards.state(),owner=ownerIds(this.access.policy());
     if(guard.mode!=='on'||!owner.chat||!owner.account)return {boxes:[]};
-    const jobs=(await this.control.query(`SELECT j.id,j.started_at,j.minutes_limit FROM background_jobs j JOIN background_settings s ON s.singleton AND s.box_tools
-      WHERE j.box AND j.state='running' AND NOT j.cancel_requested AND j.scope=$1 AND j.requester IS NULL AND j.decided_by=$2 AND ${boxOpen} AND ${repoKept} ORDER BY j.id`,[owner.chat,owner.account])).rows;
+    // The owner's private chat's box jobs, and the owner's own box jobs in a group that read a copy of that group's active
+    // project (ADR-0269).
+    const jobs=[];
+    for(const job of (await this.control.query(`SELECT j.id,j.started_at,j.minutes_limit,j.scope,j.space_id,g.project_id FROM background_jobs j
+      JOIN background_settings s ON s.singleton AND s.box_tools LEFT JOIN github_copies c ON c.copy_id=j.repo->>'copy_id' LEFT JOIN github_projects g ON g.repo=lower(c.repo)
+      WHERE j.box AND j.state='running' AND NOT j.cancel_requested AND (j.scope=$1 OR g.project_id IS NOT NULL) AND j.requester IS NULL AND j.decided_by=$2
+        AND ${boxOpen} AND ${repoKept} ORDER BY j.id`,[owner.chat,owner.account])).rows)
+      if(job.scope===owner.chat||await activeChatProject(this.control,job.space_id)===job.project_id)jobs.push(job);
     const from=jobs.length?await validFromEpoch(this.control,guard):guard.epoch;
     return {boxes:jobs.map(job=>({job:job.id,generation:guard.generation,mode:guard.mode,valid_from_epoch:from,expires:boxExpires(job)}))};
   }

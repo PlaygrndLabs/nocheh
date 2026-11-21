@@ -4,6 +4,7 @@
  * them (ADR-0267); off, a group answer uses only that group. A topic always follows its group's project (ADR-0247,
  * ADR-0248). A project can have its own Notion, which its groups use (ADR-0268).
  */
+import {ProjectGithub} from '../settings/github';
 import {NotionConnection} from '../settings/connections';
 import {useState} from 'react';
 import {FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
@@ -387,6 +388,8 @@ function ProjectDetail({
           <PrivateAnswers project={project.id} />
           {/* The project's own Notion, used in its groups and your private chat (ADR-0268). */}
           <NotionConnection project={{id: project.id, name: project.name}} />
+          {/* The project's GitHub repositories, used in its groups (ADR-0269). */}
+          <ProjectGithub project={{id: project.id, name: project.name}} />
           {context.decisions.total > 0 && (
             <section>
               <h3 className="mb-2 text-sm font-semibold">Waiting for you</h3>

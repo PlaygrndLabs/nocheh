@@ -6,6 +6,7 @@ import {carriesData,dataLimit} from '../link-check.js';
 import {canonical} from '../archive.js';
 import {parentSpace} from '../spaces.js';
 import {chats} from '../chats.js';
+import {activeChatProject} from './projects.js';
 import type {OwnerIds} from '../assistant-policy.js';
 
 /**
@@ -164,13 +165,6 @@ export class NotionRepository {
   }
 }
 
-/** The active project a group or topic belongs to, or null. */
-export async function notionChatProject(db:Pick<pg.PoolClient,'query'>,space:string):Promise<string|null> {
-  const group=chats().groupOf(space)??parentSpace(space)??space;
-  return (await db.query(`SELECT a.project_id FROM project_assignments a JOIN projects p ON p.id=a.project_id AND p.state='active'
-    WHERE a.space_id=$1 AND a.mode='assigned'`,[group])).rows[0]?.project_id??null;
-}
-
 /**
  * Where a Notion connection may be used (ADR-0268): the owner's own only from the owner's private chat, in a live turn
  * or a job the owner approved there; a project's from the owner's private chat in a live turn, or from a live turn in one
@@ -186,7 +180,7 @@ export async function assertNotionHere(db:Pick<pg.PoolClient,'query'>,principal:
     return;
   }
   if(principal.scope===null||!['group','topic'].includes(chats().kind(principal.space??principal.scope)??'')||
-    await notionChatProject(db,principal.space??principal.scope)!==target)throw new HttpError(403,'notion_not_here');
+    await activeChatProject(db,principal.space??principal.scope)!==target)throw new HttpError(403,'notion_not_here');
 }
 
 /**
@@ -239,7 +233,7 @@ export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ow
   if(target!==null) {
     if(row.job_id)return 'notion_not_here';
     if(ownChat)return (await db.query("SELECT 1 FROM projects WHERE id=$1 AND state='active'",[target])).rowCount?null:'notion_not_here';
-    return row.scope!==owner&&await notionChatProject(db,row.space_id)===target?null:'notion_not_here';
+    return row.scope!==owner&&await activeChatProject(db,row.space_id)===target?null:'notion_not_here';
   }
   if(!owner||!account||!ownChat)return 'notion_owner_private_only';
   if(!row.job_id)return null;

@@ -202,6 +202,8 @@ const githubApp={name:'Nocheh-a1b2c3',account:'octo-example',install_url:'/__pre
 let githubSignIn:{connected:boolean;app:typeof githubApp|null;connected_at:number|null;reconnect:boolean;listed:typeof githubListed;listed_at:number|null}=
   {connected:false,app:null,connected_at:null,reconnect:false,listed:[],listed_at:null};
 let githubCopies:Record<string,unknown>[]=[];
+// The repositories linked to a project, by lower-case name (ADR-0269).
+const githubLinks=new Map<string,string>();
 const githubStatus=()=>({...githubSignIn,copies:githubCopies.map(copy=>({...copy,missing:false}))});
 const tasks=new TaskRepository(pool,async()=>{throw new HttpError(403,'owner_private_turn_required');}),taskOwner={admin:true,scope:null};
 await tasks.create(taskOwner,{operation_id:'preview-1',title:'Book the Iceland flights',notes:'Window seats if possible.',group:'-10042/topic/7',tags:['Travel'],due_on:new Date(Date.now()+3*864e5).toISOString().slice(0,10)});
@@ -937,6 +939,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/chat-tools')return json(res,200,await chatTools.get(taskOwner,url.searchParams.get('space')??'*'));
   if(route==='/connections/notion')return json(res,200,notionSignIn(url.searchParams.get('project')??''));
   if(route==='/connections/github')return json(res,200,githubStatus());
+  if(route==='/github-projects')return json(res,200,{repos:[...githubLinks].sort().map(([repo,project_id])=>({repo,project_id}))});
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
   if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
   if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs,members:memberSpend()});
@@ -1005,6 +1008,11 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
     return json(res,200,setNotionSignIn(body.project,{connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
   if(route==='/connections/notion/disconnect')return json(res,200,setNotionSignIn(body.project,signedOut()));
+  if(route==='/github-projects'){
+    if(typeof body.repo!=='string'||!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(body.repo)||!(body.project===null||typeof body.project==='string'))throw new HttpError(400,'invalid_github_repo');
+    if(body.project===null)githubLinks.delete(body.repo.toLowerCase());else githubLinks.set(body.repo.toLowerCase(),body.project as string);
+    return json(res,200,{repos:[...githubLinks].sort().map(([repo,project_id])=>({repo,project_id}))});
+  }
   if(route==='/connections/github/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/connect/github')throw new HttpError(400,'invalid_github_redirect');
     return json(res,200,{action:'/__preview/github/new?state=fixture-state',manifest:JSON.stringify({name:'Nocheh-a1b2c3',url:new URL(String(body.redirect)).origin,
       redirect_url:body.redirect,setup_url:body.redirect,setup_on_update:true,public:false,default_permissions:{contents:'read',metadata:'read'},default_events:[]})});}
