@@ -17,6 +17,7 @@ import {startChatRecords} from './chat-seed.js';
 import {memberAppServer} from './member-app.js';
 import {MEMBER_APP_PORT} from '../member-app-wire.js';
 import {launchKey} from '../telegram-launch.js';
+import {schemaReady} from './dev-schema.js';
 
 // Turns and service calls that run a built-in instruction text carry the owner's replacements. Telegram calls go to
 // Nocheh's own bot (ADR-0235), the other helper services to the Hermes service.
@@ -27,6 +28,8 @@ const config=settings(),pools=runtimeStoreGroups(),adapter=combinedAdapter(teleg
 // Chats are served as the chat directory holds them (ADR-0252): the owner adds Nocheh to a group or turns it on (ADR-0253).
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:servedPolicy(()=>config.assistant),runtime:call,brain:brainWithPrompts(brain(config),pools.api.control),memoryEngine:memoryEngine(config)};
+// In development nothing reads or runs before the store setup of this build has finished (dev-schema.ts).
+await schemaReady(pools.api.control);
 const services=storageServices(pools.api,options),workflowServices=storageServices(pools.workflow,options);
 // Every chat already stored gets its row and the directory loads before anything captures or runs.
 const stopChatRecords=await startChatRecords(pools.api,services.chats,()=>config.assistant);

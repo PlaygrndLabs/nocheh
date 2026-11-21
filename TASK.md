@@ -2,6 +2,17 @@
 
 <current>
 
+Development startup order after a live reload (2026-11-21: errors in the dev stack logs).
+- The new app and the security service wait until the database has set up the stores for their
+  build (`schema_builds`, [dev-schema.ts](src/stores/dev-schema.ts)); after 120 s they start
+  anyway. The old app stops before the build's ready marker appears. This ends the
+  `deadlock detected` in `nocheh_derived` and the missing-table errors (`github_projects`) that
+  readers met while setup ran. Outside development nothing waits.
+- `project_groups_stay_apart` sets the members itself, so it runs alone.
+- Checks: [unit](test/dev-schema.test.ts), [supervisor](test/dev-node-run.test.ts),
+  [store](test/store-bootstrap.test.ts), reset setup. The full tester run of the scenario alone
+  is pending.
+
 A project's GitHub repositories, step 3 part 1 of the shared and private connectors plan
 (owner, 2026-11-20: GitHub connects to a project, never a group)
 ([ADR-0269](docs/adr/0269-github-per-project.md)).

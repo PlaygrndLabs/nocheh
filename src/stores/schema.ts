@@ -46,6 +46,7 @@ import {sourceRetirementSchema} from './source-retirement.js';
 import {reactionStateSchema} from './reaction-state.js';
 import {knowledgeManagementSchema} from './knowledge-schema.js';
 import {stageTimingSchema} from './stage-timings.js';
+import {schemaBuildSchema} from './dev-schema.js';
 
 // These fresh-install schemas deliberately contain no foreign database links.
 // Cross-store references are checked by repositories and recoverable operations.
@@ -196,6 +197,7 @@ CREATE TABLE IF NOT EXISTS spool_failures (
  seen_at timestamptz NOT NULL DEFAULT now()
 );
 ${storageWorkflowOwnerSchema}
+${schemaBuildSchema}
 `;
 
 export const storeSchemas={archive:originalArchiveSchema,derived:initialDerivedSchema,control:initialControlSchema} as const;

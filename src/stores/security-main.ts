@@ -7,12 +7,15 @@ import {brainWithPrompts,withPrompts} from '../prompts.js';
 import {brain} from '../brain/brains.js';
 import {brokerServer} from '../security/broker.js';
 import {runtimeStores} from './runtime-pools.js';
+import {schemaReady} from './dev-schema.js';
 import {storageServices} from './services.js';
 import {storageGuardService} from './guard-service.js';
 import {servedPolicy,startChatDirectory} from './chats.js';
 import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHealth,storageHeartbeat} from './lifecycle.js';
 
 const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token}))),stores.control);
+// In development nothing reads before the store setup of this build has finished (dev-schema.ts).
+await schemaReady(stores.control);
 const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:servedPolicy(()=>config.assistant),runtime:call,brain:brainWithPrompts(brain(config),stores.control),memoryEngine:memoryEngine(config)});
 // The security service reads chats as the app records them (ADR-0252); a newer guard epoch reloads them.
