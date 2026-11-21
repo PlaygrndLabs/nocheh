@@ -1,6 +1,6 @@
 /**
- * Settings › Connections: outside services Nocheh can use for the owner.
- * Notion is the first: the owner signs in to Notion here, then turns it on and
+ * Connections › Yours: the owner's own Notion, used only in the owner's private chat (ADR-0271).
+ * The owner signs in to Notion here, then turns it on and
  * chooses which Notion calls ask first. The sign-in stays with the other keys
  * and is never shown again. On/off and approvals save from the top of the page.
  * A project's own Notion uses the same card in Memory › Projects (ADR-0268).
@@ -148,7 +148,7 @@ export function NotionConnection({
   };
   useDraftSource({
     id: 'notion-settings' + (project ? ':' + project.id : ''),
-    labels: dirty ? [project ? project.name + ': Notion' : 'Connections: Notion'] : [],
+    labels: dirty ? [project ? project.name + ': Notion' : 'Your Notion'] : [],
     save: async () => {
       if (!draft) return;
       try {
@@ -236,11 +236,11 @@ export function NotionConnection({
     <Card aria-labelledby={titleId}>
       <CardHeader
         id={titleId}
-        title={project ? 'Notion for this project' : 'Notion'}
+        title={project ? 'Notion for this project' : 'Your Notion'}
         description={
           project
             ? `A Notion this project’s groups use, through Notion’s own MCP server: everyone who talks to Nocheh in ${project.name}’s groups can have it searched and read, and your private chat can use it too. Changes ask you as set below. Other groups and other people’s private chats never reach it.`
-            : 'Let Nocheh search, read and change your own Notion from your private chat and in background jobs you approve there, through Notion’s own MCP server. Groups never reach it; a project can have its own Notion in Memory › Projects. Nocheh’s own task list stays the main one.'
+            : 'Your own Notion, used only in your private chat and in background jobs you approve there. Nocheh can search, read and change it through Notion’s own MCP server. Groups and members never reach it; a project can have its own Notion, in the Projects tab. Nocheh’s own task list stays the main one.'
         }
         action={
           status.connected ? (

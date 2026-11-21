@@ -21,6 +21,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Plug,
   Server,
   Settings,
   Sun,
@@ -55,6 +56,7 @@ const nav: NavItem[] = [
   {id: 'memory', title: 'Memory', Icon: BrainCircuit},
   {id: 'usage', title: 'Usage', Icon: Gauge},
   {id: 'system', title: 'System', Icon: Server},
+  {id: 'connections', title: 'Connections', Icon: Plug},
   {id: 'settings', title: 'Settings', Icon: Settings},
 ];
 
@@ -69,6 +71,7 @@ const pages: Record<PageId, React.LazyExoticComponent<React.ComponentType>> = {
   memory: React.lazy(() => import('./pages/memory')),
   usage: React.lazy(() => import('./pages/usage')),
   system: React.lazy(() => import('./pages/system')),
+  connections: React.lazy(() => import('./pages/connections')),
   settings: React.lazy(() => import('./pages/settings')),
 };
 
@@ -78,14 +81,14 @@ function canonicalPage(): PageId {
   if (hash) history.replaceState(null, '', hash);
   return page;
 }
-// Notion's and GitHub's sign-ins return to `/?connect=…`; Settings › Connections finishes them.
-// Each service has its own sub-tab there, and Notion's is the first.
+// Notion's and GitHub's sign-ins return to `/?connect=…`; the Connections page finishes them. Every tab stays on that
+// page; a project's Notion sign-in finishes there too and says to turn it on in the project.
 const connecting = new URLSearchParams(location.search).get('connect') ?? '';
 if (['notion', 'github'].includes(connecting))
   history.replaceState(
     null,
     '',
-    location.pathname + location.search + '#settings?view=connections' + (connecting === 'github' ? '&tab=github' : ''),
+    location.pathname + location.search + (connecting === 'github' ? '#connections?view=github' : '#connections'),
   );
 canonicalPage();
 addEventListener('hashchange', canonicalPage);
