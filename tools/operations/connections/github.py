@@ -785,3 +785,78 @@ def refresh(state,**hooks):
         except ValueError as error:
             if str(error) in ('github_app_refused','github_not_connected','github_rebuild_needed'):break
     return status(state,**hooks)
+
+
+# Live lookups (ADR-0270): a few fixed reads of one repository, with a key GitHub makes for that repository alone that
+# reads only its code. The store decided where the lookup may run; this only reads and shapes the answer small.
+
+LOOKUPS=('search_code','read_file','list_files','list_commits','get_commit')
+LOOKUP_TEXT=60000
+PATCH_TEXT=4000
+
+
+def lookup_path(value,empty=False):
+    return isinstance(value,str) and (empty and value=='' or 0<len(value)<=400) and not value.startswith('/') \
+        and '..' not in value.split('/') and not re.search(r'[\0\r\n]',value)
+
+
+def lookup(state,args,**hooks):
+    """One lookup: {'response': its answer}. Raises ValueError('invalid_github_lookup') for anything the store would
+    refuse too, and GitHub's own codes for the rest."""
+    t=tools(**hooks);given=args.get('input') if isinstance(args.get('input'),dict) else {}
+    tool,name=args.get('tool'),given.get('repo')
+    if tool not in LOOKUPS or not repo_name(name):raise ValueError('invalid_github_lookup')
+    ref=given.get('ref')
+    if ref is not None and not (isinstance(ref,str) and BRANCH.fullmatch(ref) and '..' not in ref):raise ValueError('invalid_github_lookup')
+    expected=current(state)
+    found=decoded(as_app(state,t,expected,'/repos/'+name+'/installation','github_repo_not_readable')[0])
+    token=installation_key(state,t,expected,found.get('id'),'github_repo_not_readable',name.split('/')[1])
+    quote=lambda value:urllib.parse.quote(value,safe='')
+    def get(path,kind=(dict,list)):return decoded(as_installation(t,token,path,'github_lookup_not_found')[0],kind)
+    at='' if ref is None else '?ref='+quote(ref)
+    if tool=='search_code':
+        query=given.get('query')
+        if not (isinstance(query,str) and 0<len(query)<=200 and not re.search(r'[\0\r\n]',query)):raise ValueError('invalid_github_lookup')
+        answer=get('/search/code?per_page=20&q='+quote(query+' repo:'+name),dict)
+        items=[{'path':item.get('path')} for item in answer.get('items') or [] if isinstance(item,dict) and isinstance(item.get('path'),str)]
+        return {'response':{'repo':name,'total':answer.get('total_count'),'files':items[:20]}}
+    if tool in ('read_file','list_files'):
+        path=given.get('path','')
+        if not lookup_path(path,empty=tool=='list_files'):raise ValueError('invalid_github_lookup')
+        answer=get('/repos/'+name+'/contents/'+'/'.join(quote(part) for part in path.split('/') if part)+at)
+        if isinstance(answer,list):
+            entries=[{'name':row.get('name'),'path':row.get('path'),'type':row.get('type'),'size':row.get('size')} for row in answer if isinstance(row,dict)]
+            return {'response':{'repo':name,'path':path,'entries':entries[:500],'more':len(entries)>500}}
+        if tool=='list_files':return {'response':{'repo':name,'path':path,'entries':[{'name':answer.get('name'),'path':answer.get('path'),'type':answer.get('type'),'size':answer.get('size')}],'more':False}}
+        content=answer.get('content') if answer.get('encoding')=='base64' else None
+        if not isinstance(content,str):return {'response':{'repo':name,'path':path,'size':answer.get('size'),'text':None,'note':'Too big or not a file GitHub sends whole.'}}
+        try:data=base64.b64decode(content)
+        except ValueError:raise ValueError('github_unavailable') from None
+        if b'\0' in data[:8000]:return {'response':{'repo':name,'path':path,'size':len(data),'text':None,'note':'A binary file.'}}
+        text=data.decode('utf-8',errors='replace')
+        return {'response':{'repo':name,'path':path,'size':len(data),'text':text[:LOOKUP_TEXT],'cut':len(text)>LOOKUP_TEXT}}
+    if tool=='list_commits':
+        query=[('per_page','30')]
+        for key in ('path','since','until'):
+            value=given.get(key)
+            if value is None:continue
+            if key=='path' and not lookup_path(value) or key!='path' and not (isinstance(value,str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}(T[\d:]{8}Z)?',value)):
+                raise ValueError('invalid_github_lookup')
+            query.append((key,value))
+        if ref is not None:query.append(('sha',ref))
+        answer=get('/repos/'+name+'/commits?'+urllib.parse.urlencode(query),list)
+        return {'response':{'repo':name,'commits':[commit_row(row) for row in answer if isinstance(row,dict)][:30]}}
+    sha=given.get('sha')
+    if not (isinstance(sha,str) and re.fullmatch(r'[a-f0-9]{7,40}',sha)):raise ValueError('invalid_github_lookup')
+    answer=get('/repos/'+name+'/commits/'+sha,dict)
+    files=[{'file':row.get('filename'),'status':row.get('status'),'additions':row.get('additions'),'deletions':row.get('deletions'),
+            'patch':row.get('patch')[:PATCH_TEXT] if isinstance(row.get('patch'),str) else None}
+           for row in answer.get('files') or [] if isinstance(row,dict)]
+    return {'response':{'repo':name,**commit_row(answer),'files':files[:50],'more_files':len(files)>50}}
+
+
+def commit_row(row):
+    commit=row.get('commit') if isinstance(row.get('commit'),dict) else {}
+    author=commit.get('author') if isinstance(commit.get('author'),dict) else {}
+    message=commit.get('message') if isinstance(commit.get('message'),str) else ''
+    return {'sha':row.get('sha'),'date':author.get('date'),'author':author.get('name'),'message':message[:2000]}

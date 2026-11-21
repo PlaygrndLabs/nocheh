@@ -759,4 +759,54 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual((self.saved()['reconnect'],self.saved()['app']['pem']),(False,PEM),'the app stays connected')
 
 
+    # Live lookups (ADR-0270): a key for the one repository, a few fixed reads, small answers.
+
+    def lookups(self):
+        self.connect();inner=self.remote;self.asked=[]
+        def remote(url,body=None,headers=None):
+            path=url[len(github.api_base()):]
+            if path.startswith('/search/code') or '/contents/' in path or path.startswith('/repos/%s/commits'%REPO) and not path.endswith('/main'):
+                issued=inner.issued.get(headers.get('Authorization','').removeprefix('Bearer '))
+                assert issued and issued['repositories']==['widgets'] and issued['permissions']=={'contents':'read','metadata':'read'},issued
+                self.asked.append(path)
+                if path.startswith('/search/code'):return json.dumps({'total_count':1,'items':[{'path':'src/app.py','sha':'x'}]}).encode(),{}
+                if path.endswith('/contents/src/app.py?ref=main'):
+                    return json.dumps({'encoding':'base64','size':11,'content':base64.b64encode(b'print("hi")').decode()}).encode(),{}
+                if path.endswith('/contents/'):return json.dumps([{'name':'src','path':'src','type':'dir','size':0}]).encode(),{}
+                if path.startswith('/repos/%s/commits?'%REPO):
+                    return json.dumps([{'sha':'a'*40,'commit':{'message':'Add the made-up app','author':{'name':'Person','date':'2026-01-10T08:00:00Z'}}}]).encode(),{}
+                if path=='/repos/%s/commits/%s'%(REPO,'a'*40):
+                    return json.dumps({'sha':'a'*40,'commit':{'message':'m','author':{}},'files':[{'filename':'src/app.py','status':'added','additions':1,'deletions':0,'patch':'+x'*5000}]}).encode(),{}
+                raise RuntimeError('remote_response_rejected')
+            return inner(url,body,headers)
+        self.hooks['request']=remote
+
+    def look(self,tool,**given):return github.lookup(self.state,{'connection':'github','tool':tool,'input':{'repo':REPO,**given}},**self.hooks)['response']
+
+    def test_each_lookup_reads_one_repository_with_its_own_read_only_key(self):
+        self.lookups()
+        self.assertEqual(self.look('search_code',query='made up'),{'repo':REPO,'total':1,'files':[{'path':'src/app.py'}]})
+        self.assertIn('q='+urllib.parse.quote('made up repo:'+REPO,safe=''),self.asked[0])
+        self.assertEqual(self.look('read_file',path='src/app.py',ref='main')['text'],'print("hi")')
+        self.assertEqual(self.look('list_files',path='')['entries'],[{'name':'src','path':'src','type':'dir','size':0}])
+        commits=self.look('list_commits',since='2026-01-01')['commits']
+        self.assertEqual(commits,[{'sha':'a'*40,'date':'2026-01-10T08:00:00Z','author':'Person','message':'Add the made-up app'}])
+        self.assertIn('since=2026-01-01',self.asked[-1])
+        shown=self.look('get_commit',sha='a'*40)
+        self.assertEqual(len(shown['files'][0]['patch']),github.PATCH_TEXT,'a long change is cut')
+        self.shown(*self.asked)
+
+    def test_a_bad_input_or_a_repository_the_app_cannot_read_sends_nothing_to_it(self):
+        self.lookups()
+        for tool,given in (('read_file',{'path':'../secret'}),('read_file',{'path':'/etc/passwd'}),('search_code',{'query':'a\nb'}),
+                           ('get_commit',{'sha':'HEAD'}),('list_commits',{'since':'yesterday'}),('read_file',{'path':'x','ref':'a..b'}),('nothing',{})):
+            with self.assertRaises(ValueError) as caught:self.look(tool,**given)
+            self.assertEqual(str(caught.exception),'invalid_github_lookup',(tool,given))
+        self.assertEqual(self.asked,[])
+        with self.assertRaises(ValueError) as caught:
+            github.lookup(self.state,{'connection':'github','tool':'search_code','input':{'repo':'example-org/other','query':'x'}},**self.hooks)
+        self.assertEqual(str(caught.exception),'github_repo_not_readable')
+        self.assertEqual(self.asked,[])
+
+
 if __name__=='__main__':unittest.main()
