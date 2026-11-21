@@ -249,6 +249,7 @@ export function Field({
   htmlFor,
   aside,
   className,
+  labelHidden,
   children,
 }: {
   label: React.ReactNode;
@@ -257,11 +258,13 @@ export function Field({
   htmlFor?: string;
   aside?: React.ReactNode;
   className?: string;
+  /** The field sits under a column heading that names it, so its own label shows only on a phone. */
+  labelHidden?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className={cn('space-y-1.5', className)}>
-      <div className="flex items-baseline justify-between gap-2">
+      <div className={cn('flex items-baseline justify-between gap-2', labelHidden && 'sm:sr-only')}>
         <label htmlFor={htmlFor} className="text-[13px] font-medium">
           {label}
         </label>

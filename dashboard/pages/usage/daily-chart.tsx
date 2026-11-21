@@ -21,7 +21,7 @@ export default function DailyChart({rows, since, today}: {rows: UsageRow[]; sinc
   });
   return (
     <>
-      <div className="h-48" role="img" aria-label="Model calls per day">
+      <div className="h-72" role="img" aria-label="Model calls per day">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{top: 8, right: 8, bottom: 0, left: 0}}>
             <CartesianGrid stroke="var(--border)" vertical={false} />
