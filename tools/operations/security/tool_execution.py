@@ -162,6 +162,11 @@ def sandbox_command(state,action,name):
 
 def execute(state,action,request=https_request,run=subprocess.run,container_name=None):
     args=action['arguments']
+    if action['kind']=='mcp' and args.get('connection')=='github':
+        # A GitHub lookup reads one repository through Nocheh's app (ADR-0270); a missing app or repository sends nothing.
+        from tools.operations.connections import github
+        try:return github.lookup(state,args)
+        except ValueError as error:return {'exit_code':1,'error':str(error)}
     if action['kind']=='mcp':
         try:return mcp_call(args,request,state)
         except ValueError as error:

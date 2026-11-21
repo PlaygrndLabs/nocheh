@@ -426,6 +426,24 @@ async function notion(args:Value,context:ToolContext) {
   }
 }
 
+async function github(args:Value,context:ToolContext) {
+  try {
+    // The repositories this chat may look up (ADR-0270).
+    if(args.operation==='repos')return text(await request(context,'/v1/github/repos'));
+    const body={connection:'github',tool:args.tool??null,input:args.input||{}};
+    const proposed=record(await request(context,'/v1/tools/propose',summarized({kind:'mcp',arguments:body},args)));
+    if(proposed.state!=='approved')return text(proposed);
+    // A lookup runs now; wait briefly so the answer comes back in this turn.
+    const value=await waitInTurn(context,String(proposed.id));
+    if(value)return inParts(value);
+    return text({id:proposed.id,state:'running',note:'Still running; read it later with mcp__nocheh__action_status.'});
+  }catch(error) {
+    if(error instanceof Refused)return text(error.status===403&&code(error)==='tool_disabled_by_owner'?DISABLED:
+      {error:({400:'invalid_github_lookup',403:'github_not_usable_here'} as Record<number,string>)[error.status]??'github_unavailable'});
+    return text({error:'github_unavailable'});
+  }
+}
+
 async function actionStatus(args:Value,context:ToolContext) {
   try {
     const id=args.id||'',part=own(args,'part')?args.part:1;
@@ -641,6 +659,15 @@ export const mcpTools:readonly McpTool[]=[
     'Nocheh\'s own task list stays the main one: use Notion when someone asks for Notion.',
     inputSchema:shape({operation:{type:'string',enum:['connections','list','call']},connection:{type:'string',maxLength:64},tool:{type:'string',maxLength:128},
       input:{type:'object'},summary:SUMMARY},['operation']),run:notion},
+  {name:'github',description:'Look up a GitHub repository live, read only, through Nocheh\'s GitHub app. A repository linked to a project is looked up in '+
+    'that project\'s groups and in the owner\'s private conversation; any other repository the app reads is the owner\'s own, looked up only in the owner\'s '+
+    'private conversation. Never in a background job. operation=repos lists the repositories usable here. operation=call runs one tool with input: '+
+    'search_code {repo, query} finds files by their code; read_file {repo, path, ref?} reads one file; list_files {repo, path?, ref?} lists a folder; '+
+    'list_commits {repo, path?, since?, until?, ref?} lists recent commits (dates as YYYY-MM-DD); get_commit {repo, sha} shows one commit and its changes. '+
+    'repo is owner/name. A long result comes in parts; read every part with mcp__nocheh__action_status before relying on it. For work over a whole '+
+    'repository, such as comparing tasks with the code, ask for a background job with box and repo instead.',
+    inputSchema:shape({operation:{type:'string',enum:['repos','call']},tool:{type:'string',enum:['search_code','read_file','list_files','list_commits','get_commit']},
+      input:{type:'object'},summary:SUMMARY},['operation']),run:github},
   {name:'action_status',description:'Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '+
     'Without an id it lists this chat\'s recent Telegram message requests and operations, such as Notion calls, with their states; read one by its id for its text or result. '+
     'A long result comes in parts: the answer gives part and parts, and part reads another one. '+

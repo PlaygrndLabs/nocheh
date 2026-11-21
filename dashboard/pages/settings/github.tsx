@@ -552,7 +552,7 @@ export function ProjectGithub({project}: {project: {id: string; name: string}}) 
       <CardHeader
         id={'project-github-' + project.id}
         title="GitHub for this project"
-        description="Code jobs you start in this project’s groups read only these repositories. Other projects and groups in no project never use them."
+        description="Nocheh looks these repositories up in this project’s groups, and code jobs you start there read only these. Other projects and groups in no project never use them."
       />
       <div className="mt-3 grid gap-3 border-t border-line px-5 py-4">
         {problem && <Notice tone="bad">{problem}</Notice>}
