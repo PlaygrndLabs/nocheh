@@ -2,19 +2,33 @@
  * Tasks: the owner's to-do lists, kept in Nocheh. Personal tasks are one list
  * and each project has its own. Tasks have statuses, priority, dates, repeats,
  * reminders, subtasks, links, the owner's own columns and comments, and show as
- * a list, cards, a board, or what is due today and coming up. Tasks can be added
+ * a table, cards, a board, or what is due today and coming up. Tasks can be added
  * here or by telling Nocheh in chat; both edit the same lists.
  */
 import * as React from 'react';
 import {useDeferredValue, useState} from 'react';
-import {Archive, Folder, LayoutGrid, List, ListChecks, Plus, Search, Tag} from 'lucide-react';
+import {Archive, Folder, LayoutGrid, ListChecks, Plus, Search, Table2, Tag} from 'lucide-react';
 import {chatName} from '../lib/chats-model';
 import {useChatDirectory} from '../lib/chat-directory';
 import {useParam, useView} from '../lib/navigation';
 import {setParams} from '../lib/routes';
 import {pageTabs, tabIds} from '../lib/page-tabs';
 import {refreshResources, useResource} from '../lib/resource';
-import {Button, Card, Empty, Field, Input, LoadError, LoadingRows, Notice, Pager, Segmented, Select} from '../ui/core';
+import {
+  Button,
+  Card,
+  Empty,
+  Field,
+  Input,
+  LoadError,
+  LoadingRows,
+  Notice,
+  Pager,
+  Segmented,
+  Select,
+  Table,
+  Th,
+} from '../ui/core';
 import {useFeedback} from '../ui/overlay';
 import {Page, Tabs} from '../ui/page';
 import {useCommand} from './memory/shared';
@@ -22,13 +36,16 @@ import {Board} from './tasks/board';
 import {TaskDrawer} from './tasks/drawer';
 import {Chips, ListField, TagsField, withPending} from './tasks/fields';
 import {addDays, day, scopeName, type Scope, type Task, type TaskPage, type TaskSettings} from './tasks/model';
-import {TaskRow} from './tasks/row';
+import {taskColumns, TaskRow, TaskTableRow} from './tasks/row';
 
 export {day, type Task};
 
 const views = tabIds('tasks');
 type View = (typeof views)[number];
-const PAGE = 100;
+/** Tasks on one page of the table or the cards: what fits one screen. A tab that groups by day shows fewer, as each
+ * day takes a line. */
+const PAGE = 10;
+const GROUPED_PAGE = 8;
 
 /** What each tab asks the owner API for. */
 const queries: Record<View, string> = {
@@ -52,15 +69,15 @@ const empty: Record<View, string> = {
   trash: 'The trash is empty',
 };
 
-type Layout = 'list' | 'cards';
+type Layout = 'table' | 'cards';
 const LAYOUT_KEY = 'nocheh.tasks-layout';
-/** List or cards, remembered on this device. */
+/** Table or cards, remembered on this device. */
 function useLayout(): [Layout, (layout: Layout) => void] {
   const [layout, setLayout] = useState<Layout>(() => {
     try {
-      return localStorage.getItem(LAYOUT_KEY) === 'cards' ? 'cards' : 'list';
+      return localStorage.getItem(LAYOUT_KEY) === 'cards' ? 'cards' : 'table';
     } catch {
-      return 'list';
+      return 'table';
     }
   });
   return [
@@ -86,11 +103,12 @@ export default function Tasks() {
   const open = useParam('task');
   const [search, setSearch] = useState('');
   const query = useDeferredValue(search.trim());
+  const size = view === 'today' || view === 'upcoming' ? GROUPED_PAGE : PAGE;
   const path =
-    `/tasks?${queries[view]}&scope=${encodeURIComponent(scope)}&limit=${view === 'board' ? 200 : PAGE}` +
+    `/tasks?${queries[view]}&scope=${encodeURIComponent(scope)}&limit=${view === 'board' ? 200 : size}` +
     (tag ? `&tag=${encodeURIComponent(tag)}` : '') +
     (query ? `&q=${encodeURIComponent(query)}` : '') +
-    (page ? `&after=${page * PAGE}` : '');
+    (page ? `&after=${page * size}` : '');
   const list = useResource<TaskPage>(path);
   const chats = useChatDirectory(60000);
   const counts = list.data?.counts;
@@ -119,34 +137,89 @@ export default function Tasks() {
   });
   const openTask = (id: string | null) => setParams({task: id});
   const listed = view === 'board' ? [] : (list.data?.tasks ?? []);
-  const rows = (tasks: Task[]) =>
-    tasks.map(task => (
-      <TaskRow
-        key={task.id}
-        task={task}
-        card={layout === 'cards'}
-        settings={settings}
-        {...describe(task)}
-        onOpen={() => openTask(task.id)}
-      />
-    ));
-  const group = (title: string, tasks: Task[]) =>
-    !!tasks.length && (
-      <section key={title} className="space-y-2" aria-label={title}>
-        <h2 className="text-[13px] font-semibold text-muted">{title}</h2>
-        {layout === 'cards' ? (
-          <ul aria-label="Tasks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {rows(tasks)}
-          </ul>
-        ) : (
-          <Card>
-            <ul aria-label="Tasks" className="divide-y divide-line">
-              {rows(tasks)}
-            </ul>
-          </Card>
-        )}
-      </section>
+  // Restore and Unarchive are worded buttons, wider than the two icons an open task has.
+  const wideActions = view === 'dropped' || view === 'archive' || view === 'trash';
+  const pager = <Pager page={page} hasNext={!!list.data?.next} onPage={setPage} />;
+  /** The table: every task of the page with the same columns, under a line for its day where the tab groups by day. */
+  const table = (groups: {title: string | null; tasks: Task[]}[]) => (
+    <Card>
+      <Table aria-label="Tasks" className="sm:table-fixed max-sm:block [&>tbody]:max-sm:block">
+        <thead className="max-sm:sr-only">
+          <tr>
+            <Th scope="col" className="w-9 pr-0">
+              <span className="sr-only">Done</span>
+            </Th>
+            {taskColumns.map(column => (
+              <Th key={column.name} scope="col" className={column.width}>
+                {column.name}
+              </Th>
+            ))}
+            <Th scope="col" className={wideActions ? 'w-40' : 'w-[5.5rem]'}>
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map(({title, tasks}) => (
+            <React.Fragment key={title ?? 'all'}>
+              {title && (
+                <tr className="max-sm:block">
+                  <th
+                    scope="colgroup"
+                    colSpan={taskColumns.length + 2}
+                    className="border-b border-line px-4 pt-2.5 pb-1 text-left text-xs font-semibold text-muted max-sm:block"
+                  >
+                    {title}
+                  </th>
+                </tr>
+              )}
+              {tasks.map(task => (
+                <TaskTableRow
+                  key={task.id}
+                  task={task}
+                  settings={settings}
+                  {...describe(task)}
+                  onOpen={() => openTask(task.id)}
+                />
+              ))}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </Table>
+      {pager}
+    </Card>
+  );
+  const cards = (tasks: Task[]) => (
+    <ul aria-label="Tasks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {tasks.map(task => (
+        <TaskRow
+          key={task.id}
+          task={task}
+          card
+          settings={settings}
+          {...describe(task)}
+          onOpen={() => openTask(task.id)}
+        />
+      ))}
+    </ul>
+  );
+  /** A tab that groups by day: one table with a line for each day, or each day's cards under its heading. */
+  const grouped = (groups: {title: string; tasks: Task[]}[]) => {
+    const filled = groups.filter(item => item.tasks.length);
+    return layout === 'cards' ? (
+      <>
+        {filled.map(({title, tasks}) => (
+          <section key={title} className="space-y-2" aria-label={title}>
+            <h2 className="text-[13px] font-semibold text-muted">{title}</h2>
+            {cards(tasks)}
+          </section>
+        ))}
+        {pager}
+      </>
+    ) : (
+      table(filled)
     );
+  };
   let body: React.ReactNode;
   if (!list.data)
     body = !list.error && (
@@ -183,48 +256,28 @@ export default function Tasks() {
       </Card>
     );
   else if (view === 'today' && today)
-    body = (
-      <>
-        {group(
-          'Overdue',
-          listed.filter(task => (task.due_on ?? today) < today),
-        )}
-        {group(
-          'Today · ' + day(today),
-          listed.filter(task => (task.due_on ?? today) >= today),
-        )}
-      </>
-    );
+    body = grouped([
+      {title: 'Overdue', tasks: listed.filter(task => (task.due_on ?? today) < today)},
+      {title: 'Today · ' + day(today), tasks: listed.filter(task => (task.due_on ?? today) >= today)},
+    ]);
   else if (view === 'upcoming' && today) {
     const days = [...new Set(listed.map(task => upcomingDay(task, today)))].sort();
-    body = (
-      <>
-        {days.map(date =>
-          group(
-            date === addDays(today, 1) ? 'Tomorrow · ' + day(date) : day(date),
-            listed.filter(task => upcomingDay(task, today) === date),
-          ),
-        )}
-      </>
+    body = grouped(
+      days.map(date => ({
+        title: date === addDays(today, 1) ? 'Tomorrow · ' + day(date) : day(date),
+        tasks: listed.filter(task => upcomingDay(task, today) === date),
+      })),
     );
   } else
-    body = (
-      <div>
-        {layout === 'cards' ? (
-          <ul aria-label="Tasks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {rows(listed)}
-          </ul>
-        ) : (
-          <Card>
-            <ul aria-label="Tasks" className="divide-y divide-line">
-              {rows(listed)}
-            </ul>
-            <Pager page={page} hasNext={!!list.data.next} onPage={setPage} />
-          </Card>
-        )}
-        {layout === 'cards' && <Pager page={page} hasNext={!!list.data.next} onPage={setPage} />}
-      </div>
-    );
+    body =
+      layout === 'cards' ? (
+        <div>
+          {cards(listed)}
+          {pager}
+        </div>
+      ) : (
+        table([{title: null, tasks: listed}])
+      );
   return (
     <Page
       title="Tasks"
@@ -307,10 +360,10 @@ export default function Tasks() {
               onChange={setLayout}
               options={[
                 {
-                  value: 'list',
+                  value: 'table',
                   label: (
                     <span className="inline-flex items-center gap-1.5">
-                      <List className="size-3.5" aria-hidden /> List
+                      <Table2 className="size-3.5" aria-hidden /> Table
                     </span>
                   ),
                 },
@@ -389,6 +442,7 @@ function AddTask({
   due: string;
 }) {
   const command = useCommand();
+  const feedback = useFeedback();
   const [title, setTitle] = useState('');
   const [due, setDue] = useState(initialDue);
   const [priority, setPriority] = useState(0);
@@ -406,6 +460,8 @@ function AddTask({
       ...(priority ? {priority} : {}),
     });
     if (created) {
+      // The table shows a page at a time, and the new task may be on another one.
+      feedback.toast('Task added.');
       setTitle('');
       setDue(initialDue);
       setPriority(0);
@@ -439,7 +495,7 @@ function AddTask({
         pending={pending}
         onPending={setPending}
         known={known}
-        className="w-64"
+        className="w-48"
       />
       {settings && (
         <Field label="Priority" htmlFor="task-priority" className="w-36">
