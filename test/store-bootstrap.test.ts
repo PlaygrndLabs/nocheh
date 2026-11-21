@@ -7,6 +7,7 @@ import {join} from 'node:path';
 import {digest} from '../src/archive.js';
 import {bootstrapStores} from '../src/stores/bootstrap.js';
 import {runtimeStores} from '../src/stores/runtime-pools.js';
+import {devBuild,schemaReady} from '../src/stores/dev-schema.js';
 
 test('installation bootstrap provisions separate domains and workflow storage without activating an inactive restore',
   {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
@@ -24,6 +25,10 @@ test('installation bootstrap provisions separate domains and workflow storage wi
     const stores=runtimeStores(env);
     try {
       const before=(await stores.control.query('SELECT generation FROM installation')).rows[0].generation;
+      // Setup names the development build it set up, once all of it is done, and the app's wait ends on it at once.
+      const build=devBuild(),recorded=(await stores.control.query('SELECT build FROM schema_builds')).rows.map(row=>row.build);
+      assert.deepEqual(recorded,build===null?[]:[build]);
+      assert.equal(await schemaReady(stores.control,build,{deadline:0}),build===null?'none':'ready');
       const revisions=(await stores.derived.query("SELECT count(*) FROM guard_revisions WHERE author='owner'")).rows[0].count;
       const maintenance=new pg.Client({host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD});await maintenance.connect();
       try {await maintenance.query('SELECT pg_advisory_lock(803361)');await assert.rejects(bootstrapStores(),/store_maintenance_busy/);}

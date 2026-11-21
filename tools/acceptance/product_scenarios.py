@@ -1916,6 +1916,8 @@ class ProductScenarios(Scenarios):
         # private mark, would hold it too. The private mark is saved for private_canaries_never_left_the_owner.
         # Last, the owner turns "Share group chats" on: the same question in GP1 then reads GP1, GP2 and NG1 and their
         # tasks, never GP4 or the private chat, and carries no Answer privately.
+        # MEMBER asks in GP1 and taps the button, so a run of this scenario on its own sets the members first.
+        self.members_allowed()
         number = str(self.f.ids())
         word, probe = 'CRATEWORD'+number, 'PROBEMARK'+number
         gp1, gp2, gp4, ng1 = 'GPONEMARK'+number, 'GPTWOMARK'+number, 'GPFOURMARK'+number, 'NGONEMARK'+number

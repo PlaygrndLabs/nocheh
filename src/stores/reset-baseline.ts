@@ -87,6 +87,8 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
     runtime_profiles:profileCount,owner_commands:profileCount,workflow_registry:profileCount*2,workflow_outbox:profileCount*2,
     // The members' task version key is made by the first member read after the stores start, so it may already be there.
     owner_task_version_key:[0,1],
+    // A development install names the build its store setup came from (dev-schema.ts).
+    schema_builds:[0,1],
     // The owner's own Notion connection, seeded off (ADR-0268); a project's comes only when the owner saves it.
     connections:1});
   const installed=(await stores.control.query('SELECT generation::text AS generation FROM installation WHERE singleton')).rows;
