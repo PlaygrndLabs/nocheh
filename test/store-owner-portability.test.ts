@@ -125,6 +125,14 @@ test('owner data travels with its types, and nothing imported acts by itself',
     // Any other column a store no longer has is still refused.
     await assert.rejects(to.restore(owner,[sealed('project_assignments',['-10073'],{space_id:'-10073',project_id:null,mode:'none',revision:1,unknown:true})]),/invalid_owner_record_fields/);
 
+    // The owner's Notion setting from before connections comes back as the owner's own connection (ADR-0268), only
+    // while nobody here changed it; a project's connection travels as itself.
+    const notion=sealed('owner_notion',['true'],{singleton:true,enabled:true,approval:'everything',revision:3,updated_at:'2026-10-01T00:00:00Z'});
+    assert.equal((await to.restore(owner,[notion])).added,1);
+    assert.deepEqual((await target.query("SELECT enabled,approval,revision FROM connections WHERE id='notion:own'")).rows[0],{enabled:true,approval:'everything',revision:3});
+    assert.equal((await to.restore(owner,[notion])).unchanged,1);
+    assert.equal((await to.restore(owner,[sealed('owner_notion',['true'],{singleton:true,enabled:false,approval:'changes',revision:4,updated_at:'2026-10-02T00:00:00Z'})])).kept,1);
+
     // Chats (ADR-0252): every chat a record names has its row here, keeping its id, off until this installation serves it.
     const chatRows=async(pool:pg.Pool)=>(await pool.query('SELECT id,kind,parent_id,topic_key,title,title_source,state FROM chats')).rows
       .sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0);

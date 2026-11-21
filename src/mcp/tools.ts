@@ -407,7 +407,12 @@ async function controlled(kind:'shell'|'browser'|'mcp',args:Value,context:ToolCo
 
 async function notion(args:Value,context:ToolContext) {
   try {
-    const body={connection:'notion',...(args.operation==='list'?{operation:'list'}:{tool:args.tool??null,input:args.input||{}})};
+    // The Notion connections this chat may use (ADR-0268): the owner's own and each project's in the owner's private chat,
+    // the chat's own project's in a group.
+    if(args.operation==='connections')return text(await request(context,'/v1/notion/connections'));
+    // Left out, a call uses this chat's own Notion: the owner's in the owner's private chat, the project's in a group.
+    const project=typeof args.connection==='string'&&args.connection!=='own'?{project:args.connection}:{};
+    const body={connection:'notion',...project,...(args.operation==='list'?{operation:'list'}:{tool:args.tool??null,input:args.input||{}})};
     const proposed=record(await request(context,'/v1/tools/propose',summarized({kind:'mcp',arguments:body},args)));
     if(proposed.state!=='approved')return text(proposed);
     // A call the owner's setting allows runs now; wait briefly so the answer comes back in this turn.
@@ -416,7 +421,7 @@ async function notion(args:Value,context:ToolContext) {
     return text({id:proposed.id,state:'running',note:'Still running; read it later with mcp__nocheh__action_status.'});
   }catch(error) {
     if(error instanceof Refused)return text(error.status===403&&code(error)==='tool_disabled_by_owner'?DISABLED:
-      {error:({400:'invalid_notion_call',403:'notion_only_in_owner_private_chat',409:'notion_is_off_or_changed'} as Record<number,string>)[error.status]??'notion_unavailable'});
+      {error:({400:'invalid_notion_call',403:'notion_not_usable_here',409:'notion_is_off_or_changed'} as Record<number,string>)[error.status]??'notion_unavailable'});
     return text({error:'notion_unavailable'});
   }
 }
@@ -623,13 +628,18 @@ export const mcpTools:readonly McpTool[]=[
       attachments:{type:'array',items:{type:'object'},maxItems:40},
       archived:{type:'boolean'},trashed:{type:'boolean'},text:{type:'string',maxLength:4000},
       tag:{type:'string',maxLength:40},person:{type:'string'},q:{type:'string',maxLength:200},after:{type:'string'}},['action']),run:tasks},
-  {name:'notion',description:'The owner\'s own Notion, through Notion\'s MCP server, when the owner has connected it and turned it on. Only in the owner\'s '+
-    'private conversation and in background jobs the owner approved there; in a job, changes always wait for the owner. operation=list returns Notion\'s tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '+
+  {name:'notion',description:'Notion, through Notion\'s MCP server, on a connection the owner set up and turned on: the owner\'s own Notion, or '+
+    'a project\'s Notion. The owner\'s own is used only in the owner\'s private conversation and in background jobs the owner approved there; in a '+
+    'job, changes always wait for the owner. A project\'s Notion is used in that project\'s groups and in the owner\'s private conversation, never in a '+
+    'job. operation=connections lists the connections usable here, each with its connection value; leave connection out to use this chat\'s own '+
+    '(the owner\'s own in the owner\'s private conversation, the project\'s in a group), or pass one to choose. operation=list returns Notion\'s '+
+    'tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '+
     'notion-create-pages or notion-update-page) with its input. Reads may run right away and changes may wait for the owner to approve the exact call, '+
-    'as the owner set; the result says which. A read of an address outside the owner\'s Notion, such as a public notion.site page or a web address in a query, is treated like a change. Ask only for what you need: for a big table, read its columns first, then query just the columns and rows '+
+    'as the owner set for that connection; the result says which. A read of an address outside Notion, such as a public notion.site page or a web address in a query, is treated like a change. Ask only for what you need: for a big table, read its columns first, then query just the columns and rows '+
     'you need, with a filter or a limit. A long result comes in parts; read every part with mcp__nocheh__action_status before relying on it. '+
-    'Nocheh\'s own task list stays the main one: use Notion when the owner asks for Notion.',
-    inputSchema:shape({operation:{type:'string',enum:['list','call']},tool:{type:'string',maxLength:128},input:{type:'object'},summary:SUMMARY},['operation']),run:notion},
+    'Nocheh\'s own task list stays the main one: use Notion when someone asks for Notion.',
+    inputSchema:shape({operation:{type:'string',enum:['connections','list','call']},connection:{type:'string',maxLength:64},tool:{type:'string',maxLength:128},
+      input:{type:'object'},summary:SUMMARY},['operation']),run:notion},
   {name:'action_status',description:'Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '+
     'Without an id it lists this chat\'s recent Telegram message requests and operations, such as Notion calls, with their states; read one by its id for its text or result. '+
     'A long result comes in parts: the answer gives part and parts, and part reads another one. '+

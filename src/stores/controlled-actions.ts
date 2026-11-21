@@ -1,7 +1,7 @@
 import {blockingPublications} from './publications.js';
 import {followUpTurn,ownerAutonomyGrant} from './owner-autonomy.js';
 import {followUpLeft} from './action-continuations.js';
-import {notionAuthority} from './notion.js';
+import {notionAuthority,notionChatProject} from './notion.js';
 import {chatToolAllowed} from './chat-tools.js';
 import {ownerApprovedJob,relaunchedRun} from './background-jobs.js';
 import type pg from 'pg';
@@ -116,7 +116,7 @@ export class ControlledActionRepository {
     // A private answer, a member's private chat and the owner's ask about a member only read and talk (ADR-0249, step 4):
     // no tool runs and no card is made for them, not even the owner's.
     assertActingReader(principal);
-    const body=exact(value,['kind','arguments','summary']),raw=actionArguments(body.kind,body.arguments),note=summaryOf(body.summary);
+    const body=exact(value,['kind','arguments','summary']),note=summaryOf(body.summary);let raw=actionArguments(body.kind,body.arguments);
     const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=ownerChat(this.access.policy());
     // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.
     // Its switch is the chat's, never the asking turn's: a job or a scheduled task follows the chat it belongs to.
@@ -125,6 +125,12 @@ export class ControlledActionRepository {
     // It carries from there; its profile, the run's own, holds the run's workspace and lets the run read it back.
     const binding={...current,generation:turn.generation??current.generation,epoch:turn.guard_epoch};
     const source=await this.prepared.root(principal,current);
+    // A Notion call from a group or topic that names no connection uses its project's (ADR-0268); the owner's private chat's
+    // uses the owner's own. The name is part of what is checked, recorded and approved.
+    if('connection' in raw&&!('project' in raw)&&principal.scope!==null) {
+      const project=await notionChatProject(this.control,principal.space??principal.scope);
+      if(project)raw=actionArguments(body.kind,{...raw,project});
+    }
     if('connection' in raw)await notionAuthority(this.control,principal,turn,raw,false);
     let telegram=false,asker:GroupAsker|null=null;
     if(source.store==='archive') {

@@ -378,8 +378,9 @@ export async function startManagement() {
         if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
         return json(res,200,await python({operation:'offsite.connect',request:object(await readJson(req))}));
       });
-      // The owner's Notion sign-in. Tokens travel only in POST bodies and never come back.
-      if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status'}));
+      // A Notion sign-in: the owner's own, or a project's named by `project` (ADR-0268). Tokens travel only in POST bodies
+      // and never come back.
+      if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status',request:{project:url.searchParams.get('project')}}));
       const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
       if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
       // Nocheh's GitHub App and the copies background jobs may read (ADR-0209, ADR-0210). The app's key never comes

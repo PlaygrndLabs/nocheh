@@ -7,6 +7,7 @@ import type {StorageServices} from './services.js';
 import {portableDerivativeTypes} from './derivative-portability.js';
 import {portableOwnerTables} from './owner-portability.js';
 import {taskQuery} from './tasks.js';
+import {notionTarget} from './notion.js';
 import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from './member-api.js';
 
 const identity=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_identity');return id;};
@@ -36,7 +37,8 @@ export class OwnerStorageApi {
       return member[2]?s.members.remove(principal,member[1]!,memberRemoveRequest(input)):s.members.change(principal,member[1]!,memberChangeRequest(input));
     }
     if(path==='/v1/owner-autonomy')return method==='GET'?s.ownerAutonomy.get(principal):s.ownerAutonomy.save(principal,input);
-    if(path==='/v1/notion')return method==='GET'?s.notion.get(principal):s.notion.save(principal,input);
+    // A Notion connection's settings: the owner's own, or a project's named by ?project= (ADR-0268).
+    if(path==='/v1/notion')return method==='GET'?s.notion.get(principal,notionTarget(q.get('project')??undefined)):s.notion.save(principal,input);
     if(path==='/v1/chat-tools')return method==='GET'?s.chatTools.get(principal,q.get('space')??'*'):s.chatTools.save(principal,input);
     if(path==='/v1/background-jobs'&&method==='GET')return s.jobs.list(principal);
     if(path==='/v1/background-jobs/settings')return method==='GET'?s.jobs.settings():s.jobs.saveSettings(principal,input);

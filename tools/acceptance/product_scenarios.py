@@ -4129,9 +4129,10 @@ class ProductScenarios(Scenarios):
         settings = self.dashboard().get('/settings')
         text = json.dumps(settings)
         self.current['observed'] = {'keys': sorted(settings)[:80] if isinstance(settings, dict) else None}
-        notion = self.f.query('nocheh_control', "SELECT to_regclass('owner_notion') IS NOT NULL")
+        # Every Notion connection, the owner's own and each project's, starts off (ADR-0268).
+        notion = self.f.query('nocheh_control', "SELECT to_regclass('connections') IS NOT NULL")
         if notion == 't':
-            enabled = self.f.query('nocheh_control', 'SELECT coalesce(bool_or(enabled),false) FROM owner_notion')
+            enabled = self.f.query('nocheh_control', "SELECT coalesce(bool_or(enabled),false) FROM connections WHERE service='notion'")
             self.gate('notion_off_by_default', enabled == 'f', enabled=enabled)
         else:
             self.current['observed']['notion'] = 'not built on this revision'

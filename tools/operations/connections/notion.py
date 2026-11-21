@@ -1,4 +1,4 @@
-"""The owner's Notion sign-in for Notion's hosted MCP server.
+"""Notion sign-ins for Notion's hosted MCP server: the owner's own, and one per project (ADR-0268).
 
 The dashboard starts a sign-in: a public client registered once per dashboard
 address, OAuth with PKCE, and Notion sending the browser back to the dashboard,
@@ -6,8 +6,10 @@ which hands the code here. On a Business plan an MCP token can be saved instead.
 The sign-in is kept in the installation's admin folder with the other keys,
 readable only by the management and executor services; no view returns it.
 Access tokens are refreshed under one lock, and each new refresh token is saved
-before it is used, as Notion requires.
+before it is used, as Notion requires. The owner's own sign-in keeps its file,
+admin/connections/notion.json; a project's is notion-project-<project id>.json.
 """
+import re
 import base64
 import hashlib
 import json
@@ -27,10 +29,20 @@ VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26')
 PENDING_SECONDS = 600
 
 
-def path(state): return secret_file.path(state, 'notion')
-def locked(state): return secret_file.locked(state, 'notion')
-def read(state): return secret_file.read(state, 'notion')
-def write(state, value): return secret_file.write(state, 'notion', value)
+PROJECT = re.compile(r'[a-f0-9]{64}')
+
+
+def name(project=None):
+    """The sign-in file a connection keeps: the owner's own (None or 'own'), or a project's by its id."""
+    if project in (None, '', 'own'): return 'notion'
+    if not isinstance(project, str) or not PROJECT.fullmatch(project): raise ValueError('invalid_notion_connection')
+    return 'notion-project-' + project
+
+
+def path(state, project=None): return secret_file.path(state, name(project))
+def locked(state, project=None): return secret_file.locked(state, name(project))
+def read(state, project=None): return secret_file.read(state, name(project))
+def write(state, value, project=None): return secret_file.write(state, name(project), value)
 
 
 def post(url, body, form=True, opener=None):
@@ -43,8 +55,8 @@ def post(url, body, form=True, opener=None):
         return json.loads(response.read(1024 * 1024) or b'{}')
 
 
-def status(state):
-    grant = read(state).get('grant') or {}
+def status(state, project=None):
+    grant = read(state, project).get('grant') or {}
     return {'connected': bool(grant.get('access_token')), 'method': grant.get('method'),
             'workspace': grant.get('workspace_name'), 'connected_at': grant.get('connected_at'),
             'reconnect': bool(grant.get('reconnect'))}
@@ -60,10 +72,10 @@ def redirect(address):
     return address
 
 
-def start(state, address, post=post):
+def start(state, address, post=post, project=None):
     address = redirect(address)
-    with locked(state):
-        saved = read(state); clients = saved.setdefault('clients', {})
+    with locked(state, project):
+        saved = read(state, project); clients = saved.setdefault('clients', {})
         if address not in clients:
             # Registering again would orphan earlier sign-ins, so each address registers once.
             client = post(REGISTER, {'client_name': 'Nocheh', 'redirect_uris': [address], 'grant_types': ['authorization_code', 'refresh_token'],
@@ -73,16 +85,16 @@ def start(state, address, post=post):
         verifier = secrets.token_urlsafe(32); nonce = secrets.token_urlsafe(24)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
         saved['pending'] = {'state': nonce, 'verifier': verifier, 'redirect': address, 'expires': time.time() + PENDING_SECONDS}
-        write(state, saved)
+        write(state, saved, project)
     query = urllib.parse.urlencode({'response_type': 'code', 'client_id': clients[address], 'redirect_uri': address, 'state': nonce,
                                     'code_challenge': challenge, 'code_challenge_method': 'S256', 'prompt': 'consent'})
     return {'url': AUTHORIZE + '?' + query}
 
 
-def finish(state, code, nonce, post=post):
+def finish(state, code, nonce, post=post, project=None):
     if not isinstance(code, str) or not 0 < len(code) <= 2048 or not isinstance(nonce, str): raise ValueError('invalid_notion_sign_in')
-    with locked(state):
-        saved = read(state); pending = saved.get('pending') or {}
+    with locked(state, project):
+        saved = read(state, project); pending = saved.get('pending') or {}
         if not secrets.compare_digest(pending.get('state', ''), nonce) or pending.get('expires', 0) < time.time():
             raise ValueError('notion_sign_in_expired')
         client = saved['clients'][pending['redirect']]
@@ -94,8 +106,8 @@ def finish(state, code, nonce, post=post):
         saved.pop('pending')
         saved['grant'] = {**fresh(token), 'method': 'oauth', 'client_id': client, 'workspace_name': token.get('workspace_name'),
                           'workspace_id': token.get('workspace_id'), 'connected_at': int(time.time())}
-        write(state, saved)
-    return status(state)
+        write(state, saved, project)
+    return status(state, project)
 
 
 def fresh(token):
@@ -104,16 +116,16 @@ def fresh(token):
             'expires_at': time.time() + max(60, min(int(token.get('expires_in') or 3600), 86400))}
 
 
-def save_token(state, value, check=None):
+def save_token(state, value, check=None, project=None):
     """A Business plan's MCP token from Notion's developer portal; it does not expire on its own."""
     token = value.strip() if isinstance(value, str) else ''
     if not 0 < len(token) <= 4096 or not token.isprintable() or ' ' in token: raise ValueError('invalid_notion_token')
     (check or verify)(token)
-    with locked(state):
-        saved = read(state)
+    with locked(state, project):
+        saved = read(state, project)
         saved['grant'] = {'method': 'token', 'access_token': token, 'connected_at': int(time.time())}
-        saved.pop('pending', None); write(state, saved)
-    return status(state)
+        saved.pop('pending', None); write(state, saved, project)
+    return status(state, project)
 
 
 def verify(token, opener=None):
@@ -131,20 +143,20 @@ def verify(token, opener=None):
         raise ValueError('notion_unavailable') from None
 
 
-def disconnect(state, post=post):
-    with locked(state):
-        saved = read(state); grant = saved.pop('grant', None); saved.pop('pending', None); write(state, saved)
+def disconnect(state, post=post, project=None):
+    with locked(state, project):
+        saved = read(state, project); grant = saved.pop('grant', None); saved.pop('pending', None); write(state, saved, project)
     if grant and grant.get('method') == 'oauth':
         # Best effort: the sign-in is already forgotten here whatever Notion answers.
         try: post(TOKEN, {'token': grant['refresh_token'], 'client_id': grant['client_id'], 'token_type_hint': 'refresh_token'})
         except Exception: pass
-    return status(state)
+    return status(state, project)
 
 
-def bearer(state, post=post, now=time.time):
+def bearer(state, post=post, now=time.time, project=None):
     """A current access token, refreshed when it is about to expire. Raises a plain code when Notion needs signing in again."""
-    with locked(state):
-        saved = read(state); grant = saved.get('grant') or {}
+    with locked(state, project):
+        saved = read(state, project); grant = saved.get('grant') or {}
         if not grant.get('access_token'):
             raise ValueError('notion_reconnect_needed' if grant.get('reconnect') else 'notion_not_connected')
         if grant['method'] == 'token' or grant['expires_at'] - 300 > now(): return grant['access_token']
@@ -157,10 +169,10 @@ def bearer(state, post=post, now=time.time):
             if error.code in (400, 401) and body.get('error') == 'invalid_grant':
                 # Terminal: forget the tokens and ask the owner to connect again; never retry.
                 saved['grant'] = {key: grant.get(key) for key in ('method', 'workspace_name', 'workspace_id', 'connected_at')} | {'reconnect': True}
-                write(state, saved)
+                write(state, saved, project)
                 raise ValueError('notion_reconnect_needed') from None
             raise ValueError('notion_unavailable') from None
         except OSError:
             raise ValueError('notion_unavailable') from None
-        grant.update(fresh(token)); saved['grant'] = grant; write(state, saved)
+        grant.update(fresh(token)); saved['grant'] = grant; write(state, saved, project)
         return grant['access_token']

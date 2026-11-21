@@ -312,7 +312,8 @@ export function operationTitle(kind:string,args:Record<string,any>,words:Operati
   if(kind==='mcp') {
     // Another server's tool keeps its exact name: its host is shown, but not who chose its names.
     const slug=typeof args.connection==='string'?args.connection:'',address=String(args.url??''),name=String(args.tool??'');
-    const app=slug?shown(service(slug)):site(address)||shown(address);
+    // A project's Notion says so, so the owner never takes it for their own (ADR-0268).
+    const app=slug?shown((typeof args.project==='string'?'Project ':'')+service(slug)):site(address)||shown(address);
     return `${app} · ${args.operation==='list'?plain(words.kind_tools):slug?tool(name,slug):shown(name)}`;
   }
   return shown(kind);

@@ -16,15 +16,18 @@ export function actionArguments(kind:unknown,value:unknown,stored=false) {
     return {command};
   }
   if(kind==='mcp'&&args.connection!==undefined) {
-    // A connected service: its address and sign-in are fixed by the owner's connection, never by the model.
+    // A connected service: its address and sign-in are fixed by a connection the owner set up, never by the model. A call
+    // names the owner's own Notion by leaving `project` out, or a project's Notion by its id (ADR-0268).
     if(args.connection!=='notion'||args.url!==undefined)throw new HttpError(400,'invalid_mcp_action');
+    if(args.project!==undefined&&(typeof args.project!=='string'||!/^[a-f0-9]{64}$/.test(args.project)))throw new HttpError(400,'invalid_mcp_action');
+    const project=args.project===undefined?{}:{project:args.project as string};
     if(args.operation==='list') {
-      if(keys.some(k=>!['connection','operation'].includes(k)))throw new HttpError(400,'invalid_mcp_action');
-      return {connection:'notion',operation:'list'};
+      if(keys.some(k=>!['connection','operation','project'].includes(k)))throw new HttpError(400,'invalid_mcp_action');
+      return {connection:'notion',...project,operation:'list'};
     }
     const tool=string(args.tool,128),input=object(args.input);
-    if(keys.some(k=>!['connection','tool','input','operation'].includes(k))||(args.operation!==undefined&&args.operation!=='call')||!/^[\w.:-]{1,128}$/.test(tool)||canonical(input).length>32000)throw new HttpError(400,'invalid_mcp_action');
-    return {connection:'notion',tool,input};
+    if(keys.some(k=>!['connection','project','tool','input','operation'].includes(k))||(args.operation!==undefined&&args.operation!=='call')||!/^[\w.:-]{1,128}$/.test(tool)||canonical(input).length>32000)throw new HttpError(400,'invalid_mcp_action');
+    return {connection:'notion',...project,tool,input};
   }
   if(kind==='browser'||kind==='mcp') {
     const address=string(args.url,4096);let url:URL;

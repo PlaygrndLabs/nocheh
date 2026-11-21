@@ -500,9 +500,21 @@ test('a failed proposal says whether asking again can help, and a tool the owner
   }
   for(const name of ['shell','mcp'])assert.deepEqual(await run(name,{command:'true',url:'https://example.com/mcp'},fake(()=>new Status(403,{error:'tool_disabled_by_owner'})).context),{error:'tool_disabled_by_owner'});
   assert.deepEqual(await run('notion',{operation:'list'},fake(()=>new Status(403,{error:'tool_disabled_by_owner'})).context),{error:'tool_disabled_by_owner'});
-  assert.deepEqual(await run('notion',{operation:'list'},fake(()=>new Status(403)).context),{error:'notion_only_in_owner_private_chat'});
+  assert.deepEqual(await run('notion',{operation:'list'},fake(()=>new Status(403)).context),{error:'notion_not_usable_here'});
   assert.deepEqual(await run('notion',{operation:'list'},fake(()=>new Status(409)).context),{error:'notion_is_off_or_changed'});
   assert.deepEqual(await run('notion',{operation:'list'},fake(()=>{throw timeout();}).context),{error:'notion_unavailable'});
+});
+
+test('the Notion tool lists the connections usable here and names the one a call uses',async()=>{
+  // ADR-0268: connections are listed by a read; a call names a project's Notion, or leaves it out for this chat's own.
+  const listed={connections:[{connection:'a1'.repeat(32),name:'Notion of the project Made-up'}]},seen=fake(call=>call.path==='/v1/notion/connections'?listed:{id:ID,state:'proposed'});
+  assert.deepEqual(await run('notion',{operation:'connections'},seen.context),listed);
+  assert.deepEqual([seen.calls[0]!.method,seen.calls[0]!.body],['GET',undefined]);
+  await run('notion',{operation:'call',connection:'a1'.repeat(32),tool:'notion-search',input:{query:'x'}},seen.context);
+  await run('notion',{operation:'list',connection:'own'},seen.context);
+  await run('notion',{operation:'list'},seen.context);
+  assert.deepEqual(seen.calls.slice(1).map(call=>(call.body as {arguments:unknown}).arguments),[
+    {connection:'notion',project:'a1'.repeat(32),tool:'notion-search',input:{query:'x'}},{connection:'notion',operation:'list'},{connection:'notion',operation:'list'}]);
 });
 
 test('a Notion answer matches the first part and keeps its id on a slow poll',async()=>{

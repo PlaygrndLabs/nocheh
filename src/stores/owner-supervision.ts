@@ -76,7 +76,8 @@ export function actionSummary(kind:unknown,args:unknown):string|null {
   if(kind==='telegram_message')return clean(text('text'));
   if(kind==='shell')return clean(text('command'));
   if(kind==='browser')return clean(text('url'));
-  if(kind==='mcp'&&value.connection==='notion')return value.operation==='list'?'List the Notion tools':`${text('tool')??'A tool'} in Notion`;
+  if(kind==='mcp'&&value.connection==='notion'){const where=typeof value.project==='string'?'a project\'s Notion':'Notion';
+    return value.operation==='list'?(where==='Notion'?'List the Notion tools':'List the tools of '+where):`${text('tool')??'A tool'} in ${where}`;}
   if(kind==='mcp')return value.operation==='list'?`List the tools at ${text('url')??'a connected service'}`:`${text('tool')??'A tool'} at ${text('url')??'a connected service'}`;
   return null;
 }
