@@ -12,7 +12,7 @@ import {githubReturn} from '../src/github-return.js';
 import {OwnerLock} from '../src/owner-lock.js';
 import {tmpdir} from 'node:os';
 import {TaskRepository,taskQuery,taskSchema} from '../src/stores/tasks.js';
-import {NotionRepository,notionSchema} from '../src/stores/notion.js';
+import {NotionRepository,notionSchema,notionTarget} from '../src/stores/notion.js';
 import {ChatToolSettingsRepository,chatToolSchema} from '../src/stores/chat-tools.js';
 import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
@@ -170,13 +170,14 @@ const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLoc
 await initialize(pool);
 await ownerLock.create('preview-password');
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
-await pool.query('DROP TABLE IF EXISTS owner_task_requests,owner_task_operations,owner_task_people,owner_task_links,owner_task_reminder_batches,owner_task_writers,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,chat_tool_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);await pool.query(chatToolSchema);
+await pool.query('DROP TABLE IF EXISTS owner_task_requests,owner_task_operations,owner_task_people,owner_task_links,owner_task_reminder_batches,owner_task_writers,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,connections,chat_tool_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);await pool.query(chatToolSchema);
 // A reminder's "Set by" line reads the owner's reminder lines and the people Telegram showed: empty here, so the built-in
 // lines and the name kept with the reminder are used.
 await pool.query(promptSchema);await pool.query(chatSchema);await pool.query(chatRecordSchema);
 // Two synthetic projects, each with its own list beside the personal one.
 const garden='9'.repeat(64),studio='8'.repeat(64);
-for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch']])
+// The Memory page's own project is a row too, so its Notion card reads and saves its own connection (ADR-0268).
+for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch'],['ab'.repeat(32),'Aurora field guide']])
   await pool.query("INSERT INTO projects(id,name,state,revision) VALUES($1,$2,'active',1) ON CONFLICT(id) DO NOTHING",[id,name]);
 // The studio's list is seen in the Aurora planning group, so moving a task there names that group first.
 await pool.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES('-10042',$1,'assigned',1) ON CONFLICT(space_id) DO UPDATE SET project_id=$1,mode='assigned'",[studio]);
@@ -188,7 +189,11 @@ const notion=new NotionRepository(pool);
 const chatTools=new ChatToolSettingsRepository(pool,()=>'42');
 await pool.query("INSERT INTO chat_tool_settings(space_id,browser) VALUES('-10042',false),('-10042/topic/7',true)");
 // Notion's sign-in is kept by the management service; the preview stands in for Notion and returns at once.
-let notionSignIn:{connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean}={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};
+type NotionSignIn={connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean};
+// One sign-in per Notion connection, as the management service keeps them: '' is the owner's own, else a project's id (ADR-0268).
+const notionSignIns=new Map<string,NotionSignIn>(),signedOut=():NotionSignIn=>({connected:false,method:null,workspace:null,connected_at:null,reconnect:false});
+const notionSignIn=(project:unknown)=>notionSignIns.get(typeof project==='string'?project:'')??signedOut();
+const setNotionSignIn=(project:unknown,value:NotionSignIn)=>{notionSignIns.set(typeof project==='string'?project:'',value);return value;};
 // GitHub: the preview stands in for GitHub's create and install pages and returns at once; made-up repositories, and the
 // copies live only in this preview.
 const githubListed=[{name:'example-org/gadgets',branch:'main',private:false,size_kb:900},{name:'example-org/widgets',branch:'main',private:true,size_kb:21000}];
@@ -928,9 +933,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/entities/suggestions')return json(res,200,{suggestions:[entitySuggestion,projectSuggestion].filter(card=>card.status==='pending'),next:null});
   const entityRead=route.match(/^\/entities\/([a-f0-9]{64})$/);
   if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false});}
-  if(route==='/notion')return json(res,200,await notion.get(taskOwner));
+  if(route==='/notion')return json(res,200,await notion.get(taskOwner,notionTarget(url.searchParams.get('project')??undefined)));
   if(route==='/chat-tools')return json(res,200,await chatTools.get(taskOwner,url.searchParams.get('space')??'*'));
-  if(route==='/connections/notion')return json(res,200,notionSignIn);
+  if(route==='/connections/notion')return json(res,200,notionSignIn(url.searchParams.get('project')??''));
   if(route==='/connections/github')return json(res,200,githubStatus());
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
   if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
@@ -996,10 +1001,10 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/notion/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/?connect=notion')throw new HttpError(400,'invalid_notion_redirect');
     return json(res,200,{url:body.redirect+'&code=fixture-code&state=fixture-state'});}
   if(route==='/connections/notion/finish'){if(body.state!=='fixture-state')throw new HttpError(400,'notion_sign_in_expired');
-    notionSignIn={connected:true,method:'oauth',workspace:'Synthetic workspace',connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,notionSignIn);}
+    return json(res,200,setNotionSignIn(body.project,{connected:true,method:'oauth',workspace:'Synthetic workspace',connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
   if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
-    notionSignIn={connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,notionSignIn);}
-  if(route==='/connections/notion/disconnect'){notionSignIn={connected:false,method:null,workspace:null,connected_at:null,reconnect:false};return json(res,200,notionSignIn);}
+    return json(res,200,setNotionSignIn(body.project,{connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
+  if(route==='/connections/notion/disconnect')return json(res,200,setNotionSignIn(body.project,signedOut()));
   if(route==='/connections/github/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/connect/github')throw new HttpError(400,'invalid_github_redirect');
     return json(res,200,{action:'/__preview/github/new?state=fixture-state',manifest:JSON.stringify({name:'Nocheh-a1b2c3',url:new URL(String(body.redirect)).origin,
       redirect_url:body.redirect,setup_url:body.redirect,setup_on_update:true,public:false,default_permissions:{contents:'read',metadata:'read'},default_events:[]})});}

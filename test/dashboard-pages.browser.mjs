@@ -1086,6 +1086,37 @@ test('Notion is connected through its sign-in, turned on with an approval choice
   await page.close();
 });
 
+test('a project has its own Notion: its sign-in and switch are apart from yours, and Nothing asks me is not offered', async () => {
+  // ADR-0268: the project's Notion card in Memory › Projects signs in on its own and comes back to Settings › Connections.
+  const project = 'memory?view=projects&project=' + 'ab'.repeat(32);
+  const {page, problems} = await open(project);
+  const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
+  const card = drawer.getByRole('region', {name: 'Notion for this project'});
+  await card.getByText('Not connected').waitFor();
+  assert.deepEqual(await card.getByLabel('Ask me first').locator('option').allTextContents(), [
+    'Reads run, changes ask me',
+    'Everything asks me',
+  ]);
+  await card.getByRole('button', {name: 'Connect Notion'}).click();
+  await page.getByRole('status').filter({hasText: 'The project’s Notion is connected.'}).waitFor();
+  assert.match(page.url(), /#settings\?view=connections$/);
+  await page.getByRole('region', {name: 'Notion', exact: true}).getByText('Not connected').waitFor();
+  await page.goto(origin + '/#' + project);
+  await card.getByText('Connected to Synthetic workspace').waitFor();
+  // In the drawer each change saves at once: the page's Save is behind it.
+  await card.getByRole('switch', {name: 'Use this project’s Notion'}).click();
+  await card.getByRole('switch', {name: 'Use this project’s Notion', checked: true}).waitFor();
+  await card.getByLabel('Ask me first').selectOption({label: 'Everything asks me'});
+  await page.waitForResponse(
+    response => response.url().endsWith('/api/nocheh/notion') && response.request().method() === 'POST',
+  );
+  await page.reload();
+  await card.getByRole('switch', {name: 'Use this project’s Notion', checked: true}).waitFor();
+  assert.equal(await card.getByLabel('Ask me first').inputValue(), 'everything');
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('GitHub is connected through its own app, lists the chosen repositories, copies one and is disconnected', async () => {
   // GitHub has its own sub-tab, and a sign-in that returns opens it.
   const {page, problems} = await open('settings?view=connections&tab=github');

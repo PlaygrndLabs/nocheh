@@ -48,11 +48,13 @@ test('a Notion read stays in the owner\'s Notion only when every address in its 
 test('right before a Notion call runs, it must come from the owner\'s private chat or a job the owner approved there',async()=>{
   const asked={store:'archive',id:'made-up-event'},pressed={store:'archive',id:'made-up-press'};
   const job={scope:'123',requester:null,decided_by:'123',logical_profile:'job-made-up',notion_reads:true};
-  const db=(row:any)=>({query:async()=>({rows:row?[row]:[]})}) as any;
+  // The connection's switch is read first (ADR-0268); then the job, when there is one.
+  const db=(row:any,enabled=true)=>({query:async(sql:string)=>({rows:/FROM connections/.test(sql)?[{enabled}]:row?[row]:[]})}) as any;
   const call=(change:Record<string,unknown>={})=>({scope:'123',space_id:'123',job_id:null,logical_profile:'job-made-up',state:'approved',
     source_reference:asked,decision_reference:asked,...change});
   assert.equal(await notionRunRefusal(db(null),call(),'123'),null,'a live private turn');
   assert.equal(await notionRunRefusal(db(null),call(),null),'notion_owner_private_only','no owner, no Notion');
+  assert.equal(await notionRunRefusal(db(null,false),call(),'123'),'notion_not_enabled','turned off before it ran');
   assert.equal(await notionRunRefusal(db(null),call({space_id:'-100555'}),'123'),'notion_owner_private_only');
   assert.equal(await notionRunRefusal(db(null),call({scope:'-100555'}),'123'),'notion_owner_private_only');
   assert.equal(await notionRunRefusal(db(job),call({job_id:'made-up-job'}),'123'),null,'the owner\'s approved job, its read let through');

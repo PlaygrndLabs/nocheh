@@ -103,7 +103,8 @@ def mcp_call(args,request=https_request,state=None):
     if args.get('connection')=='notion':
         from tools.operations.connections import notion
         url,versions=notion.MCP_URL,notion.VERSIONS
-        auth={'Authorization':'Bearer '+notion.bearer(state)}
+        # A project's Notion uses that project's own sign-in (ADR-0268).
+        auth={'Authorization':'Bearer '+notion.bearer(state,project=args.get('project'))}
     def rpc(body,headers=None):
         data,received=request(url,body,{'Accept':'application/json, text/event-stream',**auth,**(headers or {})})
         if not data:return None,received

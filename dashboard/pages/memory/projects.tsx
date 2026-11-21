@@ -1,8 +1,10 @@
 /**
  * Memory › Projects: put related groups in one project for a shared role, skills and task list, and optionally let
- * Nocheh create projects itself. A project's groups share only the tasks set on the whole project: a group answer uses
- * only that group, and a topic always follows its group's project (ADR-0247, ADR-0248).
+ * Nocheh create projects itself. While a project shares its group chats, an answer in any of its groups can use all of
+ * them (ADR-0267); off, a group answer uses only that group. A topic always follows its group's project (ADR-0247,
+ * ADR-0248). A project can have its own Notion, which its groups use (ADR-0268).
  */
+import {NotionConnection} from '../settings/connections';
 import {useState} from 'react';
 import {FolderKanban, Pencil, Plus, Sparkles} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
@@ -383,6 +385,8 @@ function ProjectDetail({
             <ProjectKnowledge project={project} context={context} />
           </OriginalNames>
           <PrivateAnswers project={project.id} />
+          {/* The project's own Notion, used in its groups and your private chat (ADR-0268). */}
+          <NotionConnection project={{id: project.id, name: project.name}} />
           {context.decisions.total > 0 && (
             <section>
               <h3 className="mb-2 text-sm font-semibold">Waiting for you</h3>

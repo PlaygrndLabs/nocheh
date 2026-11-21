@@ -2,6 +2,18 @@
 
 <current>
 
+Notion per project or owner, step 2 of the shared and private connectors plan (owner,
+2026-11-20: a service connects to a project or a person; the owner's Notion becomes the
+owner's own) ([ADR-0268](docs/adr/0268-notion-per-project-or-person.md)).
+- `connections` replaces `owner_notion`; the owner turns the owner's own Notion on once again.
+- Memory › Projects: each project's drawer has a Notion card with its own sign-in, switch and
+  approval (no "nothing asks"). Used in that project's groups and the owner's private chat,
+  never another project's group, a group in no project or a job.
+- The `notion` tool lists usable connections; each call names one.
+- Checks: [store](test/store-notion-project.test.ts), Notion store, portability, reset setup,
+  MCP, Notion sign-in Python test, dashboard browser.
+- Next: step 3, GitHub per project. A member's private chat gets a project's Notion in step 5.
+
 Tasks, Chats, Members and Assistant notes as tables and sub-tabs, step 5 part 2 and the last step
 of the table-first dashboard plan (owner, 2026-11-19: "avoid scrolling as much as possible and use
 tables instead, everywhere"; 2026-11-20: "yes to all").
@@ -45,7 +57,6 @@ existing projects too) ([ADR-0267](docs/adr/0267-share-group-chats.md)).
 - Checks: [store](test/store-shared-project-chats.test.ts), owner API, private answers,
   projects, dashboard browser; full tester `project_groups_stay_apart` gains the on step (not
   run in cloud this time).
-- Next: step 2, connections owned by a project or a person (the owner's Notion moves over).
 
 System pages as tables and sub-tabs, step 4 of the table-first dashboard plan (owner,
 2026-11-19: "avoid scrolling as much as possible and use tables instead, everywhere";

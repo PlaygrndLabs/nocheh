@@ -1,3 +1,4 @@
+import {notionConnectionsHere} from './notion.js';
 import {createServer} from 'node:http';
 import {join} from 'node:path';
 import {admin,boundReader,currentReader} from '../access.js';
@@ -372,6 +373,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     };
     if(path==='/v1/telegram/destinations'&&req.method==='GET')return result(await s.telegramActions.destinations(principal));
     if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.actionCommands.offer('telegram',await s.telegramActions.request(principal,await readJson(req))));
+    // The Notion connections this turn may use, named for the brain (ADR-0268).
+    if(path==='/v1/notion/connections'&&req.method==='GET') {
+      if(principal.admin)throw new HttpError(403,'scoped_turn_required');
+      return result({connections:await notionConnectionsHere(s.stores.control,principal,await s.turns.binding(principal))});
+    }
     if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.actionCommands.offer('controlled',await s.controlledActions.propose(principal,await readJson(req))));
     if(req.method==='POST'&&/^\/v1\/jobs\/(?:start|status|stop)$/.test(path)) {
       const body=await readJson(req),action=path.slice('/v1/jobs/'.length);

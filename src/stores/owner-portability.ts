@@ -27,7 +27,8 @@ import {assertChatDirectory,bumpChatRevision,ensureConnection,reloadChats} from 
  * before step 2b names chats by the old values and carries topic names as telegram_topic_registrations; on import
  * each chat it names gets its row the way the seeder gives one, and a topic name becomes that topic's row.
  */
-type Table={key:string[];singleton?:boolean;serial?:string};
+// `seeded`: a table whose rows start with defaults, replaced by a record only while nobody has changed them (revision 0).
+type Table={key:string[];singleton?:boolean;seeded?:boolean;serial?:string};
 // Parents before children. Projects and people arrive earlier, with the derivatives. Chats come in kind order, so a
 // topic follows its chat.
 const tables:Record<string,Table>={
@@ -48,13 +49,13 @@ const tables:Record<string,Table>={
   source_retirements:{key:['object_id']},
   source_retirement_history:{key:['object_id','revision']},
   owner_prompts:{key:['singleton'],singleton:true},
-  owner_notion:{key:['singleton'],singleton:true},
+  connections:{key:['id'],seeded:true},
   background_settings:{key:['singleton'],singleton:true},
   chat_tool_settings:{key:['space_id']},
 };
 export const portableOwnerTables=Object.keys(tables);
 /** Tables of older records that import into the current ones. */
-const formerTables:Record<string,Table>={telegram_topic_registrations:{key:['chat_id','topic_id']}};
+const formerTables:Record<string,Table>={telegram_topic_registrations:{key:['chat_id','topic_id']},owner_notion:{key:['singleton'],singleton:true}};
 export interface OwnerRecord {format:'nocheh-owner-record-v1';table:string;key:string[];row:Record<string,unknown>;sha256:string}
 const quote=(name:string)=>'"'+name.replaceAll('"','""')+'"';
 const seal=(table:string,key:string[],row:Record<string,unknown>):OwnerRecord=>({format:'nocheh-owner-record-v1',table,key,row,sha256:digest(canonical({table,key,row}))});
@@ -139,7 +140,14 @@ export class OwnerPortabilityRepository {
     if(parsed.some(({record})=>record.table==='chats'||record.table==='chat_ids'))await ensureConnection(this.stores.control);
     const db=await this.stores.control.connect();
     try {
-      for(const {record,definition} of parsed) {
+      for(const item of parsed) {
+        let {record,definition}=item;
+        // The owner's Notion setting from before connections is the owner's own connection (ADR-0268).
+        if(record.table==='owner_notion') {
+          const {enabled,approval,revision,updated_at}=record.row;
+          record={...record,table:'connections',key:['notion:own'],row:{id:'notion:own',service:'notion',project_id:null,enabled,approval,revision,updated_at}};
+          definition=tables.connections!;
+        }
         // A topic name from before step 2b is its topic's row now, named by the owner. A topic already here takes it
         // unless the owner here named it otherwise.
         if(record.table==='telegram_topic_registrations') {
@@ -152,7 +160,7 @@ export class OwnerPortabilityRepository {
           continue;
         }
         // A setting nobody changed on the old installation has nothing to bring.
-        if(definition.singleton&&record.row.revision===0){unchanged++;continue;}
+        if((definition.singleton||definition.seeded)&&record.row.revision===0){unchanged++;continue;}
         // A record from before projects stopped sharing comes back as the stores convert their own rows (ADR-0247).
         const retired=retire(record.table,record.row);
         if(!retired){unchanged++;continue;}
@@ -180,9 +188,10 @@ export class OwnerPortabilityRepository {
             if(['23502','23514','22P02','22007','22008'].includes((error as {code?:string}).code??''))throw new HttpError(400,'invalid_owner_record_value');
             throw error;
           }
-          if(!inserted&&definition.singleton) {
+          if(!inserted&&(definition.singleton||definition.seeded)) {
             // A fresh installation already has the default row; replace it only while nobody has changed it.
-            inserted=(await db.query(`UPDATE ${record.table} t SET (${list})=(SELECT ${list} FROM json_populate_record(NULL::${record.table},$1::json)) WHERE t.revision=0`,[JSON.stringify(row)])).rowCount??0;
+            inserted=(await db.query(`UPDATE ${record.table} t SET (${list})=(SELECT ${list} FROM json_populate_record(NULL::${record.table},$1::json)) WHERE t.revision=0${
+              definition.seeded?' AND '+match:''}`,[JSON.stringify(row),...(definition.seeded?record.key:[])])).rowCount??0;
           }
           const same=(await db.query(`SELECT (SELECT to_jsonb(x) FROM json_populate_record(NULL::${record.table},$1::json) x)-$${definition.key.length+2}::text[]
             =to_jsonb(t)-$${definition.key.length+2}::text[] AS same FROM ${record.table} t WHERE ${match}`,[JSON.stringify(row),...record.key,columns.filter(name=>!present.includes(name))])).rows[0];

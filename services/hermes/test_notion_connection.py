@@ -104,4 +104,31 @@ class NotionSignInTests(unittest.TestCase):
                          {'exit_code': 1, 'error': 'notion_not_connected'}, 'nothing is sent without a sign-in')
 
 
+    def test_a_project_keeps_its_own_sign_in_apart_from_the_owner_and_other_projects(self):
+        # ADR-0268: the owner's own sign-in keeps notion.json; each project's is its own file, used only for its calls.
+        project, other = 'a' * 64, 'b' * 64
+        notion.save_token(self.state, 'ntn_owner', check=lambda token: None)
+        notion.save_token(self.state, 'ntn_project', check=lambda token: None, project=project)
+        self.assertEqual(notion.path(self.state).name, 'notion.json')
+        self.assertEqual(notion.path(self.state, project).name, 'notion-project-' + project + '.json')
+        self.assertEqual(notion.bearer(self.state, post=self.post, project=project), 'ntn_project')
+        self.assertEqual(notion.bearer(self.state, post=self.post, project='own'), 'ntn_owner')
+        self.assertFalse(notion.status(self.state, project=other)['connected'])
+        for wrong in ('../notion', 'A' * 64, 'a' * 63, 7):
+            with self.assertRaisesRegex(ValueError, 'invalid_notion_connection'): notion.status(self.state, project=wrong)
+        seen = []
+        def remote(url, body, headers):
+            seen.append(headers.get('Authorization'))
+            if body['method'] == 'initialize':
+                return json.dumps({'jsonrpc': '2.0', 'id': 1, 'result': {'protocolVersion': '2025-06-18'}}).encode(), {'content-type': 'application/json'}
+            if body['method'] == 'notifications/initialized': return b'', {}
+            return json.dumps({'jsonrpc': '2.0', 'id': 2, 'result': {'tools': []}}).encode(), {'content-type': 'application/json'}
+        mcp_call({'connection': 'notion', 'project': project, 'operation': 'list'}, remote, self.state)
+        self.assertEqual(set(seen), {'Bearer ntn_project'})
+        self.assertFalse(notion.disconnect(self.state, post=self.post, project=project)['connected'])
+        self.assertTrue(notion.status(self.state)['connected'], 'a project disconnecting leaves the owner\'s own')
+        self.assertEqual(execute(self.state, {'kind': 'mcp', 'arguments': {'connection': 'notion', 'project': other, 'operation': 'list'}}, remote),
+                         {'exit_code': 1, 'error': 'notion_not_connected'})
+
+
 if __name__ == '__main__': unittest.main()

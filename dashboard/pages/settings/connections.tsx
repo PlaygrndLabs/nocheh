@@ -3,6 +3,7 @@
  * Notion is the first: the owner signs in to Notion here, then turns it on and
  * chooses which Notion calls ask first. The sign-in stays with the other keys
  * and is never shown again. On/off and approvals save from the top of the page.
+ * A project's own Notion uses the same card in Memory › Projects (ADR-0268).
  */
 import {useEffect, useRef, useState} from 'react';
 import {ExternalLink, Unplug} from 'lucide-react';
@@ -54,6 +55,11 @@ const signInErrors: Record<string, string> = {
 };
 const signInWords = (e: unknown) => signInErrors[(e as ApiError)?.message ?? ''] ?? errorWords(e);
 
+/** Which Notion a sign-in started for: a project's id, or empty for your own. Notion's return address is the same for
+ * every sign-in, so the dashboard remembers it in this tab until the sign-in comes back. */
+const signInKey = 'nocheh.notion-sign-in-project';
+const projectQuery = (project?: string) => (project ? '?project=' + encodeURIComponent(project) : '');
+
 /** Notion sends the browser back to `/?connect=notion&code=…&state=…`; finish the sign-in and clean the address. */
 function useNotionReturn(onDone: (message: string, failed?: boolean) => void) {
   const handled = useRef(false);
@@ -71,9 +77,20 @@ function useNotionReturn(onDone: (message: string, failed?: boolean) => void) {
       );
       return;
     }
-    apiPost('/connections/notion/finish', {code, state}).then(
+    let project = '';
+    try {
+      project = sessionStorage.getItem(signInKey) ?? '';
+      sessionStorage.removeItem(signInKey);
+    } catch {
+      /* without storage the sign-in finishes as your own; a project's then fails as expired */
+    }
+    apiPost('/connections/notion/finish', {code, state, ...(project ? {project} : {})}).then(
       () => {
-        onDone('Notion is connected. Turn it on below and save.');
+        onDone(
+          project
+            ? 'The project’s Notion is connected. Turn it on in the project’s Notion card in Memory › Projects and save.'
+            : 'Notion is connected. Turn it on below and save.',
+        );
         void refreshResources();
       },
       e => onDone(signInWords(e), true),
@@ -83,21 +100,45 @@ function useNotionReturn(onDone: (message: string, failed?: boolean) => void) {
 }
 
 export function ConnectionSettings() {
-  const signIn = useResource<NotionSignIn>('/connections/notion');
-  const saved = useResource<NotionSettings>('/notion');
+  const feedback = useFeedback();
+  const [problem, setProblem] = useState<string | null>(null);
+  useNotionReturn((message, failed) => (failed ? setProblem(message) : feedback.toast(message)));
+  return <NotionConnection returned={problem} />;
+}
+
+/** One Notion connection: your own, or a project's (ADR-0268). `returned` is a sign-in that came back and failed. */
+export function NotionConnection({
+  project,
+  returned,
+}: {
+  project?: {id: string; name: string};
+  returned?: string | null;
+}) {
+  const query = projectQuery(project?.id);
+  const signIn = useResource<NotionSignIn>('/connections/notion' + query);
+  const saved = useResource<NotionSettings>('/notion' + query);
   const feedback = useFeedback();
   const [draft, setDraft] = useState<Pick<NotionSettings, 'enabled' | 'approval'> | null>(null);
   const [revision, setRevision] = useState<number | null>(null);
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  useNotionReturn((message, failed) => (failed ? setProblem(message) : feedback.toast(message)));
+  const shownProblem = problem ?? returned ?? null;
+  const target = project ? {project: project.id} : {};
 
   const data = saved.data;
   const value = draft ?? data ?? null;
   const dirty = !!draft && !!data && (draft.enabled !== data.enabled || draft.approval !== data.approval);
   const edit = (next: Partial<Pick<NotionSettings, 'enabled' | 'approval'>>) => {
     if (!value) return;
+    // A project's card sits in a drawer, over the page's Save: each change there saves at once.
+    if (project) {
+      void run('setting', async () => {
+        await apiPost('/notion', {...target, expected_revision: data?.revision, ...next});
+        await refreshResources();
+      });
+      return;
+    }
     setRevision(current => current ?? data?.revision ?? null);
     setDraft({enabled: value.enabled, approval: value.approval, ...next});
   };
@@ -106,12 +147,13 @@ export function ConnectionSettings() {
     setRevision(null);
   };
   useDraftSource({
-    id: 'notion-settings',
-    labels: dirty ? ['Connections: Notion'] : [],
+    id: 'notion-settings' + (project ? ':' + project.id : ''),
+    labels: dirty ? [project ? project.name + ': Notion' : 'Connections: Notion'] : [],
     save: async () => {
       if (!draft) return;
       try {
         await apiPost('/notion', {
+          ...target,
           expected_revision: revision ?? data?.revision,
           enabled: draft.enabled,
           approval: draft.approval,
@@ -143,28 +185,34 @@ export function ConnectionSettings() {
   const connect = () =>
     run('connect', async () => {
       const {url} = await apiPost<{url: string}>('/connections/notion/start', {
+        ...target,
         redirect: window.location.origin + '/?connect=notion',
       });
+      try {
+        sessionStorage.setItem(signInKey, project?.id ?? '');
+      } catch {
+        /* a project's sign-in then comes back as expired, and says so */
+      }
       window.location.assign(url);
     });
   const saveToken = () =>
     run('token', async () => {
-      await apiPost('/connections/notion/token', {token});
+      await apiPost('/connections/notion/token', {...target, token});
       setToken('');
       feedback.toast('Notion token saved. Turn Notion on below and save.');
       await refreshResources();
     });
   const disconnect = async () => {
     const ok = await feedback.confirm({
-      title: 'Disconnect Notion?',
-      body: 'Nocheh forgets its Notion sign-in and stops using Notion. Your Notion pages stay as they are.',
+      title: project ? `Disconnect ${project.name}’s Notion?` : 'Disconnect Notion?',
+      body: 'Nocheh forgets this Notion sign-in and stops using it. The Notion pages stay as they are.',
       confirm: 'Disconnect',
       danger: true,
     });
     if (!ok) return;
     await run('disconnect', async () => {
-      await apiPost('/connections/notion/disconnect', {});
-      if (data?.enabled) await apiPost('/notion', {expected_revision: data.revision, enabled: false});
+      await apiPost('/connections/notion/disconnect', target);
+      if (data?.enabled) await apiPost('/notion', {...target, expected_revision: data.revision, enabled: false});
       reset();
       feedback.toast('Notion disconnected.');
       await refreshResources();
@@ -180,12 +228,20 @@ export function ConnectionSettings() {
       </Card>
     );
   const status = signIn.data;
+  const suffix = project ? '-' + project.id.slice(0, 8) : '',
+    titleId = 'notion-title' + suffix,
+    enabledId = 'notion-enabled' + suffix,
+    approvalId = 'notion-approval' + suffix;
   return (
-    <Card aria-labelledby="notion-title">
+    <Card aria-labelledby={titleId}>
       <CardHeader
-        id="notion-title"
-        title="Notion"
-        description="Let Nocheh search, read and change your Notion from your private chat and in background jobs you approve there, through Notion’s own MCP server. Groups never reach it, and Nocheh’s own task list stays the main one."
+        id={titleId}
+        title={project ? 'Notion for this project' : 'Notion'}
+        description={
+          project
+            ? `A Notion this project’s groups use, through Notion’s own MCP server: everyone who talks to Nocheh in ${project.name}’s groups can have it searched and read, and your private chat can use it too. Changes ask you as set below. Other groups and other people’s private chats never reach it.`
+            : 'Let Nocheh search, read and change your own Notion from your private chat and in background jobs you approve there, through Notion’s own MCP server. Groups never reach it; a project can have its own Notion in Memory › Projects. Nocheh’s own task list stays the main one.'
+        }
         action={
           status.connected ? (
             <Badge tone="good" dot>
@@ -201,9 +257,9 @@ export function ConnectionSettings() {
         }
       />
       <div className="mt-3 border-t border-line">
-        {problem && (
+        {shownProblem && (
           <div className="px-5 pt-4">
-            <Notice tone="bad">{problem}</Notice>
+            <Notice tone="bad">{shownProblem}</Notice>
           </div>
         )}
         <SettingRow
@@ -263,14 +319,14 @@ export function ConnectionSettings() {
         )}
         <SettingRow
           title="Use Notion"
-          htmlFor="notion-enabled"
+          htmlFor={enabledId}
           description={
             status.connected ? 'Off keeps the sign-in but stops every Notion call.' : 'Connect Notion first.'
           }
         >
           <Switch
-            id="notion-enabled"
-            label="Use Notion"
+            id={enabledId}
+            label={project ? 'Use this project’s Notion' : 'Use Notion'}
             checked={value.enabled}
             disabled={!status.connected && !value.enabled}
             onChange={enabled => edit({enabled})}
@@ -278,28 +334,38 @@ export function ConnectionSettings() {
         </SettingRow>
         <SettingRow
           title="Ask me first"
-          htmlFor="notion-approval"
+          htmlFor={approvalId}
           description={
-            <>
-              A call that asks shows you the exact Notion change in your private chat and the Inbox before it runs. A
-              read of a page outside your Notion, such as a public notion.site page, asks like a change; with Nothing asks
-              me it asks only when you didn’t send that address yourself, and in a background job it always asks. A background job reads without asking only if its
-              card said so when you approved it, and only while this setting allows it; its changes always ask.
-              Scheduled tasks always ask. Deny rules still win.
-              {value.approval === 'nothing' && <span className="mt-1 block text-warn">{nothingAsksWarning}</span>}
-            </>
+            project ? (
+              <>
+                A call that asks shows you the exact Notion change in your private chat and the Inbox before it runs.
+                Anyone who talks to Nocheh in this project’s groups can ask for one, so Nothing asks me isn’t offered
+                here, and a read of a page outside Notion asks like a change. Deny rules still win.
+              </>
+            ) : (
+              <>
+                A call that asks shows you the exact Notion change in your private chat and the Inbox before it runs. A
+                read of a page outside your Notion, such as a public notion.site page, asks like a change; with Nothing
+                asks me it asks only when you didn’t send that address yourself, and in a background job it always asks.
+                A background job reads without asking only if its card said so when you approved it, and only while this
+                setting allows it; its changes always ask. Scheduled tasks always ask. Deny rules still win.
+                {value.approval === 'nothing' && <span className="mt-1 block text-warn">{nothingAsksWarning}</span>}
+              </>
+            )
           }
         >
           <Select
-            id="notion-approval"
+            id={approvalId}
             value={value.approval}
             onChange={event => edit({approval: event.target.value as Approval})}
           >
-            {approvals.map(item => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
+            {approvals
+              .filter(item => !project || item.value !== 'nothing')
+              .map(item => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
           </Select>
         </SettingRow>
       </div>
