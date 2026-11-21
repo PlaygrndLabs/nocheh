@@ -70,6 +70,9 @@ const routes = [
   ...['records', 'offsite'].map(tab => ['settings?view=privacy&tab=' + tab, 'Settings']),
   ...['priorities', 'columns'].map(tab => ['settings?view=tasks&tab=' + tab, 'Settings']),
   ['settings?view=connections&tab=github', 'Settings'],
+  ['chats?view=rules&tab=defaults', 'Chats'],
+  ...['about', 'conversations'].map(tab => ['memory?view=notes&tab=' + tab, 'Memory']),
+  ...['chats', 'pause'].map(tab => ['members?member=' + MIRA + '&tab=' + tab, 'Members']),
 ];
 
 let server, browser;
@@ -109,6 +112,39 @@ after(async () => {
 });
 
 /** A page that records uncaught errors and React/console errors. */
+/** Tasks show ten to a page, so a test finds its own task by searching for it; the search stays on between tabs. */
+async function findTask(page, title) {
+  await page.getByLabel('Search tasks').fill(title);
+  return page.getByRole('row').filter({hasText: title});
+}
+
+/**
+ * The table of chats and of members: a row by its name, found on whichever page of the table holds it, and opened
+ * from there. From an open chat or member, the way is back to the table first.
+ */
+function tableOf(page, name, back) {
+  const table = page.getByRole('table', {name});
+  const row = link => table.getByRole('row').filter({has: page.getByRole('link', {name: link})});
+  const turn = async label => {
+    const button = page.getByRole('button', {name: label, exact: true});
+    if (!(await button.count()) || !(await button.isEnabled())) return false;
+    await button.click();
+    return true;
+  };
+  const find = async link => {
+    if (await page.getByRole('button', {name: back}).count()) await page.getByRole('button', {name: back}).click();
+    await table.waitFor();
+    while (await turn('Previous'));
+    while (!(await row(link).count()) && (await turn('Next')));
+    return row(link);
+  };
+  return {table, row, find, open: async link => (await find(link)).getByRole('link', {name: link}).click()};
+}
+const chatsTable = page => tableOf(page, 'Chats', 'All chats');
+const membersTable = page => tableOf(page, 'Members', 'All members');
+/** An open member's sub-tab: What they can do, Private chat and groups, or Pause or remove. */
+const memberPart = (page, name) => page.getByRole('tablist', {name: 'This member'}).getByRole('tab', {name}).click();
+
 async function open(hash, viewport = {width: 1440, height: 900}) {
   const page = await browser.newPage({viewport});
   const problems = [];
@@ -773,7 +809,8 @@ test('a task is added, edited, finished and reopened from the Tasks page', async
   await page.getByLabel('New task').fill(title);
   await page.locator('#task-due').fill('2030-01-04');
   await page.getByRole('button', {name: 'Add'}).click();
-  const row = page.getByRole('listitem').filter({hasText: title});
+  await page.getByRole('status').filter({hasText: 'Task added.'}).waitFor();
+  const row = await findTask(page, title);
   await row.getByText(/Due /).waitFor();
   await row.getByRole('button', {name: `Edit “${title}”`}).click();
   const dialog = page.getByRole('dialog');
@@ -809,11 +846,11 @@ test('a task is added, edited, finished and reopened from the Tasks page', async
   await page.getByRole('status').filter({hasText: 'Task done.'}).waitFor();
   await row.waitFor({state: 'detached'});
   await page.getByRole('tab', {name: /Done/}).click();
-  const done = page.getByRole('listitem').filter({hasText: title});
+  const done = page.getByRole('row').filter({hasText: title});
   await done.getByRole('checkbox', {name: `Reopen “${title}”`}).click();
   await done.waitFor({state: 'detached'});
   await page.getByRole('tab', {name: /^Open/}).click();
-  await page.getByRole('listitem').filter({hasText: title}).waitFor();
+  await page.getByRole('row').filter({hasText: title}).waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -842,11 +879,7 @@ test('a reminder a person set says who and where, keeps its exact time and sette
     if (request.method() === 'POST' && request.url().endsWith('/api/nocheh/tasks/' + task.id))
       posts.push(request.postDataJSON());
   });
-  await page
-    .getByRole('listitem')
-    .filter({hasText: title})
-    .getByRole('button', {name: `Edit “${title}”`})
-    .click();
+  await (await findTask(page, title)).getByRole('button', {name: `Edit “${title}”`}).click();
   const dialog = page.getByRole('dialog');
   // The line shows under the reminder still to come and under the one Telegram refused, which reads Not sent.
   const setBy = dialog.getByText(/Set by .*Sam Rivera.*a member in group .*Aurora planning/);
@@ -886,7 +919,12 @@ test('a reminder a person set says who and where, keeps its exact time and sette
 
 test('today, upcoming and the board show tasks by date and status', async () => {
   const {page, problems} = await open('tasks?view=today');
-  await page.getByRole('listitem').filter({hasText: 'Pay the rent'}).waitFor();
+  // Today's tasks are one table, under a line for each day.
+  await page.getByRole('row').filter({hasText: 'Pay the rent'}).waitFor();
+  await page
+    .getByRole('table', {name: 'Tasks'})
+    .getByRole('columnheader', {name: /^Today · /})
+    .waitFor();
   await page.getByText('Book a dentist checkup').waitFor({state: 'detached'});
   await page.getByRole('tab', {name: /Upcoming/}).click();
   await page.getByText('Book the Iceland flights').waitFor();
@@ -897,6 +935,43 @@ test('today, upcoming and the board show tasks by date and status', async () => 
   await board.getByLabel('Status of “Book a dentist checkup”').selectOption({label: 'In progress'});
   await page.getByRole('status').filter({hasText: 'Moved to In progress.'}).waitFor();
   await board.getByRole('list', {name: 'In progress tasks'}).getByText('Book a dentist checkup').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the board shows four cards a column at a time, and an open chat leads back to the table or on to another chat', async () => {
+  const {page, problems} = await open('tasks?view=board');
+  const todo = page.getByLabel('Board').getByRole('list', {name: 'To do tasks'});
+  await settles(todo.getByRole('listitem'), 4);
+  await page.getByText(/^1–4 of \d+$/).waitFor();
+  const first = await todo.getByRole('listitem').first().innerText();
+  await page.getByRole('button', {name: 'Next To do tasks'}).click();
+  await page.getByText(/^5–\d+ of \d+$/).waitFor();
+  assert.notEqual(await todo.getByRole('listitem').first().innerText(), first);
+  // A chat opens in place of the table of chats; another chat is one choice away, on the same sub-tab.
+  await page.goto(origin + '/#chats?chat=-10042&tab=tools');
+  await page.getByRole('heading', {name: 'Aurora planning', level: 2}).waitFor();
+  assert.equal(await page.getByRole('table', {name: 'Chats'}).count(), 0);
+  await page.getByLabel('Open another chat').selectOption(UPGRADED);
+  await page.getByRole('heading', {name: 'Garden swap', level: 2}).waitFor();
+  await page.getByRole('tab', {name: 'Tools and limits', selected: true}).waitFor();
+  await page.getByRole('button', {name: 'All chats'}).click();
+  await page.getByRole('table', {name: 'Chats'}).getByRole('link', {name: 'Garden swap'}).waitFor();
+  assert.equal(new URL(page.url()).hash, '#chats');
+  // Sharing keeps its rules and its defaults on two sub-tabs; a chat's topic memory link opens the defaults.
+  await page.goto(origin + '/#chats?chat=-10042&tab=memory');
+  assert.equal(
+    await page.getByRole('link', {name: 'Change topic memory'}).getAttribute('href'),
+    '#chats?view=rules&tab=defaults',
+  );
+  await page.getByRole('link', {name: 'Change topic memory'}).click();
+  await page.getByRole('radiogroup', {name: 'Topic memory'}).waitFor();
+  assert.equal(await page.getByRole('table', {name: 'Sharing rules'}).isVisible(), false);
+  await page.getByRole('tablist', {name: 'Sharing'}).getByRole('tab', {name: 'Rules'}).click();
+  await page
+    .getByRole('table', {name: 'Sharing rules'})
+    .getByRole('button', {name: 'Trip notes from the topic'})
+    .waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -1341,7 +1416,7 @@ test('personal tasks and each project keep separate lists, with tags, a group an
   await page.locator('#task-tags').press('Enter');
   await page.locator('#task-tags').fill('Urgent');
   await page.getByRole('button', {name: 'Add'}).click();
-  const added = page.getByRole('listitem').filter({hasText: title});
+  const added = await findTask(page, title);
   await added.getByText('Urgent').waitFor();
   // A task points to a group and to people from its edit dialog.
   await added.getByRole('button', {name: `Edit “${title}”`}).click();
@@ -1362,6 +1437,7 @@ test('personal tasks and each project keep separate lists, with tags, a group an
   await added.getByText('Aurora planning').waitFor();
   await added.getByText('Devon').waitFor();
   await added.getByText('Urgent').waitFor({state: 'detached'});
+  await page.getByLabel('Search tasks').fill('');
   await lists.getByRole('radio', {name: /Personal/}).click();
   await page.getByText('Book a dentist checkup').waitFor();
   // A project task stays out of the personal list.
@@ -1371,7 +1447,11 @@ test('personal tasks and each project keep separate lists, with tags, a group an
   await page.getByText('Book a dentist checkup').waitFor();
   // A tag narrows the list.
   await page.getByText('Send the garden supplier the measurements').waitFor({state: 'detached'});
-  // Cards show the same tasks, and the choice is remembered.
+  // The table has the same columns on every row; cards show the same tasks, and the choice is remembered.
+  assert.deepEqual(
+    (await page.getByRole('table', {name: 'Tasks'}).getByRole('columnheader').allInnerTexts()).map(text => text.trim()),
+    ['Done', 'Task', 'Status', 'Priority', 'Due', 'List', 'Actions'],
+  );
   await page.getByRole('radiogroup', {name: 'Show tasks as'}).getByRole('radio', {name: 'Cards'}).click();
   await page.getByRole('list', {name: 'Tasks'}).getByText('Book a dentist checkup').waitFor();
   await page.reload();
@@ -1393,7 +1473,7 @@ test('a group’s task in a project names only that group, and a subtask follows
   const title = 'Bring the extension cords ' + Date.now();
   await page.getByLabel('New task').fill(title);
   await page.getByRole('button', {name: 'Add'}).click();
-  const added = page.getByRole('listitem').filter({hasText: title});
+  const added = await findTask(page, title);
   await added.getByRole('button', {name: `Edit “${title}”`}).click();
   const dialog = page.getByRole('dialog').filter({has: page.locator('#task-panel-list')});
   await dialog.getByText('Every group in the project sees it. Choose a group to keep it to that group.').waitFor();
@@ -1429,7 +1509,7 @@ test('moving a task into a project’s list names the chats that will see it fir
   const title = 'Ask for the studio keys ' + Date.now();
   await page.getByLabel('New task').fill(title);
   await page.getByRole('button', {name: 'Add'}).click();
-  const added = page.getByRole('listitem').filter({hasText: title});
+  const added = await findTask(page, title);
   await added.getByRole('button', {name: `Edit “${title}”`}).click();
   const panel = page.getByRole('dialog').filter({has: page.locator('#task-panel-list')});
   await panel.locator('#task-panel-list').selectOption({label: 'Studio launch'});
@@ -1886,7 +1966,7 @@ test('Notes names a private answer’s profile by where it was asked and the day
 });
 
 test('Notes lists past conversations as a table, each named by its title or first message, a page at a time', async () => {
-  const {page, problems} = await open('memory?view=notes');
+  const {page, problems} = await open('memory?view=notes&tab=conversations');
   const table = page.getByRole('table', {name: 'Past conversations'});
   const chat = table.getByRole('row').filter({hasText: 'Private chat'});
   await chat.getByText('Where can we see the northern lights?').waitFor();
@@ -1898,13 +1978,16 @@ test('Notes lists past conversations as a table, each named by its title or firs
   await table.getByRole('button', {name: 'Older question 9'}).waitFor();
   assert.equal(await table.getByRole('row').count(), 3);
   await page.getByRole('button', {name: 'Newer', exact: true}).click();
-  // Working notes are a table too, each note with where it came from.
+  // Working notes are a table too, on their own sub-tab, each note with where it came from.
+  const parts = page.getByRole('tablist', {name: 'Assistant notes'});
+  await parts.getByRole('tab', {name: 'General notes'}).click();
   const notes = page.getByRole('table', {name: 'General notes'});
   await notes
     .getByRole('row')
     .filter({hasText: 'Alice is planning a trip to Iceland.'})
     .getByText(/forwarded/)
     .waitFor();
+  await parts.getByRole('tab', {name: 'Past conversations'}).click();
   await table.getByRole('button', {name: 'Planning a stargazing trip'}).click();
   await page.getByRole('dialog', {name: 'Planning a stargazing trip'}).waitFor();
   assert.deepEqual(problems, []);
@@ -1933,7 +2016,7 @@ test('turning automatic organizing on is what lets it create projects, with no s
 test('the owner’s private chat stays out of sharing rules and projects', async () => {
   // A rule picks only groups and topics; an older rule that names a private chat is flagged.
   const {page: rules, problems} = await open('chats?view=rules');
-  const legacy = rules.getByRole('listitem').filter({hasText: 'Notes from my chat'});
+  const legacy = rules.getByRole('row').filter({hasText: 'Notes from my chat'});
   await legacy.getByText('Reads a private chat. Nocheh skips it.').waitFor();
   // That older rule can still be turned off as it is.
   await legacy.getByRole('switch', {name: 'Turn off Notes from my chat'}).click();
@@ -1974,27 +2057,28 @@ test('the owner’s private chat stays out of sharing rules and projects', async
 
 test('a group first seen after the new ids and a group Telegram upgraded open like any other, with their Telegram IDs', async () => {
   const {page, problems} = await open('chats');
-  const list = page.getByRole('navigation', {name: 'Chats'});
+  const list = chatsTable(page);
   const search = page.getByPlaceholder('Find a chat by name or Telegram ID');
   // A chat is found by any Telegram ID it has had, and its page names the current one and the earlier one.
   await search.fill('-4005');
-  await list.getByRole('link', {name: 'Garden swap'}).click();
+  await list.table.getByRole('link', {name: 'Garden swap'}).click();
   await page.getByRole('heading', {name: 'Garden swap', level: 2}).waitFor();
   await page.locator('main header').getByText('Telegram ID -10099 · earlier -4005').waitFor();
   assert.equal(new URL(page.url()).hash, '#chats?chat=' + encodeURIComponent(UPGRADED));
   // A group first seen later has a digest id that is never shown; its topic is listed under it.
-  await search.fill('');
-  await list.getByRole('link', {name: 'Night sky club'}).click();
+  await list.open('Night sky club');
   await page.getByRole('heading', {name: 'Night sky club', level: 2}).waitFor();
   await page.locator('main header').getByText('Telegram ID -10088').waitFor();
-  await list.getByRole('link', {name: 'Meteor watch'}).click();
+  await list.open('Meteor watch');
   await page.getByRole('heading', {name: 'Meteor watch', level: 2}).waitFor();
   await page.locator('main header').getByRole('link', {name: 'Night sky club'}).waitFor();
   // A group from before keeps its stored id, and its topic too.
-  await list.getByRole('link', {name: 'Iceland planning'}).click();
+  await list.open('Iceland planning');
   await page.getByRole('heading', {name: 'Iceland planning', level: 2}).waitFor();
   assert.equal(new URL(page.url()).hash, '#chats?chat=-10042%2Ftopic%2F7');
-  for (const text of [await list.innerText(), await page.locator('main').innerText()])
+  const opened = await page.locator('main').innerText();
+  await list.find('Iceland planning');
+  for (const text of [await list.table.innerText(), opened])
     assert.ok(!/[0-9a-f]{64}/.test(text), 'no Nocheh id is shown');
   // Turning Nocheh on in the new group, which is off, asks which project it joins and turns it on at once, by its own
   // id: no setting is saved (ADR-0253). Turning it off asks first, then is off at once too.
@@ -2005,23 +2089,24 @@ test('a group first seen after the new ids and a group Telegram upgraded open li
     if (request.url().endsWith('/api/nocheh/chats/state')) switched.push(request.postDataJSON());
     if (/\/api\/nocheh\/settings(?:\/apply)?$/.test(request.url())) settings.push(request.url());
   });
-  const row = list.getByRole('link', {name: 'Night sky club'});
-  await row.getByText('Off', {exact: true}).waitFor();
-  await row.click();
+  await (await list.find('Night sky club')).getByText('Off', {exact: true}).waitFor();
+  await list.open('Night sky club');
   await page.getByText('Nocheh doesn’t answer here.').waitFor();
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: false}).click();
   const join = page.getByRole('dialog', {name: 'Which project does this group join?'});
   await join.locator('#join-project').selectOption({label: 'None'});
   await join.getByRole('button', {name: 'Turn on'}).click();
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).waitFor();
-  await row.getByText('On', {exact: true}).waitFor();
+  // The table says so too.
+  await (await list.find('Night sky club')).getByText('On', {exact: true}).waitFor();
+  await list.open('Night sky club');
   await page.getByRole('region', {name: 'Save changes'}).getByText('No unsaved changes').waitFor();
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: true}).click();
   const off = page.getByRole('dialog', {name: 'Turn Nocheh off in “Night sky club”?'});
   await off.getByText('It stays in the group, silent. Its members keep their switches.').waitFor();
   await off.getByRole('button', {name: 'Turn off'}).click();
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: false}).waitFor();
-  await row.getByText('Off', {exact: true}).waitFor();
+  await (await list.find('Night sky club')).getByText('Off', {exact: true}).waitFor();
   assert.deepEqual(
     switched.map(({chat_id, state, project}) => ({chat_id, state, project})),
     [
@@ -2037,26 +2122,26 @@ test('a group first seen after the new ids and a group Telegram upgraded open li
 
 test('a group and a person show the short ID a send card adds after their name, and a person links to their profile', async () => {
   const {page, problems} = await open('chats');
-  const list = page.getByRole('navigation', {name: 'Chats'});
+  const list = chatsTable(page);
   const header = page.locator('main header');
   // The same short ID as the server's, the one a card adds to a name that reads like another's (ADR-0254).
   await list
-    .getByRole('link', {name: 'Aurora planning'})
+    .row('Aurora planning')
     .getByText('…' + chatShortId('-10042'), {exact: true})
     .waitFor();
-  await list.getByRole('link', {name: 'Aurora planning'}).click();
+  await list.open('Aurora planning');
   await page.getByRole('heading', {name: 'Aurora planning', level: 2}).waitFor();
   await header.getByText('…' + chatShortId('-10042'), {exact: true}).waitFor();
   assert.equal(await header.getByRole('link', {name: /^@/}).count(), 0, 'a group has no profile');
   // A topic is named by its group's on a card, and your own chat needs none.
-  await list.getByRole('link', {name: 'Iceland planning'}).click();
+  await list.open('Iceland planning');
   await page.getByRole('heading', {name: 'Iceland planning', level: 2}).waitFor();
   assert.equal(await header.getByText(/^…[0-9a-f]{4}$/).count(), 0);
-  await list.getByRole('link', {name: /^You\b/}).click();
+  await list.open(/^You\b/);
   await page.getByRole('heading', {name: 'Your private chat', level: 2}).waitFor();
   assert.equal(await header.getByText(/^…[0-9a-f]{4}$/).count(), 0);
   // A person's private chat: their short ID, and their public username linked to their Telegram profile.
-  await list.getByRole('link', {name: 'Mira Chen'}).click();
+  await list.open('Mira Chen');
   await page.getByRole('heading', {name: 'Mira Chen', level: 2}).waitFor();
   await header.getByText('…' + chatShortId('73'), {exact: true}).waitFor();
   assert.equal(await header.getByRole('link', {name: '@mira_chen'}).getAttribute('href'), 'https://t.me/mira_chen');
@@ -2179,10 +2264,14 @@ test('a group people were seen in, past the first page of chats, is listed once 
     return route.fulfill({response, json: first});
   });
   await page.goto(origin + '/#chats');
-  const list = page.getByRole('navigation', {name: 'Chats'});
+  const list = page.getByRole('table', {name: 'Chats'});
+  // Every chat of the table, whichever page it is on.
+  await page.getByLabel('Find a chat').fill('Garden swap');
   await list.getByRole('link', {name: 'Garden swap'}).waitFor();
   assert.equal(await list.getByRole('link', {name: 'Garden swap'}).count(), 1, 'listed once');
-  assert.equal(await list.getByRole('link', {name: 'Unknown chat'}).count(), 0);
+  await page.getByLabel('Find a chat').fill('Unknown chat');
+  await page.getByText('No chats match').waitFor();
+  await page.getByLabel('Find a chat').fill('Garden swap');
   await list.getByRole('link', {name: 'Garden swap'}).click();
   await page.getByRole('heading', {name: 'Garden swap', level: 2}).waitFor();
   assert.equal(new URL(page.url()).hash, '#chats?chat=' + encodeURIComponent(UPGRADED));
@@ -2196,8 +2285,8 @@ test('a group people were seen in, past the first page of chats, is listed once 
 
 test('each group says where Nocheh stands, and only a group Nocheh is in has a switch', async () => {
   const {page, problems} = await open('chats');
-  const list = page.getByRole('navigation', {name: 'Chats'});
-  // The list names each group's state from the chat directory (ADR-0253); On is marked.
+  const list = chatsTable(page);
+  // The table names each group's state from the chat directory (ADR-0253); On is marked.
   for (const [name, state] of [
     ['Aurora planning', 'On'],
     ['Weekend notes', 'Off'],
@@ -2205,7 +2294,7 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
     ['Choir practice', 'Left'],
     ['Hiking crew', 'Removed'],
   ])
-    await list.getByRole('link', {name}).getByText(state, {exact: true}).waitFor();
+    await (await list.find(name)).getByText(state, {exact: true}).waitFor();
   // A group someone else added is being left, one added without showing who was left, and one Nocheh was removed
   // from says so: none has a switch, or people to choose.
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Nocheh here', exact: true})});
@@ -2218,7 +2307,7 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
     ],
     ['Hiking crew', 'Removed', 'Nocheh was removed from this group.'],
   ]) {
-    await list.getByRole('link', {name}).click();
+    await list.open(name);
     await page.getByRole('heading', {name, level: 2}).waitFor();
     await card.getByText(text).waitFor();
     await card.getByText(state, {exact: true}).waitFor();
@@ -2228,14 +2317,14 @@ test('each group says where Nocheh stands, and only a group Nocheh is in has a s
   // A topic follows its group: one in a group Nocheh was removed from says so, in the group's own words, and has no
   // reply mode or Telegram notice, as its group's page has none.
   assert.equal(await card.getByText(/Add the bot in Telegram first/).count(), 0, 'Hiking crew');
-  await list.getByRole('link', {name: 'Trail maps'}).click();
+  await list.open('Trail maps');
   await page.getByRole('heading', {name: 'Trail maps', level: 2}).waitFor();
   await card.getByText('Nocheh was removed from this group.').waitFor();
   assert.match(await card.innerText(), /Follows its group, Hiking crew: Removed\./);
   for (const wrong of [/where Nocheh is/, /Add the bot in Telegram first/, /Answers only when called/])
     assert.equal(await card.getByText(wrong).count(), 0, String(wrong));
   // A group Nocheh is in but off has its switch.
-  await list.getByRole('link', {name: 'Weekend notes'}).click();
+  await list.open('Weekend notes');
   await card.getByText('Nocheh doesn’t answer here.').waitFor();
   await page.getByRole('switch', {name: 'Nocheh in this group', checked: false}).waitFor();
   // Imported history can be shared with a group Nocheh is on in, and only with one.
@@ -2271,7 +2360,7 @@ test('every group Nocheh is on in can be shared with and refreshed, past the fir
     await page.goto(origin + '/#chats');
     await page.getByText('Showing the first 100 chats', {exact: false}).waitFor();
     await page.getByLabel('Find a chat').fill('Choir');
-    await page.getByRole('navigation', {name: 'Chats'}).getByRole('link', {name: 'Choir practice'}).waitFor();
+    await page.getByRole('table', {name: 'Chats'}).getByRole('link', {name: 'Choir practice'}).waitFor();
     assert.equal(await page.getByRole('button', {name: /Refresh group names/}).isEnabled(), true);
     // Telegram is asked about 50 of the 122 a press. The owner is told how many are left to check, fewer each press,
     // and nothing more once every group was checked in the last hour; a press never promises to check them all.
@@ -2654,27 +2743,34 @@ function memberPosts(page) {
 
 test('Members lists each member by name with their groups, and a carried member who never wrote shows by name', async () => {
   const {page, problems} = await open('members');
-  const list = page.getByRole('navigation', {name: 'Members'});
-  await list.getByRole('link', {name: /Omar Haddad/}).waitFor();
-  const rows = await list.getByRole('link').allInnerTexts();
+  const list = membersTable(page);
+  await list.row(/Omar Haddad/).waitFor();
+  // A table with the same columns on every row.
   assert.deepEqual(
-    rows.map(text =>
-      text
-        .split('\n')
-        .map(line => line.trim())
-        .filter(Boolean),
-    ),
-    [
-      ['Devon', 'Paused', 'ID 84', '1 of 1 group on'],
-      ['Mira Chen', 'Active', '@mira · ID 73', '2 of 3 groups on · 1 new here'],
-      // Carried from the lists before step 3 and never seen writing: Telegram's name for him, from the identities route.
-      ['Omar Haddad', 'Active', 'ID 95', '1 of 1 group on'],
-    ],
+    (await list.table.getByRole('columnheader').allInnerTexts()).map(text => text.trim()),
+    ['Member', 'Telegram', 'State', 'Groups', 'Private chat'],
   );
+  const rows = await list.table
+    .locator('tbody tr')
+    .evaluateAll(found => found.map(row => [...row.cells].slice(0, 4).map(cell => cell.innerText.trim())));
+  assert.deepEqual(rows, [
+    ['Devon', 'ID 84', 'Paused', '1 of 1 group on'],
+    ['Mira Chen', '@mira · ID 73', 'Active', '2 of 3 groups on · 1 new here'],
+    // Carried from the lists before step 3 and never seen writing: Telegram's name for him, from the identities route.
+    ['Omar Haddad', 'ID 95', 'Active', '1 of 1 group on'],
+  ]);
   await page.getByText('Each member can talk to Nocheh 200 times a day.').waitFor();
-  await list.getByRole('link', {name: /Omar Haddad/}).click();
+  await list.open(/Omar Haddad/);
   await page.getByRole('heading', {name: 'Omar Haddad', level: 2}).waitFor();
   assert.equal(new URL(page.url()).hash, '#members?member=' + OMAR);
+  // The open member names the way back and to any other member.
+  await page.getByRole('button', {name: 'All members'}).waitFor();
+  assert.deepEqual(await page.getByLabel('Open another member').locator('option').allInnerTexts(), [
+    'Devon',
+    'Mira Chen',
+    'Omar Haddad',
+  ]);
+  await memberPart(page, 'Private chat and groups');
   const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Groups', exact: true})});
   const aurora = groups.getByRole('listitem').filter({hasText: 'Aurora planning'});
   await aurora.getByText('Nothing from Telegram yet').waitFor();
@@ -2713,6 +2809,7 @@ test('each member switch saves at once, the three under talk are off while it is
   await page.getByRole('radiogroup', {name: 'Tasks'}).getByRole('radio', {name: 'Read only'}).click();
   await page.getByRole('radiogroup', {name: 'Tasks'}).getByRole('radio', {name: 'Read only', checked: true}).waitFor();
   // Garden swap: Telegram shows her there and she has no switch yet, so it is New here and on; Weekend notes is off.
+  await memberPart(page, 'Private chat and groups');
   const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Groups', exact: true})});
   const garden = groups.getByRole('listitem').filter({hasText: 'Garden swap'});
   await garden.getByText('New here').waitFor();
@@ -2741,8 +2838,10 @@ test('each member switch saves at once, the three under talk are off while it is
     'each change has its own operation',
   );
   assert.equal(await page.getByRole('region', {name: 'Save changes'}).count(), 0, 'no Save bar');
-  // Saved: a reload shows the same.
+  // Saved: a reload shows the same, on the sub-tab that was open.
   await page.reload();
+  await page.getByRole('tab', {name: 'Private chat and groups', selected: true}).waitFor();
+  await memberPart(page, 'What they can do');
   await page.getByRole('switch', {name: under[2], checked: false}).waitFor();
   await page.getByRole('radiogroup', {name: 'Tasks'}).getByRole('radio', {name: 'Read only', checked: true}).waitFor();
   assert.deepEqual(problems, []);
@@ -2773,11 +2872,12 @@ test('a member is added from people seen in a group, with one of their groups un
     [posts[0].path, body],
     ['/members', {account_id: nia, groups: {'-10042': true, [NEW_GROUP]: false}}],
   );
+  for (const name of ['Talk to Nocheh in groups they joined', 'Small jobs (no daily limit)'])
+    assert.equal(await page.getByRole('switch', {name}).getAttribute('aria-checked'), 'true', name);
+  await memberPart(page, 'Private chat and groups');
   const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Groups', exact: true})});
   await groups.getByRole('switch', {name: 'Nia in Aurora planning', checked: true}).waitFor();
   await groups.getByRole('switch', {name: 'Nia in Night sky club', checked: false}).waitFor();
-  for (const name of ['Talk to Nocheh in groups they joined', 'Small jobs (no daily limit)'])
-    assert.equal(await page.getByRole('switch', {name}).getAttribute('aria-checked'), 'true', name);
   // She is a member now, so Aurora planning no longer offers to make her one.
   await page.goto(origin + '/#chats?chat=-10042');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Members here'})});
@@ -2830,6 +2930,7 @@ test('a member is added by Telegram user ID, ticking groups from every group Noc
     groups: Object.fromEntries(joined.map(chat => [chat, chat === UPGRADED])),
   });
   // Telegram never showed them anywhere: their first message proves they are there.
+  await memberPart(page, 'Private chat and groups');
   const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Groups', exact: true})});
   await groups.getByRole('switch', {name: 'Telegram ID 777 in Garden swap', checked: true}).waitFor();
   await groups.getByRole('listitem').filter({hasText: 'Garden swap'}).getByText('Nothing from Telegram yet').waitFor();
@@ -2845,17 +2946,16 @@ test('Pause this member saves at once, and Remove asks first', async () => {
   // Paused, with read-only tasks and jobs switched off: the switches show what is kept.
   await page.getByRole('radiogroup', {name: 'Tasks'}).getByRole('radio', {name: 'Read only', checked: true}).waitFor();
   await page.getByRole('switch', {name: 'Small jobs (no daily limit)', checked: false}).waitFor();
+  await memberPart(page, 'Pause or remove');
   await page.getByRole('switch', {name: 'Pause this member', checked: true}).click();
   await page.getByRole('status').filter({hasText: 'Devon is active again.'}).waitFor();
   await page.getByRole('switch', {name: 'Pause this member', checked: false}).waitFor();
-  const list = page.getByRole('navigation', {name: 'Members'});
-  await list
-    .getByRole('link', {name: /^Devon/})
-    .getByText('Active')
-    .waitFor();
+  const list = membersTable(page);
+  await (await list.find(/^Devon/)).getByText('Active').waitFor();
   // Remove asks first; cancelling sends nothing.
-  await list.getByRole('link', {name: /Omar Haddad/}).click();
+  await list.open(/Omar Haddad/);
   await page.getByRole('heading', {name: 'Omar Haddad', level: 2}).waitFor();
+  await memberPart(page, 'Pause or remove');
   await page.getByRole('button', {name: 'Remove', exact: true}).click();
   const ask = page.getByRole('dialog', {name: 'Remove Omar Haddad as a member?'});
   await ask.getByText('Their tasks and reminders stay.', {exact: false}).waitFor();
@@ -2868,9 +2968,10 @@ test('Pause this member saves at once, and Remove asks first', async () => {
     .getByRole('button', {name: 'Remove'})
     .click();
   await page.getByRole('status').filter({hasText: 'Omar Haddad is no longer a member.'}).waitFor();
-  await page.getByText('Choose a member').waitFor();
+  // Back at the table, without them.
+  await list.row(/Devon/).waitFor();
   assert.equal(new URL(page.url()).hash, '#members');
-  assert.equal(await list.getByRole('link', {name: /Omar Haddad/}).count(), 0);
+  assert.equal(await list.row(/Omar Haddad/).count(), 0);
   assert.deepEqual(
     posts.map(({path, body}) => [path, body.changes ?? null]),
     [
@@ -2923,13 +3024,17 @@ test('a new member, a saved switch and the daily cap show at once while the memb
   await page.getByRole('heading', {name: 'Telegram ID 778', level: 2}).waitFor();
   assert.equal(await page.getByText('This member isn’t here any more').count(), 0);
   await page
-    .getByRole('navigation', {name: 'Members'})
-    .getByRole('link', {name: /Telegram ID 778/})
-    .waitFor();
+    .getByLabel('Open another member')
+    .locator('option', {hasText: 'Telegram ID 778'})
+    .waitFor({state: 'attached'});
+  await memberPart(page, 'Private chat and groups');
   const groups = page.locator('section', {has: page.getByRole('heading', {name: 'Groups', exact: true})});
   await groups.getByRole('switch', {name: 'Telegram ID 778 in Garden swap', checked: true}).click();
   await page.getByRole('status').filter({hasText: 'Telegram ID 778 is off in Garden swap.'}).waitFor();
   await groups.getByRole('switch', {name: 'Telegram ID 778 in Garden swap', checked: false}).waitFor();
+  // The table has the new member too, and the daily cap under it.
+  const list = membersTable(page);
+  await (await list.find(/Telegram ID 778/)).waitFor();
   const input = page.getByLabel('Times each member may ask Nocheh a day');
   await input.fill('120');
   await input.press('Enter');
@@ -2943,8 +3048,10 @@ test('a new member, a saved switch and the daily cap show at once while the memb
   );
   release();
   await reloaded;
-  await groups.getByRole('switch', {name: 'Telegram ID 778 in Garden swap', checked: false}).waitFor();
   assert.equal(await input.inputValue(), '120');
+  await list.open(/Telegram ID 778/);
+  await memberPart(page, 'Private chat and groups');
+  await groups.getByRole('switch', {name: 'Telegram ID 778 in Garden swap', checked: false}).waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -2962,12 +3069,16 @@ test('a change whose answer was lost is applied when made again after a later ch
     await route.abort('failed');
   });
   const pause = checked => page.getByRole('switch', {name: 'Pause this member', checked});
+  await memberPart(page, 'Pause or remove');
   await pause(false).click();
   await page.getByText('Failed to fetch').waitFor();
   // Another change brings the list back: Mira is paused. She is resumed, then paused again.
+  await page.getByRole('button', {name: 'All members'}).click();
   const input = page.getByLabel('Times each member may ask Nocheh a day');
   await input.fill('130');
   await input.press('Enter');
+  await membersTable(page).open(/^Mira Chen/);
+  await memberPart(page, 'Pause or remove');
   await pause(true).click();
   await page.getByRole('status').filter({hasText: 'Mira Chen is active again.'}).waitFor();
   await pause(false).click();
@@ -3113,25 +3224,29 @@ test('a member’s private chat with Nocheh is its own switch, kept apart from g
   const posts = memberPosts(page);
   await page.getByRole('heading', {name: 'Mira Chen', level: 2}).waitFor();
   const toast = text => page.getByRole('status').filter({hasText: text}).last().waitFor();
+  await memberPart(page, 'Private chat and groups');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Private chat', exact: true})});
   await card.getByText('Group talk off doesn’t stop it.').waitFor();
   await card.getByText('You can read the chat under Messages › Members’ chats.', {exact: false}).waitFor();
   const privateChat = 'Private chat with Nocheh';
   const talk = 'Talk to Nocheh in groups they joined';
   // Group talk off leaves the private chat switch as it is, and it can still be changed.
+  await memberPart(page, 'What they can do');
   await page.getByRole('switch', {name: talk, checked: true}).click();
   await toast('Mira Chen can’t talk to Nocheh now.');
+  await memberPart(page, 'Private chat and groups');
   assert.equal(await page.getByRole('switch', {name: privateChat, checked: true}).isEnabled(), true);
   await page.getByRole('switch', {name: privateChat, checked: true}).click();
   await toast('Mira Chen can’t talk to Nocheh privately now.');
-  const list = page.getByRole('navigation', {name: 'Members'});
-  await list
-    .getByRole('link', {name: /^Mira Chen/})
-    .getByText('Private chat off', {exact: false})
-    .waitFor();
+  // The table says so in its Private chat column.
+  const list = membersTable(page);
+  await (await list.find(/^Mira Chen/)).getByText('Off', {exact: true}).waitFor();
   await page.reload();
+  await list.open(/^Mira Chen/);
+  await memberPart(page, 'Private chat and groups');
   await page.getByRole('switch', {name: privateChat, checked: false}).click();
   await toast('Mira Chen can talk to Nocheh privately.');
+  await memberPart(page, 'What they can do');
   await page.getByRole('switch', {name: talk, checked: false}).click();
   await page.getByRole('switch', {name: talk, checked: true}).waitFor();
   assert.deepEqual(
@@ -3144,6 +3259,7 @@ test('a member’s private chat with Nocheh is its own switch, kept apart from g
     ],
   );
   // Pause, and Remove, say the private chat stops too.
+  await memberPart(page, 'Pause or remove');
   await page.getByText('in every group and in their private chat', {exact: false}).waitFor();
   await page.getByText('Deletes them and their switches, and their private chat stops.', {exact: false}).waitFor();
   await page.getByRole('switch', {name: 'Pause this member', checked: false}).click();
@@ -4072,7 +4188,7 @@ test('a task from the members’ app says so on its row, its comments and its hi
     .getByRole('radio', {name: /Studio launch/})
     .click();
   const title = 'Label the seed trays';
-  const row = page.getByRole('listitem').filter({hasText: title});
+  const row = page.getByRole('row').filter({hasText: title});
   await row.getByText('Members’ app').waitFor();
   await row.getByRole('button', {name: `Edit “${title}”`}).click();
   const dialog = page.getByRole('dialog');
@@ -4087,7 +4203,7 @@ test('a task from the members’ app says so on its row, its comments and its hi
 });
 
 test('a note Nocheh wrote while answering names its day once, in its own words', async () => {
-  const {page, problems} = await open('memory?view=notes');
+  const {page, problems} = await open('memory?view=notes&tab=about');
   const turn = page.getByRole('row').filter({hasText: 'Prefers short answers.'}).first();
   await turn.getByText('Nocheh’s note from your private chat on 2026-11-12', {exact: true}).waitFor();
   const day = await page.evaluate(() =>

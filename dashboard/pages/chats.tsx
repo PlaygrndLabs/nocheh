@@ -1,12 +1,10 @@
 /**
- * Chats: every chat Nocheh is in, and what each one may do. The list sits
- * beside the open chat on wide screens; on a phone the chat opens full width.
+ * Chats: every chat Nocheh is in, and what each one may do. The chats are a
+ * table; a chat opens in its place, with the way back and to any other chat.
  */
-import {MessagesSquare} from 'lucide-react';
 import {useParam, useView} from '../lib/navigation';
 import {pageTabs, tabIds} from '../lib/page-tabs';
-import {cn} from '../lib/utils';
-import {Card, Empty, LoadError, Notice} from '../ui/core';
+import {LoadError, Notice} from '../ui/core';
 import {Page, Tabs} from '../ui/page';
 import {loadSettings} from '../lib/settings';
 import {ChatList} from './chats/chat-list';
@@ -55,24 +53,8 @@ export default function ChatsPage() {
   );
 }
 
+/** The table of chats, or the chat chosen from it: one at a time, each the full width of the page. */
 function ChatsView({telegram}: {telegram: ReturnType<typeof useTelegram>}) {
   const selected = useParam('chat');
-  return (
-    <div className="grid items-start gap-5 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)]">
-      <div className={cn('lg:sticky lg:top-6', selected && 'hidden lg:block')}>
-        <ChatList selected={selected} />
-      </div>
-      <div className={cn('min-w-0', !selected && 'hidden lg:block')}>
-        {selected ? (
-          <ChatDetail key={selected} space={selected} telegram={telegram} />
-        ) : (
-          <Card>
-            <Empty icon={MessagesSquare} title="Choose a chat">
-              See whether Nocheh answers there, who may talk to it, what it remembers and what it may do.
-            </Empty>
-          </Card>
-        )}
-      </div>
-    </div>
-  );
+  return selected ? <ChatDetail key={selected} space={selected} telegram={telegram} /> : <ChatList />;
 }

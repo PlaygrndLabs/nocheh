@@ -1,4 +1,4 @@
-/** The list of members, and the daily message cap every member shares. */
+/** The table of members, and the daily message cap every member shares. */
 import {useState} from 'react';
 import {Contact} from 'lucide-react';
 import {
@@ -10,94 +10,97 @@ import {
 import type {Person} from '../../lib/chats-model';
 import {setParams} from '../../lib/routes';
 import {cn} from '../../lib/utils';
-import {Badge, Button, Card, CardBody, CardHeader, Empty, Field, Input, LoadingRows} from '../../ui/core';
+import {Button, Card, Dot, Empty, Field, Input, LoadingRows, Pager, Table, Td, Th} from '../../ui/core';
 import {ActionError, useAction} from '../chats/shared';
 import {memberHref} from './hooks';
 import {byName, groupSummary, memberError, personMeta, personName, type MemberAnswer} from './model';
 
+/** Members on one page of the table. */
+const PAGE = 10;
+
 export function MemberList({
   list,
   loading,
-  selected,
   known,
 }: {
   list: Members | null;
   loading: boolean;
-  selected: string | null;
   known: ReadonlyMap<string, Person>;
 }) {
+  const [page, setPage] = useState(0);
   const members = [...(list?.members ?? [])].sort(byName(known));
   const paused = members.filter(member => member.state === 'paused').length;
+  const last = Math.max(0, Math.ceil(members.length / PAGE) - 1);
+  const current = Math.min(page, last);
+  const none = <span className="text-muted max-sm:hidden">—</span>;
   return (
-    <Card className="flex min-h-0 flex-col">
-      <CardHeader
-        title="Members"
-        description={
-          list
-            ? members.length
-              ? `${members.length} ${members.length === 1 ? 'member' : 'members'}` +
-                (paused ? `, ${paused} paused` : '')
-              : undefined
+    <Card>
+      {loading && <LoadingRows rows={3} />}
+      {list && !members.length && (
+        <Empty icon={Contact} title="No members yet">
+          Add someone Nocheh has seen in your groups, or add them by their Telegram user ID.
+        </Empty>
+      )}
+      {members.length > 0 && (
+        <Table aria-label="Members" className="max-sm:block [&>tbody]:max-sm:block">
+          <thead className="max-sm:sr-only">
+            <tr>
+              <Th scope="col">Member</Th>
+              <Th scope="col">Telegram</Th>
+              <Th scope="col">State</Th>
+              <Th scope="col">Groups</Th>
+              <Th scope="col">Private chat</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.slice(current * PAGE, (current + 1) * PAGE).map(member => {
+              const meta = personMeta(member, known);
+              return (
+                <tr
+                  key={member.id}
+                  className="hover:bg-subtle/60 max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:gap-x-3 max-sm:gap-y-0.5 max-sm:border-b max-sm:border-line max-sm:px-4 max-sm:py-2.5 max-sm:[&>td]:border-0 max-sm:[&>td]:p-0"
+                >
+                  <Td className="max-w-0 sm:w-[30%] max-sm:w-full max-sm:max-w-none">
+                    <a
+                      href={memberHref(member.id)}
+                      onClick={event => {
+                        event.preventDefault();
+                        setParams({member: member.id});
+                      }}
+                      className="block truncate font-medium hover:underline"
+                      dir="auto"
+                    >
+                      {personName(member, known)}
+                    </a>
+                  </Td>
+                  <Td className="text-[13px] whitespace-nowrap text-muted">{meta || none}</Td>
+                  <Td className="text-[13px] whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Dot tone={member.state === 'paused' ? 'warn' : 'good'} />
+                      {member.state === 'paused' ? 'Paused' : 'Active'}
+                    </span>
+                  </Td>
+                  <Td className="text-[13px] whitespace-nowrap text-muted">{groupSummary(member)}</Td>
+                  <Td className="text-[13px] whitespace-nowrap text-muted">
+                    <span className="sm:hidden">Private chat </span>
+                    <span>{member.permissions.private_chat ? 'On' : 'Off'}</span>
+                  </Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      )}
+      <Pager
+        page={current}
+        hasNext={current < last}
+        onPage={setPage}
+        summary={
+          members.length
+            ? `${members.length} ${members.length === 1 ? 'member' : 'members'}` + (paused ? `, ${paused} paused` : '')
             : undefined
         }
       />
-      <nav aria-label="Members" className="mt-2 min-h-0 flex-1 overflow-y-auto border-t border-line pb-2">
-        {loading && <LoadingRows rows={3} />}
-        {list && !members.length && (
-          <Empty icon={Contact} title="No members yet">
-            Add someone Nocheh has seen in your groups, or add them by their Telegram user ID.
-          </Empty>
-        )}
-        {members.length > 0 && (
-          <ul className="px-2 pt-2">
-            {members.map(member => {
-              const meta = personMeta(member, known);
-              return (
-                <li key={member.id}>
-                  <a
-                    href={memberHref(member.id)}
-                    onClick={event => {
-                      event.preventDefault();
-                      setParams({member: member.id});
-                    }}
-                    aria-current={selected === member.id ? 'true' : undefined}
-                    className={cn(
-                      'flex flex-col gap-0.5 rounded-lg px-2 py-2 transition-colors',
-                      selected === member.id ? 'bg-accent-soft' : 'hover:bg-subtle',
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span
-                        dir="auto"
-                        className={cn(
-                          'min-w-0 flex-1 truncate text-sm font-medium',
-                          selected === member.id && 'text-accent-text',
-                        )}
-                      >
-                        {personName(member, known)}
-                      </span>
-                      {member.state === 'paused' ? (
-                        <Badge tone="warn" className="shrink-0">
-                          Paused
-                        </Badge>
-                      ) : (
-                        <Badge tone="good" className="shrink-0">
-                          Active
-                        </Badge>
-                      )}
-                    </span>
-                    {meta && <span className="truncate text-xs text-muted">{meta}</span>}
-                    <span className="text-xs text-muted">
-                      {groupSummary(member)}
-                      {member.permissions.private_chat ? '' : ' · Private chat off'}
-                    </span>
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </nav>
     </Card>
   );
 }
@@ -126,20 +129,31 @@ export function DailyMessages({value, onSaved}: {value: number; onSaved: (answer
     }
   };
   return (
-    <Card>
-      <CardHeader
-        title="Daily messages"
-        description={`Each member can talk to Nocheh ${value.toLocaleString()} ${value === 1 ? 'time' : 'times'} a day.`}
-      />
-      <CardBody>
+    <Card className="px-5 py-4">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0 flex-1 basis-80">
+          <h2 className="text-[15px] font-semibold">Daily messages</h2>
+          <p className="mt-0.5 text-[13px] text-muted">
+            {`Each member can talk to Nocheh ${value.toLocaleString()} ${value === 1 ? 'time' : 'times'} a day.`}
+          </p>
+          <p className={cn('mt-1 text-xs', draft !== null && !valid ? 'text-bad' : 'text-muted')}>
+            {draft !== null && !valid
+              ? 'Choose a whole number from 1 to 10,000.'
+              : 'Across all their groups, per UTC day. Past it they get one short reply in that group. You have no limit.'}
+          </p>
+        </div>
         <form
-          className="flex items-end gap-2"
+          className="flex max-w-full items-end gap-2"
           onSubmit={event => {
             event.preventDefault();
             void save();
           }}
         >
-          <Field label="Times each member may ask Nocheh a day" htmlFor="daily-messages" className="min-w-0 flex-1">
+          <Field
+            label="Times each member may ask Nocheh a day"
+            htmlFor="daily-messages"
+            className="w-80 min-w-0 shrink"
+          >
             <Input
               id="daily-messages"
               type="number"
@@ -159,13 +173,8 @@ export function DailyMessages({value, onSaved}: {value: number; onSaved: (answer
             Save
           </Button>
         </form>
-        <p className={cn('mt-2 text-xs', draft !== null && !valid ? 'text-bad' : 'text-muted')}>
-          {draft !== null && !valid
-            ? 'Choose a whole number from 1 to 10,000.'
-            : 'Across all their groups, per UTC day. Past it they get one short reply in that group. You have no limit.'}
-        </p>
-        <ActionError text={action.error} />
-      </CardBody>
+      </div>
+      <ActionError text={action.error} />
     </Card>
   );
 }

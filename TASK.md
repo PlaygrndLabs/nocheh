@@ -14,6 +14,21 @@ owner's own) ([ADR-0268](docs/adr/0268-notion-per-project-or-person.md)).
   MCP, Notion sign-in Python test, dashboard browser.
 - Next: step 3, GitHub per project. A member's private chat gets a project's Notion in step 5.
 
+Tasks, Chats, Members and Assistant notes as tables and sub-tabs, step 5 part 2 and the last step
+of the table-first dashboard plan (owner, 2026-11-19: "avoid scrolling as much as possible and use
+tables instead, everywhere"; 2026-11-20: "yes to all").
+- These pages now fit one 1600x900 screen: Tasks (was 1.2 screens; its board 1.5), Chats ›
+  Sharing (1.2), an open chat, an open member (1.8), Memory › Assistant notes (1.1).
+- Tasks: the list is a table of ten a page (task, status, priority, due, list), eight under day
+  lines in Today and Upcoming; a new task answers with a toast, as it may be on another page.
+  The board shows four cards a column at a time. Cards stay a choice.
+- Chats and Members: a full-width table; a chat or a member opens in its place with the way back
+  and a choice of any other one. An open chat's cards sit side by side; an open member has three
+  sub-tabs. Sharing: rules table and a Defaults sub-tab (`tab=defaults`). Assistant notes: three
+  sub-tabs.
+- Layout only: no setting, rule or stored data changed.
+- Checks: browser (`test/dashboard-pages.browser.mjs`), dashboard unit tests.
+
 Remaining pages as tables and sub-tabs, step 5 part 1 of the table-first dashboard plan (owner,
 2026-11-19: "avoid scrolling as much as possible and use tables instead, everywhere";
 2026-11-20: "yes to all").
@@ -29,8 +44,6 @@ Remaining pages as tables and sub-tabs, step 5 part 1 of the table-first dashboa
   Long-term memory: three sub-tabs; `chat=` and `about=` links open the facts.
 - Layout only: no setting, rule or stored data changed.
 - Checks: browser (`test/dashboard-pages.browser.mjs`), [unit](test/store-member-messages.test.ts).
-  Pending: step 5 part 2 (Tasks 1.2 screens and its board 1.5, Chats list 1.0 and Sharing 1.2,
-  Memory › Assistant notes 1.1, Members).
 
 "Share group chats", step 1 of the shared and private connectors plan (owner, 2026-11-20: a
 project switch to freely share group data between the project's groups, on by default, for
