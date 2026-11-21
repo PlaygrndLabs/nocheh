@@ -20,6 +20,20 @@ Remaining pages as tables and sub-tabs, step 5 part 1 of the table-first dashboa
   Pending: step 5 part 2 (Tasks 1.2 screens and its board 1.5, Chats list 1.0 and Sharing 1.2,
   Memory › Assistant notes 1.1, Members).
 
+"Share group chats", step 1 of the shared and private connectors plan (owner, 2026-11-20: a
+project switch to freely share group data between the project's groups, on by default, for
+existing projects too) ([ADR-0267](docs/adr/0267-share-group-chats.md)).
+- `projects.share_chats` (default on); the owner's project save takes it. Memory › Projects:
+  a "Share group chats" switch with the risk line and a badge; the join notes follow it.
+- While on, every group or topic turn of the project, and a member's private chat for a group
+  they joined, reads all of the project's served groups: bound on the server per request
+  (`bindReads`, `sharedProjectGroups`), never from the pass. Off, each group reads itself and
+  Answer privately comes back.
+- Checks: [store](test/store-shared-project-chats.test.ts), owner API, private answers,
+  projects, dashboard browser; full tester `project_groups_stay_apart` gains the on step (not
+  run in cloud this time).
+- Next: step 2, connections owned by a project or a person (the owner's Notion moves over).
+
 System pages as tables and sub-tabs, step 4 of the table-first dashboard plan (owner,
 2026-11-19: "avoid scrolling as much as possible and use tables instead, everywhere";
 2026-11-20: "yes to all", which took charts on their own sub-tab so the first screen is tables).

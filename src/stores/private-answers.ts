@@ -158,13 +158,14 @@ export class PrivateAnswerRepository {
   /**
    * The project a group or topic answer may offer the button for, and that project's groups, as projectGroups gives
    * them: the asking group is served and assigned to an active project that has at least one other served group.
-   * Null otherwise, which means no button. A topic follows its group's project.
+   * Null otherwise, which means no button: also for a project whose "Share group chats" is on, whose group answer
+   * already reads every group of it (ADR-0267). A topic follows its group's project.
    */
   async offerable(space:string,db:Database=this.control):Promise<{project_id:string;groups:string[]}|null> {
     const policy=this.policy(),group=chats().groupOf(space);
     if(!policy.enabled||!policy.owner_id||group===null||!chats().served(group))return null;
     const row=(await db.query(`SELECT a.project_id FROM project_assignments a JOIN projects p ON p.id=a.project_id
-      WHERE a.space_id=$1 AND a.mode='assigned' AND p.state='active'`,[group])).rows[0];
+      WHERE a.space_id=$1 AND a.mode='assigned' AND p.state='active' AND NOT p.share_chats`,[group])).rows[0];
     if(!row)return null;
     const groups=await projectGroups(db,row.project_id,servedGroups());
     return groups.includes(group)&&groups.length>1?{project_id:row.project_id,groups}:null;

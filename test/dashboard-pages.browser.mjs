@@ -1460,14 +1460,18 @@ test('moving a task into a project’s list names the chats that will see it fir
   await page.close();
 });
 
-test('a project shares nothing between its groups, and a group joins one only after seeing the groups already there', async () => {
-  // The project has no box that makes its groups share (ADR-0247).
+test('a project shares its group chats only by its switch, and a group joins one only after seeing the groups already there', async () => {
+  // No box makes groups share (ADR-0247); the project's "Share group chats" switch does, on by default (ADR-0267).
   const {page, problems} = await open('memory?view=projects&project=' + 'ab'.repeat(32));
   const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
   await drawer.getByRole('button', {name: 'Edit'}).click();
   const dialog = page.getByRole('dialog', {name: 'Edit project'});
   await dialog.getByText('Put only related groups in one project; keep family groups out of projects.').waitFor();
   assert.equal(await dialog.getByRole('checkbox').count(), 0, 'no box makes a project share');
+  const share = dialog.getByRole('switch', {name: 'Share group chats'});
+  assert.equal(await share.getAttribute('aria-checked'), 'true', 'the project shares its group chats');
+  await share.click();
+  await dialog.getByText('Off: an answer in a group uses only that group.').waitFor();
   await dialog.getByRole('button', {name: 'Cancel'}).click();
   await dialog.waitFor({state: 'detached'});
   assert.equal(await page.getByText('Shares', {exact: true}).count(), 0);
@@ -1486,7 +1490,7 @@ test('a project shares nothing between its groups, and a group joins one only af
   const text = await ask.textContent();
   const order = [
     'Already in Aurora field guide',
-    'People in two of these groups can get private answers that combine them.',
+    'Everyone in these groups, members or not, can see answers built from all of them.',
     'Put only related groups in one project',
     'will see and, where they may write tasks, change the tasks set on the whole of Aurora field guide, never another group’s own tasks.',
   ].map(part => text.indexOf(part));
@@ -1547,12 +1551,12 @@ test('a project shares nothing between its groups, and a group joins one only af
   await moveHere.getByRole('button', {name: 'Cancel'}).click();
   await moving.close();
 
-  // A group's card says it shares only the project's own tasks, and moving it asks first, naming the groups in the
+  // A group's card says its project's groups read each other while it shares, and moving it asks first, naming the groups in the
   // other project.
   const {page: chat, problems: chatProblems} = await open('chats?chat=-10042&tab=memory');
   const card = chat.locator('section', {has: chat.getByRole('heading', {name: 'Project', exact: true})});
   await card
-    .getByText('They share only the tasks set on the whole project: a group answer uses only that group.', {
+    .getByText('While it shares its group chats, an answer in any of its groups can use all of them.', {
       exact: false,
     })
     .waitFor();
@@ -1711,7 +1715,7 @@ test('a project shares nothing between its groups, and a group joins one only af
   const turnOn = placed.getByRole('dialog', {name: 'Turn Nocheh on in Weekend notes?'});
   await turnOn.getByText('Already in Aurora field guide: Aurora planning.').waitFor();
   await turnOn
-    .getByText('People in two of these groups can get private answers that combine them.', {exact: false})
+    .getByText('Everyone in these groups, members or not, can see answers built from all of them.', {exact: false})
     .waitFor();
   await turnOn
     .getByText('the tasks set on the whole of Aurora field guide, never another group’s own', {exact: false})
@@ -1767,7 +1771,7 @@ test('a project shares nothing between its groups, and a group joins one only af
   await join.locator('#join-project').selectOption({label: 'Aurora field guide'});
   await join.getByText('Already in Aurora field guide: Aurora planning.').waitFor();
   await join
-    .getByText('People in two of these groups can get private answers that combine them.', {exact: false})
+    .getByText('Everyone in these groups, members or not, can see answers built from all of them.', {exact: false})
     .waitFor();
   await join.getByRole('button', {name: 'Turn on'}).click();
   await off.getByRole('status').filter({hasText: 'Weekend notes joins Aurora field guide.'}).waitFor();
@@ -1785,7 +1789,9 @@ test('a project shares nothing between its groups, and a group joins one only af
   await proposal.getByText('This moves a group into or out of a project').waitFor();
   await proposal.getByText('Already in Aurora field guide: Aurora planning.').waitFor();
   await proposal
-    .getByText('People in two of these groups can get private answers that combine them.', {exact: false})
+    .getByText('While a project shares its group chats, everyone in its groups, members or not, can see answers', {
+      exact: false,
+    })
     .waitFor();
   await review.close();
 

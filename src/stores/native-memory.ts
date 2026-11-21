@@ -1,11 +1,11 @@
 import {randomBytes,randomUUID} from 'node:crypto';
 import type pg from 'pg';
-import {admin,boundReader,type Reader} from '../access.js';
+import {admin,boundReader,sharedReads,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {inspectRequest} from '../guard.js';
 import {engineErrors,engineId,engineSummary,type EngineWrite,type MemoryEngine} from '../memory/engine.js';
-import {archiveScopes,groupWithTopics,parentSpace,readSetParam,readSetSql,recallCondition,servedGroups,validateSpace} from '../spaces.js';
+import {archiveScopes,groupWithTopics,parentSpace,readSetIds,readSetParam,readSetSql,recallCondition,servedGroups,validateSpace} from '../spaces.js';
 import {ownerChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import {forwardOrigin,type Forward} from '../forwarded.js';
@@ -148,7 +148,13 @@ export class NativeMemoryRepository {
   private principalAudience(principal:Reader){return principal.scope===null?'owner':principal.space??principal.scope;}
   /** The group whose every conversation a scoped principal recalls when its topics share memory. */
   /** The ids of the reader's group and its topics when its topics share memory (groupWithTopics); null otherwise. */
-  private recallGroup(principal:Reader){return groupWithTopics(principal.admin?null:this.contexts.access.recall(principal)?.group??null);}
+  /** The conversations beside its own that a scoped reader's memory reads: every conversation of its project's groups
+   * while that project shares its group chats (ADR-0267), else its group's when the group's topics share memory. */
+  private recallGroup(principal:Reader){
+    if(principal.admin)return null;
+    const shared=sharedReads(principal);
+    return shared?readSetIds(shared):groupWithTopics(this.contexts.access.recall(principal)?.group??null);
+  }
 
   async status() {
     const binding=await this.guards.state(),connection=(await this.control.query('SELECT * FROM memory_engine_connection WHERE singleton')).rows[0];

@@ -680,6 +680,8 @@ export class TelegramDispatchRepository {
       }
       principal=bound;
     }
+    // A group turn reads its project's other groups while that project shares its group chats (ADR-0267).
+    else if(!scope.owner)principal=await this.access.bindReads(principal);
     await this.turns.binding(principal);
     const selected=await this.sources.read(principal,source.id);
     const album:[string,typeof selected][]=[[source.id,selected]];

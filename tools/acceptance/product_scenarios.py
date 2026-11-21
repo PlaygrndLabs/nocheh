@@ -1903,7 +1903,8 @@ class ProductScenarios(Scenarios):
 
     def project_groups_stay_apart(self):
         # Groups of one project (ADR-0247, ADR-0248, ADR-0249): OTHER_GROUP (GP1), THIRD_GROUP (GP2) and NEW_GROUP (NG1, a
-        # group first seen after step 2b, with a digest id, ADR-0252) join a new project; GROUP (GP4) stays in none. Each
+        # group first seen after step 2b, with a digest id, ADR-0252) join a new project with "Share group chats" off
+        # (ADR-0267); GROUP (GP4) stays in none. Each
         # group, and the owner's private chat, holds its own mark next to one shared search word. A group answer reads only
         # its own group: the owner's question in GP1 finds GP1's mark and its task, never GP2's mark, task, count or tag,
         # and the same question in NG1 finds NG1's mark and neither group's task. Under the owner's answer there sits Answer
@@ -1913,6 +1914,8 @@ class ProductScenarios(Scenarios):
         # messages, so a model request holding it next to a private mark counts as a leak. It stays out of the question:
         # the question holds the search word, so search results, and the private answer the owner's chat keeps beside its
         # private mark, would hold it too. The private mark is saved for private_canaries_never_left_the_owner.
+        # Last, the owner turns "Share group chats" on: the same question in GP1 then reads GP1, GP2 and NG1 and their
+        # tasks, never GP4 or the private chat, and carries no Answer privately.
         number = str(self.f.ids())
         word, probe = 'CRATEWORD'+number, 'PROBEMARK'+number
         gp1, gp2, gp4, ng1 = 'GPONEMARK'+number, 'GPTWOMARK'+number, 'GPFOURMARK'+number, 'NGONEMARK'+number
@@ -1924,8 +1927,9 @@ class ProductScenarios(Scenarios):
             # The marks, before the project exists: a group's own message stays that group's.
             self.turn(self.f.message(OWNER, 'Spare crates are in my garage '+word+' '+private), OWNER)
             self.turn(self.f.message(GROUP, 'Crates for the venue '+word+' '+gp4, topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
-            project = self.f.app('/v1/projects', {'name': 'Project groups P1', 'description': '', 'state': 'active', 'expected_revision': 0,
-                                                  'operation_id': 'scenario-project-groups-'+number})
+            project = self.f.app('/v1/projects', {'name': 'Project groups P1', 'description': '', 'state': 'active', 'share_chats': False,
+                                                  'expected_revision': 0, 'operation_id': 'scenario-project-groups-'+number})
+            self.gate('project_starts_unshared', project.get('share_chats') is False, project=project)
             members = {OTHER_GROUP: self.f.chat(OTHER_GROUP), THIRD_GROUP: self.f.chat(THIRD_GROUP), NEW_GROUP: self.new_group_chat()}
             for chat, space in members.items():
                 own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(space, safe=''))['own_assignment']
@@ -2049,6 +2053,25 @@ class ProductScenarios(Scenarios):
                           for tap in (member, owner)]
                 return all(found)
             self.wait('every_send_recorded', recorded, 180)
+
+            # 6. The owner turns "Share group chats" on (ADR-0267): GP1's answer reads every group of the project and their
+            # tasks, never GP4 or the private chat, and no Answer privately sits under it.
+            shared = self.f.app('/v1/projects', {'id': project['id'], 'name': project['name'], 'description': project['description'],
+                                                 'state': 'active', 'share_chats': True, 'expected_revision': project['revision'],
+                                                 'operation_id': 'scenario-project-groups-share-'+number})
+            self.gate('project_shares_its_group_chats', shared.get('share_chats') is True, project=shared)
+            before = len(self.f.sent())
+            _, shared_text = self.turn(self.f.message(OTHER_GROUP, 'What do we have on crates now? '+tools), OTHER_GROUP, chunked=True)
+            search = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
+            listed = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
+            seen = shared_text+'\n'+search+'\n'+listed
+            self.gate('shared_group_answer_reads_the_projects_groups', gp1 in search and gp2 in search and ng1 in search
+                      and gp1_task in listed and gp2_task in listed, search=search[:300], tasks=listed[:300])
+            self.gate('shared_group_answer_never_reads_other_groups_or_the_private_chat', not canaries.found(seen, {gp4: 'GP4', private: 'private'}),
+                      found=canaries.found(seen, {gp4: 'GP4', private: 'private'}))
+            shared_replies = [row for row in self.replies(before, OTHER_GROUP) if not self.is_card(row)]
+            self.gate('shared_group_answer_carries_no_button', shared_replies and not any(self.buttons(row) for row in shared_replies),
+                      buttons=[self.buttons(row) for row in shared_replies])
         except Exception as error:
             failed = error
             raise

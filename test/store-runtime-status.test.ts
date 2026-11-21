@@ -19,8 +19,8 @@ test('owner runtime status names the plugged-in brain, reports Telegram polling 
     assert.equal(operation,'telegram.status');
     return {ok:true,service:'telegram',telegram:'connected',telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}};
   };
-  const capabilities={'guard.detect':true,'image.read':false,'telegram.status':true};
-  const server=storageServer({brain} as unknown as StorageServices,config,bot,undefined,undefined,capabilities);
+  const capabilities={'guard.detect':true,'image.read':false,'telegram.status':true},access={bindReads:async(principal:unknown)=>principal};
+  const server=storageServer({brain,access} as unknown as StorageServices,config,bot,undefined,undefined,capabilities);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');
@@ -35,7 +35,7 @@ test('owner runtime status names the plugged-in brain, reports Telegram polling 
     assert.deepEqual((body as unknown as {brain:unknown}).brain,{id:'hermes',name:'Fixture brain',capabilities:{telegram:true,browser:true,scheduler:true,background:true,
       settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:true,schedule_list:true}});
     // A brain that does not answer is reported, not hidden.
-    const down=storageServer({brain:{...brain,status:async()=>{throw Error('down');}}} as unknown as StorageServices,config,async()=>({}));
+    const down=storageServer({brain:{...brain,status:async()=>{throw Error('down');}},access} as unknown as StorageServices,config,async()=>({}));
     await new Promise<void>(resolve=>down.listen(0,'127.0.0.1',resolve));
     try{
       const port=(down.address() as {port:number}).port;
