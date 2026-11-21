@@ -1154,6 +1154,48 @@ test('GitHub is connected through its own app, lists the chosen repositories, co
   await page.close();
 });
 
+test('a repository is linked to a project from Settings or from the project, and unlinked there', async () => {
+  // ADR-0269: by name, copied or not; each change saves at once.
+  const {page, problems} = await open('settings?view=connections&tab=github');
+  const card = page.getByRole('region', {name: 'GitHub'});
+  await card.getByText('Not connected').waitFor();
+  await card.getByRole('button', {name: 'Connect GitHub'}).click();
+  await page.getByRole('status').filter({hasText: 'GitHub is connected.'}).waitFor();
+  const who = card.getByLabel('Who uses example-org/widgets');
+  const options = await who.locator('option').allTextContents();
+  assert.equal(options[0], 'You only');
+  assert.ok(options.includes('Project: Aurora field guide'), options.join());
+  await who.selectOption({label: 'Project: Aurora field guide'});
+  await page.getByRole('status').filter({hasText: 'Linked to Aurora field guide'}).waitFor();
+  const project = 'memory?view=projects&project=' + 'ab'.repeat(32);
+  await page.goto(origin + '/#' + project);
+  const github = page
+    .getByRole('dialog', {name: 'Aurora field guide'})
+    .getByRole('region', {name: 'GitHub for this project'});
+  const listed = github.getByRole('list', {name: 'This project’s repositories'});
+  await listed.getByText('example-org/widgets').waitFor();
+  await github.getByLabel('Repository to link').selectOption({label: 'example-org/gadgets'});
+  await github.getByRole('button', {name: 'Link', exact: true}).click();
+  await listed.getByText('example-org/gadgets').waitFor();
+  await listed
+    .getByRole('listitem')
+    .filter({hasText: 'example-org/widgets'})
+    .getByRole('button', {name: 'Unlink'})
+    .click();
+  await page.getByRole('status').filter({hasText: 'example-org/widgets is yours only now'}).waitFor();
+  await page.reload();
+  await listed.getByText('example-org/gadgets').waitFor();
+  assert.equal(await listed.getByText('example-org/widgets').count(), 0);
+  await page.goto(origin + '/#settings?view=connections&tab=github');
+  assert.equal(await card.getByLabel('Who uses example-org/widgets').inputValue(), '');
+  // Back as the next test expects it: not connected.
+  await card.getByRole('button', {name: 'Disconnect'}).click();
+  await page.getByRole('dialog', {name: 'Disconnect GitHub?'}).getByRole('button', {name: 'Disconnect'}).click();
+  await card.getByText('Not connected').waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a machine is added with its public key, tested, edited, turned off and removed, and its commands are in the log', async () => {
   const {page, problems} = await open('settings?view=machines');
   const card = page.getByRole('region', {name: 'Machines'});

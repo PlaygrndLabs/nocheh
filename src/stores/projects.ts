@@ -8,6 +8,14 @@ import {OwnerCommands} from './owner-commands.js';
 import {projectGroupsSql} from './project-groups.js';
 import {moveGroupTasks} from './tasks.js';
 
+/** The active project a group or topic belongs to, or null: a topic follows its group (ADR-0247). Used where a project's own
+ *  connection may be used, such as its Notion (ADR-0268) and its GitHub copies (ADR-0269). */
+export async function activeChatProject(db:Pick<pg.PoolClient,'query'>,space:string):Promise<string|null> {
+  const group=chats().groupOf(space)??parentSpace(space)??space;
+  return (await db.query(`SELECT a.project_id FROM project_assignments a JOIN projects p ON p.id=a.project_id AND p.state='active'
+    WHERE a.space_id=$1 AND a.mode='assigned'`,[group])).rows[0]?.project_id??null;
+}
+
 const id=(value:unknown):string=>{const v=string(value,64);if(!/^[a-f0-9]{64}$/.test(v))throw new HttpError(400,'invalid_project_id');return v;};
 const revision=(value:unknown):number=>{if(!Number.isSafeInteger(value)||Number(value)<0)throw new HttpError(400,'invalid_revision');return Number(value);};
 function exact(body:Record<string,unknown>,keys:string[]):void {

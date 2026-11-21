@@ -40,7 +40,8 @@ DEFAULTS = {
         'For work on one of the owner\'s own machines (in the owner\'s private chat action status lists them and which are ready; in a group use the name the owner gives), '
         'set machine and steps instead of box: only for the owner\'s own request, in their private chat or an active project\'s group. '
         'Its plan card and its report go to the owner\'s private chat; in a group never repeat the machine, the plan or the report. '
-        'In the owner\'s private chat, set box when the work needs commands, files or Python but no machine.'),
+        'In the owner\'s private chat, set box when the work needs commands, files or Python but no machine. '
+        'For the owner\'s own request in a project\'s group, set box with repo to read one of that project\'s GitHub repositories (action status lists them).'),
     'reply.owner': (
         'This is the owner private conversation. '
         'Archive access spans all chats. '

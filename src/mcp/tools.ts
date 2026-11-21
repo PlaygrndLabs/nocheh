@@ -550,7 +550,8 @@ export const mcpTools:readonly McpTool[]=[
   {name:'background_job',description:'Background jobs: work too big for one reply runs in a session of its own and reports back here. '+
     'action=start asks for one, with a title, the full brief, and optionally chat, from and to (YYYY-MM-DD), and box or machine with steps. '+
     'Nocheh counts and prices it and posts an Approve card; nothing runs until it is approved, and the result says who approves. '+
-    'action=status lists this chat\'s jobs with progress and cost and, in the owner\'s private chat, the GitHub copies a box job may read (repos); '+
+    'action=status lists this chat\'s jobs with progress and cost and the GitHub copies a box job may read (repos): every copy and its project in the owner\'s private chat, '+
+    'only the project\'s copies for the owner\'s own request in a project\'s group; '+
     'for the owner\'s own request there it also lists the owner\'s machines and whether each is ready (machines). '+
     'A job on the owner\'s machine reports to the owner\'s private chat; in a group its status shows no machine, plan or to-do list. '+
     'action=stop with id stops a job you may stop. Only the owner may name another chat.',
@@ -558,9 +559,9 @@ export const mcpTools:readonly McpTool[]=[
       chat:{type:'string'},from:{type:'string'},to:{type:'string'},id:{type:'string'},
       box:{type:'boolean',description:'With start: true when the job needs to run commands, work with files or run Python. '+
         'It then gets a sealed box with no internet that holds a checked copy of the job\'s own chat and, with repo, a read-only copy of that GitHub repository. '+
-        'Only for a job the owner asks for in their private chat.'},
-      repo:{type:'string',maxLength:140,description:'With start and box=true, for a job the owner asks for in their private chat: a GitHub repository '+
-        'the owner copied in Settings › Connections, as owner/name from action=status. The box then holds a read-only copy with its history at /repo/code.'},
+        'Only for a job the owner asks for in their private chat, or in a project\'s group with repo.'},
+      repo:{type:'string',maxLength:140,description:'With start and box=true, for a job the owner asks for: a GitHub repository the owner copied, as owner/name '+
+        'from action=status; in a project\'s group only one of that project\'s. The box then holds a read-only copy with its history at /repo/code.'},
       machine:{type:'string',maxLength:40,description:'For work on one of the owner\'s machines (listed by action=status in the owner\'s private chat; in a group, the name the owner gives): the machine\'s name and a short plan '+
         'of 1-12 steps the owner approves on one card. Only for the owner\'s own request in their private chat or a project group. '+
         'Your terminal and file tools then run on that machine.'},

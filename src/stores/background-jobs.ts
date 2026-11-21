@@ -28,7 +28,7 @@ import {currentChats} from './chats.js';
 import {ManagedExecutionRepository,managedEventId,type ManagedInput} from './managed-execution.js';
 import {machineJob,machinePin,machineReady,machineTokenSet,type MachinePin} from './machines.js';
 import {followUpTurn} from './owner-autonomy.js';
-import {ProjectRepository} from './projects.js';
+import {activeChatProject,ProjectRepository} from './projects.js';
 import {reordering,visible} from '../action-text.js';
 import {cents,memberCostLimit,memberDecided,memberJobSchema,MemberJobSpend} from './member-job-spend.js';
 
@@ -93,6 +93,10 @@ CREATE TABLE IF NOT EXISTS github_copies (
  previous_digest text CHECK(previous_digest ~ '^[a-f0-9]{64}$'),
  copied_at timestamptz NOT NULL DEFAULT now());
 CREATE UNIQUE INDEX IF NOT EXISTS github_copies_repo ON github_copies(lower(repo));
+-- The repositories the owner linked to a project, by name, copied or not (ADR-0269); any other is the owner's own. A box job
+-- asked in that project's group may read its copy, and the project's chats may look it up.
+CREATE TABLE IF NOT EXISTS github_projects (repo text PRIMARY KEY CHECK(repo=lower(repo) AND repo ~ '^[a-z0-9][a-z0-9-]{0,38}/[a-z0-9._-]{1,100}$'),
+ project_id text NOT NULL CHECK(project_id ~ '^[a-f0-9]{64}$'),updated_at timestamptz NOT NULL DEFAULT now());
 -- Each name's latest Remove, numbered in order. A new copy sends the number it read before it asked GitHub, so a Remove
 -- of that name after it refuses the copy, also a Remove that found no row (ADR-0209).
 CREATE TABLE IF NOT EXISTS github_removals (repo text PRIMARY KEY CHECK(repo=lower(repo)),removal integer NOT NULL CHECK(removal>0));
@@ -290,15 +294,28 @@ export const pinnedRepo=(row:any):PinnedRepo=>({copy_id:String(row.copy_id),name
 /** SQL over a job row `j`: whether the copy it pinned still exists. Remove and Disconnect delete the row for good. */
 export const repoKept="(j.repo IS NULL OR EXISTS (SELECT 1 FROM github_copies c WHERE c.copy_id=j.repo->>'copy_id'))";
 
+/** Whether a run is of a running job the owner asked for in their own message in a group and approved, that pinned a GitHub
+ *  copy of the active project that group is in (ADR-0269). Like `ownerApprovedJob` it locks the job row FOR SHARE. */
+async function projectBoxJob(db:Pick<pg.PoolClient,'query'>,owner:JobOwner,source:{store:string;id:string},
+  turn:{job?:string|null;logical_profile?:string|null}):Promise<boolean> {
+  const {chat,account}=jobOwner(owner);
+  if(!chat||!account||!turn.job||source.store!=='control')return false;
+  const row=(await db.query(`SELECT j.space_id,g.project_id FROM background_runs s JOIN background_jobs j ON j.id=s.job_id
+    JOIN github_copies c ON c.copy_id=j.repo->>'copy_id' JOIN github_projects g ON g.repo=lower(c.repo) WHERE s.event_id=$1 AND j.id=$2
+      AND j.state='running' AND NOT j.cancel_requested AND j.scope<>$3 AND j.requester IS NULL AND j.decided_by=$5 AND j.logical_profile=$4 FOR SHARE OF j`,
+    [source.id,turn.job,chat,turn.logical_profile??null,account])).rows[0];
+  return !!row&&await activeChatProject(db,row.space_id)===row.project_id;
+}
+
 /** A run's job when the run runs in the job's sealed box: a run of a job that asked for the box and whose box time
- *  has not passed, that `ownerApprovedJob` lets through, while the owner's box switch and the guard are on, and whose
- *  GitHub copy, if it pinned one, was not removed. Null otherwise. */
+ *  has not passed, that `ownerApprovedJob` or `projectBoxJob` lets through, while the owner's box switch and the guard are
+ *  on, and whose GitHub copy, if it pinned one, was not removed. Null otherwise. */
 export async function boxJob(db:Pick<pg.PoolClient,'query'>,owner:JobOwner,source:{store:string;id:string},
   turn:{owner?:boolean;job?:string|null;logical_profile?:string|null},guard:GuardBinding):Promise<any|null> {
   if(!turn.job||guard.mode!=='on'||source.store!=='control')return null;
   const job=(await db.query(`SELECT j.* FROM background_jobs j JOIN background_runs t ON t.job_id=j.id AND t.event_id=$2
     JOIN background_settings s ON s.singleton AND s.box_tools WHERE j.id=$1 AND j.box AND ${boxOpen} AND ${repoKept}`,[turn.job,source.id])).rows[0];
-  return job&&await ownerApprovedJob(db,owner,source,turn)?job:null;
+  return job&&(await ownerApprovedJob(db,owner,source,turn)||await projectBoxJob(db,owner,source,turn))?job:null;
 }
 
 /** Work too big for one reply runs on its own once approved, as one sealed Hermes run of up to its time limit,
@@ -422,15 +439,19 @@ export class BackgroundJobRepository {
     // A machine only for the owner's own request, in their private chat or an active project's group; refused before anything is spent.
     const machine=body.machine===undefined?null:await this.machineFor(principal,space,requester,box,(body.machine as string).trim());
     const size=await this.sources.size(principal,{chat:body.chat===undefined?'':string(body.chat,64),from,to}),settings=await this.settings();
-    // Only the owner's own job, asked in their private chat, gets the sealed box, and only while the box switch is on.
-    if(box&&(!privateJob({scope,requester},owner)||!settings.box_tools))throw new HttpError(409,'job_box_not_allowed');
-    // A GitHub copy only in the box, and only one the owner copied: refused before anything is spent.
-    const pin=body.repo===undefined?null:box&&repoName(body.repo)?(await this.control.query('SELECT * FROM github_copies WHERE lower(repo)=lower($1)',[body.repo])).rows[0]??null:null;
-    if(body.repo!==undefined&&!pin)throw new HttpError(409,'job_repo_not_allowed');
+    // Only the owner's own job gets the sealed box, and only while the box switch is on: asked in their private chat, or in a
+    // group of an active project to read one of that project's GitHub copies (ADR-0269).
+    const own=privateJob({scope,requester},owner);
+    const project=box&&!own&&requester===null&&principal.scope!==null&&!await followUpTurn(this.control,principal)?await activeChatProject(this.control,space):null;
+    if(box&&(!settings.box_tools||!own&&(!project||body.repo===undefined)))throw new HttpError(409,'job_box_not_allowed');
+    // A GitHub copy only in the box, and only one the owner copied; in a group, only one of its project's: refused before anything is spent.
+    const pin=body.repo===undefined?null:box&&repoName(body.repo)?(await this.control.query(`SELECT c.*,g.project_id FROM github_copies c
+      LEFT JOIN github_projects g ON g.repo=lower(c.repo) WHERE lower(c.repo)=lower($1)`,[body.repo])).rows[0]??null:null;
+    if(body.repo!==undefined&&(!pin||!own&&pin.project_id!==project))throw new HttpError(409,'job_repo_not_allowed');
     const repo=pin?pinnedRepo(pin):null;
     // Whether the card offers Notion reads, kept with the job so its card and its runs never say more (ADR-0225).
     // Not part of the fingerprint: it only narrows, and a setting saved meanwhile must not turn a repeat into job_changed.
-    const notion=privateJob({scope,requester},owner)&&await notionJobReads(this.control);
+    const notion=own&&await notionJobReads(this.control);
     const estimate=await this.estimate(size);
     // A member's job over the owner's limit, or on a model whose cost cannot be measured, waits for the owner instead. A machine
     // job's card always goes to the owner's private chat, wherever it was asked.
@@ -470,6 +491,9 @@ export class BackgroundJobRepository {
       try {
         await db.query('BEGIN');
         if(repo&&!(await db.query('SELECT 1 FROM github_copies WHERE copy_id=$1 FOR SHARE',[repo.copy_id])).rowCount)throw new HttpError(409,'job_repo_not_allowed');
+        // In a group, the copy must still be its project's: the link row after the copy row, as setRepoProject takes them.
+        if(repo&&!own&&!(await db.query('SELECT 1 FROM github_projects WHERE repo=lower($1) AND project_id=$2 FOR SHARE',[repo.name,project])).rowCount)
+          throw new HttpError(409,'job_repo_not_allowed');
         if(machine&&!(await db.query('SELECT 1 FROM machine_settings WHERE singleton AND enabled FOR SHARE')).rowCount)throw new HttpError(409,'job_machine_not_allowed');
         if(machine&&!(await db.query(`SELECT 1 FROM machines WHERE id=$1 AND ${machineReady} AND address=$2 AND port=$3 AND login=$4 AND host_key=$5 FOR SHARE`,
           [machine.id,machine.address,machine.port,machine.login,machine.host_key])).rowCount)throw new HttpError(409,'job_machine_not_found');
@@ -574,10 +598,14 @@ export class BackgroundJobRepository {
     if(principal.admin)rows=(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 50')).rows;
     else {
       const turn=await this.turns.binding(principal);
-      if(turn.owner&&!turn.job&&principal.scope===null&&(principal.purpose??'assistant')==='assistant'&&(await this.settings()).box_tools)
+      // The owner's private chat sees every copy and whose it is; the owner's own turn in a project's group only that project's (ADR-0269).
+      const project=principal.scope===null?null:await this.ownTurnProject(principal);
+      if((principal.scope===null?turn.owner&&!turn.job&&(principal.purpose??'assistant')==='assistant':!!project)&&(await this.settings()).box_tools)
         // copied_at as ISO text, as in the pin: a turn's answer is rebuilt from its texts for the secret check, so a Date would become {}.
-        repos=(await this.control.query('SELECT repo AS name,branch,left(commit_id,12) AS commit,copied_at FROM github_copies ORDER BY lower(repo)')).rows
-          .map(row=>({...row,copied_at:new Date(row.copied_at).toISOString()}));
+        repos=(await this.control.query(`SELECT c.repo AS name,c.branch,left(c.commit_id,12) AS commit,c.copied_at,p.name AS project FROM github_copies c
+          LEFT JOIN github_projects g ON g.repo=lower(c.repo) LEFT JOIN projects p ON p.id=g.project_id
+          WHERE $1::text IS NULL OR g.project_id=$1 ORDER BY lower(c.repo)`,[project])).rows
+          .map(row=>({name:row.name,branch:row.branch,commit:row.commit,copied_at:new Date(row.copied_at).toISOString(),...(project?{}:{project:row.project??null})}));
       if(await this.machinesShown(principal))machines=(await this.control.query(`SELECT name,${machineReady} AS ready FROM machines ORDER BY lower(name)`)).rows;
       rows=principal.scope===null?(await this.control.query('SELECT * FROM background_jobs ORDER BY created_at DESC LIMIT 20')).rows:
         (await this.control.query('SELECT * FROM background_jobs WHERE scope=$1 ORDER BY created_at DESC LIMIT 20',[principal.scope])).rows;
@@ -605,6 +633,13 @@ export class BackgroundJobRepository {
     if(principal.scope!==null||!machineTokenSet()||!(await this.control.query('SELECT 1 FROM machine_settings WHERE singleton AND enabled')).rowCount)return false;
     try{if((await this.liveTurn(principal)).requester!==null)return false;}catch(error){if(error instanceof HttpError)return false;throw error;}
     return !await followUpTurn(this.control,principal);
+  }
+  /** The active project of a group turn that is the owner's own message, not a follow-up: where the owner may ask for a box
+   *  job that reads that project's GitHub copies (ADR-0269). Null for anything else. */
+  private async ownTurnProject(principal:Reader):Promise<string|null> {
+    if(principal.scope===null||!principal.space)return null;
+    try{if((await this.liveTurn(principal)).requester!==null)return null;}catch(error){if(error instanceof HttpError)return null;throw error;}
+    return await followUpTurn(this.control,principal)?null:activeChatProject(this.control,principal.space);
   }
   /** The GitHub copies a box job may read, and the digests jobs still pin: an approved job, a running job within its box
    *  time and a proposal still waiting for its decision, none stopped and none whose copy was removed. github.py keeps
@@ -678,6 +713,37 @@ export class BackgroundJobRepository {
     // The cards say why, without holding up the answer.
     void Promise.all(withdrawn.map(id=>this.settled(id))).catch(()=>{});
     return this.copies(principal);
+  }
+  /** The repositories linked to a project (ADR-0269); any other is the owner's own. The dashboard's view. */
+  async repoProjects(principal:Reader) {
+    admin(principal);
+    return {repos:(await this.control.query('SELECT repo,project_id FROM github_projects ORDER BY repo')).rows};
+  }
+  /** Link a repository to an active project, or give it back to the owner (null). Jobs asked in a group that pinned its copy
+   *  and have not started are withdrawn in the same transaction; a running one loses its box (`projectBoxJob`). */
+  async setRepoProject(principal:Reader,input:unknown) {
+    admin(principal);
+    const body=object(input);
+    if(Object.keys(body).length!==2||!repoName(body.repo)||!(body.project===null||typeof body.project==='string'&&/^[a-f0-9]{64}$/.test(body.project)))
+      throw new HttpError(400,'invalid_github_repo');
+    const repo=(body.repo as string).toLowerCase(),chat=ownerIds(this.access.policy()).chat,db=await this.control.connect();let withdrawn:string[]=[];
+    try {
+      await db.query('BEGIN');
+      if(body.project!==null&&!(await db.query("SELECT 1 FROM projects WHERE id=$1 AND state='active' FOR SHARE",[body.project])).rowCount)
+        throw new HttpError(404,'project_not_found');
+      // Copy rows first, then job rows: start and decide lock in the same order.
+      const copy=(await db.query('SELECT copy_id FROM github_copies WHERE lower(repo)=$1 FOR UPDATE',[repo])).rows[0];
+      const before=(await db.query('SELECT project_id FROM github_projects WHERE repo=$1 FOR UPDATE',[repo])).rows[0]?.project_id??null;
+      if(before!==body.project) {
+        if(body.project===null)await db.query('DELETE FROM github_projects WHERE repo=$1',[repo]);
+        else await db.query(`INSERT INTO github_projects(repo,project_id) VALUES($1,$2) ON CONFLICT(repo) DO UPDATE SET project_id=$2,updated_at=now()`,[repo,body.project]);
+        if(copy)withdrawn=(await db.query(`UPDATE background_jobs SET state='stopped',cancel_requested=true,error_code='job_repo_removed',finished_at=now(),revision=revision+1,updated_at=now()
+          WHERE state IN ('proposed','approved') AND repo->>'copy_id'=$1 AND scope IS DISTINCT FROM $2 RETURNING id`,[copy.copy_id,chat])).rows.map(row=>row.id);
+      }
+      await db.query('COMMIT');
+    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    void Promise.all(withdrawn.map(id=>this.settled(id))).catch(()=>{});
+    return this.repoProjects(principal);
   }
   /** Stop a job: a proposal is withdrawn, a running job's run is cancelled and no report is sent.
    * The card's rule: the dashboard and the owner stop any job; a member only the job they asked for,
