@@ -15,7 +15,7 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
   const dataDir=await mkdtemp(join(tmpdir(),'nocheh-owner-notice-'));
   const token='fixture-owner-token',calls:any[]=[];
   let owner:string|null='42',texts:Record<string,string>={};
-  const services={access:{policy:()=>({owner_id:owner})},stores:{control:{query:async()=>({rows:[{texts}]})}}} as unknown as StorageServices;
+  const services={access:{policy:()=>({owner_id:owner}),bindReads:async(principal:unknown)=>principal},stores:{control:{query:async()=>({rows:[{texts}]})}}} as unknown as StorageServices;
   const server=storageServer(services,{token,dataDir} as Settings,async(operation,input)=>{calls.push([operation,input]);return {state:'done'};});
   // The owner's private chat, as the directory knows it (ADR-0252): the notice goes where it is in Telegram now.
   const restore=installChatsForTest(seededDirectory(()=>({owner_id:owner,group_ids:[]})));

@@ -13,7 +13,7 @@ const revision=(value:unknown):number=>{if(!Number.isSafeInteger(value)||Number(
 function exact(body:Record<string,unknown>,keys:string[]):void {
   if(Object.keys(body).some(key=>!keys.includes(key)))throw new HttpError(400,'unknown_policy_field');
 }
-export interface Project {id:string;name:string;description:string;state:'active'|'archived';revision:number}
+export interface Project {id:string;name:string;description:string;state:'active'|'archived';share_chats:boolean;revision:number}
 export interface Assignment {space_id:string;project_id:string|null;mode:'assigned'|'none'|'inherit';revision:number}
 export interface SharingRule {id:string;name:string;sources:string[];destination:string;enabled:boolean;mode:'approved'|'filtered';instructions:string;revision:number}
 
@@ -26,14 +26,17 @@ async function filteredLimit(db:Pick<pg.PoolClient,'query'>,destination:string):
 }
 
 /** Trusted callers hold the guard lock and own the surrounding receipt transaction. A project decides its role and
- * skills, its task board and what an Answer privately answer may add; it never shares between its groups (ADR-0247). */
-export async function writeProject(db:pg.PoolClient,change:Omit<Project,'revision'>&{expected_revision:number}):Promise<Project> {
-  const prior=(await db.query('SELECT revision FROM projects WHERE id=$1 FOR UPDATE',[change.id])).rows[0];
+ * skills, its task board and whether its groups read each other: "Share group chats" (`share_chats`, ADR-0267), on for
+ * a new project and kept as it is when a change does not name it. While it is off, a group answer uses only its own
+ * group and Answer privately may add the project's other groups (ADR-0247, ADR-0249). */
+export async function writeProject(db:pg.PoolClient,change:Omit<Project,'revision'|'share_chats'>&{share_chats?:boolean;expected_revision:number}):Promise<Project> {
+  const prior=(await db.query('SELECT revision,share_chats FROM projects WHERE id=$1 FOR UPDATE',[change.id])).rows[0];
   if((prior?.revision??0)!==change.expected_revision)throw new HttpError(409,'project_revision_conflict');
-  const result:Project={id:change.id,name:change.name,description:change.description,state:change.state,revision:change.expected_revision+1};
-  await db.query(`INSERT INTO projects(id,name,description,state,revision) VALUES($1,$2,$3,$4,$5)
-    ON CONFLICT(id) DO UPDATE SET name=$2,description=$3,state=$4,revision=$5,updated_at=now()`,
-    [result.id,result.name,result.description,result.state,result.revision]);
+  const result:Project={id:change.id,name:change.name,description:change.description,state:change.state,
+    share_chats:change.share_chats??prior?.share_chats??true,revision:change.expected_revision+1};
+  await db.query(`INSERT INTO projects(id,name,description,state,revision,share_chats) VALUES($1,$2,$3,$4,$5,$6)
+    ON CONFLICT(id) DO UPDATE SET name=$2,description=$3,state=$4,revision=$5,share_chats=$6,updated_at=now()`,
+    [result.id,result.name,result.description,result.state,result.revision,result.share_chats]);
   return result;
 }
 
@@ -63,11 +66,11 @@ export class ProjectRepository {
    * project's `groups`. */
   constructor(readonly control:pg.Pool,private readonly served:()=>readonly string[]=()=>[]){this.commands=new OwnerCommands(control);}
   async save(principal:Reader,input:unknown):Promise<Project> {
-    admin(principal);const body=object(input);exact(body,['id','name','description','state','expected_revision','operation_id']);
+    admin(principal);const body=object(input);exact(body,['id','name','description','state','share_chats','expected_revision','operation_id']);
     const operationId=string(body.operation_id,200),projectId=body.id===undefined?digest('project:'+operationId):id(body.id);
     const name=string(body.name,200).trim(),description=string(body.description??'',4000),expected=revision(body.expected_revision);
-    if(!name||!['active','archived'].includes(String(body.state)))throw new HttpError(400,'invalid_project');
-    const change={id:projectId,name,description,state:body.state as Project['state'],expected_revision:expected};
+    if(!name||!['active','archived'].includes(String(body.state))||body.share_chats!==undefined&&typeof body.share_chats!=='boolean')throw new HttpError(400,'invalid_project');
+    const change={id:projectId,name,description,state:body.state as Project['state'],...(typeof body.share_chats==='boolean'?{share_chats:body.share_chats}:{}),expected_revision:expected};
     return this.commands.run(principal,operationId,{kind:'project',...change},db=>writeProject(db,change));
   }
   async assign(principal:Reader,input:unknown):Promise<Assignment> {

@@ -1,8 +1,8 @@
 import type {Reader} from '../access.js';
-import {admin,boundReader,memberClaimId,type BoundReader} from '../access.js';
+import {admin,boundReader,memberClaimId,sharedReads,type BoundReader} from '../access.js';
 import {outsideChat,ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
-import {groupSpace,inReadSet,inRecall,observedChat,otherPrivate,parentSpace,readSet,readSetGroups,readSetOf,recallScope,servedGroup,sourceChat,type ReadSet,type RecallScope} from '../spaces.js';
+import {groupSpace,inReadSet,inRecall,observedChat,otherPrivate,parentSpace,readSet,readSetGroups,readSetOf,recallScope,servedGroup,servedGroups,sourceChat,type ReadSet,type RecallScope} from '../spaces.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository,type CapturedSource,type SourceReference} from './archive.js';
 import {GuardRepository,type GuardBinding} from './guards.js';
@@ -14,6 +14,7 @@ import {bindAnswerReads} from './private-answers.js';
 import {chats} from '../chats.js';
 import {deliveredKinds,sendClassOf,unconsentableSendClasses,unlearnedSendClasses,type SendClass} from '../send-classes.js';
 import {memberAskReads,memberChatClosed,memberReads} from './member-reads.js';
+import {sharedProjectGroups} from './project-groups.js';
 
 /** The 409 a bound reader gets when its reads can't be bound now: an answer keeps ADR-0249's code; a member's private
  * chat and the owner's ask about a member share step 4's. */
@@ -65,17 +66,18 @@ export class SourceAccessRepository {
     // its record and of its own private chat only its own turn's message (the /start that opened it); a member their
     // joined groups and all of their own private chat; the owner's ask about a member that member's chat and the owner's
     // own question that asked it. Nothing without its binding.
-    const kind=boundReader(principal),reads=kind?principal.reads:undefined,mine=boundChat(principal);
+    // A group reader whose project shares its group chats reads the project's groups as bindReads gave them (ADR-0267).
+    const kind=boundReader(principal),reads=kind?principal.reads:undefined,mine=boundChat(principal),shared=sharedReads(principal);
     if(kind&&!reads)return false;
     // An original belongs to the chat its raw scope names through chat_ids (current or old id), and to the topic its
     // observed audience names through that chat's topic rows; an id with no row reads nothing (ADR-0252).
     const chat=sourceChat(source);
     const own=ownTurn(kind)&&reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope,inMine=mine!==null&&chat===mine;
-    if(chat===null||(kind?!own&&!inMine&&!readSetGroups(reads!).includes(chat):chat!==principal.scope))return false;
+    if(chat===null||(kind?!own&&!inMine&&!readSetGroups(reads!).includes(chat):shared?!readSetGroups(shared).includes(chat):chat!==principal.scope))return false;
     const observed=(await this.relationships.describe(reference)).audience;
     const space=observed&&observed.chat_id===source.scope?observedChat(source.channel,observed):null;
     const allowed=space!==null&&(chats().parentOf(space)??space)===chat&&
-      (kind?own?space===principal.space:inMine||inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
+      (kind?own?space===principal.space:inMine||inReadSet(reads!,space):shared?inReadSet(shared,space):inRecall(this.recall(principal)!,space));
     await this.guards.assertCurrent(binding);return allowed;
   }
   /**
@@ -158,13 +160,13 @@ export class SourceAccessRepository {
       open=open.filter(item=>result.get(item.reference.id)!==false);
     }
     if(principal.admin||principal.scope===null){for(const item of open)result.set(item.reference.id,true);await this.guards.assertCurrent(binding);return result;}
-    const kind=boundReader(principal),reads=kind?principal.reads:undefined,mine=boundChat(principal);
+    const kind=boundReader(principal),reads=kind?principal.reads:undefined,mine=boundChat(principal),shared=sharedReads(principal);
     const placed:{reference:SourceReference;source:CapturedSource;chat:string;own:boolean;inMine:boolean}[]=[];
     for(const item of open) {
       if(!['telegram','browser'].includes(item.source.channel)||kind&&!reads){deny(item.reference.id);continue;}
       const chat=sourceChat(item.source),own=ownTurn(kind)&&item.reference.id===principal.turnEvent&&chat!==null&&chat===principal.scope,
         inMine=mine!==null&&chat===mine;
-      if(chat===null||(kind?!own&&!inMine&&!readSetGroups(reads!).includes(chat):chat!==principal.scope)){deny(item.reference.id);continue;}
+      if(chat===null||(kind?!own&&!inMine&&!readSetGroups(reads!).includes(chat):shared?!readSetGroups(shared).includes(chat):chat!==principal.scope)){deny(item.reference.id);continue;}
       placed.push({...item,chat,own,inMine});
     }
     const described=await this.relationships.describeMany(placed.map(item=>item.reference.id));
@@ -174,7 +176,7 @@ export class SourceAccessRepository {
       if(!found){deny(item.reference.id);continue;}
       const observed=found.audience,space=observed&&observed.chat_id===item.source.scope?observedChat(item.source.channel,observed):null;
       const allowed=space!==null&&(chats().parentOf(space)??space)===item.chat&&
-        (kind?item.own?space===principal.space:item.inMine||inReadSet(reads!,space):inRecall(this.recall(principal)!,space));
+        (kind?item.own?space===principal.space:item.inMine||inReadSet(reads!,space):shared?inReadSet(shared,space):inRecall(this.recall(principal)!,space));
       result.set(item.reference.id,allowed);
     }
     await this.guards.assertCurrent(binding);return result;
@@ -236,12 +238,13 @@ export class SourceAccessRepository {
   }
   /** The conversations a scoped principal reads, as a read set; null for the owner and administration. A bound reader
    * reads its bound set (groups only: a member's own chat and an asked member's chat are its boundChat, never in a set);
-   * anyone else its recall scope (ADR-0249). */
+   * a group reader whose project shares its group chats the project's groups bindReads gave it (ADR-0267); anyone else
+   * its recall scope (ADR-0249). */
   reads(principal:Reader):ReadSet|null {
     if(principal.admin||principal.scope===null)return null;
     const kind=boundReader(principal);
     if(kind!==null){if(!principal.reads)throw new HttpError(409,closedCode[kind]);return principal.reads;}
-    return readSetOf(this.recall(principal)!);
+    return sharedReads(principal)??readSetOf(this.recall(principal)!);
   }
   /**
    * A bound reader with its reads resolved in the store for this request (ADR-0249, ADR-0262); any other reader is
@@ -252,7 +255,7 @@ export class SourceAccessRepository {
    */
   async bindReads(principal:Reader):Promise<Reader> {
     const kind=boundReader(principal);
-    if(kind===null)return principal;
+    if(kind===null)return this.bindShared(principal);
     if(kind==='answer'){const {memberChat:_,...rest}=principal;return bindAnswerReads(this.stores.control,this.policy(),rest);}
     const closed=()=>new HttpError(409,memberChatClosed),policy=this.policy(),owner=ownerChat(policy);
     if(principal.admin||principal.scope===null||principal.space!==principal.scope||!principal.turnEvent||!policy.enabled||!policy.owner_id||!owner)throw closed();
@@ -265,13 +268,35 @@ export class SourceAccessRepository {
       const left=(await this.stores.control.query<{left_out:string[]}>('SELECT left_out FROM member_turns WHERE member_id=$1 AND event_id=$2 AND left_out IS NOT NULL',
         [found.member,principal.turnEvent])).rows[0]?.left_out;
       if(!left)throw closed();
-      return {...principal,reads:readSet({home:found.chat,whole:found.groups.map(group=>group.chat).filter(group=>!left.includes(group))}),memberChat:found.chat};
+      // Each joined group brings the other served groups of its project while that project shares its group chats (ADR-0267).
+      const joined=found.groups.map(group=>group.chat).filter(group=>!left.includes(group)),served=servedGroups(),whole=new Set(joined);
+      for(const group of joined)for(const other of (await sharedProjectGroups(this.stores.control,group,served))?.groups??[])whole.add(other);
+      return {...principal,reads:readSet({home:found.chat,whole}),memberChat:found.chat};
     }
     if(principal.scope!==owner)throw closed();
     // Only the turn of the owner's own message that asked it: its pass names that message as its turn.
     const found=await memberAskReads(this.stores.control,principal.memberRead!,owner);
     if(!found||found.event!==principal.turnEvent)throw closed();
     return {...principal,reads:readSet({home:owner}),memberChat:found.chat};
+  }
+  /**
+   * An ordinary reader with its shared reads resolved in the store for this request (ADR-0267). A group or topic reader
+   * whose group Nocheh serves, in an active project whose "Share group chats" is on with at least one other served
+   * group, reads every served group of that project (sharedProjectGroups): each whole, its own too, when a group's
+   * topics share memory, else its own conversation exactly and the others whole. Anyone else, the owner and the
+   * dashboard included, gets no read set and reads its own recall scope; a read set it came with is dropped, so only
+   * this decides.
+   */
+  private async bindShared(principal:Reader):Promise<Reader> {
+    const {reads:_given,...bare}=principal;
+    if(bare.admin||bare.scope===null||!this.policy().enabled||chats().kind(bare.scope)!=='group')return bare;
+    const space=bare.space??bare.scope;
+    if(chats().groupOf(space)!==bare.scope)return bare;
+    const found=await sharedProjectGroups(this.stores.control,bare.scope,servedGroups());
+    if(!found)return bare;
+    const reads=(this.policy().topic_memory??'group')==='group'?readSet({home:space,whole:found.groups,project:found.project}):
+      readSet({home:space,exact:[space],whole:found.groups.filter(group=>group!==bare.scope),project:found.project});
+    return {...bare,reads};
   }
   async space(reference:SourceReference):Promise<string|null> {
     const source=await this.archive.verify(reference);

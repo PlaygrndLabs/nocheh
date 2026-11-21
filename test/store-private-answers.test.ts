@@ -510,7 +510,7 @@ test('chats first seen after step 2b keep their Nocheh ids in the record, and wh
   const policy=groupsPolicy({group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS]}),answers=new PrivateAnswerRepository(stores.control,()=>policy);
   try {
     // NG1 (a forum first seen after step 2b) and NG2 (a group Telegram upgraded) are P3's groups.
-    await stores.control.query("INSERT INTO projects(id,name,description,state,revision) VALUES($1,'P3','','active',1) ON CONFLICT(id) DO NOTHING",[P3]);
+    await stores.control.query("INSERT INTO projects(id,name,description,state,revision,share_chats) VALUES($1,'P3','','active',1,false) ON CONFLICT(id) DO NOTHING",[P3]);
     await stores.control.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) SELECT space,$1,'assigned',1 FROM unnest($2::text[]) space
       ON CONFLICT(space_id) DO NOTHING`,[P3,[NG1,NG2]]);
     assert.deepEqual(await answers.offerable(NG1_TOPIC),{project_id:P3,groups:[NG1,NG2].sort()},'a digest topic follows its group');

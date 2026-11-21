@@ -129,7 +129,7 @@ TITLES = {
     'owner_recall_session_hits_have_text': 'Your recall shows the text and time of each chat it found, and nothing around it',
     'private_chat_stays_out_of_groups': 'Your private chat, notes, tasks, jobs and role never reach a group', 
     'new_id_group_works_end_to_end': 'A group first seen after the new chat ids works like any other once you add Nocheh there',
-    'project_groups_stay_apart': 'Groups of one project stay apart; Answer privately reads them all for you',
+    'project_groups_stay_apart': 'Groups of one project stay apart until it shares them; Answer privately reads them all for you',
     'supergroup_upgrade_keeps_history': 'A group Telegram upgrades stays the same chat, with its project, tasks and history',
     'inbox_never_asks_about_the_owner': 'Inbox: one card per new person, none for you',
     'import_with_topics_files_and_learning': 'Telegram import with topics, files and learning',

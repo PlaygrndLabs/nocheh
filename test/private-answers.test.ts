@@ -90,11 +90,11 @@ test('storage binds an answer pass to its record on every request and refuses ev
     const closed=await call('GET','/v1/search?q=invoice');
     assert.equal(closed.status,409);assert.deepEqual(await closed.json(),{error:'private_answer_closed'});
     assert.deepEqual(calls.splice(0),[['bind',answer,start,false]]);
-    // A pass without an answer is never bound here.
+    // A group pass is bound too: storage decides whether its project shares its group chats (ADR-0267).
     open=true;
     const group=turnToken(secret,GP1,Date.now()+60000,start,{space:GP1,revision:1,guard_epoch:1});
     assert.equal((await call('GET','/v1/search?q=invoice',group)).status,200);
-    assert.deepEqual(calls.splice(0),[['search',undefined,'invoice']]);
+    assert.deepEqual(calls.splice(0),[['bind',undefined,start,false],['search',reads,'invoice']]);
   }finally{await close(server);await rm(root,{recursive:true,force:true});}
 });
 

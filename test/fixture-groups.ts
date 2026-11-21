@@ -129,9 +129,10 @@ export function groupsPolicy(overrides:Partial<AssistantPolicy>={}):AssistantPol
 }
 
 /** Writes P1 and P2 and the group-level assignments into a control database. Plain rows, no owner command or
- * guard change, so a test sees exactly this layout; repeated calls change nothing. */
-export async function seedGroups(db:Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>):Promise<void> {
-  await db.query(`INSERT INTO projects(id,name,description,state,revision) VALUES($1,'P1','',$3,1),($2,'P2','',$3,1) ON CONFLICT(id) DO NOTHING`,[P1,P2,'active']);
+ * guard change, so a test sees exactly this layout; repeated calls change nothing. Both projects keep "Share group
+ * chats" off, so each group reads only itself; `share` turns it on for P1 (ADR-0267). */
+export async function seedGroups(db:Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>,share=false):Promise<void> {
+  await db.query(`INSERT INTO projects(id,name,description,state,revision,share_chats) VALUES($1,'P1','',$3,1,$4),($2,'P2','',$3,1,false) ON CONFLICT(id) DO NOTHING`,[P1,P2,'active',share]);
   await db.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) SELECT space,$1,'assigned',1 FROM unnest($2::text[]) space
     ON CONFLICT(space_id) DO NOTHING`,[P1,[GP1,GP2,GP3,UNSERVED]]);
 }

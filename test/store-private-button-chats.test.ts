@@ -92,7 +92,7 @@ test('Answer privately works the same when the owner’s private chat and the pr
     await say(NG1_TG,'Lunch is at noon',ALICE,{forward_origin:{type:'channel',chat:{id:-1003000000001,type:'channel',title:'Made-up news'},message_id:3,date:1699990000}});
     assert.deepEqual([NG1_TG,NG2_OLD_TG,NG2_TG,GP4].map(id=>chats().resolve('telegram',id)),[NG1,NG2,NG2,GP4]);
     // P2 holds the three groups.
-    await stores.control.query(`INSERT INTO projects(id,name,description,state,revision) VALUES($1,'P2','','active',1)`,[P2]);
+    await stores.control.query(`INSERT INTO projects(id,name,description,state,revision,share_chats) VALUES($1,'P2','','active',1,false)`,[P2]);
     await stores.control.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) SELECT space,$1,'assigned',1 FROM unnest($2::text[]) space`,[P2,[NG1,NG2,GP4]]);
 
     // The owner asks in NG1, forwarding a hidden sender's message; the button sits under the answer, sent where NG1 is in Telegram.

@@ -25,6 +25,13 @@ export type Rule = {
  * but a person in two of its groups can ask for a private answer that combines them (ADR-0247).
  */
 export const projectGroupsNote = 'People in two of these groups can get private answers that combine them.';
+/** What "Share group chats" means for the people in a project's groups (ADR-0267). */
+export const sharedChatsNote = 'Everyone in these groups, members or not, can see answers built from all of them.';
+/** The note for a project's groups: shared chats while its "Share group chats" is on (the default), else private answers. */
+export const projectNote = (shares: boolean | undefined) => (shares === false ? projectGroupsNote : sharedChatsNote);
+/** The note where a group moves into or out of a project whose sharing is not shown. */
+export const sharingProjectNote =
+  'While a project shares its group chats, everyone in its groups, members or not, can see answers built from all of them.';
 export const relatedGroupsHint = 'Put only related groups in one project; keep family groups out of projects.';
 
 /** The groups already in a project, named first wherever another group joins it. */

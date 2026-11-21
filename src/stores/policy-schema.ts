@@ -27,6 +27,9 @@ CREATE INDEX IF NOT EXISTS sharing_rules_destination ON sharing_rules(destinatio
 -- wrote are deleted with their texts by the sharing schema, which runs after the tables those texts live in exist.
 ALTER TABLE projects DROP COLUMN IF EXISTS sharing_enabled,DROP COLUMN IF EXISTS sharing_mode;
 ALTER TABLE project_assignments DROP COLUMN IF EXISTS share_into;
+-- "Share group chats" (ADR-0267): on, every group of the project reads every other served group of it; on for every
+-- project, old and new.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_chats boolean NOT NULL DEFAULT true;
 -- A topic always follows its group's project (ADR-0247): a topic's own choice saved earlier becomes "follows its group".
 -- Which rows are topics comes from their chats rows (ADR-0252), never from the id; the chat records are made later in
 -- the control schema, so a fresh store has neither and skips this.

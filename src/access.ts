@@ -55,6 +55,15 @@ export function boundReader(principal:Pick<Reader,'answer'|'member'|'memberRead'
   if(principal.member!==undefined)return 'member';
   return null;
 }
+/**
+ * The read set an ordinary scoped reader was given for this request: its project's groups while that project shares its
+ * group chats (ADR-0267). Undefined for the owner, the dashboard, a bound reader (whose reads are its own) and a group
+ * reader whose project does not share, which read their own recall scope. Set only on the server by bindReads, as a
+ * bound reader's reads are; a pass that names one is refused.
+ */
+export function sharedReads(principal:Pick<Reader,'admin'|'scope'|'reads'|'answer'|'member'|'memberRead'>):ReadSet|undefined {
+  return !principal.admin&&principal.scope!==null&&boundReader(principal)===null?principal.reads:undefined;
+}
 const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length && timingSafeEqual(x,y);};
 export function scopeToken(secret:string,scope:string|null,expires:number,binding?:{generation:string;guard_epoch:number}):string {
   const body=Buffer.from(JSON.stringify({scope,expires,audience:'nocheh-archive',...binding})).toString('base64url');

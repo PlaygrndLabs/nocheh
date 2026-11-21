@@ -113,7 +113,7 @@ for(const family of families)test(`an owner rule never reads from or shares into
   } finally {restore();await stores.close();}
 });
 
-for(const family of families)test(`a project never shares between its groups, lists only its served groups, and a topic always follows its group (${family.name})`,
+for(const family of families)test(`a project writes no sharing rule between its groups, lists only its served groups, and a topic always follows its group (${family.name})`,
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!},admin=new pg.Pool(config);
   try {assert.equal((await admin.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await admin.end();}
@@ -135,12 +135,13 @@ for(const family of families)test(`a project never shares between its groups, li
     for(const extra of [{sharing_enabled:true},{sharing_enabled:false},{sharing_mode:'filtered'}])
       await assert.rejects(projects.save(owner,{...fields,...extra,operation_id:op('box')}),{code:'unknown_policy_field'},JSON.stringify(extra));
     const before=await rules(),project=await projects.save(owner,{...fields,operation_id:op('new')});
-    assert.deepEqual(Object.keys(project).sort(),['description','id','name','revision','state']);
+    assert.deepEqual(Object.keys(project).sort(),['description','id','name','revision','share_chats','state']);
+    assert.equal(project.share_chats,true,'a new project shares its group chats (ADR-0267)');
     const other=await projects.save(owner,{...fields,name:'P2',operation_id:op('other')});
     for(const space of [group,second,unserved])await assign(space,'assigned',project.id);
     await assert.rejects(projects.assign(owner,{space_id:third,mode:'assigned',project_id:project.id,share_into:true,expected_revision:0,operation_id:op('share')}),
       {code:'unknown_policy_field'});
-    // Nothing is shared between the project's groups: no rule is written, and no group gets one from the others.
+    // No rule is written between the project's groups: its "Share group chats" switch widens reads instead (ADR-0267).
     assert.equal(await rules(),before,'project saves and assignments write no sharing rule');
     for(const space of [group,second])assert.deepEqual(await sharing.forDestination(space,space),[],space);
     assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema=current_schema() AND "+

@@ -33,7 +33,7 @@ import {
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
 import {ChatPicker} from '../chats/chat-picker';
 import {JoinNotes} from '../chats/project';
-import {leaveTasksText, moveTasksText, relatedGroupsHint} from '../chats/rule-dialog';
+import {leaveTasksText, moveTasksText, relatedGroupsHint, sharedChatsNote} from '../chats/rule-dialog';
 import {RoleAndSkills} from '../chats/role-skills';
 import {PrivateAnswers} from './private-answers';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
@@ -45,6 +45,8 @@ type Project = {
   state: 'active' | 'archived';
   /** The groups Nocheh serves that are in this project, as the server lists them. */
   groups?: string[];
+  /** "Share group chats": its groups read each other (ADR-0267). On unless turned off. */
+  share_chats?: boolean;
   revision: number;
 };
 type Assignment = {
@@ -121,7 +123,7 @@ export function Projects() {
       <Card>
         <CardHeader
           title="Projects"
-          description="A project gives related groups one role, skills and task list. It never shares what one group knows with another: a group answer uses only that group."
+          description="A project gives related groups one role, skills and task list. While it shares its group chats, an answer in any of its groups can use all of them."
           action={
             <Button variant="primary" onClick={() => setEditing('new')}>
               <Plus aria-hidden /> New project
@@ -209,11 +211,13 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
   const command = useCommand();
   const [name, setName] = useState(project?.name ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
+  const [share, setShare] = useState(project?.share_chats !== false);
   const save = async () => {
     const result = await command.run<Project>('/projects', {
       ...(project ? {id: project.id} : {}),
       name: name.trim(),
       description,
+      share_chats: share,
       state: project?.state ?? 'active',
       expected_revision: project?.revision ?? 0,
     });
@@ -267,7 +271,13 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
             onChange={event => setDescription(event.target.value)}
           />
         </Field>
-        <p className="text-xs text-muted">{relatedGroupsHint}</p>
+        <Field
+          label="Share group chats"
+          htmlFor="project-share"
+          hint={share ? `${sharedChatsNote} ${relatedGroupsHint}` : 'Off: an answer in a group uses only that group.'}
+        >
+          <Switch id="project-share" label="Share group chats" checked={share} onChange={setShare} />
+        </Field>
         {command.error && <Notice tone="bad">{command.error}</Notice>}
         <button type="submit" hidden />
       </form>
@@ -339,6 +349,7 @@ function ProjectDetail({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         {archived ? <Badge>Archived</Badge> : <Badge tone="good">Active</Badge>}
+        {project.share_chats === false ? <Badge>Groups don’t share</Badge> : <Badge>Groups share chats</Badge>}
         <span className="flex-1" />
         <Button size="sm" onClick={onEdit}>
           <Pencil aria-hidden /> Edit
