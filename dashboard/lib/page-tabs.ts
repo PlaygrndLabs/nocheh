@@ -33,6 +33,7 @@ export const pageTabs = {
     backups: 'Backups',
     databases: 'Databases',
   },
+  connections: {yours: 'Yours', projects: 'Projects', github: 'GitHub app'},
   settings: {
     telegram: 'Telegram',
     models: 'Models',
@@ -40,7 +41,6 @@ export const pageTabs = {
     privacy: 'Privacy & data',
     assistant: 'Assistant',
     tasks: 'Tasks',
-    connections: 'Connections',
     machines: 'Machines',
     advanced: 'Advanced',
   },

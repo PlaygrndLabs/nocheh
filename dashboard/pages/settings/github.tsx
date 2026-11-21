@@ -1,5 +1,5 @@
 /**
- * Settings › Connections › GitHub: Nocheh's own GitHub App and the repository copies that
+ * Connections › GitHub app: Nocheh's own GitHub App and the repository copies that
  * background jobs approved in the private chat may read in their sealed box (ADR-0209, ADR-0210).
  * Each repository is the owner's own or linked to one project, whose groups may use it (ADR-0269).
  * Connect GitHub sends the owner to GitHub, which creates the app and then asks which repositories
@@ -299,8 +299,8 @@ export function GithubConnection() {
     <Card aria-labelledby="github-title">
       <CardHeader
         id="github-title"
-        title="GitHub"
-        description="Let background jobs you approve read a copy of a repository and its history. The copy goes into the job’s sealed box; no GitHub key ever does. A repository linked to a project can also be used in that project’s groups."
+        title="GitHub app"
+        description="Nocheh’s own GitHub app. Each repository it reads is yours, used only in your private chat, or one project’s, used in that project’s groups too. Background jobs read a copy of a repository in their sealed box; no GitHub key ever goes there."
         action={
           data.reconnect ? (
             <Badge tone="warn" dot>
@@ -558,8 +558,8 @@ export function ProjectGithub({project}: {project: {id: string; name: string}}) 
         {problem && <Notice tone="bad">{problem}</Notice>}
         {!status.data?.connected && (
           <p className="text-[13px] text-muted">
-            Connect GitHub in Settings › Connections › GitHub first.{' '}
-            <a className="underline" href="#settings?view=connections&tab=github">
+            Connect GitHub in Connections › GitHub app first.{' '}
+            <a className="underline" href="#connections?view=github">
               Open it
             </a>
           </p>

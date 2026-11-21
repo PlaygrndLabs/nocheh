@@ -36,6 +36,7 @@ const pages = [
   ['memory', 'Memory'],
   ['usage', 'Usage'],
   ['system', 'System'],
+  ['connections', 'Connections'],
   ['settings', 'Settings'],
 ];
 /** Every page, every tab, and an open chat. */
@@ -53,9 +54,10 @@ const routes = [
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm'].map(view => ['memory?view=' + view, 'Memory']),
   ...['work', 'sends', 'machines', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
-  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'machines', 'advanced'].map(
-    view => ['settings?view=' + view, 'Settings'],
-  ),
+  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'machines', 'advanced'].map(view => [
+    'settings?view=' + view,
+    'Settings',
+  ]),
   // The sub-tabs of the two longest pages.
   ...['tools', 'jobs', 'instructions'].map(tab => ['settings?view=assistant&tab=' + tab, 'Settings']),
   ...['role', 'tools', 'memory'].map(tab => ['chats?chat=-10042&tab=' + tab, 'Chats']),
@@ -69,7 +71,7 @@ const routes = [
   ['settings?view=models&tab=providers', 'Settings'],
   ...['records', 'offsite'].map(tab => ['settings?view=privacy&tab=' + tab, 'Settings']),
   ...['priorities', 'columns'].map(tab => ['settings?view=tasks&tab=' + tab, 'Settings']),
-  ['settings?view=connections&tab=github', 'Settings'],
+  ...['projects', 'github'].map(view => ['connections?view=' + view, 'Connections']),
   ['chats?view=rules&tab=defaults', 'Chats'],
   ...['about', 'conversations'].map(tab => ['memory?view=notes&tab=' + tab, 'Memory']),
   ...['chats', 'pause'].map(tab => ['members?member=' + MIRA + '&tab=' + tab, 'Members']),
@@ -208,7 +210,7 @@ test('the sidebar lists the open page’s tabs and opens any page’s tab direct
   const settingsTabs = nav.getByRole('list', {name: 'Settings tabs'});
   assert.deepEqual(
     (await settingsTabs.getByRole('link').allTextContents()).map(text => text.trim()),
-    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Connections', 'Machines', 'Advanced'],
+    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Machines', 'Advanced'],
   );
   assert.equal(await settingsTabs.getByRole('link', {name: 'Models'}).getAttribute('aria-current'), 'true');
   assert.equal(await nav.getByRole('list', {name: 'Memory tabs'}).count(), 0);
@@ -241,6 +243,8 @@ test('old bookmarks open the page and tab that now hold them', async () => {
     ['databases', 'System', 'Databases', '#system?view=databases'],
     ['operations', 'System', 'Backups', '#system?view=backups'],
     ['system?view=usage', 'Usage', null, '#usage'],
+    ['settings?view=connections', 'Connections', 'Yours', '#connections'],
+    ['settings?view=connections&tab=github', 'Connections', 'GitHub app', '#connections?view=github'],
   ];
   for (const [hash, title, tab, canonical] of cases) {
     const {page, problems} = await open(hash);
@@ -1054,8 +1058,8 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
 });
 
 test('Notion is connected through its sign-in, turned on with an approval choice, and disconnected', async () => {
-  const {page, problems} = await open('settings?view=connections');
-  const card = page.getByRole('region', {name: 'Notion'});
+  const {page, problems} = await open('connections');
+  const card = page.getByRole('region', {name: 'Your Notion'});
   await card.getByText('Not connected').waitFor();
   assert.equal(await card.getByRole('switch', {name: 'Use Notion'}).isDisabled(), true);
   // Notion's sign-in returns to the dashboard, which finishes it and cleans the address.
@@ -1063,7 +1067,7 @@ test('Notion is connected through its sign-in, turned on with an approval choice
   await page.getByRole('status').filter({hasText: 'Notion is connected.'}).waitFor();
   await card.getByText('Connected to Synthetic workspace').waitFor();
   assert.equal(new URL(page.url()).search, '');
-  assert.match(page.url(), /#settings\?view=connections$/);
+  assert.match(page.url(), /#connections$/);
   await card.getByRole('switch', {name: 'Use Notion'}).click();
   await card.getByLabel('Ask me first').selectOption({label: 'Everything asks me'});
   const bar = page.getByRole('region', {name: 'Save changes'});
@@ -1087,7 +1091,7 @@ test('Notion is connected through its sign-in, turned on with an approval choice
 });
 
 test('a project has its own Notion: its sign-in and switch are apart from yours, and Nothing asks me is not offered', async () => {
-  // ADR-0268: the project's Notion card in Memory › Projects signs in on its own and comes back to Settings › Connections.
+  // ADR-0268: the project's Notion card in Memory › Projects signs in on its own and comes back to Connections.
   const project = 'memory?view=projects&project=' + 'ab'.repeat(32);
   const {page, problems} = await open(project);
   const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
@@ -1099,8 +1103,8 @@ test('a project has its own Notion: its sign-in and switch are apart from yours,
   ]);
   await card.getByRole('button', {name: 'Connect Notion'}).click();
   await page.getByRole('status').filter({hasText: 'The project’s Notion is connected.'}).waitFor();
-  assert.match(page.url(), /#settings\?view=connections$/);
-  await page.getByRole('region', {name: 'Notion', exact: true}).getByText('Not connected').waitFor();
+  assert.match(page.url(), /#connections$/);
+  await page.getByRole('region', {name: 'Your Notion', exact: true}).getByText('Not connected').waitFor();
   await page.goto(origin + '/#' + project);
   await card.getByText('Connected to Synthetic workspace').waitFor();
   // In the drawer each change saves at once: the page's Save is behind it.
@@ -1118,16 +1122,16 @@ test('a project has its own Notion: its sign-in and switch are apart from yours,
 });
 
 test('GitHub is connected through its own app, lists the chosen repositories, copies one and is disconnected', async () => {
-  // GitHub has its own sub-tab, and a sign-in that returns opens it.
-  const {page, problems} = await open('settings?view=connections&tab=github');
-  const card = page.getByRole('region', {name: 'GitHub'});
+  // GitHub has its own tab, and a sign-in that returns opens it.
+  const {page, problems} = await open('connections?view=github');
+  const card = page.getByRole('region', {name: 'GitHub app'});
   await card.getByText('Not connected').waitFor();
   // A sign-in that comes back while Nocheh is busy keeps its code in the address, so a reload can finish it.
   await page.goto(origin + '/?connect=github&code=preview-busy&state=fixture-state');
   await card.getByText('Reload this page in a minute to finish.', {exact: false}).waitFor();
   assert.equal(new URL(page.url()).search, '?connect=github&code=preview-busy&state=fixture-state');
   problems.splice(0, problems.length, ...problems.filter(problem => !/409/.test(problem)));
-  await page.goto(origin + '/#settings?view=connections&tab=github');
+  await page.goto(origin + '/#connections?view=github');
   await card.getByText('Not connected').waitFor();
   // GitHub creates the app, then asks which repositories it may read, and each time sends the browser back here.
   await card.getByRole('button', {name: 'Connect GitHub'}).click();
@@ -1135,7 +1139,7 @@ test('GitHub is connected through its own app, lists the chosen repositories, co
   await card.getByText('Connected', {exact: true}).waitFor();
   await card.getByText('Nocheh reads through its app Nocheh-a1b2c3 on octo-example', {exact: false}).waitFor();
   assert.equal(new URL(page.url()).search, '');
-  assert.match(page.url(), /#settings\?view=connections&tab=github$/);
+  assert.match(page.url(), /#connections\?view=github$/);
   const widgets = card
     .getByRole('list', {name: 'Repositories'})
     .getByRole('listitem')
@@ -1154,10 +1158,10 @@ test('GitHub is connected through its own app, lists the chosen repositories, co
   await page.close();
 });
 
-test('a repository is linked to a project from Settings or from the project, and unlinked there', async () => {
+test('a repository is linked to a project from Connections or from the project, and unlinked there', async () => {
   // ADR-0269: by name, copied or not; each change saves at once.
-  const {page, problems} = await open('settings?view=connections&tab=github');
-  const card = page.getByRole('region', {name: 'GitHub'});
+  const {page, problems} = await open('connections?view=github');
+  const card = page.getByRole('region', {name: 'GitHub app'});
   await card.getByText('Not connected').waitFor();
   await card.getByRole('button', {name: 'Connect GitHub'}).click();
   await page.getByRole('status').filter({hasText: 'GitHub is connected.'}).waitFor();
@@ -1167,6 +1171,21 @@ test('a repository is linked to a project from Settings or from the project, and
   assert.ok(options.includes('Project: Aurora field guide'), options.join());
   await who.selectOption({label: 'Project: Aurora field guide'});
   await page.getByRole('status').filter({hasText: 'Linked to Aurora field guide'}).waitFor();
+  // ADR-0271: the Projects tab shows each project's connections; Yours keeps only what no project uses.
+  await page.goto(origin + '/#connections?view=projects');
+  const row = page
+    .getByRole('table', {name: 'Projects’ connections'})
+    .getByRole('row')
+    .filter({hasText: 'Aurora field guide'});
+  await row.getByText('example-org/widgets').waitFor();
+  assert.equal(
+    await row.getByRole('link', {name: 'Open Aurora field guide'}).getAttribute('href'),
+    '#memory?view=projects&project=' + 'ab'.repeat(32),
+  );
+  await page.goto(origin + '/#connections');
+  const yours = page.getByRole('region', {name: 'Your GitHub repositories'});
+  await yours.getByText('example-org/gadgets', {exact: false}).waitFor();
+  assert.equal(await yours.getByText('example-org/widgets', {exact: false}).count(), 0);
   const project = 'memory?view=projects&project=' + 'ab'.repeat(32);
   await page.goto(origin + '/#' + project);
   const github = page
@@ -1186,7 +1205,7 @@ test('a repository is linked to a project from Settings or from the project, and
   await page.reload();
   await listed.getByText('example-org/gadgets').waitFor();
   assert.equal(await listed.getByText('example-org/widgets').count(), 0);
-  await page.goto(origin + '/#settings?view=connections&tab=github');
+  await page.goto(origin + '/#connections?view=github');
   assert.equal(await card.getByLabel('Who uses example-org/widgets').inputValue(), '');
   // Back as the next test expects it: not connected.
   await card.getByRole('button', {name: 'Disconnect'}).click();

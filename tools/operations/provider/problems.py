@@ -279,7 +279,7 @@ def text(problem, new):
         reason = TELEGRAM_REASONS.get(problem.get('reason'), 'the connection failed')
         return f"Telegram stopped working at {problem['at'][:16].replace('T', ' ')} UTC: {reason}."
     if kind == 'github':
-        return 'GitHub refused Nocheh’s app. Jobs keep the copies they have; connect GitHub again in Settings › Connections.'
+        return 'GitHub refused Nocheh’s app. Jobs keep the copies they have; connect GitHub again in Connections › GitHub app.'
     if kind == 'reader':
         label, one, many, verb = READERS.get(problem['reader'], (problem['label'], 'file', 'files', 'read'))
         return (f"{label}: {_plural(count, one, many)} couldn’t be {verb} today because {WRITE_FAILURES[problem['failure']]}. "

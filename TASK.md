@@ -2,6 +2,13 @@
 
 <current>
 
+Connections page, by whom each connection belongs to (owner, 2026-11-21: the owner's Notion in
+Settings looked connected to all of Nocheh) ([ADR-0271](docs/adr/0271-connections-page.md)).
+- A Connections page in the side menu: Yours (the owner's Notion and GitHub repositories, private
+  chat only), Projects (each project's Notion and GitHub, a table), GitHub app. Settings has no
+  Connections tab; old addresses and sign-in returns open the new page.
+- Checks: dashboard routes unit test, dashboard browser tests for Notion, GitHub and links.
+
 Live GitHub lookups, step 3 part 2 of the shared and private connectors plan (owner,
 2026-11-21: "live lookups to repo if is need") ([ADR-0270](docs/adr/0270-github-live-lookups.md)).
 - Nocheh's `github` tool: search code, read a file, list a folder, list commits, show a commit,
@@ -13,7 +20,7 @@ Live GitHub lookups, step 3 part 2 of the shared and private connectors plan (ow
 A project's GitHub repositories, step 3 part 1 of the shared and private connectors plan
 (owner, 2026-11-20: GitHub connects to a project, never a group)
 ([ADR-0269](docs/adr/0269-github-per-project.md)).
-- `github_projects` links a repository by name to a project. Settings › Connections › GitHub has
+- `github_projects` links a repository by name to a project. Connections › GitHub app has
   a picker per repository; each project's drawer has "GitHub for this project".
 - The owner's own box job asked in a project's group reads only that project's copies, checked
   again while it runs. Unlinking withdraws group jobs not started and takes a running one's box.
