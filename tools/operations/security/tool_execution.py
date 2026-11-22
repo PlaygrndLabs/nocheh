@@ -167,6 +167,11 @@ def execute(state,action,request=https_request,run=subprocess.run,container_name
         from tools.operations.connections import github
         try:return github.lookup(state,args)
         except ValueError as error:return {'exit_code':1,'error':str(error)}
+    if action['kind']=='mcp' and args.get('connection')=='gmail':
+        # A lookup in the owner's own Gmail, read only (ADR-0272).
+        from tools.operations.connections import gmail
+        try:return gmail.lookup(state,args)
+        except ValueError as error:return {'exit_code':1,'error':str(error)}
     if action['kind']=='mcp':
         try:return mcp_call(args,request,state)
         except ValueError as error:

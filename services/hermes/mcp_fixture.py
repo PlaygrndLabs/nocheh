@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # The bare names Nocheh's MCP server lists; Hermes offers each one as mcp__nocheh__<name>.
 TOOLS = ('archive_search', 'archive_read', 'archive_page', 'memory_search', 'memory_recall', 'action_request', 'background_job',
-         'telegram_destinations', 'shell', 'browser', 'mcp', 'owner_read', 'tasks', 'notion', 'github', 'action_status', 'knowledge_inspect',
+         'telegram_destinations', 'shell', 'browser', 'mcp', 'owner_read', 'tasks', 'notion', 'github', 'gmail', 'action_status', 'knowledge_inspect',
          'knowledge_propose', 'knowledge_status', 'ask_member_chat')
 NAMES = frozenset('mcp__nocheh__' + name for name in TOOLS)
 

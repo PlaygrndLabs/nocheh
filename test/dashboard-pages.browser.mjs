@@ -1090,6 +1090,35 @@ test('Notion is connected through its sign-in, turned on with an approval choice
   await page.close();
 });
 
+test('your Gmail takes your Google keys, signs in through Google and disconnects', async () => {
+  // ADR-0272: the owner's own Gmail on Connections › Yours, read only, private chat only.
+  const {page, problems} = await open('connections');
+  const card = page.getByRole('region', {name: 'Your Gmail'});
+  await card.getByText('Not connected').waitFor();
+  assert.equal(await card.getByRole('button', {name: 'Connect Gmail'}).isDisabled(), true);
+  await card.getByText('How to make your Google keys').click();
+  await card.getByText(origin + '/?connect=gmail').waitFor();
+  await card.getByLabel('Client ID').fill('not-a-client');
+  await card.getByLabel('Client secret').fill('synthetic-secret');
+  await card.getByRole('button', {name: 'Save keys'}).click();
+  await card.getByText('That doesn’t look like a Google client ID and secret.', {exact: false}).waitFor();
+  await card.getByLabel('Client ID').fill('123456789012-abcdef.apps.googleusercontent.com');
+  await card.getByRole('button', {name: 'Save keys'}).click();
+  await card.getByRole('button', {name: 'Change keys'}).waitFor();
+  // Google's sign-in returns to the dashboard, which finishes it and cleans the address.
+  await card.getByRole('button', {name: 'Connect Gmail'}).click();
+  await page.getByRole('status').filter({hasText: 'Gmail is connected.'}).waitFor();
+  await card.getByText('Connected to owner@example.com').waitFor();
+  assert.equal(new URL(page.url()).search, '');
+  assert.match(page.url(), /#connections$/);
+  await card.getByRole('button', {name: 'Disconnect'}).click();
+  await page.getByRole('dialog', {name: 'Disconnect Gmail?'}).getByRole('button', {name: 'Disconnect'}).click();
+  await card.getByText('Not connected').waitFor();
+  problems.splice(0, problems.length, ...problems.filter(problem => !/400/.test(problem)));
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('a project has its own Notion: its sign-in and switch are apart from yours, and Nothing asks me is not offered', async () => {
   // ADR-0268: the project's Notion card in Memory › Projects signs in on its own and comes back to Connections.
   const project = 'memory?view=projects&project=' + 'ab'.repeat(32);

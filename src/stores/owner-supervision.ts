@@ -76,6 +76,7 @@ export function actionSummary(kind:unknown,args:unknown):string|null {
   if(kind==='telegram_message')return clean(text('text'));
   if(kind==='shell')return clean(text('command'));
   if(kind==='browser')return clean(text('url'));
+  if(kind==='mcp'&&value.connection==='gmail')return `${(text('tool')??'A lookup').replaceAll('_',' ')} in your Gmail`;
   if(kind==='mcp'&&value.connection==='github')return `${(text('tool')??'A lookup').replaceAll('_',' ')} in GitHub ${String((value.input as Record<string,unknown>|undefined)?.repo??'')}`;
   if(kind==='mcp'&&value.connection==='notion'){const where=typeof value.project==='string'?'a project\'s Notion':'Notion';
     return value.operation==='list'?(where==='Notion'?'List the Notion tools':'List the tools of '+where):`${text('tool')??'A tool'} in ${where}`;}

@@ -383,6 +383,11 @@ export async function startManagement() {
       if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status',request:{project:url.searchParams.get('project')}}));
       const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
       if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
+      // The owner's own Gmail (ADR-0272): the OAuth client of the owner's Personal mode project, then a sign-in. The secret
+      // and tokens travel only in POST bodies and never come back.
+      if(req.method==='GET'&&route==='/connections/gmail')return json(res,200,await python({operation:'gmail.status'}));
+      const gmail=route.match(/^\/connections\/gmail\/(client|start|finish|disconnect)$/);
+      if(req.method==='POST'&&gmail)return exclusive('gmail-connection',async()=>json(res,200,await python({operation:'gmail.'+gmail[1],request:object(await readJson(req))})));
       // Nocheh's GitHub App and the copies background jobs may read (ADR-0209, ADR-0210). The app's key never comes
       // back. A copy, a list and the hourly check run one at a time. Connecting, Remove and Disconnect never wait for
       // them: github.py's short file lock and the store order them with a copy that is still running.

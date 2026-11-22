@@ -8,6 +8,7 @@ import {hostActionAuthority} from '../workflows/host-tools.js';
 import {covers,type ControlledActionRepository} from './controlled-actions.js';
 import {notionRunRefusal} from './notion.js';
 import {githubRunRefusal} from './github-lookups.js';
+import {gmailRunRefusal} from './gmail-lookups.js';
 import {chatToolAllowed} from './chat-tools.js';
 import {ownerChat,ownerIds} from '../assistant-policy.js';
 import {freshMembers} from '../members.js';
@@ -113,7 +114,8 @@ export class ControlledExecutionRepository {
       // there (ADR-0225), a project's from the owner's private chat or a group still in that project (ADR-0268).
       // A GitHub lookup still from where its repository may be looked up (ADR-0270).
       const refused=!('connection' in (args as object))?null:(args as {connection?:string}).connection==='github'?
-        await githubRunRefusal(db,row,ownerIds(this.actions.access.policy()),args as {input?:unknown}):await notionRunRefusal(db,row,ownerIds(this.actions.access.policy()),args as {project?:unknown});
+        await githubRunRefusal(db,row,ownerIds(this.actions.access.policy()),args as {input?:unknown}):
+        (args as {connection?:string}).connection==='gmail'?gmailRunRefusal(row,ownerIds(this.actions.access.policy())):await notionRunRefusal(db,row,ownerIds(this.actions.access.policy()),args as {project?:unknown});
       if(refused){const result=await this.blocked(db,row,refused);await db.query('COMMIT');this.closed(row.id);return result;}
       // Stop also stops what a job's Notion setting let run without a card but has not run yet (ADR-0203).
       // A call the owner approved on its own card stays approved.

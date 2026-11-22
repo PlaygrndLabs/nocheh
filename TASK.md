@@ -2,6 +2,16 @@
 
 <current>
 
+The owner's own Gmail, read only, step 4 of the shared and private connectors plan (owner,
+2026-11-20) ([ADR-0272](docs/adr/0272-gmail-read-only.md)).
+- Connections › Yours › Your Gmail: the owner pastes the OAuth client of a Google Cloud project in
+  Personal mode (no review, no 7-day expiry), then signs in with `gmail.readonly`.
+- Nocheh's `gmail` tool: search mail, read a message, read a thread. Only the owner's private chat,
+  in a live turn, with no card; never a group, a member's private chat or a job.
+- Checks: [Python](services/hermes/test_gmail_connection.py), [store](test/store-gmail-lookups.test.ts),
+  MCP unit test, dashboard browser test.
+- Next: step 5, members connect their own accounts (after go-live).
+
 Development startup order after a live reload (2026-11-21: errors in the dev stack logs).
 - The new app and the security service wait until the database has set up the stores for their
   build (`schema_builds`, [dev-schema.ts](src/stores/dev-schema.ts)); after 120 s they start

@@ -192,6 +192,15 @@ def dispatch(body):
         if operation == 'notion.finish': return notion.finish(state, request.get('code'), request.get('state'), project=project)
         if operation == 'notion.token': return notion.save_token(state, request.get('token'), project=project)
         if operation == 'notion.disconnect': return notion.disconnect(state, project=project)
+    if operation.startswith('gmail.'):
+        # The owner's own Gmail (ADR-0272); no answer ever carries the client secret or a token.
+        from tools.operations.connections import gmail
+        request = body.get('request') or {}
+        if operation == 'gmail.status': return gmail.status(state)
+        if operation == 'gmail.client': return gmail.save_client(state, request.get('client_id'), request.get('client_secret'))
+        if operation == 'gmail.start': return gmail.start(state, request.get('redirect'))
+        if operation == 'gmail.finish': return gmail.finish(state, request.get('code'), request.get('state'))
+        if operation == 'gmail.disconnect': return gmail.disconnect(state)
     if operation.startswith('github.'):
         # Nocheh's GitHub App and the copies box jobs may read; no answer ever carries the app's key.
         from tools.operations.connections import github
