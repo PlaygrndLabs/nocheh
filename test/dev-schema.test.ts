@@ -24,14 +24,20 @@ test('the app starts at once outside development and waits for its own build in 
   const asked:string[]=[];
   assert.equal(await schemaReady({query:async(text:string)=>{asked.push(text);return {rows:[]};}},null,{log}),'none');
   assert.deepEqual(asked,[],'no build, no query');
-  // Missing table first (setup has not reached this code), then an older build, then this one.
-  const answers:(()=>Promise<{rows:{build?:unknown}[]}>)[]=[
-    async()=>{throw Object.assign(Error('relation does not exist'),{code:'42P01'});},
-    async()=>({rows:[{build:'1'}]}),
-    async()=>({rows:[{build:'2'}]})];
-  const control={query:async()=>answers.shift()!()};
+  // No table first (setup has not reached this code), then an older build, then this one. It never reads a missing
+  // table: the database logs that error even when the app catches it.
+  const builds:(string|undefined)[]=[undefined,'1','2'],reads:string[]=[];
+  const control={query:async(text:string)=>{
+    if(text.includes('to_regclass')) {
+      if(builds[0]!==undefined)return {rows:[{present:true}]};
+      builds.shift();return {rows:[{present:false}]};
+    }
+    const build=builds.shift();
+    if(build===undefined)throw Object.assign(Error('relation does not exist'),{code:'42P01'});
+    reads.push(build);return {rows:[{build}]};
+  }};
   assert.equal(await schemaReady(control,'2',{every:5,log}),'ready');
-  assert.equal(answers.length,0);
+  assert.deepEqual(reads,['1','2']);
   assert.equal(JSON.parse(lines.at(-1)!).event,'development_schema_ready');
 });
 

@@ -28,7 +28,7 @@ export async function recordSchemaBuild(admin:pg.ClientConfig,build:string|null)
   finally {await client.end();}
 }
 
-type Queryable={query(text:string):Promise<{rows:{build?:unknown}[]}>};
+type Queryable={query(text:string):Promise<{rows:{build?:unknown;present?:unknown}[]}>};
 type Wait={deadline?:number;every?:number;log?:(line:string)=>void};
 
 /** Waits until setup has finished for this build. After `deadline` it goes on anyway, as it did before it waited: setup
@@ -38,8 +38,11 @@ export async function schemaReady(control:Queryable,build:string|null=devBuild()
   if(build===null)return 'none';
   const started=Date.now();let waited=false;
   for(;;) {
-    // Before this build's setup the table may not exist yet (42P01); that is waiting too.
-    const applied=await control.query('SELECT build FROM schema_builds WHERE singleton').then(result=>result.rows[0]?.build,()=>undefined);
+    // Before the first setup that has it, the table does not exist yet: that is waiting too. The runtime role may not
+    // make tables, so it looks for the table first instead of reading it and getting an error the database logs.
+    const applied=await control.query("SELECT to_regclass('schema_builds') IS NOT NULL AS present")
+      .then(async result=>result.rows[0]?.present===true?(await control.query('SELECT build FROM schema_builds WHERE singleton')).rows[0]?.build:undefined)
+      .catch(()=>undefined);
     if(applied===build) {
       if(waited)log(JSON.stringify({event:'development_schema_ready',waited_ms:Date.now()-started}));
       return 'ready';
