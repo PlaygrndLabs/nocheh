@@ -32,11 +32,16 @@ class GateTests(unittest.TestCase):
         gate.bind('Asia/Tokyo')
         self.assertEqual(self.call(action='create',prompt='Brief',schedule='0 8 * * 1-5',name='Morning'),
                          {'action':'modify','args':{'deliver':'telegram','timezone':'Asia/Tokyo'}})
-        # Hermes's own delivery targets and zones are replaced, not refused.
-        self.assertEqual(self.call(action='create',prompt='Brief',schedule='every 1h',deliver='origin',timezone='UTC')['args'],
-                         {'deliver':'telegram','timezone':'Asia/Tokyo'})
+        # Hermes's own delivery targets are replaced, not refused; a zone the owner named is kept.
+        self.assertEqual(self.call(action='create',prompt='Brief',schedule='every 1h',deliver='origin',timezone='Europe/Berlin')['args'],
+                         {'deliver':'telegram'})
         self.assertEqual(self.call(action='update',job_id='abc',prompt='New text'),{'action':'modify','args':{'deliver':'telegram'}})
-        self.assertEqual(self.call(action='update',job_id='abc',schedule='0 9 * * *')['args']['timezone'],'Asia/Tokyo')
+        self.assertNotIn('timezone',self.call(action='update',job_id='abc',schedule='0 9 * * *')['args'],'a changed time keeps its zone')
+        self.assertEqual(self.call(action='update',job_id='abc',timezone='America/New_York')['args'],{'deliver':'telegram'})
+        self.assertEqual(self.call(action='update',job_id='abc',timezone='')['args']['timezone'],'Asia/Tokyo','a cleared zone is the owner\'s')
+        for zone in ('Not/AZone','../etc','x'*70,7):
+            blocked=self.call(action='create',prompt='Brief',schedule='every 1h',timezone=zone)
+            self.assertEqual(blocked['action'],'block',zone);self.assertIn('not a time zone',blocked['message'])
         for action in ('list','pause','resume','remove'):self.assertIsNone(self.call(action=action,job_id='abc'),action)
 
     def test_running_and_options_nocheh_does_not_run_are_refused(self):
@@ -90,6 +95,12 @@ class HermesToolTests(unittest.TestCase):
             job,=inspect(home)
             self.assertEqual((job['deliver'],job['timezone'],job['name']),('telegram','Asia/Tokyo','Morning brief'))
             self.assertFalse(job.get('nocheh_registered'),'nothing runs before Nocheh captures it')
+            # A zone the owner named reaches the store as named.
+            named={'action':'create','prompt':'Weekly review','schedule':'0 18 * * 5','name':'Review','timezone':'Europe/Berlin'}
+            with store(home):
+                raw=_cronjob_handler({**named,**gate.tool_call(tool_name=gate.TOOL,args=named)['args']})
+            self.assertTrue(json.loads(raw)['success'],raw)
+            self.assertEqual({row['name']:row['timezone'] for row in inspect(home)},{'Morning brief':'Asia/Tokyo','Review':'Europe/Berlin'})
 
 
 class TurnTests(unittest.TestCase):
