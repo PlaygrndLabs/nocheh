@@ -118,7 +118,7 @@ class SnapshotTests(unittest.TestCase):
                  patch('tools.operations.workflows.workflow_worker.stop') as stop_host,patch('tools.operations.workflows.workflow_worker.resume_existing') as start_host:
                 backup(state,root/'backup')
                 stop_host.assert_called_once_with(state,wait=True);start_host.assert_called_once_with(state)
-            self.assertIn(['fixture','start','--wait','--wait-timeout','180','nocheh-app'],commands)
+            self.assertIn(['fixture','start','--wait','--wait-timeout','300','nocheh-app'],commands)
             self.assertFalse(any('up' in command for command in commands))
             manifest=validate_snapshot(root/'backup')
             self.assertEqual(manifest['version'],3)
@@ -159,29 +159,57 @@ class SnapshotTests(unittest.TestCase):
             with self.assertRaises(ValueError):fingerprints([],{},['events; DROP TABLE events'])
             process.assert_not_called()
 
-    def test_backup_resume_failure_preserves_snapshot_without_recreating_containers(self):
+    def run_backup_with_restart(self,folder,start_results,clock_step=0):
+        """A backup whose service starts return `start_results` in turn (an exception fails that try)."""
+        root=Path(folder);state=root/'state';state.mkdir()
+        (state/'.env').write_text('TELEGRAM_ENABLED=false\n')
+        for name in ('files','spool','hermes'):(state/name).mkdir()
+        commands=[];results=list(start_results);clock=[0.0]
+        def run(command,**kwargs):
+            commands.append(command)
+            if 'pg_dump' in command:kwargs['stdout'].write(b'synthetic database dump')
+            if 'start' in command:
+                clock[0]+=clock_step
+                result=results.pop(0) if results else None
+                if isinstance(result,BaseException):raise result
+        def sleep(seconds):clock[0]+=seconds
+        with patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
+             patch('tools.operations.installation.operations.environment',return_value={}),\
+             patch('tools.operations.installation.operations.subprocess.check_output',side_effect=['nocheh-app\nhermes','fixture-revision']),\
+             patch('tools.operations.installation.operations.fingerprints',return_value={}),\
+             patch('tools.operations.installation.operations.subprocess.run',side_effect=run),\
+             patch('tools.operations.installation.operations.time.monotonic',side_effect=lambda:clock[0]),\
+             patch('tools.operations.installation.operations.time.sleep',side_effect=sleep),\
+             patch('tools.operations.workflows.workflow_worker.running',return_value=True),\
+             patch('tools.operations.workflows.workflow_worker.stop'),\
+             patch('tools.operations.workflows.workflow_worker.resume_existing') as start_host,\
+             contextlib.redirect_stderr(io.StringIO()):
+            try:backup(state,root/'backup');raised=None
+            except Exception as error:raised=error
+        starts=[command for command in commands if 'start' in command]
+        self.assertFalse(any('up' in command for command in commands))
+        self.assertEqual(validate_snapshot(root/'backup')['version'],3)
+        return raised,starts,start_host
+
+    def test_a_service_still_settling_is_started_again_until_healthy(self):
+        # Compose gives up on a service that turns unhealthy while it waits for store setup; a later try finds it healthy.
+        unhealthy=subprocess.CalledProcessError(1,'start')
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);state=root/'state';state.mkdir()
-            (state/'.env').write_text('TELEGRAM_ENABLED=false\n')
-            for name in ('files','spool','hermes'):(state/name).mkdir()
-            commands=[]
-            def run(command,**kwargs):
-                commands.append(command)
-                if 'pg_dump' in command:kwargs['stdout'].write(b'synthetic database dump')
-                if 'start' in command:raise subprocess.CalledProcessError(1,command)
-            with patch('tools.operations.installation.operations.compose',return_value=['fixture']),\
-                 patch('tools.operations.installation.operations.environment',return_value={}),\
-                 patch('tools.operations.installation.operations.subprocess.check_output',side_effect=['nocheh-app','fixture-revision']),\
-                 patch('tools.operations.installation.operations.fingerprints',return_value={}),\
-                 patch('tools.operations.installation.operations.subprocess.run',side_effect=run),\
-                 patch('tools.operations.workflows.workflow_worker.running',return_value=True),\
-                 patch('tools.operations.workflows.workflow_worker.stop'),\
-                 patch('tools.operations.workflows.workflow_worker.resume_existing') as start_host:
-                with self.assertRaises(subprocess.CalledProcessError):backup(state,root/'backup')
-                start_host.assert_not_called()
-            self.assertIn(['fixture','start','--wait','--wait-timeout','180','nocheh-app'],commands)
-            self.assertFalse(any('up' in command for command in commands))
-            self.assertEqual(validate_snapshot(root/'backup')['version'],3)
+            raised,starts,start_host=self.run_backup_with_restart(folder,[unhealthy,unhealthy,None])
+        self.assertIsNone(raised)
+        self.assertEqual(starts,[['fixture','start','--wait','--wait-timeout','300','hermes','nocheh-app']]*3)
+        start_host.assert_called_once()
+
+    def test_backup_resume_failure_preserves_snapshot_and_still_starts_the_workflow_host(self):
+        unhealthy=subprocess.CalledProcessError(1,'start')
+        with tempfile.TemporaryDirectory() as folder:
+            raised,starts,start_host=self.run_backup_with_restart(folder,[unhealthy]*1000,clock_step=60)
+        self.assertIs(raised,unhealthy)
+        # Tried again until the patience ran out, never forever.
+        self.assertGreater(len(starts),1)
+        self.assertLessEqual(len(starts),operations.RESTART_PATIENCE//60+1)
+        # A failed start never keeps the workflow host stopped.
+        start_host.assert_called_once()
 
     def test_restore_holds_all_executors_before_starting_services(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -313,7 +341,7 @@ class WorkspaceLinkTests(unittest.TestCase):
         def failing(output):raise subprocess.CalledProcessError(1,'pg_dump')
         with two_stores(commands,dump=failing):
             with self.assertRaisesRegex(BackupError,'backup_failed'):backup(state,self.root/'first')
-        self.assertIn(['fixture','start','--wait','--wait-timeout','180','nocheh-app'],commands)
+        self.assertIn(['fixture','start','--wait','--wait-timeout','300','nocheh-app'],commands)
         self.assertEqual([path.name for path in self.root.iterdir() if path.name.startswith('.backup-')],[])
         # pg_dump fails as a command; the little space left says why.
         usage=operations.shutil.disk_usage(self.root)._replace(free=1024)
