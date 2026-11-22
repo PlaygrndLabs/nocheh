@@ -874,7 +874,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/longterm/rebuild'){const chosen=url.searchParams.getAll('space').length;
     return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
-  if(route==='/runtime')return json(res,200,{brain:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
+  if(route==='/runtime')return json(res,200,{agent:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
     status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'guard.detect':true,'image.read':true,'usage.price':false}});
   if(route==='/graph'){
     const scope=url.searchParams.get('scope')??'*',all=scope==='*';

@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {listWorkflows,workflowDetail,workflowHealth} from '../src/workflows/owner.js';
 import {workflowMetrics} from '../src/workflows/metrics.js';

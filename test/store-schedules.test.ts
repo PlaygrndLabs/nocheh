@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {canonical,digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 test('schedule definitions and fires are recoverable control operations with durable guarded derivatives',

@@ -12,7 +12,7 @@ import {reader} from '../src/access.js';
 import {HttpError,json} from '../src/http.js';
 import {storeSchemas} from '../src/stores/schema.js';
 import {connectStores,initializeStoreDatabases,storeNames} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 

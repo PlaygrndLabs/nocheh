@@ -180,7 +180,7 @@ export function brokerServer(options:BrokerOptions) {
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
     const timings:ModelTimings={};
     const authorizeEffect=async(kind:Effect['kind'],value:unknown)=>{
-      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{}),...(principal.brain?{brain:principal.brain}:{})};
+      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{}),...(principal.agent?{agent:principal.agent}:{})};
       const decision=await evaluate(options.pool,effect);
       trace={effect,decision,started:false,closed:false};
       await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);
@@ -261,7 +261,7 @@ export function brokerServer(options:BrokerOptions) {
         if(payload.model!==options.model)throw new HttpError(403,'model_configuration_mismatch');
       }catch(error){
         if(error instanceof HttpError){
-          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{}),...(principal.brain?{brain:principal.brain}:{})};
+          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{}),...(principal.agent?{agent:principal.agent}:{})};
           const current=await evaluate(options.pool,effect);
           const decision:Decision={outcome:'deny',origin:'mandatory',revision:current.revision,rule:error.code};
           await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);

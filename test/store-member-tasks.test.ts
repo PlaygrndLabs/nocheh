@@ -11,7 +11,7 @@ import {installMembersForTest} from '../src/members.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {startMembers,type MemberDirectoryLoader} from '../src/stores/members.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {ALI,CANARY_LABEL,GP1,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ACCOUNT,MEMBER_NG_ID,NG1,NG1_TG,NG_GROUP_IDS,OWNER,P2,fixtureChats,
   fixtureDirectory,seedAssignee,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 

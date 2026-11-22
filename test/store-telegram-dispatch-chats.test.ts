@@ -11,7 +11,7 @@ import {chatIdFor,chats,installChats} from '../src/chats.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-agent.js';
 import {NG1,NG1_TG,NG1_TOPIC,NG1_TOPIC_KEY,NG2,NG2_OLD_TG,NG2_TG,OWNER} from './fixture-groups.js';
 
 // Dispatch on chats first seen after step 2b (ADR-0252), as the running service has them: capture records each chat and
@@ -151,7 +151,7 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
     const typed=await say(OWNER,'Typed by the owner');
     assert.equal(turnOf(typed).forwarded,undefined,'a typed message has no such line');
     for(const origin of [{type:'user',sender_user:{id:Number(OWNER),is_bot:false,first_name:'Owner'},date:1699990000},{type:'hidden_user',sender_user_name:'Made-up Person',date:1699990000}]) {
-      // The owner's command reply is sent by Nocheh's bot without a brain turn, in the owner's chat where it is in Telegram.
+      // The owner's command reply is sent by Nocheh's bot without an agent turn, in the owner's chat where it is in Telegram.
       const command=await say(OWNER,'/approve '+'a'.repeat(64),Number(OWNER),{forward_origin:origin});
       assert.equal(turnOf(command),undefined,origin.type);
       assert.deepEqual([replyTo(command)?.chat_id,replyTo(command)?.text],[OWNER,'Forwarded commands are ignored. Type it or use the card.'],origin.type);
@@ -170,13 +170,13 @@ test('a reply running while the owner\'s add card gives the group its own projec
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-dispatch-card-')),base=Date.now(),token=digest('dispatch-card:'+base);
   const configured:AssistantPolicy={enabled:true,owner_id:OWNER,group_ids:[],topic_memory:'group'};
   const policy=servedPolicy(()=>configured),GROUP='-1004000000301',group=chatIdFor('telegram',GROUP);
-  const started:any[]=[],replies:any[]=[];let serial=base,brain='running';
+  const started:any[]=[],replies:any[]=[];let serial=base,agent='running';
   const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
     // The card goes to the owner's private chat.
     if(operation==='telegram.notice')return {state:'done'};
-    if(operation==='run.resume')return {state:brain};
-    assert.equal(operation,'run.start');started.push(input);return {state:brain,stage:'assistant'};
+    if(operation==='run.resume')return {state:agent};
+    assert.equal(operation,'run.start');started.push(input);return {state:agent,stage:'assistant'};
   };
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy,runtime,
     memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');}),groupReplies:{mode:'addressed',names:['Nocheh']},
@@ -196,7 +196,7 @@ test('a reply running while the owner\'s add card gives the group its own projec
     await update(GROUP,{my_chat_member:{chat,from:{id:Number(OWNER),is_bot:false,first_name:'Owner'},date:1700000001,
       old_chat_member:{status:'left',user:bot},new_chat_member:{status:'member',user:bot}}});
     assert.ok(chats().served(group));
-    // The owner asks Nocheh there; the brain is still working on it when the card's project is made.
+    // The owner asks Nocheh there; the agent is still working on it when the card's project is made.
     const n=++serial,message={message_id:n,date:1700000002,chat,from:{id:Number(OWNER),is_bot:false,first_name:'Owner'},text:'Nocheh, what is on today?'};
     const asked=(await services.capture.capture({version:1,key:`telegram:123456:update:${n}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:GROUP,
       source_id:String(n),revision:'1',occurred_at:null,text:message.text,payload:{update_id:n,message}} as Envelope)).source.reference.id;
@@ -209,8 +209,8 @@ test('a reply running while the owner\'s add card gives the group its own projec
     await services.chatAdds.settle();
     assert.ok((await stores.control.query(`SELECT 1 FROM project_assignments WHERE space_id=$1 AND mode='assigned'`,[group])).rowCount,'the card made the group its own project');
     assert.equal(await epoch(),before,'and moved no guard epoch');
-    // The brain finishes: the reply goes out from the first attempt, and no turn starts again.
-    brain='done';
+    // The agent finishes: the reply goes out from the first attempt, and no turn starts again.
+    agent='done';
     await stores.control.query('UPDATE dispatches SET next_attempt=now() WHERE event_id=$1',[asked]);
     await services.telegram.run(asked,await authority('telegram'));
     assert.deepEqual((await stores.control.query('SELECT state,attempts,error_code FROM dispatches WHERE event_id=$1',[asked])).rows[0],{state:'done',attempts:1,error_code:null});

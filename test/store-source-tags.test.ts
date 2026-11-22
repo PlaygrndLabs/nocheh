@@ -15,7 +15,7 @@ import {ownerPeopleNames} from '../src/stores/entities.js';
 import {memoryProblemSchema,memoryProblems,type NoteSourceRepository} from '../src/stores/note-sources.js';
 import {recallNames} from '../src/stores/recall-places.js';
 import {SourceTagRepository} from '../src/stores/source-tags.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
 
 test('source tags: readable() is canRead, members read only their groups in UTC by Telegram\'s names, the owner reads the Tasks zone and People names (ADR-0261)',

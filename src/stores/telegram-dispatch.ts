@@ -8,7 +8,7 @@ import {appBindingOf,telegramChat,telegramScopes,telegramTarget} from '../frontd
 import {isProxyAccount} from '../chats-telegram-updates.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
-import type {Brain,TurnReceipt} from '../brain/brain.js';
+import type {Agent,TurnReceipt} from '../agent/agent.js';
 import {groupReplies as replySettings,groupTurn,identityCache,type GroupReplies} from '../telegram-addressing.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from '../workflows/store.js';
@@ -136,7 +136,7 @@ const placeName=(value:unknown)=>typeof value==='string'?value.replace(/[\[\]\p{
 /** A recent group message as a turn's frame shows it (turn_process.recent_group). */
 type RecentItem={id:string;speaker:string;text:string;forwarded?:string;reply?:string};
 
-/** The owner's command reply, which Nocheh's bot sends without a brain turn. */
+/** The owner's command reply, which Nocheh's bot sends without an agent turn. */
 function controlReply(input:Input):TurnReceipt|null {
   const text=input.body.control_reply;
   return typeof text==='string'&&text?{state:'done',reply:{text,session_id:'owner-control'}}:null;
@@ -146,7 +146,7 @@ export class TelegramDispatchRepository {
   constructor(readonly archive:ArchiveRepository,readonly access:SourceAccessRepository,readonly sources:SourceRepository,
     readonly derived:DerivedRepository,readonly guards:GuardRepository,readonly preparation:PreparationRepository,
     readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,readonly actions:ActionCommandRepository,
-    readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly brain:Brain,readonly token:string,readonly detect:(text:string)=>Promise<unknown>,
+    readonly memoryAccess:MemoryAccessRepository,readonly call:RuntimeCall,readonly agent:Agent,readonly token:string,readonly detect:(text:string)=>Promise<unknown>,
     readonly groupReplies:GroupReplies=replySettings(process.env),readonly answers?:PrivateAnswerRepository){}
   private get control(){return this.access.stores.control;}
   /** The bot's own username and display name, which address it in groups. */
@@ -156,7 +156,7 @@ export class TelegramDispatchRepository {
     if(!ids.length)return;
     const rows=(await this.control.query("SELECT event_id,attempts FROM dispatches WHERE event_id=ANY($1::text[]) AND state='running' AND attempts>0",[ids])).rows;
     for(const row of rows) {
-      try{await this.brain.cancelTurn({channel:'telegram',event_id:row.event_id,attempt:row.attempts});}
+      try{await this.agent.cancelTurn({channel:'telegram',event_id:row.event_id,attempt:row.attempts});}
       catch{/* The running workflow retries observation and cancellation under the revoked guard epoch. */}
       await cancelReply(this.call,row.event_id,row.attempts);
     }
@@ -180,7 +180,7 @@ export class TelegramDispatchRepository {
     }
     const output=await this.derived.record({operation_id:`telegram-dispatch-result:${row.event_id}:${row.attempts}`,
       source:row.source_reference,parents:[row.input_reference],kind:'runtime_result',content:Buffer.from(canonical(result)),
-      producer:this.brain.id,producer_version:protocol,configuration:{attempt:row.attempts},provenance:{binding:row.binding}});
+      producer:this.agent.id,producer_version:protocol,configuration:{attempt:row.attempts},provenance:{binding:row.binding}});
     // Timings are diagnostics outside the durable result; a malformed set is dropped whole.
     const timings=hermesTimings(response);if(timings)await recordHermesAttempt(this.control,row.event_id,row.attempts,timings);
     return this.finish(row,result,output);
@@ -237,7 +237,7 @@ export class TelegramDispatchRepository {
     return credential;
   }
   /**
-   * The member a turn's lane names (step 4), so the brain runs one turn at a time per member: in their own private chat,
+   * The member a turn's lane names (step 4), so the agent runs one turn at a time per member: in their own private chat,
    * the member bound to it; in a group, the member whose message started the turn, while they are one. The owner's
    * turns, an answer's and an ask's have none. The lane grants nothing; storage drops it.
    */
@@ -250,7 +250,7 @@ export class TelegramDispatchRepository {
     return members().memberOf(telegramAccount(String(from)))?.id;
   }
   /**
-   * The brain closed the turn. A done turn's reply goes out through Nocheh's bot (ADR-0235), after any earlier reply in
+   * The agent closed the turn. A done turn's reply goes out through Nocheh's bot (ADR-0235), after any earlier reply in
    * the same chat, and only while the turn's context still holds; otherwise the reply is withdrawn or runs again.
    * Every other end clears the working reaction, or marks it 👎 when the turn failed and will be retried.
    */
@@ -264,7 +264,7 @@ export class TelegramDispatchRepository {
     if(state!=='done') {
       // Without a current pass the bot cannot be asked; an unrenewed presence lapses on its own.
       if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),unansweredFinish(state));
-      // The brain never sends anything, so a turn it lost to a restart runs again under a new attempt.
+      // The agent never sends anything, so a turn it lost to a restart runs again under a new attempt.
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
     }
     // The reply was written for a context that changed: it runs again under the new one, or not at all.
@@ -277,7 +277,7 @@ export class TelegramDispatchRepository {
       return await this.storeResult(row,renewedCodes.includes(withdrawn!)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
     }
     const target=replyTarget(input,attempt,credential);
-    if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
+    if(!receipt.reply)throw new HttpError(502,'agent_invalid_response');
     if(await this.earlierReply(row,input,receipt))return await this.receive(row,{state:'running',stage:'delivery'});
     const button=await this.privateButton(input,receipt);
     // Worked out here, never kept in the turn's input, so a turn already in flight keeps its input. A fixed reply (a command's
@@ -308,7 +308,7 @@ export class TelegramDispatchRepository {
     }catch(error){if(error instanceof HttpError)return null;throw error;}
   }
   /**
-   * The brain runs one chat's turns in order, but each is observed on its own, so a quick turn can finish just after a
+   * The agent runs one chat's turns in order, but each is observed on its own, so a quick turn can finish just after a
    * slow one and be seen first. Its reply waits, at most two minutes after its turn ended, while an earlier turn in the
    * same chat is still running.
    */
@@ -775,10 +775,10 @@ export class TelegramDispatchRepository {
       let input:Input,credential:string|undefined;
       if(row.state==='running') {
         input=await this.input(row.input_reference);
-        // A fixed owner reply needs no brain: it is the turn's answer as it stands.
+        // A fixed owner reply needs no agent: it is the turn's answer as it stands.
         const fixed=controlReply(input);if(fixed)return await this.settle(row,input,fixed);
         let observed:TurnReceipt;
-        try{observed=await this.brain.observeTurn({channel:'telegram',event_id:id,attempt:row.attempts});}
+        try{observed=await this.agent.observeTurn({channel:'telegram',event_id:id,attempt:row.attempts});}
         catch{return await this.receive(row,{state:'running'});}
         if(closed.has(String(observed.state)))return await this.settle(row,input,observed);
         try{credential=await this.credential(input);}catch(error){
@@ -794,7 +794,7 @@ export class TelegramDispatchRepository {
           }
           if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
-          try{return await this.receive(row,await this.brain.cancelTurn({channel:'telegram',event_id:id,attempt:row.attempts}));}
+          try{return await this.receive(row,await this.agent.cancelTurn({channel:'telegram',event_id:id,attempt:row.attempts}));}
           catch{return await this.receive(row,{state:'running'});}
         }
         if(!['not_found','queued'].includes(String(observed.state))) {
@@ -849,10 +849,10 @@ export class TelegramDispatchRepository {
       credential??=await this.credential(input);
       // The same ref starts once the bot can send its reply; until then it waits, as it did while Hermes held the bot.
       if(!await botReady(this.call))return await this.receive(row,{state:'running'},10000);
-      // Typing and 👀 show while the brain works; Nocheh renews them at each check.
+      // Typing and 👀 show while the agent works; Nocheh renews them at each check.
       await showPresence(this.call,replyTarget(input,row.attempts,credential));
       let result:TurnReceipt;
-      try{result=await this.brain.startTurn({channel:'telegram',event_id:id,attempt:row.attempts},{...input.body,archive_credential:credential});}
+      try{result=await this.agent.startTurn({channel:'telegram',event_id:id,attempt:row.attempts},{...input.body,archive_credential:credential});}
       catch{result={state:'running'};}
       if(closed.has(String(result.state)))return await this.settle(row,input,result);
       return await this.receive(row,result);

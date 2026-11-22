@@ -2,6 +2,13 @@
 
 <current>
 
+The brain is called the agent (owner, 2026-11-22: "not just docs and dashboard, want change it
+in code like variables, functions and etc.") ([ADR-0273](docs/adr/0273-the-brain-is-called-the-agent.md)).
+- Code, error codes, routes, texts, docs and tests say "agent" for the part Hermes fills;
+  "brain" stays for Nocheh itself and its logo. No behaviour change.
+- A running install needs its Hermes container recreated for the new `spool/agent-turns` mount.
+- Checks: TypeScript build, unit and store tests, Hermes and tester Python tests.
+
 The owner's own Gmail, read only, step 4 of the shared and private connectors plan (owner,
 2026-11-20) ([ADR-0272](docs/adr/0272-gmail-read-only.md)).
 - Connections › Yours › Your Gmail: the owner pastes the OAuth client of a Google Cloud project in
@@ -330,7 +337,7 @@ only). One branch: a contract, six parts and their integration.
 - 4b: `ask_member_chat`, the ask guard, `owner_member_asks` and its worker, one `member_read`
   message in the owner's chat, never carried, pruned, its quotes hidden
   ([guard](test/owner-member-asks.test.ts), [store](test/store-owner-member-asks.test.ts),
-  [Hermes](services/hermes/test_member_read.py), [turns](services/hermes/test_brain_turns.py),
+  [Hermes](services/hermes/test_member_read.py), [turns](services/hermes/test_agent_turns.py),
   [history](services/hermes/test_profile_history.py)).
 - Dashboard: the local laws line, **Private chat with Nocheh**, Messages' **Members’ chats**
   filter (`private_chats`), Notes labels, six new editable texts
@@ -529,7 +536,7 @@ again; Hermes's own code is unchanged.
   note go) and a review note's day and ref in `native_notes_reach_later_turns`, each seen to fail
   at its gate on a fake without the fix; the scripted model's `[[replied:]]` reads a turn's reply
   frame and `[[note_open:]]` opens a note by its ref ([scenarios](test/test_source_tag_scenarios.py),
-  [model](test/test_scripted_brain.py)). The fake now names a recall row's role in words, as
+  [model](test/test_scripted_agent.py)). The fake now names a recall row's role in words, as
   storage does, which `retired_source_leaves_tags`'s fake run had missed since step 2.
   Checks (2026-11-18): the build; node unit tests (456: 401 pass, 51 skipped, and only the 4
   workflow tests that also fail on main fail); the store files of this step (telegram reply and
@@ -589,7 +596,7 @@ and nothing is learned again.
   `forward_fact_names_its_origin`, `per_turn_memory_stays_small` and the facts part of
   `retired_source_leaves_tags`, each seen to fail at its gate on a fake without the fix; the
   scripted model's `[[memory_blocks:]]` reports a turn's blocks
-  ([scenarios](test/test_source_tag_scenarios.py), [model](test/test_scripted_brain.py)).
+  ([scenarios](test/test_source_tag_scenarios.py), [model](test/test_scripted_agent.py)).
   Checks (2026-11-18): the build; node unit tests (448: 393 pass, 51 skipped, and only the 4
   workflow tests that also fail on main fail); the whole store suite (801 pass; only the files
   that also fail on main fail: controlled-actions, managed-runs, sharing, workflow-operations and
@@ -1117,7 +1124,7 @@ becomes your private memory"). One pull request of several commits
   names how many reviews still waited, or says that count is unknown. The
   tester's Honcho takes the real setup's query and input limits and asks its model for answers
   as the real setup does, `json_object` at every dialectic level, from the same settings code
-  ([scenarios](tools/acceptance/product_scenarios.py), [brain](test/test_scripted_brain.py),
+  ([scenarios](tools/acceptance/product_scenarios.py), [agent](test/test_scripted_agent.py),
   [waits](test/test_product_review_waits.py),
   [rehearsal](tools/acceptance/rehearsals/installation-rehearsal.py),
   [tester Honcho](test/test_installation_rehearsal.py)).
@@ -1643,7 +1650,7 @@ offers Nocheh's data tools over MCP and moves the tool switches into Nocheh): th
 broker and `nocheh-app` serve the 18 data tools at `/mcp`, each calling its existing
 route with the turn's pass; Hermes connects in each turn and sees them as
 `mcp__nocheh__…`, and a turn without all of them stops with `data_tools_unavailable`;
-a turn's pass names its brain, kept with each checked effect; commands, web pages and
+a turn's pass names its agent, kept with each checked effect; commands, web pages and
 outside tools are switched per chat or topic on its page in Chats, with "Tools in every
 chat" in Settings › Assistant, and Nocheh checks the switch on every proposal and again
 before a run ([ADR-0233](docs/adr/0233-data-tools-over-mcp.md), [tools](test/mcp.test.ts),
@@ -2055,19 +2062,19 @@ development-machine installation ran the fresh start (H5) and live acceptance
 (H6) on the Claude provider; see item 7. [Stage timing, storage growth and Inngest findings](docs/operations-review-plan.md)
 list the gaps with code references.
 
-Swappable brain (owner, 2026-11-11: "yes start Telegram and brain socket"): the brain
-now sits behind one brain socket, and Hermes is the only brain plugged in. Every turn,
-and the brain's own settings, role and skills, notes and scheduled tasks, go through it;
-the brain never sends to a platform. The brain route moved to `/v1/brain/manage`, and Health
-shows the brain and what it can do ([decision](docs/adr/0234-brain-socket.md),
-[socket](src/brain/brain.ts), [checks](test/brain.test.ts),
-[Hermes turn routes](services/hermes/test_brain_turns.py)). Pending: a second brain when the
+Swappable agent (owner, 2026-11-11: "yes start Telegram and brain socket"): the agent
+now sits behind one agent socket, and Hermes is the only agent plugged in. Every turn,
+and the agent's own settings, role and skills, notes and scheduled tasks, go through it;
+the agent never sends to a platform. The agent route moved to `/v1/agent/manage`, and Health
+shows the agent and what it can do ([decision](docs/adr/0234-brain-socket.md),
+[socket](src/agent/agent.ts), [checks](test/agent.test.ts),
+[Hermes turn routes](services/hermes/test_agent_turns.py)). Pending: a second agent when the
 owner wants one.
 
 Nocheh's own Telegram bot (owner, 2026-11-11, same go-ahead): the new `nocheh-telegram`
 service is the only holder of the bot token. It polls Telegram, shows typing and reactions,
 and sends replies, approval cards, refusals and notices; Nocheh decides group addressing
-and sends the reply the brain returns, and Hermes is brain only
+and sends the reply the agent returns, and Hermes is agent only
 ([decision](docs/adr/0235-nocheh-owns-the-telegram-bot.md),
 [service](services/telegram/test_service.py), [simulation](services/telegram/test_simulation.py),
 [core](test/store-telegram-dispatch.test.ts), [addressing](test/telegram-frontdoor.test.ts)).
@@ -2152,7 +2159,7 @@ none. Each turn now reads them itself, and the stored prompt stays the same
 ([checks](services/hermes/test_memory_evidence.py)). The checks passed in the Hermes
 image on the owner's machine, and replies went through after the pull. The full tester
 saves a note and checks that the chat's next two messages still carry it
-([scenario](tools/acceptance/product_scenarios.py), [fixture model](test/test_scripted_brain.py)).
+([scenario](tools/acceptance/product_scenarios.py), [fixture model](test/test_scripted_agent.py)).
 
 Agent-led knowledge management is implemented and verified locally. Organization
 delegation starts disabled, has exact conversation scopes, respects owner
@@ -2340,10 +2347,10 @@ read them and cannot write them, and topics use their group's
 ([decision](docs/adr/0151-chat-role-and-skills-in-hermes-profiles.md),
 [profile checks](services/hermes/test_persona.py),
 [tool checks](services/hermes/test_scopes.py),
-[brain checks](test/brain.test.ts),
+[agent checks](test/agent.test.ts),
 [browser checks](test/dashboard-pages.browser.mjs)). The storage service had no
-brain management route, so per-chat assistant limits, Memory › Assistant notes
-and the CLI's profile commands could not reach Hermes; `/v1/brain/manage` now
+agent management route, so per-chat assistant limits, Memory › Assistant notes
+and the CLI's profile commands could not reach Hermes; `/v1/agent/manage` now
 serves them too. Projects have no role and skills of their own for now (owner, October 17:
 "follow your recommend"). The first live group check (October 19) failed: the
 reply ignored the role and never used the skill, because Hermes looked for
@@ -2917,7 +2924,7 @@ Earlier upgrades are in [task history](docs/task-history.md).
   all 31 scenarios and 288 gates pass with no unmodeled Bot API method, and
   the raw synthetic secret never reached a model call. The suite drives real
   Hermes polling, three stores, Inngest, Honcho and Nocheh tools through a
-  scripted fixture brain and a substituted speech service; it does not
+  scripted fixture agent and a substituted speech service; it does not
   measure model judgement, real transcription or real Telegram. It found and
   verified repairs for a reply never transmitted during a polling reconnect,
   which had been recorded as uncertain and lost; for replies to messages sent

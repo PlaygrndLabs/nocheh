@@ -15,7 +15,7 @@ import {askSendKey} from '../src/stores/owner-member-ask-turns.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {reloadMembers,startMembers,type MemberDirectoryLoader} from '../src/stores/members.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
-import {fixtureServices,fixtureTelegram} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram} from './fixture-agent.js';
 import {BOB_ACCOUNT,GP1,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_GP_OFF_ACCOUNT,MEMBER_GP_OFF_ID,MEMBER_NG_ACCOUNT,MEMBER_NG_ID,MEMBER_NG_OFF_ID,NG_GROUP_IDS,
   OWNER,fixtureChats,fixtureDirectory,seedChats,seedMembers} from './fixture-groups.js';
 
@@ -30,7 +30,7 @@ test('an ask about a member is recorded only from the owner\'s own words, once, 
   const restoreChats=installChatsForTest(fixtureDirectory(served));
   const restoreMembers=installMembersForTest({members:[],accounts:[],chats:[],presence:[],owner_account:null});
   const notices:any[]=[],starts:any[]=[],replies:any[]=[],frontDoor=fixtureTelegram((operation,input)=>{if(operation==='telegram.reply'&&!input.cancel&&!input.observe_only)replies.push(input);});
-  // How the fake brain's ask turns go (`running` keeps them running), and whether the fake bot refuses every reply as the
+  // How the fake agent's ask turns go (`running` keeps them running), and whether the fake bot refuses every reply as the
   // real one refuses a malformed request (400). As the real bot (services/telegram/gateway.py reply()), it sends a reply
   // only under its asking message's source key with a continuation, and only when that key's digest is the turn's event.
   let turns:'done'|'running'='done',refuseAll=false,refused=0;

@@ -13,7 +13,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {MEMBER_READ_STALE_DAYS,memberAskReads,memberReads} from '../src/stores/member-reads.js';
 import {startMembers,type MemberDirectoryLoader} from '../src/stores/members.js';
 import {readSetGroups} from '../src/spaces.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {BOB,BOB_CHAT,GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_GP_OFF_CHAT,MEMBER_NG,MEMBER_NG_CHAT,
   MEMBER_NG_ID,MEMBER_NG_OFF_CHAT,NG1,NG2,NG_GROUP_IDS,OWNER,P1,P2,ALI,CANARY_LABEL,GUS,fixtureChats,fixtureDirectory,seedAssignee,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 

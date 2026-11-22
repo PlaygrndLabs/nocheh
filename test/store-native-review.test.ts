@@ -9,7 +9,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {observedSource} from '../src/observed-source.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {NativeReviewRepository,nativeAttemptLimit,nativeReconcileLimit,requestStrandedSources} from '../src/stores/native-review.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {honchoEngine} from '../src/memory/honcho.js';
@@ -26,7 +26,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-')),key='review:'+Date.now(),group='-'+Date.now();
   const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null},receipts=new Set<string>(),launched=new Set<string>();
-  // missing: the start never reaches the brain; cut: the brain launches the review and its answer is lost.
+  // missing: the start never reaches the agent; cut: the agent launches the review and its answer is lost.
   let mode:'busy'|'lose'|'missing'|'cut'|'done'='busy',writes=0,requests=0,observations=0,observed:((id:string)=>Promise<unknown>)|null=null;
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
@@ -79,12 +79,12 @@ test('native review preserves profile waits, guarded inputs, durable completion 
       },release:client.release.bind(client)} as pg.PoolClient;
     }) as typeof control.connect;
     const access=Object.assign(Object.create(services.access),{stores:{...stores,control}}),contexts=Object.assign(Object.create(services.contexts),{access});
-    const recovering=new NativeReviewRepository(contexts,services.derived,services.prepared,services.turns,services.reviews.brain,token);
+    const recovering=new NativeReviewRepository(contexts,services.derived,services.prepared,services.turns,services.reviews.agent,token);
     mode='done';await assert.rejects(recovering.run(next,authority),/synthetic_control_completion_lost/);
     const beforeRecovery={requests,observations,writes};assert.equal(await services.reviews.run(next,authority),'done');
     assert.deepEqual({requests,observations,writes},beforeRecovery,'durable completion requires neither native execution nor another observation');
 
-    // A review the brain launched before its answer was lost has a start record: no receipt does not authorize repeating it.
+    // A review the agent launched before its answer was lost has a start record: no receipt does not authorize repeating it.
     const third=await makeSource(3),uncertain=((await services.reviews.queue(third)).ids)[0]!;mode='cut';
     assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');let attempted=requests;
     assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');assert.equal(requests,attempted,'no receipt does not authorize repeating a native note mutation');
@@ -93,7 +93,7 @@ test('native review preserves profile waits, guarded inputs, durable completion 
     await services.reviews.controlJob(owner,uncertain,{action:'resume',expected_revision:2});
     assert.equal(await services.reviews.run(uncertain,authority),'ambiguous');assert.equal(requests,attempted);
 
-    // A start the brain never received leaves no start record: the review waits again as new work and runs once.
+    // A start the agent never received leaves no start record: the review waits again as new work and runs once.
     const lost=((await services.reviews.queue(await makeSource(5))).ids)[0]!;mode='missing';
     assert.equal(await services.reviews.run(lost,authority),'ambiguous');assert.equal(requests,++attempted);
     assert.equal(await services.reviews.run(lost,authority),'pending');assert.equal(requests,attempted,'an observation starts nothing');
@@ -138,7 +138,7 @@ test('native review runs once per source across authorization epochs and stops o
   await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-review-once-')),key='review-once:'+Date.now(),group='-'+Date.now();
   const token='synthetic-review-service-credential-only',owner:Reader={admin:true,scope:null};
-  // missing: the start never reaches the brain; cut: the brain launches the review and its answer is lost.
+  // missing: the start never reaches the agent; cut: the agent launches the review and its answer is lost.
   let mode:'done'|'missing'|'cut'|'running'|'failed'='done',starts=0,observations=0;const launched=new Set<string>();
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async(operation,input)=>{
@@ -357,7 +357,7 @@ test('native review runs once per source across authorization epochs and stops o
     assert.equal(reviewBody(replacedText),reviewBody(failedText));
     assert.equal(await services.reviews.queue(longSource).then(found=>found.ids.join()),renewed.join(),'a later sweep keeps them');
 
-    // A start the brain never received waits again as new work after one observation, up to the attempt limit,
+    // A start the agent never received waits again as new work after one observation, up to the attempt limit,
     // then closes as uncertain like any unconfirmed review.
     const [unstarted]=(await services.reviews.queue(await makeSource(16))).ids;mode='missing';
     const [lostStarts,lostObservations]=[starts,observations],seen:string[]=[];

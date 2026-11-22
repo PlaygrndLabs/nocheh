@@ -207,7 +207,7 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
     refused (ADR-0249). A member's pass (step 4) names that member and reads as their own private chat, which the
     served list marks member_private: its scope and space are that chat, never a topic, never the owner's. The owner's ask
     about a member (member_read, step 4b) reads as the owner's private chat, as an answer does. A pass names at most one
-    of these. A lane (a member id, so the brain runs one turn at a time per member) grants nothing; it is taken only on a
+    of these. A lane (a member id, so the agent runs one turn at a time per member) grants nothing; it is taken only on a
     member's own pass, for that member, and on a group pass."""
     try:
         prefix,body,signature=credential.split('.')

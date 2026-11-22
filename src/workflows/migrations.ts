@@ -4,7 +4,7 @@ import {HttpError,object} from '../http.js';
 import {families,hash,closedStates,switchFamilyTransaction,type WorkflowFamily} from './store.js';
 import {workflowIdentity} from './client.js';
 import type {RuntimeCall} from '../runtime.js';
-import {brainOperation,type Brain} from '../brain/brain.js';
+import {agentOperation,type Agent} from '../agent/agent.js';
 
 export const migrationSchema=`
 CREATE TABLE IF NOT EXISTS workflow_migrations (
@@ -130,7 +130,7 @@ async function reconcileRecorded(client:pg.PoolClient,f:WorkflowFamily){
   return (rows.rowCount??0)+(receipts.rowCount??0);
 }
 /** Observe existing native identities only. Missing receipts stay unresolved. */
-export async function reconcileMigration(pool:pg.Pool,id:string,runtime:RuntimeCall,brain:Brain,ownerScope:string|null){
+export async function reconcileMigration(pool:pg.Pool,id:string,runtime:RuntimeCall,agent:Agent,ownerScope:string|null){
   workflowIdentity(id);const client=await pool.connect();let observed=0,unavailable=0;
   try{
     await client.query('BEGIN');
@@ -152,8 +152,8 @@ export async function reconcileMigration(pool:pg.Pool,id:string,runtime:RuntimeC
       let receipt:Record<string,unknown>;
       try{
         if(row.family==='actions')receipt=await runtime('action.execute',{id:job.id,observe_only:true},4000);
-        else if(row.family==='memory_review')receipt=await brainOperation(brain,'reviewNotes')({id:hash(job.id+':'+job.generation),scope:ownerScope,observe_only:true});
-        else receipt=await brain.observeTurn({channel:row.family==='schedules'?'scheduler':row.family as 'telegram'|'browser',event_id:job.id,attempt:row.family==='telegram'?job.attempts:1});
+        else if(row.family==='memory_review')receipt=await agentOperation(agent,'reviewNotes')({id:hash(job.id+':'+job.generation),scope:ownerScope,observe_only:true});
+        else receipt=await agent.observeTurn({channel:row.family==='schedules'?'scheduler':row.family as 'telegram'|'browser',event_id:job.id,attempt:row.family==='telegram'?job.attempts:1});
       }catch{unavailable++;continue;}
       const state=String(receipt.state);
       if(row.family==='telegram'&&['done','failed','ambiguous','suppressed','cancelled'].includes(state)){

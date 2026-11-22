@@ -35,18 +35,18 @@ def outcome(agent,cancelled):
             result['unexpected_tool_names']=[name for name in agent['unexpected_tool_names'][:16] if isinstance(name,str) and TOOL.fullmatch(name)]
         return result
     text=render_reply_citations(agent.get('text') or '')
-    # Nothing to say is the brain's choice, not a failure; a blank reply cannot be sent either.
+    # Nothing to say is the agent's choice, not a failure; a blank reply cannot be sent either.
     if not text.strip():return {'state':'suppressed','error_code':'intentional_silence'}
     # A cancel that arrives while the answer is written still withdraws it, as the gateway never sends it.
     if cancelled.is_set():return {'state':'cancelled'}
     return {'state':'done','reply':{'text':text,'session_id':agent['session_id']}}
 
 
-class BrainTurns:
+class AgentTurns:
     def __init__(self,root,spool,policy,model,credentials,turn=native_turn,capacity=TURN_CAPACITY):
         self.root,self.scopes,self.model,self.credentials,self.turn,self.size=Path(root),policy,model,credentials,turn,capacity
         # Not spool/async-runs: the same Telegram attempt has the same run id on both runners.
-        self.directory=Path(spool)/'brain-turns'
+        self.directory=Path(spool)/'agent-turns'
         self.runs=AsyncRuns(self.directory,self._execute,self._saved)
         self.loop=self.thread=self.capacity=None;self.lanes={}
 
@@ -54,7 +54,7 @@ class BrainTurns:
         # One loop for every turn, so lanes and capacity are plain asyncio locks.
         loop=asyncio.new_event_loop();running=threading.Event();loop.call_soon(running.set)
         self.capacity=asyncio.Semaphore(self.size)
-        self.thread=threading.Thread(target=loop.run_forever,name='nocheh-brain',daemon=True);self.thread.start()
+        self.thread=threading.Thread(target=loop.run_forever,name='nocheh-agent',daemon=True);self.thread.start()
         running.wait(5);self.loop=loop
 
     def ready(self):
@@ -99,12 +99,12 @@ class BrainTurns:
 
     def start(self,body):
         self._admit(body)
-        if not self.ready():raise RuntimeError('brain_not_ready')
+        if not self.ready():raise RuntimeError('agent_not_ready')
         return self._answer(self.runs.start(body))
 
     def resume(self,body):
         self._channel(body)
-        if body.get('observe_only') is not True and not self.ready():raise RuntimeError('brain_not_ready')
+        if body.get('observe_only') is not True and not self.ready():raise RuntimeError('agent_not_ready')
         return self._answer(self.runs.resume(body))
 
     def cancel(self,body):
@@ -121,7 +121,7 @@ class BrainTurns:
 
     def _execute(self,body,progress,cancelled):
         loop=self.loop
-        if loop is None or not loop.is_running():raise RuntimeError('brain_not_ready')
+        if loop is None or not loop.is_running():raise RuntimeError('agent_not_ready')
         result=asyncio.run_coroutine_threadsafe(self._turn(body,progress,cancelled),loop).result()
         # Kept before the receipt closes the run, so a restart in between still finds the reply.
         immutable_file(self.directory,identity(body)+'.outcome',canonical(result))

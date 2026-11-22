@@ -278,7 +278,7 @@ def _make(state,output,leave_stopped,command,env,recovery,outcome):
         if three_stores else [name for name in SERVICES if name in running])
     barrier=ExitStack()
     workflow_was_running=workflows_running(state)
-    # Ingress, one at a time: the Telegram bot stops reading and sending before the brain stops answering.
+    # Ingress, one at a time: the Telegram bot stops reading and sending before the agent stops answering.
     ingress=('nocheh-telegram','hermes')
     stage=None
     try:

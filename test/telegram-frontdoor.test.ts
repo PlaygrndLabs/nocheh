@@ -88,7 +88,7 @@ test('the bot\'s identity is read once a minute and an unknown one never blocks 
   answer={username:'late_bot'};assert.deepEqual(await empty(),{username:'late_bot',first_name:null},'an identity not yet loaded is asked for again');
 });
 
-test('a reply goes to the asking message in its topic, with the brain\'s and the bot\'s timings',()=>{
+test('a reply goes to the asking message in its topic, with the agent\'s and the bot\'s timings',()=>{
   const restore=installChatsForTest(fixtureDirectory());
   try {
     const event='e'.repeat(64),input={binding:{} as any,principal:{admin:false,scope:GP1,space:GP1_TOPIC,turnEvent:event} as any,

@@ -9,7 +9,7 @@ import {join} from 'node:path';
 import {digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {SharingContentRepository} from '../src/stores/sharing.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {honchoEngine} from '../src/memory/honcho.js';

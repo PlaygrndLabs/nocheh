@@ -2,7 +2,7 @@
 
 Extends tools.acceptance.telegram_rehearsal on the same synthetic installation:
 actual polling by Nocheh's Telegram service, Hermes, three stores, workflows,
-Honcho and the scripted fixture brain. Directives such as ``[[search:...]]``
+Honcho and the scripted fixture agent. Directives such as ``[[search:...]]``
 make the fixture model request real Nocheh tools; they test plumbing,
 isolation and effects, not judgement.
 Each scenario is recorded separately and later scenarios still run after a
@@ -278,8 +278,8 @@ console.log(JSON.stringify({status:response.status,headers:{'cache-control':resp
     def sent(self):
         return self.telegram()['sent']
 
-    def brain(self):
-        return self.http('/fixture/brain')['events']
+    def agent(self):
+        return self.http('/fixture/agent')['events']
 
     def control(self, body):
         return self.http('/fixture/telegram/control', body)
@@ -493,7 +493,7 @@ class Scenarios:
             self.wait('chunk_archived', lambda row=row: archived_delivery(self.f.query, row['message'], update['update_id']), 60)
 
     def last_words(self):
-        events = [event for event in self.f.brain() if event.get('directive') == 'long']
+        events = [event for event in self.f.agent() if event.get('directive') == 'long']
         return events[-1]['words']
 
     def intentional_silence(self):
@@ -506,10 +506,10 @@ class Scenarios:
         update = self.f.message(GROUP, 'جواب بده [[empty-once:E1]]', topic=13)
         _, text = self.turn(update, GROUP, 13, attempts=None)
         row = self.f.dispatch(self.f.event(update['update_id']))
-        phases = [event['phase'] for event in self.f.brain() if event.get('directive') == 'empty-once' and event.get('argument') == 'E1']
+        phases = [event['phase'] for event in self.f.agent() if event.get('directive') == 'empty-once' and event.get('argument') == 'E1']
         self.gate('blank_answer_was_retried', phases[:2] == ['empty', 'final'], phases=phases, attempts=row['attempts'])
         self.gate('blank_answer_not_recorded_as_silence', row['state'] == 'done' and row['error'] is None)
-        self.gate('recovered_answer_delivered', '[brain] recovered E1' in text)
+        self.gate('recovered_answer_delivered', '[agent] recovered E1' in text)
 
     # Memory, tools and audience ---------------------------------------------
 
@@ -519,7 +519,7 @@ class Scenarios:
         self.state['fact_event'], _ = self.turn(fact, OWNER)
         _, text = self.turn(self.f.message(OWNER, 'دنبالش بگرد [[search:PRIVFACT91]]'), OWNER)
         self.gate('archive_tool_called', any(event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'
-                                              and 'PRIVFACT91' in event.get('argument', '') for event in self.f.brain()))
+                                              and 'PRIVFACT91' in event.get('argument', '') for event in self.f.agent()))
         self.gate('owner_private_search_finds_fact', 'PRIVFACT91' in text and 'فیروزه' in text, excerpt=text[:300])
 
     def owner_private_context(self):
@@ -530,17 +530,17 @@ class Scenarios:
         _, text = self.turn(self.f.message(GROUP, 'دنبالش بگرد [[search:PRIVFACT91]]', topic=11), GROUP, 11)
         self.gate('group_search_withholds_private_fact', 'فیروزه' not in text and 'PRIVFACT91 ' not in text.replace('[[search:PRIVFACT91]]', ''),
                   excerpt=text[:300])
-        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
         self.gate('group_tool_result_withholds_fact', 'فیروزه' not in final['result'], result=final['result'][:300])
         _, text = self.turn(self.f.message(GROUP, 'چه می‌دانی؟ [[context:فیروزه]]', topic=11), GROUP, 11)
-        events = [event for event in self.f.brain() if event.get('directive') == 'context']
+        events = [event for event in self.f.agent() if event.get('directive') == 'context']
         self.gate('group_model_context_withholds_fact', events[-1]['present'] is False, answer=text)
         _, text = self.turn(self.f.message(OTHER_GROUP, 'به خاطر داری؟ [[recall:رنگ مورد علاقه خواهر]]'), OTHER_GROUP)
         self.gate('other_group_recall_withholds_fact', 'فیروزه' not in text, excerpt=text[:300])
 
     def owner_recall(self):
         _, text = self.turn(self.f.message(OWNER, 'یادت هست؟ [[recall:رنگ مورد علاقه خواهر]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]
         self.gate('recall_tool_returned', 'error' not in final['result'][:40] or 'limited' in final['result'], result=final['result'][:400])
 
     def secret_is_guarded(self):
@@ -565,7 +565,7 @@ class Scenarios:
         self.gate('retired', result.get('retired') is True, revision=result.get('revision'))
         self.wait('retirement_visible', lambda: self.f.app('/v1/sources/'+event_id+'/retirement')['retired'] is True, 60)
         _, text = self.turn(self.f.message(OWNER, 'دوباره بگرد [[search:PRIVFACT91]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
         sources = json.loads(final['result'])['sources']
         self.gate('retired_source_not_retrieved', all(row['id'] != event_id for row in sources),
                   returned=[row['kind'] for row in sources])
@@ -575,7 +575,7 @@ class Scenarios:
             self.f.app('/v1/sources/'+reply['event_id']+'/retirement', {'retired': True, 'expected_revision': reply['revision'],
                        'operation_id': 'scenario-retire-reply-'+reply['event_id'][:16]})
         _, again = self.turn(self.f.message(OWNER, 'یک بار دیگر [[search:PRIVFACT91]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]
         retired = {reply['event_id'] for reply in quoting}
         self.gate('retired_replies_not_retrieved', all(row['id'] not in retired for row in json.loads(final['result'])['sources']))
         # Assistant replies that quoted the fact are separate delivered sources;
@@ -1051,7 +1051,7 @@ class Scenarios:
         self.gate('memory_tmp', '/tmp' in (host.get('Tmpfs') or {}) or mounts.get('/tmp', {}).get('Type') == 'tmpfs', tmpfs=host.get('Tmpfs'))
         self.gate('memory_home', environment.get('HOME') == '/tmp/home',
                   home=environment.get('HOME'))
-        self.gate('only_the_folders_it_uses', {'/dashboard-state/home', '/data/spool/brain-turns'} <= set(mounts)
+        self.gate('only_the_folders_it_uses', {'/dashboard-state/home', '/data/spool/agent-turns'} <= set(mounts)
                   and not {'/dashboard-state', '/data/spool'} & set(mounts), mounts=sorted(mounts))
         probe = ('token=absent; [ -e /dashboard-state/token ] && token=present; '
                  'write() { if ( : > "$1/.nocheh-write-probe" ) 2>/dev/null; then rm -f "$1/.nocheh-write-probe"; echo written; else echo refused; fi; }; '
@@ -1129,14 +1129,14 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         root = {'message_id': topic, 'date': 1, 'chat': {'id': GROUP, 'type': 'supergroup', 'is_forum': True}, 'forum_topic_created': {'name': name, 'icon_color': 7322096}}
         self.turn(self.f.message(GROUP, 'سلام از تاپیک برنامه‌ریزی', topic=topic, reply_to=root), GROUP, topic)
         _, text = self.turn(self.f.message(OWNER, 'گروه‌ها و تاپیک‌هایم را فهرست کن [[owner:conversations]]'), OWNER)
-        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
         items = json.loads(final['result'])['items']
         named = {item['space_id']: item['name'] for item in items}
         self.gate('owner_sees_groups', self.f.chat(GROUP) in named and self.f.chat(OTHER_GROUP) in named,
                   groups=sorted(item['space_id'] for item in items if item.get('kind') == 'group'))
         self.gate('topic_named_from_root_message', named.get(self.f.chat(GROUP, topic)) == name, name=named.get(self.f.chat(GROUP, topic)))
         self.turn(self.f.message(GROUP, 'فهرست گروه‌ها [[owner:conversations]]', topic=11), GROUP, 11)
-        final = [event for event in self.f.brain() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
+        final = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__owner_read' and event['phase'] == 'final'][-1]
         self.gate('group_turn_cannot_read_owner_directory', 'owner_read_unavailable' in final['result'] and 'items' not in final['result'])
 
     def unparseable_update_does_not_wedge_polling(self):
@@ -1231,7 +1231,7 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
     def restart_preserves_receipts(self):
         sent = len(self.f.sent())
         self.wait('updates_acknowledged', lambda: not self.f.telegram()['updates'], 120)
-        # The whole runtime restarts: the Telegram service with its delivery receipts, and the brain.
+        # The whole runtime restarts: the Telegram service with its delivery receipts, and the agent.
         self.f.run('restart', '--no-deps', TELEGRAM_SERVICE, 'hermes')
         self.f.run('up', '-d', '--no-build', '--no-deps', '--wait', TELEGRAM_SERVICE, 'hermes')
         wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected')
@@ -1383,7 +1383,7 @@ def run(directory, names, scenarios_class=Scenarios):
                                      'native_reviews_awaiting_receipt': int(count("state='waiting' AND waiting_reason='receipt_pending'")), 'drain_seconds': round(time.monotonic()-started, 1)}
     scenarios.results.append(scenarios.current)
     summary = {'passed': all(row['passed'] for row in scenarios.results), 'live_acceptance': False,
-               'provider': 'deterministic-fixture-with-scripted-brain', 'scenarios': scenarios.results,
+               'provider': 'deterministic-fixture-with-scripted-agent', 'scenarios': scenarios.results,
                'unknown_methods': final['unknown'][len(initial['unknown']):], 'stats': fixture.http('/fixture/stats')}
     (report/'result.json').write_text(json.dumps(summary, indent=2, ensure_ascii=False)+'\n')
     print(json.dumps({'passed': summary['passed'], 'failed': [row['scenario'] for row in scenarios.results if not row['passed']],

@@ -5,7 +5,7 @@ import {HttpError} from '../src/http.js';
 import {promptKeys,promptProblem,scheduleNoticeLines,scheduleNoticeTexts} from '../src/prompts.js';
 import {ScheduleNotices,ownerTime,scheduleButton} from '../src/stores/schedule-notices.js';
 import {silentResult} from '../src/stores/telegram-actions.js';
-import {fixtureBrain,type FakeCall} from './fixture-brain.js';
+import {fixtureAgent,type FakeCall} from './fixture-agent.js';
 import {seededDirectory} from './fixture-seeded-chats.js';
 
 const OWNER='42',STORE='1'.repeat(24),PROFILE='nocheh-'+STORE,JOB='a1b2c3d4e5f6';
@@ -15,7 +15,7 @@ const schedule={scope:OWNER,profile:PROFILE,job_id:JOB,name:'Morning brief',sche
 
 function notices(sent:Record<string,any>[],manage:FakeCall=async()=>({})) {
   const call=(async(operation:string,input:Record<string,unknown>)=>{sent.push({operation,...input});return {state:'done'};}) as any;
-  return new ScheduleNotices(control,policy,call,fixtureBrain(async(operation,input)=>operation==='schedules.manage'?manage(operation,input):{}));
+  return new ScheduleNotices(control,policy,call,fixtureAgent(async(operation,input)=>operation==='schedules.manage'?manage(operation,input):{}));
 }
 
 test('a schedule set by asking gets one message in the owner\'s words, in their time zone, with Pause and Delete (ADR-0266)',async()=>{
@@ -54,7 +54,7 @@ test('a press pauses or deletes only a schedule of the owner\'s private chat, th
     asked.length=0;
     assert.equal(await notices([],manage).press('d',STORE,'ffffffffffff','e'.repeat(64)),scheduleNoticeLines('').changed);
     assert.deepEqual(asked.map(input=>input.operation),['list']);
-    // The brain refusing it reads as changed, never as a failure of the press.
+    // The agent refusing it reads as changed, never as a failure of the press.
     const refusing:FakeCall=async(_,input)=>{if(input.operation==='list')return {schedules:listed};throw new HttpError(400,'cron_job_not_found');};
     assert.equal(await notices([],refusing).press('d',STORE,JOB,'d'.repeat(64)),scheduleNoticeLines('').changed);
   } finally {restore();}

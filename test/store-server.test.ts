@@ -9,7 +9,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
-import {fixtureServices,type FakeCall} from './fixture-brain.js';
+import {fixtureServices,type FakeCall} from './fixture-agent.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
 import {storageServer} from '../src/stores/server.js';
 import {countMemoryStep} from '../src/stores/note-sources.js';
@@ -93,15 +93,15 @@ test('separated application captures through control outages, exposes owner repo
     assert.deepEqual((await request('/v1/chat-sends?filter=problems')).records.map((row:any)=>[row.kind,row.detail,row.chat]),[['reaction','👀','-42']]);
     await request('/v1/chat-sends?limit=101',undefined,400);
     const runtimeStatus=await request('/v1/runtime');
-    assert.equal(runtimeStatus.status.telegram,'connected');assert.equal(runtimeStatus.brain.id,'hermes');assert.equal(runtimeStatus.brain.capabilities.persona,true);
+    assert.equal(runtimeStatus.status.telegram,'connected');assert.equal(runtimeStatus.agent.id,'hermes');assert.equal(runtimeStatus.agent.capabilities.persona,true);
     await request('/v1/runtime',undefined,403,scopeToken(token,'123',Date.now()+60000));
     const persona={action:'persona',scope:'default',role:'Fixture role',skills:[],revision:'r1'};
-    assert.deepEqual(await request('/v1/brain/manage',persona),{operation:'persona.write',input:{scope:'default',role:'Fixture role',skills:[],revision:'r1'}});
-    assert.equal((await request('/v1/brain/manage',{action:'persona',scope:'default'})).operation,'persona.read');
-    assert.equal((await request('/v1/brain/manage',{action:'preferences',scope:'default'})).operation,'config.read');
-    await request('/v1/brain/manage',{action:'unknown'},400);
+    assert.deepEqual(await request('/v1/agent/manage',persona),{operation:'persona.write',input:{scope:'default',role:'Fixture role',skills:[],revision:'r1'}});
+    assert.equal((await request('/v1/agent/manage',{action:'persona',scope:'default'})).operation,'persona.read');
+    assert.equal((await request('/v1/agent/manage',{action:'preferences',scope:'default'})).operation,'config.read');
+    await request('/v1/agent/manage',{action:'unknown'},400);
     // The Notes page reads each note's source in the owner's words; what Hermes recorded stays behind (ADR-0257).
-    assert.deepEqual((await request('/v1/brain/manage',{action:'memory',scope:'123'})).memories[0].entries,[{target:'memory',text:'Juniper',from:'unknown',label:'Source not recorded',day:null,originals:[]}]);
+    assert.deepEqual((await request('/v1/agent/manage',{action:'memory',scope:'123'})).memories[0].entries,[{target:'memory',text:'Juniper',from:'unknown',label:'Source not recorded',day:null,originals:[]}]);
     // Hermes's lookup takes the service token only, and a body not as Hermes writes it is refused.
     const lookup={notes:[{key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}],space:'123'};
     assert.deepEqual(await request('/internal/notes/sources',lookup),{labels:{['e'.repeat(64)]:{from:'unknown',label:'source not recorded'}}});

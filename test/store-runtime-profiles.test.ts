@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {chatIdFor,installChatsForTest} from '../src/chats.js';

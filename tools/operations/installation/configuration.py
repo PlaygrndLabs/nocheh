@@ -271,9 +271,9 @@ def machine_folder(state):
 
 
 # The state folders services mount, each made one level at a time: mkdir(parents=True) would give a parent, such as
-# admin/dashboard with the dashboard's token, the default mode. Hermes mounts only spool/brain-turns and
+# admin/dashboard with the dashboard's token, the default mode. Hermes mounts only spool/agent-turns and
 # admin/dashboard/home (ADR-0251).
-RUNTIME_FOLDERS = ('files', 'spool', 'spool/brain-turns', 'hermes', 'telegram', 'reports',
+RUNTIME_FOLDERS = ('files', 'spool', 'spool/agent-turns', 'hermes', 'telegram', 'reports',
                    'admin', 'admin/dashboard', 'admin/dashboard/home')
 
 

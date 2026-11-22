@@ -91,7 +91,7 @@ class Scope:
 
 
 class Scopes:
-    """Who Nocheh's brain serves (ADR-0252). Whether it is on comes from its environment; the owner, the owner's private
+    """Who Nocheh's agent serves (ADR-0252). Whether it is on comes from its environment; the owner, the owner's private
     chat and the served groups come from the app's served list (services/chats.py), by their Nocheh chat ids and their
     Telegram ids now and before. Who else may talk in a served group is the app's member directory alone (step 3): the
     app admits the sender and signs the turn's pass for this event. A turn's chat, space and app binding come from its

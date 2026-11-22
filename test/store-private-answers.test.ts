@@ -15,7 +15,7 @@ import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {runtimeProfile} from '../src/stores/runtime-profile.js';
 import {PrivateAnswerRepository,privateAnswerId,privateAnswerStates,privateAnswerTimes,
   type PrivateAnswer,type PrivateAnswerOffer,type PrivateAnswerOutcome,type PrivateAnswerStart,type PrivateAnswerTap} from '../src/stores/private-answers.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,NG1,NG1_TOPIC,NG2,NG_GROUP_IDS,OWNER,P1,P1_GROUPS,P2,UNSERVED,groupsPolicy,seedChats,seedGroups} from './fixture-groups.js';
 import {accountIdFor} from '../src/chats.js';
 

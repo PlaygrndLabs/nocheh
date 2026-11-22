@@ -8,7 +8,7 @@ import pg from 'pg';
 import {canonical,digest} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices,type FakeCall} from './fixture-brain.js';
+import {fixtureServices,type FakeCall} from './fixture-agent.js';
 import {drainSourceSpool} from '../src/stores/capture.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
