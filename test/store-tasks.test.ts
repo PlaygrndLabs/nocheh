@@ -1126,7 +1126,8 @@ for(const family of families)test(`a group or topic reaches only its own tasks a
     await s.guards.reconcile();await s.guards.setMode('on');
     await stores.control.query('DELETE FROM owner_tasks');await stores.control.query("UPDATE owner_task_settings SET settings='{}'::jsonb");
     const mark=String(Date.now()),p1=digest(key+':p1'),p2=digest(key+':p2');
-    for(const [id,name] of [[p1,'P1'],[p2,'P2']])await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,$2,'active',1)",[id,name]);
+    // Sharing off: each group reads only itself (ADR-0248); with "Share group chats" on they would read each other (ADR-0267).
+    for(const [id,name] of [[p1,'P1'],[p2,'P2']])await stores.control.query("INSERT INTO projects(id,name,state,revision,share_chats) VALUES($1,$2,'active',1,false)",[id,name]);
     for(const chat of [g1,g2])await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[chat,p1]);
 
     // In P1: a task set on the project itself, a task of each group and one of a topic of the first group.
@@ -1329,7 +1330,8 @@ for(const family of families)test(`a group's move, archive or trash takes only t
   try {
     await s.guards.reconcile();await s.guards.setMode('on');
     const mark=String(Date.now()),p1=digest(key+':p1');
-    await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'P1','active',1)",[p1]);
+    // Sharing off: each group sees only its own tasks (ADR-0248, ADR-0267).
+    await stores.control.query("INSERT INTO projects(id,name,state,revision,share_chats) VALUES($1,'P1','active',1,false)",[p1]);
     for(const chat of [g1,g2])await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[chat,p1]);
     // A task of the second group, with one of its own under it, under a task of the first group, as written before
     // subtasks followed their parent's group.

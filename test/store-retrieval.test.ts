@@ -102,7 +102,7 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     assert.ok(!graph.nodes.some(n=>n.label==='runtime_context'));
     await assert.rejects(sources.graph(scoped,'-321'),{code:'owner_required'});
 
-    const projects=new ProjectRepository(stores.control),project=await projects.save(owner,{name:key,state:'active',expected_revision:0,operation_id:key+':project'});
+    const projects=new ProjectRepository(stores.control),project=await projects.save(owner,{name:key,state:'active',share_chats:false,expected_revision:0,operation_id:key+':project'});
     for(const space of ['-321','-654'])await projects.assign(owner,{space_id:space,mode:'assigned',project_id:project.id,
       expected_revision:(await stores.control.query('SELECT revision FROM project_assignments WHERE space_id=$1',[space])).rows[0]?.revision??0,operation_id:key+space});
     const projectGraph=await sources.graph(owner,'-321','',1,reply.id);

@@ -57,11 +57,15 @@ project's groups, members or not, can see answers built from all of them.
 
 - The owner turns sharing off per project; each group then reads only itself and
   Answer privately comes back. An archived project shares nothing.
-- Known gaps, accepted for now: the members' app's group reach is not widened; a
-  reset-setup snapshot restores `share_chats` at its default (on); a member's
-  per-group switch is passed by sharing; the start-of-turn Honcho session context
-  stays the group's own (recall tools reach the others); sharing rules and fact
-  grants stay keyed to the home group.
+- Known gaps, accepted for now: the members' app's group reach is not widened, nor
+  is reminder delivery's (a member's reminder set in one group on a task of
+  another group of the project takes the owner lane, not the member's chat); a
+  group a member's turn left out, left or last saw long ago comes back through
+  another joined group of a sharing project; a reset-setup snapshot restores
+  `share_chats` at its default (on); a member's per-group switch is passed by
+  sharing; the start-of-turn Honcho session context stays the group's own (recall
+  tools reach the others); sharing rules and fact grants stay keyed to the home
+  group.
 - Checks: `test/store-shared-project-chats.test.ts`, the owner API, private-answer
   and project store tests, the dashboard browser test, and the full tester's
   `project_groups_stay_apart` (off, then on).

@@ -62,6 +62,10 @@ Checks and follow-ups:
   script policy from Report-Only to enforced in one commit. Later: one shared name cleaner for
   cards, forwards and recall labels, and a notice when an off-site restore check fails.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
+- "Share group chats" ([ADR-0267](docs/adr/0267-share-group-chats.md)): a member's private chat reads a sharing
+  project's other groups and their tasks, but the members' app and reminder delivery do not
+  (a reminder a member sets on such a task goes to the owner). Asked the owner whether both
+  should follow sharing.
 - Many entries in the old log end with "a live look on the owner's install after merge". These
   are not listed one by one; the old log in Git history has each one.
 - Older October checks are also only in the old log: learning keeps valid items ([ADR-0128](docs/adr/0128-learning-results-keep-valid-items.md)),

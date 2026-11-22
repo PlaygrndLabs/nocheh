@@ -114,7 +114,10 @@ class MemberTasks(unittest.TestCase):
         found.private_search = lambda person, word: ''
         found.tool_final = lambda *args: None
         found.approval_cards = lambda before: []
-        found.groups_in_projects = contextlib.contextmanager(lambda layout: (yield {name: {'id': 'p'+str(index)} for index, name in enumerate(layout)}))
+        found.groups_in_projects = contextlib.contextmanager(lambda layout: (yield {
+            name: {'id': 'p'+str(index), 'name': name, 'description': '', 'revision': 1, 'share_chats': True} for index, name in enumerate(layout)}))
+        # The owner's project save answers the project as saved: switching "Share group chats" off echoes it back.
+        found.f.app = lambda path, body=None: {**body, 'revision': body['expected_revision']+1}
         found.task_tool = lambda arguments, chat=OWNER, topic=None, sender=OWNER: (
             {'error': 'tool_unavailable'} if sender != OWNER and arguments['action'] not in ('list', 'get') else {})
         with patch('tools.acceptance.product_scenarios.time.sleep'):
