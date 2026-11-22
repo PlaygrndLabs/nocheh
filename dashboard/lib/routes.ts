@@ -14,6 +14,7 @@ export const pageIds = [
   'memory',
   'usage',
   'system',
+  'connections',
   'settings',
 ] as const;
 export type PageId = (typeof pageIds)[number];
@@ -70,6 +71,9 @@ export function resolveRoute(hash: string): {page: PageId; hash: string | null} 
   const view = params.get('view');
   // Usage was a System tab; it is its own page now.
   if (page === 'system' && view === 'usage') return {page: 'usage', hash: '#usage'};
+  // Connections was a Settings tab, with Notion and GitHub sub-tabs; it is its own page now (ADR-0271).
+  if (page === 'settings' && view === 'connections')
+    return {page: 'connections', hash: params.get('tab') === 'github' ? '#connections?view=github' : '#connections'};
   const renamed = view !== null ? viewAliases[page]?.[view] : undefined;
   if (renamed !== undefined) {
     if (renamed) params.set('view', renamed);

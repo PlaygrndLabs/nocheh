@@ -38,6 +38,8 @@ test('old page names lead to the page and tab that now own them',()=>{
  assert.deepEqual(resolveRoute('#operations'),{page:'system',hash:'#system?view=backups'});
  assert.deepEqual(resolveRoute('#overview'),{page:'home',hash:'#home'});
  assert.deepEqual(resolveRoute('#system?view=usage'),{page:'usage',hash:'#usage'},'the old usage tab opens the Usage page');
+ assert.deepEqual(resolveRoute('#settings?view=connections'),{page:'connections',hash:'#connections'},'the old Connections tab opens its page');
+ assert.deepEqual(resolveRoute('#settings?view=connections&tab=github'),{page:'connections',hash:'#connections?view=github'});
  assert.deepEqual(resolveRoute('#honcho?view=learned'),{page:'memory',hash:'#memory?view=facts'},'an explicit tab wins');
 });
 

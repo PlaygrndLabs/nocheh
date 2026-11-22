@@ -1,6 +1,6 @@
 /**
  * GitHub sends the browser back to /connect/github after it creates Nocheh's GitHub App and after the owner picks its
- * repositories (ADR-0210). The dashboard then opens on Settings › Connections, which finishes the sign-in. Only
+ * repositories (ADR-0210). The dashboard then opens on Connections › GitHub app, which finishes the sign-in. Only
  * GitHub's own values, each in its own shape, go along.
  */
 const forwarded: Record<string, RegExp> = {

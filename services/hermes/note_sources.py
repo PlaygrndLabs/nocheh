@@ -53,7 +53,7 @@ TOKENS=(re.compile(r'\d{6,}'),re.compile(r'[^\s@<>()"\']+@[^\s@<>()"\']+\.[^\s@<
 # already, and the project's tasks and a job's own to-do list are Nocheh's own records, so they are not outside reads;
 # any other tool is.
 TOOL_READS={'mcp__nocheh__archive_search':'archive','mcp__nocheh__archive_read':'archive','mcp__nocheh__archive_page':'archive',
-            'mcp__nocheh__memory_search':'archive','mcp__nocheh__browser':'web','mcp__nocheh__notion':'notion','mcp__nocheh__mcp':'tools',
+            'mcp__nocheh__memory_search':'archive','mcp__nocheh__browser':'web','mcp__nocheh__notion':'notion','mcp__nocheh__github':'tools','mcp__nocheh__mcp':'tools',
             'mcp__nocheh__shell':'commands','session_search':'past'}
 NOT_READS=frozenset({'memory','mcp__nocheh__memory_recall','mcp__nocheh__tasks','todo_list'})
 # The lines Nocheh puts in a turn's message, which stay in its session until a compaction: what earlier turns read.

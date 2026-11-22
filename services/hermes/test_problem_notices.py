@@ -325,7 +325,7 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW)
         self.check(NOW + 120, refused)
         self.assertEqual(self.sent[-1]['problems'],
-                         ['GitHub refused Nocheh’s app. Jobs keep the copies they have; connect GitHub again in Settings › Connections.'])
+                         ['GitHub refused Nocheh’s app. Jobs keep the copies they have; connect GitHub again in Connections › GitHub app.'])
         self.check(NOW + 4000, refused)
         self.assertEqual(len(self.sent), 1, 'one notice for one refused app')
         connected = {'connected': True, 'reconnect': False}

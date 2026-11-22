@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS background_runs (
 CREATE TABLE IF NOT EXISTS background_reports (
  job_id text NOT NULL REFERENCES background_jobs(id),part integer NOT NULL CHECK(part>0),action_id text NOT NULL,PRIMARY KEY(job_id,part)
 );
--- The GitHub copies a box job may read (ADR-0209): one row a repository, made from Settings › Connections only. A row's
+-- The GitHub copies a box job may read (ADR-0209): one row a repository, made from Connections › GitHub app only. A row's
 -- copy_id is random and never comes back once the row is removed, so a later copy of the same name is a new copy.
 CREATE TABLE IF NOT EXISTS github_copies (
  copy_id text PRIMARY KEY CHECK(copy_id ~ '^[a-f0-9]{32}$'),

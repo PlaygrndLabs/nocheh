@@ -13,15 +13,29 @@ Development startup order after a live reload (2026-11-21: errors in the dev sta
   [store](test/store-bootstrap.test.ts), reset setup. The full tester run of the scenario alone
   is pending.
 
+Connections page, by whom each connection belongs to (owner, 2026-11-21: the owner's Notion in
+Settings looked connected to all of Nocheh) ([ADR-0271](docs/adr/0271-connections-page.md)).
+- A Connections page in the side menu: Yours (the owner's Notion and GitHub repositories, private
+  chat only), Projects (each project's Notion and GitHub, a table), GitHub app. Settings has no
+  Connections tab; old addresses and sign-in returns open the new page.
+- Checks: dashboard routes unit test, dashboard browser tests for Notion, GitHub and links.
+
+Live GitHub lookups, step 3 part 2 of the shared and private connectors plan (owner,
+2026-11-21: "live lookups to repo if is need") ([ADR-0270](docs/adr/0270-github-live-lookups.md)).
+- Nocheh's `github` tool: search code, read a file, list a folder, list commits, show a commit,
+  read only, on a key for that one repository. A project's repository in its groups and the
+  owner's private chat; the owner's own only in the owner's private chat; never a job. No card.
+- Checks: [store](test/store-github-lookups.test.ts), MCP unit test, Python lookup tests.
+- Next: step 4, Gmail read-only (check Google's restricted scope first).
+
 A project's GitHub repositories, step 3 part 1 of the shared and private connectors plan
 (owner, 2026-11-20: GitHub connects to a project, never a group)
 ([ADR-0269](docs/adr/0269-github-per-project.md)).
-- `github_projects` links a repository by name to a project. Settings › Connections › GitHub has
+- `github_projects` links a repository by name to a project. Connections › GitHub app has
   a picker per repository; each project's drawer has "GitHub for this project".
 - The owner's own box job asked in a project's group reads only that project's copies, checked
   again while it runs. Unlinking withdraws group jobs not started and takes a running one's box.
 - Checks: [store](test/store-job-repo-project.test.ts), job repo store test, dashboard browser.
-- Next: part 2, live GitHub lookups in the project's replies (owner, 2026-11-21: "if needed").
 
 Notion per project or owner, step 2 of the shared and private connectors plan (owner,
 2026-11-20: a service connects to a project or a person; the owner's Notion becomes the
