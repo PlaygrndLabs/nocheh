@@ -144,7 +144,7 @@ the owner freedom setting, which still shows a card for each post to a group,
 a fixed reply to someone who may not talk in a group, replies only when addressed in a group,
 unselected groups and members, retirement, a voice note
 transcribed before its reply that does not hold the next message, a photo read by the vision tool, an ordinary file with a caption, an owner-private schedule that fires on its
-own cadence and waits for exact review before one delivery, deleted topics,
+own cadence and sends its result there once with no card, deleted topics,
 polling 5xx (measured after the adapter restarts polling), lost send responses,
 a blocked bot, and restart. Two operations scenarios close the run: the
 `./bin/nocheh storage` report and the Monitoring Storage operation must measure

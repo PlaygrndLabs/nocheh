@@ -675,31 +675,29 @@ class Scenarios:
         self.gate('posted_once_without_card', len([row for row in self.replies(before, GROUP, topic) if row['message']['text'] == wording]) == 1
                   and not self.cards_since(before, OWNER) and not self.cards_since(before, GROUP))
 
-    def schedule_fires_and_waits_for_review(self):
-        # An owner-private schedule fires on its own cadence, runs once, and its
-        # Telegram result waits for exact owner approval before one delivery.
+    def schedule_fires_and_sends_without_card(self):
+        # An owner-private schedule fires on its own cadence, runs once, and its Telegram result goes to the owner's
+        # private chat with no card: the owner approved that chat's schedules once (ADR-0266).
         known = {row['id'] for row in self.proposals()}
         before = len(self.f.sent())
         started = self.f.query('nocheh_control', 'SELECT now()')
         job = self.f.native('/api/cron/jobs?profile=default', {'name': 'Synthetic reminder', 'prompt': 'یادآوری: آب بخور SCHEDMARK',
                                                              'schedule': 'every 1m', 'deliver': 'telegram', 'repeat': 1})
-        self.gate('schedule_created', job.get('deliver') == 'telegram' and job.get('delivery_policy') == 'review_each_result', job=job.get('id'))
+        self.gate('schedule_created', job.get('deliver') == 'telegram', job=job.get('id'))
         self.wait('definition_captured', lambda: self.f.native('/api/cron/jobs/'+job['id']+'?profile=default').get('managed'), 120)
         run = self.wait('scheduled_run_done', lambda: self.f.query('nocheh_control', "SELECT json_build_object('id',event_id,'state',state,'error',error_code) "
             "FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"' AND state IN ('done','failed','cancelled','interrupted')"), 300)
         run = json.loads(run)
         self.gate('scheduled_run_completed', run['state'] == 'done', state=run['state'], error=run['error'])
-        proposal = self.wait('result_proposed', lambda: next((row for row in self.proposals() if row['id'] not in known), None), 120)
-        self.gate('result_addressed_to_owner_chat', proposal['state'] == 'proposed' and proposal['arguments']['destination'] == self.f.chat(OWNER),
-                  state=proposal['state'], destination=proposal['arguments']['destination'])
+        result = self.wait('result_staged', lambda: next((row for row in self.proposals() if row['id'] not in known), None), 120)
+        self.gate('result_addressed_to_owner_chat', result['arguments']['destination'] == self.f.chat(OWNER), destination=result['arguments']['destination'])
+        self.wait('result_delivered', lambda: next(row for row in self.proposals() if row['id'] == result['id'])['state'] in ('done', 'ambiguous'), 240)
+        final = next(row for row in self.proposals() if row['id'] == result['id'])
+        self.gate('result_sent_without_approval', final['state'] == 'done', state=final['state'], error=final.get('error_code'))
         time.sleep(5)
-        self.gate('only_a_card_before_review', all(self.is_card(row) for row in self.replies(before, OWNER))
-                  and len(self.cards_since(before, OWNER)) == 1, count=len(self.replies(before, OWNER)))
-        self.f.app('/v1/tools/telegram-decision', {'id': proposal['id'], 'fingerprint': proposal['fingerprint'], 'decision': 'approve',
-                                                   'operation_id': 'scenario-schedule-'+proposal['id'][:16]})
-        self.wait('result_delivered', lambda: next(row for row in self.proposals() if row['id'] == proposal['id'])['state'] in ('done', 'ambiguous'), 240)
-        new = [row for row in self.replies(before, OWNER) if not self.is_card(row)]
-        self.gate('delivered_once_with_exact_text', len(new) == 1 and new[0]['message']['text'] == proposal['arguments']['text'], count=len(new))
+        new = self.replies(before, OWNER)
+        self.gate('no_card_for_owner_schedule', not self.cards_since(before, OWNER), cards=len(self.cards_since(before, OWNER)))
+        self.gate('delivered_once_with_exact_text', len(new) == 1 and new[0]['message']['text'] == result['arguments']['text'], count=len(new))
         time.sleep(75)
         runs = self.f.query('nocheh_control', "SELECT count(*) FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"'")
         self.gate('repeat_limit_honored', runs == '1', runs=runs)
@@ -1326,7 +1324,7 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
 
 ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'hermes_is_locked_down', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
-         'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_waits_for_review', 'participant_not_permitted',
+         'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_sends_without_card', 'participant_not_permitted',
          'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'long_voice_is_read_whole_from_everyone', 'photo_is_read',
          'files_upload_over_1mb', 'profiles_round_trip', 'no_refused_writes',
          'owner_directory_lists_conversations', 'unparseable_update_does_not_wedge_polling', 'telegram_refresh_names', 'owner_freedom_keeps_group_cards', 'launcher_stop_mid_turn', 'deleted_topic', 'polling_outage', 'lost_send_response',

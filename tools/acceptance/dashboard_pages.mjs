@@ -19,12 +19,14 @@ const routes = [
     ['home', 'Home'],
     ['inbox', 'Inbox'],
     ['tasks', 'Tasks'],
+    ['schedules', 'Schedules'],
     ['chats', 'Chats'],
     ['members', 'Members'],
     ['messages', 'Messages'],
     ['memory', 'Memory'],
     ['usage', 'Usage'],
     ['system', 'System'],
+    ['connections', 'Connections'],
     ['settings', 'Settings'],
   ],
   ...['allowed', 'history'].map(view => ['inbox?view=' + view, 'Inbox']),
@@ -33,8 +35,11 @@ const routes = [
   ['chats?chat=-10042', 'Chats'],
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm', 'facts'].map(view => ['memory?view=' + view, 'Memory']),
-  ...['work', 'machines', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
-  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'connections', 'machines', 'advanced'].map(view => ['settings?view=' + view, 'Settings']),
+  ...['work', 'sends', 'machines', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
+  ...['projects', 'github'].map(view => ['connections?view=' + view, 'Connections']),
+  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'machines', 'advanced'].map(view => ['settings?view=' + view, 'Settings']),
+  // Connections was a Settings tab; its old address opens the Connections page (ADR-0271).
+  ['settings?view=connections', 'Connections'],
 ];
 
 const relay = net

@@ -58,7 +58,7 @@ TITLES = {
     'owner_recall': 'Long-term memory recall works', 'secret_is_guarded': 'Secrets never reach the model',
     'document_reply': 'A PDF is kept and read', 'action_approval': 'Approval from the dashboard sends once',
     'action_denial': 'A rejected message is never sent', 'group_current_action': 'Group post in the same topic',
-    'schedule_fires_and_waits_for_review': 'Scheduled job waits for approval', 'participant_not_permitted': 'A stranger in a group: one fixed reply a day',
+    'schedule_fires_and_sends_without_card': 'Owner schedule sends its result with no card', 'participant_not_permitted': 'A stranger in a group: one fixed reply a day',
     'group_answers_only_when_addressed': 'Groups: answers only when addressed', 'unselected_group': 'Groups you never added Nocheh to stay off and silent',
     'retirement_hides_fact': 'Hidden message leaves search', 'voice_is_transcribed': 'Voice notes are turned into text',
     'long_voice_is_read_whole_from_everyone': 'A long voice note from someone who is not a member is read whole',
