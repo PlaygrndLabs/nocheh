@@ -14,7 +14,7 @@ import {policySnapshot,savePolicy} from '../src/security/store.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {groupToolKind} from '../src/stores/controlled-actions.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {BOB,GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ACCOUNT,MEMBER_NG_ID,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,NG_GROUP_IDS,OWNER,
   fixtureChats,fixtureMemberDirectory,fixtureMembers,groupsPolicy,seedChats,seedMembers,type FixtureMembers} from './fixture-groups.js';
 

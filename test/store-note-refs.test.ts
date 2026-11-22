@@ -12,7 +12,7 @@ import type {SourceReference} from '../src/stores/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {noteRef} from '../src/stores/note-sources.js';
 import {readSet} from '../src/spaces.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 
 /**
  * A note's day and ref (ADR-0261 B3.3, B3.6): its label names the day in the reader's zone, and in the turn whose lookup

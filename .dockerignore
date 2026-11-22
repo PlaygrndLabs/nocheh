@@ -6,6 +6,5 @@
 data
 node_modules
 dist
-graphify-out
 **/__pycache__
 docs

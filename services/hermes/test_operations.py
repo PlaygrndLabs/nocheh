@@ -189,7 +189,7 @@ class SnapshotTests(unittest.TestCase):
             (snapshot/'archive.dump').write_bytes(b'dump')
             # Every real snapshot holds the dashboard home's config, so restore extracts into admin/dashboard/home.
             members={'hermes/auth.json':b'{"synthetic":"login"}','admin/dashboard/home/config.yaml':b'model: example\n',
-                     'spool/brain-turns/example.json':b'{}','files/example':b'synthetic'}
+                     'spool/agent-turns/example.json':b'{}','files/example':b'synthetic'}
             with tarfile.open(snapshot/'state.tar.gz','w:gz') as tar:
                 for name,raw in members.items():
                     info=tarfile.TarInfo('state/'+name);info.size=len(raw);tar.addfile(info,io.BytesIO(raw))
@@ -203,7 +203,7 @@ class SnapshotTests(unittest.TestCase):
                         self.assertTrue((state/name).is_file(),name)
                     # Hermes's two mounted folders exist before any service starts, so Docker never makes them as root.
                     # Their parents are 0700 too, also those extraction reaches first: admin/dashboard holds the token.
-                    for name in ('files','spool','spool/brain-turns','hermes','admin','admin/dashboard','admin/dashboard/home'):
+                    for name in ('files','spool','spool/agent-turns','hermes','admin','admin/dashboard','admin/dashboard/home'):
                         self.assertEqual((state/name).stat().st_mode&0o777,0o700,name)
                     self.assertFalse((state/'hermes/auth.json').exists())
                     self.assertIn("TELEGRAM_ENABLED='false'",(state/'.env').read_text())

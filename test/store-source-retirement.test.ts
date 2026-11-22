@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {SourceRetirementRepository} from '../src/stores/source-retirement.js';
 import {ArchiveRepository} from '../src/stores/archive.js';

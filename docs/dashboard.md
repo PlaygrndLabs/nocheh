@@ -61,7 +61,7 @@ Links that use an earlier page or tab name (for example `#activity`, `#archive`,
 Nocheh is the main product, and its own service is the Telegram bot. Hermes provides the assistant runtime,
 its own native tools, profiles and native notes through an integration. Nocheh owns
 capture, access rules, guarding, approvals, the per-chat tool switches, its data tools
-(served to the brain over `/mcp`) and long-term memory behind its memory socket (Honcho
+(served to the agent over `/mcp`) and long-term memory behind its memory socket (Honcho
 today). Native execution and administration remain restricted until
 their integration acceptance passes; see TASK.md for actual phase status.
 
@@ -310,8 +310,7 @@ Original chat identity remains part of an imported message's identity even when
 multiple Desktop exports are mapped into one scope. Group-scoped API credentials
 cannot request a different scope. Citations outside the current page or scope do
 not create an edge; uncited memory has no verified source provenance. This is a
-deterministic evidence view, not semantic entity extraction or the repository's
-Graphify graph.
+deterministic evidence view, not semantic entity extraction.
 
 The owner dashboard shows people, projects and facts as lists with side panels;
 the graph is available as JSON from the CLI and API.

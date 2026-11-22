@@ -4,7 +4,7 @@ import { conversationScope } from './assistant-policy.js';
 import { turnToken } from './access.js';
 import {eventSpace,spacePolicy} from './spaces.js';
 import { controlReply } from './actions.js';
-import type {Brain} from './brain/brain.js';
+import type {Agent} from './agent/agent.js';
 import {guardState,guardedValue,prepareGuarded} from './guarded.js';
 import {allowPrepared} from './prepared-context.js';
 import {enterFamily,leaveFamily,releaseOperation,type ExecutionAuthority} from './workflows/store.js';
@@ -27,7 +27,7 @@ export async function storedTranscripts(client:pg.Pool|pg.PoolClient,eventId:str
   return rows.map(row=>row.content.toString());
 }
 
-export async function dispatchCommitted(pool:pg.Pool,config:Settings,brain:Brain,eventId:string|null=null,authority:ExecutionAuthority):Promise<void> {
+export async function dispatchCommitted(pool:pg.Pool,config:Settings,agent:Agent,eventId:string|null=null,authority:ExecutionAuthority):Promise<void> {
   if (!config.assistant.enabled)return;
   const client=await pool.connect();let held=false,fenced=false;
   try {
@@ -41,7 +41,7 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,brain:Brain
     const event=rows[0];if(!event)return;
     if(event.state==='running') {
       try {
-        const observed=await brain.observeTurn({channel:'telegram',event_id:event.id,attempt:event.attempts});
+        const observed=await agent.observeTurn({channel:'telegram',event_id:event.id,attempt:event.attempts});
         // A queued turn whose start was lost is started again under the same ref.
         if(observed.state!=='not_found'&&observed.state!=='queued'){await dispatchReceipt(client,event.id,observed);return;}
         // Only the runtime's explicit absence permits resending the same start
@@ -78,7 +78,7 @@ export async function dispatchCommitted(pool:pg.Pool,config:Settings,brain:Brain
     try {
       const policy=await spacePolicy(pool,eventSpace(event.scope,payload));
       await allowPrepared(pool,{scope:scope.owner?null:scope.chat_id,admin:false,turnEvent:event.id,space:policy.id,revision:policy.revision,guard_epoch:guard.epoch},{text,transcripts:selectedTranscripts});
-      const result=await brain.startTurn({channel:'telegram',event_id:event.id,attempt},{source_key:event.source_key,scope:event.scope,payload,
+      const result=await agent.startTurn({channel:'telegram',event_id:event.id,attempt},{source_key:event.source_key,scope:event.scope,payload,
         text,transcripts:selectedTranscripts,control_reply:control,guard_mode:guard.mode,
         archive_credential:turnToken(config.token,scope.owner?null:scope.chat_id,Date.now()+600000,event.id,{space:policy.id,revision:policy.revision,guard_epoch:guard.epoch})});
       await dispatchReceipt(client,event.id,result);

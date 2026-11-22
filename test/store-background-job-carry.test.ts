@@ -17,7 +17,7 @@ import {HttpError} from '../src/http.js';
 import {assertGuardConfiguration} from '../src/stores/lifecycle.js';
 import {OwnerCommands} from '../src/stores/owner-commands.js';
 import {storageServer} from '../src/stores/server.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import type {Settings} from '../src/config.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {grantMembers} from './fixture-member-grants.js';

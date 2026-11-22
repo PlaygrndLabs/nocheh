@@ -1,7 +1,7 @@
 # Telegram setup and assistant acceptance
 
 Nocheh's own Telegram service, `nocheh-telegram`, is the bot: it is the only part
-that holds the bot token, polls Telegram and sends to it. The brain (Hermes today)
+that holds the bot token, polls Telegram and sends to it. The agent (Hermes today)
 only writes the replies ([ADR-0235](adr/0235-nocheh-owns-the-telegram-bot.md)). It is
 active locally with the configured owner and selected groups. Owner-DM and selected-group replies have passed; the remaining
 [release checks](release-acceptance.md) are pending. New installations default to

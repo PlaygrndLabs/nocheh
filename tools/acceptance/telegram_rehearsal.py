@@ -19,7 +19,7 @@ from tools.acceptance.telegram_mock import BOT,LAUNCH_KEY_ENV,TOKEN,bot_status,l
 # The real-model rehearsal's only egress, attached to the model relay alone.
 MODEL_EGRESS='model-egress'
 # Nocheh's own Telegram service holds the bot token, polls, sends and reports the
-# Telegram state on its health; Hermes keeps only the brain.
+# Telegram state on its health; Hermes keeps only the agent.
 TELEGRAM_SERVICE='nocheh-telegram'
 TELEGRAM_HEALTH='http://nocheh-telegram:8784/health'
 # The service's folders that must be this fixture's: its incident file and the capture spool.

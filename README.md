@@ -9,7 +9,7 @@
 
 **Your data, your rules and your memory, owned by you.** Nocheh keeps what you and the people around you say in an archive you own. It decides who may see and do what, and turns it into memory and answers.
 
-Today's AI assistants are rented brains: what they learn lives inside one app and one company, and switching means starting over. In Nocheh the brain and the memory engine plug in through sockets. Swap them, and your data, your rules and your history stay.
+Today's AI assistants are rented brains: what they learn lives inside one app and one company, and switching means starting over. In Nocheh the agent and the memory engine plug in through sockets. Swap them, and your data, your rules and your history stay.
 
 ## How the parts connect
 
@@ -22,8 +22,8 @@ flowchart LR
   end
   doors --> CORE["<b>Nocheh</b><br/>archive, sharing rules,<br/>approvals, secret check"]
   CORE --- ARCH[("Your archive")]
-  CORE -- "brain socket" --> BRAIN["Brain<br/>Hermes today"]
-  BRAIN -- "data tools (MCP),<br/>checked per chat" --> CORE
+  CORE -- "agent socket" --> AGENT["Agent<br/>Hermes today"]
+  AGENT -- "data tools (MCP),<br/>checked per chat" --> CORE
   CORE -- "memory socket" --> MEM["Memory engine<br/>Honcho today"]
   CORE --> CONN["Connections<br/>Notion, Gmail, GitHub"]
 ```
@@ -31,7 +31,7 @@ flowchart LR
 | Part | Job | Today |
 | --- | --- | --- |
 | Nocheh | Keeps the archive, files, tasks, sharing rules and approvals. Runs the dashboard | Permanent |
-| Brain | Reasons and writes each reply. Reads your data only through Nocheh's tools | Hermes |
+| Agent | Reasons and writes each reply. Reads your data only through Nocheh's tools | Hermes |
 | Memory engine | Learns people and projects, finds things by meaning | Honcho |
 | Front doors | Where you talk to Nocheh | Telegram, dashboard chat |
 
@@ -58,7 +58,7 @@ flowchart LR
   IN["Message"] --> SAVE["Save the original"] --> READ["Read files,<br/>mask secrets"]
   READ --> LEARN["Learn people,<br/>projects, tasks"]
   READ --> ASK{"Asked<br/>to answer?"}
-  ASK -- "yes" --> TURN["Brain turn"] --> ACT{"Acts beyond<br/>this reply?"}
+  ASK -- "yes" --> TURN["Agent turn"] --> ACT{"Acts beyond<br/>this reply?"}
   ACT -- "no" --> REPLY["Reply"]
   ACT -- "yes" --> CARD["Approval card"] --> DO["Send or run"]
 ```

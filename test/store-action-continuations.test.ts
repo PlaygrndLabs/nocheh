@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {reader,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices,fixtureTelegram} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram} from './fixture-agent.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {foregroundReplyActive} from '../src/stores/automatic-publication.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
@@ -26,7 +26,7 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
   const owner:Reader={admin:true,scope:null},starts:any[]=[],resumes:any[]=[],cancels:any[]=[];
   // What the runtime answers to the next start and observation of a follow-up turn.
   let started:Record<string,unknown>={state:'done'},observed:Record<string,unknown>={state:'running'},denied:string[]=[],delivery='done';
-  // Nocheh's bot sends what the brain returns; only its send can end uncertain.
+  // Nocheh's bot sends what the agent returns; only its send can end uncertain.
   const sends:any[]=[],frontDoor=fixtureTelegram((operation,input)=>sends.push({operation,...input}));
   const policy=()=>({enabled:true,owner_id:'123',group_ids:[group]});
   // The owner's members (step 3): 9 talks in the group unless `denied` switches them off there.

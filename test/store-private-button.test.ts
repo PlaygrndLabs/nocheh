@@ -10,7 +10,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {privateAnswerLines} from '../src/prompts.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {privateAnswerId,type PrivateAnswer} from '../src/stores/private-answers.js';
-import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-agent.js';
 import {GP1,GP2,GP3,GP4,OWNER,P1,P2,groupsPolicy,seedChats,seedGroups} from './fixture-groups.js';
 import {accountIdFor} from '../src/chats.js';
 import {grantMembers} from './fixture-member-grants.js';
@@ -28,7 +28,7 @@ test('Answer privately is offered under the owner’s group answer, tapped only 
   // The owner's members (step 3): 9 talks in GP1 only.
   const people=grantMembers({[GP1]:{granted:['9']}},{owner:policy.owner_id,groups:[GP2,GP3,GP4]});
   const started:any[]=[],replies:any[]=[],answers:any[]=[],refusals:any[]=[],notices:any[]=[];let serial=base,link=true;
-  // What the next brain turn returns, when not an ordinary done reply; a running turn is observed done later.
+  // What the next agent turn returns, when not an ordinary done reply; a running turn is observed done later.
   let next:Record<string,unknown>|null=null;
   const runtime:FakeCall=async(operation,input)=>{
     // A group's name can hold a secret; the guarded copy hides it.

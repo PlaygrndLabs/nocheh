@@ -9,7 +9,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {storageServer} from '../src/stores/server.js';
 import {workflowDetail} from '../src/workflows/owner.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';

@@ -3,8 +3,8 @@ import {hermesAdapter} from '../hermes-adapter.js';
 import {telegramAdapter} from '../frontdoor/telegram.js';
 import {memoryEngine} from '../memory/engines.js';
 import {combinedAdapter,runtimeCall} from '../runtime.js';
-import {brainWithPrompts,withPrompts} from '../prompts.js';
-import {brain} from '../brain/brains.js';
+import {agentWithPrompts,withPrompts} from '../prompts.js';
+import {agent} from '../agent/agents.js';
 import {brokerServer} from '../security/broker.js';
 import {runtimeStores} from './runtime-pools.js';
 import {schemaReady} from './dev-schema.js';
@@ -17,7 +17,7 @@ const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(comb
 // In development nothing reads before the store setup of this build has finished (dev-schema.ts).
 await schemaReady(stores.control);
 const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
-  policy:servedPolicy(()=>config.assistant),runtime:call,brain:brainWithPrompts(brain(config),stores.control),memoryEngine:memoryEngine(config)});
+  policy:servedPolicy(()=>config.assistant),runtime:call,agent:agentWithPrompts(agent(config),stores.control),memoryEngine:memoryEngine(config)});
 // The security service reads chats as the app records them (ADR-0252); a newer guard epoch reloads them.
 await startChatDirectory(stores.control,()=>config.assistant);
 const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',

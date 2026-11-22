@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {savePolicy} from '../src/security/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {chatDirectory,installChatsForTest} from '../src/chats.js';

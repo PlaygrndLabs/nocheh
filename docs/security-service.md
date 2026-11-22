@@ -54,7 +54,7 @@ grant permissions or read owner effect logs. Runtime policy applies at the next
 authorization; an action already sent cannot be undone.
 
 Effect records contain IDs, scope/profile, source reference, rule, origin, policy
-revision, permission ID and, for an effect a turn asked for, the brain its pass names
+revision, permission ID and, for an effect a turn asked for, the agent its pass names
 (`hermes` today). They omit prompts, URLs, credentials and result text.
 Inspect originals/results through the linked action and existing archive UI.
 `allowed` means permission, `claimed` means an executor reservation, `started`

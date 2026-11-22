@@ -10,7 +10,7 @@ import {installChatsForTest} from '../src/chats.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServer} from '../src/stores/server.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {GP1,GP1_TOPIC,GP2,GP_GROUP_IDS,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureChats,fixtureDirectory,seedChats} from './fixture-groups.js';
 
 // The owner's chat search on the real chat records (ADR-0252): a chat is found by any Telegram ID it has had, current

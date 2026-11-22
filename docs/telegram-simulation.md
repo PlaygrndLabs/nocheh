@@ -154,7 +154,7 @@ and saves them with the p50/p95 summary in the report's `timings.json`. Before
 the final lingering-turn check the runner waits for native memory reviews to
 drain and records how long that took.
 
-The model fixture's scripted brain acts only on an explicit directive in
+The model fixture's scripted agent acts only on an explicit directive in
 the current user turn of a request that offers Nocheh tools: `[[search:q]]`,
 `[[recall:q]]`, `[[owner:view]]` and `[[action:destination|text]]` request that real tool and
 answer from its actual result; `[[context:marker]]` reports whether a marker
@@ -167,7 +167,7 @@ answer. `[[turn:marker]]` reports whether a marker appears in the current turn
 (unaddressed group messages travel there), `[[tool:mcp__nocheh__x {json}]]` calls any
 Nocheh tool (Hermes's name for Nocheh's MCP tool `x`) with those arguments (also `memory`, `todo_list` and a job box's
 Hermes tools) and `[[after:silent]]` makes the answer after a
-tool call `[NO_REPLY]`. The brain reads a Nocheh tool's own result inside the
+tool call `[NO_REPLY]`. The agent reads a Nocheh tool's own result inside the
 `{"result": ...}` envelope Hermes's MCP client puts around it. `[[usage:n]]` makes each scripted answer in that turn
 report `n` prompt tokens; the fixture's reply rates (`NOCHEH_FIXTURE_REPLY_RATES`,
 read only with `NOCHEH_INSTALLATION_FIXTURE=1`) price them, so a background
@@ -176,7 +176,7 @@ turn wait `s` seconds (1 to 90), so a scenario can act while a job runs; the
 answer's event is recorded before the wait. When the current turn is a job's
 resume line (`The job was interrupted and restarted.`), the directives come from
 the newest earlier user message that has one, the job's first message, and its
-tool results so far count, so the resumed run goes on where it was. The brain
+tool results so far count, so the resumed run goes on where it was. The agent
 also records, once each, `{"directive":"notice","kind":"cost"|"time"}` when a
 tool result of the directive turn carries a cost or time notice,
 `{"directive":"resume","results":n}` for a resumed run (`n` tool results before

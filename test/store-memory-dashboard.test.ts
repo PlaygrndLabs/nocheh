@@ -17,7 +17,7 @@ import {LEARNED_WRITES,MemoryDashboard} from '../src/stores/memory-dashboard.js'
 import {materialPeer,materialSessionKey} from '../src/stores/native-memory.js';
 import {memoryProblems} from '../src/stores/note-sources.js';
 import {OwnerOriginals} from '../src/stores/owner-originals.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 
 /** Honcho's ids: 21 characters. */
 const nid=(name:string)=>name.replace(/[^A-Za-z0-9]/g,'').padEnd(21,'0').slice(0,21);

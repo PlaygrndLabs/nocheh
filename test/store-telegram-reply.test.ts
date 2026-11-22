@@ -10,7 +10,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import type {SourceReference} from '../src/stores/archive.js';
-import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-agent.js';
 import {OWNER} from './fixture-groups.js';
 
 // A turn's frame names and quotes the message its own message replies to, and each recent group message names the one it

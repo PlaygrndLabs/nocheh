@@ -244,7 +244,7 @@ export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ow
     null:'notion_job_not_approved';
 }
 
-/** The Notion connections a turn may use, named for the brain (ADR-0268): the owner's own and every active project's
+/** The Notion connections a turn may use, named for the agent (ADR-0268): the owner's own and every active project's
  *  in the owner's private chat; its own project's in a group or topic. Only those that are on. */
 export async function notionConnectionsHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null}) {
   const rows=(await db.query(`SELECT c.project_id,p.name FROM connections c LEFT JOIN projects p ON p.id=c.project_id

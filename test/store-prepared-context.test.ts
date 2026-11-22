@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {DerivedRepository} from '../src/stores/derived.js';
 import {PreparedContextRepository,preparedAudience} from '../src/stores/prepared-context.js';
 import {honchoEngine} from '../src/memory/honcho.js';

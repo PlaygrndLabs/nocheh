@@ -4,7 +4,7 @@ import {ownerChat} from '../assistant-policy.js';
 import {quotedName} from '../chat-labels.js';
 import {appBindingOf,telegramTarget} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
-import type {Brain,TurnReceipt} from '../brain/brain.js';
+import type {Agent,TurnReceipt} from '../agent/agent.js';
 import type {RuntimeCall} from '../runtime.js';
 import {fillTemplate,memberReadFrame,memberReadLines,ownerPrompts} from '../prompts.js';
 import {readSetIds} from '../spaces.js';
@@ -57,7 +57,7 @@ function passClaims(credential:string):Record<string,unknown> {
 export class OwnerMemberAskTurns {
   constructor(readonly asks:OwnerMemberAskRepository,readonly archive:ArchiveRepository,readonly access:SourceAccessRepository,
     readonly derived:DerivedRepository,readonly guards:GuardRepository,readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,
-    readonly brain:Brain,readonly token:string,readonly call:RuntimeCall){}
+    readonly agent:Agent,readonly token:string,readonly call:RuntimeCall){}
   private get control(){return this.access.stores.control;}
   private observation(row:OwnerMemberAsk):Observation {
     const states:Record<string,Observation['state']>={queued:'waiting',running:'running',answered:'completed',failed:'failed',expired:'skipped'};
@@ -142,7 +142,7 @@ export class OwnerMemberAskTurns {
       WHERE id=$1 AND state='running'`,[row.id]);
     return this.observed(row.id);
   }
-  /** The brain closed the turn: a done answer goes out as one separate member_read message, under its source line. */
+  /** The agent closed the turn: a done answer goes out as one separate member_read message, under its source line. */
   private async settle(row:OwnerMemberAsk,input:TurnInput,receipt:TurnReceipt):Promise<Observation> {
     const attempt=askAttempt(row.id,row.attempts),state=String(receipt.state);
     let credential:string|null=null;
@@ -189,13 +189,13 @@ export class OwnerMemberAskTurns {
       if(row.state==='running'&&row.attempts>0&&row.input_reference) {
         const attempt=askAttempt(id,row.attempts);let observed:TurnReceipt;
         input=await this.input(row.input_reference as DerivativeReference);
-        try{observed=await this.brain.observeTurn({channel:'telegram',event_id:row.owner_event,attempt});}
+        try{observed=await this.agent.observeTurn({channel:'telegram',event_id:row.owner_event,attempt});}
         catch{return observation('running','assistant',row.attempts,Date.now()+1000,'receipt_pending');}
         if(closedTurnStates.has(String(observed.state)))return await this.settle(row,input,observed);
         try{credential=await this.credential(input);}catch(error){
           if(!(error instanceof HttpError)||![409,403].includes(error.status))throw error;
           // The ask or its chat closed while the turn ran: it is stopped and never answered.
-          try{await this.brain.cancelTurn({channel:'telegram',event_id:row.owner_event,attempt});}catch{/* Its reply is withdrawn below. */}
+          try{await this.agent.cancelTurn({channel:'telegram',event_id:row.owner_event,attempt});}catch{/* Its reply is withdrawn below. */}
           await cancelReply(this.call,row.owner_event,attempt);
           return this.closed(row,closedCodes.has(error.code)?error.code:'member_chat_closed');
         }
@@ -269,7 +269,7 @@ export class OwnerMemberAskTurns {
       if(!await botReady(this.call))return observation('running','admission',row.attempts,Date.now()+10000,'receipt_pending');
       await showPresence(this.call,replyTarget(input,attempt,credential));
       let result:TurnReceipt;
-      try{result=await this.brain.startTurn({channel:'telegram',event_id:row.owner_event,attempt},{...input.body,archive_credential:credential});}
+      try{result=await this.agent.startTurn({channel:'telegram',event_id:row.owner_event,attempt},{...input.body,archive_credential:credential});}
       catch{result={state:'running'};}
       if(closedTurnStates.has(String(result.state)))return await this.settle(row,input,result);
       return observation('running','assistant',row.attempts,Date.now()+1000,'receipt_pending');

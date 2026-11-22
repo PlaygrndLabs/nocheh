@@ -62,7 +62,7 @@ ERRORS = deque(maxlen=20)
 ADMIN = None
 SCHEDULER = None
 MANAGED = None
-BRAIN = None
+AGENT = None
 
 
 def configure():
@@ -134,7 +134,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply(200, {"ok": True, "service": "hermes", "model": MODEL,
                                 "administration": "running" if ADMIN and ADMIN.poll() is None else "unavailable",
                                 "managed_runs":len(MANAGED.runs.active) if MANAGED else 0,
-                                "brain_turns":len(BRAIN.runs.active) if BRAIN else 0,
+                                "agent_turns":len(AGENT.runs.active) if AGENT else 0,
                                 "scheduler": SCHEDULER.status if SCHEDULER else 'not_started'})
 
     def do_POST(self):
@@ -181,8 +181,8 @@ class Handler(BaseHTTPRequestHandler):
     def dispatch(self, body):
         # Telegram turns return their reply, which Nocheh sends; Hermes never talks to Telegram.
         if self.path in ('/internal/turn/start','/internal/turn/resume','/internal/turn/events','/internal/turn/cancel'):
-            if BRAIN is None:raise RuntimeError('brain_not_started')
-            return getattr(BRAIN,self.path.rsplit('/',1)[-1])(body)
+            if AGENT is None:raise RuntimeError('agent_not_started')
+            return getattr(AGENT,self.path.rsplit('/',1)[-1])(body)
         # Every other channel's run; a Telegram turn has only the turn routes.
         if self.path in ('/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel'):
             if body.get('channel') not in ('browser','scheduler','background'):raise ValueError('runtime_channel_unavailable')
@@ -266,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ADMIN, SCHEDULER, BRAIN
+    global ADMIN, SCHEDULER, AGENT
     if len(TOKEN) < 24:
         raise SystemExit("Service token is missing or too short")
     logging.disable(logging.CRITICAL)
@@ -283,14 +283,14 @@ def main():
     spool,managed_runs,journal_days=Path(os.environ.get('NOCHEH_SPOOL_DIR','/data/spool')),PROFILE_HOME/'nocheh-managed-runs',journal_retention.retention_days()
     journal_retention.prune(spool,managed_runs,journal_days)
     journal_stop=threading.Event();journal_retention.start(spool,managed_runs,journal_days,journal_stop)
-    from services.hermes.brain_turns import BrainTurns
-    BRAIN=BrainTurns(PROFILE_HOME,str(spool),policy,MODEL,resolve_credentials)
+    from services.hermes.agent_turns import AgentTurns
+    AGENT=AgentTurns(PROFILE_HOME,str(spool),policy,MODEL,resolve_credentials)
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(json.dumps({"event": "ready", "service": "hermes"}), flush=True)
     # One process-wide redirect, installed before starting threads. Per-request
     # redirects race and can restore another request's secret-bearing output.
     with open(os.devnull,'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
-        BRAIN.open()
+        AGENT.open()
         ADMIN = admin = subprocess.Popen([sys.executable, '-m', 'services.hermes.native_admin'], stdout=quiet, stderr=quiet)
         from .native_admin import Administration,audience_revision
         from .scheduler import Scheduler
@@ -305,7 +305,7 @@ def main():
         finally:
             journal_stop.set()
             MANAGED.stop()
-            BRAIN.stop()
+            AGENT.stop()
             SCHEDULER.stop()
             admin.terminate()
             try: admin.wait(timeout=10)

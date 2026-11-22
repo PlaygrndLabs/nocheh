@@ -351,7 +351,7 @@ class TelegramService:
         check = OUTBOUND_CHECK.set(outbound_check(chat, topic, lambda: check_delivery_policy(credential), cancelled, requests, markup))
         started, sending = int(time.time() * 1000), perf_counter()
         try:
-            # The archive keeps the reply as the brain gave it, whatever Telegram later does with it.
+            # The archive keeps the reply as the agent gave it, whatever Telegram later does with it.
             await asyncio.to_thread(self.capture.enqueue, self.capture.event('assistant:' + body['event_id'] + ':' + str(body['attempt']),
                 'assistant_result', {'event_id': body['event_id'], 'session_id': body['session_id']}, chat, text))
             # Stop typing before the reply: a status sent after it would show again.

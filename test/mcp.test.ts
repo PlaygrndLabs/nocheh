@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer,type IncomingMessage,type Server} from 'node:http';
 import pg from 'pg';
-import {defaultBrain,reader,scopeToken,turnToken,type Reader} from '../src/access.js';
+import {defaultAgent,reader,scopeToken,turnToken,type Reader} from '../src/access.js';
 import {ingest} from '../src/archive.js';
 import {initialize} from '../src/database.js';
 import {HttpError,readJson} from '../src/http.js';
@@ -31,12 +31,12 @@ const listen=async(server:Server)=>{await new Promise<void>(resolve=>server.list
 const close=async(server:Server)=>{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));};
 
 test('the data tools keep their names, closed schemas and engine-neutral words',()=>{
-  // The brain sees each one as mcp__nocheh__<name>, one for one with the plugin tool nocheh_<name> it replaces (ADR-0233).
+  // The agent sees each one as mcp__nocheh__<name>, one for one with the plugin tool nocheh_<name> it replaces (ADR-0233).
   assert.deepEqual(mcpTools.map(item=>item.name),['archive_search','archive_read','archive_page','memory_search','memory_recall','action_request','background_job',
     'telegram_destinations','shell','browser','mcp','ask_member_chat','owner_read','tasks','notion','github','gmail','action_status','knowledge_inspect','knowledge_propose','knowledge_status']);
   for(const item of mcpTools) {
     assert.equal(item.inputSchema.type,'object',item.name);assert.equal(item.inputSchema.additionalProperties,false,item.name);
-    // No memory engine's name and no old plugin tool name reaches the brain.
+    // No memory engine's name and no old plugin tool name reaches the agent.
     assert.doesNotMatch(item.description+JSON.stringify(item.inputSchema),/honcho|\bnocheh_[a-z]/i,item.name);
   }
   for(const name of ['shell','browser','mcp','notion'])assert.equal((tool(name).inputSchema.properties as any).summary.maxLength,300);
@@ -62,14 +62,14 @@ test('the data tools keep their names, closed schemas and engine-neutral words',
   assert.equal(relayedJobErrors,jobErrors);assert.ok(jobErrors.has('job_repo_not_allowed'));
 });
 
-test('a turn pass names its brain, and only a turn pass may',()=>{
+test('a turn pass names its agent, and only a turn pass may',()=>{
   const secret='synthetic-service-token-only-for-tests',request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;
   const pass=turnToken(secret,'-1001',Date.now()+60000,ID,{space:'-1001',revision:1});
-  assert.equal(defaultBrain,'hermes');assert.equal(reader(request(pass),secret).brain,'hermes');
-  assert.equal(reader(request(turnToken(secret,null,Date.now()+60000,ID,{space:'1',revision:1,brain:'other-brain'})),secret).brain,'other-brain');
-  assert.equal(reader(request(scopeToken(secret,'-1001',Date.now()+60000)),secret).brain,undefined);
-  for(const brain of ['Hermes','','1brain','a'.repeat(33),'two words'])
-    assert.throws(()=>reader(request(turnToken(secret,null,Date.now()+60000,ID,{space:'1',revision:1,brain})),secret),{code:'invalid_scope_token'});
+  assert.equal(defaultAgent,'hermes');assert.equal(reader(request(pass),secret).agent,'hermes');
+  assert.equal(reader(request(turnToken(secret,null,Date.now()+60000,ID,{space:'1',revision:1,agent:'other-agent'})),secret).agent,'other-agent');
+  assert.equal(reader(request(scopeToken(secret,'-1001',Date.now()+60000)),secret).agent,undefined);
+  for(const agent of ['Hermes','','1agent','a'.repeat(33),'two words'])
+    assert.throws(()=>reader(request(turnToken(secret,null,Date.now()+60000,ID,{space:'1',revision:1,agent})),secret),{code:'invalid_scope_token'});
 });
 
 test('the MCP endpoint speaks JSON-only Streamable HTTP without sessions',async()=>{
@@ -181,7 +181,7 @@ test('a long memory recall fits the turn, and the secret-checked routes get a mi
   assert.ok(timeoutFor(memoryRoutes.recall)>600000);
   for(const path of ['/v1/context/prepare',memoryRoutes.search,'/v1/tools/propose','/v1/tools/actions/'+ID,'/v1/jobs/start'])assert.equal(timeoutFor(path),60000,path);
   for(const path of ['/v1/tools/actions','/v1/search?q=synthetic','/v1/owner/tasks'])assert.equal(timeoutFor(path),15000,path);
-  // Time is left for the brain to reason and check delivery policy.
+  // Time is left for the agent to reason and check delivery policy.
   const left=timeoutFor(memoryRoutes.recall,now/1000+100,now);assert.ok(left>50000&&left<56000,String(left));
   assert.throws(()=>timeoutFor(memoryRoutes.recall,now/1000+44,now),{name:'TimeoutError'});
   // The turn process names its deadline; a value it could not have set is ignored.
@@ -197,7 +197,7 @@ test('a long memory recall fits the turn, and the secret-checked routes get a mi
   assert.equal(turnDeadline({headers:{}} as unknown as IncomingMessage,now),undefined);
 });
 
-test('memory recall skips a call the turn has no time for, and the owner also gets the brain\'s own notes',async()=>{
+test('memory recall skips a call the turn has no time for, and the owner also gets the agent\'s own notes',async()=>{
   const short=fake(()=>({sources:[]}),{scope:null,admin:false},{deadline:Date.now()/1000+44});
   assert.deepEqual(await run('memory_recall',{query:'Synthetic recall'},short.context),{error:'owner_memory_unavailable'});
   assert.equal(short.calls.length,0);
@@ -659,10 +659,10 @@ test('PostgreSQL broker: the data tools reach each route through the broker\'s o
     };
     assert.deepEqual(await call('archive_search',{query:'Friday'}),{sources:[{id:'nocheh:source:'+ID}],filter_status:null});
     assert.deepEqual(archived.map(item=>[item.method,item.url,item.auth]),[['GET','http://archive/v1/imports/pending','Bearer '+credential],['GET','http://archive/v1/search?q=Friday&limit=5','Bearer '+credential]]);
-    // Each read is an effect the broker checked, labelled with the turn's brain.
-    const effects=(await pool.query("SELECT DISTINCT kind,brain FROM security_events WHERE state='completed'")).rows;
-    assert.deepEqual(effects,[{kind:'archive.read',brain:'hermes'}]);
-    // The owner's switch reaches the brain as itself; any other refusal stays opaque.
+    // Each read is an effect the broker checked, labelled with the turn's agent.
+    const effects=(await pool.query("SELECT DISTINCT kind,agent FROM security_events WHERE state='completed'")).rows;
+    assert.deepEqual(effects,[{kind:'archive.read',agent:'hermes'}]);
+    // The owner's switch reaches the agent as itself; any other refusal stays opaque.
     assert.deepEqual(await call('browser',{url:'https://example.com/'}),{error:'tool_disabled_by_owner'});
     assert.deepEqual(await call('background_job',{action:'start',title:'t',instruction:'i'}),{error:'background_jobs_unavailable'});
     assert.deepEqual(await call('action_status',{}),{requests:[],operations:[{id:ID,kind:'browser',state:'done',error_code:null,resolution:null,created_at:'t'}]});

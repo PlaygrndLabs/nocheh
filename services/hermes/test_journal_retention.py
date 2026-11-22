@@ -20,7 +20,7 @@ class JournalRetentionTests(unittest.TestCase):
     def test_only_finished_journals_older_than_the_window_are_removed(self):
         with tempfile.TemporaryDirectory() as folder:
             spool, managed = Path(folder) / 'spool', Path(folder) / 'hermes' / 'nocheh-managed-runs'
-            turns = spool / 'brain-turns'
+            turns = spool / 'agent-turns'
             for suffix in ('.request', '.events', '.started', '.outcome'): write(turns / ('old' + suffix), b'{}', 40)
             write(turns / 'old.result', {'state': 'done'}, 40)
             for suffix in ('.request', '.events', '.started'): write(turns / ('new' + suffix), b'{}', 5)
@@ -38,8 +38,8 @@ class JournalRetentionTests(unittest.TestCase):
             self.assertEqual(prune(spool, managed, 30), 2)
             left = sorted(str(path.relative_to(folder)) for path in Path(folder).rglob('*') if path.is_file())
             self.assertEqual(left, sorted([
-                'spool/brain-turns/new.request', 'spool/brain-turns/new.events', 'spool/brain-turns/new.started', 'spool/brain-turns/new.result',
-                'spool/brain-turns/live.request', 'spool/brain-turns/live.events', 'spool/brain-turns/live.started',
+                'spool/agent-turns/new.request', 'spool/agent-turns/new.events', 'spool/agent-turns/new.started', 'spool/agent-turns/new.result',
+                'spool/agent-turns/live.request', 'spool/agent-turns/live.events', 'spool/agent-turns/live.started',
                 'spool/outbound/sent.intent', 'spool/outbound/sent.result', 'spool/dispatch/reply.intent', 'spool/dispatch/reply.result',
                 'hermes/nocheh-managed-runs/owed.request', 'hermes/nocheh-managed-runs/owed.receipt',
                 'hermes/nocheh-managed-runs/owed.result']), 'unfinished, unpublished and Telegram journals stay')
@@ -48,7 +48,7 @@ class JournalRetentionTests(unittest.TestCase):
     def test_an_interrupted_pass_never_leaves_an_unanswered_run(self):
         with tempfile.TemporaryDirectory() as folder:
             spool = Path(folder)
-            write(spool / 'brain-turns' / 'a.request', {}, 40); write(spool / 'brain-turns' / 'a.result', {'state': 'ambiguous'}, 40)
+            write(spool / 'agent-turns' / 'a.request', {}, 40); write(spool / 'agent-turns' / 'a.result', {'state': 'ambiguous'}, 40)
             removed = []
             real = Path.unlink
             def unlink(path, missing_ok=False):
@@ -57,7 +57,7 @@ class JournalRetentionTests(unittest.TestCase):
                 return real(path, missing_ok=missing_ok)
             with patch.object(Path, 'unlink', unlink), self.assertRaises(OSError):prune(spool, spool / 'managed', 30)
             self.assertEqual(removed, ['.request', '.events', '.started', '.outcome', '.result'])
-            self.assertFalse((spool / 'brain-turns' / 'a.request').exists())
+            self.assertFalse((spool / 'agent-turns' / 'a.request').exists())
             self.assertEqual(prune(spool, spool / 'managed', 30), 1, 'the next pass removes the leftover result')
 
     def test_retention_days_default_to_keeping_everything_and_reject_invalid_values(self):

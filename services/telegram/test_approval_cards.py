@@ -413,6 +413,20 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(bad),self.assertRaises(ValueError):await gateway.send_notice({**card,'id':'c'*64,'buttons':bad})
             self.assertEqual(len(sent),2,'a refused button sends nothing')
 
+    async def test_a_schedule_notice_carries_pause_and_delete(self):
+        # A schedule set by asking (ADR-0266): the same pattern storage sends and handles (scheduleButton).
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];edits=[];gateway=self.gateway(Path(folder),sent,edits)
+            store,job='ab'*12,'a1b2c3d4e5f6'
+            notice={'id':'a'*64,'chat_id':'123','text':'⏰ New schedule: Morning brief',
+                    'buttons':[[{'text':'Pause','callback':'nkp'+store+job},{'text':'Delete','callback':'nkd'+store+job}]]}
+            self.assertEqual(await gateway.send_notice(notice),{'state':'done'})
+            self.assertEqual([[button.callback_data for button in row] for row in sent[0][3].inline_keyboard],[['nkp'+store+job,'nkd'+store+job]])
+            for bad in ('nkx'+store+job,'nkp'+store+job[:-1],'nkp'+store.upper()+job,'nkp'+store+job+'0','nk'):
+                with self.subTest(bad),self.assertRaises(ValueError):
+                    await gateway.send_notice({**notice,'id':'b'*64,'buttons':[{'text':'Pause','callback':bad}]})
+            self.assertEqual(len(sent),1)
+
     async def test_a_sent_notice_is_edited_in_place_and_only_that_one(self):
         from telegram.error import BadRequest, Forbidden
         with tempfile.TemporaryDirectory() as folder:

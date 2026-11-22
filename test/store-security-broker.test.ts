@@ -10,7 +10,7 @@ import {turnToken,reader} from '../src/access.js';
 import type {IncomingMessage} from 'node:http';
 import {preparedAudience} from '../src/stores/prepared-context.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {brokerServer} from '../src/security/broker.js';
 import {honchoEngine} from '../src/memory/honcho.js';

@@ -1,8 +1,8 @@
 import { HttpError } from './http.js';
 
-/** Helper services Nocheh calls besides the brain: secret checks, file, voice and image reading, prices and the memory
- * filter from the Hermes service, and the front door calls of Nocheh's own Telegram bot (ADR-0235). Turns and the brain's
- * own state go through the brain socket instead (ADR-0234). */
+/** Helper services Nocheh calls besides the agent: secret checks, file, voice and image reading, prices and the memory
+ * filter from the Hermes service, and the front door calls of Nocheh's own Telegram bot (ADR-0235). Turns and the agent's
+ * own state go through the agent socket instead (ADR-0234). */
 export const runtimeOperations = ['source.file', 'guard.detect', 'action.execute', 'memory.filter','telegram.chat','telegram.approval',
   'telegram.refusal','telegram.notice','telegram.status','telegram.identity','telegram.presence','telegram.reply','telegram.leave','telegram.member_status',
   'usage.price','file.extract','voice.transcribe','image.read'] as const;

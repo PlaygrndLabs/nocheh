@@ -5,7 +5,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import {observedSource} from '../src/observed-source.js';
 import {sourceObjectId} from '../src/source-model.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 
 const desktop=(scope:string,chat:{id:number;type:string},message:Record<string,unknown>,label=''):Envelope=>({version:1,

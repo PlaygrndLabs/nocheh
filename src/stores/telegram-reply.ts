@@ -1,14 +1,14 @@
 import {digest} from '../archive.js';
 import {HttpError} from '../http.js';
-import type {TurnReceipt} from '../brain/brain.js';
+import type {TurnReceipt} from '../agent/agent.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {TurnInput} from './telegram-turn.js';
 import {telegramTarget} from '../frontdoor/telegram.js';
 import type {SendClass} from '../send-classes.js';
 
 /**
- * Nocheh's own bot answers a Telegram turn (ADR-0235). The brain only returns the reply; Nocheh shows typing and the
- * working reaction while the brain works, then asks its bot to send the reply. The bot keeps a receipt per reply id, so
+ * Nocheh's own bot answers a Telegram turn (ADR-0235). The agent only returns the reply; Nocheh shows typing and the
+ * working reaction while the agent works, then asks its bot to send the reply. The bot keeps a receipt per reply id, so
  * asking again after a lost answer never sends twice.
  */
 export type ReplyFinish='answered'|'failed'|'clear';
@@ -26,13 +26,13 @@ export function replyTarget(input:TurnInput,attempt:number|string,credential:str
     ...(target.topic!==undefined?{topic:target.topic}:{}),archive_credential:credential};
 }
 
-/** Whether the bot is connected to Telegram, so a turn's reply can be sent. A brain turn starts only then, as a reply
+/** Whether the bot is connected to Telegram, so a turn's reply can be sent. An agent turn starts only then, as a reply
  * that cannot be sent would cost a model call for nothing. */
 export async function botReady(call:RuntimeCall):Promise<boolean> {
   try{return ['connected','recovering'].includes(String((await call('telegram.identity',{},5000)).state));}catch{return false;}
 }
 
-/** Show typing and 👀 while the brain works, or keep them showing; they lapse on their own if Nocheh stops asking. */
+/** Show typing and 👀 while the agent works, or keep them showing; they lapse on their own if Nocheh stops asking. */
 export async function showPresence(call:RuntimeCall,target:ReturnType<typeof replyTarget>):Promise<void> {
   try{await call('telegram.presence',target,5000);}catch{/* Presence is cosmetic. */}
 }
@@ -42,7 +42,7 @@ export async function finishPresence(call:RuntimeCall,target:ReturnType<typeof r
   try{await call('telegram.presence',{...target,finish},10000);}catch{/* The bot clears an unrenewed presence itself. */}
 }
 
-/** How a closed brain receipt that has no reply to send ends the working reaction. */
+/** How a closed agent receipt that has no reply to send ends the working reaction. */
 export const unansweredFinish=(state:string):ReplyFinish=>state==='failed'?'failed':'clear';
 
 /** The one button a group reply may carry: Answer privately under the owner's own answer (ADR-0249). Its data is `np`
@@ -74,12 +74,12 @@ export async function withdrawReply(call:RuntimeCall,event:string,attempt:number
 /** A withdrawn reply that the bot already sent, may have sent, or settled as silence: its receipt stands. */
 export const replyOutcome=(sent:Record<string,unknown>)=>['done','ambiguous','suppressed'].includes(String(sent.state));
 
-/** The turn's receipt with the brain's timings and the bot's send: queued and assistant from the brain, delivery and
+/** The turn's receipt with the agent's timings and the bot's send: queued and assistant from the agent, delivery and
  * finished from the bot. */
-export function deliveredReceipt(brain:TurnReceipt,delivery:Record<string,unknown>):Record<string,unknown> {
+export function deliveredReceipt(agent:TurnReceipt,delivery:Record<string,unknown>):Record<string,unknown> {
   const record=(value:unknown)=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
-  const window=record(brain.window),sent=record(delivery.window);
-  return {...delivery,timings:{...record(brain.timings),...record(delivery.timings)},
+  const window=record(agent.window),sent=record(delivery.window);
+  return {...delivery,timings:{...record(agent.timings),...record(delivery.timings)},
     window:{...(window.queued!==undefined?{queued:window.queued}:{}),...(window.assistant!==undefined?{assistant:window.assistant}:{}),
       ...(sent.delivery!==undefined?{delivery:sent.delivery}:{}),finished:sent.finished??window.finished}};
 }

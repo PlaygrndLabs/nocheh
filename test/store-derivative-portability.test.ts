@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {storeSchemas} from '../src/stores/schema.js';
 import {connectStores,initializeStoreDatabases,storeNames,type StorePasswords} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {portableDerivativeTypes,type PortableRecord} from '../src/stores/derivative-portability.js';
 import type {DerivativeReference} from '../src/stores/derived.js';
 import {honchoEngine} from '../src/memory/honcho.js';

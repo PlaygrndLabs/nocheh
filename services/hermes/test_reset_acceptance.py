@@ -177,7 +177,7 @@ class ResetAcceptanceTests(unittest.TestCase):
 
         def verify(*_arguments, **_options):
             # The baseline wants a spool with only its fence: the folder comes after it.
-            self.assertFalse((self.state / 'spool/brain-turns').exists())
+            self.assertFalse((self.state / 'spool/agent-turns').exists())
             return {'phase': 'empty_baseline'}
         with reset_protocol.locked(self.state) as journal:
             initialization = self.ready(journal)
@@ -192,7 +192,7 @@ class ResetAcceptanceTests(unittest.TestCase):
                 (self.state / 'admin/dashboard/home').unlink()
                 reset_acceptance.activate(journal, self.preflight, runner=runner,
                     environment=self.environment, command=self.command, timeout=0)
-        self.assertEqual(seen, [{'spool/brain-turns': 0o700, 'admin/dashboard/home': 0o700}])
+        self.assertEqual(seen, [{'spool/agent-turns': 0o700, 'admin/dashboard/home': 0o700}])
 
     def test_changed_recorded_plan_is_rejected(self):
         fake = FakeDocker(self.root, self.project)

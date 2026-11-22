@@ -42,7 +42,7 @@ class ServiceCatalogTests(unittest.TestCase):
         state='${NOCHEH_STATE_DIR:-./data/local}'
         self.assertEqual(hermes['volumes'],[state+'/admin/dashboard/home:/dashboard-state/home',
                                             state+'/hermes:/workspace/data/local/hermes',state+'/reports:/reports',
-                                            state+'/files:/data/files:ro',state+'/spool/brain-turns:/data/spool/brain-turns'])
+                                            state+'/files:/data/files:ro',state+'/spool/agent-turns:/data/spool/agent-turns'])
         # Not the dashboard's token beside its home, nor the rest of the spool, such as incoming Telegram updates.
         sources={volume.split(':')[0].removeprefix(state+'/') for volume in hermes['volumes']}
         self.assertFalse(sources&{'admin','admin/dashboard','spool'})
@@ -61,7 +61,7 @@ class ServiceCatalogTests(unittest.TestCase):
         holders={name for name,service in compose.items() if 'TELEGRAM_BOT_TOKEN' in (service.get('environment') or {})}
         self.assertEqual(holders,{'nocheh-telegram'})
         bot=compose['nocheh-telegram']
-        # A brain restart must not stop polling, and the incident file outlives the bot's restart.
+        # An agent restart must not stop polling, and the incident file outlives the bot's restart.
         self.assertEqual(bot['depends_on'],{'nocheh-app':{'condition':'service_healthy'}})
         self.assertEqual((bot['image'],bot['command'],bot['read_only'],bot['networks']),
                          ('${NOCHEH_IMAGES:-nocheh}-hermes:local',['python','-m','services.telegram.server'],True,['default']))

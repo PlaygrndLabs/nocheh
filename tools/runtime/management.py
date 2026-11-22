@@ -147,9 +147,9 @@ def dispatch(body):
     if operation == 'usage.view':
         from tools.operations.provider.usage import view
         return view(state, body.get('days', 30))
-    if operation == 'brain.manage':
-        # The plugged-in brain's own settings, persona and notes (ADR-0234); its plain error code reaches the dashboard.
-        return api_call('/v1/brain/manage', body['request'], 'brain_unavailable')
+    if operation == 'agent.manage':
+        # The plugged-in agent's own settings, persona and notes (ADR-0234); its plain error code reaches the dashboard.
+        return api_call('/v1/agent/manage', body['request'], 'agent_unavailable')
     if operation == 'archive.projections':
         from tools.operations.archive.archive import API
         from urllib.parse import urlsplit

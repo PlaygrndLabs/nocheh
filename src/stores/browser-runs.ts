@@ -1,7 +1,7 @@
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object} from '../http.js';
-import type {Brain} from '../brain/brain.js';
+import type {Agent} from '../agent/agent.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow} from '../workflows/store.js';
 import type {SourceAccessRepository} from './access.js';
 import type {SourceRepository} from './retrieval.js';
@@ -22,8 +22,8 @@ export class BrowserRunRepository extends ManagedExecutionRepository {
   protected readonly family='browser' as const;
   protected override readonly rebindBeforeLaunch=true;
   constructor(access:SourceAccessRepository,readonly sources:SourceRepository,derived:DerivedRepository,
-    readonly preparation:PreparationRepository,turns:RuntimeTurnRepository,token:string,brain:Brain,
-    readonly delivery:BrowserDeliveryRepository){super(access,derived,turns,token,brain);}
+    readonly preparation:PreparationRepository,turns:RuntimeTurnRepository,token:string,agent:Agent,
+    readonly delivery:BrowserDeliveryRepository){super(access,derived,turns,token,agent);}
   override async observe(input:unknown){
     const status=await super.observe(input);
     if(!status.visible)return {...status,delivery:null,context:null};
