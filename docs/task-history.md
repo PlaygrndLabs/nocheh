@@ -2896,3 +2896,128 @@ its share box is gone and its project rules are deleted at start
 the open points above no longer apply.
 
 </entry>
+
+<entry date="2026-11-22" area="TASK.md cut to current status">
+
+TASK.md had grown to about 4,000 lines of dated reports. It now holds only current status,
+open items and next steps. The full log is at
+[7c07980](https://github.com/PlaygrndLabs/nocheh/blob/7c07980160dd7ce0700a413b76375aa85bf0e685/TASK.md)
+(`git show 7c07980:TASK.md`). Its entries, newest first, as they stood:
+
+- 2026-11-22: The brain is called the agent ([ADR-0273](adr/0273-the-brain-is-called-the-agent.md))
+- 2026-11-20: The owner's own Gmail, read only, step 4 of the shared and private connectors plan ([ADR-0272](adr/0272-gmail-read-only.md))
+- 2026-11-21: Development startup order after a live reload
+- 2026-11-21: Connections page, by whom each connection belongs to ([ADR-0271](adr/0271-connections-page.md))
+- 2026-11-21: Live GitHub lookups, step 3 part 2 of the shared and private connectors plan ([ADR-0270](adr/0270-github-live-lookups.md))
+- 2026-11-20: A project's GitHub repositories, step 3 part 1 of the shared and private connectors plan ([ADR-0269](adr/0269-github-per-project.md))
+- 2026-11-20: Notion per project or owner, step 2 of the shared and private connectors plan ([ADR-0268](adr/0268-notion-per-project-or-person.md))
+- 2026-11-19: Tasks, Chats, Members and Assistant notes as tables and sub-tabs, step 5 part 2 and the last step of the table-first dashboard plan
+- 2026-11-19: Remaining pages as tables and sub-tabs, step 5 part 1 of the table-first dashboard plan
+- 2026-11-20: "Share group chats", step 1 of the shared and private connectors plan ([ADR-0267](adr/0267-share-group-chats.md))
+- 2026-11-19: System pages as tables and sub-tabs, step 4 of the table-first dashboard plan
+- 2026-11-19: Sub-tabs for the two longest pages, step 3 of the table-first dashboard plan
+- 2026-11-19: Memory pages as tables, step 2 of the table-first dashboard plan
+- 2026-11-12: Members step 5 ([ADR-0265](adr/0265-member-mini-app.md))
+- 2026-11-14: Security fixes part 5 ([ADR-0263](adr/0263-only-addresses-no-model-built-open-without-a-card.md))
+- 2026-11-17: Memory step 4 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md))
+- 2026-11-12: Members step 4 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md), [ADR-0262](adr/0262-member-private-chat.md))
+- 2026-11-12: Members step 3 ([ADR-0257](adr/0257-learned-memory-names-its-source.md), [ADR-0259](adr/0259-honcho-retries-each-workspace-bound.md), [ADR-0260](adr/0260-members-in-groups.md))
+- 2026-11-17: Memory step 3 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md))
+- 2026-11-17: Memory step 2 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md))
+- 2026-11-17: Memory step 1 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md))
+- 2026-11-12: Members step 2b-2 ([ADR-0253](adr/0253-only-the-owner-adds-nocheh.md))
+- 2026-11-12: Members step 2b-1 ([ADR-0250](adr/0250-cards-and-forwards-say-whose-words-they-are.md), [ADR-0251](adr/0251-fixes-that-lose-nothing.md), [ADR-0252](adr/0252-chats-get-nochehs-own-ids.md))
+- 2026-11-14: Security fixes ([ADR-0256](adr/0256-nochehs-own-messages-carry-a-send-class.md), [ADR-0257](adr/0257-learned-memory-names-its-source.md), [ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md), [ADR-0262](adr/0262-member-private-chat.md))
+- 2026-11-14: Security fixes, part 2 ([ADR-0251](adr/0251-fixes-that-lose-nothing.md), [ADR-0264](adr/0264-groups-are-read-whole-from-everyone.md))
+- 2026-11-14: Security fixes, part 1 ([ADR-0250](adr/0250-cards-and-forwards-say-whose-words-they-are.md))
+- 2026-11-14: Security fixes ([ADR-0254](adr/0254-sends-go-only-to-chats-nocheh-serves.md), [ADR-0255](adr/0255-reminders-say-who-set-them.md))
+- 2026-11-12: Members step 2 ([ADR-0247](adr/0247-projects-replace-the-share-box.md), [ADR-0248](adr/0248-tasks-follow-data-access.md), [ADR-0249](adr/0249-answer-privately.md))
+- 2026-11-12: Members step 1 ([ADR-0242](adr/0242-private-chats-stay-out-of-group-sharing.md), [ADR-0243](adr/0243-project-boards-get-the-private-side-only-through-a-card.md), [ADR-0244](adr/0244-owner-defaults-posts-and-machine-reports-stay-private.md))
+- 2026-10-28: Production move ([ADR-0187](adr/0187-daily-automatic-backups.md), [ADR-0229](adr/0229-encrypted-off-site-backup-copies.md), [ADR-0230](adr/0230-portable-export-carries-owner-work.md), [ADR-0236](adr/0236-off-site-storage-from-one-pasted-credential.md))
+- 2026-11-12: Several workspaces on one machine ([ADR-0245](adr/0245-several-workspaces-on-one-machine.md))
+- 2026-10-28: Problem notices ([ADR-0220](adr/0220-a-new-safety-epoch-mid-call-is-retried-not-a-failure.md))
+- 2026-11-01: Get started
+- 2026-11-10: Chat in the sidebar
+- 2026-11-10: Machine control ([ADR-0231](adr/0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md))
+- 2026-11-11: Machine jobs on the owner's own login ([ADR-0237](adr/0237-stop-ends-only-the-programs-a-machine-job-started.md))
+- 2026-11-10: Data tools over MCP ([ADR-0233](adr/0233-data-tools-over-mcp.md))
+- 2026-11-08: One waiting card per person or project ([ADR-0219](adr/0219-repeat-names-wait-on-one-card.md))
+- 2026-11-09: Approval cards lead with the assistant's summary ([ADR-0224](adr/0224-operation-cards-lead-with-the-askers-summary.md))
+- 2026-11-12: Private chat and group memory ([ADR-0241](adr/0241-honcho-runs-only-the-tools-it-offered.md))
+- 2026-11-09: Member safety ([ADR-0225](adr/0225-member-safety-rules.md))
+- 2026-11-09: Hermes dashboard names ([ADR-0227](adr/0227-hermes-lists-chats-by-their-names.md))
+- 2026-11-08: Secret check connection failures
+- 2026-11-13: Secret check on Haiku 5.5 ([ADR-0246](adr/0246-the-secret-check-on-anthropic-defaults-to-haiku-5-5.md))
+- 2026-11-08: Stuck notes review ([ADR-0216](adr/0216-failed-reviews-keep-their-place-across-epochs.md), [ADR-0217](adr/0217-waiting-fragments-keep-their-place.md))
+- 2026-11-12: Notes reviews on full notes ([ADR-0239](adr/0239-notes-reviews-make-room-in-full-notes.md))
+- 2026-11-16: Notes reviews stuck after a restart ([ADR-0258](adr/0258-a-notes-review-whose-start-was-lost-waits-again.md))
+- 2026-11-17: Message search missing messages after a rebuild ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md))
+- 2026-11-01: Notion inside background jobs ([ADR-0199](adr/0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md), [ADR-0200](adr/0200-waiting-approvals-survive-reaction-epochs.md), [ADR-0201](adr/0201-job-reports-survive-reaction-epochs.md), [ADR-0202](adr/0202-approved-actions-report-how-they-ended.md))
+- 2026-10-28: Owner login ([ADR-0189](adr/0189-mini-app-password.md), [ADR-0190](adr/0190-one-owner-login.md))
+- 2026-10-29: Chat-review build, part 1 of 4 ([ADR-0191](adr/0191-imports-share-secret-checks-and-become-ready.md), [ADR-0192](adr/0192-files-are-read-by-the-runtime-document-reader.md), [ADR-0193](adr/0193-voice-notes-are-transcribed-by-the-runtime-transcriber.md), [ADR-0194](adr/0194-images-are-read-by-the-runtime-vision-tool.md))
+- 2026-10-23: Honcho memory on by default
+- 2026-10-09: Last reconciled 2026-10-09
+- 2026-10-09: Owner architecture review ([ADR-0109](adr/0109-standard-honcho-entity-model.md), [ADR-0115](adr/0115-honcho-session-revisions.md))
+- 2026-11-11: Swappable agent ([ADR-0234](adr/0234-brain-socket.md))
+- 2026-11-11: Nocheh's own Telegram bot ([ADR-0235](adr/0235-nocheh-owns-the-telegram-bot.md))
+- 2026-11-11: Send records ([ADR-0238](adr/0238-record-every-send-to-a-chat-app.md))
+- 2026-11-10: Swappable memory ([ADR-0232](adr/0232-memory-engine-socket.md))
+- 2026-11-11: Honcho image build
+- 2026-11-10: Long recalls
+- Retired sources now leave Hermes' own stored history ([ADR-0123](adr/0123-retired-sources-leave-native-history.md), [ADR-0129](adr/0129-retired-sources-leave-native-notes.md), [ADR-0132](adr/0132-retired-history-placeholders.md))
+- Hermes native notes reach every turn
+- Agent-led knowledge management is implemented and verified locally ([ADR-0091](adr/0091-bounded-agent-knowledge-organization.md))
+- Activity Decisions provides complete server totals and exact-item links across approval families
+- 2026-10-08: The active `nocheh_postgres_data` volume measured 36.9 GB on 2026-10-08; the Inngest database is 35 GB ([ADR-0105](adr/0105-shared-background-engine-queue.md), [ADR-0106](adr/0106-configurable-workflow-history-retention.md), [ADR-0107](adr/0107-daily-workflow-history-retention.md), [ADR-0144](adr/0144-keep-history-by-default.md))
+- Honcho is attached and verified as primary memory; historical ingestion is off ([ADR-0082](adr/0082-evidence-based-learning-deduplication.md))
+- Guarded reaction observations and bounded target excerpts are active in discovery
+- Restarting the cached development database image reinstated an older, slow workflow view
+- The existing embedding spending cap and subscription request safety limit remain in force ([ADR-0142](adr/0142-external-providers-only.md))
+- Group chats now answer only when a message addresses Nocheh ([ADR-0133](adr/0133-group-replies-when-addressed.md), [ADR-0134](adr/0134-editable-bot-names.md))
+- All topics of a group now share one memory by default ([ADR-0135](adr/0135-group-topics-share-memory.md))
+- Dashboard rebuild ([ADR-0145](adr/0145-rebuilt-owner-dashboard.md), [ADR-0146](adr/0146-save-in-page-header.md))
+- Provider addresses without `/v1`
+- Logo ([ADR-0180](adr/0180-pixel-brain-logo-and-logo-colours.md))
+- Role and skills per chat ([ADR-0151](adr/0151-chat-role-and-skills-in-hermes-profiles.md))
+- Built-in instructions ([ADR-0152](adr/0152-owner-editable-built-in-instructions.md))
+- Reply outage after the built-in instructions update
+- Honcho memory provider rejection
+- Honcho memory message dates
+- Honcho learning query limit ([ADR-0228](adr/0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md))
+- Deep check for hidden data and failure gaps
+- Known gaps fixed before the release tests ([ADR-0154](adr/0154-message-edits-replace-honcho-writes.md), [ADR-0155](adr/0155-albums-answered-once.md), [ADR-0156](adr/0156-desktop-exports-share-proven-telegram-identities.md), [ADR-0157](adr/0157-group-turns-see-recent-unaddressed-messages.md))
+- Re-running and replacing Honcho memory ([ADR-0153](adr/0153-owner-reruns-and-replaces-honcho-memory.md))
+- 2026-11-12: Upgrades ([ADR-0228](adr/0228-hermes-and-honcho-built-ins-replace-nocheh-copies.md))
+- 2026-11-08: Unclear outcomes close ([ADR-0218](adr/0218-unclear-outcomes-close-by-the-owners-word-or-as-a-read.md))
+- 2026-11-08: One message when already allowed, stage C ([ADR-0215](adr/0215-an-allowed-operation-answers-in-the-same-turn.md))
+- 2026-11-08: Allow a site or command in one chat, stage B ([ADR-0214](adr/0214-allow-a-site-or-command-in-one-chat.md))
+- 2026-11-08: Answers come back to the chat that asked, stage A ([ADR-0212](adr/0212-approved-operations-answer-in-the-chat-that-asked.md))
+- 2026-11-08: A decided card loses its buttons, and a refused page read is a failure
+- 2026-11-08: Reactions while Nocheh works ([ADR-0211](adr/0211-hermes-working-reactions-on-the-answered-message.md))
+- 2026-11-08: Operation cards read in words ([ADR-0213](adr/0213-operation-cards-read-in-words.md))
+- 2026-10-28: Typing while Nocheh works ([ADR-0188](adr/0188-typing-status-while-a-turn-works.md))
+- 2026-10-28: Menu still shown in the default scope after the strangers change ([ADR-0182](adr/0182-strangers-cost-nothing-and-reach-no-model.md))
+- 2026-10-27: Strangers kept away from models, downloads and the menu ([ADR-0182](adr/0182-strangers-cost-nothing-and-reach-no-model.md))
+- 2026-10-27: Settings apply followed to its end ([ADR-0178](adr/0178-settings-apply-is-followed-to-its-end.md))
+- 2026-10-27: Full end-to-end tester ([ADR-0174](adr/0174-memory-preparation-outages-are-retried.md))
+- 2026-10-08: Personal-use mocked-Telegram evaluation ([ADR-0104](adr/0104-telegram-update-order-and-untransmitted-sends.md))
+- 2026-10-03: Personal-use Telegram simulation has passing native, storage, workflow, portability, host-isolation and provider-contract evidence across th ([ADR-0097](adr/0097-durable-native-review-handoff.md), [ADR-0098](adr/0098-isolated-native-lease-recovery.md), [ADR-0099](adr/0099-independent-evidence-for-historical-recall.md), [ADR-0100](adr/0100-durable-embedding-egress-cooldown.md))
+- Guarded reaction evidence now accompanies discovery with bounded target excerpts ([ADR-0086](adr/0086-reaction-discovery-evidence.md))
+- Primary ingestion now receives its first attempt before a new native note review can take the background slot ([ADR-0088](adr/0088-primary-ingestion-before-native-note-review.md))
+- The October 2 General check has one captured message, one linked reply, and one execution attempt
+- The trusted native parent now retains allowlisted timings and an explicit guard-change failure when authorization changes after child comple
+- A native diagnostic candidate retains only bounded Python error type and function-stage identifiers in a failed dispatch receipt
+- Archive reads now link a note to at most twenty currently captured reaction sources after access checks
+- Archive search can discover bounded current reaction sources without message words or a target ID ([ADR-0084](adr/0084-scoped-reaction-discovery.md))
+- Automatic learned publications now wait while a current Telegram reply or leased managed reply is active ([ADR-0083](adr/0083-defer-automatic-memory-publication-during-replies.md))
+- Background admission now hands a free slot directly to one live callback waiting for at most one second ([ADR-0087](adr/0087-live-background-admission-handoff.md))
+- Owner workflow inspection now joins memory receipts by indexed identity
+- The prior native candidate passed 380 networkless image checks and three host checks, including real container isolation
+- Timing changes passed seven broker/security/storage checks, eleven admin CLI checks, and the TypeScript/dashboard build
+- Dashboard reload shutdown now closes stalled HTTP connections after a bounded grace period and still waits for admitted owner writes and lif
+- The learning repair passed four focused learning/entity checks and seven learned-memory/native-context/review checks
+- Populated backup and inactive restore passed
+- Fresh provider chat, literal detector, and refresh-delegation checks passed
+- The acceptance report hashes are reconciled, including the later-updated topic report
+
+</entry>
