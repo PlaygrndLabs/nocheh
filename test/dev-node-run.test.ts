@@ -50,6 +50,20 @@ test('a finished build stops the running process and starts the new one at once'
   await files.cleanup();
 });
 
+test('a restart runs its step after the old process ended and before the new one starts', async () => {
+  // The development app writes the build's ready marker in that step, so no old app reads while the stores are set up.
+  const {DevProcess}=await supervisor(),files=await scratch(`process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000);`);
+  const service=new DevProcess([files.entry]);
+  try {
+    service.start();
+    await until(async()=>(await files.runs()).length===1);
+    let seen:{running:boolean;runs:number}|undefined;
+    await service.restart(async()=>{seen={running:service.running,runs:(await files.runs()).length};});
+    assert.deepEqual(seen,{running:false,runs:1});
+    await until(async()=>(await files.runs()).length===2);
+  } finally {await service.stop();await files.cleanup();}
+});
+
 test('a restart kills a process that ignores SIGTERM, so a hung shutdown never holds back new code', async () => {
   const {DevProcess}=await supervisor(),log:string[]=[];
   // The first process ignores SIGTERM; later ones stop when asked.

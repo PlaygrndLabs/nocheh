@@ -48,11 +48,14 @@ while (!stopping) {
     if (current !== previous) {
       previous = current;
       if (await build()) {
-        const revision = `${Date.now()}\n`;
-        await writeFile('dashboard/dist/.dev-revision', revision);
-        await writeFile('dist/.dev-ready', revision);
-        console.log(`Development assets ready: ${revision.trim()}`);
-        await app.restart();
+        // The old app stops before the ready marker appears: the database sets up the stores for the new build on that
+        // marker, and no app reads while it does. The new app waits for that setup to finish (src/stores/dev-schema.ts).
+        await app.restart(async () => {
+          const revision = `${Date.now()}\n`;
+          await writeFile('dashboard/dist/.dev-revision', revision);
+          await writeFile('dist/.dev-ready', revision);
+          console.log(`Development assets ready: ${revision.trim()}`);
+        });
       } else console.error('Development build failed; the app keeps running the last finished build.');
     }
   } catch (error) { console.error('Development source scan failed:', error); }
