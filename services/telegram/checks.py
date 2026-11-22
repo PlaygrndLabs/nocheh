@@ -151,12 +151,15 @@ NOTICE_CALLBACKS=('nr','njp','nju')
 # The card about a group the owner added Nocheh to (ADR-0253): Move to one of its offered projects (0-2), No project (x)
 # or Turn off (o), each with the first 32 hex of the add's archive event.
 CARD_CALLBACK=re.compile(r'ng[012xo][a-f0-9]{32}')
+# A schedule set by asking in the owner's private chat (ADR-0266): Pause (p) or Delete (d), with the chat's schedule store
+# (24 hex) and the schedule's Hermes id (12 hex).
+SCHEDULE_CALLBACK=re.compile(r'nk[pd][a-f0-9]{24}[a-f0-9]{12}')
 
 
 def notice_buttons(buttons):
     """Buttons under a notice in the owner's private chat, one row (a list of buttons) or up to three rows (a list of
     lists) of up to three each: open a page in the mini app or a browser, or a press that storage handles
-    (NOTICE_CALLBACKS, or CARD_CALLBACK). Anything else is refused."""
+    (NOTICE_CALLBACKS, CARD_CALLBACK or SCHEDULE_CALLBACK). Anything else is refused."""
     if buttons is None:return None
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
     rows=buttons if isinstance(buttons,list) and buttons and all(isinstance(row,list) for row in buttons) else [buttons]
@@ -171,7 +174,7 @@ def notice_buttons(buttons):
             web,url,callback=button.get('web_app'),button.get('url'),button.get('callback')
             if isinstance(web,str) and len(web)<=512 and re.fullmatch(r'https://\S+',web):row.append(InlineKeyboardButton(label,web_app=WebAppInfo(web)))
             elif isinstance(url,str) and len(url)<=512 and re.fullmatch(r'https?://\S+',url):row.append(InlineKeyboardButton(label,url=url))
-            elif callback in NOTICE_CALLBACKS or isinstance(callback,str) and CARD_CALLBACK.fullmatch(callback):
+            elif callback in NOTICE_CALLBACKS or isinstance(callback,str) and (CARD_CALLBACK.fullmatch(callback) or SCHEDULE_CALLBACK.fullmatch(callback)):
                 row.append(InlineKeyboardButton(label,callback_data=callback))
             else:raise ValueError('invalid_notice')
         keyboard.append(row)
