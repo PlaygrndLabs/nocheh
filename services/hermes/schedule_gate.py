@@ -2,13 +2,14 @@
 
 The turn writes the chat's own Hermes schedule store, mounted into the sealed turn; Nocheh's scheduler captures each new
 or changed schedule there before it may run, fires it as a sealed turn and sends its result to this chat. Hermes's
-pre_tool_call hook keeps the tool to what that runs: an agent prompt on a schedule, in the owner's time zone, sent back
-here. Everything else Hermes's tool can do (scripts, other models, webhooks, running a schedule inside this reply) is
+pre_tool_call hook keeps the tool to what that runs: an agent prompt on a schedule, sent back here, in the time zone the
+owner named or else their own. Everything else Hermes's tool can do (scripts, other models, webhooks, running a schedule inside this reply) is
 refused, and its notes about Hermes's own gateway, which Nocheh does not run, are replaced by what Nocheh does.
 The hooks are inert, and the tool refused, unless the turn bound them.
 """
 import json
 import threading
+from zoneinfo import ZoneInfo,available_timezones
 
 TOOL='cronjob_manage'
 ACTIONS={'create','list','update','pause','resume','remove'}
@@ -19,6 +20,7 @@ RUN_REFUSED=("Nocheh runs each schedule at its own time and sends the result to 
              "reply. To change when it runs, update its schedule.")
 OPTION_REFUSED="Nocheh runs a schedule only as a prompt on its schedule, sent to this chat. Leave out: {names}."
 UNBOUND="Schedules can be set only from the owner's own message in their private chat."
+ZONE_REFUSED="{zone} is not a time zone name. Use one such as Europe/Berlin, or leave it out for the owner's own."
 LIMIT="This chat already has {count} schedules, the most allowed. Remove one first."
 NOTE=("Nocheh runs this at its time as a fresh reply with this chat's tools and memory, and sends the result to this chat. "
       "A run with nothing worth sending should answer only [SILENT]. The owner sees and manages schedules on the "
@@ -59,14 +61,26 @@ def tool_call(tool_name='',args=None,**_):
         if action=='create' and rules['limit'] is not None and isinstance(rules['count'],int) and rules['count']>=rules['limit']:
             return {'action':'block','message':LIMIT.format(count=rules['count'])}
         if action in ('create','update'):
-            # Results come back to this chat (Nocheh's "telegram" delivery), in the owner's time zone.
+            # Results come back to this chat (Nocheh's "telegram" delivery). A zone the owner named is kept; a new
+            # schedule without one, or a cleared one, takes the owner's own. An update that names none keeps its zone.
             changes={'deliver':'telegram'}
-            if action=='create' or args.get('schedule') not in EMPTY or args.get('timezone') not in EMPTY:
+            zone=args.get('timezone')
+            if zone not in EMPTY:
+                if not _zone(zone):return {'action':'block','message':ZONE_REFUSED.format(zone=str(zone)[:64])}
+            elif action=='create' or zone=='':
                 changes['timezone']=rules['time_zone']
             return {'action':'modify','args':changes}
         return None
     except Exception:
         return {'action':'block','message':UNBOUND}
+
+
+def _zone(value):
+    """Whether value names an IANA time zone this machine knows."""
+    if not isinstance(value,str) or not 0<len(value)<=64 or value not in available_timezones():return False
+    try:ZoneInfo(value)
+    except Exception:return False
+    return True
 
 
 def tool_result(tool_name='',result=None,**_):

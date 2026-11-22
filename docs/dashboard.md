@@ -592,7 +592,7 @@ approval flag keeps imports searchable without scheduling a native review.
 
 Ask in your private chat to set a schedule, for example "every weekday at 8, send me a
 short brief". Nocheh posts a message with the schedule's name, when it runs and its
-next run, with **Pause** and **Delete**. Schedules run in your Tasks time zone. Each
+next run, with **Pause** and **Delete**. Schedules run in your Tasks time zone unless you name another. Each
 result comes to your private chat with no card; a run with nothing new sends nothing.
 A group's results still wait for your yes (ADR-0266).
 

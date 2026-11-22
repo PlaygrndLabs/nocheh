@@ -75,7 +75,9 @@ def container_spec(profile,host_root,image,network,uid,gid,source_root=None,box=
       'Env':['HOME=/tmp/home','HERMES_HOME=/profile','NOCHEH_ISOLATED_TURN=1',
              'ARCHIVE_URL=http://nocheh-security:8786','GUARD_URL=http://nocheh-security:8786',
              *(['TERMINAL_ENV=nocheh_box','TERMINAL_CWD=/work','NOCHEH_BOX_SOCKET=/box/exec.sock'] if box is not None else []),
-             *(['TERMINAL_ENV=nocheh_machine','TERMINAL_CWD=~','NOCHEH_MACHINE_RUN=1'] if machine else [])],
+             *(['TERMINAL_ENV=nocheh_machine','TERMINAL_CWD=~','NOCHEH_MACHINE_RUN=1'] if machine else []),
+             # The turn's /profile is a scratch tmpfs: only this says /profile/cron is the chat's real store.
+             *(['NOCHEH_SCHEDULE_STORE=1'] if schedules is not None else [])],
       'OpenStdin':True,'StdinOnce':True,'AttachStdin':True,'AttachStdout':True,'AttachStderr':False,'Tty':False,
       'Labels':{'nocheh.role':'isolated-turn','nocheh.profile':profile},
       'HostConfig':{'ReadonlyRootfs':True,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges:true'],

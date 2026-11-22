@@ -39,7 +39,8 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
 3. **A gate over the tool.** A plugin hook allows only create, list, update, pause,
    resume and remove; refuses running a schedule inside the reply and every option
    Nocheh does not run (scripts, other models, skills, webhooks and so on); and sets
-   each new or rescheduled schedule to send to this chat in the owner's time zone.
+   each schedule to send to this chat. A time zone the owner names is kept (an unknown
+   name is refused); a new schedule without one takes the owner's time zone.
    A result keeps Hermes's fields and replaces its notes about its own gateway with
    what Nocheh does. Without the turn's binding the tool is refused.
 4. **Captured as before.** Nocheh's scheduler captures a schedule the tool made like

@@ -32,11 +32,16 @@ class GateTests(unittest.TestCase):
         gate.bind('Asia/Tokyo')
         self.assertEqual(self.call(action='create',prompt='Brief',schedule='0 8 * * 1-5',name='Morning'),
                          {'action':'modify','args':{'deliver':'telegram','timezone':'Asia/Tokyo'}})
-        # Hermes's own delivery targets and zones are replaced, not refused.
-        self.assertEqual(self.call(action='create',prompt='Brief',schedule='every 1h',deliver='origin',timezone='UTC')['args'],
-                         {'deliver':'telegram','timezone':'Asia/Tokyo'})
+        # Hermes's own delivery targets are replaced, not refused; a zone the owner named is kept.
+        self.assertEqual(self.call(action='create',prompt='Brief',schedule='every 1h',deliver='origin',timezone='Europe/Berlin')['args'],
+                         {'deliver':'telegram'})
         self.assertEqual(self.call(action='update',job_id='abc',prompt='New text'),{'action':'modify','args':{'deliver':'telegram'}})
-        self.assertEqual(self.call(action='update',job_id='abc',schedule='0 9 * * *')['args']['timezone'],'Asia/Tokyo')
+        self.assertNotIn('timezone',self.call(action='update',job_id='abc',schedule='0 9 * * *')['args'],'a changed time keeps its zone')
+        self.assertEqual(self.call(action='update',job_id='abc',timezone='America/New_York')['args'],{'deliver':'telegram'})
+        self.assertEqual(self.call(action='update',job_id='abc',timezone='')['args']['timezone'],'Asia/Tokyo','a cleared zone is the owner\'s')
+        for zone in ('Not/AZone','../etc','x'*70,7):
+            blocked=self.call(action='create',prompt='Brief',schedule='every 1h',timezone=zone)
+            self.assertEqual(blocked['action'],'block',zone);self.assertIn('not a time zone',blocked['message'])
         for action in ('list','pause','resume','remove'):self.assertIsNone(self.call(action=action,job_id='abc'),action)
 
     def test_running_and_options_nocheh_does_not_run_are_refused(self):
@@ -90,6 +95,12 @@ class HermesToolTests(unittest.TestCase):
             job,=inspect(home)
             self.assertEqual((job['deliver'],job['timezone'],job['name']),('telegram','Asia/Tokyo','Morning brief'))
             self.assertFalse(job.get('nocheh_registered'),'nothing runs before Nocheh captures it')
+            # A zone the owner named reaches the store as named.
+            named={'action':'create','prompt':'Weekly review','schedule':'0 18 * * 5','name':'Review','timezone':'Europe/Berlin'}
+            with store(home):
+                raw=_cronjob_handler({**named,**gate.tool_call(tool_name=gate.TOOL,args=named)['args']})
+            self.assertTrue(json.loads(raw)['success'],raw)
+            self.assertEqual({row['name']:row['timezone'] for row in inspect(home)},{'Morning brief':'Asia/Tokyo','Review':'Europe/Berlin'})
 
 
 class TurnTests(unittest.TestCase):
@@ -107,10 +118,14 @@ class TurnTests(unittest.TestCase):
             answers.append(path);return {'allowed':True,'time_zone':'Asia/Tokyo','limit':None,'count':None}
         with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'1'}),\
                 patch('services.hermes.archive_tools.request',request):
-            os.environ.pop('HERMES_GATEWAY_SESSION',None)
+            os.environ.pop('HERMES_GATEWAY_SESSION',None);os.environ.pop('NOCHEH_SCHEDULE_STORE',None)
             profile=Path(temp)
             self.assertFalse(assistant_turn.schedule_turn(body,profile),'no store mounted')
+            # A cron folder Hermes made on the turn's scratch /profile is not the chat's store: it is lost with the turn.
             (profile/'cron').mkdir()
+            self.assertFalse(assistant_turn.schedule_turn(body,profile),'the launcher did not mount the store')
+            self.assertEqual(answers,[])
+            os.environ['NOCHEH_SCHEDULE_STORE']='1'
             for flags in ({'review':True},{'background':True},{'box':True},{'machine':True},{'answer':True},{'member':True},{'member_read':True}):
                 self.assertFalse(assistant_turn.schedule_turn(body,profile,**flags),flags)
             for other in ({'owner':False,'channel':'telegram'},{'owner':True,'channel':'scheduler'}):
@@ -121,13 +136,26 @@ class TurnTests(unittest.TestCase):
             self.assertFalse(gate.bound())
             self.assertTrue(assistant_turn.schedule_turn(body,profile))
             self.assertEqual((answers,gate._BOUND['time_zone'],os.environ.get('HERMES_GATEWAY_SESSION')),(['/v1/schedules/turn'],'Asia/Tokyo','1'))
-            os.environ.pop('HERMES_GATEWAY_SESSION',None)
-        with patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'0'}):
+            os.environ.pop('HERMES_GATEWAY_SESSION',None);os.environ.pop('NOCHEH_SCHEDULE_STORE',None)
+        with patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'0','NOCHEH_SCHEDULE_STORE':'1'}):
             gate._BOUND=None;self.assertFalse(assistant_turn.schedule_turn(body,Path('/nonexistent')),'never outside a sealed turn')
 
 
 class StoreMountTests(unittest.TestCase):
     def binding(self,**extra):return {'owner':True,'logical_profile':LOGICAL,**extra}
+
+    def test_the_owner_turn_makes_the_chat_store_the_launcher_then_mounts(self):
+        from services.hermes.scopes import Scopes
+        from services.hermes.turn_process import schedule_store
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);logical=Scopes.profile('42')
+            # The chat's own folder may not exist yet: only revisioned profiles do.
+            self.assertEqual(schedule_store(root,'42'),root/logical/'cron')
+            self.assertTrue((root/logical/'cron').is_dir())
+            self.assertEqual(launcher.schedule_store({'owner':True,'logical_profile':logical},False,False,root),logical)
+            self.assertEqual(schedule_store(root,'42'),root/logical/'cron','a second turn finds it')
+            other=root/Scopes.profile('43');other.symlink_to(root/logical)
+            self.assertIsNone(schedule_store(root,'43'),'a linked folder is left alone')
 
     def test_only_the_owners_own_reply_gets_its_chat_store(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -145,8 +173,10 @@ class StoreMountTests(unittest.TestCase):
     def test_the_store_is_mounted_read_write_at_the_turn_home(self):
         spec=launcher.container_spec(PROFILE,'/owned/profiles',IMAGE,'nocheh-agent',1000,1000,schedules=LOGICAL)
         self.assertIn({'Type':'bind','Source':'/owned/profiles/'+LOGICAL+'/cron','Target':'/profile/cron','ReadOnly':False},spec['HostConfig']['Mounts'])
+        self.assertIn('NOCHEH_SCHEDULE_STORE=1',spec['Env'],'the turn is told its store is mounted')
         plain=launcher.container_spec(PROFILE,'/owned/profiles',IMAGE,'nocheh-agent',1000,1000)
         self.assertFalse([m for m in plain['HostConfig']['Mounts'] if m['Target']=='/profile/cron'])
+        self.assertNotIn('NOCHEH_SCHEDULE_STORE=1',plain['Env'])
         for bad in ({'schedules':'../x'},{'schedules':LOGICAL,'machine':True}):
             with self.assertRaises(ValueError):launcher.container_spec(PROFILE,'/owned/profiles',IMAGE,'nocheh-agent',1000,1000,**bad)
 
