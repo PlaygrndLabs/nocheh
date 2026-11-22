@@ -17,8 +17,8 @@ The members' app (step 5, ADR-0265) reads no chat at all, so its answers are swe
 member_http got is kept in mini-app-responses.jsonl, and `member_app_never_leaks` fails on any saved mark in any of them,
 a member's own MEMBERMARK included, and on the app's own marks (member-app-marks.json): a task title of a project the
 member is in no group of (OTHERPROJECTMARK), the owner's personal task (PERSONALMARK), and on a task the member does see, a private
-column's value (OWNERCOLMARK), the owner's name for the person assigned (OWNERNAMEMARK) and a comment from before the task
-joined the board (PREJOINMARK). The reminders that reached members' own chats are swept for the same marks and for
+column's value (OWNERCOLMARK) and a comment from before the task joined the board (PREJOINMARK). The person assigned
+shows by their People name, their name everywhere (ADR-0274), so that name is no mark. The reminders that reached members' own chats are swept for the same marks and for
 people's Telegram names.
 """
 import json

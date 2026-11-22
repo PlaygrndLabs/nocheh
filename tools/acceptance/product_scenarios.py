@@ -5206,17 +5206,19 @@ class ProductScenarios(Scenarios):
         # opens the members' app from their menu button (ADR-0265). P1 also holds GP2 (OTHER_GROUP), where the owner ticked
         # them but Telegram never showed them; P2 holds none of their groups. They see P1's whole list, GP2's task included
         # (ADR-0276), never P2's task or the owner's personal ones, and on a task the owner moved onto GP1's board never the
-        # owner's private column, the owner's name for the person assigned, or a comment from before it joined the board.
+        # owner's private column or a comment from before it joined the board. The person assigned shows by their People
+        # name, which is their name everywhere (ADR-0274).
         # With write they add, finish, trash and restore and comment, never with a stale version or a refused field; with
         # read they read only. Launch data from the owner, a stranger, a group or another key is refused. The marks are
         # saved for member_app_never_leaks.
         person, number = self.fresh_person(), str(self.f.ids())
         hidden = {'OTHERPROJECTMARK'+number: 'a task title of a project the member is in no group of', 'PERSONALMARK'+number: 'the owner\'s personal task',
-                  'OWNERCOLMARK'+number: 'a private column on a task the member sees', 'OWNERNAMEMARK'+number: 'the owner\'s name for the person assigned',
+                  'OWNERCOLMARK'+number: 'a private column on a task the member sees',
                   'PREJOINMARK'+number: 'a comment from before the task joined the board'}
         seen = {name: 'APPSEEN'+name+'x'+number for name in ('gp1', 'gp2', 'gp3', 'p1', 'moved', 'shared', 'postjoin', 'made')}
+        people_name = 'APPNAME'+number
         canaries.save_app_marks(self.f.directory, hidden, {mark: name for name, mark in seen.items()})
-        far, personal, ownercol, ownername, prejoin = hidden
+        far, personal, ownercol, prejoin = hidden
         self.new_group_chat()
         item = self.add_member(person, (GROUP, OTHER_GROUP, THIRD_GROUP, NEW_GROUP))
         try:
@@ -5224,7 +5226,7 @@ class ProductScenarios(Scenarios):
                 self.said_in_group(person, group, 'سلام همه '+number)
             with self.groups_in_projects({'App P1 '+number: (GROUP, OTHER_GROUP, THIRD_GROUP), 'App P2 '+number: ()}) as made, \
                     self.task_columns(number) as (private, shared), \
-                    self.owner_named(ownername) as named:
+                    self.owner_named(people_name) as named:
                 project = made['App P1 '+number]['id']
                 tasks = {'gp1': self.owner_task('Plan the trip '+seen['gp1'], project, GROUP), 'gp3': self.owner_task('Book seats '+seen['gp3'], project, THIRD_GROUP),
                          'p1': self.owner_task('Whole trip '+seen['p1'], project), 'gp2': self.owner_task('Other group '+seen['gp2'], project, OTHER_GROUP),
@@ -5262,14 +5264,13 @@ class ProductScenarios(Scenarios):
                 self.gate('never_another_project_or_personal', not canaries.found(titles, {far, personal}))
                 listing = self.member_app('board_raw', '/tasks'+self.app_query(project=project), person)
                 rows = listing.get('tasks') or []
-                # The person the owner assigned shows by their own Telegram name when they are in one of the groups of this
-                # board's project, else is only counted; the owner's name for them never shows (ADR-0265 D6, ADR-0276).
+                # The person the owner assigned shows by their People name, their name everywhere (ADR-0274), when Telegram
+                # shows them in one of the groups of this board's project, else is only counted (ADR-0265 D6, ADR-0276);
+                # which one depends on what earlier scenarios of the run did.
                 assigned = [(task.get('assignees') or [], task.get('assignees_other')) for task in rows if task.get('id') == moved]
                 self.gate('no_people_on_the_board', not any({'people', 'origin', 'external', 'revision'} & set(task) for task in rows)
                           and all(task.get('assignees') == [] and task.get('assignees_other') == 0 for task in rows if task.get('id') != moved)
-                          and not canaries.found(json.dumps(listing, ensure_ascii=False), {ownername})
-                          and len(assigned) == 1 and len(assigned[0][0])+assigned[0][1] == 1
-                          and all(set(row) == {'name'} and row['name'] and ownername not in row['name'] for row in assigned[0][0]),
+                          and assigned in ([([{'name': people_name}], 0)], [([], 1)]),
                           assigned=assigned)
                 only = self.app_titles(person, project, group=self.f.chat(THIRD_GROUP))
                 self.gate('group_filter', seen['gp3'] in only and seen['gp1'] not in only)
@@ -5288,7 +5289,7 @@ class ProductScenarios(Scenarios):
                 text = json.dumps(detail, ensure_ascii=False)
                 self.gate('moved_task_shows_what_joined_the_board', seen['postjoin'] in text and seen['shared'] in text and detail.get('on_board_since')
                           and 'created_at' not in detail and 'created_by' not in detail)
-                self.gate('moved_task_keeps_the_owners_side', not canaries.found(text, {ownercol, ownername, prejoin}) and private not in detail.get('properties', {}))
+                self.gate('moved_task_keeps_the_owners_side', not canaries.found(text, {ownercol, prejoin}) and private not in detail.get('properties', {}))
                 # Their changes, with write.
                 operation = 'app-create-'+number
                 body = {'operation_id': operation, 'project': project, 'title': 'Bring maps '+seen['made']}
@@ -5534,7 +5535,7 @@ class ProductScenarios(Scenarios):
     def member_app_never_leaks(self):
         # The members' app sweep, next to private_canaries_never_left_the_owner: no answer the app gave anyone in this run
         # holds a private mark (PRIVATEMARK, PROBEMARK, any member's MEMBERMARK, a member's own included) or one of the
-        # app's own (OTHERPROJECTMARK, PERSONALMARK, OWNERCOLMARK, OWNERNAMEMARK, PREJOINMARK); and no reminder that reached a
+        # app's own (OTHERPROJECTMARK, PERSONALMARK, OWNERCOLMARK, PREJOINMARK); and no reminder that reached a
         # member's own chat holds one, or anyone's Telegram name. The visible marks show up in the answers, so the sweep
         # reads the right thing. Without saved answers or marks the sweep fails.
         responses = canaries.load_http(self.f.directory)
