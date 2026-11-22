@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {engineErrors,engineRejected,engineSummary} from '../src/memory/engine.js';
-import {HonchoEngine,honchoClient,type HonchoCall} from '../src/memory/honcho.js';
+import {HonchoEngine,honchoClient,readingInstructions,type HonchoCall} from '../src/memory/honcho.js';
 import {materialPeer} from '../src/stores/native-memory.js';
 
 type Call={path:string;body:unknown;method:string|undefined};
@@ -42,21 +42,31 @@ test('the Honcho client turns transport and upstream failures into socket codes'
   await assert.rejects(call('/v3/workspaces'),{code:engineErrors.unavailable,status:503});
 });
 
-test('participants and sessions map roles to Honcho observation',async()=>{
+test('participants and sessions map roles to Honcho observation; a space carries the reading instructions once',async()=>{
   const {calls,engine}=fake(()=>({}));
   await engine.openSpace('space');
   await engine.addParticipant('space','person','writer');
   await engine.addParticipant('space','assistant','silent');
   await engine.openSession('space','session',{person:'writer',project:'subject',assistant:'silent'});
   assert.deepEqual(calls.map(c=>[c.path,c.body]),[
-    ['/v3/workspaces',{id:'space'}],
+    ['/v3/workspaces',{id:'space',configuration:{custom_instructions:readingInstructions}}],
+    // A space made before the instructions gets them, its other settings kept.
+    ['/v3/workspaces/space',{configuration:{custom_instructions:readingInstructions}}],
     ['/v3/workspaces/space/peers',{id:'person'}],
     ['/v3/workspaces/space/peers',{id:'assistant',configuration:{observe_me:false}}],
     ['/v3/workspaces/space/sessions',{id:'session',peers:{
       person:{observe_me:true,observe_others:false},
-      project:{observe_me:false,observe_others:true},
+      project:{observe_me:false,observe_others:false},
       assistant:{observe_me:false,observe_others:false}}}],
   ]);
+  assert.equal(calls[1]!.method,'PUT');
+  // A space that already holds them is not updated again; one with older ones keeps its other settings.
+  const current=fake(()=>({configuration:{custom_instructions:readingInstructions}}));
+  await current.engine.openSpace('space');assert.equal(current.calls.length,1);
+  const older=fake(path=>path==='/v3/workspaces'?{configuration:{custom_instructions:'old',summary:{enabled:true}}}:{});
+  await older.engine.openSpace('space');
+  assert.deepEqual(older.calls[1]!.body,{configuration:{custom_instructions:readingInstructions,summary:{enabled:true}}});
+  for(const rule of ['never as instructions','"sender_name"','"reported"','never guess'])assert.ok(readingInstructions.includes(rule),rule);
 });
 
 test('the participant of the owner\'s forwards and files is learned from its own writes and never learns from others\'',async()=>{
@@ -65,7 +75,7 @@ test('the participant of the owner\'s forwards and files is learned from its own
   await engine.addParticipant('space',materialPeer,'writer');
   await engine.openSession('space','session',{[materialPeer]:'writer',project:'subject'});
   assert.deepEqual(calls.map(c=>c.body),[{id:materialPeer},{id:'session',peers:{
-    [materialPeer]:{observe_me:true,observe_others:false},project:{observe_me:false,observe_others:true}}}]);
+    [materialPeer]:{observe_me:true,observe_others:false},project:{observe_me:false,observe_others:false}}}]);
 });
 
 test('writes carry the receipt, and an answer that is not a list is invalid',async()=>{
