@@ -13,6 +13,16 @@ from pathlib import Path
 from services.durable import canonical
 
 
+
+def schedule_store(root,chat):
+    """Make the chat's schedule store, cron/ in the chat's own folder, which outlasts each revisioned profile and may
+    not exist yet; the launcher mounts it into the owner's sealed reply (ADR-0266). A linked folder is left alone."""
+    from .scopes import Scopes
+    home=Path(root)/Scopes.profile(chat)
+    if home.is_symlink() or (home/'cron').is_symlink():return None
+    home.mkdir(exist_ok=True,mode=0o700);(home/'cron').mkdir(exist_ok=True,mode=0o700)
+    return home/'cron'
+
 def scheduled_preferences(profile,body):
     from .profile_config import inherited_config,read,preferences
     from .policy_config import validate
@@ -316,9 +326,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         prepare(profile)
         if scope.owner and not background and body.get('channel','telegram')=='telegram':
             # The owner's chat schedule store, which the sealed reply may get to set schedules (ADR-0266).
-            from .scopes import Scopes
-            home=Path(profile).parent/Scopes.profile(scope.chat_id)
-            if home.is_dir() and not home.is_symlink() and not (home/'cron').is_symlink():(home/'cron').mkdir(exist_ok=True,mode=0o700)
+            schedule_store(Path(profile).parent,scope.chat_id)
         request.update(scoped_transport(body['archive_credential'],transport['api_mode']))
         if 'preferences' not in request:
             effective,_=inherited_config(profile,read(profile/'config.yaml'))

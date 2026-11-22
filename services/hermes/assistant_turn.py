@@ -65,6 +65,9 @@ def schedule_turn(body,profile,review=False,background=False,box=False,machine=F
     schedule store mounted, and Nocheh's word that the message is the owner's own (not forwarded). Fails closed."""
     if (body.get('owner') is not True or body.get('channel','telegram')!='telegram' or review or background or box or machine
             or answer or member or member_read or os.environ.get('NOCHEH_ISOLATED_TURN')!='1'):return False
+    # /profile is a scratch tmpfs where Hermes may make its own cron folder; a schedule written there is lost with the
+    # turn. Only the launcher's word says the chat's store is mounted (ADR-0266).
+    if os.environ.get('NOCHEH_SCHEDULE_STORE')!='1':return False
     store=Path(profile)/'cron'
     if store.is_symlink() or not store.is_dir():return False
     try:
