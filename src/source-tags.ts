@@ -100,7 +100,7 @@ export function shownFileName(kind:string,payload:unknown):string|null {
 
 /** What code knows of one source: its class and facts (NoteSourceRepository.classesFor), its sender and forward origin
  *  as the reader's own copy shows them (telegramSenderName, forwardFacts), the name the owner gave its sender in People
- *  (ownerChosenName; the owner reader only), the chat it belongs to and its moment. `exported` marks a Telegram Desktop
+ *  (ownerChosenName; every reader since ADR-0274), the chat it belongs to and its moment. `exported` marks a Telegram Desktop
  *  export, whose names are the ones the exporting account saw: a saved contact's is the name the owner gave it. */
 export interface TagSource {
   id:string;class:EventClass;facts:SourceFacts;
@@ -117,7 +117,7 @@ export interface TagSource {
 const namesShown=(source:TagSource,reader:TagReader)=>reader.owner||source.exported!==true;
 /** Who reads a tag: the owner (the owner's private chat, web chat and the owner's own jobs) or anyone else (a group, a
  *  topic or a private answer); the reader's own chat; the owner's Tasks time zone; and whether the time is a minute or a
- *  day. Anyone but the owner reads UTC and no People name, whatever is passed. */
+ *  day. Anyone but the owner reads UTC, whatever is passed, and a People name in place of Telegram's (ADR-0274). */
 export interface TagReader {owner:boolean;chat:string|null;zone:string;precision:'minute'|'day';
   /** The one private chat that is not the owner's this reader may read (step 4): the asked member's chat for the owner's
    *  ask about a member, named as that member's private chat; null or absent for everyone else. */
@@ -130,8 +130,10 @@ function who(source:TagSource,reader:TagReader,size:number,usernames=true):strin
   if(facts.author==='anonymous')return words.anonymous;
   const username=telegramUsername(source.sender.username);
   if(facts.author==='bot')return username?fillLine(words.bot_named,{name:username}):words.bot;
-  // A person, someone code cannot tell, or the owner read by anyone else: by the name Telegram showed (Q1).
-  const name=namesShown(source,reader)?tagName(source.sender.name,size):'';
+  // A person, someone code cannot tell, or the owner read by anyone else: anyone but the owner reads the People name the
+  // owner set (ADR-0274), else the name Telegram showed (Q1). The owner reads Telegram's, with the People name beside it.
+  const people=!reader.owner&&source.saved?tagName(source.saved,size):'';
+  const name=people||(namesShown(source,reader)?tagName(source.sender.name,size):'');
   let label=name?fillLine(words.named,{name}):words.person;
   if(username&&usernames)label+=fillLine(words.username,{username});
   if(reader.owner&&facts.author!=='owner'&&source.saved) {

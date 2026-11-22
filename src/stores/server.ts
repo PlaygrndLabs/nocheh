@@ -243,8 +243,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         const space=url.searchParams.get('space')??'';
         if(await s.supervision.outsider(policy,space))throw new HttpError(404,'conversation_not_found');
       }
-      if(view==='people')return json(res,200,await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
-        after:url.searchParams.get('after')??'',state:'active'}));
+      if(view==='people') {
+        // The owner's private note about each person shows here, in the owner's own private chat only (ADR-0274).
+        const found=await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
+          after:url.searchParams.get('after')??'',state:'active'}),notes=await s.entities.ownerNotes(reader,found.entities.map(entity=>entity.id));
+        return json(res,200,{...found,entities:found.entities.map(entity=>notes.get(entity.id)?.note?{...entity,private_note:notes.get(entity.id)!.note}:entity)});
+      }
       const target=({conversations:'/v1/conversations','conversation-context':'/v1/conversations/context',projects:'/v1/projects',
         'project-assignments':'/v1/projects/assignments','memory-map':'/v1/memory-map'} as Record<string,string>)[view]!;
       return json(res,200,await owner.request(reader,'GET',new URL(target+url.search,url)));

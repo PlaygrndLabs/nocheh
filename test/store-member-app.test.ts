@@ -58,7 +58,7 @@ async function principal(db:pg.Pool,member:string,account:string,chat:string,cha
 const leaks=(value:unknown,why:string)=>{
   const text=JSON.stringify(value);
   for(const mark of MARKS)assert.ok(!text.includes(mark),`${why} shows ${mark}`);
-  for(const word of ['time_zone','"revision"','"people"','CANARY-LABEL','"origin"','"external"','"source_event"','"position"','created_by_account','Asia/Kolkata',GP2])
+  for(const word of ['time_zone','"revision"','"people"','CANARY-LABEL Gus','CANARY-LABEL Lone','"origin"','"external"','"source_event"','"position"','created_by_account','Asia/Kolkata',GP2])
     assert.ok(!text.includes(word),`${why} shows ${word}`);
 };
 
@@ -323,7 +323,7 @@ test('the members\' app writes as the member: read refuses every write, write ch
   } finally {await close();}
 });
 
-test('the members\' app names an assignee only by their Telegram name and only when they are in a group she reaches; every other is counted, and the owner\'s label never shows',fixture,async()=>{
+test('the members\' app names an assignee by their People name (ADR-0274) only when they are in a group she reaches; every other is counted, never named',fixture,async()=>{
   const {stores,s,close}=await open(),db=stores.control;
   try {
     // Ali in GP1 (hers), Gus only in GP2 (gone from her reach), one card bound to nobody, and Mira's own card.
@@ -336,16 +336,16 @@ test('the members\' app names an assignee only by their Telegram name and only w
     const mira=await principal(db,MEMBER_GP_ID,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT);
     const page=await s.tasks.memberList(mira,{project:P1}),of=(id:string)=>page.tasks.find(task=>task.id===id)!;
     leaks(page,'the list');
-    assert.deepEqual([of(lights.id).assignees,of(lights.id).assignees_other],[[{name:'Ali T'}],1],'Ali by his Telegram name; Gus, only in GP2, counted');
+    assert.deepEqual([of(lights.id).assignees,of(lights.id).assignees_other],[[{name:CANARY_LABEL}],1],'Ali by the name the owner set; Gus, only in GP2, counted');
     assert.deepEqual([of(cake.id).assignees,of(cake.id).assignees_other],[[],1],'a card bound to nobody is counted');
-    assert.deepEqual([of(caterer.id).assignees,of(caterer.id).assignees_other,of(caterer.id).mine],[[{name:'Mira T'}],0,true],'assigned to her: hers');
+    assert.deepEqual([of(caterer.id).assignees,of(caterer.id).assignees_other,of(caterer.id).mine],[[{name:'CANARY-LABEL Mira (helper)'}],0,true],'assigned to her: hers');
     assert.deepEqual([of(lights.id).mine,of(cake.id).mine],[false,false]);
     const ours=[lights.id,cake.id,caterer.id];
     assert.deepEqual((await s.tasks.memberList(mira,{project:P1,mine:true})).tasks.map(task=>task.id).filter(id=>ours.includes(id)),[caterer.id],
       '"Mine" holds what is assigned to her');
     const detail=await s.tasks.memberGet(mira,lights.id);
     leaks(detail,'the drawer');
-    assert.deepEqual([detail.assignees,detail.assignees_other],[[{name:'Ali T'}],1]);
+    assert.deepEqual([detail.assignees,detail.assignees_other],[[{name:CANARY_LABEL}],1]);
     // Ali leaves GP1: he is counted, never named.
     await db.query(`UPDATE chat_memberships SET state='left' WHERE chat_id=$1 AND account_id=$2`,[GP1,(await db.query('SELECT id FROM chat_accounts WHERE external_id=$1',[ALI])).rows[0].id]);
     const after=await s.tasks.memberGet(mira,lights.id);

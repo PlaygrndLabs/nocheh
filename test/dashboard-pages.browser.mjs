@@ -4144,6 +4144,31 @@ test('Facts, People and Inbox review name each original next to its link', async
   await inbox.close();
 });
 
+test('People says a name the owner set is shown to everyone, and keeps a private note only the owner reads', async () => {
+  const {page, problems} = await open('memory?view=people');
+  const notice = page.getByRole('status').filter({hasText: 'Names you set are shown to everyone'});
+  await notice.getByText('Mira Chen', {exact: false}).waitFor();
+  const mira = page.getByRole('list', {name: 'People'}).getByRole('button', {name: /Mira Chen/});
+  await mira.getByText('Shown', {exact: true}).waitFor();
+  assert.equal(await page.getByRole('list', {name: 'People'}).getByRole('button', {name: /Devon/}).getByText('Shown').count(), 0);
+  await notice.getByRole('button', {name: 'Got it'}).click();
+  await notice.waitFor({state: 'detached'});
+  await mira.click();
+  const drawer = page.getByRole('dialog');
+  await drawer.getByText('Everyone sees this name', {exact: false}).waitFor();
+  const note = drawer.getByLabel('Private note');
+  await note.fill('Prefers calls after six.');
+  await drawer.getByRole('button', {name: 'Save note'}).click();
+  await page.getByText('Note saved.').waitFor();
+  await page.reload();
+  await page.getByRole('dialog').getByLabel('Private note').waitFor();
+  assert.equal(await page.getByRole('dialog').getByLabel('Private note').inputValue(), 'Prefers calls after six.');
+  // Dismissed once, the notice stays away.
+  assert.equal(await page.getByRole('status').filter({hasText: 'Names you set are shown to everyone'}).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 /** A page opened with every dashboard request it makes counted by path, the query left out. */
 async function counted(hash) {
   const page = await browser.newPage({viewport: {width: 1440, height: 900}});

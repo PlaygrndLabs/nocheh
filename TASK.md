@@ -25,6 +25,11 @@ Nocheh is in development mode and not yet released. Everything below is built an
 - Workspaces: several installs run side by side on one machine ([ADR-0245](docs/adr/0245-several-workspaces-on-one-machine.md)).
 - Memory: fact sources and People pages ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md)); memory search stays on
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)).
+- People: the name the owner sets in Memory › People is the person's name everywhere, and each
+  person has a private note only the owner reads
+  ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)); next, Honcho 3.6.2,
+  reading instructions for Honcho and no unread copies under mentioned people (owner said yes
+  2026-11-22).
 - Assistant: a "what matters now" list and a morning brief through Hermes notes and its
   scheduler; a schedule approved once sends to the owner's private chat without a card.
 - Connections: a service connects to a project (shared) or a person (private). Notion per

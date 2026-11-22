@@ -100,15 +100,16 @@ test('a member paused or switched off mid-turn writes no task; a read-only membe
       assert.equal(closed.state,'done');
 
       // The owner names people on it: the group reads neither them, nor the owner's names for them, nor the person column,
-      // only the other shared column; an assignee in this group by their Telegram name, every other counted.
+      // only the other shared column; an assignee in this group by the People name the owner set (ADR-0274), every other
+      // counted.
       await s.tasks.update(owner,hall.id,{operation_id:key+':names:'+person,expected_revision:closed.revision,people:[named],assignees:[named,ali],properties:{Lead:[named],Size:4}});
-      const assignees=chat===GP1?[[{name:'Ali T'}],1]:[[],2];
+      const assignees=chat===GP1?[[{name:CANARY_LABEL}],1]:[[],2];
       const listed=(await s.tasks.chatList(await turn('Who does the hall?'),{state:'all'})).tasks.find((task:any)=>task.id===hall.id);
       const seen=await s.tasks.chatGet(await turn('Who does the hall?'),hall.id);
       for(const value of [listed,seen]){
         assert.deepEqual([value.people,value.properties,value.created_by_account],[undefined,{size:4},undefined]);
         assert.deepEqual([value.assignees,value.assignees_other],assignees,chat);
-        for(const word of ['Owner name for them',named,ali,'CANARY-LABEL'])assert.ok(!JSON.stringify(value).includes(word),word);
+        for(const word of ['Owner name for them',named,ali,...chat===GP1?[]:['CANARY-LABEL']])assert.ok(!JSON.stringify(value).includes(word),word);
       }
       assert.deepEqual((await s.tasks.chatList(await turn('Which columns?'))).settings.properties.map((item:any)=>item.id),['size']);
       assert.deepEqual((await s.tasks.get(owner,hall.id)).assignees.map((item:any)=>item.id).sort(),[named,ali].sort(),'the owner still reads them');
