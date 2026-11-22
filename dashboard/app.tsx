@@ -81,10 +81,10 @@ function canonicalPage(): PageId {
   if (hash) history.replaceState(null, '', hash);
   return page;
 }
-// Notion's and GitHub's sign-ins return to `/?connect=…`; the Connections page finishes them. Every tab stays on that
+// Notion's, Gmail's and GitHub's sign-ins return to `/?connect=…`; the Connections page finishes them. Every tab stays on that
 // page; a project's Notion sign-in finishes there too and says to turn it on in the project.
 const connecting = new URLSearchParams(location.search).get('connect') ?? '';
-if (['notion', 'github'].includes(connecting))
+if (['notion', 'gmail', 'github'].includes(connecting))
   history.replaceState(
     null,
     '',

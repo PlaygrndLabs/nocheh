@@ -3,6 +3,7 @@ import {followUpTurn,ownerAutonomyGrant} from './owner-autonomy.js';
 import {followUpLeft} from './action-continuations.js';
 import {notionAuthority} from './notion.js';
 import {githubAuthority} from './github-lookups.js';
+import {gmailAuthority} from './gmail-lookups.js';
 import {activeChatProject} from './projects.js';
 import {chatToolAllowed} from './chat-tools.js';
 import {ownerApprovedJob,relaunchedRun} from './background-jobs.js';
@@ -134,7 +135,9 @@ export class ControlledActionRepository {
       if(project)raw=actionArguments(body.kind,{...raw,project});
     }
     // A GitHub lookup only where its repository may be looked up (ADR-0270).
-    if('connection' in raw)await (raw.connection==='github'?githubAuthority(this.control,principal,turn,raw,false):notionAuthority(this.control,principal,turn,raw,false));
+    // A Gmail lookup only in the owner's private chat (ADR-0272).
+    if('connection' in raw)await (raw.connection==='github'?githubAuthority(this.control,principal,turn,raw,false):
+      raw.connection==='gmail'?gmailAuthority(principal,turn,false):notionAuthority(this.control,principal,turn,raw,false));
     let telegram=false,asker:GroupAsker|null=null;
     if(source.store==='archive') {
       const original=await this.access.archive.verify(source),intake=(await this.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
@@ -203,6 +206,7 @@ export class ControlledActionRepository {
       const provided=(address:string)=>{const exact=sameAddress(address);return !!given&&!!exact&&(given.typed.has(exact)||given.forwarded.has(exact));};
       // A GitHub lookup reads only, so one asked where it may run, in a live turn, runs (ADR-0270).
       const notion=!connected?null:args.connection==='github'?await githubAuthority(db,principal,turn,args,live&&!turn.job,true):
+        args.connection==='gmail'?gmailAuthority(principal,turn,live&&!turn.job):
         await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,ownerIds(this.access.policy()),source,turn,true):live,provided);
       // "Do what I ask" runs a command the owner asks for in their private chat. A web read, or another server's list of
       // tools, runs only when no model built its address: a link the owner gave, one on a page opened for this message, or
@@ -227,7 +231,7 @@ export class ControlledActionRepository {
         const lines=groupToolsLines((await ownerPrompts(db))['telegram.group_tools_texts']);
         return {id,state:'approved',fingerprint,allowed:true,message:telegram&&await followUpLeft(db,source.id)?lines.allowed_follow_up:lines.allowed};
       }
-      if(autonomy&&decision.outcome==='allow')return {id,state:'approved',fingerprint,allowed:true,message:autonomy===notion?((args as {connection?:string}).connection==='github'?'A GitHub lookup; it runs now.':'Allowed by the owner\'s Notion setting; it will run now.'):
+      if(autonomy&&decision.outcome==='allow')return {id,state:'approved',fingerprint,allowed:true,message:autonomy===notion?((args as {connection?:string}).connection==='github'?'A GitHub lookup; it runs now.':(args as {connection?:string}).connection==='gmail'?'A Gmail lookup; it runs now.':'Allowed by the owner\'s Notion setting; it will run now.'):
         // Only a Telegram chat gets the follow-up turn, at most three per asking message (ADR-0212); a browser turn reads the operation itself.
         telegram&&await followUpLeft(db,source.id)?'Approved by your own request under the owner freedom setting; it runs now. Its answer will follow here as a reply; do not wait for it, say only that it is running.':
         'Approved by your own request under the owner freedom setting; it will run now.'};

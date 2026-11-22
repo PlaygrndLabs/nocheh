@@ -2,6 +2,7 @@ import {canonical,digest} from './archive.js';
 import {HttpError,object,string} from './http.js';
 import {browserRuleKey,toolRuleKey} from './link-check.js';
 import {githubArguments} from './github-arguments.js';
+import {gmailArguments} from './gmail-arguments.js';
 
 /** Whether a web address's host is written plainly, so the card, a chat rule, the executor and any other parser all read
  * the same one (ADR-0214): no backslash, percent escape, user name, port spelling or non-ASCII name. */
@@ -21,6 +22,8 @@ export function actionArguments(kind:unknown,value:unknown,stored=false) {
     // names the owner's own Notion by leaving `project` out, or a project's Notion by its id (ADR-0268).
     // GitHub's lookups are a fixed few reads of one repository (ADR-0270).
     if(args.connection==='github')return githubArguments(args);
+    // The owner's own Gmail: three fixed reads (ADR-0272).
+    if(args.connection==='gmail')return gmailArguments(args);
     if(args.connection!=='notion'||args.url!==undefined)throw new HttpError(400,'invalid_mcp_action');
     if(args.project!==undefined&&(typeof args.project!=='string'||!/^[a-f0-9]{64}$/.test(args.project)))throw new HttpError(400,'invalid_mcp_action');
     const project=args.project===undefined?{}:{project:args.project as string};

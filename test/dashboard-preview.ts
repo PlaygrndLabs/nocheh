@@ -194,6 +194,8 @@ type NotionSignIn={connected:boolean;method:string|null;workspace:string|null;co
 const notionSignIns=new Map<string,NotionSignIn>(),signedOut=():NotionSignIn=>({connected:false,method:null,workspace:null,connected_at:null,reconnect:false});
 const notionSignIn=(project:unknown)=>notionSignIns.get(typeof project==='string'?project:'')??signedOut();
 const setNotionSignIn=(project:unknown,value:NotionSignIn)=>{notionSignIns.set(typeof project==='string'?project:'',value);return value;};
+// The owner's own Gmail (ADR-0272): the saved client and the sign-in, never a secret.
+let gmail:{client:string|null;connected:boolean;email:string|null;connected_at:number|null;reconnect:boolean}={client:null,connected:false,email:null,connected_at:null,reconnect:false};
 // GitHub: the preview stands in for GitHub's create and install pages and returns at once; made-up repositories, and the
 // copies live only in this preview.
 const githubListed=[{name:'example-org/gadgets',branch:'main',private:false,size_kb:900},{name:'example-org/widgets',branch:'main',private:true,size_kb:21000}];
@@ -938,6 +940,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/notion')return json(res,200,await notion.get(taskOwner,notionTarget(url.searchParams.get('project')??undefined)));
   if(route==='/chat-tools')return json(res,200,await chatTools.get(taskOwner,url.searchParams.get('space')??'*'));
   if(route==='/connections/notion')return json(res,200,notionSignIn(url.searchParams.get('project')??''));
+  if(route==='/connections/gmail')return json(res,200,gmail);
   if(route==='/connections/github')return json(res,200,githubStatus());
   if(route==='/github-projects')return json(res,200,{repos:[...githubLinks].sort().map(([repo,project_id])=>({repo,project_id}))});
   if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
@@ -1008,6 +1011,13 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
     return json(res,200,setNotionSignIn(body.project,{connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
   if(route==='/connections/notion/disconnect')return json(res,200,setNotionSignIn(body.project,signedOut()));
+  if(route==='/connections/gmail/client'){if(typeof body.client_id!=='string'||!/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(body.client_id.trim())||typeof body.client_secret!=='string'||body.client_secret.trim().length<8)throw new HttpError(400,'invalid_gmail_client');
+    gmail={...gmail,client:body.client_id.trim(),...(gmail.client===body.client_id.trim()?{}:{connected:false,email:null,connected_at:null})};return json(res,200,gmail);}
+  if(route==='/connections/gmail/start'){if(!gmail.client)throw new HttpError(400,'gmail_client_missing');if(body.redirect!==new URL(String(body.redirect)).origin+'/?connect=gmail')throw new HttpError(400,'invalid_gmail_redirect');
+    return json(res,200,{url:body.redirect+'&code=fixture-code&state=fixture-state'});}
+  if(route==='/connections/gmail/finish'){if(body.state!=='fixture-state')throw new HttpError(400,'gmail_sign_in_expired');
+    gmail={...gmail,connected:true,email:'owner@example.com',connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,gmail);}
+  if(route==='/connections/gmail/disconnect'){gmail={...gmail,connected:false,email:null,connected_at:null,reconnect:false};return json(res,200,gmail);}
   if(route==='/github-projects'){
     if(typeof body.repo!=='string'||!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(body.repo)||!(body.project===null||typeof body.project==='string'))throw new HttpError(400,'invalid_github_repo');
     if(body.project===null)githubLinks.delete(body.repo.toLowerCase());else githubLinks.set(body.repo.toLowerCase(),body.project as string);

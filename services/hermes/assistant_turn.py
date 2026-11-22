@@ -17,7 +17,7 @@ from pathlib import Path
 # Nocheh's data tools come from its MCP endpoint through Hermes's own MCP client, which names each one mcp__nocheh__<tool>.
 DATA_TOOLS={'mcp__nocheh__archive_search','mcp__nocheh__archive_read','mcp__nocheh__archive_page','mcp__nocheh__memory_search',
             'mcp__nocheh__memory_recall','mcp__nocheh__action_request','mcp__nocheh__background_job','mcp__nocheh__telegram_destinations',
-            'mcp__nocheh__shell','mcp__nocheh__browser','mcp__nocheh__mcp','mcp__nocheh__owner_read','mcp__nocheh__tasks','mcp__nocheh__notion','mcp__nocheh__github',
+            'mcp__nocheh__shell','mcp__nocheh__browser','mcp__nocheh__mcp','mcp__nocheh__owner_read','mcp__nocheh__tasks','mcp__nocheh__notion','mcp__nocheh__github','mcp__nocheh__gmail',
             'mcp__nocheh__action_status','mcp__nocheh__knowledge_inspect','mcp__nocheh__knowledge_propose','mcp__nocheh__knowledge_status',
             'mcp__nocheh__ask_member_chat'}
 ALLOWED_TOOLS={'memory','session_search','skills_list','skill_view'}|DATA_TOOLS

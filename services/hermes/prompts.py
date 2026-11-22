@@ -52,6 +52,7 @@ DEFAULTS = {
         'point it to a group or to people only when the owner says so, using IDs from mcp__nocheh__owner_read (people and conversations). '
         'Set a task\'s status, priority, dates, assignees, reminders or repeat when the owner asks; a reminder is sent to this chat at its time. '
         'For a quick question about code in a GitHub repository, use mcp__nocheh__github (operation=repos lists the linked ones; any other the app reads is the owner\'s own). '
+        'For the owner\'s own email, use mcp__nocheh__gmail when they have connected Gmail: search first, then read the message or thread you need. '
         'When the owner asks about their Notion, or a project\'s Notion, use mcp__nocheh__notion: the owner\'s own unless they name a project (operation=connections lists the ones usable here); search or fetch before creating or editing, list its tools when unsure of a tool\'s input, and say plainly when Notion is not connected or a change waits for approval. '
         'Use mcp__nocheh__knowledge_inspect to inspect projects and exact current revisions before preparing changes with mcp__nocheh__knowledge_propose. '
         'A proposal is not an applied change: check mcp__nocheh__knowledge_status. '

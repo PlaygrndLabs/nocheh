@@ -12,6 +12,7 @@ import {LinkButton} from '../ui/link-button';
 import {Page, Tabs} from '../ui/page';
 import {ConnectionSettings} from './settings/connections';
 import {GithubConnection} from './settings/github';
+import {GmailConnection} from './settings/gmail';
 
 const views = tabIds('connections');
 const labels = pageTabs.connections;
@@ -169,6 +170,7 @@ export default function Connections() {
     >
       <Panel id="yours" current={view}>
         <ConnectionSettings />
+        <GmailConnection />
         <YourRepositories />
       </Panel>
       <Panel id="projects" current={view}>

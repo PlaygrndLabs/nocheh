@@ -33,7 +33,7 @@ const close=async(server:Server)=>{server.closeAllConnections();await new Promis
 test('the data tools keep their names, closed schemas and engine-neutral words',()=>{
   // The brain sees each one as mcp__nocheh__<name>, one for one with the plugin tool nocheh_<name> it replaces (ADR-0233).
   assert.deepEqual(mcpTools.map(item=>item.name),['archive_search','archive_read','archive_page','memory_search','memory_recall','action_request','background_job',
-    'telegram_destinations','shell','browser','mcp','ask_member_chat','owner_read','tasks','notion','github','action_status','knowledge_inspect','knowledge_propose','knowledge_status']);
+    'telegram_destinations','shell','browser','mcp','ask_member_chat','owner_read','tasks','notion','github','gmail','action_status','knowledge_inspect','knowledge_propose','knowledge_status']);
   for(const item of mcpTools) {
     assert.equal(item.inputSchema.type,'object',item.name);assert.equal(item.inputSchema.additionalProperties,false,item.name);
     // No memory engine's name and no old plugin tool name reaches the brain.
@@ -92,7 +92,7 @@ test('the MCP endpoint speaks JSON-only Streamable HTTP without sessions',async(
     assert.deepEqual((await rpc({jsonrpc:'2.0',method:'notifications/initialized'})),{status:202,body:null});
     assert.deepEqual((await rpc({jsonrpc:'2.0',id:5,method:'ping'},{'mcp-protocol-version':'2025-11-25'})).body,{jsonrpc:'2.0',id:5,result:{}});
     const listed=(await rpc({jsonrpc:'2.0',id:'list',method:'tools/list'})).body.result.tools;
-    assert.equal(listed.length,20);assert.deepEqual(Object.keys(listed[0]),['name','description','inputSchema']);
+    assert.equal(listed.length,21);assert.deepEqual(Object.keys(listed[0]),['name','description','inputSchema']);
     const called=await rpc({jsonrpc:'2.0',id:6,method:'tools/call',params:{name:'archive_search',arguments:{query:'Friday',scope:'private'}}});
     assert.deepEqual(called.body,{jsonrpc:'2.0',id:6,result:{content:[{type:'text',text:JSON.stringify({sources:[],filter_status:null})}],isError:false}});
     assert.deepEqual(seen.map(call=>call.path),['/v1/imports/pending','/v1/search?q=Friday&limit=5'],'the model never chooses the scope');
@@ -524,6 +524,15 @@ test('the GitHub tool lists the repositories usable here and asks for one lookup
   assert.deepEqual([seen.calls[0]!.method,seen.calls[0]!.body],['GET',undefined]);
   await run('github',{operation:'call',tool:'read_file',input:{repo:'example-org/widgets',path:'README.md'}},seen.context);
   assert.deepEqual(seen.calls[1]!.body,{kind:'mcp',arguments:{connection:'github',tool:'read_file',input:{repo:'example-org/widgets',path:'README.md'}}});
+});
+
+test('the Gmail tool asks for one lookup at a time and says plainly where it is not usable',async()=>{
+  // ADR-0272: a lookup is one controlled read of the owner's own Gmail.
+  const seen=fake(()=>({id:ID,state:'proposed'}));
+  await run('gmail',{operation:'call',tool:'search_mail',input:{query:'from:someone@example.com'}},seen.context);
+  assert.deepEqual(seen.calls[0]!.body,{kind:'mcp',arguments:{connection:'gmail',tool:'search_mail',input:{query:'from:someone@example.com'}}});
+  const refused=fake(()=>new Status(403,{error:'gmail_not_here'}));
+  assert.deepEqual(await run('gmail',{operation:'call',tool:'read_message',input:{id:'abcdef12'}},refused.context),{error:'gmail_not_usable_here'});
 });
 
 test('a Notion answer matches the first part and keeps its id on a slow poll',async()=>{

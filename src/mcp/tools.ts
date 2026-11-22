@@ -444,6 +444,22 @@ async function github(args:Value,context:ToolContext) {
   }
 }
 
+async function gmail(args:Value,context:ToolContext) {
+  try {
+    const body={connection:'gmail',tool:args.tool??null,input:args.input||{}};
+    const proposed=record(await request(context,'/v1/tools/propose',summarized({kind:'mcp',arguments:body},args)));
+    if(proposed.state!=='approved')return text(proposed);
+    // A lookup runs now; wait briefly so the answer comes back in this turn (ADR-0272).
+    const value=await waitInTurn(context,String(proposed.id));
+    if(value)return inParts(value);
+    return text({id:proposed.id,state:'running',note:'Still running; read it later with mcp__nocheh__action_status.'});
+  }catch(error) {
+    if(error instanceof Refused)return text(error.status===403&&code(error)==='tool_disabled_by_owner'?DISABLED:
+      {error:({400:'invalid_gmail_lookup',403:'gmail_not_usable_here'} as Record<number,string>)[error.status]??'gmail_unavailable'});
+    return text({error:'gmail_unavailable'});
+  }
+}
+
 async function actionStatus(args:Value,context:ToolContext) {
   try {
     const id=args.id||'',part=own(args,'part')?args.part:1;
@@ -668,6 +684,13 @@ export const mcpTools:readonly McpTool[]=[
     'repository, such as comparing tasks with the code, ask for a background job with box and repo instead.',
     inputSchema:shape({operation:{type:'string',enum:['repos','call']},tool:{type:'string',enum:['search_code','read_file','list_files','list_commits','get_commit']},
       input:{type:'object'},summary:SUMMARY},['operation']),run:github},
+  {name:'gmail',description:'Look up the owner\'s own Gmail live, read only. Only in the owner\'s private conversation, never in a group, '+
+    'another person\'s private conversation or a background job. operation=call runs one tool with input: search_mail {query} finds up to 20 '+
+    'messages with Gmail\'s own search words (from:, to:, subject:, after:YYYY/MM/DD, is:unread, has:attachment); read_message {id} reads one '+
+    'message; read_thread {id} reads a whole conversation by its thread id. Attachments are named, never opened. A long result comes in parts; '+
+    'read every part with mcp__nocheh__action_status before relying on it.',
+    inputSchema:shape({operation:{type:'string',enum:['call']},tool:{type:'string',enum:['search_mail','read_message','read_thread']},
+      input:{type:'object'},summary:SUMMARY},['operation']),run:gmail},
   {name:'action_status',description:'Read a proposed action, a Telegram message or a controlled operation, with its state and result in your authorized scope. '+
     'Without an id it lists this chat\'s recent Telegram message requests and operations, such as Notion calls, with their states; read one by its id for its text or result. '+
     'A long result comes in parts: the answer gives part and parts, and part reads another one. '+
