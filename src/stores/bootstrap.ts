@@ -6,6 +6,7 @@ import {secret} from '../config.js';
 import {initializeStoreDatabases,pgCode} from './connections.js';
 import {storageConfiguration} from './config.js';
 import {bootstrapWorkflowDatabase} from '../workflows/bootstrap.js';
+import {devBuild,recordSchemaBuild} from './dev-schema.js';
 
 /** PostgreSQL startup and explicit reset setup own this administrator operation. */
 function inactive(root:string,resetId?:string) {
@@ -21,13 +22,15 @@ export async function bootstrapStores(resetId?:string) {
   const {connection,passwords}=storageConfiguration(),password=secret('PGPASSWORD'),workflowPassword=secret('INNGEST_POSTGRES_PASSWORD');
   if(!/^[a-f0-9]{64}$/.test(workflowPassword))throw Error('invalid_workflow_database_password');
   if(new Set([...Object.values(passwords),password,workflowPassword]).size!==5)throw Error('bootstrap_and_store_credentials_must_differ');
-  const admin={...connection,user:'nocheh',database:'nocheh',password};
+  // Read before setup: a build that finishes during it is set up by the next run (dev-schema.ts).
+  const admin={...connection,user:'nocheh',database:'nocheh',password},build=devBuild();
   const client=new pg.Client(admin);await client.connect();
   try {
     if(!(await client.query('SELECT pg_try_advisory_lock(803361) AS acquired')).rows[0].acquired)throw Error('store_maintenance_busy');
     inactive(root,resetId);
     await initializeStoreDatabases(admin,passwords);
     await bootstrapWorkflowDatabase(client,workflowPassword);
+    await recordSchemaBuild(admin,build);
   }
   finally{await client.end();}
 }

@@ -12,6 +12,17 @@ The owner's own Gmail, read only, step 4 of the shared and private connectors pl
   MCP unit test, dashboard browser test.
 - Next: step 5, members connect their own accounts (after go-live).
 
+Development startup order after a live reload (2026-11-21: errors in the dev stack logs).
+- The new app and the security service wait until the database has set up the stores for their
+  build (`schema_builds`, [dev-schema.ts](src/stores/dev-schema.ts)); after 120 s they start
+  anyway. The old app stops before the build's ready marker appears. This ends the
+  `deadlock detected` in `nocheh_derived` and the missing-table errors (`github_projects`) that
+  readers met while setup ran. Outside development nothing waits.
+- `project_groups_stay_apart` sets the members itself, so it runs alone.
+- Checks: [unit](test/dev-schema.test.ts), [supervisor](test/dev-node-run.test.ts),
+  [store](test/store-bootstrap.test.ts), reset setup. The full tester run of the scenario alone
+  is pending.
+
 Connections page, by whom each connection belongs to (owner, 2026-11-21: the owner's Notion in
 Settings looked connected to all of Nocheh) ([ADR-0271](docs/adr/0271-connections-page.md)).
 - A Connections page in the side menu: Yours (the owner's Notion and GitHub repositories, private

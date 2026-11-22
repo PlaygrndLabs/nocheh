@@ -50,12 +50,13 @@ export class DevProcess {
     });
   }
 
-  /** After a finished build: stops the running process, then starts it on the new code at once. A shutdown that hangs
-   * must not hold back the new code, so the process is killed after `stopAfter`. */
-  async restart() {
+  /** After a finished build: stops the running process, runs `stopped` (if given), then starts it on the new code at
+   * once. A shutdown that hangs must not hold back the new code, so the process is killed after `stopAfter`. */
+  async restart(stopped) {
     clearTimeout(this.#timer); this.#timer = undefined;
     this.#delay = this.firstDelay;
     await this.#halt(this.stopAfter);
+    if (stopped) await stopped();
     this.start();
   }
 
