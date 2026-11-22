@@ -39,7 +39,7 @@ Long-term memory is swappable too: it sits behind Nocheh's memory socket, and Ho
 
 <repository_workflow>
 
-- For each new task session, create and use a dedicated worktree on a `codex/` branch from `main`. Reuse that session's worktree on follow-ups; preserve other sessions' changes and the `archive/pre-hermes-nocheh` branch.
+- Do each task on its own branch from `main` and open a pull request for it. Preserve other sessions' changes and the `archive/pre-hermes-nocheh` branch.
 - Inspect the applicable specifications, current status, code, and acceptance procedure before editing. Use repository commands and pinned upstream dependencies; retain npm, TypeScript services, thin Python integration, React, and Docker Compose.
 - Complete authorized work and continue independent work when a dependency is blocked. Do not ask for repeated permission for already authorized phase work.
 - Keep credentials, source conversations, and runtime data out of commits and logs. A worktree does not isolate Compose resources or grant access to another installation's credentials or state.
@@ -47,7 +47,7 @@ Long-term memory is swappable too: it sits behind Nocheh's memory socket, and Ho
 - In docs and commit messages, never point to the external example project by name or path. Remove any such references found in current files before committing.
 - Don't name the owner's own provider gateway, hosting or devices anywhere in the repository: code, tests, docs, examples, and placeholders use neutral provider names, addresses and wording.
 - The repository is public. Every push passes the privacy scan (`tools/development/privacy_scan.py`): run `git config core.hooksPath tools/development/git-hooks` once per checkout so it runs as a pre-push hook. It reads the owner's private word list from `NOCHEH_PRIVATE_TERMS_FILE` or `data/privacy-terms.txt`, which never enters Git, and refuses to run without it. Fix a refused push by rewording the files or commit messages, including earlier commits on the branch; never skip the hook.
-- Keep project agent skills and supporting files only in `.agent/`. Discover the admin, deployment, and Graphify skills in `.agent/skills`. Do not add agent-specific support directories or compatibility skill links; `AGENTS.md` remains the root working-instructions file.
+- Keep project agent skills and supporting files only in `.agent/`. Discover the admin and deployment skills in `.agent/skills`. Do not add agent-specific support directories or compatibility skill links; `AGENTS.md` remains the root working-instructions file.
 - Use `./bin/nocheh` for owner operations. Keep command routing in `tools/cli`, operational code in `tools/operations`, runtime helpers in `tools/runtime`, acceptance tools in `tools/acceptance`, development helpers in `tools/development`, and build helpers in `tools/build`. Keep the dashboard in `dashboard` and the Hermes plugin and Honcho service in `services`. Use absolute `tools.*` and `services.*` Python imports and the shared repository-root resolver.
 
 </repository_workflow>
@@ -67,7 +67,7 @@ Long-term memory is swappable too: it sits behind Nocheh's memory socket, and Ho
 
 <previews>
 
-- For UI changes, run a preview from the session's worktree when a suitable environment exists. Use a dedicated localhost port and a persistent terminal. Capture that terminal session's ID and open that exact session with `mcp__codex_app__open_in_codex`; leave the process and its output visible.
+- For UI changes, run a preview from the task's checkout when a suitable environment exists, on a dedicated localhost port. Check the changed pages in a browser and share screenshots with the owner.
 - Open that preview URL with `mcp__codex_app__open_in_codex`. For visual and interaction verification, prefer `mcp__cua_repl.js` with the `iab` browser so the user and agent inspect the same preview.
 - Before starting services, verify ownership of ports, Compose projects, networks, images, state, pollers, and schedulers. Do not start competing services against the active installation or borrow its provider keys.
 - Use `make dev` in the session worktree for the operating Compose project of its workspace (`nocheh` for `personal`) with source mounts on that workspace's localhost ports. Run one Compose stack per workspace and one poller per Telegram bot; stop the workspace's unattended services before starting development. Other workspaces may keep running (ADR-0245). A session worktree belongs to its main checkout's workspace: a `.env` a command writes there takes that workspace's name, and `./bin/nocheh test` there uses that workspace's images. Use the existing app service to watch and compile source; do not add a builder service. Verify pinned local runtime image revisions before using them as credential-free build bases. Keep the persistent terminal visible; use `make dev-status` and `make dev-stop` in that same worktree. Verify volume ownership, and a single Telegram poller before development. A clean setup creates new project-owned volumes; a normal restart retains them. An explicitly authorized data reset preserves credentials and settings when requested. Development startup does not replace local Compose release acceptance.
@@ -77,30 +77,11 @@ Long-term memory is swappable too: it sits behind Nocheh's memory socket, and Ho
 <commits_and_integration>
 
 - Make one commit per feature or distinct setup step. Do not combine unrelated features. Keep commits working and buildable whenever practical; a large phase may contain multiple separately verified increments.
-- In each commit body, include a chronological bullet list of all relevant user prompts or excerpts. Keep them faithful, allowing up to about 10% editing to remove non-constructive wording or redundancies and resolve references using wording from earlier prompts. Keep entries self-contained; omit unrelated and automatically supplied context and never include secrets. Replace Telegram identifiers and other live identifiers in quoted prompts with a neutral placeholder such as `<group ID>`, and the owner's private details (names, provider gateway, hosting, devices, domains) with one such as `<hosting details>`.
-- After every verified increment, commit it, merge it into `main`, then push `origin/main`. Report the commit hash and continue automatically. Phase completion and runtime activation still require their separate acceptance evidence.
-- Serialize integration through the shared Git directory returned by `git rev-parse --git-common-dir`: hold an exclusive OS advisory file lock (`fcntl.flock`, `LOCK_EX`) on `nocheh-integration.lock` there while checking main, merging, and pushing. All sessions use that same lock file; keep the file in place after releasing the lock. Fetch available remote changes, preserve unrelated work, reconcile concurrent commits, and rerun affected checks before integrating. Never reset another session's work or force-push main.
-- If authentication or connectivity prevents fetch/push, a verified local integration may proceed when the main checkout is clean. Report local and remote outcomes separately, including the unpushed commit and exact blocker; do not claim synchronization succeeded.
+- Write commit subjects as `type(scope): lowercase subject` with type `feat`, `fix`, `docs`, `chore`, `refactor` or `test`; omit the scope when the change spans several areas. Add a body only when the subject is not enough. Never quote the owner's private details in commits.
+- Push the branch and open a pull request. The owner merges it, or a session merges it after the owner says yes. Phase completion and runtime activation still require their separate acceptance evidence.
+- Before opening or updating a pull request, fetch `main`, preserve unrelated work, resolve conflicts by merging `main` into the branch, and rerun affected checks. Never reset another session's work or force-push `main`.
+- If a push fails, report the unpushed commit and the exact blocker; do not claim it was pushed.
 
 </commits_and_integration>
-
-<graphify>
-
-Graphify is the repository's development code graph, not Nocheh's product memory.
-When `graphify-out/graph.json` exists, use it for codebase questions, including when
-its output is dirty. Query the existing graph before rebuilding it.
-
-```sh
-graphify query "How does incoming message processing work?" --budget 1200
-graphify path "SOURCE" "DESTINATION"
-graphify explain "CONCEPT"
-npm run graphify:update
-```
-
-Use the Graphify skill's query expansion and source verification. Rebuild after
-code changes with the AST-only workflow; keep Graphify out of runtime dependencies.
-A documentation-only change does not require rebuilding the AST graph.
-
-</graphify>
 
 </agent_instructions>

@@ -310,8 +310,7 @@ Original chat identity remains part of an imported message's identity even when
 multiple Desktop exports are mapped into one scope. Group-scoped API credentials
 cannot request a different scope. Citations outside the current page or scope do
 not create an edge; uncited memory has no verified source provenance. This is a
-deterministic evidence view, not semantic entity extraction or the repository's
-Graphify graph.
+deterministic evidence view, not semantic entity extraction.
 
 The owner dashboard shows people, projects and facts as lists with side panels;
 the graph is available as JSON from the CLI and API.

@@ -15,7 +15,6 @@ coverage/
 *.sqlite
 .DS_Store
 .env
-graphify-out/
 __pycache__/
 *.py[cod]
 *.tsbuildinfo
