@@ -9,7 +9,7 @@ revision is the complete ledger before this summary replaced it.
 
 ## Foundation and local consolidation, 2026-09-07–16
 
-- The Hermes-owned source rebuild, independent Nocheh dashboard and CLI, guarded projections, native browser turns, controlled tools, schedules, and recovery tooling reached their recorded P1–P7 and D1–D4 checkpoints. [Runtime plan](runtime-platform-plan.md), [rebuild plan](rebuild-plan.md), P7 evidence (report removed for privacy).
+- The Hermes-owned source rebuild, independent Nocheh dashboard and CLI, guarded projections, native browser turns, controlled tools, schedules, and recovery tooling reached their recorded P1–P7 and D1–D4 checkpoints. P7 evidence (report removed for privacy).
 - Guarded-copy owner editing and scoped recall passed local checks. Security-broker isolation and approval enforcement passed their recorded checks. Guarded acceptance (report removed for privacy), security activation (report removed for privacy).
 - The refactor was consolidated into local `main` while release and activation remained separate. Integration evidence (report removed for privacy), [ADR-0039](adr/0039-main-refactor-consolidation.md).
 - CPA became the shared subscription route with one refresh owner. Nine Inngest families completed local cutover at epoch 2. Earlier real Telegram text, voice, silence, isolation, exact approval, and restart checks passed on that installation. Provider evidence (report removed for privacy), consolidated acceptance (report removed for privacy).
@@ -18,7 +18,7 @@ revision is the complete ledger before this summary replaced it.
 
 ## Original-only archive candidate, 2026-09-17–21
 
-- The accepted target became an archive of original evidence, separate derivative and control stores, platform-independent identities, owned files, versioned provenance, contextual learning, projects, and explicit sharing. [Plan and acceptance sequence](original-only-archive-plan.md), [ADR-0053](adr/0053-original-only-archive.md).
+- The accepted target became an archive of original evidence, separate derivative and control stores, platform-independent identities, owned files, versioned provenance, contextual learning, projects, and explicit sharing. [ADR-0053](adr/0053-original-only-archive.md).
 - Three-store repositories, role separation, recoverable capture handoff, guarding, reprocessing, owner correction, import/export, backup/inactive restore, and reset/empty-baseline controls passed isolated fixtures and combined synthetic rehearsals. These did not cut over the saved legacy installation. The detailed incremental results and their failure paths remain in the Git ledger above.
 - Dashboard component, theme, responsive layout, monitoring, and entity-memory work passed their recorded builds, focused tests, and isolated visual reviews. Entity-memory evidence (report removed for privacy), [dashboard guide](dashboard.md).
 - The accepted core service names became `nocheh-app`, `nocheh-security`, `hermes`, `hermes-agent-sb`, `nocheh-db`, and `nocheh-executor`; PostgreSQL provisioning moved inside the database service. Service-name evidence (report removed for privacy), bootstrap evidence (report removed for privacy).
@@ -2800,7 +2800,7 @@ operating installation's CLIProxyAPI were removed
 <entry date="2026-10-12" area="Dashboard redesign">
 
 The owner found the dashboard unclear and accepted a five-step
-[redesign plan](dashboard-redesign-plan.md): TypeScript groundwork with one API
+redesign plan: TypeScript groundwork with one API
 client and a browser test of every page; eight pages (Home, Inbox, Chats &
 access, Memory, Archive, Projects, System, Settings) with tabs in the address and
 old page names redirected; Chats & access as the one memory-access hub; Settings
