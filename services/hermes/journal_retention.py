@@ -1,4 +1,4 @@
-"""Finished brain-turn and managed-run journals are kept unless the owner sets retention days.
+"""Finished agent-turn and managed-run journals are kept unless the owner sets retention days.
 
 A journal is removed only once its closed result is older than the retention
 window. Unfinished journals, and managed receipts still owed to Nocheh, stay.
@@ -48,8 +48,8 @@ def prune(spool: Path, managed: Path, days: int, now: float | None = None) -> in
     if not days:
         return 0
     cutoff, removed = (now if now is not None else time.time()) - days * DAY, 0
-    # Brain turns keep their reply in .outcome, which goes with its run.
-    for result in (spool / 'brain-turns').glob('*.result'):
+    # Agent turns keep their reply in .outcome, which goes with its run.
+    for result in (spool / 'agent-turns').glob('*.result'):
         if _closed(result, cutoff, CLOSED):
             removed += _remove(result, ('.request', '.events', '.started', '.outcome'))
     for result in managed.glob('*.result'):

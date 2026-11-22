@@ -156,10 +156,10 @@ const reasons: Record<string, string> = {
   provider_unavailable: 'The model provider isn’t answering',
   provider_not_configured: 'No model is set up',
   runtime_unavailable: 'The assistant isn’t answering',
-  brain_unavailable: 'The assistant isn’t answering',
-  brain_rejected: 'The assistant refused the request',
-  brain_invalid_response: 'The assistant answered in a way Nocheh can’t read',
-  brain_capability_unavailable: 'The connected assistant can’t do this',
+  agent_unavailable: 'The assistant isn’t answering',
+  agent_rejected: 'The assistant refused the request',
+  agent_invalid_response: 'The assistant answered in a way Nocheh can’t read',
+  agent_capability_unavailable: 'The connected agent can’t do this',
   workflow_execution_failed: 'It couldn’t start',
   legacy_owner: 'Handled by the older runner, so it can’t be retried or cancelled here',
   closed: 'It has finished, so there is nothing to retry or cancel',
@@ -551,7 +551,7 @@ const storeNames: Record<string, string> = {
 export const storeName = (row: {database: string; role?: string}): string =>
   storeNames[row.database] ?? row.role ?? row.database;
 
-/** Plain words for what the connected assistant (the brain) can do. */
+/** Plain words for what the connected agent can do. */
 const capabilityNames: Record<string, string> = {
   telegram: 'Answer Telegram messages',
   browser: 'Answer in the dashboard chat',

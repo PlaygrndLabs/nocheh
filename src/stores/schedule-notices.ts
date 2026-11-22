@@ -2,15 +2,15 @@ import type pg from 'pg';
 import {digest} from '../archive.js';
 import {cardName} from '../action-text.js';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
-import type {Brain} from '../brain/brain.js';
-import {brainOperation} from '../brain/brain.js';
+import type {Agent} from '../agent/agent.js';
+import {agentOperation} from '../agent/agent.js';
 import {telegramAddress} from '../frontdoor/telegram.js';
 import {HttpError,object,string} from '../http.js';
 import {fillTemplate,ownerPrompts,scheduleNoticeLines,type ScheduleNoticeText} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
 
 /*
- * The owner's own message when a reply in their private chat set a schedule with the brain's own schedule tool (ADR-0266).
+ * The owner's own message when a reply in their private chat set a schedule with the agent's own schedule tool (ADR-0266).
  * The scheduler captures the new schedule, then asks for this message once: code writes it from the schedule's fields,
  * with Pause and Delete buttons that only the owner's press in that chat acts on. The schedule's results later come to
  * the same chat with no card each time.
@@ -23,7 +23,7 @@ export type ScheduleChoice='p'|'d';
 const PROFILE=/^nocheh-([a-f0-9]{24})$/,JOB=/^[a-f0-9]{12}$/;
 /** At most `size` code points, as Telegram counts a button's label and a press's answer. */
 const points=(text:string,size:number)=>Array.from(text).slice(0,size).join('');
-/** One short line someone else (the brain) wrote: the schedule's name or how often it runs. */
+/** One short line someone else (the agent) wrote: the schedule's name or how often it runs. */
 const line=(value:unknown,size:number)=>cardName(value,size);
 
 /** An instant as the owner reads it, in their Tasks time zone: "Mon 24 Nov, 08:00". A zone the server does not know reads UTC. */
@@ -36,7 +36,7 @@ export function ownerTime(value:unknown,zone:string):string|null {
 }
 
 export class ScheduleNotices {
-  constructor(readonly control:pg.Pool,readonly policy:()=>Pick<AssistantPolicy,'owner_id'|'owner_chat'>,readonly call:RuntimeCall,readonly brain:Brain){}
+  constructor(readonly control:pg.Pool,readonly policy:()=>Pick<AssistantPolicy,'owner_id'|'owner_chat'>,readonly call:RuntimeCall,readonly agent:Agent){}
 
   private async lines():Promise<Record<ScheduleNoticeText,string>> {
     return scheduleNoticeLines((await ownerPrompts(this.control))['schedules.notice_texts']);
@@ -74,12 +74,12 @@ export class ScheduleNotices {
 
   /**
    * A press on the message, already checked to be the owner's own in their private chat: pause or delete the schedule
-   * through the brain, as the Schedules page does. The message then shows the answer under its text and loses its
+   * through the agent, as the Schedules page does. The message then shows the answer under its text and loses its
    * buttons. Returns the answer to the press.
    */
   async press(choice:ScheduleChoice,store:string,job:string,press:string):Promise<string> {
     const lines=await this.lines(),profile='nocheh-'+store,owner=ownerChat(this.policy()),target=telegramAddress(owner);
-    const manage=brainOperation(this.brain,'manageSchedules');
+    const manage=agentOperation(this.agent,'manageSchedules');
     let reply:string,text:string;
     try {
       // Only a schedule of the owner's private chat that is still there; its message shows it as it is now.
@@ -89,7 +89,7 @@ export class ScheduleNotices {
       const result=await manage({operation:choice==='p'?'pause':'delete',profile,job_id:job,request_id:'press-'+press.slice(0,64)});
       text=this.text(lines,choice==='p'&&result.schedule&&typeof result.schedule==='object'?result.schedule as Record<string,unknown>:found);
       reply=choice==='p'?lines.paused:lines.deleted;
-    }catch(error){if(!(error instanceof HttpError)||error.status>=500&&error.code!=='brain_rejected')throw error;return lines.changed;}
+    }catch(error){if(!(error instanceof HttpError)||error.status>=500&&error.code!=='agent_rejected')throw error;return lines.changed;}
     // The message shows the answer and loses its buttons; an edit that fails changes nothing else.
     if(target)await this.call('telegram.notice',{id:ScheduleNotices.id(profile,job),...target,text:text+'\n\n'+points(reply,280),edit:true},30000).catch(()=>{});
     return reply;

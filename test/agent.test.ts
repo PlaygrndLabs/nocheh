@@ -1,15 +1,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {brainErrors,brainOperation,brainSummary,turnChannel,turnChannels,type Brain} from '../src/brain/brain.js';
-import {hermesBrain} from '../src/brain/hermes.js';
-import {activeBrain,brain} from '../src/brain/brains.js';
-import {defaultBrain} from '../src/access.js';
+import {agentErrors,agentOperation,agentSummary,turnChannel,turnChannels,type Agent} from '../src/agent/agent.js';
+import {hermesAgent} from '../src/agent/hermes.js';
+import {activeAgent,agent} from '../src/agent/agents.js';
+import {defaultAgent} from '../src/access.js';
 
 type Seen={path:string;method:string;body:Record<string,unknown>|null};
 /** Hermes behind a fake transport that records each request and answers with `answer`. */
 function hermes(answer:(seen:Seen)=>Response|Promise<Response>) {
   const seen:Seen[]=[];
-  const plugged=hermesBrain({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
+  const plugged=hermesAgent({url:'http://fixture.invalid',token:'fixture',fetch:async(url,init)=>{
     assert.equal((init?.headers as Record<string,string>).authorization,'Bearer fixture');
     const request={path:new URL(String(url)).pathname,method:String(init?.method),body:init?.body?JSON.parse(String(init.body)):null};
     seen.push(request);return answer(request);
@@ -41,7 +41,7 @@ test('Telegram turns run on the turn routes and must return their reply, which N
   assert.deepEqual(seen[0]?.body,{text:'hi',channel:'telegram',event_id:id,attempt:'continuation-1'},'turn routes take no asynchronous flag');
   answer={state:'suppressed',error_code:'intentional_silence'};assert.equal((await plugged.observeTurn(ref)).state,'suppressed');
   for(const invalid of [{state:'done'},{state:'done',reply:{text:'Hello'}},{state:'done',reply:'Hello'},{state:'sent'}]) {
-    answer=invalid;await assert.rejects(plugged.observeTurn(ref),{code:brainErrors.invalid,status:502});
+    answer=invalid;await assert.rejects(plugged.observeTurn(ref),{code:agentErrors.invalid,status:502});
   }
   // Other channels still run on the run routes.
   seen.length=0;answer={state:'queued'};await plugged.startTurn({channel:'browser',event_id:id,attempt:1},{owner_epoch:2});
@@ -53,16 +53,16 @@ test('Hermes errors become the socket codes, and only owner-actionable setting r
   const ref={channel:'telegram' as const,event_id:id,attempt:1};
   await assert.rejects(failing(429,{error:'private'}).startTurn(ref,{}),{code:'quota_paused',status:429});
   await assert.rejects(failing(503,{error:'provider_not_configured'}).startTurn(ref,{}),{code:'provider_not_configured'});
-  await assert.rejects(failing(400,{error:'run_identity_conflict'}).startTurn(ref,{}),{code:brainErrors.rejected,status:503});
-  await assert.rejects(failing(502,{secret:'private'}).observeTurn(ref),{code:brainErrors.unavailable,status:503});
+  await assert.rejects(failing(400,{error:'run_identity_conflict'}).startTurn(ref,{}),{code:agentErrors.rejected,status:503});
+  await assert.rejects(failing(502,{secret:'private'}).observeTurn(ref),{code:agentErrors.unavailable,status:503});
   await assert.rejects(failing(409,{error:'configuration_conflict'}).writePersona!({scope:'-20',revision:'stale'}),{code:'configuration_conflict',status:409});
   await assert.rejects(failing(400,{error:'invalid_preference'}).writeSettings!({scope:'-20'}),{code:'invalid_preference',status:400});
-  await assert.rejects(failing(409,{error:'configuration_conflict'}).readNotes!({scope:'-20'}),{code:brainErrors.rejected},'only settings and persona keep setting codes');
-  const lost=hermesBrain({url:'http://fixture.invalid',token:'fixture',fetch:async()=>{throw Error('connection refused');}});
-  await assert.rejects(lost.startTurn(ref,{}),{code:brainErrors.unavailable,status:503});
-  await assert.rejects(hermes(()=>new Response('not json')).plugged.status(),{code:brainErrors.invalid});
-  await assert.rejects(hermes(()=>Response.json([1])).plugged.status(),{code:brainErrors.invalid});
-  await assert.rejects(hermes(()=>Response.json({sequence:1})).plugged.turnEvents(ref,0),{code:brainErrors.invalid});
+  await assert.rejects(failing(409,{error:'configuration_conflict'}).readNotes!({scope:'-20'}),{code:agentErrors.rejected},'only settings and persona keep setting codes');
+  const lost=hermesAgent({url:'http://fixture.invalid',token:'fixture',fetch:async()=>{throw Error('connection refused');}});
+  await assert.rejects(lost.startTurn(ref,{}),{code:agentErrors.unavailable,status:503});
+  await assert.rejects(hermes(()=>new Response('not json')).plugged.status(),{code:agentErrors.invalid});
+  await assert.rejects(hermes(()=>Response.json([1])).plugged.status(),{code:agentErrors.invalid});
+  await assert.rejects(hermes(()=>Response.json({sequence:1})).plugged.turnEvents(ref,0),{code:agentErrors.invalid});
 });
 
 test('Hermes keeps its own settings, persona, notes and schedules behind named operations',async()=>{
@@ -78,28 +78,28 @@ test('Hermes keeps its own settings, persona, notes and schedules behind named o
     ['/internal/manage',{scope:'default',action:'preferences'}],['/internal/manage',{action:'profiles'}],['/internal/manage',{scope:'-20',action:'memory'}],
     ['/internal/manage',{action:'prompts'}],['/internal/memory/recall',{query:'q'}],['/internal/memory/review',{id:'r',observe_only:true}],
     ['/internal/schedule/advance',{job_id:'j'}],['/internal/manage',{operation:'list',action:'schedules'}]]);
-  // A schedule the brain no longer has keeps its code, so a press or the Schedules page can say so (ADR-0266).
+  // A schedule the agent no longer has keeps its code, so a press or the Schedules page can say so (ADR-0266).
   await assert.rejects(hermes(()=>Response.json({error:'cron_job_not_found'},{status:400})).plugged.manageSchedules!({operation:'pause'}),{code:'cron_job_not_found',status:400});
-  await assert.rejects(hermes(()=>Response.json({defaults:{'reply.owner':1}})).plugged.promptDefaults!(),{code:brainErrors.invalid});
+  await assert.rejects(hermes(()=>Response.json({defaults:{'reply.owner':1}})).plugged.promptDefaults!(),{code:agentErrors.invalid});
 });
 
-test('a replacement brain offers only what it has, and Nocheh refuses the rest with one code',async()=>{
+test('a replacement agent offers only what it has, and Nocheh refuses the rest with one code',async()=>{
   const turns:string[]=[];
-  const minimal:Brain={id:'fixture',name:'Fixture',channels:['browser'],
+  const minimal:Agent={id:'fixture',name:'Fixture',channels:['browser'],
     startTurn:async ref=>{turns.push(ref.event_id);return {state:'queued'};},observeTurn:async()=>({state:'not_found'}),
     cancelTurn:async()=>({state:'cancelled'}),turnEvents:async()=>({events:[]}),status:async()=>({ok:true})};
-  assert.deepEqual(brainSummary(minimal),{id:'fixture',name:'Fixture',capabilities:{telegram:false,browser:true,scheduler:false,background:false,
+  assert.deepEqual(agentSummary(minimal),{id:'fixture',name:'Fixture',capabilities:{telegram:false,browser:true,scheduler:false,background:false,
     settings:false,persona:false,prompts:false,notes:false,recall:false,review:false,schedules:false,schedule_list:false}});
   for(const name of ['readSettings','writePersona','recallNotes','reviewNotes','advanceSchedules','manageSchedules'] as const)
-    assert.throws(()=>brainOperation(minimal,name),{code:brainErrors.unsupported,status:409});
+    assert.throws(()=>agentOperation(minimal,name),{code:agentErrors.unsupported,status:409});
   assert.equal(turnChannel(minimal,'browser'),'browser');
-  for(const channel of ['telegram','sms',undefined])assert.throws(()=>turnChannel(minimal,channel),{code:brainErrors.unsupported});
+  for(const channel of ['telegram','sms',undefined])assert.throws(()=>turnChannel(minimal,channel),{code:agentErrors.unsupported});
   const full=hermes(()=>Response.json({state:'done'})).plugged;
-  assert.ok(Object.values(brainSummary(full).capabilities).every(Boolean),'Hermes offers every channel and operation');
-  assert.equal(typeof brainOperation(full,'readNotes'),'function');
+  assert.ok(Object.values(agentSummary(full).capabilities).every(Boolean),'Hermes offers every channel and operation');
+  assert.equal(typeof agentOperation(full,'readNotes'),'function');
 });
 
-test('one brain runs at a time, and turn passes name it',()=>{
-  const plugged=brain({hermesUrl:'http://fixture.invalid',token:'fixture'});
-  assert.equal(plugged.id,activeBrain);assert.equal(defaultBrain,activeBrain);assert.equal(plugged.name,'Hermes');
+test('one agent runs at a time, and turn passes name it',()=>{
+  const plugged=agent({hermesUrl:'http://fixture.invalid',token:'fixture'});
+  assert.equal(plugged.id,activeAgent);assert.equal(defaultAgent,activeAgent);assert.equal(plugged.name,'Hermes');
 });

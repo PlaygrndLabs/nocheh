@@ -18,7 +18,7 @@ if os.environ.get('NOCHEH_INSTALLATION_FIXTURE') != '1':
 FIXTURE = 'http://model-fixture:8317/v1'
 
 
-class ScriptedBrain:
+class ScriptedAgent:
     """Explicit fixture directives drive real Nocheh tool calls through Hermes.
 
     A directive such as ``[[search:query]]`` in the current user turn makes the
@@ -151,7 +151,7 @@ class ScriptedBrain:
             return {'tool': name, 'arguments': arguments}
         result = self.result(name, results[-1].content)
         self.record(directive=kind, argument=argument, phase='final', tool=name, result=result[:20000], **seen)
-        return {'content': '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
+        return {'content': '[agent] ' + name + ': ' + ' '.join(result.split())[:3000]}
 
     def record(self, **event):
         self.events = (self.events + [event])[-500:]
@@ -255,7 +255,7 @@ class ScriptedBrain:
             for (name, argument), message in zip(tools, results[-len(tools):]):
                 result = self.result(name, message.content)
                 self.record(directive='tool', argument=argument, phase='final', tool=name, result=result[:20000])
-                lines.append('[brain] ' + name + ': ' + ' '.join(result.split())[:3000])
+                lines.append('[agent] ' + name + ': ' + ' '.join(result.split())[:3000])
             return {'content': '[NO_REPLY]' if silent_after else '\n'.join(lines)}
         kind, argument = match[1], (match[2] or '').strip()
         if kind in self.TOOLS:
@@ -264,7 +264,7 @@ class ScriptedBrain:
                 name = self.TOOLS[kind]
                 result = self.result(name, results[-1].content)
                 self.record(directive=kind, argument=argument, phase='final', tool=name, result=result[:20000])
-                return {'content': '[NO_REPLY]' if silent_after else '[brain] ' + name + ': ' + ' '.join(result.split())[:3000]}
+                return {'content': '[NO_REPLY]' if silent_after else '[agent] ' + name + ': ' + ' '.join(result.split())[:3000]}
             if kind == 'search':
                 arguments = {'mode': 'text', 'query': argument, 'limit': 5}
             elif kind == 'recall':
@@ -295,18 +295,18 @@ class ScriptedBrain:
             # Whether the marker reaches the model in the current turn itself, outside this directive.
             present = bool(argument) and argument in current.replace(match[0], '')
             self.record(directive=kind, argument=argument, phase='final', present=present)
-            return {'content': '[brain] turn ' + argument + (' present' if present else ' absent')}
+            return {'content': '[agent] turn ' + argument + (' present' if present else ' absent')}
         if kind == 'notes':
             present = bool(argument) and any(argument in note for note in self.notes(body))
             self.record(directive=kind, argument=argument, phase='final', present=present)
-            return {'content': '[brain] notes ' + argument + (' present' if present else ' absent')}
+            return {'content': '[agent] notes ' + argument + (' present' if present else ' absent')}
         if kind == 'note_from':
             # The source a native note with the marker carries, as Nocheh's code labelled it: owner, person, turn...
             found = next((note for note in self.evidence_notes(body) if argument and argument in str(note.get('content'))), None)
             source = str(found.get('from')) if found else 'absent'
             self.record(directive=kind, argument=argument, phase='final', present=found is not None, source=source,
                         label=found.get('label') if found else None, ref=found.get('ref') if found else None)
-            return {'content': '[brain] note_from ' + argument + ' ' + source}
+            return {'content': '[agent] note_from ' + argument + ' ' + source}
         if kind == 'note_open':
             # The native note with the marker opened by its ref, in this turn, as its evidence gave it (archive_read note=<ref>,
             # ADR-0261): the messages its writer read. A note without a ref answers no_ref, none at all absent.
@@ -315,18 +315,18 @@ class ScriptedBrain:
                     'label': found.get('label') if found else None, 'ref': found.get('ref') if found else None}
             if not isinstance(seen['ref'], str) or not seen['ref']:
                 self.record(directive=kind, argument=argument, phase='final', **seen)
-                return {'content': '[brain] note_open ' + argument + (' no_ref' if found else ' absent')}
+                return {'content': '[agent] note_open ' + argument + (' no_ref' if found else ' absent')}
             return self.opened(kind, argument, later, {'note': seen['ref']}, **seen)
         if kind == 'replied':
             block = self.reply_frame(current)['block']
             if argument.split(' ')[0] == 'open' and block:
                 return self.opened(kind, argument, later, {'id': 'nocheh:event:' + block['id']}, block=block)
-            return {'content': '[brain] replied ' + ('by=' + block['by'] if block else 'absent')}
+            return {'content': '[agent] replied ' + ('by=' + block['by'] if block else 'absent')}
         if kind == 'memory_about':
             # Which long-term memory blocks of the turn hold the marker, by what Nocheh's code says each is about.
             about = sorted({str(block.get('about') or 'none') for block in self.memory_blocks(body) if argument and argument in str(block.get('text'))})
             self.record(directive=kind, argument=argument, phase='final', present=bool(about), about=about)
-            return {'content': '[brain] memory_about ' + argument + ' ' + (','.join(about) or 'absent')}
+            return {'content': '[agent] memory_about ' + argument + ' ' + (','.join(about) or 'absent')}
         if kind == 'memory_blocks':
             # The turn's long-term memory blocks as the model reads them (ADR-0261): what Nocheh's code names each block by,
             # what it is about, whether its facts cite their messages, what it could not say, and its text, so a scenario
@@ -335,7 +335,7 @@ class ScriptedBrain:
                        'limitations': block.get('limitations'), 'text': str(block.get('text') or '')[:40000]} for block in self.memory_blocks(body)]
             present = bool(argument) and any(argument in block['text'] for block in blocks)
             self.record(directive=kind, argument=argument, phase='final', present=present, blocks=blocks)
-            return {'content': '[brain] memory_blocks ' + argument + (' present' if present else ' absent')}
+            return {'content': '[agent] memory_blocks ' + argument + (' present' if present else ' absent')}
         if kind in ('context', 'context_split'):
             earlier = '\n'.join(self.text(message.content) for message in body.messages
                                 if message is not messages[index])
@@ -344,16 +344,16 @@ class ScriptedBrain:
             wanted = argument.replace('|', '') if kind == 'context_split' else argument
             present = bool(wanted) and wanted in earlier
             self.record(directive=kind, argument=argument, phase='final', present=present)
-            return {'content': '[brain] ' + kind + ' ' + argument + (' present' if present else ' absent')}
+            return {'content': '[agent] ' + kind + ' ' + argument + (' present' if present else ' absent')}
         self.record(directive=kind, argument=argument, phase='final')
-        return {'content': '[brain] recovered ' + argument}
+        return {'content': '[agent] recovered ' + argument}
 
     def render(self, body, scripted):
         from fastapi.responses import JSONResponse, StreamingResponse
         if 'error' in scripted:
             return JSONResponse({'error': {'message': scripted['error']}}, status_code=400)
         model = body.model or 'mock-model'
-        identity = 'chatcmpl-brain-' + hashlib.sha256(json.dumps(scripted, sort_keys=True).encode()).hexdigest()[:24]
+        identity = 'chatcmpl-agent-' + hashlib.sha256(json.dumps(scripted, sort_keys=True).encode()).hexdigest()[:24]
         content = scripted.get('content')
         calls = None
         if 'tool' in scripted:
@@ -535,28 +535,28 @@ def provider():
 
     chat._response_content = answer
     app = FastAPI()
-    brain = ScriptedBrain(counts, canary)
+    agent = ScriptedAgent(counts, canary)
     upstream = os.environ.get('NOCHEH_FIXTURE_UPSTREAM')
     if upstream:
         relay(app, json.loads(open(upstream).read()), counts, canary)
     else:
         # Registered before Honcho's mock router so tool-bearing agent turns that
-        # carry an explicit fixture directive reach the scripted brain first.
+        # carry an explicit fixture directive reach the scripted agent first.
         @app.post('/v1/chat/completions')
         async def completions(body: chat.ChatCompletionRequest):
-            texts = [brain.text(message.content) for message in body.messages]
+            texts = [agent.text(message.content) for message in body.messages]
             privacy.check(texts, [tool.get('function', {}).get('name') for tool in body.tools or [] if isinstance(tool, dict)],
                           [message.role for message in body.messages])
             probe = privacy.probe(body, texts)
             if probe:
-                return brain.render(body, probe)
-            scripted = brain.respond(body)
+                return agent.render(body, probe)
+            scripted = agent.respond(body)
             if scripted is None:
                 return await chat.chat_completions(body)
             delay = scripted.pop('delay', None)
             if delay:
                 await asyncio.sleep(delay)
-            return brain.render(body, scripted)
+            return agent.render(body, scripted)
 
     if not upstream:
         @app.post('/v1/audio/transcriptions')
@@ -568,9 +568,9 @@ def provider():
                 counts['raw_canary_outside_detector'] += 1
             return JSONResponse({'text': 'Synthetic voice VOICEMARK77: water the garden on Friday.'})
 
-    @app.get('/fixture/brain')
-    def brain_events():
-        return {'events': brain.events}
+    @app.get('/fixture/agent')
+    def agent_events():
+        return {'events': agent.events}
 
     if os.environ.get('NOCHEH_TELEGRAM_FIXTURE_STATE'):
         from tools.acceptance.telegram_mock import TelegramMock

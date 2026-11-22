@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {HttpError} from '../src/http.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {claimHostWorkflow,finishHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {workflowDetail} from '../src/workflows/owner.js';

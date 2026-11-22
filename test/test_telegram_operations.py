@@ -17,7 +17,7 @@ OPERATIONS = 'tools.operations.installation.operations'
 
 
 class TelegramOperationsTests(unittest.TestCase):
-    def test_backup_stops_the_bot_before_the_brain_and_keeps_its_incident(self):
+    def test_backup_stops_the_bot_before_the_agent_and_keeps_its_incident(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); state = root / 'state'; state.mkdir()
             (state / '.env').write_text('TELEGRAM_ENABLED=false\n')

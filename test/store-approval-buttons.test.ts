@@ -7,7 +7,7 @@ import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
 import {accountIdFor,chatShortId,installChatsForTest} from '../src/chats.js';
 import {BOB,BOB_CHAT,GP1,GP3,OWNER,P1,P2,fixtureChats,fixtureDirectory,seedChats,seedGroups} from './fixture-groups.js';

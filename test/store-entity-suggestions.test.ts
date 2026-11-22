@@ -5,7 +5,7 @@ import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {EntityRepository,nameKey} from '../src/stores/entities.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {OwnerSupervisionRepository} from '../src/stores/owner-supervision.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 

@@ -10,8 +10,8 @@ import {captureInput,claimRun,finishRun} from '../src/managed-runs.js';
 import {admitBrowser,activeBrowser,browserObservation,browserWorkflowContext,browserAuthority,browserOperation,cancelBrowser} from '../src/workflows/browser.js';
 import {pauseFamily,switchFamily} from '../src/workflows/store.js';
 import {setGuardMode} from '../src/guarded.js';
-import {hermesBrain} from '../src/brain/hermes.js';
-import {fixtureBrain} from './fixture-brain.js';
+import {hermesAgent} from '../src/agent/hermes.js';
+import {fixtureAgent} from './fixture-agent.js';
 
 test('browser workflows admit once, reconnect by native session and close cancelled or uncertain runs',{skip:!process.env.PGHOST},async()=>{
   const config=settings(),connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:config.databasePassword};
@@ -34,7 +34,7 @@ test('browser workflows admit once, reconnect by native session and close cancel
     await assert.rejects(claimRun(pool,config,{...request,actor:'legacy'},undefined,{owner:'inngest',epoch:1}),/workflow_owner_changed/);
     await assert.rejects(browserWorkflowContext(pool,config,{event_id:captured.event_id,owner_epoch:1}),/workflow_owner_changed/);
     let effects=0,started=false;
-    const op=browserOperation(pool,config,hermesBrain({url:'http://synthetic-runtime.invalid',token:'fixture',fetch:async(url,options)=>{
+    const op=browserOperation(pool,config,hermesAgent({url:'http://synthetic-runtime.invalid',token:'fixture',fetch:async(url,options)=>{
       const path=new URL(String(url)).pathname,input=JSON.parse(String(options?.body));
       assert.equal(input.channel,'browser');
       if(path==='/internal/run/resume'){assert.equal(input.observe_only,true);return Response.json({state:started?'running':'not_found'});}
@@ -58,7 +58,7 @@ test('browser workflows admit once, reconnect by native session and close cancel
     await admitBrowser(pool,config,{...body,conversation:'other-session',event_id:lost.event_id});
     const ctx=await browserWorkflowContext(pool,config,{event_id:lost.event_id,owner_epoch:2});
     await claimRun(pool,config,ctx,'browser',await browserAuthority(pool,config,ctx));
-    const missing=browserOperation(pool,config,fixtureBrain(async()=>({state:'not_found'})));
+    const missing=browserOperation(pool,config,fixtureAgent(async()=>({state:'not_found'})));
     assert.equal((await missing(lost.event_id,{owner:'inngest',epoch:2})).state,'ambiguous');
     assert.equal((await missing(lost.event_id,{owner:'inngest',epoch:2})).state,'ambiguous');
     await setGuardMode(pool,'on');

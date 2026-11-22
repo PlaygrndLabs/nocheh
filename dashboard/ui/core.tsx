@@ -212,14 +212,14 @@ export function LoadError({
   className,
 }: {
   what: string;
-  /** The API error code. A brain that lacks the feature gets its own message and no retry (ADR-0234). */
+  /** The API error code. An agent that lacks the feature gets its own message and no retry (ADR-0234). */
   error?: string;
   onRetry?: () => void;
   className?: string;
 }) {
-  if (error === 'brain_capability_unavailable')
+  if (error === 'agent_capability_unavailable')
     return (
-      <Notice className={className} title="The connected assistant can’t do this">
+      <Notice className={className} title="The connected agent can’t do this">
         It doesn’t offer {what}.
       </Notice>
     );

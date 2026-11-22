@@ -17,7 +17,7 @@ OUTBOUND = {'delivered', 'rejected', 'ambiguous'}
 
 
 def retention_days():
-    # The owner's one journal setting covers the brain's journals and these.
+    # The owner's one journal setting covers the agent's journals and these.
     value = os.environ.get('NOCHEH_HERMES_JOURNAL_RETENTION_DAYS', '').strip() or '0'
     if not re.fullmatch(r'\d{1,4}', value) or int(value) > 3650:
         raise ValueError('Invalid NOCHEH_HERMES_JOURNAL_RETENTION_DAYS')

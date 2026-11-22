@@ -16,7 +16,7 @@ FORMAT = 'nocheh-reset-acceptance-mode-v1'
 STAGES = ('prepared', 'containers_created', 'fences_release_intent',
           'acceptance_running')
 # The state folders Hermes mounts besides its own: the erasure empties their parents, so they are made again.
-HERMES_FOLDERS = ('spool/brain-turns', 'admin/dashboard/home')
+HERMES_FOLDERS = ('spool/agent-turns', 'admin/dashboard/home')
 
 
 def run(arguments, environment):

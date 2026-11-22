@@ -349,9 +349,9 @@ function Connections({m}: {m: any}) {
   const telegram = m?.telegram_enabled
     ? (telegramStates[status.telegram] ?? {label: readable(status.telegram) || 'Unknown', tone: 'neutral' as Tone})
     : {label: 'Turned off', tone: 'neutral' as Tone};
-  // What the connected brain offers; Nocheh's own helper services are not listed.
-  const brain = runtime.data?.brain;
-  const capabilities = Object.entries(brain?.capabilities ?? {}).filter(([, v]) => typeof v === 'boolean');
+  // What the connected agent offers; Nocheh's own helper services are not listed.
+  const agent = runtime.data?.agent;
+  const capabilities = Object.entries(agent?.capabilities ?? {}).filter(([, v]) => typeof v === 'boolean');
   const worker = (value: string | undefined) =>
     ['ready', 'connected', 'running'].includes(String(value))
       ? {tone: 'good' as Tone, label: 'Working'}
@@ -404,7 +404,7 @@ function Connections({m}: {m: any}) {
                 }
                 detail={
                   [
-                    brain?.name && `Brain: ${brain.name}`,
+                    agent?.name && `Agent: ${agent.name}`,
                     runtime.data?.status?.model && `Model: ${runtime.data.status.model}`,
                   ]
                     .filter(Boolean)

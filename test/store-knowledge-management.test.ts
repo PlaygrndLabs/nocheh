@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {initializeStoreDatabases,connectStores} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {parentSpace} from '../src/spaces.js';
 import type {OrganizationProposal} from '../src/stores/knowledge-contract.js';
 import type {SourceReference} from '../src/stores/archive.js';

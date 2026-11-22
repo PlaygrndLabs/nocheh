@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {grantMembers} from './fixture-member-grants.js';
 

@@ -503,14 +503,14 @@ test('the private chat and groups each start from their own default role and ski
   await page.close();
 });
 
-test('a page for a feature the connected assistant lacks says so instead of offering a retry', async () => {
+test('a page for a feature the connected agent lacks says so instead of offering a retry', async () => {
   const page = await browser.newPage({viewport: {width: 1440, height: 900}});
   await page.route(/\/api\/nocheh\/memory\/persona\?/, route =>
-    route.fulfill({status: 409, contentType: 'application/json', body: '{"error":"brain_capability_unavailable"}'}),
+    route.fulfill({status: 409, contentType: 'application/json', body: '{"error":"agent_capability_unavailable"}'}),
   );
   await page.goto(origin + '/#chats?chat=-10042&tab=role');
   const card = page.locator('section', {has: page.getByRole('heading', {name: 'Role and skills'})});
-  await card.getByText('The connected assistant can’t do this').waitFor();
+  await card.getByText('The connected agent can’t do this').waitFor();
   await card.getByText('It doesn’t offer the role and skills.').waitFor();
   assert.equal(await card.getByRole('button', {name: 'Try again'}).count(), 0);
   await page.close();

@@ -27,7 +27,7 @@ class RetentionTests(unittest.TestCase):
             write(out / 'orphan.result', {'state': 'rejected'}, 40)
             write(dispatch / 'reply-a.intent', {}, 40); write(dispatch / 'reply-a.result', {'state': 'done'}, 40)
             write(dispatch / 'reply-b.intent', {}, 40)
-            # The brain's own journals in the shared spool are not this service's to remove.
+            # The agent's own journals in the shared spool are not this service's to remove.
             write(spool / 'async-runs/done.result', {'state': 'done'}, 40)
             self.assertEqual(prune(spool, 30), 3)
             left = sorted(str(path.relative_to(folder)) for path in spool.rglob('*') if path.is_file())

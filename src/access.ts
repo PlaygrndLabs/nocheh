@@ -4,11 +4,11 @@ import { HttpError, object, string } from './http.js';
 import type pg from 'pg';
 import {policyRevision,validateSpace,type ReadSet} from './spaces.js';
 import {guardState} from './guarded.js';
-import {activeBrain} from './brain/brains.js';
+import {activeAgent} from './agent/agents.js';
 import {chatApps,type AppBinding} from './chat-wire.js';
 import {chats,chatsAfterMiss} from './chats.js';
 
-export interface Reader {readonly scope:string|null; readonly admin:boolean;readonly turnEvent?:string;readonly space?:string;readonly revision?:number;readonly guard_epoch?:number;readonly generation?:string;readonly logical_profile?:string;readonly purpose?:'assistant'|'memory-review'|'filter';readonly brain?:string;
+export interface Reader {readonly scope:string|null; readonly admin:boolean;readonly turnEvent?:string;readonly space?:string;readonly revision?:number;readonly guard_epoch?:number;readonly generation?:string;readonly logical_profile?:string;readonly purpose?:'assistant'|'memory-review'|'filter';readonly agent?:string;
   /** The "Answer privately" record this turn answers (32 hex, ADR-0249). Signed in a turn pass, and only in one whose
    * scope and space are the asker's private chat; it never makes the pass an owner pass. */
   readonly answer?:string;
@@ -69,19 +69,19 @@ export function scopeToken(secret:string,scope:string|null,expires:number,bindin
   const body=Buffer.from(JSON.stringify({scope,expires,audience:'nocheh-archive',...binding})).toString('base64url');
   return `scope.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
 }
-/** The brain a turn's pass is for: the one plugged into the brain socket (ADR-0234). The pass names it so its effects can be told apart (ADR-0233). */
-export const defaultBrain=activeBrain;
-const brainName=/^[a-z][a-z0-9-]{0,31}$/;
+/** The agent a turn's pass is for: the one plugged into the agent socket (ADR-0234). The pass names it so its effects can be told apart (ADR-0233). */
+export const defaultAgent=activeAgent;
+const agentName=/^[a-z][a-z0-9-]{0,31}$/;
 /**
  * A turn pass. `member` (a member's own private chat), `lane` (a member's turn, in a group or their private chat: the
  * member id, for Hermes to run one turn at a time per member; storage parses it and drops it) and `memberRead` (signed
  * as the claim member_read: the owner's ask about a member) are step 4's claims; verifiedReader says where each is
  * allowed.
  */
-export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;brain?:string;answer?:string;app?:AppBinding;
+export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;agent?:string;answer?:string;app?:AppBinding;
   member?:string;lane?:string;memberRead?:string}):string {
   const {memberRead,...claims}=policy??{};
-  const body=Buffer.from(JSON.stringify({scope,expires,event_id:eventId,audience:'nocheh-assistant',brain:defaultBrain,...claims,
+  const body=Buffer.from(JSON.stringify({scope,expires,event_id:eventId,audience:'nocheh-assistant',agent:defaultAgent,...claims,
     ...(memberRead===undefined?{}:{member_read:memberRead})})).toString('base64url');
   return `turn.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
 }
@@ -137,7 +137,7 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     if(claims.purpose!==undefined&&!['assistant','memory-review','filter'].includes(String(claims.purpose)))throw Error();
     if(claims.logical_profile!==undefined&&(prefix!=='turn'||!claims.generation||typeof claims.logical_profile!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(claims.logical_profile)))throw Error();
     if(claims.project!==undefined&&(prefix!=='turn'||typeof claims.project!=='string'||!/^[a-f0-9]{64}$/.test(claims.project)))throw Error();
-    if(claims.brain!==undefined&&(prefix!=='turn'||typeof claims.brain!=='string'||!brainName.test(claims.brain)))throw Error();
+    if(claims.agent!==undefined&&(prefix!=='turn'||typeof claims.agent!=='string'||!agentName.test(claims.agent)))throw Error();
     // An answer pass reads as the asker's private chat, never as the owner: its scope and space are that chat, a private
     // chat row of the owner's (ADR-0249, ADR-0252).
     if(claims.answer!==undefined&&(prefix!=='turn'||typeof claims.answer!=='string'||!answerId.test(claims.answer)||scope===null||
@@ -159,7 +159,7 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     if(claims.reads!==undefined||claims.member_chat!==undefined||claims.memberChat!==undefined||claims.memberRead!==undefined)throw Error();
     const app=claims.app===undefined?undefined:appBinding(claims.app);
     if(app!==undefined&&prefix!=='turn')throw Error();
-    return {scope,admin:false,...(prefix==='turn'?{turnEvent:claims.event_id as string}:{}),...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.brain===undefined?{}:{brain:claims.brain as string}),...(claims.answer===undefined?{}:{answer:claims.answer as string}),...(app===undefined?{}:{app}),...(claims.member===undefined?{}:{member:claims.member as string}),...(claims.member_read===undefined?{}:{memberRead:claims.member_read as string})};
+    return {scope,admin:false,...(prefix==='turn'?{turnEvent:claims.event_id as string}:{}),...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.agent===undefined?{}:{agent:claims.agent as string}),...(claims.answer===undefined?{}:{answer:claims.answer as string}),...(app===undefined?{}:{app}),...(claims.member===undefined?{}:{member:claims.member as string}),...(claims.member_read===undefined?{}:{memberRead:claims.member_read as string})};
   } catch { throw new HttpError(401,'invalid_scope_token'); }
 }
 export function admin(principal:Reader):void { if (!principal.admin) throw new HttpError(403,'owner_required'); }

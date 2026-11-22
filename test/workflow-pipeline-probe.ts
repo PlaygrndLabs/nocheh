@@ -16,7 +16,7 @@ import {workflowClient,connectWorkflows} from '../src/workflows/client.js';
 import {captureInput,claimRun,finishRun,scheduleDefinition} from '../src/managed-runs.js';
 import {admitBrowser,browserOperation,browserWorkflowContext,browserAuthority,managedRunOperation} from '../src/workflows/browser.js';
 import {scheduleOperation,scheduledContext,scheduledAuthority} from '../src/workflows/schedules.js';
-import {fixtureBrain,type FakeCall} from './fixture-brain.js';
+import {fixtureAgent,type FakeCall} from './fixture-agent.js';
 if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_required');
 const admin=new pg.Pool(),namespace='pipeline_probe_'+Date.now();await admin.query(`CREATE SCHEMA ${namespace}`);
 const pool=new pg.Pool({options:`-c search_path=${namespace}`,max:8});
@@ -73,8 +73,8 @@ try {
     if(operation==='run.resume'){calls.resume++;if(input.attempt!==1)throw Error('replacement_attempt');return {state:'done'};}
     throw Error('unexpected_runtime_operation');
   };
-  const brain=fixtureBrain(runtime);
-  const operations={...pipelineOperations(pool,config,runtime,brain),browser:browserOperation(pool,config,brain),schedules:scheduleOperation(pool,brain,managedRunOperation(pool,config,brain,'scheduler'))};
+  const agent=fixtureAgent(runtime);
+  const operations={...pipelineOperations(pool,config,runtime,agent),browser:browserOperation(pool,config,agent),schedules:scheduleOperation(pool,agent,managedRunOperation(pool,config,agent,'scheduler'))};
   connection=await connectWorkflows('pipeline',client,workflowFunctions(client,pool,operations));
   const source:Envelope={version:1,key:'telegram:fixture:'+namespace+':update:1',origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:'1',revision:'1',occurred_at:null,text:null,
     payload:{update_id:1,message:{message_id:1,chat:{id:123,type:'private'},from:{id:123,is_bot:false},voice:{file_id:'voice1'}}}};

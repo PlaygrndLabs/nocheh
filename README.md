@@ -7,7 +7,7 @@
 
 # Nocheh: a personal AI brain that you own
 
-Nocheh keeps your chats and files in an archive you own, decides who may see what, and turns it into memory and answers. The brain and the memory engine plug in through sockets. Swap them, and your data and rules stay.
+Nocheh keeps your chats and files in an archive you own, decides who may see what, and turns it into memory and answers. The agent and the memory engine plug in through sockets. Swap them, and your data and rules stay.
 
 ## How the parts connect
 
@@ -20,8 +20,8 @@ flowchart LR
   end
   doors --> CORE["<b>Nocheh</b><br/>archive, sharing rules,<br/>approvals, secret check"]
   CORE --- ARCH[("Your archive")]
-  CORE -- "brain socket" --> BRAIN["Brain<br/>Hermes today"]
-  BRAIN -- "data tools (MCP),<br/>checked per chat" --> CORE
+  CORE -- "agent socket" --> AGENT["Agent<br/>Hermes today"]
+  AGENT -- "data tools (MCP),<br/>checked per chat" --> CORE
   CORE -- "memory socket" --> MEM["Memory engine<br/>Honcho today"]
 ```
 
@@ -32,7 +32,7 @@ flowchart LR
   IN["Message"] --> SAVE["Save the original"] --> READ["Read files,<br/>mask secrets"]
   READ --> LEARN["Learn people,<br/>projects, tasks"]
   READ --> ASK{"Asked<br/>to answer?"}
-  ASK -- "yes" --> TURN["Brain turn"] --> ACT{"Acts beyond<br/>this reply?"}
+  ASK -- "yes" --> TURN["Agent turn"] --> ACT{"Acts beyond<br/>this reply?"}
   ACT -- "no" --> REPLY["Reply"]
   ACT -- "yes" --> CARD["Approval card"] --> DO["Send or run"]
 ```

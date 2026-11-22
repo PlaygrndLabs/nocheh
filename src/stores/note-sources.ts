@@ -508,7 +508,7 @@ export class NoteSourceRepository {
   }
 
   /**
-   * The Notes page's notes (the brain's `memory` result), each with its source in the owner's words in place of what
+   * The Notes page's notes (the agent's `memory` result), each with its source in the owner's words in place of what
    * Hermes recorded; the records themselves stay in Hermes. A note whose source can't be read now says so.
    */
   async withOwnerLabels(result:unknown,originals?:(ids:string[])=>Promise<ReadonlyMap<string,unknown>>):Promise<unknown> {
@@ -542,7 +542,7 @@ export class NoteSourceRepository {
   }
 
   /**
-   * The owner's recall (the brain's `recall` result) with each note hit's source in the model's words and each past
+   * The owner's recall (the agent's `recall` result) with each note hit's source in the model's words and each past
    * conversation hit's writer in fixed words; what Hermes recorded stays behind. Run before the hits' places are named,
    * since a note's source reads the chat of the profile it is in. Each note hit also gets its day, in the owner's zone,
    * and with `tag` (the owner's SourceTagRepository.checked, which checks canRead first and keeps only what the owner may

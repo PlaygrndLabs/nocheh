@@ -11,7 +11,7 @@ import {brokerServer} from '../src/security/broker.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageGuardService} from '../src/stores/guard-service.js';
 import {storageServer} from '../src/stores/server.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {grantMembers} from './fixture-member-grants.js';
 

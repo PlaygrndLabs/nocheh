@@ -15,7 +15,7 @@ import {validFromEpoch} from '../src/stores/guards.js';
 import {JobBoxRepository,boxTokenValid} from '../src/stores/job-box.js';
 import {notionJobFetch,notionReads} from '../src/stores/notion.js';
 import {storageServer} from '../src/stores/server.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {grantMembers} from './fixture-member-grants.js';
 

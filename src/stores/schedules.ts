@@ -43,7 +43,7 @@ export class ScheduleRepository {
   }
   private document(value:unknown,profile:string):Record<string,unknown>&{prompt:string;execution_version:string}{
     const body=object(value),keys=['profile','name','prompt','schedule','deliver','repeat','enabled','removed','preferences','execution_version','timezone'];
-    // A schedule's own time zone (ADR-0266): an IANA name, or none for the brain's own.
+    // A schedule's own time zone (ADR-0266): an IANA name, or none for the agent's own.
     if(body.timezone!==undefined&&body.timezone!==null&&!(typeof body.timezone==='string'&&/^[A-Za-z0-9_+\-\/]{1,64}$/.test(body.timezone)))
       throw new HttpError(400,'invalid_schedule_definition');
     if(Object.keys(body).some(k=>!keys.includes(k))||body.profile!==profile||typeof body.enabled!=='boolean'||typeof body.removed!=='boolean'||

@@ -7,20 +7,20 @@ import {scopeToken} from '../src/access.js';
 import type {Settings} from '../src/config.js';
 import {storageServer} from '../src/stores/server.js';
 import type {StorageServices} from '../src/stores/services.js';
-import {fixtureBrain} from './fixture-brain.js';
+import {fixtureAgent} from './fixture-agent.js';
 
-test('owner runtime status names the plugged-in brain, reports Telegram polling and denies scoped readers',async()=>{
+test('owner runtime status names the plugged-in agent, reports Telegram polling and denies scoped readers',async()=>{
   const dataDir=await mkdtemp(join(tmpdir(),'nocheh-runtime-status-'));
   const token='fixture-owner-token';
   const config={token,dataDir} as Settings;
-  // The brain reports its own health; Telegram's comes from Nocheh's own bot.
-  const brain=fixtureBrain(async operation=>{assert.equal(operation,'status');return {ok:true,service:'hermes'};});
+  // The agent reports its own health; Telegram's comes from Nocheh's own bot.
+  const agent=fixtureAgent(async operation=>{assert.equal(operation,'status');return {ok:true,service:'hermes'};});
   const bot=async(operation:string)=>{
     assert.equal(operation,'telegram.status');
     return {ok:true,service:'telegram',telegram:'connected',telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}};
   };
   const capabilities={'guard.detect':true,'image.read':false,'telegram.status':true},access={bindReads:async(principal:unknown)=>principal};
-  const server=storageServer({brain,access} as unknown as StorageServices,config,bot,undefined,undefined,capabilities);
+  const server=storageServer({agent,access} as unknown as StorageServices,config,bot,undefined,undefined,capabilities);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');
@@ -32,15 +32,15 @@ test('owner runtime status names the plugged-in brain, reports Telegram polling 
     assert.equal(body.status.telegram_details.last_poll_at,'2026-09-25T11:44:49Z');
     assert.equal((body.status as unknown as {service:string}).service,'hermes');
     assert.deepEqual((body as unknown as {capabilities:unknown}).capabilities,capabilities);
-    assert.deepEqual((body as unknown as {brain:unknown}).brain,{id:'hermes',name:'Fixture brain',capabilities:{telegram:true,browser:true,scheduler:true,background:true,
+    assert.deepEqual((body as unknown as {agent:unknown}).agent,{id:'hermes',name:'Fixture agent',capabilities:{telegram:true,browser:true,scheduler:true,background:true,
       settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:true,schedule_list:true}});
-    // A brain that does not answer is reported, not hidden.
-    const down=storageServer({brain:{...brain,status:async()=>{throw Error('down');}},access} as unknown as StorageServices,config,async()=>({}));
+    // An agent that does not answer is reported, not hidden.
+    const down=storageServer({agent:{...agent,status:async()=>{throw Error('down');}},access} as unknown as StorageServices,config,async()=>({}));
     await new Promise<void>(resolve=>down.listen(0,'127.0.0.1',resolve));
     try{
       const port=(down.address() as {port:number}).port;
       const answer=await (await fetch(`http://127.0.0.1:${port}/v1/runtime`,{headers:{authorization:'Bearer '+token}})).json() as {status:unknown};
-      assert.deepEqual(answer.status,{ok:false,error:'brain_unavailable'});
+      assert.deepEqual(answer.status,{ok:false,error:'agent_unavailable'});
     }finally{await new Promise<void>(resolve=>down.close(()=>resolve()));}
     const scoped=await fetch(url,{headers:{authorization:'Bearer '+scopeToken(token,'owner',Date.now()+60_000)}});
     assert.equal(scoped.status,403);

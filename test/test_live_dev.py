@@ -223,7 +223,7 @@ class LiveDevTests(unittest.TestCase):
         self.assertLessEqual({'hermes', 'nocheh-telegram'}, set(policies))
         self.assertEqual({name for name, policy in policies.items() if policy != 'unless-stopped'}, set())
 
-    def test_a_brain_edit_never_restarts_the_telegram_poller(self):
+    def test_a_agent_edit_never_restarts_the_telegram_poller(self):
         lines = (live_dev.ROOT / 'docker-compose.dev.yml').read_text().splitlines()
         start = lines.index('  nocheh-telegram:') + 1
         end = next(index for index in range(start, len(lines)) if lines[index].startswith('  ') and not lines[index].startswith('   '))

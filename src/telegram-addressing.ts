@@ -1,5 +1,5 @@
 /** Group messages start a turn only when they address the bot, unless the owner lets it answer every message
- * (ADR-0133, ADR-0134). Nocheh decides this before any brain runs or presence shows (ADR-0235). */
+ * (ADR-0133, ADR-0134). Nocheh decides this before any agent runs or presence shows (ADR-0235). */
 export type GroupReplies={readonly mode:'addressed'|'all';readonly names:readonly string[]};
 /** What in a captured group message can address the bot: a reply to it or a tap on its name, and the @usernames it names. */
 export type AddressingFacts={readonly direct:boolean;readonly handles:readonly string[]};

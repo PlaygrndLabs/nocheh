@@ -53,35 +53,35 @@ class KeptFixture:
 
 class AskReachesTheModel(unittest.TestCase):
     def test_the_owners_ask_is_one_tool_call_and_its_question_searches_the_members_chat(self):
-        brain = load().ScriptedBrain({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
+        agent = load().ScriptedAgent({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
         text = ProductScenarios.ask_text('Synthetic 5000111', 'MEMBERWORD7')
         tools = ('mcp__nocheh__archive_search', ASK_TOOL)
-        called = brain.respond(request(message('user', text), tools=tools))
+        called = agent.respond(request(message('user', text), tools=tools))
         self.assertEqual(called, {'tool': ASK_TOOL, 'arguments': {'member': 'Synthetic 5000111',
                                                                   'question': 'What did they say about the locker? [[search:MEMBERWORD7]]'}})
         self.assertIn('Synthetic 5000111', text.split('[[tool:')[0], 'the owner\'s own words name the member')
         # The ask's own turn reads the question as its message.
-        searched = brain.respond(request(message('user', called['arguments']['question']), tools=tools))
+        searched = agent.respond(request(message('user', called['arguments']['question']), tools=tools))
         self.assertEqual(searched, {'tool': 'mcp__nocheh__archive_search', 'arguments': {'mode': 'text', 'query': 'MEMBERWORD7', 'limit': 5}})
 
     def test_the_asking_turn_answers_so_it_ends_done_before_the_ask_runs(self):
-        brain = load().ScriptedBrain({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
+        agent = load().ScriptedAgent({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
         asked = message('user', ProductScenarios.ask_text('Synthetic 5000111', 'MEMBERWORD7'))
-        answer = brain.respond(request(asked, message('assistant', None), message('tool', '{"queued":true,"id":"a1"}'), tools=(ASK_TOOL,)))
-        self.assertEqual(answer, {'content': '[brain] '+ASK_TOOL+': {"queued":true,"id":"a1"}'}, 'never [NO_REPLY], which closes it suppressed')
+        answer = agent.respond(request(asked, message('assistant', None), message('tool', '{"queued":true,"id":"a1"}'), tools=(ASK_TOOL,)))
+        self.assertEqual(answer, {'content': '[agent] '+ASK_TOOL+': {"queued":true,"id":"a1"}'}, 'never [NO_REPLY], which closes it suppressed')
 
 
 class RecheckSearches(unittest.TestCase):
     def test_the_rechecks_searches_send_no_reply_that_a_later_search_could_find(self):
         # A reply quoting the hits stays in the member's chat, which they read whole: a group's mark would still be found
         # there after the group is no longer read.
-        found, turns, brain = ProductScenarios(KeptFixture(), None), [], load().ScriptedBrain({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
+        found, turns, agent = ProductScenarios(KeptFixture(), None), [], load().ScriptedAgent({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
         found.current = {}
         found.f.sent = list
         found.f.chat = lambda chat: 'telegram:'+str(chat)
         found.f.control = found.age_presence = found.said_in_group = found.remove_member = lambda *args: None
         found.f.telegram = lambda: {'faults': []}
-        found.f.brain = lambda: [{'tool': 'mcp__nocheh__archive_search', 'phase': 'final', 'argument': turns[-1][0].split('[[search:')[1].split(']]')[0],
+        found.f.agent = lambda: [{'tool': 'mcp__nocheh__archive_search', 'phase': 'final', 'argument': turns[-1][0].split('[[search:')[1].split(']]')[0],
                                   'result': 'hits'}]
         found.gate = found.wait = lambda *args, **kwargs: None
         found.fresh_person = lambda: MEMBER
@@ -91,7 +91,7 @@ class RecheckSearches(unittest.TestCase):
 
         def answered(update, chat, *args, **kwargs):
             text = update['message']['text']
-            turns.append((text, brain.respond(request(message('user', text), message('assistant', None), message('tool', '{"hits":[]}'),
+            turns.append((text, agent.respond(request(message('user', text), message('assistant', None), message('tool', '{"hits":[]}'),
                                                       tools=('mcp__nocheh__archive_search',)))['content']))
             return 'event', ''
         found.turn = found.silent_turn = answered
@@ -128,15 +128,15 @@ class OwnerChat:
     TOOLS = ('mcp__nocheh__archive_search', 'mcp__nocheh__memory_recall', 'mcp__nocheh__owner_read', ASK_TOOL)
 
     def __init__(self, sent):
-        self.brain = load().ScriptedBrain({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
+        self.agent = load().ScriptedAgent({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
         self.history, self.sent = [], sent
 
     def say(self, text):
         current = message('user', text)
-        answer = self.brain.respond(request(*self.history, current, tools=self.TOOLS))
+        answer = self.agent.respond(request(*self.history, current, tools=self.TOOLS))
         if 'tool' in answer:
             result = '{"queued":true}' if answer['tool'] == ASK_TOOL else '{}'
-            answer = self.brain.respond(request(*self.history, current, message('assistant', None), message('tool', result), tools=self.TOOLS))
+            answer = self.agent.respond(request(*self.history, current, message('assistant', None), message('tool', result), tools=self.TOOLS))
         self.history += [current, message('assistant', answer['content'])]
         if answer['content'] != '[NO_REPLY]':
             self.sent.append(sent(OWNER, answer['content'], 2000+len(self.sent)))
@@ -154,7 +154,7 @@ class OwnerProbes(unittest.TestCase):
         owner = OwnerChat(rows)
         events = [{'tool': name, 'phase': 'final', 'result': '', 'argument': None}
                   for name in ('mcp__nocheh__archive_search', 'mcp__nocheh__memory_recall')]
-        fixture.brain = lambda: events
+        fixture.agent = lambda: events
         fixture.query = lambda *args: '0'
         fixture.conversations = list
 
@@ -163,7 +163,7 @@ class OwnerProbes(unittest.TestCase):
             if ASK_TOOL in update['message']['text']:
                 # The ask's separate answer quotes the member's chat; the owner's session never keeps it.
                 planted = found.member_canary
-                rows.append(sent(OWNER, 'From their chat:\n\n[brain] mcp__nocheh__archive_search: '+planted['said']+' '+planted.get('kept', ''), 2900))
+                rows.append(sent(OWNER, 'From their chat:\n\n[agent] mcp__nocheh__archive_search: '+planted['said']+' '+planted.get('kept', ''), 2900))
                 events.append({'tool': 'mcp__nocheh__archive_search', 'phase': 'final', 'argument': planted['word'], 'result': planted['said']})
             return reply
         fixture.inject = say
@@ -188,7 +188,7 @@ class OwnerProbes(unittest.TestCase):
         found.is_card = lambda row: False
 
         def turn(update, chat, topic=None, expect_reply=True, **kwargs):
-            return 'event', say(update) if chat == OWNER else '[brain] ok'
+            return 'event', say(update) if chat == OWNER else '[agent] ok'
         found.turn = turn
         found.silent_turn = lambda update, chat, topic=None: (say(update) if chat == OWNER else None, len(rows))
         canaries.save(folder, {'PRIVATEMARK1': 'private chat message'}, OWNER)

@@ -9,7 +9,7 @@ import {prepareGuarded,setGuardMode,editGuarded} from '../src/guarded.js';
 import {memoryStatus} from '../src/honcho.js';
 import {pauseFamily,switchFamily,requestWorkflow} from '../src/workflows/store.js';
 import {memoryOperations} from '../src/workflows/memory.js';
-import {fixtureBrain,type FakeCall} from './fixture-brain.js';
+import {fixtureAgent,type FakeCall} from './fixture-agent.js';
 import {advanceWorkflow} from '../src/workflows/engine.js';
 
 test('memory requests preserve consent, native receipt identity, owner revisions and read-only Honcho reconciliation',{skip:!process.env.PGHOST},async()=>{
@@ -22,7 +22,7 @@ test('memory requests preserve consent, native receipt identity, owner revisions
     if(operation==='guard.detect')return {literals:[]};
     assert.equal(operation,'memory.review');calls.push(String(body.id));if(calls.length===1)throw Error('synthetic lost receipt response');return {state:'done'};
   };
-  const ops=memoryOperations(pool,config,runtime,fixtureBrain(runtime),async(path,body:any)=>{
+  const ops=memoryOperations(pool,config,runtime,fixtureAgent(runtime),async(path,body:any)=>{
     if(path.endsWith('/messages/list')){reads++;return {items:saved.get(path.slice(0,-5))??[]};}
     if(path.endsWith('/messages')){writes++;saved.set(path,body.messages.map((m:any)=>({...m,id:'remote-fixture'})));throw Error('synthetic lost write acknowledgment');}
     if(path.endsWith('/representation'))return {representation:'Stored synthetic memory'};

@@ -7,7 +7,7 @@ import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
 import {reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-agent.js';
 import {groupAddressing,speakerLine} from '../src/stores/telegram-dispatch.js';
 import {dispatchPayload} from '../src/stores/telegram-turn.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
@@ -98,7 +98,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const prior=native.get(id);assert.ok(!prior||['queued','failed','ambiguous'].includes(prior.state),'only a failed or lost attempt may launch a fresh execution');
     const state=['running','queued','suppressed','failed','ambiguous'].includes(mode)?mode:'done';native.set(id,{state});
     if(mode==='lost_ack'){mode='done';throw Error('native result acknowledgement lost');}
-    // The brain times its own turn; the bot adds the send.
+    // The agent times its own turn; the bot adds the send.
     const now=Date.now()-50,timing=state!=='done'?{}:{timings:timingShape==='valid'?{conversation:{ms:30,calls:1}}:{conversation:{ms:30,calls:1,text:'private'}},
       window:{queued:now-100,assistant:now-90,finished:now}};
     return {state,...(state==='failed'?{error_code:'guard_context_changed'}:{}),stage:'assistant',private_output:'not copied into workflow metadata',...timing};
@@ -132,7 +132,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const generalCalls=calls.filter(c=>c.input.event_id===general.id&&c.operation==='run.start');
     assert.equal(generalCalls.length,1);assert.equal(generalCalls[0]!.input.payload.message.message_thread_id,undefined);
     assert.equal(reader({headers:{authorization:'Bearer '+generalCalls[0]!.input.archive_credential}} as any,token).space,group);
-    // Nocheh's bot shows presence before the turn starts, then sends the brain's reply as a reply to the asking message.
+    // Nocheh's bot shows presence before the turn starts, then sends the agent's reply as a reply to the asking message.
     const generalSends=sends.filter(item=>item.input.event_id===general.id);
     assert.deepEqual(generalSends.map(item=>item.operation),['telegram.presence','telegram.reply']);
     const answer=generalSends[1]!.input;
@@ -219,13 +219,13 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal((await run(silent.reference.id)).state,'skipped');
     const silentCalls:number=calls.length;await due(silent.reference.id);await run(silent.reference.id);assert.equal(calls.length,silentCalls,'terminal execution cannot automatically restart');
     assert.deepEqual(sends.filter(item=>item.input.event_id===silent.reference.id).map(item=>item.input.finish??null),[null,'clear'],'no answer clears the working reaction');
-    // Only the send can be uncertain: the brain sends nothing, so a turn it lost runs again.
-    const lost=await capture('Brain lost the turn');await prepare(lost.reference.id);mode='ambiguous';
+    // Only the send can be uncertain: the agent sends nothing, so a turn it lost runs again.
+    const lost=await capture('Agent lost the turn');await prepare(lost.reference.id);mode='ambiguous';
     assert.equal((await run(lost.reference.id)).state,'retryable_failed');
     assert.equal((await stores.control.query('SELECT error_code FROM dispatches WHERE event_id=$1',[lost.reference.id])).rows[0].error_code,'assistant_runtime_unavailable');
     await due(lost.reference.id);mode='done';assert.equal((await run(lost.reference.id)).state,'completed');
     assert.deepEqual(calls.filter(c=>c.input.event_id===lost.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
-    // While the bot is not connected no brain turn starts, so no model call is spent on a reply that cannot go out.
+    // While the bot is not connected no agent turn starts, so no model call is spent on a reply that cannot go out.
     const offline=await capture('Bot offline');await prepare(offline.reference.id);mode='done';botState='failed';
     assert.equal((await run(offline.reference.id)).state,'running');assert.ok(!calls.some(c=>c.input.event_id===offline.reference.id));
     botState='connected';await due(offline.reference.id);assert.equal((await run(offline.reference.id)).state,'completed');
@@ -254,7 +254,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     const count=calls.length;assert.equal((await run(imported.reference.id)).state,'skipped');assert.equal(calls.length,count);
     const ownerCommand=await capture('/actions',{},'123');await prepare(ownerCommand.reference.id);mode='done';
     assert.equal((await run(ownerCommand.reference.id)).state,'completed');
-    assert.ok(!calls.some(c=>c.input.event_id===ownerCommand.reference.id),'a fixed command reply needs no brain');
+    assert.ok(!calls.some(c=>c.input.event_id===ownerCommand.reference.id),'a fixed command reply needs no agent');
     const command=sends.filter(item=>item.input.event_id===ownerCommand.reference.id);
     // A command's fixed reply is Nocheh's own card: kept, never learned (ADR-0256).
     assert.deepEqual(command.map(item=>[item.operation,item.input.session_id,item.input.presence,item.input.send_class]),[['telegram.reply','owner-control',false,'card']]);
@@ -390,7 +390,7 @@ test('a group turn sees the unaddressed group messages since the last turn, neve
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-recent-')),base=Date.now(),group='-'+base,token=digest('recent:'+base);
   const policy={enabled:true,owner_id:'123',group_ids:[group]},started:any[]=[],sends:{operation:string;input:any}[]=[];let serial=base;
-  // Nocheh decides: a group message that does not address the bot is suppressed before any brain or presence.
+  // Nocheh decides: a group message that does not address the bot is suppressed before any agent or presence.
   const runtime:FakeCall=async(operation,input)=>{
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='telegram.refusal'){sends.push({operation,input});return {state:'done'};}

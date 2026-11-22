@@ -65,7 +65,7 @@ export const keepaliveMs=20000;
 /** One MCP request: POST with one JSON-RPC message. The caller has already authenticated `principal`. */
 export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{principal:Reader;call:Loopback;isolated:boolean;keepalive?:number}) {
   if(req.method!=='POST'){res.writeHead(405,{allow:'POST','content-type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:'method_not_allowed'}));return;}
-  // Brains reach this only from inside Nocheh's own network; a browser never does.
+  // Agents reach this only from inside Nocheh's own network; a browser never does.
   if(req.headers.origin!==undefined)throw new HttpError(403,'origin_not_allowed');
   // Only a turn's own pass: never the service token, nor an older pass that names no turn.
   if(options.principal.admin||!options.principal.turnEvent)throw new HttpError(403,'turn_credential_required');
@@ -107,7 +107,7 @@ export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{p
       res.write(': running\n\n');
     },options.keepalive??keepaliveMs):undefined;
     let text:string;
-    // A tool's own failure is a normal result whose text says so, as the Python tools answered: a brain reads it and goes on.
+    // A tool's own failure is a normal result whose text says so, as the Python tools answered: an agent reads it and goes on.
     try{text=await tool.run(args as Record<string,unknown>,context);}catch{text=JSON.stringify({error:'tool_unavailable'});}finally{clearInterval(timer);}
     const answer={jsonrpc:'2.0',id,result:{content:[{type:'text',text}],isError:false}};
     if(!streaming)return rpc(res,200,answer);
@@ -117,7 +117,7 @@ export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{p
   return rpc(res,200,failure(id,-32601,'Method not found'));
 }
 
-/** A digest of the tool list, so a test or an operator can tell which tool surface a brain was offered. */
+/** A digest of the tool list, so a test or an operator can tell which tool surface an agent was offered. */
 export function toolSurface():string {
   return createHash('sha256').update(JSON.stringify(mcpTools.map(({name,description,inputSchema})=>({name,description,inputSchema})))).digest('hex');
 }

@@ -1,4 +1,4 @@
-"""The owner's ask about a member (step 4b, ADR-0262) in the brain: its attempt, its ask and its read-only tools."""
+"""The owner's ask about a member (step 4b, ADR-0262) in the agent: its attempt, its ask and its read-only tools."""
 import unittest
 
 from .assistant_gateway import continuation_id, session_title

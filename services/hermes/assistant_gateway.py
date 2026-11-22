@@ -1,4 +1,4 @@
-"""The brain's side of a Telegram turn: its native profile, the native turn and its session title.
+"""The agent's side of a Telegram turn: its native profile, the native turn and its session title.
 
 Nocheh decides who a group message addresses and its own Telegram service polls and sends; nothing here reaches Telegram."""
 

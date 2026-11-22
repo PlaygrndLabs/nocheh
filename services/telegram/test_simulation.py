@@ -138,7 +138,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         return {'update_id': identifier, 'message': message}
 
     async def deliver(self, envelope, gateway=None, work=0.0):
-        """Show presence while the brain works for ``work`` seconds, then deliver the reply; the outcome only."""
+        """Show presence while the agent works for ``work`` seconds, then deliver the reply; the outcome only."""
         gateway = gateway or self.gateway
         chat, topic, message, credential, *_ = gateway._turn(envelope)
         if envelope.get('presence') and gateway.connected() and (gateway.typing_on or gateway.reactions_on):
@@ -147,8 +147,8 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         result = await gateway._reply(envelope['id'], envelope, chat, topic, message, credential)
         return {key: value for key, value in result.items() if key not in ('timings', 'window')}
 
-    async def brain_ended(self, envelope, finish, work=0.0):
-        """The brain's turn ended without a reply: presence is finished as Nocheh's core does."""
+    async def agent_ended(self, envelope, finish, work=0.0):
+        """The agent's turn ended without a reply: presence is finished as Nocheh's core does."""
         chat, topic, message, credential, *_ = self.gateway._turn(envelope)
         await self.gateway._start(envelope['id'], chat, topic, message, credential)
         await asyncio.sleep(work)
@@ -355,7 +355,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
     async def test_typing_stops_when_the_turn_fails_or_authority_is_gone(self):
         self.gateway.typing_on = True
         with patch('services.telegram.gateway.TYPING_INTERVAL', 0.05):
-            await self.brain_ended(self.envelope(), 'failed', work=0.3)
+            await self.agent_ended(self.envelope(), 'failed', work=0.3)
             count = len(self.chat_actions())
             self.assertGreater(count, 0)
             await asyncio.sleep(0.2)
@@ -399,7 +399,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_failed_turn_shows_thumbs_down_and_its_retry_works_again(self):
         self.gateway.reactions_on = True
-        await self.brain_ended(self.envelope(), 'failed', work=0.01)
+        await self.agent_ended(self.envelope(), 'failed', work=0.01)
         self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, ['\U0001f44e'])])
         # The retry's 👀 is the same request as the first one; it is sent, not answered from the journal.
         self.assertEqual(await self.deliver(self.envelope(attempt=2), work=0.01), {'state': 'done'})
@@ -409,7 +409,7 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
     async def test_silence_and_cancellation_clear_the_working_reaction(self):
         self.gateway.reactions_on = True
         self.assertEqual(await self.deliver(self.envelope(text=''), work=0.01), {'state': 'suppressed', 'error_code': 'intentional_silence'})
-        await self.brain_ended(self.envelope(identifier=2), 'clear', work=0.01)
+        await self.agent_ended(self.envelope(identifier=2), 'clear', work=0.01)
         self.assertEqual(self.reactions(), [('-20', 1, ['\U0001f440']), ('-20', 1, []), ('-20', 2, ['\U0001f440']), ('-20', 2, [])])
         self.assertEqual(self.request.delivered, [])
 

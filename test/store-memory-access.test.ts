@@ -8,7 +8,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {AssistantPolicy} from '../src/assistant-policy.js';
 import type {Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {installChatsForTest} from '../src/chats.js';
 import {legacyDirectory} from './fixture-groups.js';
