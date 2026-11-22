@@ -1792,10 +1792,32 @@ test('a project shares its group chats only by its switch, and a group joins one
   await leave.getByRole('button', {name: 'Remove'}).click();
   await chat.getByRole('status').filter({hasText: 'Removed from its project.'}).waitFor();
   assert.deepEqual(
-    leftPosted.map(({space_id, mode, project_id}) => ({space_id, mode, project_id})),
-    [{space_id: '-10042', mode: 'none', project_id: null}],
+    leftPosted.map(({space_id, mode, project_id, tasks}) => ({space_id, mode, project_id, tasks})),
+    [{space_id: '-10042', mode: 'none', project_id: null, tasks: undefined}],
   );
   await chat.close();
+
+  // A move can take the group's tasks along instead, when the owner ticks it.
+  const {page: taking} = await open('chats?chat=-10042&tab=memory');
+  const takenPosted = [];
+  await taking.route(/\/api\/nocheh\/projects\/assignments$/, route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    takenPosted.push(body);
+    return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({...body, revision: 9})});
+  });
+  await taking.locator('#chat-project').selectOption({label: 'Garden redesign'});
+  const takeMove = taking.getByRole('dialog', {name: 'Move Aurora planning to Garden redesign?'});
+  await takeMove
+    .getByRole('checkbox', {name: /Take its tasks along to Garden redesign, with every task under them\./})
+    .check();
+  await takeMove.getByRole('button', {name: 'Move here'}).click();
+  await taking.getByRole('status').filter({hasText: 'Moved to Garden redesign.'}).waitFor();
+  assert.deepEqual(
+    takenPosted.map(({mode, tasks}) => ({mode, tasks})),
+    [{mode: 'assigned', tasks: 'move'}],
+  );
+  await taking.close();
 
   // A topic's card only says which project it follows.
   const {page: topic, problems: topicProblems} = await open('chats?chat=-10042%2Ftopic%2F7&tab=memory');

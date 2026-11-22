@@ -75,11 +75,16 @@ whom it is about.
    `task_group_later`, `task_move_group`, `task_move_group_family`, `task_move_project` and
    `task_move_project_family` are no longer used: a stored text under those names is read and
    never shown.
-5. **Tasks stay when a group moves.** `moveGroupTasks` is gone. When a group moves to another
-   project or leaves every project, its tasks and its topics' tasks stay on the old project's
-   list, where that project's chats keep seeing them, as the project's connections stay with it.
-   Their group label then points outside the project and shows as none to its chats. The group
-   sees the new project's list instead. The owner's review and a project's "Add a chat" say a
+5. **Tasks stay when a group moves, unless the owner takes them along.** When a group moves to
+   another project or leaves every project, its tasks and its topics' tasks stay on the old
+   project's list by default, where that project's chats keep seeing them, as the project's
+   connections stay with it. Their group label then points outside the project and shows as none
+   to its chats. The group sees the new project's list instead. A move to another project may
+   take them along instead (`tasks: 'move'` on the assignment, a box left unticked by default):
+   `moveGroupTasks` moves each task labelled with the group or its topics, with every task under
+   it, to the new list; one that sat under a task staying behind is cut loose. Each moved task
+   joins its new list then, with one history entry. Leaving every project has no such choice,
+   since a group in no project has no list. The owner's review and a project's "Add a chat" say a
    chat will see and change a project's list whenever that project has any task
    (`task_projects` no longer asks `group_id IS NULL`).
 6. **Members.** A member's boards come from the groups they joined and Telegram confirmed

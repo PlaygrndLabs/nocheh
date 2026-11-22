@@ -69,6 +69,26 @@ export const leaveTasksText = (project: string) =>
 export const moveTasksText = (from: string, to: string) =>
   `Its tasks, and its topics’ tasks, stay on ${from}’s list. From now on it sees ${to}’s tasks instead.`;
 
+/** The move note with the owner's choice to take the group's tasks along instead; unticked keeps them where they are.
+ * `onChange` gets the choice as it changes. */
+export function MoveTasksChoice({from, to, onChange}: {from: string; to: string; onChange: (move: boolean) => void}) {
+  return (
+    <div className="space-y-2">
+      <p>{moveTasksText(from, to)}</p>
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input
+          type="checkbox"
+          className="mt-1 size-4 accent-accent"
+          onChange={event => onChange(event.target.checked)}
+        />
+        <span>
+          Take its tasks along to {to}, with every task under them. {from}’s chats then no longer see them.
+        </span>
+      </label>
+    </div>
+  );
+}
+
 /**
  * What each way of sharing does. The filter is a model that people can steer: what anyone writes in these chats, a
  * question in the receiving group or a message in a source group, can talk it into passing on more (ADR-0251).

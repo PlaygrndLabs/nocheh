@@ -37,7 +37,7 @@ import {
 import {Dialog, Drawer, useFeedback} from '../../ui/overlay';
 import {ChatPicker} from '../chats/chat-picker';
 import {JoinNotes} from '../chats/project';
-import {leaveTasksText, moveTasksText, relatedGroupsHint, sharedChatsNote} from '../chats/rule-dialog';
+import {leaveTasksText, MoveTasksChoice, relatedGroupsHint, sharedChatsNote} from '../chats/rule-dialog';
 import {RoleAndSkills} from '../chats/role-skills';
 import {PrivateAnswers} from './private-answers';
 import {certainty, EvidenceLinks, useChats, useCommand, when, type Conversation} from './shared';
@@ -441,6 +441,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   const add = async () => {
     const other = elsewhere(adding),
       name = chats.name(adding);
+    let take = false;
     if (
       !(await feedback.confirm({
         title: other ? `Move ${name}?` : `Add ${name} to ${project.name}?`,
@@ -448,7 +449,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
           <div className="space-y-3">
             {other && <p>It is in {other} now. A group belongs to one project at a time.</p>}
             <JoinNotes space={adding} name={name} project={listed} names={chats.name} />
-            {other && <p>{moveTasksText(other, project.name)}</p>}
+            {other && <MoveTasksChoice from={other} to={project.name} onChange={move => (take = move)} />}
           </div>
         ),
         confirm: other ? 'Move here' : 'Add',
@@ -459,6 +460,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
       space_id: adding,
       mode: 'assigned',
       project_id: project.id,
+      ...(take ? {tasks: 'move'} : {}),
       expected_revision: ownOf(adding)?.revision ?? 0,
     });
     if (result) {

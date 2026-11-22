@@ -1301,5 +1301,20 @@ for(const family of families)test(`every group and topic of a project reads and 
     const kept=await s.tasks.get(owner,second.id);
     assert.deepEqual([kept.project_id,kept.group_id],[p1,g2],'the owner sees it as it is');
     assert.equal((await s.tasks.chatGet(after,tent.id)).group_id,null,'a group of another project shows as none on this one');
+
+    // The owner may take the group's tasks along instead: each task labelled with it or its topics moves with every
+    // task under it, and one under a staying task is cut loose. Tasks of other groups stay.
+    const ring=await s.tasks.create(owner,{operation_id:key+':ring',title:'Ring the hall',scope:p2,group:g2});
+    const keys=await s.tasks.create(owner,{operation_id:key+':keys',title:'Ask for the keys',scope:p2,parent:ring.id,group:at(t1,8)});
+    const chairs=await s.tasks.create(owner,{operation_id:key+':chairs',title:'Count the chairs',scope:p2,parent:tent.id,group:at(t2,3)});
+    const take=(tasks:unknown,operation:string)=>s.projects.assign(owner,{space_id:g2,project_id:p1,mode:'assigned',expected_revision:2,operation_id:key+operation,tasks} as any);
+    await assert.rejects(take('all',':take-bad'),{status:400,code:'invalid_project_assignment'});
+    await take('move',':take');
+    const where=async(id:string)=>{const task=await s.tasks.get(owner,id);return [task.project_id,task.parent_id];};
+    assert.deepEqual(await Promise.all([ring,keys,chairs,tent].map(task=>where(task.id))),[[p1,null],[p1,ring.id],[p1,null],[p2,null]]);
+    const back=await ask(t2,'What do we have back home?','Bob');
+    for(const task of [ring,keys,chairs,second])assert.equal((await s.tasks.chatGet(back,task.id)).project_id,p1);
+    const moved=await s.tasks.get(owner,chairs.id);
+    assert.deepEqual(moved.activity.find((item:any)=>item.changes.project_id).changes,{project_id:{from:p2,to:p1},parent_id:{to:null}});
   }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
