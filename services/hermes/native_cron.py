@@ -102,23 +102,31 @@ def profiles(admin):
         yield name,logical,bound
 
 
-def annotate(job,home,selected):
+def delivery_policy(job,bound):
+    """How a schedule's results go out (ADR-0266): kept local; sent to the owner's private chat with no card, since the
+    owner approved that chat's schedules once; or, for a group, each result waits for the owner's card."""
+    if job.get('deliver','local')=='local':return 'local'
+    return 'send_each_result' if bound.owner else 'review_each_result'
+
+
+def annotate(job,home,selected,bound):
     return {**job,'profile':selected,'profile_name':selected,'hermes_home':str(home),
         '_nocheh_revision':revision(job,home.name),'managed':bool(job.get('nocheh_registered')),
-        'delivery_policy':'local' if job.get('deliver','local')=='local' else 'review_each_result'}
+        'delivery_policy':delivery_policy(job,bound)}
 
 
 def manage(admin,path,method,query,body,headers,call=None):
     call=call or (lambda route,payload:archive(route,payload,admin.token))
     if path=='/api/cron/delivery-targets':return {'targets':[
         {'id':'local','name':'Local (save only)','home_target_set':True,'home_env_var':None},
-        {'id':'telegram','name':'Telegram to this scope (review each result)','home_target_set':True,'home_env_var':None}]}
+        {'id':'telegram','name':'Telegram to this chat (no card in your private chat; a group\'s results wait for your card)',
+         'home_target_set':True,'home_env_var':None}]}
     if path=='/api/cron/blueprints':return {'blueprints':[]}
     match=re.fullmatch(r'/api/cron/jobs(?:/([a-zA-Z0-9_-]{1,128})(?:/(runs|pause|resume|trigger|catch-up|cancel))?)?',path)
     if not match:raise ValueError('cron_operation_unavailable')
     job_id,operation=match.groups();selected=query.get('profile',['default'])[0]
     if selected=='all' and method=='GET' and not job_id:
-        return [annotate(job,home,name) for name,home,_ in profiles(admin) for job in inspect(home) if not job.get('nocheh_removed')]
+        return [annotate(job,home,name,bound) for name,home,bound in profiles(admin) for job in inspect(home) if not job.get('nocheh_removed')]
     name,physical=admin.profile(selected);bound=admin.binding(name);home=admin.preference_home(name,physical)
     if bound.space!=bound.chat_id:raise ValueError('cron_topic_scope_unavailable')
     if operation=='runs' and method=='GET':
@@ -128,10 +136,10 @@ def manage(admin,path,method,query,body,headers,call=None):
             'message_count':0,'profile':name,'nocheh_event_id':row['event_id']} for row in result['runs'] if row.get('native_session') and row['payload']['profile']==name],'limit':100}
     jobs=inspect(home)
     if method=='GET':
-        if not job_id:return [annotate(job,home,name) for job in jobs if not job.get('nocheh_removed')]
+        if not job_id:return [annotate(job,home,name,bound) for job in jobs if not job.get('nocheh_removed')]
         job=next((job for job in jobs if job['id']==job_id and not job.get('nocheh_removed')),None)
         if not job:raise ValueError('cron_job_not_found')
-        return annotate(job,home,name)
+        return annotate(job,home,name,bound)
     from cron import jobs as native
     with store(home):
         jobs=inspect(home);job=next((job for job in jobs if job['id']==job_id and not job.get('nocheh_removed')),None)
@@ -141,7 +149,7 @@ def manage(admin,path,method,query,body,headers,call=None):
             if job.get('nocheh_pending') or job.get('nocheh_running'):raise ValueError('cron_already_pending')
             identity=body.get('request_id') or headers.get(b'idempotency-key',b'').decode()
             if not isinstance(identity,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',identity):raise ValueError('cron_request_identity_required')
-            if job.get('nocheh_last_request')==identity:return annotate(job,home,name)
+            if job.get('nocheh_last_request')==identity:return annotate(job,home,name,bound)
             if operation=='catch-up' and not job.get('nocheh_missed'):raise ValueError('cron_no_missed_run')
             job=native.update_job(job_id,{'nocheh_pending':{'id':identity,'reason':'catch_up' if operation=='catch-up' else 'manual','at':datetime.now(timezone.utc).isoformat()},'nocheh_last_request':identity})
         elif operation=='cancel' and method=='POST':
@@ -152,7 +160,7 @@ def manage(admin,path,method,query,body,headers,call=None):
             if not values.get('prompt') or not values.get('schedule'):raise ValueError('cron_prompt_and_schedule_required')
             request_id=headers.get(b'idempotency-key',b'').decode() or uuid.uuid4().hex
             existing=next((j for j in jobs if j.get('nocheh_create_id')==request_id),None)
-            if existing:return annotate(existing,home,name)
+            if existing:return annotate(existing,home,name,bound)
             preferences=values.pop('nocheh_preferences',{})
             job=native.create_job(**values,provider='openai',model=admin.model)
             job=native.update_job(job['id'],{'prompt':values['prompt'],'nocheh_create_id':request_id,'nocheh_preferences':preferences,'nocheh_registered':False})
@@ -176,7 +184,7 @@ def manage(admin,path,method,query,body,headers,call=None):
             job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex})
         job=native.update_job(job['id'],{'nocheh_workflow_synced':False})
         job=sync_job(call,job,home,bound)
-        return {'ok':True} if method=='DELETE' else annotate(job,home,name)
+        return {'ok':True} if method=='DELETE' else annotate(job,home,name,bound)
 
 
 SCHEDULE_ACTIONS={'pause':('POST','/pause'),'resume':('POST','/resume'),'run':('POST','/trigger'),'delete':('DELETE','')}

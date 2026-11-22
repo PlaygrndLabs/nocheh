@@ -11,6 +11,18 @@ from .scopes import Scopes
 from services.chats import Served
 
 
+class DeliveryPolicyTests(unittest.TestCase):
+    def test_delivery_policy_says_how_results_go_out(self):
+        # ADR-0266: the owner's private chat gets each result with no card; a group's result waits for the owner's card.
+        with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':temp}):
+            admin=Administration(None,Path(temp),'gpt-5.6-sol',Scopes({'enabled':False},Served.of('42',groups=['-10'])),'fixture-token-long-enough')
+            ask=lambda profile,**extra:manage(admin,'/api/cron/jobs','POST',{'profile':[profile]},
+                {'name':'Fixture','prompt':'Text','schedule':'every 1h',**extra},{},lambda route,body:{'state':'local'})['delivery_policy']
+            self.assertEqual(ask('default',deliver='telegram'),'send_each_result')
+            self.assertEqual(ask('default'),'local')
+            self.assertEqual(ask(Scopes.profile('-10'),deliver='telegram'),'review_each_result')
+
+
 class SchedulerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
