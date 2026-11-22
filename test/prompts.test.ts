@@ -51,15 +51,15 @@ test('approval card templates leave out a line whose value is missing and keep d
   assert.equal(fillTemplate(approvalTask,{change:'Add a task to the list of “P1”',chats:'“Group A”',private:null,fields:'Title: Book the room'}),
     '📋 Add a task to the list of “P1”\n👥 Seen in “Group A”\n\nTitle: Book the room','a card with nothing private leaves that line out');
   assert.match(approvalLines('').task_changed,/changed after it was asked/);
-  assert.equal(approvalLines('').task_later,'Chats you add to this project later will see it too.','a card for a task set on the project says chats added later see it');
-  // A group's task is that group's alone: its card says so instead, and a move to a group names the group (ADR-0248).
-  assert.equal(approvalLines('').task_group_only,'Other groups in this project don\'t see it.');
-  assert.equal(fillTemplate(approvalLines('').task_group_later,{group:'“Group A”'}),'“Group A” will see it once you add that group to this project.');
-  assert.equal(fillTemplate(approvalLines('').task_move_group,{group:'“Group A”',project:'“P1”'}),'Move a task to “Group A” in the list of “P1”');
-  assert.equal(fillTemplate(approvalLines('').task_move_group_family,{group:'“Group A”',project:'“P1”',count:'2'}),'Move a task, with 2 under it, to “Group A” in the list of “P1”');
-  // A group's task set on its project itself says that every group of the project gets it.
-  assert.equal(fillTemplate(approvalLines('').task_move_project,{project:'“P1”'}),'Set a task on “P1” itself, for every group in it');
-  assert.equal(fillTemplate(approvalLines('').task_move_project_family,{project:'“P1”',count:'2'}),'Set a task, with 2 under it, on “P1” itself, for every group in it');
+  // Every chat of a project sees its whole list, whatever group a task is labelled with, so every task card says that
+  // chats added later see it too (ADR-0276).
+  assert.equal(approvalLines('').task_later,'Chats you add to this project later will see it too.','a task card says chats added later see it');
+  // The group-only lines are gone; an owner's stored copy of one still saves and is never shown.
+  for(const gone of ['task_group_only','task_group_later','task_move_group','task_move_group_family','task_move_project','task_move_project_family'])
+    assert.equal(gone in approvalLines(''),false,gone);
+  const stored='task_group_only: Only this group sees it.\ntask_later: Later chats see it too.';
+  assert.equal(promptProblem('telegram.approval_texts',stored),null,'a stored text with a line no longer used still saves');
+  assert.equal(approvalLines(stored).task_later,'Later chats see it too.');
 });
 
 test('sends and reminders name chats and people in fixed lines the owner can edit, which must keep their values (ADR-0254, ADR-0255)',async()=>{

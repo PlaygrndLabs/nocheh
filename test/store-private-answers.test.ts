@@ -425,13 +425,14 @@ test('an answer reader reads the groups frozen at its tap, by search and by page
     const group:Reader={admin:false,scope:GP1,space:GP1,generation:binding.generation,guard_epoch:binding.epoch};
     assert.equal(await s.access.canRead(group,asked,binding),true);assert.equal(await s.access.canRead(group,inGP3,binding),false,'a group turn still reads only its own group');
 
-    // Its tasks, through the read set the record binds: the frozen groups' own tasks and the ones set on their project,
-    // never a group that left before the tap or another project's list, and only to read (ADR-0248).
+    // Its tasks: the whole list of the project the record binds, whatever each task's group, never another project's
+    // list, and only to read (ADR-0276).
     const task=async(title:string,scope:string,group:string|null)=>s.tasks.create(owner,{operation_id:key+':task:'+title,title,scope,group});
     const tasks=[await task('GP1 task',P1,GP1),await task('GP3 task',P1,GP3),await task('P1 task',P1,null),await task('GP2 task',P1,GP2),await task('P2 task',P2,null)];
     const reader={...answer,revision:binding.epoch};
-    assert.deepEqual((await s.tasks.chatList(reader)).tasks.map((item:any)=>item.id).sort(),tasks.slice(0,3).map(item=>item.id).sort());
-    await assert.rejects(s.tasks.chatGet(reader,tasks[3]!.id),{status:404});
+    assert.deepEqual((await s.tasks.chatList(reader)).tasks.map((item:any)=>item.id).sort(),tasks.slice(0,4).map(item=>item.id).sort());
+    assert.equal((await s.tasks.chatGet(reader,tasks[3]!.id)).group_id,GP2,'a group of the project shows as itself');
+    await assert.rejects(s.tasks.chatGet(reader,tasks[4]!.id),{status:404});
     await assert.rejects(s.tasks.chatCreate(reader,{title:'Sneak'}),{code:'task_read_only'});
     await assert.rejects(s.tasks.chatList({...pass,revision:binding.epoch}),{status:403},'a pass without its bound record reaches no task');
 

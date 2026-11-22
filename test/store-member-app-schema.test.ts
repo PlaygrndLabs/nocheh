@@ -3,11 +3,10 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {digest} from '../src/archive.js';
 import {installChatsForTest} from '../src/chats.js';
-import {inReadSet,readSetGroups} from '../src/spaces.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {MEMBER_READ_STALE_DAYS,MEMBER_RECHECK_HOURS,joinedGroups,memberReads} from '../src/stores/member-reads.js';
 import {memberTaskViews} from '../src/stores/member-task-views.js';
-import {GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_APP_HIDDEN,MEMBER_APP_REACH,MEMBER_APP_SWITCHES,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,
+import {GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_APP_HIDDEN,MEMBER_APP_REACH,MEMBER_APP_SWITCHES,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,
   MEMBER_GP_OFF_ID,MEMBER_NG_ID,NG1,NG2,NG_GROUP_IDS,OWNER,P1,UNSERVED,fixtureChats,fixtureDirectory,memberAppMembers,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
 // The members' app schema and shared reads (step 5, ADR-0265): what P0 adds to the control store, bootstrapped twice
@@ -145,18 +144,14 @@ test('joinedGroups reads the groups a member is in now, fresh within the hours a
     await db.query(`UPDATE chat_memberships SET checked_at=now() WHERE chat_id=ANY($1::text[])`,[[NG1,NG2]]);
     assert.deepEqual(chatsOf(await joinedGroups(db,MEMBER_NG_ID,{owner:OWNER})),[NG1,NG2].sort());
 
-    // memberTaskViews: P1 reaching GP1 and GP3, with GP1's topic when topics share their group's memory; none for groups in
-    // no project or a project that is not active.
-    const [view,...more]=await memberTaskViews(db,MEMBER_APP_REACH,'group');
-    assert.equal(more.length,0);assert.deepEqual([view!.project,view!.name],[P1,'P1']);
-    assert.deepEqual(readSetGroups(view!.reach).sort(),[...MEMBER_APP_REACH].sort());
-    assert.ok(inReadSet(view!.reach,GP1_TOPIC),'topics share their group\'s tasks');assert.ok(!inReadSet(view!.reach,GP2),'never GP2');
-    const [exact]=await memberTaskViews(db,MEMBER_APP_REACH,'topic');
-    assert.ok(inReadSet(exact!.reach,GP1)&&!inReadSet(exact!.reach,GP1_TOPIC));
-    assert.deepEqual(await memberTaskViews(db,[],'group'),[]);
-    assert.deepEqual(await memberTaskViews(db,[GP4,NG1,NG2],'group'),[]);
+    // memberTaskViews: one board for P1, its whole list, labelled for plain adds with the first of the member's groups in
+    // it; none for groups in no project or a project that is not active (ADR-0276).
+    const [view,...more]=await memberTaskViews(db,MEMBER_APP_REACH);
+    assert.equal(more.length,0);assert.deepEqual(view,{project:P1,name:'P1',home:[...MEMBER_APP_REACH].sort()[0]});
+    assert.deepEqual(await memberTaskViews(db,[]),[]);
+    assert.deepEqual(await memberTaskViews(db,[GP4,NG1,NG2]),[]);
     await db.query(`UPDATE projects SET state='archived' WHERE id=$1`,[P1]);
-    assert.deepEqual(await memberTaskViews(db,MEMBER_APP_REACH,'group'),[]);
+    assert.deepEqual(await memberTaskViews(db,MEMBER_APP_REACH),[]);
     await db.query(`UPDATE projects SET state='active' WHERE id=$1`,[P1]);
   } finally {
     restore();

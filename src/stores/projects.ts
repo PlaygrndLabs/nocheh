@@ -6,7 +6,6 @@ import {groupChatId,groupSpace,groupWithTopics,parentSpace,recallCondition,valid
 import {chats} from '../chats.js';
 import {OwnerCommands} from './owner-commands.js';
 import {projectGroupsSql} from './project-groups.js';
-import {moveGroupTasks} from './tasks.js';
 
 /** The active project a group or topic belongs to, or null: a topic follows its group (ADR-0247). Used where a project's own
  *  connection may be used, such as its Notion (ADR-0268) and its GitHub copies (ADR-0269). */
@@ -62,9 +61,8 @@ export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'r
   const result:Assignment={space_id:change.space_id,project_id:change.project_id,mode:change.mode,revision:change.expected_revision+1};
   await db.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,$3,$4)
     ON CONFLICT(space_id) DO UPDATE SET project_id=$2,mode=$3,revision=$4,updated_at=now()`,[result.space_id,result.project_id,result.mode,result.revision]);
-  // A group moving from one project to another takes its tasks and its topics' tasks with it; leaving every project
-  // leaves them on the old board, where only the owner sees them (ADR-0248).
-  if(groupChatId(change.space_id))await moveGroupTasks(db,change.space_id,previous?.mode==='assigned'?previous.project_id:null,result.mode==='assigned'?result.project_id:null);
+  // A group's tasks stay on its old project's list when it moves to another project or leaves every project, as the
+  // project's connections do; their group label then shows to no chat (ADR-0276).
   return result;
 }
 

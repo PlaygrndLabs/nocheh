@@ -80,9 +80,9 @@ test('reminders go to whoever set them: the member\'s own chat after core says y
   const revision=async(id:string)=>(await s.tasks.get(owner,id)).revision as number;
   // A change from the members' app, as part B's memberUpdate makes it: the member's account and Telegram name, no chat.
   const fromApp=async(id:string,body:Record<string,unknown>,who:{account:string;name:string;project:string;groups:string[]})=>{
-    const [view]=await memberTaskViews(db,who.groups,'group');
+    const [view]=await memberTaskViews(db,who.groups);
     return (s.tasks as any).change(next(),id,{expected_revision:await revision(id),...body},{origin:'app',actor:{kind:'member',name:who.name},source:null,
-      within:who.project,reach:view!.reach,chat:false,card:false,setter:{by:'person',account:who.account,name:who.name,chat:null,group:null,via:'app'}});
+      within:view!.project,chat:false,card:false,setter:{by:'person',account:who.account,name:who.name,chat:null,group:null,via:'app'}});
   };
   const mira={account:MEMBER_GP_ACCOUNT,name:'Mira',project:P1,groups:[GP1,GP3]};
   const due=(task:string)=>db.query("UPDATE owner_task_reminders SET remind_at=remind_at-interval '1 day' WHERE task_id=$1 AND state='pending'",[task]);
@@ -190,21 +190,40 @@ test('reminders go to whoever set them: the member\'s own chat after core says y
       '“Reminders to themselves” is off for them.']],'one line per member per day, its count the day\'s total');
     assert.ok((await s.chatSends.summary()).latest_problems.some((row:any)=>row.error_code==='reminder_skipped'),'it shows in System › Health');
 
-    // 6. The task is no longer on her boards (she left GP1, or the task moved to GP2): skipped as well.
+    // 6. Her boards are her projects' whole lists (ADR-0276): a task relabelled to another group of her project stays on
+    // them and her reminder comes to her own chat; one moved to another project, or in a project where she left every
+    // group, is skipped. "Share group chats" makes no difference.
     await reset();
-    const left=await add({title:'Left behind',scope:P1,group:GP1}),moved=await add({title:'Moved away',scope:P1,group:GP3});
-    for(const task of [left,moved])await fromApp(task.id,{reminders:[soon(10)]},mira);
-    await db.query('UPDATE member_chats SET enabled=false WHERE member_id=$1 AND chat_id=$2',[MEMBER_GP_ID,GP1]);
-    await s.tasks.update(owner,moved.id,{operation_id:next(),expected_revision:await revision(moved.id),group:GP2});
-    await due(left.id);await due(moved.id);
+    const relabelled=await add({title:'Relabelled',scope:P1,group:GP1}),moved=await add({title:'Moved away',scope:P1,group:GP3});
+    for(const task of [relabelled,moved])await fromApp(task.id,{reminders:[soon(10)]},mira);
+    await s.tasks.update(owner,relabelled.id,{operation_id:next(),expected_revision:await revision(relabelled.id),group:GP2});
+    await s.tasks.update(owner,moved.id,{operation_id:next(),expected_revision:await revision(moved.id),scope:P2,group:NG1});
+    await due(relabelled.id);await due(moved.id);
     assert.equal(await s.tasks.remind(),2);
-    assert.equal(notices.length,0);
-    assert.deepEqual([(await rows(left.id))[0].state,(await rows(moved.id))[0].state],['skipped','skipped']);
+    assert.deepEqual(notices.map(item=>String(item.chat_id)),[MEMBER_GP_CHAT]);
+    assert.match(String(notices[0]!.text),/Relabelled/);
+    assert.deepEqual([(await rows(relabelled.id))[0].state,(await rows(moved.id))[0].state],['sent','skipped']);
     assert.match((await skipped())[0].detail,/the task is no longer on their boards\.$/);
-    assert.deepEqual(await recipientOf(db,{set_by:'person',account:MEMBER_GP_ACCOUNT,via:'chat',project:P1,group:GP2},
-      {owner:OWNER,directory:chats(),topicMemory:'group'}),{lane:'owner',reason:'not_visible'},'set in a group, it would come to the owner');
+    await reset();
+    const left=await add({title:'Left behind',scope:P1,group:GP1});
+    await fromApp(left.id,{reminders:[soon(10)]},mira);
+    await db.query('UPDATE member_chats SET enabled=false WHERE member_id=$1 AND chat_id=ANY($2::text[])',[MEMBER_GP_ID,[GP1,GP3]]);
+    await due(left.id);
+    assert.equal(await s.tasks.remind(),1);
+    assert.equal(notices.length,0);
+    assert.equal((await rows(left.id))[0].state,'skipped');
+    await db.query('UPDATE member_chats SET enabled=true WHERE member_id=$1 AND chat_id=ANY($2::text[])',[MEMBER_GP_ID,[GP1,GP3]]);
+    assert.deepEqual(await recipientOf(db,{set_by:'person',account:MEMBER_GP_ACCOUNT,via:'chat',project:P2,group:NG1},
+      {owner:OWNER,directory:chats()}),{lane:'owner',reason:'not_visible'},'set in a group, it would come to the owner');
     assert.deepEqual(await recipientOf(db,{set_by:'person',account:MEMBER_GP_ACCOUNT,via:'app',project:null,group:null},
-      {owner:OWNER,directory:chats(),topicMemory:'group'}),{lane:'skip',member:MEMBER_GP_ID,reason:'not_visible'},'a personal task is never on a board');
+      {owner:OWNER,directory:chats()}),{lane:'skip',member:MEMBER_GP_ID,reason:'not_visible'},'a personal task is never on a board');
+    for(const share of [true,false]) {
+      await db.query('UPDATE projects SET share_chats=$2 WHERE id=$1',[P1,share]);
+      for(const via of ['chat','app'] as const) {
+        const other=await recipientOf(db,{set_by:'person',account:MEMBER_GP_ACCOUNT,via,project:P1,group:GP2},{owner:OWNER,directory:chats()});
+        assert.deepEqual([other.lane,'member' in other&&other.member,'chat' in other&&other.chat],['member',MEMBER_GP_ID,MEMBER_GP_CHAT],via+' '+share);
+      }
+    }
 
     // 7. "Reminders to themselves" off: no new reminder in the app or in a group (403); removing her own still works.
     await reset();
@@ -301,7 +320,7 @@ test('reminders go to whoever set them: the member\'s own chat after core says y
     assert.match(String(to(OWNER)[0]!.text),/Group not confirmed/);
     // A re-check that cannot run at all reaches no board either.
     assert.deepEqual(await recipientOf(db,{set_by:'person',account:MEMBER_GP_ACCOUNT,via:'app',project:P1,group:GP1},
-      {owner:OWNER,directory:chats(),topicMemory:'group',recheck:async()=>{throw Error('no runtime');}}),{lane:'skip',member:MEMBER_GP_ID,reason:'not_visible'});
+      {owner:OWNER,directory:chats(),recheck:async()=>{throw Error('no runtime');}}),{lane:'skip',member:MEMBER_GP_ID,reason:'not_visible'});
     membership='in';
 
     // 9. A member's private app reminder is hers alone (ADR-0265 D6, D9): no group sees its time, a group's list never

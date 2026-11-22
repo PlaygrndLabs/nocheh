@@ -49,24 +49,25 @@ export const ruleAudienceText = (group: string | null) =>
   `You and every member in ${group ?? 'the chat you share into'}, its topics included, will see what this rule lets in.`;
 
 /**
- * Shown wherever a group joins a project: its members see the tasks set on the whole project, and change them where they
- * may write tasks, never another group's own tasks (ADR-0243, ADR-0248).
+ * Shown wherever a group joins a project: everyone in it, members or not, sees every task on the project's list, and
+ * members change them where they may write tasks, whatever "Share group chats" says (ADR-0276).
  */
 export const projectTasksWarning = (chat: string, projects: string[]) =>
-  `Members in ${chat} will see and, where they may write tasks, change the tasks set on the whole of ` +
+  `Everyone in ${chat}, members or not, will see every task on the list of ` +
   (projects.length < 2 ? (projects[0] ?? '') : projects.slice(0, -1).join(', ') + ' and ' + projects.at(-1)) +
-  ', never another group’s own tasks.';
+  ', whatever “Share group chats” says. Members can change them where they may write tasks.';
 
 /**
- * Shown before a group leaves its project for none: its tasks, its topics' too, stay on that project's list, where
- * only the owner sees them (ADR-0248).
+ * Shown before a group leaves its project for none: its tasks, its topics' too, stay on that project's list, which the
+ * project's chats keep seeing (ADR-0276).
  */
 export const leaveTasksText = (project: string) =>
-  `Its tasks, and its topics’ tasks, stay on ${project}’s list, where only you see them.`;
+  `Its tasks, and its topics’ tasks, stay on ${project}’s list. ${project}’s chats still see them. This group no longer does.`;
 
-/** Shown before a group moves from one project to another: its tasks, its topics' too, move with it (ADR-0248). */
+/** Shown before a group moves from one project to another: its tasks, its topics' too, stay on the old project's list,
+ * and the group sees the new project's list instead (ADR-0276). */
 export const moveTasksText = (from: string, to: string) =>
-  `Its tasks, and its topics’ tasks, move with it from ${from} to ${to}.`;
+  `Its tasks, and its topics’ tasks, stay on ${from}’s list. From now on it sees ${to}’s tasks instead.`;
 
 /**
  * What each way of sharing does. The filter is a model that people can steer: what anyone writes in these chats, a

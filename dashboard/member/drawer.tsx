@@ -15,7 +15,9 @@ import {
   actorName,
   assigneeText,
   AudienceLine,
+  boardGroups,
   dueText,
+  groupTitle,
   localInput,
   localMoment,
   Plain,
@@ -302,7 +304,6 @@ function Overview({task, me, board}: {task: MemberDetail; me: MemberMe; board: B
   const words = useWords();
   const {t, moment} = words;
   const due = dueText(task, words);
-  const group = task.group ? (me.groups.find(item => item.id === task.group)?.title?.trim() ?? '') : '';
   const assignees = assigneeText(task, t);
   // Only the columns the board names, in its order; a value it holds nothing of is left out.
   const columns = boardColumns(board).filter(column => {
@@ -329,7 +330,7 @@ function Overview({task, me, board}: {task: MemberDetail; me: MemberMe; board: B
           </>
         )}
         <dt className="text-muted">{t('field_group')}</dt>
-        <dd dir="auto">{task.group ? group || t('unnamed_group') : t('whole_project')}</dd>
+        <dd dir="auto">{groupTitle(me, task.group, t)}</dd>
         {assignees && (
           <>
             <dt className="text-muted">{t('assignees')}</dt>
@@ -384,7 +385,8 @@ function EditTask({
   onSave: (patch: MemberTaskPatch) => void;
 }) {
   const {t} = useWords();
-  const groups = me.groups.filter(item => item.board === 'open' && item.project === task.project);
+  // Any group of the project can label the task, as everyone in its groups sees it either way (ADR-0276).
+  const groups = boardGroups(me, task.project);
   const projectName = me.projects.find(item => item.id === task.project)?.name ?? '';
   const [title, setTitle] = React.useState(task.title);
   const [notes, setNotes] = React.useState(task.notes);
@@ -441,7 +443,7 @@ function EditTask({
           <option value="">{t('whole_project')}</option>
         </Select>
       </Field>
-      <AudienceLine me={me} group={group} projectName={projectName} />
+      <AudienceLine projectName={projectName} />
       <ColumnFields board={board} prefix="member-edit" drafts={columns} onChange={setColumns} />
       <div className="flex justify-end gap-2">
         <Button onClick={onCancel}>{t('cancel')}</Button>

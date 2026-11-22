@@ -272,7 +272,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
     if (next === value) return;
     const target = choices.find(project => project.id === next),
       current = data?.project ?? null;
-    // Joining a project is confirmed first, naming the groups already there; a move says its tasks go with it.
+    // Joining a project is confirmed first, naming the groups already there; a move says its tasks stay behind.
     if (
       target &&
       !(await feedback.confirm({
@@ -287,7 +287,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
       }))
     )
       return;
-    // Leaving a project for none asks too: its tasks stay on that project's list, where only the owner sees them.
+    // Leaving a project for none asks too: its tasks stay on that project's list, for that project's chats.
     if (
       !target &&
       current &&

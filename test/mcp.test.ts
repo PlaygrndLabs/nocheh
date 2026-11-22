@@ -605,6 +605,11 @@ test('the task tool uses only the owner task routes and explains failures',async
   assert.equal((tool('tasks').inputSchema.properties as Record<string,Record<string,unknown>>).reminders!.maxItems,undefined,'the limit is per person, kept by storage');
   const long=await run('tasks',{action:'list'},fake(()=>({tasks:['x'.repeat(30000)]})).context);
   assert.equal(long.truncated,true);assert.equal(long.excerpt.length,22000);assert.match(long.note,/Narrow the list/);
+  assert.equal(long.other_groups,undefined);
+  // A cut read keeps storage's mark that it shows other groups' tasks, which the notes' source labels read (ADR-0276).
+  for(const action of ['list','get'])
+    assert.equal((await run('tasks',{action,id:ID},fake(()=>({other_groups:true,tasks:['x'.repeat(30000)]})).context)).other_groups,true,action);
+  assert.equal((await run('tasks',{action:'list'},fake(()=>({other_groups:'yes',tasks:['x'.repeat(30000)]})).context)).other_groups,undefined);
   assert.deepEqual(await run('tasks',{action:'comment',id:ID,text:'t'},fake(()=>({comment:'x'.repeat(30000)})).context),{id:ID,commented:true});
 });
 

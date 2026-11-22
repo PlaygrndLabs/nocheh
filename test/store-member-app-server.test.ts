@@ -6,7 +6,6 @@ import type {Server} from 'node:http';
 import {digest} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
 import {installChatsForTest} from '../src/chats.js';
-import {inReadSet,readSetGroups} from '../src/spaces.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {memberAppServer,type MemberAppServices} from '../src/stores/member-app.js';
 import {MEMBER_RECHECK_HOURS,forgetMemberAppRechecks} from '../src/stores/member-reads.js';
@@ -14,12 +13,13 @@ import {Members} from '../src/stores/members.js';
 import {TaskRepository,type MemberAppPrincipal} from '../src/stores/tasks.js';
 import type {RuntimeCall} from '../src/runtime.js';
 import {MEMBER_APP_WRITES_PER_10_MIN,MEMBER_APP_WRITES_PER_DAY} from '../src/member-app-wire.js';
-import {BOB,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_APP_HIDDEN,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_GP_OFF,
+import {BOB,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_GP_OFF,
   MEMBER_NG,MEMBER_NG_ACCOUNT,MEMBER_NG_CHAT,MEMBER_NG_ID,NG1,NG1_TG,NG2,NG2_TG,NG_GROUP_IDS,OWNER,P1,UNSERVED,fixtureChats,fixtureDirectory,
   memberAppMembers,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
 // The members' app's listener against the control store (step 5, ADR-0265 D2-D4, D13): who is a member now on every
-// call, their groups confirmed lately (Bob's case: GP1 and GP3, never GP2), when a launch is too old, sign-out,
+// call, their groups confirmed lately (Bob's case: GP1 and GP3, never GP2, though P1's board holds GP2's tasks too,
+// ADR-0276), when a launch is too old, sign-out,
 // the write limit, and the principal the task repository gets. The task methods themselves are part B's; here a
 // recording repository stands in, and the real one's stubs pass through.
 
@@ -91,11 +91,14 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     assert.equal(me.status,200);
     assert.deepEqual(asked.map(item=>item.chat_id).sort(),[GP1,GP3,GP4].sort(),'by their Telegram ids');
     assert.ok(asked.every(item=>item.user_id===MEMBER_GP));
-    assert.deepEqual(me.body,{name:'Mira',mode:'write',reminders:{available:true},projects:[{id:P1,name:'P1'}],
+    // Her groups are the ones she is in; her board names every group of P1, which its tasks' labels may show (ADR-0276).
+    const p1Groups=[{id:GP1,title:'GP1'},{id:GP2,title:'GP2'},{id:GP3,title:'GP3'},{id:UNSERVED,title:'Unserved'}];
+    assert.deepEqual(me.body,{name:'Mira',mode:'write',reminders:{available:true},projects:[{id:P1,name:'P1',groups:p1Groups}],
       groups:[{id:GP1,title:'GP1',board:'open',project:P1,open_count:0},{id:GP3,title:'GP3',board:'open',project:P1,open_count:0},
         {id:GP4,title:'GP4',board:'none',project:null}]});
-    assert.ok(!JSON.stringify(me.body).includes(GP2)&&!JSON.stringify(me.body).includes(UNSERVED),'never GP2 or a group Nocheh does not serve');
-    // Open counts: a group's own open tasks and its topics', never trashed, archived, done, another group's or the project's own.
+    assert.ok(!JSON.stringify(me.body.groups).includes(GP2)&&!JSON.stringify(me.body.groups).includes(UNSERVED),'her groups: never GP2 or a group Nocheh does not serve');
+    // Open counts: the open tasks labelled with a group or its topics, never trashed, archived, done, another group's or the
+    // project's own.
     const task=(name:string,group:string|null,extra='')=>db.query(`INSERT INTO owner_tasks(id,title,status_id,origin,project_id,group_id${extra?','+extra.split('=')[0]:''})
       VALUES($1,$2,'todo','dashboard',$3,$4${extra?','+extra.split('=')[1]:''})`,[digest('app-server:'+name),name,P1,group]);
     await task('one',GP1);await task('topic',GP1_TOPIC);await task('gp2',GP2);await task('project',null);await task('trashed',GP1,'deleted_at=now()');
@@ -104,41 +107,46 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     assert.deepEqual(counted,[[GP1,2],[GP3,0],[GP4,undefined]]);
     assert.equal(asked.length,3,'asked again at most once every ten minutes');
 
-    // The principal a list gets: P1 reaching GP1 (with its topic) and GP3, never GP2; Mira's account and private chat.
+    // The principal a list gets: P1's board, its home her first group there; Mira's account and private chat.
     assert.equal((await ask('/tasks?project='+P1,mira)).status,200);
     const {principal,args}=principals.at(-1)!;
     assert.deepEqual([principal.member,principal.account,principal.accounts,principal.name,principal.mode,principal.chat,principal.reminders],
       [MEMBER_GP_ID,MEMBER_GP_ACCOUNT,[MEMBER_GP_ACCOUNT],'Mira','write',MEMBER_GP_CHAT,{available:true}]);
-    assert.deepEqual(principal.views.map(view=>[view.project,view.name]),[[P1,'P1']]);
-    assert.deepEqual(readSetGroups(principal.views[0]!.reach).sort(),[GP1,GP3].sort());
-    assert.ok(inReadSet(principal.views[0]!.reach,GP1_TOPIC)&&!inReadSet(principal.views[0]!.reach,MEMBER_APP_HIDDEN));
+    assert.deepEqual(principal.views,[{project:P1,name:'P1',home:GP1}]);
     assert.deepEqual(args,[{project:P1}]);
-    // The real repository behind the real listener: P1's own task and GP1's (with its topic's), open ones only; never
-    // GP2's, the trashed or the archived; a GP2 task is not found.
+    // The real repository behind the real listener: P1's whole list, open ones only, GP2's task too, whatever "Share
+    // group chats" says; never the trashed or the archived (ADR-0276).
     const real=await serve(new TaskRepository(db,async()=>{throw Error('no turn here');}));
-    const listed=await fetch(real+'/tasks?project='+P1,{headers:{'x-telegram-init-data':mira}});
-    const page=await listed.json() as {tasks:{title:string}[]};
-    assert.equal(listed.status,200);
-    assert.deepEqual(page.tasks.map(item=>item.title).sort(),['one','project','topic']);
-    const hidden=await fetch(real+'/tasks/'+digest('app-server:gp2'),{headers:{'x-telegram-init-data':mira}});
-    assert.deepEqual([hidden.status,await hidden.json()],[404,{error:'task_not_found'}]);
+    for(const share of [false,true]) {
+      await db.query('UPDATE projects SET share_chats=$2 WHERE id=$1',[P1,share]);
+      const listed=await fetch(real+'/tasks?project='+P1,{headers:{'x-telegram-init-data':mira}});
+      const page=await listed.json() as {tasks:{title:string;group:string|null}[]};
+      assert.equal(listed.status,200);
+      assert.deepEqual(page.tasks.map(item=>[item.title,item.group]).sort(),[['gp2',GP2],['one',GP1],['project',null],['topic',GP1]],`sharing ${share}`);
+      const opened=await fetch(real+'/tasks/'+digest('app-server:gp2'),{headers:{'x-telegram-init-data':mira}});
+      const task=await opened.json() as {title:string;version:string};
+      assert.deepEqual([opened.status,task.title,'read_only' in task],[200,'gp2',false]);
+      const realMe=await fetch(real+'/me',{headers:{'x-telegram-init-data':mira}});
+      assert.deepEqual((await realMe.json() as {projects:unknown}).projects,[{id:P1,name:'P1',groups:p1Groups}]);
+    }
+    await db.query('UPDATE projects SET share_chats=false WHERE id=$1',[P1]);
 
     // A group Telegram last confirmed longer ago than MEMBER_RECHECK_HOURS and cannot confirm again drops out; one it says
     // she left drops out too. Neither is ever read meanwhile.
     await confirmed(GP1,MEMBER_RECHECK_HOURS+1);
-    assert.deepEqual(readSetGroups((await (async()=>{await ask('/tasks?project='+P1,mira);return principals.at(-1)!.principal;})()).views[0]!.reach),[GP3],
+    assert.deepEqual((await (async()=>{await ask('/tasks?project='+P1,mira);return principals.at(-1)!.principal;})()).views,[{project:P1,name:'P1',home:GP3}],
       'past six hours, GP1 is left out until confirmed');
     forgetMemberAppRechecks();asked.length=0;
     status=chat=>chat===GP1?{state:'failed'}:{state:'done',status:'in'};
     const quiet=await ask('/me',mira);
     assert.deepEqual(asked.map(item=>item.chat_id),[GP1],'only the group past six hours');
     assert.deepEqual(quiet.body.groups.map((group:{id:string})=>group.id),[GP3,GP4],'a failed check closes GP1');
-    assert.deepEqual(quiet.body.projects,[{id:P1,name:'P1'}]);
+    assert.deepEqual(quiet.body.projects,[{id:P1,name:'P1',groups:p1Groups}]);
     forgetMemberAppRechecks();status=()=>({state:'done',status:'in'});
     assert.deepEqual((await ask('/me',mira)).body.groups.map((group:{id:string})=>group.id),[GP1,GP3,GP4],'confirmed again, it is back');
     await confirmed(GP3,MEMBER_RECHECK_HOURS+1);forgetMemberAppRechecks();status=chat=>({state:'done',status:chat===GP3?'left':'in'});
     assert.deepEqual((await ask('/tasks/'+digest('app-server:one'),mira,{operation_id:'o1',expected_version:'v',patch:{title:'x'}})).status,200);
-    assert.deepEqual(readSetGroups(principals.at(-1)!.principal.views[0]!.reach),[GP1],'a write asks first: she left GP3');
+    assert.deepEqual(principals.at(-1)!.principal.views,[{project:P1,name:'P1',home:GP1}],'a write asks first: she left GP3');
     assert.equal((await db.query(`SELECT state FROM chat_memberships WHERE chat_id=$1 AND account_id=$2`,[GP3,MEMBER_GP_ACCOUNT])).rows[0].state,'left');
     await db.query(`UPDATE chat_memberships SET state='in',checked_at=now() WHERE chat_id=$1 AND account_id=$2`,[GP3,MEMBER_GP_ACCOUNT]);
     status=()=>({state:'done',status:'in'});

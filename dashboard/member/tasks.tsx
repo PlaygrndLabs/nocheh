@@ -15,6 +15,7 @@ import {ColumnFields, columnPatch, draftsOf, StatusField} from './columns';
 import {
   assigneeText,
   AudienceLine,
+  boardGroups,
   dueText,
   emptyBoard,
   groupTitle,
@@ -65,7 +66,8 @@ export function MemberTasks({me, focus, onMe}: {me: MemberMe; focus: TasksFocus;
     if (project !== pickProject(me, project ?? undefined)) setProject(pickProject(me, project ?? undefined));
   }, [me, project]);
 
-  const groups = me.groups.filter(item => item.board === 'open' && item.project === project);
+  // A board holds the project's whole list, so any of its groups can filter it (ADR-0276).
+  const groups = boardGroups(me, project);
   const groupIds = groups.map(item => item.id).join();
   const query = React.useMemo<MemberTaskQuery | null>(() => {
     if (!project) return null;
@@ -350,15 +352,15 @@ function NewTask({
 }) {
   const {t} = useWords();
   const toast = useToast();
-  const groups = me.groups.filter(item => item.board === 'open' && item.project === project);
+  // The member's own groups on this board; any group of the project can label the task.
+  const own = me.groups.filter(item => item.board === 'open' && item.project === project);
+  const groups = boardGroups(me, project);
   const [title, setTitle] = React.useState('');
   const [notes, setNotes] = React.useState('');
   const [due, setDue] = React.useState('');
   const [tags, setTags] = React.useState('');
   // The member's own group by default: the filtered one, or their first in the project; Whole project is a choice.
-  const [group, setGroup] = React.useState(
-    groups.some(item => item.id === filtered) ? filtered : (groups[0]?.id ?? ''),
-  );
+  const [group, setGroup] = React.useState(own.some(item => item.id === filtered) ? filtered : (own[0]?.id ?? ''));
   const [parent, setParent] = React.useState('');
   // A new task starts in the board's first open status, as the server would put it.
   const firstStatus = board.statuses.find(item => item.state === 'open')?.id ?? '';
@@ -369,9 +371,8 @@ function NewTask({
   // One id per task being added, so a retry after a lost answer adds it once.
   const operation = React.useRef(operationId());
   const parents = tasks.filter(task => task.state === 'open' && !task.trashed);
-  // A subtask goes where its parent is (its group, or the whole project), so with a parent there is no group to choose.
+  // A subtask takes its parent's group, so with a parent there is no group to choose.
   const under = parents.find(task => task.id === parent) ?? null;
-  const audience = under ? (under.group ?? '') : group;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -449,7 +450,7 @@ function NewTask({
             </Select>
           </Field>
         )}
-        <AudienceLine me={me} group={audience} projectName={projectName} />
+        <AudienceLine projectName={projectName} />
         <ColumnFields board={board} prefix="member-task" drafts={columns} onChange={setColumns} />
         {!!parents.length && (
           <Field label={t('field_parent')} htmlFor="member-task-parent">

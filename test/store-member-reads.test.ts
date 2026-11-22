@@ -176,14 +176,15 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
       await assert.rejects(s.access.bindReads(await turn(question,OWNER,{memberRead:ask})),{status:409,code:'member_chat_closed'},'an answered ask reads nothing');
     }
 
-    // Tasks (D14): a list in each of P1 and P2, and one in GP2, which MEMBER_GP left.
+    // Tasks (D14, ADR-0276): a list in each of P1 and P2. GP2, which MEMBER_GP left, is a group of P1, so its task is on
+    // her P1 board too.
     const groupTask=async(raw:string,title:string)=>s.tasks.chatCreate(await turn(await capture(raw,OWNER,'Add '+title,'supergroup'),raw),{title});
     const inGp1=await groupTask(GP1,'Book the hall'),inGp4=await groupTask(GP4,'Print the flyers'),inGp2=await groupTask(GP2,'Hire the band');
     const said=await capture(MEMBER_GP,MEMBER_GP,'What is left?','private'),bound=await s.access.bindReads(await turn(said,MEMBER_GP_CHAT,{member:MEMBER_GP_ID}));
     await assert.rejects(s.tasks.chatList(bound),(error:any)=>{
       assert.equal(error.status,400);assert.equal(error.code,'task_project_required');
       assert.deepEqual(error.details.projects,[{id:P1,name:'P1'},{id:P2,name:'P2'}].sort((a,b)=>a.id<b.id?-1:1));return true;});
-    assert.deepEqual((await s.tasks.chatList(bound,{scope:P1})).tasks.map((task:any)=>task.id),[inGp1.id],'P1: GP1 only, not GP2 they left');
+    assert.deepEqual((await s.tasks.chatList(bound,{scope:P1})).tasks.map((task:any)=>task.id).sort(),[inGp1.id,inGp2.id].sort(),'P1: its whole list');
     assert.deepEqual((await s.tasks.chatList(bound,{scope:P2})).tasks.map((task:any)=>task.id),[inGp4.id]);
     await assert.rejects(s.tasks.chatList(bound,{scope:'personal'}),{status:403,code:'task_scope_denied'});
     assert.equal((await s.tasks.chatGet(bound,inGp1.id)).title,'Book the hall');
@@ -191,23 +192,23 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
     const shaped=await s.tasks.chatGet(bound,inGp1.id),page=await s.tasks.chatList(bound,{scope:P1});
     assert.deepEqual([typeof shaped.version,shaped.revision,shaped.people,shaped.mine,shaped.reminders],['string',undefined,undefined,false,{mine:[],others:0}]);
     assert.deepEqual(Object.keys(page).sort(),['columns','next','statuses','tags','tasks']);
-    // Assignees (ADR-0265 D6): by the People name the owner set (ADR-0274) only while in a group this chat reaches, every
-    // other counted and never named; one bound to the member's own account makes the task theirs.
+    // Assignees (ADR-0265 D6): by the People name the owner set (ADR-0274) only while in a group of the task's project,
+    // every other counted and never named; one bound to the member's own account makes the task theirs (ADR-0276).
     const ali=await seedAssignee(stores.control,CANARY_LABEL,ALI,'Ali T',[GP1]),gus=await seedAssignee(stores.control,'CANARY-LABEL Gus (vendor)',GUS,'Gus T',[GP2]);
     const lone=await seedAssignee(stores.control,'CANARY-LABEL Lone (friend)',null),her=await seedAssignee(stores.control,'CANARY-LABEL Mira (helper)',MEMBER_GP,'Mira T');
     const current=await s.tasks.get(owner,inGp1.id);
     await s.tasks.update(owner,inGp1.id,{operation_id:key+':assignees',expected_revision:current.revision,assignees:[ali,gus,lone]});
     let named=await s.tasks.chatGet(bound,inGp1.id);
-    assert.deepEqual([named.assignees,named.assignees_other,named.mine],[[{name:CANARY_LABEL}],2,false]);
+    assert.deepEqual([named.assignees,named.assignees_other,named.mine],[[{name:CANARY_LABEL},{name:'CANARY-LABEL Gus (vendor)'}],1,false]);
     await s.tasks.update(owner,inGp1.id,{operation_id:key+':assignees-her',expected_revision:(await s.tasks.get(owner,inGp1.id)).revision,assignees:[ali,gus,lone,her]});
     named=await s.tasks.chatGet(bound,inGp1.id);
     const listedNames=(await s.tasks.chatList(bound,{scope:P1})).tasks.find((task:any)=>task.id===inGp1.id);
     for(const value of [named,listedNames]) {
-      assert.deepEqual([value.assignees,value.assignees_other,value.mine],[[{name:CANARY_LABEL},{name:'CANARY-LABEL Mira (helper)'}],2,true]);
-      for(const counted of ['CANARY-LABEL Gus','CANARY-LABEL Lone'])assert.ok(!JSON.stringify(value).includes(counted),counted);
+      assert.deepEqual([value.assignees,value.assignees_other,value.mine],[[{name:CANARY_LABEL},{name:'CANARY-LABEL Gus (vendor)'},{name:'CANARY-LABEL Mira (helper)'}],1,true]);
+      assert.ok(!JSON.stringify(value).includes('CANARY-LABEL Lone'));
     }
     await assert.rejects(s.tasks.chatList(bound,{scope:P1,person:digest('someone')}),{status:400,code:'task_filter_not_allowed'});
-    await assert.rejects(s.tasks.chatGet(bound,inGp2.id),{status:404,code:'task_not_found'});
+    assert.equal((await s.tasks.chatGet(bound,inGp2.id)).title,'Hire the band');
     await assert.rejects(s.tasks.chatCreate(bound,{title:'Hire a band'}),{status:403,code:'task_read_only'});
     await assert.rejects(s.tasks.chatUpdate(bound,inGp1.id,{expected_revision:inGp1.revision,state:'done'}),{status:403,code:'task_read_only'});
     await assert.rejects(s.tasks.chatComment(bound,inGp1.id,{text:'Booked'}),{status:403,code:'task_read_only'});

@@ -14,7 +14,7 @@ import {bindAnswerReads} from './private-answers.js';
 import {chats} from '../chats.js';
 import {deliveredKinds,sendClassOf,unconsentableSendClasses,unlearnedSendClasses,type SendClass} from '../send-classes.js';
 import {memberAskReads,memberChatClosed,memberReads} from './member-reads.js';
-import {sharedProjectGroups} from './project-groups.js';
+import {sharedProjectGroups,withSharedGroups} from './project-groups.js';
 
 /** The 409 a bound reader gets when its reads can't be bound now: an answer keeps ADR-0249's code; a member's private
  * chat and the owner's ask about a member share step 4's. */
@@ -269,8 +269,8 @@ export class SourceAccessRepository {
         [found.member,principal.turnEvent])).rows[0]?.left_out;
       if(!left)throw closed();
       // Each joined group brings the other served groups of its project while that project shares its group chats (ADR-0267).
-      const joined=found.groups.map(group=>group.chat).filter(group=>!left.includes(group)),served=servedGroups(),whole=new Set(joined);
-      for(const group of joined)for(const other of (await sharedProjectGroups(this.stores.control,group,served))?.groups??[])whole.add(other);
+      const joined=found.groups.map(group=>group.chat).filter(group=>!left.includes(group));
+      const whole=await withSharedGroups(this.stores.control,joined,servedGroups());
       return {...principal,reads:readSet({home:found.chat,whole}),memberChat:found.chat};
     }
     if(principal.scope!==owner)throw closed();

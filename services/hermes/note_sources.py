@@ -51,11 +51,17 @@ TOKENS=(re.compile(r'\d{6,}'),re.compile(r'[^\s@<>()"\']+@[^\s@<>()"\']+\.[^\s@<
 # What a turn's tools read, as read tokens. A search by meaning returns archived messages as they were sent, with no
 # source, so it reads other chats as the archive tools do. Only the notes and long-term memory recall are labelled
 # already, and the project's tasks and a job's own to-do list are Nocheh's own records, so they are not outside reads;
-# any other tool is.
+# any other tool is. A task read storage marks other_groups is the exception (task_read).
 TOOL_READS={'mcp__nocheh__archive_search':'archive','mcp__nocheh__archive_read':'archive','mcp__nocheh__archive_page':'archive',
             'mcp__nocheh__memory_search':'archive','mcp__nocheh__browser':'web','mcp__nocheh__notion':'notion','mcp__nocheh__github':'tools','mcp__nocheh__gmail':'tools','mcp__nocheh__mcp':'tools',
             'mcp__nocheh__shell':'commands','session_search':'past'}
 NOT_READS=frozenset({'memory','mcp__nocheh__memory_recall','mcp__nocheh__tasks','todo_list'})
+# Every chat of a project reads its whole task list, but with "Share group chats" off a group does not share what it
+# knows with the project's other groups, so storage marks a read that shows their tasks other_groups (ADR-0276). Such a
+# read is what those chats wrote, so it reads as other chats' messages do. The mark is looked for escaped too, as a
+# result cut to fit or stored inside another holds it; task text cannot hide it, only add a look-alike that counts.
+TASKS='mcp__nocheh__tasks'
+OTHER_GROUPS=re.compile(r'\\*"other_groups\\*"\s*:\s*true')
 # The lines Nocheh puts in a turn's message, which stay in its session until a compaction: what earlier turns read.
 MARKERS=(('[Forwarded: ','forward'),('[Archived attachment: ','file'),('[Recent messages in this group','recent'))
 # The fixed lines src/forwarded.ts forwardLine puts before a forward of the sender's own earlier message, in the owner's
@@ -348,10 +354,16 @@ def _called(row):
     return {call['function'].get('name') for call in calls if isinstance(call,dict) and isinstance(call.get('function'),dict)} if isinstance(calls,list) else set()
 
 
+def task_read(content):
+    """The read token of a task result: other chats' words when storage marked it other_groups, else None."""
+    return 'archive' if isinstance(content,str) and OTHER_GROUPS.search(content) else None
+
+
 def tool_read(row):
     """The read token of a stored tool result, by its tool's name, or None for a tool that is not an outside read. A row
     without a tool name, as an older schema stores it, is another tool."""
     name=row.get('tool_name')
+    if name==TASKS:return task_read(row.get('content'))
     return None if name in NOT_READS else TOOL_READS.get(name,'other')
 
 

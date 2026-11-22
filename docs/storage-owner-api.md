@@ -143,9 +143,9 @@ the removed `sharing_enabled`, `sharing_mode` or `share_into`, is refused with
 `instructions`, `expected_revision`, `operation_id`.
 
 A project shares no knowledge between its groups: a group answer uses only that
-group ([ADR-0247](adr/0247-projects-replace-the-share-box.md)); its groups share
-only the tasks set on the whole project
-([ADR-0248](adr/0248-tasks-follow-data-access.md)). Every sharing rule is
+group ([ADR-0247](adr/0247-projects-replace-the-share-box.md)), unless its
+"Share group chats" is on ([ADR-0267](adr/0267-share-group-chats.md)); its groups always share its whole task list
+([ADR-0276](adr/0276-a-projects-tasks-are-one-list.md)). Every sharing rule is
 the owner's own. A rule with more than 100 sources is refused with 400
 `invalid_sharing_sources`, and a change that would give a group more than ten
 enabled filtered rules, counted over its General chat and topics, is refused

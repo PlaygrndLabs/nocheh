@@ -244,7 +244,8 @@ first seen after the install, have digest ids. The owner adds Nocheh to NG1
 (`owner_adds`), and it then answers, reads its group from a topic and holds a
 task (`new_id_group_works_end_to_end`); it sits in P1 for the
 privacy probes and for `project_groups_stay_apart`, where its own answer reads
-only NG1 and the private answer reads it too.
+only NG1's messages, its task list is the project's whole list, and the private
+answer reads it too.
 `supergroup_upgrade_keeps_history` injects Telegram's `migrate_to_chat_id` and
 `migrate_from_chat_id` messages for a basic group: the supergroup stays the same
 chat, with both Telegram ids, its project, its task and its switch, and a search
@@ -262,7 +263,9 @@ hide and unhide carrying the conversation, reactions keeping the group name,
 learning reaching Honcho, Inbox person cards (one per new name, none for the
 owner), a Telegram Desktop export with a topic, a file and learning, tasks
 from chat with a reminder, status and board, tasks staying out of unrelated
-groups, two groups of one project staying apart while **Answer privately**
+groups, two groups of one project keeping their messages apart though both list
+the project's whole task list, each task labelled by its group
+([ADR-0276](adr/0276-a-projects-tasks-are-one-list.md)), while **Answer privately**
 sits only under the owner's own answer, refuses a member's tap and answers the
 owner's `/start` from both groups but not the third (its probe mark rides an
 unaddressed message just before the question, so no search hit or private
@@ -291,8 +294,9 @@ once; and posts made in a chat's own name, which get nothing. Member private cha
 Telegram answers `getChatMember` from what it has shown of each person in each
 group. The scenarios cover a member in groups of two projects and a group of
 none, who reads all three privately and nothing else, lists tasks one project at
-a time (asked without one, the tool names the two lists), cannot open a task of a
-group they never joined or the owner's, and cannot add one or post to a group
+a time (asked without one, the tool names the two lists), reads the task of a
+group of that project they never joined, with the project's sharing on and off,
+cannot open the owner's personal task, and cannot add one or post to a group
 (`member_private_chat_reads_joined_groups`); group talk off, which leaves private
 chat on (`member_private_chat_with_group_talk_off`); a paused member and one with
 private chat off, who get the fixed private reply once a UTC day and are answered
@@ -332,15 +336,18 @@ page, which asks for Trusted Types, and the edge reaching nothing but its own
 network (`owner_mini_app_still_works`); Apply setting the members' page as every
 private chat's menu button and then the owner's page on the owner's chat, and
 both going back to Telegram's default when turned off (`menu_button_on_apply`);
-a member seeing only the tasks of groups they joined and those groups'
-projects, never the owner's private columns or personal tasks, and the person
+a member seeing the whole list of each project that holds a group they joined,
+another group's task included and labelled with it, with every group of the
+project named and usable as a filter, never another project's task, the owner's
+private columns or personal tasks, and the person
 the owner assigned, linked to no Telegram account, only counted, never by the
 owner's name for them, adding,
 finishing, trashing, restoring and commenting with write, reading only with
 read, and refused launches from the owner, a stranger, a group or another key
 (`member_app_tasks`); the app closing when the member is paused, signed out or
 removed (`member_app_ends_on_removal`); a group they left while Nocheh missed it
-dropping out after the Telegram re-check (`member_app_drops_a_left_group`); and
+dropping out after the Telegram re-check, with a project's board gone once its
+last group they joined is (`member_app_drops_a_left_group`); and
 a reminder set in the app reaching only the member's own chat, saying "Set by
 you", and skipped rather than sent to the owner when their private chat is off
 (`member_app_reminder_goes_to_setter`). `member_reminder_says_who_set_it` now

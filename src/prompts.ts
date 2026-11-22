@@ -114,10 +114,12 @@ export const learningPrompt=(
 export const approvalCard='📨 Send to {destination}\n💬 Asked in {origin}\n\n{text}';
 export const approvalAction='⚙️ {kind}\n📝 {summary}\n💬 Asked in {origin}\n\n{arguments}';
 /** The card for a change asked in the owner's private chat that a project's chats would see: {change} says what changes
- * in which project's list, {chats} names every group and topic that sees that list, {private} what stays private, and
- * {fields} shows exactly what those chats will see, field by field (ADR-0243). */
+ * in which project's list, {chats} names every group and topic of that project, since each of them sees the whole list
+ * whatever group a task is labelled with, {private} what stays private, and {fields} shows exactly what those chats
+ * will see, field by field (ADR-0243, ADR-0276). */
 export const approvalTask='📋 {change}\n👥 Seen in {chats}\n🔒 {private}\n\n{fields}';
-/** One "name: text" line for each button, outcome and notice on an approval card. */
+/** One "name: text" line for each button, outcome and notice on an approval card. A stored line under a name Nocheh no
+ * longer uses, such as the group-only task lines before ADR-0276, is read and never shown. */
 export const approvalTexts=[
   'approve: ✅ Approve','reject: ❌ Reject','allow_once: ✅ Allow once','allow_here: 🕒 Allow where asked, 12 hours','allow_always: 📌 Always allow this site where asked',
   'allow_command: 📌 Always allow it where asked','allow_document: 📌 Always allow this file where asked','allow_tool: 📌 Always allow this tool where asked',
@@ -166,9 +168,6 @@ export const approvalTexts=[
   'task_add: Add a task to the list of {project}','task_move: Move a task into the list of {project}',
   'task_move_family: Move a task, with {count} under it, into the list of {project}','task_change: Change a task in the list of {project}',
   'task_comment: Comment on a task in the list of {project}','task_no_chats: no chat yet','task_later: Chats you add to this project later will see it too.',
-  'task_move_group: Move a task to {group} in the list of {project}','task_move_group_family: Move a task, with {count} under it, to {group} in the list of {project}',
-  'task_move_project: Set a task on {project} itself, for every group in it','task_move_project_family: Set a task, with {count} under it, on {project} itself, for every group in it',
-  'task_group_only: Other groups in this project don\'t see it.','task_group_later: {group} will see it once you add that group to this project.',
   'task_private_move: Its earlier comments and history, the archived messages attached to it, its IDs in outside tools such as Notion and the columns you have not shared stay private.',
   'task_private_family: Their earlier comments and history, the archived messages attached to them, their IDs in outside tools such as Notion and the columns you have not shared stay private.',
   'task_private_parts: The archived messages attached to it and the columns you have not shared stay private.',
@@ -183,7 +182,6 @@ export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_alw
   'failed_action'|'unsure'|'not_run'|'read_closed'|'marked_ran'|'marked_not_run'|'marked_sent'|'marked_not_sent'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_sandbox'|'reason_other'|
   'from_job'|'from_schedule'|'from_schedule_in'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
   'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_later'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed'|
-  'task_move_group'|'task_move_group_family'|'task_move_project'|'task_move_project_family'|'task_group_only'|'task_group_later'|
   'group_chat'|'topic_name'|'person_chat'|'person_chat_more'|'person_chat_other'|'unnamed_person'|'unknown_chat'|'not_served'|'name_project'|'name_id'|
   'not_sent'|'reason_not_served'|'reason_settings_changed'|'reason_member_changed'|'schedule_not_sent'|'schedule_not_run'|'job_report_not_sent';
 /** The labeled lines, with any line the owner removed or left empty taken from the default, and so is a stored line

@@ -1,8 +1,9 @@
 /**
  * Memory › Projects: put related groups in one project for a shared role, skills and task list, and optionally let
  * Nocheh create projects itself. While a project shares its group chats, an answer in any of its groups can use all of
- * them (ADR-0267); off, a group answer uses only that group. A topic always follows its group's project (ADR-0247,
- * ADR-0248). A project can have its own Notion, which its groups use (ADR-0268).
+ * them (ADR-0267); off, a group answer uses only what that group knows. Either way every chat of a project sees and
+ * changes its one task list (ADR-0276). A topic always follows its group's project (ADR-0247, ADR-0248). A project can
+ * have its own Notion, which its groups use (ADR-0268).
  */
 import {ProjectGithub} from '../settings/github';
 import {NotionConnection} from '../settings/connections';
@@ -277,7 +278,11 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
         <Field
           label="Share group chats"
           htmlFor="project-share"
-          hint={share ? `${sharedChatsNote} ${relatedGroupsHint}` : 'Off: an answer in a group uses only that group.'}
+          hint={
+            share
+              ? `${sharedChatsNote} ${relatedGroupsHint}`
+              : 'Off: an answer in a group uses only what that group knows. The project’s tasks are still one list for all its groups.'
+          }
         >
           <Switch id="project-share" label="Share group chats" checked={share} onChange={setShare} />
         </Field>
@@ -463,7 +468,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   };
 
   // A group taken out of a project joins none, which answers "Which project does this group join?" too. It asks first:
-  // the group's tasks stay on this project's list, where only the owner sees them (ADR-0248).
+  // the group's tasks stay on this project's list, which its other chats keep seeing (ADR-0276).
   const remove = async (chat: ContextChat) => {
     const name = chats.name(chat.space_id);
     if (
@@ -510,8 +515,8 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
       )}
       {members.length > 1 && (
         <p className="mt-2 text-xs text-muted">
-          These groups share only the tasks set on the whole project. People in two of them can get private answers that
-          combine them.
+          These groups share one task list, whatever “Share group chats” says. People in two of them can get private
+          answers that combine them.
         </p>
       )}
       {project.state === 'active' && (

@@ -173,7 +173,7 @@ test('the member listener checks every call in order and answers only with fixed
   const runtime:string[]=[];
   const make=(identity:Record<string,unknown>|null,options:{limit?:boolean}={})=>{
     const fake=fakeControl(identity,options);
-    const server=memberAppServer({control:fake.control,tasks,policy:()=>({owner_id:ownerId,owner_chat:ownerId,topic_memory:'group'}),
+    const server=memberAppServer({control:fake.control,tasks,policy:()=>({owner_id:ownerId,owner_chat:ownerId}),
       call:async(operation)=>{runtime.push(operation);return {};}},{botId,key:publicKey});
     return {fake,server};
   };

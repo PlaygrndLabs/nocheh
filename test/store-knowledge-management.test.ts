@@ -163,10 +163,10 @@ test('delegated organization only creates projects; every move asks the owner, n
    assert.equal(leave.state,'review');
    assert.deepEqual((await s.knowledge.proposal(owner,leave.id)).project_groups,[{id:created.id,name:created.name,groups:[]}],'leaving names the project too');
    assert.deepEqual((await s.knowledge.proposal(owner,leave.id)).task_projects,[]);
-   // A group joining a project sees the tasks set on the whole project, never another group's own (ADR-0248).
+   // A group joining a project sees the project's whole list, a task labelled with another group too (ADR-0276).
    const groupTask=await s.tasks.create(owner,{operation_id:key+':group-task',title:'Synthetic group task',scope:created.id});
    await stores.control.query('UPDATE owner_tasks SET group_id=$2 WHERE id=$1',[groupTask.id,group]);
-   assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[],'another group\'s own task is not on the joining group\'s board');
+   assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[{id:created.id,name:created.name}],'another group\'s task is on the joining group\'s board');
    const projectTask=await s.tasks.create(owner,{operation_id:key+':project-task',title:'Synthetic project task',scope:created.id});
    assert.deepEqual((await s.knowledge.proposal(owner,join.id)).task_projects,[{id:created.id,name:created.name}]);
    for(const task of [groupTask,projectTask]){const gone=await s.tasks.update(owner,task.id,{operation_id:key+':trash:'+task.id,expected_revision:task.revision,trashed:true});await s.tasks.remove(owner,gone.id);}
@@ -179,10 +179,9 @@ test('delegated organization only creates projects; every move asks the owner, n
    const board=async()=>(await stores.control.query('SELECT id,project_id,group_id,project_since::text FROM owner_tasks WHERE id=ANY($1::text[]) ORDER BY id',[family])).rows;
    const placed=await board();
    assert.deepEqual(placed.map(row=>[row.project_id,row.group_id]),placed.map(row=>[created.id,row.id===topical.id?other+'/topic/5':other]),'a subtask has its parent\'s group');
-   const movedTo=async(project:string,why:string)=>{
-    const rows=await board();
-    assert.deepEqual(rows.map(row=>row.project_id),rows.map(()=>project),why);
-    assert.deepEqual(rows.map(row=>[row.id,row.group_id,row.project_since]),placed.map(row=>[row.id,row.group_id,row.project_since]),'each keeps its group and project_since');
+   // A group's tasks never move with it (ADR-0276): each stays on its list with its group, joining time and comments.
+   const stayed=async(why:string)=>{
+    assert.deepEqual(await board(),placed,why);
     assert.deepEqual((await s.tasks.get(owner,top.id)).comments.map((item:any)=>item.body),['Synthetic comment'],'and its comments');
    };
    // The owner approves the move: it applies under the owner's review, and undoing it names the project's groups too.
@@ -193,27 +192,27 @@ test('delegated organization only creates projects; every move asks the owner, n
    assert.deepEqual(joinReceipt.undo_project_groups,[{id:created.id,name:created.name,groups:[group]}]);
    const moved=(await s.projects.effective(other)).own_assignment!;
    await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:plain.id,expected_revision:moved.revision,operation_id:key+':owner-moves-on'});
-   await movedTo(plain.id,'a group moving from one project to another takes its tasks, its topics\' and the ones under them (ADR-0248)');
+   await stayed('a group moving from one project to another leaves its tasks, its topics\' and the ones under them');
    await assert.rejects(s.knowledge.undo(owner,join.id,{expected_revision:joinReceipt.revision,operation_id:key+':undo-conflict'}),{code:'knowledge_undo_conflict'});
    assert.equal((await s.knowledge.proposal(owner,join.id)).state,'applied','conflicting undo preserves original receipt');
    await s.projects.assign(owner,{space_id:other,mode:'inherit',expected_revision:moved.revision+1,operation_id:key+':owner-moves-back'});
-   await movedTo(plain.id,'leaving every project leaves its tasks on the old board');
-   // Joining another project from none takes nothing off the old board: the tasks stay where only the owner sees them.
+   await stayed('leaving every project leaves its tasks on the old board');
+   // Joining another project from none takes nothing off the old board.
    await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:created.id,expected_revision:moved.revision+2,operation_id:key+':owner-joins-other'});
-   await movedTo(plain.id,'joining from no project moves nothing');
-   // Undoing an organization that moved the group between two projects moves its tasks back.
+   await stayed('joining from no project moves nothing');
+   // An organization that moves the group between two projects, and its undo, move no task either.
    await s.projects.assign(owner,{space_id:other,mode:'assigned',project_id:plain.id,expected_revision:moved.revision+3,operation_id:key+':owner-moves-again'});
-   await movedTo(plain.id,'its tasks on the project it leaves, none here, are all that move');
+   await stayed('moving again moves nothing');
    const across=await persist('across',{kind:'organization',reason:'Synthetic move across projects',creates:[],
     assignments:[{space_id:other,project_id:created.id,expected_revision:moved.revision+4,evidence_ids:[moveSource.id],reason:'Explicit purpose evidence',purpose_evidence:true}]},moveSource,other);
    assert.equal(across.state,'review');
    await s.knowledge.decide(owner,across.id,{decision:'approve',expected_revision:(await s.knowledge.proposal(owner,across.id)).revision,operation_id:key+':approve-across'});
    assert.equal((await s.knowledge.process('proposal:'+across.id)).state,'applied');
-   await movedTo(created.id,'an applied organization moves the group\'s tasks with it');
+   await stayed('an applied organization moves no task');
    const acrossReceipt=await s.knowledge.proposal(owner,across.id);
    assert.equal((await s.knowledge.undo(owner,across.id,{expected_revision:acrossReceipt.revision,operation_id:key+':undo-across'})).state,'undone');
    assert.equal((await s.projects.effective(other)).project?.id,plain.id);
-   await movedTo(plain.id,'undoing it moves them back');
+   await stayed('nor does its undo');
    const back=(await s.projects.effective(other)).own_assignment!;
    await s.projects.assign(owner,{space_id:other,mode:'inherit',expected_revision:back.revision,operation_id:key+':owner-leaves-again'});
    for(const id of [topical.id,under.id,top.id]){const task=await s.tasks.get(owner,id);const gone=await s.tasks.update(owner,id,{operation_id:key+':trash:'+id,expected_revision:task.revision,trashed:true});await s.tasks.remove(owner,gone.id);}

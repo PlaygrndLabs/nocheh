@@ -51,7 +51,12 @@ test('the member page imports nothing of the owner’s pages, API client or mini
 test('the member page never names the owner page’s storage keys or renders raw HTML', async () => {
   for (const path of own) {
     const text = await readFile(path, 'utf8');
-    for (const banned of ['nocheh.mini-session', 'nocheh.telegram-launch', 'nocheh.telegram-theme', '__NOCHEH_MINI_SESSION__'])
+    for (const banned of [
+      'nocheh.mini-session',
+      'nocheh.telegram-launch',
+      'nocheh.telegram-theme',
+      '__NOCHEH_MINI_SESSION__',
+    ])
       assert.equal(text.includes(banned), false, `${path} names ${banned}`);
     for (const banned of ['dangerouslySetInnerHTML', 'innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write'])
       assert.equal(text.includes(banned), false, `${path} uses ${banned}`);
@@ -63,7 +68,11 @@ test('the member page never names the owner page’s storage keys or renders raw
 
 test('the page is in English only, every word is filled, and none says team', async () => {
   const i18n = await load('dashboard/member/i18n.ts');
-  assert.deepEqual(Object.keys(i18n).sort(), ['memberWords', 'translate'], 'one English dictionary, no language choice');
+  assert.deepEqual(
+    Object.keys(i18n).sort(),
+    ['memberWords', 'translate'],
+    'one English dictionary, no language choice',
+  );
   for (const [key, value] of Object.entries(i18n.memberWords)) assert.ok(value.trim(), `${key} is empty`);
   for (const value of Object.values(i18n.memberWords)) {
     assert.doesNotMatch(value, /\bteams?\b/i);
@@ -73,7 +82,8 @@ test('the page is in English only, every word is filled, and none says team', as
   // Nothing on the page reads Telegram's language or turns it right to left.
   for (const path of own) {
     const text = await readFile(path, 'utf8');
-    for (const banned of ['language_code', "'rtl'", 'rtl:', 'prefs']) assert.equal(text.includes(banned), false, `${path} has ${banned}`);
+    for (const banned of ['language_code', "'rtl'", 'rtl:', 'prefs'])
+      assert.equal(text.includes(banned), false, `${path} has ${banned}`);
   }
 });
 
@@ -153,6 +163,37 @@ test('only http(s) links are followed, list filters are the member route’s own
   assert.deepEqual(problem(new MemberApiError(409, 'conflict')), {word: 'conflict', reload: false});
   assert.deepEqual(problem(new MemberApiError(403, 'task_read_only')), {word: 'read_only_now', reload: true});
   assert.deepEqual(problem(new MemberApiError(429, 'member_app_busy')), {word: 'busy', reload: false});
+});
+
+test('a task’s group shows by its title, another group of the project’s too', async () => {
+  const {groupTitle, boardGroups} = await loadSource(
+    "export {groupTitle, boardGroups} from './dashboard/member/shared.tsx';",
+  );
+  const {translate} = await load('dashboard/member/i18n.ts');
+  const project = 'a'.repeat(64);
+  const own = {id: '-30001', title: 'Aurora planning', board: 'open', project, open_count: 1};
+  const me = {
+    name: 'Lena',
+    mode: 'write',
+    reminders: {available: true},
+    projects: [{id: project, name: 'Studio launch', groups: [own, {id: '-30006', title: 'Print crew'}]}],
+    groups: [own],
+  };
+  // A board is the project's whole list, so a task of a group the member is not in names that group (ADR-0276).
+  assert.equal(groupTitle(me, '-30006', translate), 'Print crew');
+  assert.equal(groupTitle(me, '-30001', translate), 'Aurora planning');
+  assert.equal(groupTitle(me, null, translate), 'Whole project');
+  assert.equal(groupTitle(me, '-39999', translate), 'Unnamed group');
+  assert.deepEqual(
+    boardGroups(me, project).map(group => group.id),
+    ['-30001', '-30006'],
+  );
+  // Without the project's groups, the member's own groups on that board.
+  assert.deepEqual(
+    boardGroups({...me, projects: [{id: project, name: 'Studio launch'}]}, project).map(group => group.id),
+    ['-30001'],
+  );
+  assert.equal(translate('whole_project_line', {project: 'Studio launch'}).includes('whatever its group'), true);
 });
 
 test('the Mini app card names the owner’s address and the members’ /m/', async () => {

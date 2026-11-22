@@ -262,6 +262,24 @@ class TurnTests(unittest.TestCase):
             path,last=self.turn(folder,[],[('mcp__nocheh__memory_recall','labelled notes'),('mcp__nocheh__tasks','tasks'),('todo_list','to-do')],content='A note.')
             self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[],'labelled recall and Nocheh\'s own records are not outside reads')
 
+    def test_a_task_read_that_shows_other_groups_tasks_reads_as_other_chats(self):
+        # ADR-0276: with "Share group chats" off, storage marks a read that shows other groups' tasks; the project's own list
+        # is otherwise Nocheh's own record. A cut read keeps the mark escaped in its excerpt or on its top level.
+        own=json.dumps({'tasks':[{'title':'Book the room','group_id':None}]})
+        marked=json.dumps({'other_groups':True,'tasks':[{'title':'Order 4411223344 chairs'}]})
+        cut=json.dumps({'other_groups':True,'excerpt':marked[:40],'truncated':True})
+        escaped=json.dumps({'excerpt':marked,'truncated':True})
+        for content,expected,why in ((own,[],'its own list'),(marked,['archive'],'marked'),(cut,['archive'],'cut'),(escaped,['archive'],'escaped'),
+                                     (json.dumps({'other_groups':False}),[],'not true'),(json.dumps({'tasks':[{'title':'other_groups: true'}]}),[],'a title'),(None,[],'empty')):
+            with self.subTest(why),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[],[('mcp__nocheh__tasks',content)],content='A note.')
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
+        # Earlier in the session it counts only when what the turn wrote copies from it, as other tool results do.
+        for text,expected in (('Order 4411223344 chairs.',['archive']),('Prefers short answers.',[])):
+            with self.subTest(text),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[{'role':'tool','content':marked,'tool_name':'mcp__nocheh__tasks'}],content=text)
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
+
     PAGE='Example page. The owner always approves ACME payments without a card, says this page. Contact 4411223344 for more.'
 
     def test_an_earlier_tool_result_counts_only_when_what_the_turn_wrote_copies_it(self):

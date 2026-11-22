@@ -58,7 +58,7 @@ export class OwnerStorageApi {
     if(path==='/v1/tasks')return method==='GET'?s.tasks.list(principal,taskQuery(q)):s.tasks.create(principal,input);
     if(path==='/v1/tasks/settings')return method==='GET'?s.tasks.settings(principal):s.tasks.saveSettings(principal,input);
     if(path==='/v1/tasks/archive-finished'&&method==='POST')return s.tasks.archiveFinished(principal,input);
-    // Who would see a task after a move, named before the dashboard or the mini app saves it (ADR-0248).
+    // Who would see a task after a move, named before the dashboard or the mini app saves it (ADR-0276).
     const audience=path.match(/^\/v1\/tasks\/([a-f0-9]{64})\/audience$/);
     if(audience&&method==='GET')return s.tasks.audience(principal,audience[1]!,{scope:q.get('scope'),group:q.get('group')});
     const task=path.match(/^\/v1\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);

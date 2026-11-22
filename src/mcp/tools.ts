@@ -305,22 +305,25 @@ const TASK_NOTES:Record<string,string>={task_reminder_past:'Nothing was changed:
 const taskFields=['title','notes','status','state','priority','start_on','start_time','due_on','due_time','repeat','parent','scope','group','people','assignees','tags',
   'properties','reminders','blocked_by','related','attachments'];
 const pick=(args:Value,keys:readonly string[])=>Object.fromEntries(keys.filter(key=>own(args,key)).map(key=>[key,args[key]]));
+/** Storage's mark that a chat's task read shows tasks of other groups it does not share what it knows with, kept on a read
+ * cut to fit: Hermes labels a note written after it as from an outside read (ADR-0276). */
+const otherGroups=(answer:unknown)=>answer&&typeof answer==='object'&&(answer as Value).other_groups===true?{other_groups:true}:{};
 async function tasks(args:Value,context:ToolContext) {
   try {
     const action=args.action;
     if(action==='list') {
       const values:Record<string,string>={};
       for(const key of ['state','when','scope','tag','group','person','status','priority','parent','q','sort','after'])if(args[key]!==undefined&&args[key]!==null&&args[key]!=='')values[key]=String(args[key]);
-      const value=text(await request(context,'/v1/owner/tasks'+query(values)));
+      const answer=await request(context,'/v1/owner/tasks'+query(values)),value=text(answer);
       // Bound tool context; the dashboard keeps the complete lists.
-      return size(value)<=24000?value:text({excerpt:cut(value,0,22000),truncated:true,note:'Narrow the list with filters or after.'});
+      return size(value)<=24000?value:text({...otherGroups(answer),excerpt:cut(value,0,22000),truncated:true,note:'Narrow the list with filters or after.'});
     }
     if(action==='add')return text(await request(context,'/v1/owner/tasks',pick(args,taskFields)));
     const task=String(own(args,'id')?args.id:'');
     if((action==='get'||action==='update'||action==='comment')&&!hex.test(task))return text({error:'invalid_task_id'});
     if(action==='get') {
-      const value=text(await request(context,'/v1/owner/tasks/'+task));
-      return size(value)<=24000?value:text({excerpt:cut(value,0,22000),truncated:true});
+      const answer=await request(context,'/v1/owner/tasks/'+task),value=text(answer);
+      return size(value)<=24000?value:text({...otherGroups(answer),excerpt:cut(value,0,22000),truncated:true});
     }
     if(action==='update')return text(await request(context,'/v1/owner/tasks/'+task,pick(args,['expected_revision',...taskFields,'archived','trashed'])));
     if(action==='comment') {
@@ -629,9 +632,9 @@ export const mcpTools:readonly McpTool[]=[
     'action=list reads tasks (state open by default; done, dropped or all; when today or upcoming; scope all, personal or a project id; optionally one tag, '+
     'group, person, status, priority, parent id or top, q to search words, sort due, priority, manual, created or updated) and returns the lists (scopes), '+
     'tags in use, settings and today. action=get reads one task with its subtasks, links, comments and history. action=add needs title and takes the fields '+
-    'above; a task the owner does not tie to a project is personal, and a subtask joins its parent\'s list and group. A task added in a group or topic '+
-    'belongs to it, and only that group sees it; set group null only when the person asks to put it on the whole project\'s board, which every group in '+
-    'the project sees. '+
+    'above; a task the owner does not tie to a project is personal, and a subtask joins its parent\'s list and group. A project\'s tasks are one list '+
+    'that every group and topic of the project reads and changes; a task\'s group (a group or topic of that project) is only a label to sort and filter '+
+    'by. A task added in a group or topic is labelled with it; set group null when the person asks for no group. '+
     'action=update needs id and the expected_revision from the latest list or get, plus the fields to change; lists such as tags, people, assignees, '+
     'blocked_by, related, attachments and reminders replace the whole list, null clears a field, state done finishes a task (a repeating task then makes '+
     'its next one), archived true archives it and trashed true moves it to the trash. action=comment adds text as a comment. '+
@@ -639,16 +642,18 @@ export const mcpTools:readonly McpTool[]=[
     'member\'s to that member\'s own private chat with Nocheh (to the owner instead when it cannot reach them there). In a group, a list changes only reminders '+
     'people set; the owner\'s reminders stay even when left out. Each person keeps up to 10 of their own on a task. repeat is '+
     '{"every":1,"unit":"day|week|month|year","weekdays":[1,4],"from":"due|done"} (weekdays only with week, 0 is Sunday) or null. '+
-    'In the owner private conversation every list is available; in a group or topic that belongs to a project only that group\'s own tasks (with its '+
-    'topics\' tasks when they share memory) and the tasks set on the project itself (no group) are, never another group\'s tasks, and nothing else; '+
-    'elsewhere none. In a project\'s chat a task shows only as it is on that project\'s board: comments and history only from when it joined its list or group, '+
+    'In the owner private conversation every list is available; in a group or topic that belongs to a project its project\'s whole list is, whatever '+
+    'group a task is labelled with, and nothing else; elsewhere none. In a project\'s chat a task shows only as it is on that project\'s board: a group label '+
+    'only when it names a group or topic of the project now (otherwise none), comments and history only from when it joined the list, '+
     'only the columns the owner shares with project chats, no attached archived messages and no outside IDs such as Notion\'s, never people or person '+
-    'columns, and assignees only by their Telegram name, for those the owner linked to a Telegram account in one of the groups that chat reaches, every '+
-    'other assignee only counted in assignees_other (say "N other people", never guess who); nothing is missing by error. In a member\'s private chat tasks are only read, one project\'s board at a time (scope names it), '+
+    'columns, and assignees only by their Telegram name, for those the owner linked to a Telegram account in one of the project\'s groups, every '+
+    'other assignee only counted in assignees_other (say "N other people", never guess who); nothing is missing by error. '+
+    'A result with other_groups true shows tasks labelled with other groups of the project, which this chat does not share what it knows with: use them '+
+    'to answer here, but never write them into this chat\'s notes or memory. In a member\'s private chat tasks are only read, one project\'s board at a time (scope names it), '+
     'never personal tasks and never with a person filter; each task there has an opaque version instead of a revision, mine (the member made it, set '+
     'a reminder on it or is one of its assignees), on_board_since, and reminders as the member\'s own still to come plus how many others, never whose. '+
-    'In the owner private conversation, a change that a group would see (adding a task to a project\'s list, moving one into it or to a group in it, a comment on '+
-    'one of its tasks, or changing anything on them but status, priority, start and due days and times, archive and trash) waits for the owner\'s card, '+
+    'In the owner private conversation, a change that a project\'s chats would see (adding a task to a project\'s list, moving one into it, a comment on '+
+    'one of its tasks, or changing anything on them but status, priority, start and due days and times, group label, archive and trash) waits for the owner\'s card, '+
     'which shows every task under a task that moves in: the '+
     'result has state proposed, and nothing changes until the owner approves it.',
     inputSchema:shape({action:{type:'string',enum:['list','get','add','update','comment']},state:{type:'string',enum:['open','done','dropped','all']},

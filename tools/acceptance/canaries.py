@@ -15,8 +15,8 @@ a mark anywhere else is a leak.
 
 The members' app (step 5, ADR-0265) reads no chat at all, so its answers are swept whole: every answer the tester's
 member_http got is kept in mini-app-responses.jsonl, and `member_app_never_leaks` fails on any saved mark in any of them,
-a member's own MEMBERMARK included, and on the app's own marks (member-app-marks.json): a task title of a group the
-member never joined (GP2MARK), the owner's personal task (PERSONALMARK), and on a task the member does see, a private
+a member's own MEMBERMARK included, and on the app's own marks (member-app-marks.json): a task title of a project the
+member is in no group of (OTHERPROJECTMARK), the owner's personal task (PERSONALMARK), and on a task the member does see, a private
 column's value (OWNERCOLMARK), the owner's name for the person assigned (OWNERNAMEMARK) and a comment from before the task
 joined the board (PREJOINMARK). The reminders that reached members' own chats are swept for the same marks and for
 people's Telegram names.
@@ -246,7 +246,7 @@ def member_reminders(state, owner):
 
 
 def leaks_reminders(state, marks, owner):
-    """Each reminder in a member's own chat whose text holds a mark, such as a task title of a group they never joined,
+    """Each reminder in a member's own chat whose text holds a mark, such as a task title of a project they are not in,
     the owner's name for a person, a comment from before the task joined the board, or anyone's Telegram name (the
     fixture's people and groups are all called "Synthetic ..."). Pure."""
     hits = []
