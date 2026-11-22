@@ -21,6 +21,9 @@ replace('''  saveConfig: (config: Record<string, unknown>, profile = getManageme
       headers: { "Content-Type": "application/json", "If-Match": String(config._nocheh_revision || "") },
       body: JSON.stringify({ config }),
     }).then(result => { config._nocheh_revision = result.revision; return result; }),''')
+path.write_text(source)
+path = root / 'web/src/lib/api-request-scope.ts'
+source = path.read_text()
 replace('const PROFILE_SCOPED_PREFIXES = [', 'const PROFILE_SCOPED_PREFIXES = [\n  "/api/files",\n  "/api/chat/image-upload",')
 path.write_text(source)
 path = root / 'web/src/contexts/ProfileProvider.tsx'

@@ -254,7 +254,8 @@ class MachineBackendTests(Machine):
             time.sleep(.1)
         self.assertTrue(session.exited);self.assertIn('Alice: done',session.output_buffer)
         logged=[(item['body']['kind'],item['body']['command']) for item in self.broker.requests[sent:]]
-        self.assertEqual(logged[0],('command',command));self.assertGreaterEqual(len(logged),3)
+        # Hermes 0.23.2 reads liveness, output and exit in one poll, so a short command may need only one.
+        self.assertEqual(logged[0],('command',command));self.assertGreaterEqual(len(logged),2)
         self.assertEqual({kind for kind,_ in logged[1:]},{'internal'})
 
 
