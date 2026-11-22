@@ -1,8 +1,8 @@
 {
-  "honcho": {"repository":"https://github.com/plastic-labs/honcho.git","revision":"3326373c35f6538fb3b7af97803abe328c5aafb4"},
+  "honcho": {"repository":"https://github.com/plastic-labs/honcho.git","revision":"e212feef9bb0e085b2a660a0181d13234dbf858b"},
   "build_images": {
     "python:3.13-slim-bookworm":"python:3.13-slim-bookworm@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72",
     "ghcr.io/astral-sh/uv:0.13.5":"ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff"
   },
-  "note":"Honcho source pin is the v3.6.0 release. Reasoning uses the memory provider chosen in Settings › Models."
+  "note":"Honcho source pin is the v3.6.2 release. Reasoning uses the memory provider chosen in Settings › Models."
 }

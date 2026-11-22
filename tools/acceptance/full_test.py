@@ -38,7 +38,7 @@ from tools.acceptance.owner_dashboard import FIXTURE_PASSWORD
 from tools.paths import ROOT
 
 IMAGES = {'services': 'nocheh-services:local', 'management': 'nocheh-management:local', 'postgres': 'nocheh-store-postgres:local',
-          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:3326373c', 'box': 'nocheh-box:local', 'miniapp': 'nocheh-miniapp:local'}
+          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:e212feef', 'box': 'nocheh-box:local', 'miniapp': 'nocheh-miniapp:local'}
 # The Telegram mini app's edge joins the fixture only when the fake Telegram connects (telegram_rehearsal.py), without its
 # tunnel; the synthetic installation itself starts without it.
 LATER_IMAGES = ('miniapp',)

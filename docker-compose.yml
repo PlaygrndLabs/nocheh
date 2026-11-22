@@ -56,7 +56,7 @@ x-service: &service
 
 x-honcho-runtime: &honcho-runtime
   logging: *logging
-  image: nocheh-honcho:3326373c
+  image: nocheh-honcho:e212feef
   build:
     context: ./data/compat/upstreams/honcho
     # Written into the context by `./bin/nocheh build` (tools/operations/memory/honcho_setup.py): Compose builds through
