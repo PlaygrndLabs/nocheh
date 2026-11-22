@@ -4577,9 +4577,10 @@ class ProductScenarios(Scenarios):
         # A member in groups of two projects and in a group of none reads all three from their own private chat, and
         # nothing else: not a group they never joined, not the owner's private chat (step 4, ADR-0262). Its tasks are read
         # only, one project's list at a time (D14): asked without a project, the tool names the two lists to choose
-        # from; each list holds only the tasks of the groups they joined; a task of a group they never joined or the owner's
-        # own task is not found; adding one is refused. A message to a group is refused too, with no card. OTHER_GROUP and
-        # NEW_GROUP (which the member never joins) are in project A, THIRD_GROUP in B; GROUP stays in none.
+        # from; each list holds the tasks of the groups they joined and, while the project shares its group chats (on by
+        # default, ADR-0267 D1 and D4), of its other groups too; switched off, a task of a group they never joined is not found.
+        # The owner's own task is never found; adding one is refused. A message to a group is refused too, with no card.
+        # OTHER_GROUP and NEW_GROUP (which the member never joins) are in project A, THIRD_GROUP in B; GROUP stays in none.
         person, number = self.fresh_person(), str(self.f.ids())
         word = 'JOINEDWORD'+number
         marks = {group: 'JOINEDMARK'+number+'g'+str(index) for index, group in enumerate((GROUP, OTHER_GROUP, THIRD_GROUP, NEW_GROUP))}
@@ -4608,12 +4609,28 @@ class ProductScenarios(Scenarios):
                 named = {row.get('id'): row.get('name') for row in unscoped.get('projects') or [] if isinstance(row, dict)}
                 self.gate('a_list_without_a_project_names_the_two', unscoped.get('error') == 'task_project_required'
                           and set(named) == {first['id'], second['id']} and all(named.values()), result=str(unscoped)[:400])
-                listed = {key: json.dumps(self.task_tool({'action': 'list', 'scope': project['id'], 'state': 'all'}, chat=person, sender=person),
-                                          ensure_ascii=False) for key, project in (('a', first), ('b', second))}
+                def lists():
+                    return {key: json.dumps(self.task_tool({'action': 'list', 'scope': project['id'], 'state': 'all'}, chat=person, sender=person),
+                                            ensure_ascii=False) for key, project in (('a', first), ('b', second))}
+
+                def seen(listed):
+                    return {key: [name for name, title in titles.items() if title in value] for key, value in listed.items()}
+                listed = lists()
                 self.gate('each_list_holds_its_joined_groups_tasks', titles['a'] in listed['a'] and titles['b'] in listed['b']
                           and titles['b'] not in listed['a'] and titles['a'] not in listed['b'], lists={key: value[:300] for key, value in listed.items()})
-                self.gate('a_list_never_holds_an_unjoined_groups_or_the_owners_task',
-                          not any(titles[key] in value for key in ('unjoined', 'personal') for value in listed.values()))
+                # Sharing is on by default: project A's list also reaches NEW_GROUP, which the member never joined.
+                self.gate('a_sharing_projects_list_holds_its_other_groups_task', titles['unjoined'] in listed['a']
+                          and titles['unjoined'] not in listed['b'], seen=seen(listed))
+                self.gate('a_list_never_holds_the_owners_task', not any(titles['personal'] in value for value in listed.values()), seen=seen(listed))
+                got = self.task_tool({'action': 'get', 'id': tasks['unjoined']}, chat=person, sender=person)
+                self.gate('reads_a_sharing_groups_task', titles['unjoined'] in json.dumps(got, ensure_ascii=False), result=str(got)[:300])
+                first = self.f.app('/v1/projects', {'id': first['id'], 'name': first['name'], 'description': first['description'],
+                                                    'state': 'active', 'share_chats': False, 'expected_revision': first['revision'],
+                                                    'operation_id': 'scenario-joined-unshare-'+number})
+                self.gate('project_stops_sharing', first.get('share_chats') is False, project=first)
+                listed = lists()
+                self.gate('an_unshared_list_holds_only_its_joined_groups_tasks', titles['a'] in listed['a'] and titles['b'] in listed['b']
+                          and not any(titles[key] in value for key in ('unjoined', 'personal') for value in listed.values()), seen=seen(listed))
                 for key in ('unjoined', 'personal', 'a'):
                     got = self.task_tool({'action': 'get', 'id': tasks[key]}, chat=person, sender=person)
                     if key == 'a':
@@ -5182,7 +5199,9 @@ class ProductScenarios(Scenarios):
         # personal ones, and on a task the owner moved onto GP1's board never the owner's private column, the owner's name
         # for the person assigned, or a comment from before it joined the board. With write they add, finish, trash and
         # restore and comment, never with a stale version or a refused field; with read they read only. Launch data from the
-        # owner, a stranger, a group or another key is refused. The marks are saved for member_app_never_leaks.
+        # owner, a stranger, a group or another key is refused. The marks are saved for member_app_never_leaks. P1 shares its
+        # group chats (the default), which the app does not follow (a known gap, ADR-0267): GP2 stays out here, while the
+        # member's private chat would read it (member_private_chat_reads_joined_groups).
         person, number = self.fresh_person(), str(self.f.ids())
         hidden = {'GP2MARK'+number: 'a task title of a group the member never joined', 'PERSONALMARK'+number: 'the owner\'s personal task',
                   'OWNERCOLMARK'+number: 'a private column on a task the member sees', 'OWNERNAMEMARK'+number: 'the owner\'s name for the person assigned',
@@ -5331,7 +5350,8 @@ class ProductScenarios(Scenarios):
     def member_app_drops_a_left_group(self):
         # A member left GP1 (GROUP) while Nocheh missed it (D5). Opening the app asks Telegram about groups whose presence is
         # more than 6 hours old: GROUP, where Telegram now says they left, drops out with its board and tasks, and
-        # OTHER_GROUP, where they still are, stays.
+        # OTHER_GROUP, where they still are, stays. The app reads joined groups alone even while the project shares its group
+        # chats (a known gap, ADR-0267), so GROUP's board drops out here.
         person, number = self.fresh_person(), str(self.f.ids())
         item = self.add_member(person, (GROUP, OTHER_GROUP))
         try:

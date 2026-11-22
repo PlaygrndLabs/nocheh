@@ -6,10 +6,12 @@ type Db=Pick<pg.Pool,'query'>|Pick<pg.PoolClient,'query'>;
 
 /**
  * The task boards a member reads (ADR-0262 D14, ADR-0265 D5): one view per active project assigned one of `groups` (the
- * member's joined groups, as the caller resolved them), named by the project, reaching only those of `groups` in it, with
- * their topics when topics share what their group knows (`topicMemory` 'group'), else the groups alone. Groups in no
- * project, or in a project that is not active, have no board. The member's private chat (D14) and the members' app read
- * through this one rule, so the two never drift apart. Sorted by project id, each reach by group id.
+ * groups the caller resolved), named by the project, reaching only those of `groups` in it, with their topics when topics
+ * share what their group knows (`topicMemory` 'group'), else the groups alone. Groups in no project, or in a project that
+ * is not active, have no board. The member's private chat (D14) and the members' app both read through this rule, but
+ * with different `groups`: the private chat passes its bound reads, which add the other served groups of each project
+ * that shares its group chats (ADR-0267 D4); the members' app and reminder delivery pass the joined groups alone (a known
+ * gap, ADR-0267). Sorted by project id, each reach by group id.
  */
 export async function memberTaskViews(db:Db,groups:readonly string[],topicMemory:TopicMemory):Promise<TaskView[]> {
   if(!groups.length)return [];

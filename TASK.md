@@ -2,6 +2,18 @@
 
 <current>
 
+Members and sharing checks on the fake Telegram (owner, 2026-11-22: "test members and data sharing
+rules with current mock telegram").
+- 16 member and sharing scenarios ran: 15 passed. `member_private_chat_reads_joined_groups`
+  still expected a member's project list to hold joined groups only; with "Share group chats" on
+  (the default, [ADR-0267](docs/adr/0267-share-group-chats.md)) it also holds the project's other
+  groups. The scenario now checks sharing on, then off; the owner's own task is never listed.
+- Three store tests that meant "sharing off" now say so (`share_chats` false). ADR-0267 lists two
+  more known gaps: reminder delivery is not widened, and a left or stale group comes back through
+  sharing.
+- Checks: the scenario after `group_members` (3/3), [unit](test/test_tester_member_private.py),
+  [store](test/store-tasks.test.ts) tasks, retrieval and shared project chats (12/12).
+
 The owner's own Gmail, read only, step 4 of the shared and private connectors plan (owner,
 2026-11-20) ([ADR-0272](docs/adr/0272-gmail-read-only.md)).
 - Connections › Yours › Your Gmail: the owner pastes the OAuth client of a Google Cloud project in
