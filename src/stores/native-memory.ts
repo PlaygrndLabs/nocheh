@@ -21,7 +21,7 @@ import type {LearningContextRepository,PreparedLearningContext} from './learning
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {MemoryProvenanceRepository} from './memory-provenance.js';
 import {OwnerCommands} from './owner-commands.js';
-import {evidencePeerId,memoryPeerId,type EntityContext,type MemoryEntity} from './entities.js';
+import {evidencePeerId,memoryPeerId,ownerPeopleNames,type EntityContext,type MemoryEntity} from './entities.js';
 import {NoteSourceRepository,countMemoryStep} from './note-sources.js';
 import {FactSourceRepository,factRecords,type FactAudience,type SourcedFact,type StoredFact} from './fact-sources.js';
 import {bindingMoved,type SourceTagRepository} from './source-tags.js';
@@ -47,7 +47,8 @@ const headers={summary:'[conversation summary]',speaker:'[what is known about th
   owner:'[what is known about the owner; it may include conclusions drawn from things the owner forwarded or sent]',
   materialSummary:'[summary of messages the owner forwarded from other people]',
   material:'[from forwards (other people\'s words) and files the owner sent (their contents, not the owner\'s typed words)]',
-  materialRecall:'[related through the owner\'s forwards and files: information other people or files wrote, not the owner\'s words]'};
+  materialRecall:'[related through the owner\'s forwards and files: information other people or files wrote, not the owner\'s words]',
+  ownerNote:'[the owner\'s private note about {name}: only the owner reads it; never repeat it in a group or to anyone else]'};
 const limited:{sources:never[];limited_memory:boolean;note:string;syncing?:boolean}={sources:[],limited_memory:true,note:'Long-term memory is limited. Current context, native notes and archive search remain available.'};
 const correcting={...limited,syncing:true,note:'Long-term memory is being corrected after an owner change, such as a retired message. Current context, native notes and archive search remain available.'};
 const sessionName=(protocol:string,workspace:string,key:string,revision:number)=>digest(canonical([protocol,'session',workspace,key,revision]));
@@ -474,8 +475,11 @@ export class NativeMemoryRepository {
   private async parts(source:SourceReference,row:{payload:Buffer},space:string,observations:PreparedLearningContext['observations']):Promise<Part[]> {
     const found=(await this.sources.classesFor([source.id])).get(source.id);
     if(!found)throw new HttpError(404,'source_not_found');
-    const {facts}=found,audience=this.audienceOf(space),document=(items:typeof observations,named:string)=>
-      canonical({kind:'source_evidence',space,source:named,observations:items,authority:sourceAuthority});
+    // Someone the owner named in People is called by that name in every record of theirs (ADR-0273); the message's own
+    // Telegram name stays in its payload.
+    const {facts}=found,called=facts.author==='person'?(await ownerPeopleNames(this.contexts.access.stores,[source.id])).get(source.id):undefined;
+    const audience=this.audienceOf(space),document=(items:typeof observations,named:string)=>
+      canonical({kind:'source_evidence',space,source:named,...(called?{sender_name:called}:{}),observations:items,authority:sourceAuthority});
     if(facts.author==='nocheh') {
       const about=found.class==='nocheh_about_forward';
       return [{text:document(observations,honchoSource({part:'nocheh',send_class:facts.send_class,about_forward:about})),writer:'assistant',
@@ -949,7 +953,7 @@ export class NativeMemoryRepository {
     let connected=query.trim()?await this.contexts.entities.connected(principal,query,12):{entities:[],partial:false,ambiguities:[]};
     const clarification=principal.scope===null&&connected.ambiguities.length?
       `Please clarify which ${connected.ambiguities.map(item=>item.name).join(', ')} identity you mean.`:undefined;
-    if(clarification)return {items:[],partial:connected.partial,clarification};
+    if(clarification)return {items:[],people:[],partial:connected.partial,clarification};
     if(!connected.entities.length) {
       let source=current.row.root_reference as SourceReference;
       if(principal.turnEvent)try{source=(await this.contexts.access.archive.captured(principal.turnEvent)).reference;}catch{}
@@ -957,7 +961,10 @@ export class NativeMemoryRepository {
       connected={...await this.contexts.entities.connectedFrom(principal,seeds,12),ambiguities:[]};
     }
     const candidates=connected.entities.map(item=>({peer:memoryPeerId(item.entity),path:item.path.join(' → ')}));
-    if(!candidates.length)return {items:[],partial:connected.partial,clarification:undefined};
+    // The people a recall is about, whether or not memory learned anything about them: the owner's private notes about
+    // them join the owner's own recall (ADR-0273).
+    const people=connected.entities.filter(item=>item.entity.kind==='person').slice(0,4).map(item=>({id:item.entity.id,name:item.entity.name}));
+    if(!candidates.length)return {items:[],people,partial:connected.partial,clarification:undefined};
     const available=new Set((await this.control.query(`SELECT DISTINCT peer.value AS peer_id FROM memory_ingestion_receipts r
       CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_array_length(r.peer_ids)>0 THEN r.peer_ids ELSE jsonb_build_array(r.peer_id) END) peer(value)
       WHERE r.generation=$1 AND r.state='done' AND r.retired_at IS NULL AND peer.value=ANY($2::text[])
@@ -967,7 +974,19 @@ export class NativeMemoryRepository {
           ELSE jsonb_build_array(r.source_reference) END) evidence(value)
         WHERE evidence.value->>'id'<>$3
       ))`,[current.row.id,candidates.map(item=>item.peer),turnSource??null,audience,group===null?null:[...group]])).rows.map(row=>String(row.peer_id)));
-    return {items:candidates.filter(item=>available.has(item.peer)),partial:connected.partial,clarification:undefined};
+    return {items:candidates.filter(item=>available.has(item.peer)),people,partial:connected.partial,clarification:undefined};
+  }
+  /** The owner's private notes about these people (ADR-0273), each under its own header, together at most 4,000 characters. */
+  private async ownerNotes(principal:Reader,people:readonly {id:string;name:string}[]):Promise<string[]> {
+    if(!people.length)return [];
+    // A note that can't be read leaves the recall as it was, without notes.
+    const found=await this.contexts.entities.ownerNotes(principal,people.map(person=>person.id)).catch(()=>new Map<string,{note:string}>()),blocks:string[]=[];let used=0;
+    for(const person of people) {
+      const note=found.get(person.id)?.note.trim();if(!note)continue;
+      const block=fitted(`${headers.ownerNote.replace('{name}',()=>person.name)}\n${note}`,Math.max(0,4000-used));
+      if(!block)break;blocks.push(block);used+=block.length+2;
+    }
+    return blocks;
   }
   /** Read the engine's context for the current conversation and its speaker, guarded once per distinct result.
    * Owner reads span the workspace; any other audience reads only its own session. With `material`, the owner's
@@ -1290,12 +1309,15 @@ export class NativeMemoryRepository {
         answers.push(answers.length?answer:fitted(answer,20000));
       }
       const cut=answers.length<read.length||read.some(({item,response},index)=>index===0&&`${item.head}\n${response.text}`.length>20000);
-      if(!answers.length)return corrections.length?{sources:corrections,limited_memory:false,syncing,...missing.length?{limitations:missing}:{}}:
+      // The owner's private notes about the people asked about, only in the owner's own recall (ADR-0273): never in a
+      // group's, a member's or the memory engine's.
+      const notes=audience==='owner'?await this.ownerNotes(principal,connected.people??[]):[];
+      if(!answers.length&&!notes.length)return corrections.length?{sources:corrections,limited_memory:false,syncing,...missing.length?{limitations:missing}:{}}:
         missing.length?{...limited,limitations:missing}:{...limited,note:'No authorized person or project memory matched this request.'};
       const included=read.slice(0,answers.length);
       const evidence=await this.evidence(id,audience,included.map(({response})=>response),current.binding,principal,group);
       const limitations=['reasoning_response_has_no_exact_conclusion_citations',...evidence.limitations,...missing,...cut?['recall_answer_cut']:[]];
-      const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from(answers.join('\n\n')),
+      const output=await this.derived.record({operation_id:'native-recall-output:'+requestId,source:root,parents:[input],kind:'memory_result',content:Buffer.from([...answers,...notes].join('\n\n')),
         producer:this.engine.id,producer_version:this.protocol,configuration:{workspace:id,audience,reasoning_level:'low',peers:connected.items.slice(0,4),
           ...(included.some(({item})=>item.peer===materialPeer)?{forwards_and_files:true}:{})},
         provenance:{partial:connected.partial,evidence:evidence.references,limitations}});

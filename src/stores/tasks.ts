@@ -25,6 +25,7 @@ import {reloadMembers} from './members.js';
 import {memberLane,skippedLine,skippedReference,type MemberSend,type ReminderSkip} from './task-reminder-delivery.js';
 import {currentChats} from './chats.js';
 import {peopleNames} from './people-names.js';
+import {accountPeopleNames} from './entities.js';
 import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
 
 export const taskSchema=`
@@ -1147,8 +1148,8 @@ export class TaskRepository {
 
   /**
    * The assignees of these stored task rows as the project view `view` sees them (owner answer Q4), set on each row as
-   * `assignees_seen` for row() and memberTask, in one query for all of them. An assignee shows by their Telegram name
-   * (the name Telegram last showed, else their @username) only when the owner bound them in Memory › People, exactly
+   * `assignees_seen` for row() and memberTask, in one query for all of them. An assignee shows by the People name the
+   * owner set (ADR-0273), else their Telegram name (the name Telegram last showed, else their @username), only when the owner bound them in Memory › People, exactly
    * or as confirmed, to the source identity of a person's Telegram account that is in one of the groups the view reaches
    * now (its membership 'in', the group an active top-level group, and not switched off for that account's member);
    * every other assignee, unbound or elsewhere, is only counted. `accounts` are the reading member's own: an assignee
@@ -1167,14 +1168,15 @@ export class TaskRepository {
             AND NOT EXISTS(SELECT 1 FROM member_chats w WHERE w.member_id=a.member_id AND w.chat_id=s.chat_id AND NOT w.enabled)),
         known AS (SELECT a.id,a.display_name,a.username,a.id IN (SELECT account_id FROM present) AS shown,a.id=ANY($3::text[]) AS mine,
             ${actorSourceSql('a.')} AS source FROM chat_accounts a WHERE (a.id IN (SELECT account_id FROM present) OR a.id=ANY($3::text[])) AND ${telegramPersonSql('a.')})
-        SELECT b.entity_id,k.display_name,coalesce(k.username,(SELECT d.username FROM chats c JOIN chat_details d ON d.chat_id=c.id
+        SELECT b.entity_id,k.id AS account,k.display_name,coalesce(k.username,(SELECT d.username FROM chats c JOIN chat_details d ON d.chat_id=c.id
             WHERE c.account_id=k.id AND c.kind='private' AND d.username IS NOT NULL ORDER BY c.id LIMIT 1)) AS username,k.shown,k.mine
           FROM memory_entity_bindings b JOIN known k ON k.source=b.source_object_id
           WHERE b.entity_id=ANY($1::text[]) AND b.binding_kind='source_identity' AND b.state IN ('exact','confirmed') ORDER BY b.entity_id,k.id`,
         [wanted,groups,mine])).rows;
+      const chosen=await accountPeopleNames(db,bound.filter(item=>item.shown===true).map(item=>item.account));
       for(const item of bound) {
         if(item.mine===true)ours.add(item.entity_id);
-        const name=item.shown===true?telegramName(item.display_name,item.username):null;
+        const name=item.shown===true?chosen.get(item.account)??telegramName(item.display_name,item.username):null;
         if(name!==null&&!named.has(item.entity_id))named.set(item.entity_id,name);
       }
     }

@@ -39,10 +39,14 @@ test('the owner reads "the owner" and the Tasks zone; a group reads the owner by
   assert.match(sourceTag(own,{...owner,zone:'Not/AZone'},names,directory).tag,/ 14:12 UTC$/);
 });
 
-test('a People name the owner set shows for the owner only, and only when it differs from the Telegram name (Q3)',()=>{
+test('a People name the owner set is the name everyone else reads; the owner reads it beside Telegram\'s when they differ (ADR-0273)',()=>{
   const said=source(3,message(bob),{chat:GP1_TOPIC,saved:'Brother'});
   assert.equal(sourceTag(said,owner,names,directory).tag,'“Bob” (@bob_gp), saved as “Brother” · group “GP1” › topic “Trips” · 2026-11-03 15:12 Europe/Berlin');
-  assert.equal(sourceTag(said,member,names,directory).tag,'“Bob” (@bob_gp) · group “GP1” › topic “Trips” · 2026-11-03 14:12 UTC','members never see People names');
+  assert.equal(sourceTag(said,member,names,directory).tag,'“Brother” (@bob_gp) · group “GP1” › topic “Trips” · 2026-11-03 14:12 UTC','everyone else reads the People name');
+  assert.equal(sourceTag({...said,saved:null},member,names,directory).tag,'“Bob” (@bob_gp) · group “GP1” › topic “Trips” · 2026-11-03 14:12 UTC','no People name: Telegram\'s');
+  // A Desktop export's own names stay hidden from everyone else, but a People name the owner set is shown.
+  assert.match(sourceTag({...said,exported:true},member,names,directory).tag,/^“Brother” \(@bob_gp\) · /);
+  assert.match(sourceTag({...said,exported:true,saved:null},member,names,directory).tag,/^a person \(@bob_gp\) · /);
   assert.equal(sourceTag({...said,saved:' b O b '},owner,names,directory).tag,'“Bob” (@bob_gp) · group “GP1” › topic “Trips” · 2026-11-03 15:12 Europe/Berlin');
   // The owner's own message is "the owner", whatever People holds.
   assert.equal(sourceTag(source(4,message(sam),{saved:'Me'}),owner,names,directory).tag,'the owner · group “GP1” · 2026-11-03 15:12 Europe/Berlin');

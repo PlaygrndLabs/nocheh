@@ -488,7 +488,8 @@ const machineList=(mode:string)=>({available:mode!=='unavailable',...machineCont
 const machineAt=(id:string)=>{const machine=machines.find(row=>row.id===id);if(!machine)throw new HttpError(404,'machine_not_found');return machine;};
 const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',revision:2}];
 const devonId=hx('d1');
-const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
+const personNotes=new Map<string,{note:string;revision:number}>();
+const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2,people_name:true},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
  {id:projectEntityId,kind:'project',name:'Aurora field guide',state:'active',project_id:projectId,merged_into:null,revision:1}];
 const claim=(id:string,subject:string,object:string|null,predicate:string,content:string,extra:any={})=>({id,subject_entity_id:subject,object_entity_id:object,predicate,revision:1,content,relationship_kind:object?'associated':null,attribution:'direct',speaker_entity_id:subject,uncertainty:'explicit',author:'learning',retired:false,evidence:[{id}],created_at:minutesAgo(900),...extra});
 // Mira's preference came from the owner's message (named on People in the owner's words, ADR-0261 step 4); the other
@@ -936,7 +937,8 @@ const server=createServer((req,res)=>{void(async()=>{
    return json(res,200,{entities:people.filter(p=>(!kind||p.kind===kind)&&(all||p.state==='active')&&p.name.toLocaleLowerCase().includes(q)),next:null});}
   if(route==='/entities/suggestions')return json(res,200,{suggestions:[entitySuggestion,projectSuggestion].filter(card=>card.status==='pending'),next:null});
   const entityRead=route.match(/^\/entities\/([a-f0-9]{64})$/);
-  if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false});}
+  if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false,
+   ...(entity.kind==='person'?{note:personNotes.get(entity.id)??{note:'',revision:0}}:{})});}
   if(route==='/notion')return json(res,200,await notion.get(taskOwner,notionTarget(url.searchParams.get('project')??undefined)));
   if(route==='/chat-tools')return json(res,200,await chatTools.get(taskOwner,url.searchParams.get('space')??'*'));
   if(route==='/connections/notion')return json(res,200,notionSignIn(url.searchParams.get('project')??''));
@@ -991,9 +993,14 @@ const server=createServer((req,res)=>{void(async()=>{
   const claimCorrect=route.match(/^\/entities\/claims\/([a-f0-9]{64})\/correct$/);
   if(claimCorrect){const item=claims.find(c=>c.id===claimCorrect[1]);if(!item)throw new HttpError(404,'entity_claim_not_found');if(item.revision!==body.expected_revision)throw new HttpError(409,'entity_claim_revision_conflict');
    Object.assign(item,{content:String(body.content),attribution:body.attribution,uncertainty:body.uncertainty,retired:body.retired,author:'owner',revision:item.revision+1},body.relationship_kind?{relationship_kind:body.relationship_kind}:{});return json(res,200,{id:item.id,revision:item.revision,retired:item.retired});}
+  // The owner's private note about a person (ADR-0273).
+  const entityNote=route.match(/^\/entities\/([a-f0-9]{64})\/note$/);
+  if(entityNote){const entity=people.find(p=>p.id===entityNote[1]&&p.kind==='person');if(!entity)throw new HttpError(404,'entity_not_found');
+   const saved=personNotes.get(entity.id)??{note:'',revision:0};if(saved.revision!==body.expected_revision)throw new HttpError(409,'entity_note_conflict');
+   personNotes.set(entity.id,{note:String(body.note).trim(),revision:saved.revision+1});return json(res,200,{id:entity.id,revision:saved.revision+1});}
   const entityChange=route.match(/^\/entities\/([a-f0-9]{64})\/(rename|merge|unmerge)$/);
   if(entityChange){const entity=people.find(p=>p.id===entityChange[1]);if(!entity)throw new HttpError(404,'entity_not_found');if(entity.revision!==body.expected_revision)throw new HttpError(409,'entity_revision_conflict');
-   if(entityChange[2]==='rename')entity.name=String(body.name).trim();else if(entityChange[2]==='merge'){entity.state='merged';entity.merged_into=body.target_id;}else{entity.state='active';entity.merged_into=null;}
+   if(entityChange[2]==='rename'){entity.name=String(body.name).trim();entity.people_name=true;}else if(entityChange[2]==='merge'){entity.state='merged';entity.merged_into=body.target_id;}else{entity.state='active';entity.merged_into=null;}
    entity.revision++;return json(res,200,{id:entity.id,name:entity.name,state:entity.state,revision:entity.revision});}
   if(route==='/memory-access/grants'){const fact=claims.find(c=>c.id===body.fact_id&&!c.retired);if(!fact)throw new HttpError(404,'memory_fact_not_found');if(fact.revision!==body.fact_revision)throw new HttpError(409,'memory_fact_changed');
    if(!groupSpace(String(body.destination)))throw new HttpError(400,'memory_grant_private_destination');

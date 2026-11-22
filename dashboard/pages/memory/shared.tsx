@@ -31,6 +31,7 @@ export function errorWords(error: unknown): string {
     project_topic_follows_group: 'A topic always follows its group’s project. Change the group’s project instead.',
     memory_fact_not_found: 'This fact was retired or removed.',
     entity_rename_invalid: 'Only active people can be renamed.',
+    entity_note_invalid: 'Only active people can have a private note.',
     memory_correction_required: 'Type the corrected wording first.',
     invalid_entity_relationship: 'That kind of relationship can’t be used here.',
     invalid_grant_expiration: 'Choose an end date in the future.',

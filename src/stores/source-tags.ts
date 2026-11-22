@@ -135,7 +135,7 @@ export class SourceTagRepository {
     const rows=new Map((await this.stores.archive.query('SELECT id,kind,channel,scope,occurred_at,received_at,payload FROM events WHERE id=ANY($1::text[])',[ids])).rows
       .map(row=>[row.id as string,row]));
     const [classes,described,zone,saved]=await Promise.all([this.notes.classesFor(ids),this.access.relationships.describeMany(ids),
-      owner?ownerTimeZone(this.stores.control):Promise.resolve('UTC'),owner?ownerPeopleNames(this.stores,ids):Promise.resolve(new Map<string,string>())]);
+      owner?ownerTimeZone(this.stores.control):Promise.resolve('UTC'),ownerPeopleNames(this.stores,ids)]);
     // The copy this reader reads: the guarded copy when the secret check is on, else the original. A guarded copy not
     // ready yet names nobody.
     const shown=new Map<string,unknown>(),guarded=!principal.admin&&binding.mode==='on';

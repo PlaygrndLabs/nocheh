@@ -35,6 +35,12 @@ CREATE INDEX IF NOT EXISTS memory_entity_suggestions_status ON memory_entity_sug
 -- A name folded into another card for the same person or project waits there, not as its own card.
 ALTER TABLE memory_entity_suggestions ADD COLUMN IF NOT EXISTS merged_into text REFERENCES memory_entity_suggestions(id);
 CREATE INDEX IF NOT EXISTS memory_entity_suggestions_merged ON memory_entity_suggestions(merged_into,created_at,id) WHERE merged_into IS NOT NULL;
+-- The owner's private note about a person (ADR-0273): only the owner reads it, never the memory engine, a group or a member.
+-- Its own table, so writing it never changes the person's revision or anything that reads memory_entities.
+CREATE TABLE IF NOT EXISTS memory_entity_notes (
+ entity_id text PRIMARY KEY REFERENCES memory_entities(id),note text NOT NULL CHECK(length(note)<=4000),
+ revision integer NOT NULL DEFAULT 1 CHECK(revision>0),updated_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 export const derivedEntitySchema=`

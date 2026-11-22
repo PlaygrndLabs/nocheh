@@ -14,6 +14,7 @@ import {archiveScopes,groupSpace,parentSpace,readSetGroups} from '../spaces.js';
 import {ownerChat} from '../assistant-policy.js';
 import type {EventClass,SourceFacts} from '../source-facts.js';
 import {NoteSourceRepository} from './note-sources.js';
+import {sourceObjectId} from '../source-model.js';
 
 const protocol='nocheh-connected-entities-v1';
 export type EntityKind='person'|'project';
@@ -57,10 +58,39 @@ export function ownerChosenName(entity:{id:string;name:string;revision:number},b
   return !name||name===automaticName(identity)?null:name;
 }
 /**
- * The People name the owner chose for the sender of each of these events, by event id (ownerChosenName), for the owner's
- * own tags only: who wrote it (its one authored_by identity), that identity's binding the owner confirmed or else its
- * automatic one, and the active entity it names, following a merged entity to the one it was merged into. An event with
- * no such name, or more than one author, is left out.
+ * The People name the owner chose for each of these platform identities (source objects), by identity id
+ * (ownerChosenName): its binding the owner confirmed or else its automatic one, and the active person entity it names,
+ * following a merged entity to the one it was merged into. An identity with no such name is left out. Since ADR-0273
+ * this is the person's name everywhere: the owner's chats, groups, members and memory.
+ */
+export async function identityPeopleNames(control:Pick<pg.Pool,'query'>,identities:readonly {id:string;platform:string;kind:string;external_id:string}[]):Promise<Map<string,string>> {
+  const found=new Map<string,string>(),byId=new Map(identities.map(identity=>[identity.id,identity]));
+  if(!byId.size)return found;
+  const bindings=(await control.query(`SELECT DISTINCT ON (b.source_object_id) b.source_object_id,b.entity_id,b.state
+    FROM memory_entity_bindings b WHERE b.source_object_id=ANY($1::text[]) AND b.binding_kind='source_identity' AND b.state IN ('exact','confirmed')
+    ORDER BY b.source_object_id,b.state='confirmed' DESC,b.updated_at DESC,b.id`,[[...byId.keys()]])).rows;
+  const entities=new Map<string,MemoryEntity>();
+  let ids=[...new Set(bindings.map(row=>row.entity_id as string))];
+  // A merged entity names the one it was merged into; a chain of merges is followed a few steps, never in a loop.
+  for(let step=0;step<5&&ids.length;step++) {
+    const rows=(await control.query('SELECT id,kind,name,state,merged_into,revision FROM memory_entities WHERE id=ANY($1::text[])',[ids])).rows as MemoryEntity[];
+    for(const row of rows)entities.set(row.id,row);
+    ids=rows.filter(row=>row.state==='merged'&&row.merged_into&&!entities.has(row.merged_into)).map(row=>row.merged_into!);
+  }
+  const active=(id:string)=>{let entity=entities.get(id);for(let step=0;step<5&&entity?.state==='merged'&&entity.merged_into;step++)entity=entities.get(entity.merged_into);
+    return entity?.state==='active'&&entity.kind==='person'?entity:null;};
+  for(const binding of bindings) {
+    const identity=byId.get(binding.source_object_id),entity=active(binding.entity_id);
+    if(!identity||!entity)continue;
+    // A merge moved the binding to another entity, so it is the owner's choice, as a rename is.
+    const name=ownerChosenName(entity,entity.id===binding.entity_id?binding:{...binding,state:'merged'},identity);
+    if(name)found.set(identity.id,name);
+  }
+  return found;
+}
+/**
+ * The People name the owner chose for the sender of each of these events, by event id (identityPeopleNames): who wrote
+ * it (its one authored_by identity). An event with no such name, or more than one author, is left out.
  */
 export async function ownerPeopleNames(stores:{archive:Pick<pg.Pool,'query'>;control:Pick<pg.Pool,'query'>},eventIds:readonly string[]):Promise<Map<string,string>> {
   const found=new Map<string,string>(),wanted=[...new Set(eventIds)];
@@ -68,28 +98,27 @@ export async function ownerPeopleNames(stores:{archive:Pick<pg.Pool,'query'>;con
   const authors=(await stores.archive.query(`SELECT r.event_id,min(o.id) AS id,min(o.platform) AS platform,min(o.kind) AS kind,min(o.external_id) AS external_id
     FROM source_relations r JOIN source_objects o ON o.id=r.target_id WHERE r.event_id=ANY($1::text[]) AND r.kind='authored_by'
     GROUP BY r.event_id HAVING count(*)=1`,[wanted])).rows;
-  if(!authors.length)return found;
-  const bindings=(await stores.control.query(`SELECT DISTINCT ON (b.source_object_id) b.source_object_id,b.entity_id,b.state
-    FROM memory_entity_bindings b WHERE b.source_object_id=ANY($1::text[]) AND b.binding_kind='source_identity' AND b.state IN ('exact','confirmed')
-    ORDER BY b.source_object_id,b.state='confirmed' DESC,b.updated_at DESC,b.id`,[[...new Set(authors.map(row=>row.id as string))]])).rows;
-  const byObject=new Map(bindings.map(row=>[row.source_object_id as string,row]));
-  const entities=new Map<string,MemoryEntity>();
-  let ids=[...new Set(bindings.map(row=>row.entity_id as string))];
-  // A merged entity names the one it was merged into; a chain of merges is followed a few steps, never in a loop.
-  for(let step=0;step<5&&ids.length;step++) {
-    const rows=(await stores.control.query('SELECT id,kind,name,state,merged_into,revision FROM memory_entities WHERE id=ANY($1::text[])',[ids])).rows as MemoryEntity[];
-    for(const row of rows)entities.set(row.id,row);
-    ids=rows.filter(row=>row.state==='merged'&&row.merged_into&&!entities.has(row.merged_into)).map(row=>row.merged_into!);
-  }
-  const active=(id:string)=>{let entity=entities.get(id);for(let step=0;step<5&&entity?.state==='merged'&&entity.merged_into;step++)entity=entities.get(entity.merged_into);
-    return entity?.state==='active'&&entity.kind==='person'?entity:null;};
-  for(const author of authors) {
-    const binding=byObject.get(author.id),entity=binding?active(binding.entity_id):null;
-    if(!binding||!entity)continue;
-    // A merge moved the binding to another entity, so it is the owner's choice, as a rename is.
-    const name=ownerChosenName(entity,entity.id===binding.entity_id?binding:{...binding,state:'merged'},author);
-    if(name)found.set(author.event_id,name);
-  }
+  const names=await identityPeopleNames(stores.control,authors);
+  for(const author of authors){const name=names.get(author.id);if(name)found.set(author.event_id,name);}
+  return found;
+}
+/** The Telegram identity of a person's chat account: the source object its messages name as their author. */
+export const telegramActor=(externalId:string)=>{
+  const identity={platform:'telegram',namespace:'bot-api',kind:'actor',external_id:externalId};
+  return {id:sourceObjectId(identity),...identity};
+};
+/**
+ * The People name the owner chose for each of these chat accounts (ADR-0273), by account id: a person's account on the
+ * Telegram connection with a plain user id, through its Telegram identity. Every other account is left out.
+ */
+export async function accountPeopleNames(control:Pick<pg.Pool,'query'>,accountIds:readonly string[]):Promise<Map<string,string>> {
+  const found=new Map<string,string>(),wanted=[...new Set(accountIds)];
+  if(!wanted.length)return found;
+  const accounts=(await control.query(`SELECT a.id,a.external_id FROM chat_accounts a WHERE a.id=ANY($1::text[]) AND a.team='' AND a.kind='human'
+    AND a.external_id ~ '^[0-9]{1,20}$' AND EXISTS(SELECT 1 FROM chat_connections k WHERE k.id=a.connection_id AND k.app='telegram')`,[wanted])).rows;
+  const identities=accounts.map(row=>({account:row.id as string,...telegramActor(String(row.external_id))}));
+  const names=await identityPeopleNames(control,identities);
+  for(const identity of identities){const name=names.get(identity.id);if(name)found.set(identity.account,name);}
   return found;
 }
 const entityId=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_entity_id');return id;};
@@ -456,6 +485,36 @@ export class EntityRepository {
       // A new name keeps the entity active: no written receipt becomes invalid (ADR-0223).
     },{holdsMemory:false});
   }
+  /**
+   * The owner's private note about a person (ADR-0273): only the owner writes or reads it, and nothing sends it to the
+   * memory engine, a group or a member. An empty note clears it. `expected_revision` is the note's, 0 before the first.
+   */
+  async note(principal:Reader,id:string,input:unknown) {
+    admin(principal);const body=exact(input,['note','expected_revision','operation_id']),target=entityId(id),expected=revision(body.expected_revision),note=string(body.note,4000).trim();
+    return this.commands.run(principal,string(body.operation_id,200),{kind:'entity_note',target,expected,note:digest(note)},async db=>{
+      const entity=(await db.query('SELECT kind,state FROM memory_entities WHERE id=$1 FOR UPDATE',[target])).rows[0];
+      if(!entity)throw new HttpError(404,'entity_not_found');
+      if(entity.kind!=='person'||entity.state!=='active')throw new HttpError(409,'entity_note_invalid');
+      const current=Number((await db.query('SELECT revision FROM memory_entity_notes WHERE entity_id=$1 FOR UPDATE',[target])).rows[0]?.revision??0);
+      if(current!==expected)throw new HttpError(409,'entity_note_conflict');
+      await db.query(`INSERT INTO memory_entity_notes(entity_id,note) VALUES($1,$2)
+        ON CONFLICT(entity_id) DO UPDATE SET note=$2,revision=memory_entity_notes.revision+1,updated_at=now()`,[target,note]);
+      // The result is kept with the command, so it holds no note text.
+      return {id:target,revision:expected+1};
+      // Nothing the memory engine or any other reader holds changes, so the epoch stays and no refresh is asked.
+    },{holdsMemory:false,epoch:false});
+  }
+  /**
+   * The owner's private notes about these people, by entity id, for the owner only (ADR-0273): the dashboard, or the
+   * owner's own chats and jobs (no scope, not bound to a member). A cleared note reads as empty.
+   */
+  async ownerNotes(principal:Reader,ids:readonly string[]):Promise<Map<string,{note:string;revision:number}>> {
+    if(!principal.admin&&(principal.scope!==null||boundReader(principal)!==null))throw new HttpError(403,'owner_required');const found=new Map<string,{note:string;revision:number}>();
+    if(!ids.length)return found;
+    for(const row of (await this.stores.control.query("SELECT entity_id,note,revision FROM memory_entity_notes WHERE entity_id=ANY($1::text[])",[[...new Set(ids)]])).rows)
+      found.set(row.entity_id,{note:row.note,revision:Number(row.revision)});
+    return found;
+  }
   async unmerge(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['expected_revision','operation_id']),source=entityId(id),expected=revision(body.expected_revision);
     return this.commands.run(principal,string(body.operation_id,200),{kind:'entity_unmerge',source,expected},async db=>{
@@ -671,7 +730,9 @@ export class EntityRepository {
   async inspect(principal:Reader,id:string) {
     const entity=await this.row(id);if(!await this.visible(principal,entity))throw new HttpError(404,'entity_not_found');
     const memory=await this.readableClaims(principal,entity.id),bindings=principal.admin?(await this.stores.control.query('SELECT * FROM memory_entity_bindings WHERE entity_id=$1 ORDER BY id',[entity.id])).rows:[];
-    return {entity,bindings,...memory};
+    // The owner's private note, only for the owner (ADR-0273).
+    const note=principal.admin&&entity.kind==='person'?(await this.ownerNotes(principal,[entity.id])).get(entity.id)??{note:'',revision:0}:null;
+    return {entity,bindings,...memory,...(note?{note}:{})};
   }
   async history(principal:Reader,id:string,before?:number) {
     if(before!==undefined&&(!Number.isSafeInteger(before)||before<1||before>2147483647))throw new HttpError(400,'invalid_entity_revision');
@@ -685,7 +746,7 @@ export class EntityRepository {
     return {versions,next:rows.length>50?rows[49].revision:null};
   }
   async connected(principal:Reader,query:string,limit=12) {
-    const corpus=query.trim().toLocaleLowerCase(),first=await this.list(principal),matches=first.entities
+    const corpus=query.trim().toLocaleLowerCase(),first=await this.listPage(principal),matches=first.entities
       .filter(entity=>corpus.includes(entity.name.trim().toLocaleLowerCase())).sort((a,b)=>b.name.length-a.name.length||a.id.localeCompare(b.id));
     const names=new Map<string,MemoryEntity[]>();for(const entity of matches){const name=entity.name.trim().toLocaleLowerCase(),group=names.get(name)??[];group.push(entity);names.set(name,group);}
     const ambiguities=[...names.entries()].filter(([,entities])=>entities.length>1).map(([name,entities])=>({name,entity_ids:entities.map(entity=>entity.id)}));
@@ -709,7 +770,32 @@ export class EntityRepository {
     }
     return {entities:results,partial:partial||queue.length>0};
   }
-  async list(principal:Reader,input:{query?:string;kind?:string;after?:string;state?:string}={}) {
+  /**
+   * The active people among these whose name the owner chose (ownerChosenName) for an identity that writes messages: the
+   * name every reader sees for that person (ADR-0273). Only the owner asks.
+   */
+  private async namedByOwner(entities:readonly MemoryEntity[]):Promise<Set<string>> {
+    const named=new Set<string>(),people=new Map(entities.filter(entity=>entity.kind==='person'&&entity.state==='active').map(entity=>[entity.id,entity]));
+    if(!people.size)return named;
+    const bindings=(await this.stores.control.query(`SELECT entity_id,source_object_id,state FROM memory_entity_bindings WHERE entity_id=ANY($1::text[])
+      AND binding_kind='source_identity' AND state IN ('exact','confirmed')`,[[...people.keys()]])).rows;
+    if(!bindings.length)return named;
+    const identities=new Map((await this.stores.archive.query('SELECT id,platform,kind,external_id FROM source_objects WHERE id=ANY($1::text[])',
+      [[...new Set(bindings.map(row=>row.source_object_id as string))]])).rows.map(row=>[row.id as string,row]));
+    for(const binding of bindings) {
+      const entity=people.get(binding.entity_id),identity=identities.get(binding.source_object_id);
+      if(entity&&identity&&ownerChosenName(entity,binding,identity))named.add(entity.id);
+    }
+    return named;
+  }
+  async list(principal:Reader,input:{query?:string;kind?:string;after?:string;state?:string}={}):Promise<{entities:(MemoryEntity&{people_name?:true})[];next:string|null}> {
+    const page=await this.listPage(principal,input);
+    if(!principal.admin)return page;
+    // The owner sees which names everyone reads (ADR-0273).
+    const named=await this.namedByOwner(page.entities);
+    return {...page,entities:page.entities.map(entity=>named.has(entity.id)?{...entity,people_name:true as const}:entity)};
+  }
+  private async listPage(principal:Reader,input:{query?:string;kind?:string;after?:string;state?:string}={}) {
     const query=String(input.query??'').trim().toLocaleLowerCase(),kind=input.kind??'',after=input.after??'',state=input.state??'active';
     if(kind&&!['person','project'].includes(kind))throw new HttpError(400,'invalid_entity_kind');
     if(!['active','all'].includes(state)||state==='all'&&!principal.admin)throw new HttpError(400,'invalid_entity_state');

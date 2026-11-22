@@ -2,6 +2,18 @@
 
 <current>
 
+People names everywhere, and a private note per person (owner, 2026-11-22, after the memory
+privacy review) ([ADR-0273](docs/adr/0273-people-names-everywhere-and-private-notes.md)).
+- The name the owner set in Memory › People is what groups, members, reminders and memory read
+  (`sender_name` on new memory records). The owner still reads it beside the Telegram name.
+- A private note per person: People page, the owner's `owner_read` people view and the owner's
+  own recall only; never the memory engine, a group or a member. Writing it asks no memory refresh.
+- People page: "everyone sees this name" hint, a "Shown" badge and a one-time list of those names.
+- Checks: [store](test/store-people-notes.test.ts), [source tags](test/source-tags.test.ts),
+  [store source tags](test/store-source-tags.test.ts).
+- Next: Honcho 3.6.2, reading instructions for Honcho, and no unread copies under mentioned
+  people (owner said yes 2026-11-22).
+
 The owner's own Gmail, read only, step 4 of the shared and private connectors plan (owner,
 2026-11-20) ([ADR-0272](docs/adr/0272-gmail-read-only.md)).
 - Connections › Yours › Your Gmail: the owner pastes the OAuth client of a Google Cloud project in

@@ -18,7 +18,7 @@ import {SourceTagRepository} from '../src/stores/source-tags.js';
 import {fixtureServices} from './fixture-brain.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
 
-test('source tags: readable() is canRead, members read only their groups in UTC by Telegram\'s names, the owner reads the Tasks zone and People names (ADR-0261)',
+test('source tags: readable() is canRead, members read only their groups in UTC by Telegram\'s names, the owner reads the Tasks zone, everyone reads People names (ADR-0261, ADR-0273)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -129,27 +129,28 @@ test('source tags: readable() is canRead, members read only their groups in UTC 
     assert.equal(nocheh.by,'nocheh');assert.match(nocheh.tag,/^Nocheh, Nocheh's reply · group “GP1” · \d{4}-\d{2}-\d{2} \d{2}:\d{2} Europe\/Berlin$/,'timed when it was saved');
     assert.equal((await s.tags.tags(owner,binding,[bobA])).get(bobA.id)!.at,'2025-11-03T14:12:00.000Z');
 
-    // A group member: only their own group, UTC, Telegram's names; the owner by their Telegram name with by=owner.
+    // A group member: only their own group, UTC, the People name the owner set (ADR-0273) else Telegram's; the owner by
+    // their Telegram name with by=owner.
     const topicTags=await tags(topic,[t77,bobA,samA,t78,anon,ownerPrivate,bobB,unserved,retired,added]);
     assert.deepEqual(topicTags,[
-      'person: “Bob” (@bob_gp) · this chat · 2025-11-03 14:12 UTC',
-      'person: “Bob” (@bob_gp) · group “GP1” · 2025-11-03 14:12 UTC',
+      'person: “Brother” (@bob_gp) · this chat · 2025-11-03 14:12 UTC',
+      'person: “Brother” (@bob_gp) · group “GP1” · 2025-11-03 14:12 UTC',
       'owner: “Sam” (@sam_owner) · group “GP1” · 2025-11-03 14:12 UTC',
       'person: “Ana” · group “GP1” › a topic · 2025-11-03 14:12 UTC',
       'person: a person · group “GP1” · 2025-11-03 14:12 UTC',
       null,null,null,null,null]);
-    assert.deepEqual(await tags(general,[t77,bobA]),['person: “Bob” (@bob_gp) · group “GP1” › topic “Trips” · 2025-11-03 14:12 UTC','person: “Bob” (@bob_gp) · this chat · 2025-11-03 14:12 UTC']);
-    assert.deepEqual(await tags(other,[bobB,bobA,t77]),['person: “Bob” (@bob_gp) · this chat · 2025-11-03 14:12 UTC',null,null],'another group reads nothing of GP1');
+    assert.deepEqual(await tags(general,[t77,bobA]),['person: “Brother” (@bob_gp) · group “GP1” › topic “Trips” · 2025-11-03 14:12 UTC','person: “Brother” (@bob_gp) · this chat · 2025-11-03 14:12 UTC']);
+    assert.deepEqual(await tags(other,[bobB,bobA,t77]),['person: “Brother” (@bob_gp) · this chat · 2025-11-03 14:12 UTC',null,null],'another group reads nothing of GP1');
     const memberText=JSON.stringify([topicTags,await tags(general,all),await tags(other,all)]);
-    for(const never of ['Brother','Secret plan','Europe/Berlin','the owner','private chat',A.slice(1),B.slice(1),'123','456','789','999'])
+    for(const never of ['Secret plan','Europe/Berlin','the owner','private chat',A.slice(1),B.slice(1),'123','456','789','999'])
       assert.ok(!memberText.includes(never),`a member's tags never hold ${never}`);
     // An unshared sibling topic is unreadable when topics keep their own memory.
     policy.topic_memory='topic';
-    try{assert.deepEqual(await tags(reader(A,T77,{turnEvent:t77.id}),[t77,bobA,t78]),['person: “Bob” (@bob_gp) · this chat · 2025-11-03 14:12 UTC',null,null]);}
+    try{assert.deepEqual(await tags(reader(A,T77,{turnEvent:t77.id}),[t77,bobA,t78]),['person: “Brother” (@bob_gp) · this chat · 2025-11-03 14:12 UTC',null,null]);}
     finally{policy.topic_memory='group';}
     // A private answer reads only its frozen groups, as members do (no detector here: the stores' answer pass is not this test's).
     const unchecked=new SourceTagRepository(stores,s.access,s.noteSources,null,s.detect,()=>policy);
-    assert.deepEqual(await tags(answer,[bobA,bobB,ownerPrivate],unchecked),['person: “Bob” (@bob_gp) · group “GP1” · 2025-11-03 14:12 UTC',null,null]);
+    assert.deepEqual(await tags(answer,[bobA,bobB,ownerPrivate],unchecked),['person: “Brother” (@bob_gp) · group “GP1” · 2025-11-03 14:12 UTC',null,null]);
 
     // A tag that cannot be built reads "source not available right now" and is counted; an unreadable source stays null.
     const today=async()=>(await memoryProblems(stores.control)).find(row=>row.kind==='source_tags')??{done:0,failed:0};

@@ -135,7 +135,8 @@ test('people\'s reminders due together are merged round-robin, one Set by line p
 
 test('reminder lines and note sources read people\'s names the same way: every member who reaches a group and these people, the first row each',async()=>{
   const asked:unknown[][]=[];
-  const db={query:async(_sql:string,values:unknown[])=>{asked.push(values);return {rows:[{id:sara,display_name:'Sara',username:'sara_example'},
+  // The People-name lookup (ADR-0273) finds no Telegram account here; a store test covers it.
+  const db={query:async(sql:string,values:unknown[])=>{if(/chat_connections k/.test(sql))return {rows:[]};asked.push(values);return {rows:[{id:sara,display_name:'Sara',username:'sara_example'},
     {id:sara,display_name:'Sara',username:null},{id:gone,display_name:null,username:null}]};}} as any;
   const policy={owner_id:'123'},restore=grantMembers({[GP1]:{granted:['4561']}},{owner:'123'});
   try {

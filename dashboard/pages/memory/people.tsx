@@ -3,7 +3,7 @@
  * relate, and which chats may use a fact about them.
  */
 import {useState, type ReactNode} from 'react';
-import {ChevronRight, Pencil, Search, Share2, UserRound} from 'lucide-react';
+import {ChevronRight, Eye, Pencil, Search, Share2, UserRound} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {OriginalNames} from '../../lib/originals';
 import {href, setParams} from '../../lib/routes';
@@ -36,7 +36,11 @@ type Entity = {
   project_id: string | null;
   merged_into: string | null;
   revision: number;
+  /** The owner set this name, so everyone reads it: groups, members and memory. */
+  people_name?: true;
 };
+/** The owner's private note about a person: only the owner reads it. */
+type PrivateNote = {note: string; revision: number};
 type Claim = {
   id: string;
   subject_entity_id: string;
@@ -99,6 +103,7 @@ export function People() {
   );
   const waiting = suggestions.data?.suggestions.length ?? 0;
   const people = list.data?.entities ?? [];
+  const renamed = people.filter(entity => entity.people_name);
 
   return (
     <>
@@ -122,6 +127,7 @@ export function People() {
           Confirm whether they are the same person before Nocheh links them.
         </Notice>
       )}
+      <RenamedNotice names={renamed.map(entity => entity.name)} />
       <Field label="Search people" htmlFor="people-search" className="max-w-md">
         <div className="relative">
           <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
@@ -162,6 +168,11 @@ export function People() {
                     {entity.name.trim().slice(0, 1).toUpperCase() || '?'}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{entity.name}</span>
+                  {entity.people_name && (
+                    <Badge title="You set this name. Everyone sees it.">
+                      <Eye aria-hidden className="size-3" /> Shown
+                    </Badge>
+                  )}
                   <ChevronRight className="size-4 shrink-0 text-muted" aria-hidden />
                 </button>
               </li>
@@ -181,7 +192,7 @@ export function People() {
 }
 
 function PersonDrawer({id, onClose}: {id: string | null; onClose: () => void}) {
-  const detail = useResource<{entity: Entity; claims: Claim[]; bindings: unknown[]; partial: boolean}>(
+  const detail = useResource<{entity: Entity; claims: Claim[]; bindings: unknown[]; partial: boolean; note?: PrivateNote}>(
     id ? '/entities/' + id : null,
   );
   const entity = detail.data?.entity;
@@ -206,7 +217,7 @@ function PersonDetail({
 }: {
   entity: Entity;
   claims: Claim[];
-  data: {partial: boolean; bindings: unknown[]};
+  data: {partial: boolean; bindings: unknown[]; note?: PrivateNote};
 }) {
   const names = useNames();
   const grants = useResource<{grants: Grant[]}>('/memory-access/grants?after=', 30000);
@@ -220,6 +231,7 @@ function PersonDetail({
   return (
     <div className="space-y-6">
       <NameEditor entity={entity} mergedInto={names(entity.merged_into)} />
+      {entity.state === 'active' && data.note && <NoteEditor key={data.note.revision} entity={entity} saved={data.note} />}
 
       <section>
         <h3 className="mb-2 text-sm font-semibold">What Nocheh knows</h3>
@@ -280,6 +292,85 @@ function PersonDetail({
   );
 }
 
+const SHOWN_NAME = 'Everyone sees this name: in groups, to members, and in memory. Use the private note for anything only for you.';
+const RENAMED_SEEN = 'nocheh.people.renamed-notice';
+
+/** Once: the names the owner set, which everyone now reads (ADR-0273). Dismissed for this browser. */
+function RenamedNotice({names}: {names: string[]}) {
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem(RENAMED_SEEN) === '1';
+    } catch {
+      return false;
+    }
+  });
+  if (hidden || names.length === 0) return null;
+  return (
+    <Notice
+      tone="info"
+      title="Names you set are shown to everyone"
+      action={
+        <Button
+          size="sm"
+          onClick={() => {
+            try {
+              localStorage.setItem(RENAMED_SEEN, '1');
+            } catch {
+              // Private windows may block storage; the notice just hides for now.
+            }
+            setHidden(true);
+          }}
+        >
+          Got it
+        </Button>
+      }
+    >
+      Groups, members and memory now read these names instead of the person’s Telegram name: {names.join(', ')}. Check
+      none of them is private. Move anything private to the person’s private note.
+    </Notice>
+  );
+}
+
+/** The owner's private note about a person: only the owner reads it, and Nocheh uses it only in the owner's private chat. */
+function NoteEditor({entity, saved}: {entity: Entity; saved: PrivateNote}) {
+  const feedback = useFeedback();
+  const command = useCommand();
+  const [note, setNote] = useState(saved.note);
+  return (
+    <form
+      className="space-y-2"
+      onSubmit={async event => {
+        event.preventDefault();
+        if (
+          await command.run('/entities/' + entity.id + '/note', {
+            note: note.trim(),
+            expected_revision: saved.revision,
+          })
+        )
+          feedback.toast(note.trim() ? 'Note saved.' : 'Note cleared.');
+      }}
+    >
+      <Field
+        label="Private note"
+        htmlFor="person-note"
+        hint="Only you see this. Nocheh uses it only in your private chat, never in groups, with members or in memory."
+        error={command.error}
+      >
+        <Textarea
+          id="person-note"
+          value={note}
+          maxLength={4000}
+          rows={3}
+          onChange={event => setNote(event.target.value)}
+        />
+      </Field>
+      <Button type="submit" size="sm" busy={command.busy} disabled={note.trim() === saved.note.trim()}>
+        Save note
+      </Button>
+    </form>
+  );
+}
+
 function NameEditor({entity, mergedInto}: {entity: Entity; mergedInto: string | null}) {
   const feedback = useFeedback();
   const command = useCommand();
@@ -308,11 +399,14 @@ function NameEditor({entity, mergedInto}: {entity: Entity; mergedInto: string | 
     );
   if (!editing)
     return (
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge>Person</Badge>
-        <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
-          <Pencil aria-hidden /> Rename
-        </Button>
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge>Person</Badge>
+          <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            <Pencil aria-hidden /> Rename
+          </Button>
+        </div>
+        {entity.people_name && <p className="text-[13px] text-muted">{SHOWN_NAME}</p>}
       </div>
     );
   return (
@@ -331,7 +425,7 @@ function NameEditor({entity, mergedInto}: {entity: Entity; mergedInto: string | 
         }
       }}
     >
-      <Field label="Name" htmlFor="person-name" error={command.error}>
+      <Field label="Name" htmlFor="person-name" hint={SHOWN_NAME} error={command.error}>
         <Input
           id="person-name"
           value={name}
