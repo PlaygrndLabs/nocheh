@@ -1,4 +1,4 @@
-# ADR-0273: People names everywhere, and a private note per person
+# ADR-0274: People names everywhere, and a private note per person
 
 <status>
 Accepted on 2026-11-22. The owner asked that the name set in Memory › People be the person's

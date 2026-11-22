@@ -1149,7 +1149,7 @@ export class TaskRepository {
   /**
    * The assignees of these stored task rows as the project view `view` sees them (owner answer Q4), set on each row as
    * `assignees_seen` for row() and memberTask, in one query for all of them. An assignee shows by the People name the
-   * owner set (ADR-0273), else their Telegram name (the name Telegram last showed, else their @username), only when the owner bound them in Memory › People, exactly
+   * owner set (ADR-0274), else their Telegram name (the name Telegram last showed, else their @username), only when the owner bound them in Memory › People, exactly
    * or as confirmed, to the source identity of a person's Telegram account that is in one of the groups the view reaches
    * now (its membership 'in', the group an active top-level group, and not switched off for that account's member);
    * every other assignee, unbound or elsewhere, is only counted. `accounts` are the reading member's own: an assignee

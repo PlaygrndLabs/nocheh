@@ -475,7 +475,7 @@ export class NativeMemoryRepository {
   private async parts(source:SourceReference,row:{payload:Buffer},space:string,observations:PreparedLearningContext['observations']):Promise<Part[]> {
     const found=(await this.sources.classesFor([source.id])).get(source.id);
     if(!found)throw new HttpError(404,'source_not_found');
-    // Someone the owner named in People is called by that name in every record of theirs (ADR-0273); the message's own
+    // Someone the owner named in People is called by that name in every record of theirs (ADR-0274); the message's own
     // Telegram name stays in its payload.
     const {facts}=found,called=facts.author==='person'?(await ownerPeopleNames(this.contexts.access.stores,[source.id])).get(source.id):undefined;
     const audience=this.audienceOf(space),document=(items:typeof observations,named:string)=>
@@ -962,7 +962,7 @@ export class NativeMemoryRepository {
     }
     const candidates=connected.entities.map(item=>({peer:memoryPeerId(item.entity),path:item.path.join(' → ')}));
     // The people a recall is about, whether or not memory learned anything about them: the owner's private notes about
-    // them join the owner's own recall (ADR-0273).
+    // them join the owner's own recall (ADR-0274).
     const people=connected.entities.filter(item=>item.entity.kind==='person').slice(0,4).map(item=>({id:item.entity.id,name:item.entity.name}));
     if(!candidates.length)return {items:[],people,partial:connected.partial,clarification:undefined};
     const available=new Set((await this.control.query(`SELECT DISTINCT peer.value AS peer_id FROM memory_ingestion_receipts r
@@ -976,7 +976,7 @@ export class NativeMemoryRepository {
       ))`,[current.row.id,candidates.map(item=>item.peer),turnSource??null,audience,group===null?null:[...group]])).rows.map(row=>String(row.peer_id)));
     return {items:candidates.filter(item=>available.has(item.peer)),people,partial:connected.partial,clarification:undefined};
   }
-  /** The owner's private notes about these people (ADR-0273), each under its own header, together at most 4,000 characters. */
+  /** The owner's private notes about these people (ADR-0274), each under its own header, together at most 4,000 characters. */
   private async ownerNotes(principal:Reader,people:readonly {id:string;name:string}[]):Promise<string[]> {
     if(!people.length)return [];
     // A note that can't be read leaves the recall as it was, without notes.
@@ -1309,7 +1309,7 @@ export class NativeMemoryRepository {
         answers.push(answers.length?answer:fitted(answer,20000));
       }
       const cut=answers.length<read.length||read.some(({item,response},index)=>index===0&&`${item.head}\n${response.text}`.length>20000);
-      // The owner's private notes about the people asked about, only in the owner's own recall (ADR-0273): never in a
+      // The owner's private notes about the people asked about, only in the owner's own recall (ADR-0274): never in a
       // group's, a member's or the memory engine's.
       const notes=audience==='owner'?await this.ownerNotes(principal,connected.people??[]):[];
       if(!answers.length&&!notes.length)return corrections.length?{sources:corrections,limited_memory:false,syncing,...missing.length?{limitations:missing}:{}}:

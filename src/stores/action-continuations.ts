@@ -4,7 +4,7 @@ import {canonical,digest} from '../archive.js';
 import {conversationScope} from '../assistant-policy.js';
 import {appBindingOf} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
-import type {Brain,TurnReceipt} from '../brain/brain.js';
+import type {Agent,TurnReceipt} from '../agent/agent.js';
 import type {RuntimeCall} from '../runtime.js';
 import {actionContinued,fillTemplate,ownerPrompts} from '../prompts.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
@@ -71,13 +71,13 @@ export function continuationText(template:string,actions:{id:string;kind:string;
 
 /**
  * After approved operations end, the agent continues the conversation that asked for them and answers there, as a
- * reply to the asking message (ADR-0212). Nocheh decides when the turn runs and checks it; the brain writes the answer and
+ * reply to the asking message (ADR-0212). Nocheh decides when the turn runs and checks it; the agent writes the answer and
  * Nocheh's bot sends it (ADR-0235).
  */
 export class ActionContinuationRepository {
   constructor(readonly archive:ArchiveRepository,readonly access:SourceAccessRepository,readonly derived:DerivedRepository,
     readonly guards:GuardRepository,readonly prepared:PreparedContextRepository,readonly turns:RuntimeTurnRepository,
-    readonly brain:Brain,readonly token:string,readonly call:RuntimeCall){}
+    readonly agent:Agent,readonly token:string,readonly call:RuntimeCall){}
   private get control(){return this.access.stores.control;}
   /** Native cancellation is best effort; the durable receipt remains authoritative. */
   async cancelRetired(ids:string[]):Promise<void> {
@@ -85,7 +85,7 @@ export class ActionContinuationRepository {
     const rows=(await this.control.query("SELECT action_id,event_id,attempts FROM action_continuations WHERE event_id=ANY($1::text[]) AND state='running' AND attempts>0",[ids])).rows;
     for(const row of rows) {
       const attempt=continuationAttempt(row.action_id,row.attempts);
-      try{await this.brain.cancelTurn({channel:'telegram',event_id:row.event_id,attempt});}
+      try{await this.agent.cancelTurn({channel:'telegram',event_id:row.event_id,attempt});}
       catch{/* The running workflow observes it again and cancels it under the revoked guard epoch. */}
       await cancelReply(this.call,row.event_id,attempt);
     }
@@ -118,7 +118,7 @@ export class ActionContinuationRepository {
     }
     const output=await this.derived.record({operation_id:`action-continuation-result:${row.action_id}:${row.attempts}`,
       source:(await this.archive.captured(row.event_id)).reference,parents:[row.input_reference],kind:'runtime_result',content:Buffer.from(canonical(result)),
-      producer:this.brain.id,producer_version:protocol,configuration:{attempt:continuationAttempt(row.action_id,row.attempts)},provenance:{binding:row.binding}});
+      producer:this.agent.id,producer_version:protocol,configuration:{attempt:continuationAttempt(row.action_id,row.attempts)},provenance:{binding:row.binding}});
     return this.finish(row,result,output);
   }
   private async finish(row:any,result:{state:string;error_code?:string},reference:DerivativeReference) {
@@ -162,7 +162,7 @@ export class ActionContinuationRepository {
       return await this.storeResult(row,renewedCodes.includes(withdrawn!)?{...receipt,state:'failed',error_code:'space_policy_changed'}:{state:'cancelled'});
     }
     const target=replyTarget(input,attempt,credential);
-    if(!receipt.reply)throw new HttpError(502,'brain_invalid_response');
+    if(!receipt.reply)throw new HttpError(502,'agent_invalid_response');
     const sent=await sendReply(this.call,target,String(input.body.source_key)+':continuation:'+row.action_id,receipt.reply,{notify:true,presence:true,sendClass:'follow_up'});
     if(!sent||!closedTurnStates.has(String(sent.state)))return await this.receive(row,{state:'running'});
     return await this.storeResult(row,deliveredReceipt(receipt,sent));
@@ -200,7 +200,7 @@ export class ActionContinuationRepository {
       if(row.state==='running') {
         const attempt=continuationAttempt(id,row.attempts);let observed:TurnReceipt;
         input=await this.input(row.input_reference);
-        try{observed=await this.brain.observeTurn({channel:'telegram',event_id:row.event_id,attempt});}
+        try{observed=await this.agent.observeTurn({channel:'telegram',event_id:row.event_id,attempt});}
         catch{return await this.receive(row,{state:'running'});}
         if(closedTurnStates.has(String(observed.state)))return await this.settle(row,input,observed);
         try{credential=await this.credential(input);}catch(error){
@@ -214,7 +214,7 @@ export class ActionContinuationRepository {
           }
           if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
-          try{return await this.receive(row,await this.brain.cancelTurn({channel:'telegram',event_id:row.event_id,attempt}));}
+          try{return await this.receive(row,await this.agent.cancelTurn({channel:'telegram',event_id:row.event_id,attempt}));}
           catch{return await this.receive(row,{state:'running'});}
         }
         if(!['not_found','queued'].includes(String(observed.state))) {
@@ -307,7 +307,7 @@ export class ActionContinuationRepository {
       if(!await botReady(this.call))return await this.receive(row,{state:'running'});
       await showPresence(this.call,replyTarget(input,attempt,credential));
       let result:TurnReceipt;
-      try{result=await this.brain.startTurn({channel:'telegram',event_id:row.event_id,attempt},{...input.body,archive_credential:credential});}
+      try{result=await this.agent.startTurn({channel:'telegram',event_id:row.event_id,attempt},{...input.body,archive_credential:credential});}
       catch{result={state:'running'};}
       if(closedTurnStates.has(String(result.state)))return await this.settle(row,input,result);
       return await this.receive(row,result);

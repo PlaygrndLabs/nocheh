@@ -348,7 +348,7 @@ def main():
     if 'recall_after_restart' in selected:
         if counter:
             wait('updates_acknowledged', lambda: fixture.telegram()['offset'] > base + counter, 60)
-        # Restart the brain and the Telegram service: recall must come from stored evidence, not a live process.
+        # Restart the agent and the Telegram service: recall must come from stored evidence, not a live process.
         fixture.run('restart', '--no-deps', TELEGRAM_SERVICE, 'hermes')
         fixture.run('up', '-d', '--no-build', '--no-deps', '--wait', TELEGRAM_SERVICE, 'hermes')
         wait_telegram_connected(wait, fixture.command, 'polling_reconnected')

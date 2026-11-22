@@ -10,7 +10,7 @@ import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 
 /** Honcho's ids: 21 characters. */
 const nid=(name:string)=>name.replace(/[^A-Za-z0-9]/g,'').padEnd(21,'0').slice(0,21);

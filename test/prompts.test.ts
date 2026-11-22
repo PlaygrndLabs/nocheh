@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,brainWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,memberReadLines,memberReminderLines,scheduleNoticeLines,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
-import {brainSummary} from '../src/brain/brain.js';
-import {fixtureBrain,type FakeCall} from './fixture-brain.js';
+import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundMachine,backgroundTexts,agentWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,memberReadLines,memberReminderLines,scheduleNoticeLines,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
+import {agentSummary} from '../src/agent/agent.js';
+import {fixtureAgent,type FakeCall} from './fixture-agent.js';
 
 test('owner instruction texts need content, a known name and the values Nocheh fills in',()=>{
   assert.equal(promptProblem('reply.owner','Answer in Persian.'),null);
@@ -22,16 +22,16 @@ test('turns and calls that run an instruction text carry only the owner’s vali
     'learning.interpret':'Stays in Nocheh {trigger_id} {citable_ids}','telegram.not_allowed':'Also stays in Nocheh','telegram.approval_card':'Card {text}','telegram.approval_texts':'sent: Sent',
     'telegram.action_continued':'Ended {actions}','memory.source_texts':'said: {who} at {place}'}}]})} as any;
   const seen:[string,Record<string,unknown>][]=[],record:FakeCall=async(operation,input)=>{seen.push([operation,input]);return {};};
-  const call=withPrompts(record,control),brain=brainWithPrompts(fixtureBrain(record),control);
-  await brain.startTurn({channel:'telegram',event_id:'e',attempt:1},{});await call('guard.detect',{text:'t'});await call('usage.price',{});
-  await brain.observeTurn({channel:'telegram',event_id:'e',attempt:1});await brain.reviewNotes!({id:'r'});await brain.readSettings!({scope:'default'});
+  const call=withPrompts(record,control),agent=agentWithPrompts(fixtureAgent(record),control);
+  await agent.startTurn({channel:'telegram',event_id:'e',attempt:1},{});await call('guard.detect',{text:'t'});await call('usage.price',{});
+  await agent.observeTurn({channel:'telegram',event_id:'e',attempt:1});await agent.reviewNotes!({id:'r'});await agent.readSettings!({scope:'default'});
   const prompts={'reply.owner':'Mine'},ref={channel:'telegram',event_id:'e',attempt:1};
   assert.deepEqual(seen,[['run.start',{...ref,asynchronous:true,prompts}],['guard.detect',{text:'t',prompts}],['usage.price',{}],
     ['run.resume',{...ref,observe_only:true}],['memory.review',{id:'r',prompts}],['config.read',{scope:'default'}]]);
-  // The wrapped brain offers exactly what the brain offers.
-  const {reviewNotes:_review,readSettings:_settings,...rest}=fixtureBrain(record),bare=brainWithPrompts(rest,control);
+  // The wrapped agent offers exactly what the agent offers.
+  const {reviewNotes:_review,readSettings:_settings,...rest}=fixtureAgent(record),bare=agentWithPrompts(rest,control);
   assert.equal(bare.reviewNotes,undefined);assert.equal(bare.readSettings,undefined);assert.equal(bare.id,'hermes');
-  assert.deepEqual(brainSummary(bare).capabilities,{...brainSummary(fixtureBrain(record)).capabilities,review:false,settings:false});
+  assert.deepEqual(agentSummary(bare).capabilities,{...agentSummary(fixtureAgent(record)).capabilities,review:false,settings:false});
   const failing=withPrompts(async()=>({}),{query:async()=>{throw Error('control unavailable');}} as any);
   await assert.rejects(failing('memory.filter',{}),/control unavailable/);
 });

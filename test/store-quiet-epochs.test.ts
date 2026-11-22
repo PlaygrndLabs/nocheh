@@ -8,7 +8,7 @@ import {canonical,digest,type Envelope} from '../src/archive.js';
 import type {Interpretation} from '../src/interpretations.js';
 import {defaultLogicalProfile} from '../src/stores/runtime-profile.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import type {GuardBinding} from '../src/stores/guards.js';
 import {honchoEngine} from '../src/memory/honcho.js';

@@ -36,7 +36,7 @@ const at=(chat:string|null,claims:Record<string,unknown>)=>signed('turn',{scope:
 test('a member claim is read only from a turn pass for a private chat that is not the owner\'s, in both families',()=>{
   for(const chat of [MEMBER_GP_CHAT,MEMBER_NG_CHAT,MEMBER_GP_OFF_CHAT,MEMBER_NG_OFF_CHAT,BOB_CHAT]) {
     const parsed=reader(request(turnToken(secret,chat,later(),event,{space:chat,revision:1,guard_epoch:1,member})),secret);
-    assert.deepEqual(parsed,{scope:chat,admin:false,turnEvent:event,space:chat,revision:1,guard_epoch:1,brain:'hermes',member},chat);
+    assert.deepEqual(parsed,{scope:chat,admin:false,turnEvent:event,space:chat,revision:1,guard_epoch:1,agent:'hermes',member},chat);
     assert.equal(boundReader(parsed),'member');
   }
   for(const value of ['D'.repeat(64),'d'.repeat(63),'d'.repeat(65),'d'.repeat(32),'g'.repeat(64),'',64,null])
@@ -69,7 +69,7 @@ test('a lane is checked for shape and dropped: it never reaches the reader and g
 
 test('a member_read claim is read only from a turn pass for the owner\'s private chat, as an answer is',()=>{
   const parsed=reader(request(turnToken(secret,OWNER,later(),event,{space:OWNER,revision:1,memberRead:ask})),secret);
-  assert.deepEqual(parsed,{scope:OWNER,admin:false,turnEvent:event,space:OWNER,revision:1,brain:'hermes',memberRead:ask});
+  assert.deepEqual(parsed,{scope:OWNER,admin:false,turnEvent:event,space:OWNER,revision:1,agent:'hermes',memberRead:ask});
   assert.equal(boundReader(parsed),'memberRead');
   assert.ok(memberReadId.test(ask));assert.ok(memberClaimId.test(member));
   for(const value of ['C'.repeat(32),'c'.repeat(31),'c'.repeat(64),'',32])refused(at(OWNER,{member_read:value}),String(value));
@@ -164,7 +164,7 @@ test('step 4\'s texts are editable keys with defaults, and the members\' private
   assert.match(memberPrivateDailyLimitReply,/limit/);assert.match(membersLocalLaws,/local laws/);
   assert.doesNotMatch(membersLocalLaws+memberPrivateDailyLimitReply+notAllowedPrivateReply,/\bteam\b/i,'owner-facing words say member');
   for(const text of [memberPrivateDailyLimitReply,membersLocalLaws,notAllowedPrivateReply])assert.equal(promptProblem('members.local_laws',text),null);
-  // reply.member is a reply rule, so its default is the brain's, as every reply.* text is.
+  // reply.member is a reply rule, so its default is the agent's, as every reply.* text is.
   const hermes=readFileSync(servicesFile('services/hermes/prompts.py'),'utf8'),rules=hermes.match(/'reply\.member': \(([\s\S]*?)\),\n/)?.[1]??'';
   assert.match(rules,/the owner can read it/,'the truthful rule');
   assert.doesNotMatch(rules,/memory_recall|knowledge|owner_read/,'no notes tool and no owner tools in a member\'s chat');

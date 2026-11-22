@@ -13,7 +13,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {MEMBER_RECHECK_HOURS,joinedGroups} from '../src/stores/member-reads.js';
 import {memberTaskViews} from '../src/stores/member-task-views.js';
 import {TaskRepository,type MemberAppPrincipal} from '../src/stores/tasks.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {ALI,CANARY_LABEL,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,GUS,MEMBER_GP,MEMBER_APP_REACH,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_NG_ACCOUNT,MEMBER_NG_CHAT,MEMBER_NG_ID,
   NG1,NG2,NG_GROUP_IDS,OWNER,P1,P2,fixtureChats,fixtureDirectory,memberAppMembers,seedAssignee,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
@@ -323,7 +323,7 @@ test('the members\' app writes as the member: read refuses every write, write ch
   } finally {await close();}
 });
 
-test('the members\' app names an assignee by their People name (ADR-0273) only when they are in a group she reaches; every other is counted, never named',fixture,async()=>{
+test('the members\' app names an assignee by their People name (ADR-0274) only when they are in a group she reaches; every other is counted, never named',fixture,async()=>{
   const {stores,s,close}=await open(),db=stores.control;
   try {
     // Ali in GP1 (hers), Gus only in GP2 (gone from her reach), one card bound to nobody, and Mira's own card.

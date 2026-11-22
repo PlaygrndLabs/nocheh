@@ -41,7 +41,7 @@ def provider():
 
 
 PROVIDER = provider()
-BRAIN, LEARNING = PROVIDER.ScriptedBrain, PROVIDER.PrivacyCanary({})
+AGENT, LEARNING = PROVIDER.ScriptedAgent, PROVIDER.PrivacyCanary({})
 DAY, CLOCK = TIME.split(' ')
 UNAVAILABLE = {'error': 'archive_source_unavailable'}
 # The block titles and the opening line Nocheh's code writes (src/stores/native-memory.ts headers, src/fact-block.ts).
@@ -52,7 +52,7 @@ OPEN = '[To open a fact\'s original: archive_read id={id} fact=<n>. Times are wh
 
 
 class Installation(Fixture):
-    """The fake Telegram, the archive and the brain's tools of a made-up installation, as the scenarios read them.
+    """The fake Telegram, the archive and the agent's tools of a made-up installation, as the scenarios read them.
 
     Faults: `untagged` (hits and opened messages as before ADR-0261), `owner_zone_everywhere`, `owner_word_in_groups`,
     `owner_topic_name_leaks`, `outside_reply_in_group`, `evidence_dropped` (sibling topic evidence lost, V2),
@@ -88,7 +88,7 @@ class Installation(Fixture):
         self.next_id += 10
         return self.next_id
 
-    def brain(self):
+    def agent(self):
         return self.events
 
     def sent(self):
@@ -422,7 +422,7 @@ class Installation(Fixture):
         message (ADR-0261 B3.3)."""
         row = self.message_of(event_id)
         day = datetime.fromtimestamp(row['date'], timezone.utc).strftime('%Y-%m-%d')
-        text = next(found.strip() for found in BRAIN.REVIEW_NOTE.findall(row['text']) if mark in found)
+        text = next(found.strip() for found in AGENT.REVIEW_NOTE.findall(row['text']) if mark in found)
         label = 'Nocheh\'s notes review '+('' if self.fault == 'review_undated' else 'on '+day+' ')+'of another person\'s message in a group › a topic'
         self.notes.append({'text': text, 'turn': None, 'session': (OWNER, None), 'from': 'person', 'label': label, 'sources': [event_id], 'day': day})
         return {'state': 'done', 'provenance': {}}
@@ -478,21 +478,21 @@ class Installation(Fixture):
                      'reply': target['id'] if target else None})
         self.context = {'recent': bool(recent), 'reply_by': self.tag(session, target)['by'] if target else None}
         answers = []
-        replied = next((found for found in BRAIN.DIRECTIVE.finditer(row['text']) if found[1] == 'replied'), None)
+        replied = next((found for found in AGENT.DIRECTIVE.finditer(row['text']) if found[1] == 'replied'), None)
         if replied:
-            seen = BRAIN.reply_frame(frame+row['text'])
+            seen = AGENT.reply_frame(frame+row['text'])
             self.events.append({'directive': 'replied', 'argument': (replied[2] or '').strip(), 'phase': 'frame', **seen})
             if (replied[2] or '').startswith('open') and seen['block']:
                 result = json.dumps(self.read(session, {'id': 'nocheh:event:'+seen['block']['id']}), ensure_ascii=False)
                 self.events.append({'directive': 'replied', 'argument': replied[2].strip(), 'phase': 'final', 'tool': 'mcp__nocheh__archive_read', 'result': result})
                 rows.append({'role': 'tool', 'turn': row['id'], 'text': result, 'cites': re.findall('[a-f0-9]{64}', result)})
                 answers.append('mcp__nocheh__archive_read: '+result)
-        for name, argument in BRAIN.TOOL.findall(row['text']):
+        for name, argument in AGENT.TOOL.findall(row['text']):
             result = json.dumps(self.call(name, json.loads(argument), session, row['id'], row['sender']), ensure_ascii=False)
             self.events.append({'directive': 'tool', 'tool': name, 'phase': 'final', 'argument': argument, 'result': result})
             rows.append({'role': 'tool', 'turn': row['id'], 'text': result, 'cites': re.findall('[a-f0-9]{64}', result)})
             answers.append(name+': '+result)
-        found = BRAIN.DIRECTIVE.search(row['text'])
+        found = AGENT.DIRECTIVE.search(row['text'])
         if found and found[1] == 'recall':
             result = json.dumps(self.call('mcp__nocheh__memory_recall', {'query': found[2]}, session, row['id'], row['sender']), ensure_ascii=False)
             self.events.append({'directive': 'recall', 'tool': 'mcp__nocheh__memory_recall', 'phase': 'final', 'argument': found[2], 'result': result})
@@ -507,7 +507,7 @@ class Installation(Fixture):
             answers.append('turn '+found[2]+' absent')
         elif found and found[1] == 'note_open':
             answers.append(self.open_note(session, found[2]))
-        answer = '[NO_REPLY]' if '[[after:silent]]' in row['text'] else '[brain] '+' '.join(answers)
+        answer = '[NO_REPLY]' if '[[after:silent]]' in row['text'] else '[agent] '+' '.join(answers)
         rows.append({'role': 'assistant', 'turn': row['id'], 'text': answer, 'cites': []})
         if answer != '[NO_REPLY]':
             self.answered(chat, topic, answer)

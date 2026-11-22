@@ -15,7 +15,7 @@ import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
-import {brainErrors,brainOperation,brainSummary,type BrainOperation} from '../brain/brain.js';
+import {agentErrors,agentOperation,agentSummary,type AgentOperation} from '../agent/agent.js';
 import {immutableFile} from '../storage.js';
 import {ownerSecurityRoute} from '../security/owner-api.js';
 import {captureEvidence} from './generated-capture.js';
@@ -127,11 +127,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:false});
     if(req.method==='GET'&&path==='/v1/runtime') {
       admin(principal);
-      // The plugged-in brain and its health, Nocheh's own Telegram bot (ADR-0235), and which helper services answer (ADR-0234).
-      const [brainStatus,bot]=await Promise.all([s.brain.status().catch(()=>({ok:false,error:brainErrors.unavailable})),
+      // The plugged-in agent and its health, Nocheh's own Telegram bot (ADR-0235), and which helper services answer (ADR-0234).
+      const [agentStatus,bot]=await Promise.all([s.agent.status().catch(()=>({ok:false,error:agentErrors.unavailable})),
         capabilities['telegram.status']?call('telegram.status',{},5000).catch(()=>null):Promise.resolve(null)]);
       const telegram=bot?{telegram:bot.telegram,telegram_details:bot.telegram_details}:capabilities['telegram.status']?{telegram:'unavailable'}:{};
-      return json(res,200,{brain:brainSummary(s.brain),status:{...brainStatus,...telegram},capabilities});
+      return json(res,200,{agent:agentSummary(s.agent),status:{...agentStatus,...telegram},capabilities});
     }
     if(req.method==='POST'&&path==='/v1/runtime/usage-price'){
       // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.
@@ -244,7 +244,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         if(await s.supervision.outsider(policy,space))throw new HttpError(404,'conversation_not_found');
       }
       if(view==='people') {
-        // The owner's private note about each person shows here, in the owner's own private chat only (ADR-0273).
+        // The owner's private note about each person shows here, in the owner's own private chat only (ADR-0274).
         const found=await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
           after:url.searchParams.get('after')??'',state:'active'}),notes=await s.entities.ownerNotes(reader,found.entities.map(entity=>entity.id));
         return json(res,200,{...found,entities:found.entities.map(entity=>notes.get(entity.id)?.note?{...entity,private_note:notes.get(entity.id)!.note}:entity)});
@@ -259,17 +259,17 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(req.method==='GET'&&path==='/v1/runtime/profiles')return json(res,200,await s.runtimeProfiles.list(principal));
       if(req.method==='POST')return json(res,200,await (path.endsWith('/resolve')?s.runtimeProfiles.resolve(principal,await readJson(req)):s.runtimeProfiles.save(principal,await readJson(req))));
     }
-    if(req.method==='POST'&&path==='/v1/brain/manage') {
-      // Owner management of the brain's own state (ADR-0234): each action maps to a brain operation, never a native path.
+    if(req.method==='POST'&&path==='/v1/agent/manage') {
+      // Owner management of the agent's own state (ADR-0234): each action maps to an agent operation, never a native path.
       admin(principal);
       const {action,...input}=object(await readJson(req,1024*1024)),writes=['changes','role','skills'].some(key=>key in input);
       const operation=({profiles:'listProfiles',memory:'readNotes',preferences:writes?'writeSettings':'readSettings',
-        persona:writes?'writePersona':'readPersona',schedules:'manageSchedules'} as Record<string,BrainOperation>)[string(action,20)];
+        persona:writes?'writePersona':'readPersona',schedules:'manageSchedules'} as Record<string,AgentOperation>)[string(action,20)];
       if(!operation)throw new HttpError(400,'unknown_management_action');
       // The Schedules pages (ADR-0266): each schedule with the name of its chat as the owner sees it.
-      if(operation==='manageSchedules')return json(res,200,await scheduleChats(s.stores.control,ownerChat(s.access.policy()),await brainOperation(s.brain,operation)(input)));
+      if(operation==='manageSchedules')return json(res,200,await scheduleChats(s.stores.control,ownerChat(s.access.policy()),await agentOperation(s.agent,operation)(input)));
       // Each note says where it came from in the owner's words; what Hermes recorded about it stays behind.
-      const value=await brainOperation(s.brain,operation)(input);
+      const value=await agentOperation(s.agent,operation)(input);
       return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value,ids=>s.originals.originals(ids)):value);
     }
     if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
@@ -378,7 +378,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     };
     if(path==='/v1/telegram/destinations'&&req.method==='GET')return result(await s.telegramActions.destinations(principal));
     if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.actionCommands.offer('telegram',await s.telegramActions.request(principal,await readJson(req))));
-    // The Notion connections this turn may use, named for the brain (ADR-0268).
+    // The Notion connections this turn may use, named for the agent (ADR-0268).
     if(path==='/v1/notion/connections'&&req.method==='GET') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');
       return result({connections:await notionConnectionsHere(s.stores.control,principal,await s.turns.binding(principal))});
@@ -515,7 +515,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       // Each hit says in words which chat it came from, never by its raw ID (ADR-0251), and each note where it came from (ADR-0257).
       // An owner turn recalls the owner's own notes and those of the owner's chat and the groups Nocheh serves, never a
       // member's private chat's or an ask about a member's (D7); the dashboard (admin) names none and reads every one.
-      const found=await brainOperation(s.brain,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation,
+      const found=await agentOperation(s.agent,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation,
         ...(principal.admin?{}:{allowed:ownerRecallAllowed(s.access.policy())})});
       // Each note hit names up to 3 of the messages it was written from, tagged for the owner (B3.6).
       const tagged=async(ids:string[])=>s.tags.checked(principal,binding,[...(await s.archive.capturedMany(ids)).values()].map(item=>item.reference));

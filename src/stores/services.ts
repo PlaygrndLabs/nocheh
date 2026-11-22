@@ -11,7 +11,7 @@ import {TelegramTopicRepository} from './telegram-topics.js';
 import {ownerChat,settleTelegramChat,type AssistantPolicy} from '../assistant-policy.js';
 import type {RuntimeCall} from '../runtime.js';
 import {groupReplies,type GroupReplies} from '../telegram-addressing.js';
-import type {Brain} from '../brain/brain.js';
+import type {Agent} from '../agent/agent.js';
 import type {MemoryEngine} from '../memory/engine.js';
 import type {StorePools} from './connections.js';
 import {ArchiveRepository} from './archive.js';
@@ -82,7 +82,7 @@ import {Members} from './members.js';
 
 /** The same explicit repository composition is used by HTTP, workers and fixtures. */
 export function storageServices(stores:StorePools,options:{dataDir:string;detectorVersion:string;policy:()=>AssistantPolicy;
-  runtime:RuntimeCall;brain:Brain;memoryEngine:MemoryEngine;transcription?:DerivationEngine;serviceToken?:string;
+  runtime:RuntimeCall;agent:Agent;memoryEngine:MemoryEngine;transcription?:DerivationEngine;serviceToken?:string;
   /** When groups get replies; the owner's setting from the environment unless given. */
   groupReplies?:GroupReplies}) {
   const archive=new ArchiveRepository(stores.archive),operations=new OperationRepository(stores.control),derived=new DerivedRepository(stores.derived,archive,operations);
@@ -123,11 +123,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   // What is left to do once someone adds Nocheh to a group or removes it: leave, the card and the owner's notes (ADR-0253).
   const chatAdds=new ChatAdds(stores.control,options.policy,options.runtime,chats);
   // The owner's message when a reply set a schedule in their private chat, with Pause and Delete (ADR-0266).
-  const scheduleNotices=new ScheduleNotices(stores.control,options.policy,options.runtime,options.brain);
+  const scheduleNotices=new ScheduleNotices(stores.control,options.policy,options.runtime,options.agent);
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
   const memoryMap=new MemoryMapRepository(stores,memoryAccess);
-  const ownerAutonomy=new OwnerAutonomyRepository(stores.control),notion=new NotionRepository(stores.control),prompts=new PromptRepository(stores.control,options.brain);
+  const ownerAutonomy=new OwnerAutonomyRepository(stores.control),notion=new NotionRepository(stores.control),prompts=new PromptRepository(stores.control,options.agent);
   const chatTools=new ChatToolSettingsRepository(stores.control,()=>ownerChat(options.policy()));
   const telegramTopics=new TelegramTopicRepository(stores.control);
   const telegramChats=new TelegramChatRepository(stores.control,options.runtime,chats);
@@ -209,7 +209,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
     return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),...await sender(source.reference.id,space)};
   },{call:options.runtime,owner:()=>ownerChat(options.policy()),policy:options.policy,record:send=>chatSends.recordLocal(send)},topicMemory);
-  const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.brain,detect,options.serviceToken??'');
+  const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.agent,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers,chatAdds,scheduleNotices),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
   // A card edit is best effort: a job or an operation never fails because its card could not be updated.
@@ -221,23 +221,23 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
   // The owner's Members routes (step 3, src/stores/member-api.ts).
   const members:MemberRepository=new Members(stores.control,options.policy);
-  return {brain:options.brain,chats,chatAdds,scheduleNotices,members,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {agent:options.agent,chats,chatAdds,scheduleNotices,members,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,
-    schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.brain,schedules,telegramActions),
+    schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.agent,schedules,telegramActions),
     runtimeProfiles:new RuntimeProfileRepository(access),
-    browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.brain,browserDelivery),
+    browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.agent,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,
     chatSends,
     privateAnswers,
-    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.brain,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env),privateAnswers),
-    continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
-    memberAsks,memberAskTurns:new OwnerMemberAskTurns(memberAsks,archive,access,derived,guards,prepared,turns,options.brain,options.serviceToken??'',options.runtime),
+    telegramActions,actionCommands,telegram:new TelegramDispatchRepository(archive,access,sources,derived,guards,preparation,prepared,turns,actionCommands,memoryAccess,options.runtime,options.agent,options.serviceToken??'',detect,options.groupReplies??groupReplies(process.env),privateAnswers),
+    continuations:new ActionContinuationRepository(archive,access,derived,guards,prepared,turns,options.agent,options.serviceToken??'',options.runtime),
+    memberAsks,memberAskTurns:new OwnerMemberAskTurns(memberAsks,archive,access,derived,guards,prepared,turns,options.agent,options.serviceToken??'',options.runtime),
     capture,sourcePortability,imports:new ImportRepository(sourcePortability,access,{call:options.runtime,owner:()=>ownerChat(options.policy())}),derivativePortability,ownerPortability:new OwnerPortabilityRepository(stores),legacyImports:new LegacyImportRepository(sourcePortability,derivativePortability),
     learning:new ContextualLearningRepository(contexts,derived,guards,learned,provenance,options.memoryEngine),
     memory,knowledge,supervision,originals,memoryDashboard,
-    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.brain,options.serviceToken??'',noteSources),noteSources,tags,
+    reviews:new NativeReviewRepository(contexts,derived,prepared,turns,options.agent,options.serviceToken??'',noteSources),noteSources,tags,
     shared,
     detectorVersion:options.detectorVersion,detect};
 }

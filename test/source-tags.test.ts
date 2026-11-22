@@ -39,7 +39,7 @@ test('the owner reads "the owner" and the Tasks zone; a group reads the owner by
   assert.match(sourceTag(own,{...owner,zone:'Not/AZone'},names,directory).tag,/ 14:12 UTC$/);
 });
 
-test('a People name the owner set is the name everyone else reads; the owner reads it beside Telegram\'s when they differ (ADR-0273)',()=>{
+test('a People name the owner set is the name everyone else reads; the owner reads it beside Telegram\'s when they differ (ADR-0274)',()=>{
   const said=source(3,message(bob),{chat:GP1_TOPIC,saved:'Brother'});
   assert.equal(sourceTag(said,owner,names,directory).tag,'“Bob” (@bob_gp), saved as “Brother” · group “GP1” › topic “Trips” · 2026-11-03 15:12 Europe/Berlin');
   assert.equal(sourceTag(said,member,names,directory).tag,'“Brother” (@bob_gp) · group “GP1” › topic “Trips” · 2026-11-03 14:12 UTC','everyone else reads the People name');

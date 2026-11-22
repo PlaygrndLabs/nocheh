@@ -875,7 +875,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/longterm/rebuild'){const chosen=url.searchParams.getAll('space').length;
     return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
-  if(route==='/runtime')return json(res,200,{brain:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
+  if(route==='/runtime')return json(res,200,{agent:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
     status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'guard.detect':true,'image.read':true,'usage.price':false}});
   if(route==='/graph'){
     const scope=url.searchParams.get('scope')??'*',all=scope==='*';
@@ -993,7 +993,7 @@ const server=createServer((req,res)=>{void(async()=>{
   const claimCorrect=route.match(/^\/entities\/claims\/([a-f0-9]{64})\/correct$/);
   if(claimCorrect){const item=claims.find(c=>c.id===claimCorrect[1]);if(!item)throw new HttpError(404,'entity_claim_not_found');if(item.revision!==body.expected_revision)throw new HttpError(409,'entity_claim_revision_conflict');
    Object.assign(item,{content:String(body.content),attribution:body.attribution,uncertainty:body.uncertainty,retired:body.retired,author:'owner',revision:item.revision+1},body.relationship_kind?{relationship_kind:body.relationship_kind}:{});return json(res,200,{id:item.id,revision:item.revision,retired:item.retired});}
-  // The owner's private note about a person (ADR-0273).
+  // The owner's private note about a person (ADR-0274).
   const entityNote=route.match(/^\/entities\/([a-f0-9]{64})\/note$/);
   if(entityNote){const entity=people.find(p=>p.id===entityNote[1]&&p.kind==='person');if(!entity)throw new HttpError(404,'entity_not_found');
    const saved=personNotes.get(entity.id)??{note:'',revision:0};if(saved.revision!==body.expected_revision)throw new HttpError(409,'entity_note_conflict');

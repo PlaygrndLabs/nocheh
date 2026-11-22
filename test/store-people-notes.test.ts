@@ -10,9 +10,9 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {ensureAccount,ensureConnection} from '../src/stores/chats.js';
 import {accountPeopleNames} from '../src/stores/entities.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 
-// ADR-0273: the name the owner sets in People is the person's name everywhere; the owner's private note is never.
+// ADR-0274: the name the owner sets in People is the person's name everywhere; the owner's private note is never.
 test('a People name reaches groups and memory; the owner\'s private note reaches only the owner\'s own recall',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};

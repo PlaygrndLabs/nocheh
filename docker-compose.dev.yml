@@ -164,7 +164,7 @@ services:
     build: !reset null
     restart: unless-stopped
     entrypoint: [python, -m, tools.development.dev_reload]
-    # Not services/hermes: a brain edit must not restart the poller and leave its sends in flight unconfirmed.
+    # Not services/hermes: an agent edit must not restart the poller and leave its sends in flight unconfirmed.
     # The shared file helpers in services/durable.py are watched too.
     command: [--watch, /workspace/services/telegram, --watch, /workspace/services/durable.py, --watch, /workspace/tools, --, python, -m, services.telegram.server]
     volumes:

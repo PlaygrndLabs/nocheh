@@ -612,7 +612,7 @@ services:
     depends_on:
       nocheh-miniapp: {condition: service_healthy}
 
-  # The brain: answers turns for Nocheh and never talks to Telegram. It keeps the chat scopes, not the bot token.
+  # The agent: answers turns for Nocheh and never talks to Telegram. It keeps the chat scopes, not the bot token.
   hermes:
     logging: *logging
     image: ${NOCHEH_IMAGES:-nocheh}-hermes:local
@@ -674,14 +674,14 @@ services:
       NOCHEH_TRANSCRIPTION_ROUTE_PRICE: ${NOCHEH_TRANSCRIPTION_ROUTE_PRICE:-}
       ARCHIVE_URL: http://nocheh-app:8780
       GUARD_URL: http://nocheh-security:8786
-    # Only the folders Hermes uses: the dashboard's look (not its token) and its own brain-turn journal (not the
+    # Only the folders Hermes uses: the dashboard's look (not its token) and its own agent-turn journal (not the
     # rest of the spool). ./bin/nocheh makes them at 0700, so Docker never makes them as root.
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard/home:/dashboard-state/home
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes:/workspace/data/local/hermes
       - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
       - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
-      - ${NOCHEH_STATE_DIR:-./data/local}/spool/brain-turns:/data/spool/brain-turns
+      - ${NOCHEH_STATE_DIR:-./data/local}/spool/agent-turns:/data/spool/agent-turns
     depends_on:
       nocheh-app: {condition: service_healthy}
       nocheh-security: {condition: service_healthy}
@@ -693,7 +693,7 @@ services:
       start_period: 15s
 
   # The only Telegram poller and sender, and the only service given the bot token in its environment: long polling,
-  # durable capture, the outbound journal and every message sent. It waits for the app, not Hermes, so a brain restart
+  # durable capture, the outbound journal and every message sent. It waits for the app, not Hermes, so an agent restart
   # never stops polling.
   nocheh-telegram:
     logging: *logging

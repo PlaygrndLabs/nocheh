@@ -13,7 +13,7 @@ import {observedSource} from '../src/observed-source.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import type {PreparedDependency} from '../src/stores/learned.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 
 /** The fields archive_read adds (ADR-0261). */
 const added=['tag','by','at','chat_id','forward','topic','answers','reply_to','chain','replies','reply_link_withheld'];

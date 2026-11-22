@@ -41,7 +41,7 @@ class AsyncRunTests(unittest.TestCase):
                     'telegram_send':{'ms':7,'calls':1},'private phrase':{'ms':1,'calls':1},'total':{'ms':3,'calls':1,'text':'private'}}}
             runs=AsyncRuns(folder,execute,lambda body:None);body=self.body();runs.start(body)
             result=self.wait(runs,body)
-            # The brain never sends to Telegram, so a send time is not one of its phases.
+            # The agent never sends to Telegram, so a send time is not one of its phases.
             self.assertEqual(result['timings'],{'conversation':{'ms':40,'calls':1}})
             window=result['window'];self.assertEqual(set(window),{'queued','assistant','delivery','finished'})
             self.assertTrue(window['queued']<=window['assistant']<=window['delivery']<=window['finished'])

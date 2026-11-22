@@ -2,7 +2,7 @@ import type pg from 'pg';
 import {admin,type Reader} from './access.js';
 import {HttpError,object} from './http.js';
 import type {RuntimeCall,RuntimeOperation} from './runtime.js';
-import {brainErrors,type Brain,type TurnInput,type TurnRef} from './brain/brain.js';
+import {agentErrors,type Agent,type TurnInput,type TurnRef} from './agent/agent.js';
 import type {groupToolsTextLabels,memberReminderTextLabels} from './member-wire.js';
 
 /**
@@ -430,7 +430,7 @@ export type PrivateAnswerText='button'|'open'|'only_asker'|'expired'|'used'|'cha
 export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerText,string> {
   return labeledLines(privateAnswerTexts,text) as Record<PrivateAnswerText,string>;
 }
-/** The message Nocheh posts in the owner's private chat when a reply set a schedule there with the brain's own schedule
+/** The message Nocheh posts in the owner's private chat when a reply set a schedule there with the agent's own schedule
  * tool (ADR-0266), one "name: text" line each: set, when, next and note are its lines ({name}, {when}, {next}), with the pause and delete
  * buttons; paused and deleted answer a press and are added under it; unnamed stands in for a schedule with no name and
  * no_next for one with no next run; changed and only_owner answer a press that cannot act. Code writes it, never a model. */
@@ -500,24 +500,24 @@ export function withPrompts(call:RuntimeCall,control:Pick<pg.Pool,'query'>):Runt
     return call(operation,{...input,prompts:await replacements(control)},timeout);
   };
 }
-/** The brain, with the owner's replacement texts sent with every turn it starts and every notes review it runs. */
-export function brainWithPrompts(brain:Brain,control:Pick<pg.Pool,'query'>):Brain {
-  const withTexts=async(input:Readonly<Record<string,unknown>>)=>({...input,prompts:await replacements(control)}),review=brain.reviewNotes;
-  // Every other operation, and the lack of one, comes from the brain itself.
-  return Object.assign(Object.create(brain) as Brain,{
-    startTurn:async(ref:TurnRef,input:TurnInput)=>brain.startTurn(ref,await withTexts(input)),
-    ...(review?{reviewNotes:async(input:Readonly<Record<string,unknown>>)=>review.call(brain,await withTexts(input))}:{}),
+/** The agent, with the owner's replacement texts sent with every turn it starts and every notes review it runs. */
+export function agentWithPrompts(agent:Agent,control:Pick<pg.Pool,'query'>):Agent {
+  const withTexts=async(input:Readonly<Record<string,unknown>>)=>({...input,prompts:await replacements(control)}),review=agent.reviewNotes;
+  // Every other operation, and the lack of one, comes from the agent itself.
+  return Object.assign(Object.create(agent) as Agent,{
+    startTurn:async(ref:TurnRef,input:TurnInput)=>agent.startTurn(ref,await withTexts(input)),
+    ...(review?{reviewNotes:async(input:Readonly<Record<string,unknown>>)=>review.call(agent,await withTexts(input))}:{}),
   });
 }
 
 export class PromptRepository {
-  constructor(readonly control:pg.Pool,readonly brain:Brain){}
+  constructor(readonly control:pg.Pool,readonly agent:Agent){}
   async get(principal:Reader) {
     admin(principal);
     const row=(await this.control.query('SELECT texts,revision FROM owner_prompts WHERE singleton')).rows[0];
     // Hermes also reports the texts of the services it runs today, such as the secret check (ADR-0234).
-    if(!this.brain.promptDefaults)throw new HttpError(409,brainErrors.unsupported);
-    const reported=await this.brain.promptDefaults();
+    if(!this.agent.promptDefaults)throw new HttpError(409,agentErrors.unsupported);
+    const reported=await this.agent.promptDefaults();
     const defaults=Object.fromEntries(promptKeys.map(key=>[key,nochehTexts[key]??reported[key]]));
     if(Object.values(defaults).some(text=>typeof text!=='string'))throw new HttpError(502,'runtime_prompts_unavailable');
     return {revision:String(row?.revision??0),defaults,texts:await ownerPrompts(this.control),limit:PROMPT_LIMIT,placeholders:promptPlaceholders};

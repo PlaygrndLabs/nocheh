@@ -11,7 +11,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import type {SourceReference} from '../src/stores/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {SourceRepository} from '../src/stores/retrieval.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 
 /** A result without the fields ADR-0261 adds, to compare with what the same read gave before. */
 const plain=(value:unknown):unknown=>{

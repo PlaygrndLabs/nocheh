@@ -4,7 +4,7 @@ the forward reach what is known about the owner (ADR-0257).
 
 The scenario runs here against a made-up installation: long-term memory as the tester's Honcho keeps it, its conclusions
 drawn by the fixture's own learning (installation-provider.py PrivacyCanary) about each message's writer, and the turn's
-answer given by the fixture's own scripted brain from the blocks recall labels. The owner's question is learned before
+answer given by the fixture's own scripted agent from the blocks recall labels. The owner's question is learned before
 the turn reads memory, as it was in a full run where it reached Honcho first."""
 import contextlib
 import importlib.util
@@ -40,7 +40,7 @@ class Installation:
     owner. `owner_block_reads_forwards`: the owner's turn shows the forwards participant's conclusions in the owner's block."""
     def __init__(self, module, learned_about_owner=False, owner_block_reads_forwards=False):
         self.privacy = module.PrivacyCanary({})
-        self.brain = module.ScriptedBrain({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
+        self.agent = module.ScriptedAgent({'chat': 0, 'raw_canary_outside_detector': 0}, 'fixture-canary')
         self.learned_about_owner, self.owner_block_reads_forwards = learned_about_owner, owner_block_reads_forwards
         self.messages, self.conclusions, self.typed = [], [], []
 
@@ -60,8 +60,8 @@ class Installation:
             self.write(FORWARDS, message['text']+'\n'+NAMED)
             if self.learned_about_owner:
                 self.conclusions += [(PERSON, PERSON, text.replace(FORWARDS, PERSON)) for _, _, text in list(self.conclusions)]
-            self.write(ASSISTANT, '[brain] turn a person who hides their account present', observed=False)
-            return 'forward', '[brain] turn a person who hides their account present'
+            self.write(ASSISTANT, '[agent] turn a person who hides their account present', observed=False)
+            return 'forward', '[agent] turn a person who hides their account present'
         self.typed.append(message['text'])
         self.write(PERSON, message['text'])
         owner = self.block(PERSON)+('\n'+self.block(FORWARDS) if self.owner_block_reads_forwards else '')
@@ -70,7 +70,7 @@ class Installation:
         evidence = PREFIX+json.dumps({'entries': [{'source': 'nocheh.memory.recall', 'content': {'sources': sources}}]})
         body = SimpleNamespace(messages=[SimpleNamespace(role='user', content=evidence), SimpleNamespace(role='user', content=message['text'])],
                                tools=[{'type': 'function', 'function': {'name': 'mcp__nocheh__memory_recall'}}], stream=False, stream_options=None, model='fixture')
-        answer = self.brain.respond(body)['content']
+        answer = self.agent.respond(body)['content']
         self.write(ASSISTANT, answer, observed=False)
         return 'question', answer
 

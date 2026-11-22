@@ -19,7 +19,7 @@ const signed=(prefix:'turn'|'scope',claims:Record<string,unknown>)=>{
 
 test('an answer claim is read only from a turn pass for the asker\'s private chat',()=>{
   const pass=turnToken(secret,OWNER,later(),event,{space:OWNER,revision:1,guard_epoch:1,answer});
-  assert.deepEqual(reader(request(pass),secret),{scope:OWNER,admin:false,turnEvent:event,space:OWNER,revision:1,guard_epoch:1,brain:'hermes',answer});
+  assert.deepEqual(reader(request(pass),secret),{scope:OWNER,admin:false,turnEvent:event,space:OWNER,revision:1,guard_epoch:1,agent:'hermes',answer});
   assert.ok(answerId.test(answer));
   for(const value of ['A'.repeat(32),'a'.repeat(31),'a'.repeat(33),'a'.repeat(64),'g'.repeat(32),'',32])
     assert.throws(()=>reader(request(signed('turn',{scope:OWNER,event_id:event,space:OWNER,revision:1,answer:value})),secret),{code:'invalid_scope_token'},String(value));
@@ -39,14 +39,14 @@ test('a read set never comes from a pass, and passes without an answer read as b
   assert.throws(()=>reader(request(signed('turn',{scope:GP1,event_id:event,space:GP1,revision:1,reads:{home:GP1,exact:[],whole:[GP1],project:null}})),secret),{code:'invalid_scope_token'});
   assert.throws(()=>reader(request(signed('scope',{scope:GP1,reads:[GP1]})),secret),{code:'invalid_scope_token'});
   const group=reader(request(turnToken(secret,GP1,later(),event,{space:GP1_TOPIC,revision:2})),secret);
-  assert.deepEqual(group,{scope:GP1,admin:false,turnEvent:event,space:GP1_TOPIC,revision:2,brain:'hermes'});
+  assert.deepEqual(group,{scope:GP1,admin:false,turnEvent:event,space:GP1_TOPIC,revision:2,agent:'hermes'});
   assert.equal('answer' in group||'reads' in group,false);
   // Both fixture families: a digest topic's pass reads under its group's row, and a space under another chat is refused.
   assert.deepEqual(reader(request(turnToken(secret,NG1,later(),event,{space:NG1_TOPIC,revision:2})),secret),
-    {scope:NG1,admin:false,turnEvent:event,space:NG1_TOPIC,revision:2,brain:'hermes'});
+    {scope:NG1,admin:false,turnEvent:event,space:NG1_TOPIC,revision:2,agent:'hermes'});
   for(const [scope,space] of [[NG2,NG1_TOPIC],[GP1,NG1_TOPIC],[NG1,GP1_TOPIC]])
     assert.throws(()=>reader(request(signed('turn',{scope,event_id:event,space,revision:2})),secret),{code:'invalid_scope_token'},scope+' '+space);
-  assert.deepEqual(reader(request(turnToken(secret,null,later(),event,{space:OWNER,revision:1})),secret),{scope:null,admin:false,turnEvent:event,space:OWNER,revision:1,brain:'hermes'});
+  assert.deepEqual(reader(request(turnToken(secret,null,later(),event,{space:OWNER,revision:1})),secret),{scope:null,admin:false,turnEvent:event,space:OWNER,revision:1,agent:'hermes'});
   assert.deepEqual(reader(request(scopeToken(secret,GP1,later())),secret),{scope:GP1,admin:false});
   assert.deepEqual(reader(request(secret),secret),{scope:null,admin:true});
 });
@@ -63,7 +63,7 @@ test('a scoped pass reads in its own chat or one of its topics, as the chat dire
 test('a turn pass may carry its chat\'s app binding; storage does not require it',()=>{
   const app={app:'telegram' as const,chat:NG1_TG,topic:'7'};
   assert.deepEqual(reader(request(turnToken(secret,NG1,later(),event,{space:NG1_TOPIC,revision:1,app})),secret),
-    {scope:NG1,admin:false,turnEvent:event,space:NG1_TOPIC,revision:1,brain:'hermes',app});
+    {scope:NG1,admin:false,turnEvent:event,space:NG1_TOPIC,revision:1,agent:'hermes',app});
   assert.deepEqual(reader(request(turnToken(secret,NG2,later(),event,{space:NG2,revision:1,app:{app:'telegram',chat:NG2_TG,topic:null}})),secret).app,
     {app:'telegram',chat:NG2_TG,topic:null});
   // A job's or a schedule's pass has no app binding and still reads.

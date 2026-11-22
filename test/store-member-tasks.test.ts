@@ -11,7 +11,7 @@ import {installMembersForTest} from '../src/members.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {startMembers,type MemberDirectoryLoader} from '../src/stores/members.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {ALI,CANARY_LABEL,GP1,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ACCOUNT,MEMBER_NG_ID,NG1,NG1_TG,NG_GROUP_IDS,OWNER,P2,fixtureChats,
   fixtureDirectory,seedAssignee,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
@@ -100,7 +100,7 @@ test('a member paused or switched off mid-turn writes no task; a read-only membe
       assert.equal(closed.state,'done');
 
       // The owner names people on it: the group reads neither them, nor the owner's names for them, nor the person column,
-      // only the other shared column; an assignee in this group by the People name the owner set (ADR-0273), every other
+      // only the other shared column; an assignee in this group by the People name the owner set (ADR-0274), every other
       // counted.
       await s.tasks.update(owner,hall.id,{operation_id:key+':names:'+person,expected_revision:closed.revision,people:[named],assignees:[named,ali],properties:{Lead:[named],Size:4}});
       const assignees=chat===GP1?[[{name:CANARY_LABEL}],1]:[[],2];

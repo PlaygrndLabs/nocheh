@@ -22,7 +22,7 @@ Temporary isolated agent containers are additional.
 | `nocheh-db` | Separate Nocheh and Inngest databases and roles | Docker / running |
 | `nocheh-security` | Security broker, guard, exact authorization checks and the `/mcp` data tools for isolated turns | Docker / running |
 | `nocheh-telegram` | The Telegram bot: the only service holding its token; polls Telegram, shows typing and reactions, sends replies, cards and notices | Docker / running |
-| `hermes` | The brain behind the brain socket, with its native dashboard; the helper services for voice notes, images and the secret check | Docker / running |
+| `hermes` | The agent behind the agent socket, with its native dashboard; the helper services for voice notes, images and the secret check | Docker / running |
 | `hermes-agent-sb` | Launch sealed turn containers and job boxes; only agent infrastructure container mounting the Docker socket | Docker / running |
 | `nocheh-machines` | Run the commands of jobs the owner approved on the owner's machines over SSH; the only service holding their keys | Docker / running |
 | `inngest-server` | Workflow scheduling, retries, waits and inspection UI | Docker / running |
@@ -81,7 +81,7 @@ flowchart TB
         Engine[inngest-server]
         Queue[inngest-redis]
         Bot["nocheh-telegram<br/>the Telegram bot"]
-        Hermes["hermes<br/>the brain · native dashboard"]
+        Hermes["hermes<br/>the agent · native dashboard"]
         Launcher[hermes-agent-sb]
         Security["nocheh-security<br/>broker and guard"]
         Machines["nocheh-machines :8789<br/>machine keys · SSH commands"]

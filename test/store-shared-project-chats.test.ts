@@ -14,7 +14,7 @@ import {PrivateAnswerRepository} from '../src/stores/private-answers.js';
 import {sharedProjectGroups} from '../src/stores/project-groups.js';
 import {ProjectRepository} from '../src/stores/projects.js';
 import {readSet,readSetGroups,readSetIds} from '../src/spaces.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {BOB,GP1,GP1_TOPIC,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_CHAT,MEMBER_GP_ID,NG_GROUP_IDS,OWNER,P1,UNSERVED,fixtureChats,fixtureDirectory,
   seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 

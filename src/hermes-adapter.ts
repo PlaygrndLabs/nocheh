@@ -2,8 +2,8 @@ import { HttpError, object } from './http.js';
 import { runtimeOperations, type RuntimeAdapter, type RuntimeOperation } from './runtime.js';
 
 type Options = {url: string; token: string; fetch?: typeof fetch};
-/** Only this adapter knows the private paths of the helper services the Hermes service hosts. The brain itself is in
- * `brain/hermes.ts` (ADR-0234); Telegram is Nocheh's own bot, in `frontdoor/telegram.ts` (ADR-0235). */
+/** Only this adapter knows the private paths of the helper services the Hermes service hosts. The agent itself is in
+ * `agent/hermes.ts` (ADR-0234); Telegram is Nocheh's own bot, in `frontdoor/telegram.ts` (ADR-0235). */
 export function hermesAdapter(options: Options): RuntimeAdapter {
   const transport = options.fetch ?? fetch;
   const routes: Partial<Record<RuntimeOperation, string>> = {

@@ -7,7 +7,7 @@ import pg from 'pg';
 import {randomUUID} from 'node:crypto';
 import {digest,type Envelope} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {boundStorageOperations,storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {advanceWorkflow} from '../src/workflows/engine.js';
 import {safeMetadata} from '../src/workflows/boundary.js';

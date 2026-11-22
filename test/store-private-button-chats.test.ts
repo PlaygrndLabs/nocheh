@@ -13,7 +13,7 @@ import {privateAnswerLines} from '../src/prompts.js';
 import {servedPolicy,startChatDirectory} from '../src/stores/chats.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {privateAnswerId,type PrivateAnswer} from '../src/stores/private-answers.js';
-import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-brain.js';
+import {fixtureServices,fixtureTelegram,type FakeCall} from './fixture-agent.js';
 import {GP4,NG1,NG1_TG,NG2,NG2_OLD_TG,NG2_TG,OWNER,P2,fixtureChats,seedChats} from './fixture-groups.js';
 
 // The Answer privately button (ADR-0249) on chats first seen after step 2b (ADR-0252): the owner's private chat, the

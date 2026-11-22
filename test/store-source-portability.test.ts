@@ -12,7 +12,7 @@ import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src
 import {ArchiveRepository,sourceIdentity,type CapturedSource} from '../src/stores/archive.js';
 import {CaptureCoordinator} from '../src/stores/capture.js';
 import {SourcePortabilityRepository} from '../src/stores/source-portability.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {OwnerStorageApi} from '../src/stores/owner-api.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 

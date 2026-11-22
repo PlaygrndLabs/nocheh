@@ -13,7 +13,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {MEMBER_READ_STALE_DAYS,memberAskReads,memberReads} from '../src/stores/member-reads.js';
 import {startMembers,type MemberDirectoryLoader} from '../src/stores/members.js';
 import {readSetGroups} from '../src/spaces.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {BOB,BOB_CHAT,GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_GP_OFF_CHAT,MEMBER_NG,MEMBER_NG_CHAT,
   MEMBER_NG_ID,MEMBER_NG_OFF_CHAT,NG1,NG2,NG_GROUP_IDS,OWNER,P1,P2,ALI,CANARY_LABEL,GUS,fixtureChats,fixtureDirectory,seedAssignee,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
@@ -191,7 +191,7 @@ test('a member chat is bound, read, kept from the owner\'s own turns and never l
     const shaped=await s.tasks.chatGet(bound,inGp1.id),page=await s.tasks.chatList(bound,{scope:P1});
     assert.deepEqual([typeof shaped.version,shaped.revision,shaped.people,shaped.mine,shaped.reminders],['string',undefined,undefined,false,{mine:[],others:0}]);
     assert.deepEqual(Object.keys(page).sort(),['columns','next','statuses','tags','tasks']);
-    // Assignees (ADR-0265 D6): by the People name the owner set (ADR-0273) only while in a group this chat reaches, every
+    // Assignees (ADR-0265 D6): by the People name the owner set (ADR-0274) only while in a group this chat reaches, every
     // other counted and never named; one bound to the member's own account makes the task theirs.
     const ali=await seedAssignee(stores.control,CANARY_LABEL,ALI,'Ali T',[GP1]),gus=await seedAssignee(stores.control,'CANARY-LABEL Gus (vendor)',GUS,'Gus T',[GP2]);
     const lone=await seedAssignee(stores.control,'CANARY-LABEL Lone (friend)',null),her=await seedAssignee(stores.control,'CANARY-LABEL Mira (helper)',MEMBER_GP,'Mira T');

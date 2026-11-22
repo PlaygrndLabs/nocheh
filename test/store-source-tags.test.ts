@@ -15,10 +15,10 @@ import {ownerPeopleNames} from '../src/stores/entities.js';
 import {memoryProblemSchema,memoryProblems,type NoteSourceRepository} from '../src/stores/note-sources.js';
 import {recallNames} from '../src/stores/recall-places.js';
 import {SourceTagRepository} from '../src/stores/source-tags.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {chatRowForTest} from './fixture-seeded-chats.js';
 
-test('source tags: readable() is canRead, members read only their groups in UTC by Telegram\'s names, the owner reads the Tasks zone, everyone reads People names (ADR-0261, ADR-0273)',
+test('source tags: readable() is canRead, members read only their groups in UTC by Telegram\'s names, the owner reads the Tasks zone, everyone reads People names (ADR-0261, ADR-0274)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:300000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -129,7 +129,7 @@ test('source tags: readable() is canRead, members read only their groups in UTC 
     assert.equal(nocheh.by,'nocheh');assert.match(nocheh.tag,/^Nocheh, Nocheh's reply · group “GP1” · \d{4}-\d{2}-\d{2} \d{2}:\d{2} Europe\/Berlin$/,'timed when it was saved');
     assert.equal((await s.tags.tags(owner,binding,[bobA])).get(bobA.id)!.at,'2025-11-03T14:12:00.000Z');
 
-    // A group member: only their own group, UTC, the People name the owner set (ADR-0273) else Telegram's; the owner by
+    // A group member: only their own group, UTC, the People name the owner set (ADR-0274) else Telegram's; the owner by
     // their Telegram name with by=owner.
     const topicTags=await tags(topic,[t77,bobA,samA,t78,anon,ownerPrivate,bobB,unserved,retired,added]);
     assert.deepEqual(topicTags,[

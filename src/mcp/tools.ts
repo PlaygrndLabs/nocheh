@@ -21,7 +21,7 @@ export const actionErrors=new Set(['destination_not_served','member_post_not_all
 /** What a task change may be told about its reminders, so the person can be asked for another time (ADR-0255). The broker
  * relays exactly these. */
 export const taskErrors=new Set(['task_reminder_past','task_reminder_limit','invalid_task_reminders','invalid_task_reminder','task_reminders_off']);
-/** What the owner must do first, for a refusal the brain cannot correct by itself. */
+/** What the owner must do first, for a refusal the agent cannot correct by itself. */
 const jobNotes:Record<string,string>={job_machine_not_found:'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '+
   'there until the test passes. In the owner\'s private chat action=status lists the machines and whether each is ready; a group never lists them, so ask the owner for the exact name.'};
 
@@ -62,7 +62,7 @@ const given=(value:unknown)=>value!==undefined&&value!==null&&value!==''&&value!
 /** A tool waits as long as its route can take: a long memory recall up to the turn's own end, the secret-checked routes a minute. */
 export function timeoutFor(path:string,deadline?:number,now=Date.now()):number {
   if(path===memoryRoutes.recall) {
-    // Leave time for the brain to reason and check delivery policy.
+    // Leave time for the agent to reason and check delivery policy.
     const left=deadline===undefined?615000:Math.min(615000,Math.floor(deadline*1000-now-45000));
     if(left<=0){const error=new Error('memory_recall_turn_budget_exhausted');error.name='TimeoutError';throw error;}
     return left;
@@ -110,7 +110,7 @@ async function page(args:Value,context:ToolContext) {
     const status=await importStatus(context);
     return text({...record(await request(context,'/v1/archive/page'+query(values))),...(status?{import_status:status}:{})});
   }catch(error) {
-    // The brain can correct its own arguments; other failures stay opaque.
+    // The agent can correct its own arguments; other failures stay opaque.
     if(error instanceof Refused)return text({error:error.status===400?'invalid_page_request':error.status===403?'conversation_not_permitted':'archive_page_unavailable',
       ...(error.status===400?{note:'from and to are YYYY-MM-DD or a time with its zone; after is the next value of the previous page.'}:{})});
     return text({error:'archive_page_unavailable'});
@@ -128,7 +128,7 @@ async function memorySearch(args:Value,context:ToolContext) {
 async function memoryRecall(args:Value,context:ToolContext) {
   try {
     const result=record(await request(context,memoryRoutes.recall,{query:own(args,'query')?args.query:''}));
-    // The owner also gets the brain's own notes beside long-term memory.
+    // The owner also gets the agent's own notes beside long-term memory.
     if(context.principal.scope===null)result.native=await request(context,memoryRoutes.notes,args);
     return text(result);
   }catch{return text({error:'owner_memory_unavailable'});}
@@ -544,8 +544,8 @@ const day={type:['string','null']},ids={type:'array',items:{type:'string'},maxIt
  *  never inside a tool result, so stored history does not pile it up. */
 const TAGS=' Each hit has tag (who · where · when), by (whose words: owner, person, forward, file, mixed, nocheh, shared or unknown) and at '+
   '(when, as an ISO time). Times in tags are in the owner\'s Settings › Tasks time zone in the owner\'s own chats and in UTC elsewhere. '+sourceTagUsage;
-/** Nocheh's data tools, as the brain sees them under the MCP server name nocheh (mcp__nocheh__<name>). Arguments and answers are
- * those the brain's own plugin tools had, so a turn reads the same evidence the same way (ADR-0233). */
+/** Nocheh's data tools, as the agent sees them under the MCP server name nocheh (mcp__nocheh__<name>). Arguments and answers are
+ * those the agent's own plugin tools had, so a turn reads the same evidence the same way (ADR-0233). */
 export const mcpTools:readonly McpTool[]=[
   {name:'archive_search',description:'Find permitted archive evidence in your authorized scope. For reaction questions without a known note ID, use mode=current_reactions with no query. Results include the guarded reaction observation and bounded target text; read source references for further detail. An individual empty new_reaction list records that actor removing their reaction; it does not prove task completion or that nobody else reacted. This captured evidence is incomplete; empty search results do not prove no reactions. For mode=text (default), query is required and every query word must match; try one or two distinctive words when a longer search misses. Cite returned source references.'+TAGS,
     inputSchema:shape({mode:{type:'string',enum:['text','current_reactions']},query:{type:'string',description:'Required for text mode; omitted for current_reactions.'},limit:{type:'integer',minimum:1,maximum:10}}),run:search},

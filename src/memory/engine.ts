@@ -3,7 +3,7 @@ import {HttpError} from '../http.js';
 /**
  * The memory socket (ADR-0232). Nocheh keeps the receipts, sessions, guarding, sharing rules, corrections and
  * deletion bookkeeping; a memory engine only stores what Nocheh feeds it, learns from it and answers reads.
- * Brains never see this socket: they ask Nocheh for memory, and Nocheh asks the engine.
+ * Agents never see this socket: they ask Nocheh for memory, and Nocheh asks the engine.
  *
  * Words used here:
  * - space: the installation's memory store in the engine (a Honcho workspace).

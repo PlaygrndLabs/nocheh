@@ -13,7 +13,7 @@ CATALOG=(
  ('nocheh-app','Nocheh + Inngest SDK','API, capture, event publication and ordinary workflows','docker','running'),
  ('nocheh-db','PostgreSQL','Separate Nocheh and Inngest databases and roles','docker','running'),
  ('nocheh-security','Nocheh','Security broker, guard and exact authorization checks','docker','running'),
- ('hermes','Hermes','Brain: answers turns and runs the native dashboard; never talks to Telegram','docker','running'),
+ ('hermes','Hermes','Agent: answers turns and runs the native dashboard; never talks to Telegram','docker','running'),
  ('nocheh-telegram','Nocheh','The only Telegram poller and sender; holds the bot token','docker','running'),
  ('hermes-agent-sb','Hermes','Launch isolated agent containers','docker','running'),
  ('inngest-server','Inngest','Workflow scheduling, retries, waits and inspection UI','docker','running'),

@@ -5,7 +5,7 @@ import {cn} from '../lib/utils';
 /** Logo colours. They stay the same in light and dark mode. */
 const colors = {body: '#B69CF7', fold: '#8A6FDC', visor: '#0B1024', eyes: '#6EE7C8'};
 
-/** The brain on its own, 16 by 14 pixels. Sized by `className`. */
+/** The agent on its own, 16 by 14 pixels. Sized by `className`. */
 export function LogoMark({className}: {className?: string}) {
   return (
     <svg viewBox="0 0 16 14" shapeRendering="crispEdges" aria-hidden className={cn('h-auto', className)}>

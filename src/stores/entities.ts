@@ -60,7 +60,7 @@ export function ownerChosenName(entity:{id:string;name:string;revision:number},b
 /**
  * The People name the owner chose for each of these platform identities (source objects), by identity id
  * (ownerChosenName): its binding the owner confirmed or else its automatic one, and the active person entity it names,
- * following a merged entity to the one it was merged into. An identity with no such name is left out. Since ADR-0273
+ * following a merged entity to the one it was merged into. An identity with no such name is left out. Since ADR-0274
  * this is the person's name everywhere: the owner's chats, groups, members and memory.
  */
 export async function identityPeopleNames(control:Pick<pg.Pool,'query'>,identities:readonly {id:string;platform:string;kind:string;external_id:string}[]):Promise<Map<string,string>> {
@@ -108,7 +108,7 @@ export const telegramActor=(externalId:string)=>{
   return {id:sourceObjectId(identity),...identity};
 };
 /**
- * The People name the owner chose for each of these chat accounts (ADR-0273), by account id: a person's account on the
+ * The People name the owner chose for each of these chat accounts (ADR-0274), by account id: a person's account on the
  * Telegram connection with a plain user id, through its Telegram identity. Every other account is left out.
  */
 export async function accountPeopleNames(control:Pick<pg.Pool,'query'>,accountIds:readonly string[]):Promise<Map<string,string>> {
@@ -486,7 +486,7 @@ export class EntityRepository {
     },{holdsMemory:false});
   }
   /**
-   * The owner's private note about a person (ADR-0273): only the owner writes or reads it, and nothing sends it to the
+   * The owner's private note about a person (ADR-0274): only the owner writes or reads it, and nothing sends it to the
    * memory engine, a group or a member. An empty note clears it. `expected_revision` is the note's, 0 before the first.
    */
   async note(principal:Reader,id:string,input:unknown) {
@@ -505,7 +505,7 @@ export class EntityRepository {
     },{holdsMemory:false,epoch:false});
   }
   /**
-   * The owner's private notes about these people, by entity id, for the owner only (ADR-0273): the dashboard, or the
+   * The owner's private notes about these people, by entity id, for the owner only (ADR-0274): the dashboard, or the
    * owner's own chats and jobs (no scope, not bound to a member). A cleared note reads as empty.
    */
   async ownerNotes(principal:Reader,ids:readonly string[]):Promise<Map<string,{note:string;revision:number}>> {
@@ -730,7 +730,7 @@ export class EntityRepository {
   async inspect(principal:Reader,id:string) {
     const entity=await this.row(id);if(!await this.visible(principal,entity))throw new HttpError(404,'entity_not_found');
     const memory=await this.readableClaims(principal,entity.id),bindings=principal.admin?(await this.stores.control.query('SELECT * FROM memory_entity_bindings WHERE entity_id=$1 ORDER BY id',[entity.id])).rows:[];
-    // The owner's private note, only for the owner (ADR-0273).
+    // The owner's private note, only for the owner (ADR-0274).
     const note=principal.admin&&entity.kind==='person'?(await this.ownerNotes(principal,[entity.id])).get(entity.id)??{note:'',revision:0}:null;
     return {entity,bindings,...memory,...(note?{note}:{})};
   }
@@ -772,7 +772,7 @@ export class EntityRepository {
   }
   /**
    * The active people among these whose name the owner chose (ownerChosenName) for an identity that writes messages: the
-   * name every reader sees for that person (ADR-0273). Only the owner asks.
+   * name every reader sees for that person (ADR-0274). Only the owner asks.
    */
   private async namedByOwner(entities:readonly MemoryEntity[]):Promise<Set<string>> {
     const named=new Set<string>(),people=new Map(entities.filter(entity=>entity.kind==='person'&&entity.state==='active').map(entity=>[entity.id,entity]));
@@ -791,7 +791,7 @@ export class EntityRepository {
   async list(principal:Reader,input:{query?:string;kind?:string;after?:string;state?:string}={}):Promise<{entities:(MemoryEntity&{people_name?:true})[];next:string|null}> {
     const page=await this.listPage(principal,input);
     if(!principal.admin)return page;
-    // The owner sees which names everyone reads (ADR-0273).
+    // The owner sees which names everyone reads (ADR-0274).
     const named=await this.namedByOwner(page.entities);
     return {...page,entities:page.entities.map(entity=>named.has(entity.id)?{...entity,people_name:true as const}:entity)};
   }

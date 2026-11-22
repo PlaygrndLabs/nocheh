@@ -10,7 +10,7 @@ import {installChatsForTest} from '../src/chats.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {storageServer} from '../src/stores/server.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {BOB,GP1,MEMBER_GP,MEMBER_NG,NG1_TG,OWNER,fixtureChats,fixtureDirectory,GP_GROUP_IDS,NG_GROUP_IDS,seedChats} from './fixture-groups.js';
 
 /*

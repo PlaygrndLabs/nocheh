@@ -7,7 +7,7 @@ import {accountPeopleNames} from './entities.js';
 
 /**
  * What labels that name people read (ADR-0255): the directory, the members who reach a served group now (step 3), and
- * these people and every such member as Telegram last showed them, or by the People name the owner set (ADR-0273).
+ * these people and every such member as Telegram last showed them, or by the People name the owner set (ADR-0274).
  * Reminder lines and note sources read the same names, so a person reads alike in both. Without a policy nobody reads as
  * no longer allowed.
  */

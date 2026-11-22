@@ -67,9 +67,9 @@ class ConfigurationTests(unittest.TestCase):
         import stat
         import tools.cli.main as cli
         from tools.operations.installation.configuration import DEFAULTS, generate
-        # Hermes mounts only spool/brain-turns and admin/dashboard/home; Docker would make a missing one as root, and
+        # Hermes mounts only spool/agent-turns and admin/dashboard/home; Docker would make a missing one as root, and
         # admin/dashboard holds the dashboard's token, so no parent may get the default mode either.
-        folders=('files','spool','spool/brain-turns','hermes','telegram','reports','admin','admin/dashboard','admin/dashboard/home')
+        folders=('files','spool','spool/agent-turns','hermes','telegram','reports','admin','admin/dashboard','admin/dashboard/home')
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder)/'state';initialize(state)
             for name in folders:

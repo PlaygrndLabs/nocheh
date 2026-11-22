@@ -295,7 +295,7 @@ function PersonDetail({
 const SHOWN_NAME = 'Everyone sees this name: in groups, to members, and in memory. Use the private note for anything only for you.';
 const RENAMED_SEEN = 'nocheh.people.renamed-notice';
 
-/** Once: the names the owner set, which everyone now reads (ADR-0273). Dismissed for this browser. */
+/** Once: the names the owner set, which everyone now reads (ADR-0274). Dismissed for this browser. */
 function RenamedNotice({names}: {names: string[]}) {
   const [hidden, setHidden] = useState(() => {
     try {

@@ -16,7 +16,7 @@ import {forgetMemberAppRechecks} from '../src/stores/member-reads.js';
 import {memberTaskViews} from '../src/stores/member-task-views.js';
 import {startMembers,type MemberDirectoryLoader} from '../src/stores/members.js';
 import {authorizeNotice,recipientOf} from '../src/stores/task-reminder-delivery.js';
-import {fixtureServices} from './fixture-brain.js';
+import {fixtureServices} from './fixture-agent.js';
 import {BOB_ACCOUNT,GP1,GP2,GP3,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ACCOUNT,MEMBER_NG_CHAT,MEMBER_NG_ID,
   NG1,NG_GROUP_IDS,OWNER,P1,P2,fixtureChats,fixtureDirectory,memberAppMembers,seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
