@@ -47,7 +47,7 @@ Long-term memory is swappable too: it sits behind Nocheh's memory socket, and Ho
 - In docs and commit messages, never point to the external example project by name or path. Remove any such references found in current files before committing.
 - Don't name the owner's own provider gateway, hosting or devices anywhere in the repository: code, tests, docs, examples, and placeholders use neutral provider names, addresses and wording.
 - The repository is public. Every push passes the privacy scan (`tools/development/privacy_scan.py`): run `git config core.hooksPath tools/development/git-hooks` once per checkout so it runs as a pre-push hook. It reads the owner's private word list from `NOCHEH_PRIVATE_TERMS_FILE` or `data/privacy-terms.txt`, which never enters Git, and refuses to run without it. Fix a refused push by rewording the files or commit messages, including earlier commits on the branch; never skip the hook.
-- Keep project agent skills and supporting files only in `.agent/`. Discover the admin, deployment, and Graphify skills in `.agent/skills`. Do not add agent-specific support directories or compatibility skill links; `AGENTS.md` remains the root working-instructions file.
+- Keep project agent skills and supporting files only in `.agent/`. Discover the admin and deployment skills in `.agent/skills`. Do not add agent-specific support directories or compatibility skill links; `AGENTS.md` remains the root working-instructions file.
 - Use `./bin/nocheh` for owner operations. Keep command routing in `tools/cli`, operational code in `tools/operations`, runtime helpers in `tools/runtime`, acceptance tools in `tools/acceptance`, development helpers in `tools/development`, and build helpers in `tools/build`. Keep the dashboard in `dashboard` and the Hermes plugin and Honcho service in `services`. Use absolute `tools.*` and `services.*` Python imports and the shared repository-root resolver.
 
 </repository_workflow>
@@ -83,24 +83,5 @@ Long-term memory is swappable too: it sits behind Nocheh's memory socket, and Ho
 - If authentication or connectivity prevents fetch/push, a verified local integration may proceed when the main checkout is clean. Report local and remote outcomes separately, including the unpushed commit and exact blocker; do not claim synchronization succeeded.
 
 </commits_and_integration>
-
-<graphify>
-
-Graphify is the repository's development code graph, not Nocheh's product memory.
-When `graphify-out/graph.json` exists, use it for codebase questions, including when
-its output is dirty. Query the existing graph before rebuilding it.
-
-```sh
-graphify query "How does incoming message processing work?" --budget 1200
-graphify path "SOURCE" "DESTINATION"
-graphify explain "CONCEPT"
-npm run graphify:update
-```
-
-Use the Graphify skill's query expansion and source verification. Rebuild after
-code changes with the AST-only workflow; keep Graphify out of runtime dependencies.
-A documentation-only change does not require rebuilding the AST graph.
-
-</graphify>
 
 </agent_instructions>

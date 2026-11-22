@@ -21,7 +21,6 @@ The former top-level `compatibility/` mixed these roles. Its reusable scripts ar
 | --- | --- |
 | `data/` | Installation state, credentials, upstream checkouts, and private acceptance output, including `data/acceptance/results/` |
 | `node_modules/`, `dist/` | Installed dependencies and builds |
-| `graphify-out/` | Generated development code graph |
 | `results/`, `reports/`, `logs/`, `coverage/`, caches, local databases, `.env` | Generated output and machine-specific state |
 
 Acceptance tools must create private outputs in ignored local paths with restrictive permissions. A committed status summary may describe a check without operational IDs, source content, credentials, or installation paths. The old tracked live reports were removed for privacy; historical claims that depended on them require fresh local-only evidence before release. Git-history cleanup and remote verification are tracked in [TASK.md](../TASK.md).

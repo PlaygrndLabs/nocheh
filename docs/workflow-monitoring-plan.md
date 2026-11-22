@@ -175,7 +175,7 @@ restore stale snapshots over later source evidence.
 Repeat real Telegram owner text/voice, selected-group silence, isolation, exact
 approval and reconnect/restart checks from [release acceptance](release-acceptance.md)
 before Telegram cutover completes. Missing inputs or credentials remain pending.
-Refresh the AST-only Graphify graph after code changes. Retain safe evidence in
+Retain safe evidence in
 ignored `data/acceptance/results/` without source conversations or credentials. Do not commit live reports.
 
 </acceptance>
