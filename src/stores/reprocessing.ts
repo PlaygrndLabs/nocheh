@@ -40,7 +40,7 @@ export function documentExtraction(runtime:RuntimeCall):DerivationEngine {
     const mime=typeof file.metadata.mime_type==='string'?file.metadata.mime_type:'';
     if(UNREAD.includes(file.kind))return {kind:'extraction_status',text:READINGS.unsupported!};
     if(['photo','image'].includes(file.kind)||/^image\//i.test(mime)) {
-      const result=await runtime('image.read',{bytes_base64:bytes.toString('base64'),name,mime_type:mime},300000);
+      const result=await runtime('image.read',{bytes_base64:bytes.toString('base64'),name,mime_type:mime},360000);
       if(result.state==='done'&&typeof result.text==='string'&&result.text)return result.text;
       if(result.state==='failed'&&['provider_error','rate_limited','timed_out'].includes(String(result.reason)))
         throw new HttpError(503,'image_reading_unavailable');
@@ -85,7 +85,7 @@ export function voiceTranscription(runtime:RuntimeCall):DerivationEngine {
     // Telegram's stated length is the sender's to set: a usage hint only.
     const duration=file.metadata.duration;
     const result=await runtime('voice.transcribe',{bytes_base64:bytes.toString('base64'),name:text('file_name')||text('relative_path'),
-      mime_type:text('mime_type'),kind:file.kind,...(typeof duration==='number'&&duration>=0?{duration}:{})},660000);
+      mime_type:text('mime_type'),kind:file.kind,...(typeof duration==='number'&&duration>=0?{duration}:{})},840000);
     if(result.state==='done'&&typeof result.text==='string'&&result.text)return result.text;
     if(result.state==='failed'&&RETRY.has(String(result.reason)))throw new HttpError(503,'transcription_unavailable');
     return {kind:'extraction_status',text:HEARINGS[String(result.state)]??HEARINGS.failed!};

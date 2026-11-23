@@ -143,7 +143,7 @@ def main():
             owned.append(volume)
         rendered = json.loads(subprocess.check_output(compose_command(state, project) + ['config', '--format', 'json'], env=env, text=True))
         selected = {'nocheh-db', 'nocheh-app', 'nocheh-security', 'inngest-redis', 'inngest-server',
-            'hermes', 'hermes-agent-sb', 'nocheh-telegram', 'honcho-postgres', 'honcho-redis',
+            'hermes', 'hermes-agent-sb', 'nocheh-telegram', 'nocheh-reader', 'honcho-postgres', 'honcho-redis',
             'honcho-api', 'honcho-deriver', 'honcho-provider-gateway', 'nocheh-dashboard', 'nocheh-executor', 'nocheh-machines'}
         rendered['services'] = {name: value for name, value in rendered['services'].items() if name in selected}
         for network in rendered['networks'].values():
@@ -176,8 +176,9 @@ def main():
                 # The GitHub fetcher runs the box image, and copies come from the fake GitHub on the fixture's internal network.
                 service['environment'].update(NOCHEH_BOX_IMAGE=images['box'], NOCHEH_GITHUB_URL=FIXTURE_GITHUB_URL,
                                               NOCHEH_GITHUB_FIXTURE_NETWORK=rendered['networks']['default']['name'])
-            # The Telegram service runs the native image too; it reaches the fake Bot API on the default network.
-            if name in ('hermes', 'hermes-agent-sb', 'nocheh-telegram'):
+            # The Telegram service and the file reader run the native image too; the bot reaches the fake Bot API on the
+            # default network.
+            if name in ('hermes', 'hermes-agent-sb', 'nocheh-telegram', 'nocheh-reader'):
                 service['image'] = images['native']
             if name == 'hermes':
                 # The scripted model has no price anywhere, so a background job's cost limit could never be reached:

@@ -677,6 +677,8 @@ services:
       NOCHEH_TRANSCRIPTION_ROUTE_PRICE: ${NOCHEH_TRANSCRIPTION_ROUTE_PRICE:-}
       ARCHIVE_URL: http://nocheh-app:8780
       GUARD_URL: http://nocheh-security:8786
+      # Documents, pictures and recordings are parsed by nocheh-reader, never here (ADR-0285).
+      NOCHEH_READER_SOCKET: /run/reader/reader.sock
     # Only the folders Hermes uses: the dashboard's look (not its token) and its own agent-turn journal (not the
     # rest of the spool). ./bin/nocheh makes them at 0700, so Docker never makes them as root.
     volumes:
@@ -685,15 +687,46 @@ services:
       - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
       - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
       - ${NOCHEH_STATE_DIR:-./data/local}/spool/agent-turns:/data/spool/agent-turns
+      - reader_socket:/run/reader
     depends_on:
       nocheh-app: {condition: service_healthy}
       nocheh-security: {condition: service_healthy}
+      nocheh-reader: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8781/health', timeout=4)"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 15s
+
+  # Reads the files people send, away from every key (ADR-0285): documents to text, pictures and recordings encoded
+  # again. Root only to give each file a login of its own (SETUID, SETGID) and end that login's processes after it
+  # (KILL); no network, no key, no state. Hermes reaches it only through the socket in reader_socket.
+  nocheh-reader:
+    logging: *logging
+    image: ${NOCHEH_IMAGES:-nocheh}-hermes:local
+    command: [python, -m, services.reader.server]
+    user: "0:0"
+    init: true
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    tmpfs: ['/tmp:size=1g,mode=1777']
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, KILL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 4g
+    environment:
+      NOCHEH_READER_SOCKET: /run/reader/reader.sock
+      NOCHEH_READER_UIDS: '61001,61002'
+    volumes:
+      - reader_socket:/run/reader
+    healthcheck:
+      test: [CMD, python, -m, services.reader.server, health]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   # The only Telegram poller and sender, and the only service given the bot token in its environment: long polling,
   # durable capture, the outbound journal and every message sent. It waits for the app, not Hermes, so an agent restart
@@ -752,6 +785,7 @@ volumes:
   honcho_redis:
     name: ${NOCHEH_HONCHO_REDIS_VOLUME:-${COMPOSE_PROJECT_NAME:-nocheh}_honcho_redis}
   postgres_data:
+  reader_socket:
 
 networks:
   honcho-isolated:

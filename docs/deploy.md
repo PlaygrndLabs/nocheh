@@ -624,6 +624,16 @@ not permission to cut over. For rollback, use the matching prior code/images and
 a verified snapshot in a new inactive project. Never downgrade a live database
 in place or activate copied pending actions without reconciliation.
 
+### The file reader
+
+`nocheh-reader` parses every document, picture and recording Hermes is asked to
+read ([ADR-0285](adr/0285-files-are-parsed-by-a-separate-reader.md)). It runs from
+the Hermes image as root with only the rights to switch and end logins, no network
+and a read-only root; each file is read under one of the logins in
+`NOCHEH_READER_UIDS` (default `61001,61002`), which must be unused by any other
+service. Hermes reaches it only through the socket in the `reader_socket` volume.
+While it is down, files wait and are read once it is back.
+
 ## Pauses, backlogs and release checks
 
 `diagnose` shows container health, model provider configuration, Telegram state,

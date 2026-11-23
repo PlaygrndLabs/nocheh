@@ -29,6 +29,20 @@ class ServiceCatalogTests(unittest.TestCase):
         listed={name for name,*_ in CATALOG}
         self.assertEqual({name for name,service in compose.items() if 'reset' not in (service.get('profiles') or [])}-listed,set())
 
+    def test_the_file_reader_has_no_network_no_key_and_only_the_rights_to_switch_and_end_logins(self):
+        import yaml
+        from tools.operations.installation.configuration import ROOT
+        compose=yaml.safe_load((ROOT/'docker-compose.yml').read_text())['services']
+        reader,hermes=compose['nocheh-reader'],compose['hermes']
+        self.assertEqual((reader['network_mode'],reader['read_only'],reader['cap_drop'],sorted(reader['cap_add']),reader['security_opt']),
+                         ('none',True,['ALL'],['KILL','SETGID','SETUID'],['no-new-privileges:true']))
+        self.assertEqual(reader['volumes'],['reader_socket:/run/reader'])
+        self.assertEqual(set(reader['environment']),{'NOCHEH_READER_SOCKET','NOCHEH_READER_UIDS'})
+        self.assertIn('reader_socket:/run/reader',hermes['volumes'])
+        self.assertEqual(hermes['environment']['NOCHEH_READER_SOCKET'],reader['environment']['NOCHEH_READER_SOCKET'])
+        # The logins its children use are not Hermes's own.
+        self.assertNotIn(str(hermes['user']).split(':')[0].strip('${}'),reader['environment']['NOCHEH_READER_UIDS'].split(','))
+
     def test_hermes_runs_locked_down_and_mounts_only_the_state_it_uses(self):
         import yaml
         from tools.operations.installation.configuration import ROOT
@@ -42,7 +56,8 @@ class ServiceCatalogTests(unittest.TestCase):
         state='${NOCHEH_STATE_DIR:-./data/local}'
         self.assertEqual(hermes['volumes'],[state+'/admin/dashboard/home:/dashboard-state/home',
                                             state+'/hermes:/workspace/data/local/hermes',state+'/reports:/reports',
-                                            state+'/files:/data/files:ro',state+'/spool/agent-turns:/data/spool/agent-turns'])
+                                            state+'/files:/data/files:ro',state+'/spool/agent-turns:/data/spool/agent-turns',
+                                        'reader_socket:/run/reader'])
         # Not the dashboard's token beside its home, nor the rest of the spool, such as incoming Telegram updates.
         sources={volume.split(':')[0].removeprefix(state+'/') for volume in hermes['volumes']}
         self.assertFalse(sources&{'admin','admin/dashboard','spool'})

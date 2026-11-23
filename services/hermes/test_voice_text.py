@@ -30,11 +30,22 @@ def transcriber(result):
     return module
 
 
+def made(state='done', seconds=None):
+    """nocheh-reader's answer: the recording made again as Ogg Opus, with the length it measured."""
+    def read(kind, data, hint):
+        return ({'state': state, 'format': 'ogg', 'seconds': seconds}, b'OggS' + data) if state == 'done' else ({'state': state}, b'')
+    return patch.object(voice_text.reader_client, 'read', side_effect=read)
+
+
 class VoiceTextTests(unittest.TestCase):
+    def setUp(self):
+        reader = made()
+        self.reader = reader.start()
+        self.addCleanup(reader.stop)
     def read(self, result, **hint):
         module = transcriber(result)
-        with patch.dict(sys.modules, {'tools.transcription_tools': module}), patch.object(voice_text, 'duration', return_value=61.2):
-            return voice_text.read(b'synthetic audio', {'name': '', 'mime_type': '', 'kind': '', **hint}), module.calls
+        with patch.dict(sys.modules, {'tools.transcription_tools': module}):
+            return voice_text.read(b'synthetic audio', {'name': '', 'mime_type': '', 'kind': '', 'duration': 61.2, **hint}), module.calls
 
     def test_the_format_comes_from_the_name_the_mime_type_or_the_kind(self):
         found, calls = self.read({'success': True, 'transcript': 'Synthetic note about the garden club'}, name='voice_messages/a.OGG')
@@ -89,7 +100,7 @@ class VoiceTextTests(unittest.TestCase):
             'model': 'gpt-transcribe', 'base_url': 'https://transcribe.example.test/v1', 'api_key': '${env:' + voice_text.KEY + '}'}},
             'the key is read from the environment, never written to the file')
         self.assertEqual(seen['timeout'], voice_text.SECONDS)
-        self.assertEqual(seen['hint'], {'name': '', 'mime_type': '', 'kind': 'voice', 'duration': 30})
+        self.assertEqual(seen['hint'], {'name': 'voice.ogg', 'mime_type': 'audio/ogg', 'kind': 'voice', 'duration': 30})
         self.assertEqual([(row['part'], row['model'], row['runs'], row['audio_seconds'], row['priced_runs']) for row in rows],
                          [('transcription', 'gpt-transcribe', 1, 90.4, 1)])
         self.assertAlmostEqual(rows[0]['cost_usd'], 91 / 60 * 0.0045)
@@ -107,7 +118,7 @@ class VoiceTextTests(unittest.TestCase):
             with patch.object(usage, 'DATABASE', target), patch.object(voice_text.subprocess, 'run', side_effect=run):
                 self.assertEqual(voice_text.transcribe(body), {'state': 'done', 'text': 'Synthetic'})
                 rows = usage.rows('2000-01-01', target)
-        self.assertEqual(seen, [{'name': '', 'mime_type': '', 'kind': 'voice', 'duration': 5}])
+        self.assertEqual(seen, [{'name': 'voice.ogg', 'mime_type': 'audio/ogg', 'kind': 'voice', 'duration': 5}])
         self.assertEqual([row['audio_seconds'] for row in rows], [1200.0], 'usage counts the whole recording')
         self.assertFalse(hasattr(voice_text, 'cut'))
 
@@ -154,6 +165,28 @@ class VoiceTextTests(unittest.TestCase):
         self.assertEqual(readers, [{'day': day, 'reader': 'voice', 'done': 1, 'temp_full': 1, 'read_only': 1}])
         self.assertEqual([(row['part'], row['runs'], row['failed']) for row in calls], [('transcription', 1, 0)],
                          'only the transcription that reached the model is a model call')
+
+    def test_only_what_the_reader_made_is_transcribed(self):
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'name': 'a.m4a', 'kind': 'audio', 'duration': 30}
+        seen = []
+
+        def run(command, **options):
+            seen.append((options['input'], json.loads(command[-1])))
+            return subprocess.CompletedProcess(command, 0, b'{"state": "done", "text": "Synthetic", "seconds": 12.5}', b'')
+        self.reader.side_effect = None
+        self.reader.return_value = ({'state': 'done', 'format': 'ogg', 'seconds': 12.5}, b'OggS made')
+        with patch.dict('os.environ', ROUTE), patch.object(voice_text.subprocess, 'run', side_effect=run), \
+                patch.object(voice_text.usage, 'record'), patch.object(voice_text.usage, 'reader_done'):
+            self.assertEqual(voice_text.transcribe(body), {'state': 'done', 'text': 'Synthetic'})
+        self.reader.assert_called_once_with('audio', b'synthetic', {'name': 'a.m4a', 'mime_type': '', 'kind': 'audio'})
+        # The reader's measured length wins over the one the sender stated.
+        self.assertEqual(seen, [(b'OggS made', {'name': 'voice.ogg', 'mime_type': 'audio/ogg', 'kind': 'audio', 'duration': 12.5})])
+        for answer, state in (({'state': 'unsupported'}, 'unsupported'), ({'state': 'too_large'}, 'too_large'),
+                              ({'state': 'failed', 'reason': 'timed_out'}, 'too_large'), ({'state': 'unreadable'}, 'unsupported')):
+            self.reader.return_value = (answer, b'')
+            with patch.dict('os.environ', ROUTE), patch.object(voice_text.subprocess, 'run') as run:
+                self.assertEqual(voice_text.transcribe(body), {'state': state}, answer)
+                run.assert_not_called()
 
 
 if __name__ == '__main__':
