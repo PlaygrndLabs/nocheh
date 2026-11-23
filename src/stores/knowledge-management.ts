@@ -120,6 +120,12 @@ export class KnowledgeManagementRepository {
   return {turn,event_id:principal.turnEvent};
  }
 
+ /** What may read the owner's own data: their live private turn, or a schedule's running run in their private chat. */
+ async ownerReader(principal:Reader) {
+  try{return (await this.ownerTurn(principal)).source.reference.id;}
+  catch(error){const run=await this.ownerScheduledRun(principal).catch(()=>null);if(!run)throw error;return run.event_id;}
+ }
+
  /** A current live turn in a group or topic, not a job or review run; the space is the turn's own. */
  async liveGroupTurn(principal:Reader) {
   if(principal.admin||principal.scope===null||(principal.purpose??'assistant')!=='assistant')throw new HttpError(403,'group_turn_required');

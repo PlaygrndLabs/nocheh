@@ -41,12 +41,17 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const claim=await s.scheduled.claim(context);claims.set(id,claim);assert.equal(claim.claimed,true);assert.ok(!claim.text!.includes('fixture-secret'));
     const principal=reader({headers:{authorization:'Bearer '+claim.archive_credential}} as any,token);
     const binding=await s.turns.binding(principal);assert.equal(binding.reference!.store,'control');assert.equal(binding.job,context.job_id);
-    // A schedule's run in the owner's private chat, such as a morning brief, reads the task lists and changes none;
-    // a group's schedule run gets none (ADR-0266).
+    // A schedule's run in the owner's private chat, such as a morning brief, reads the task lists and the owner's views and
+    // changes none; a group's schedule run gets none (ADR-0266).
     if(claim.scope==='123') {
       assert.ok(await s.tasks.chatList(principal,{}));tasksRead.push(id);
       await assert.rejects(s.tasks.chatCreate(principal,{title:'From a schedule'}),{code:'task_read_only'});
-    } else await assert.rejects(s.tasks.chatList(principal,{}),{status:403});
+      assert.equal(await s.knowledge.ownerReader(principal),id);
+      await assert.rejects(s.knowledge.ownerTurn(principal),{code:'owner_private_turn_required'},'a run is not the owner\'s live message');
+    } else {
+      await assert.rejects(s.tasks.chatList(principal,{}),{status:403});
+      await assert.rejects(s.knowledge.ownerReader(principal),{status:403});
+    }
     assert.equal((await s.scheduled.claim(context)).claimed,false);assert.deepEqual(await s.scheduled.prepare(context),{transcripts:[],files:[]});
     native.set(id,{state:'running'});if(mode==='running')return {state:'running'};
     await s.scheduled.finish({event_id:id,actor:context.actor,state:'done',session:context.conversation,text:answer});
@@ -59,10 +64,10 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const capture=async(options:Record<string,unknown>={})=>{
     const scope=String(options.scope??'123'),profile='nocheh-'+digest(scope).slice(0,24),job='execution-'+base+'-'+(++serial);
     const definition={profile,name:'Fixture',prompt:'Prompt fixture-secret',schedule:{kind:'interval',minutes:60},deliver:'local',repeat:null,enabled:true,removed:false,
-      preferences:{'agent.reasoning_effort':'high'},execution_version:'v1',...options};delete (definition as any).scope;
+      preferences:{'agent.reasoning_effort':'high'},execution_version:'v1',...options};delete (definition as any).scope;delete (definition as any).fire_reason;
     const saved=await s.schedules.definition(owner,{scope,profile,job_id:job,definition,workflow_cursor:digest(job),workflow_sequence:1});
     const fire=await s.schedules.capture(owner,{scope,space:scope,profile,job_id:job,id:'first',text:definition.prompt,files:[],definition,
-      job_revision:digest(canonical(definition)),scheduled_for:'2026-09-18T12:00:00Z',fire_reason:'manual',owner_epoch:(await authority()).epoch});
+      job_revision:digest(canonical(definition)),scheduled_for:'2026-09-18T12:00:00Z',fire_reason:String(options.fire_reason??'manual'),owner_epoch:(await authority()).epoch});
     return {...fire,scope,profile,job,definition,schedule:saved.id};
   };
   const run=async(id:string)=>{const result=await storageWorkflowOperations(s,runtime).schedules!('run:'+id,await authority());safeMetadata(result);return result;};
@@ -75,6 +80,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
     assert.ok(tasksRead.includes(local.event_id),'the owner chat\'s run read its tasks');
     await assert.rejects(s.tasks.chatList(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token),{}),{code:'runtime_turn_changed'},'a finished run reads nothing');
+    await assert.rejects(s.knowledge.ownerReader(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
     const delivered=await capture({scope:'-123',deliver:'telegram'});await run(delivered.event_id);
     const proposal=await s.scheduled.delivery(delivered);assert.equal(proposal.state,'proposed');assert.ok('id' in proposal);
     const inspected=await s.telegramActions.inspect(owner,proposal.id!);assert.ok(!JSON.stringify(inspected).includes('fixture-secret'));
@@ -84,16 +90,26 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.equal((await stores.control.query('SELECT send_class FROM telegram_action_requests WHERE id=$1',[proposal.id])).rows[0].send_class,'scheduled_run');
     assert.equal((await s.scheduled.history({profile:delivered.profile,job_id:delivered.job})).runs[0]!.native_session,contexts.get(delivered.event_id).conversation);
     await assert.rejects(s.telegramActions.requestScheduled({admin:false,scope:'-123'},delivered.event_id),{status:403});
-    // The owner's private chat: its results go there with no card, as a trusted scheduled send (ADR-0266); a run that
-    // answers only [SILENT] sends nothing. A schedule's own time zone is part of its definition.
+    // The owner's private chat: its results go there with no card, as a trusted scheduled send (ADR-0266); a scheduled run
+    // that answers only [SILENT] sends nothing, and a Run now says so in one fixed line. A schedule's own time zone is part
+    // of its definition.
     const own=await capture({scope:'123',deliver:'telegram',timezone:'Asia/Tokyo'});await run(own.event_id);
     const sent=await s.scheduled.delivery(own);assert.equal(sent.state,'approved');assert.ok('id' in sent);
     const row=(await stores.control.query('SELECT state,send_class,destination FROM telegram_action_requests WHERE id=$1',[sent.id])).rows[0];
     assert.deepEqual(row,{state:'approved',send_class:'scheduled_run',destination:'123'});
     assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM security_events WHERE state='allowed' AND rule='owner_scheduled_chat'")).rows[0].n,1);
     assert.equal(((await s.scheduled.delivery(own)) as {id?:string}).id,sent.id,'one send for the run');
-    answer='[SILENT]';const quiet=await capture({scope:'123',deliver:'telegram'});await run(quiet.event_id);
-    assert.deepEqual(await s.scheduled.delivery(quiet),{state:'local'});answer='Scheduled answer fixture-secret';
+    assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM security_events WHERE effect_id=$1 AND state='awaiting_approval'",[sent.id])).rows[0].n,0,
+      'delivering again logs no wait for approval');
+    answer='[SILENT]';const quiet=await capture({scope:'123',deliver:'telegram',fire_reason:'scheduled'});await run(quiet.event_id);
+    assert.deepEqual(await s.scheduled.delivery(quiet),{state:'local'});
+    const pressed=await capture({scope:'123',deliver:'telegram'});await run(pressed.event_id);
+    const told=await s.scheduled.delivery(pressed);assert.equal(told.state,'approved');assert.ok('id' in told);
+    assert.equal((await stores.control.query('SELECT text_hash FROM telegram_action_requests WHERE id=$1',[told.id])).rows[0].text_hash,
+      digest('✅ Ran now: nothing new right now.'),'a Run now with nothing new says so');
+    const group=await capture({scope:'-123',deliver:'telegram'});await run(group.event_id);
+    assert.deepEqual(await s.scheduled.delivery(group),{state:'local'},'a group\'s Run now with nothing new sends nothing');
+    answer='Scheduled answer fixture-secret';
     await assert.rejects(capture({timezone:'../../etc'}),{code:'invalid_schedule_definition'});
     const recovered=await capture();failCompletion=true;assert.equal((await run(recovered.event_id)).state,'waiting');
     const before=calls.length;assert.equal((await run(recovered.event_id)).state,'completed');assert.equal(calls.length,before,'durable derivative receipt repairs control without new native execution');

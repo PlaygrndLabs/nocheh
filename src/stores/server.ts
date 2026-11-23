@@ -225,11 +225,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&chatTask&&!chatTask[2])return json(res,200,await s.tasks.chatGet(principal,chatTask[1]!));
     if(req.method==='POST'&&chatTask)return json(res,200,await s.actionCommands.offer('task',
       await (chatTask[2]?s.tasks.chatComment:s.tasks.chatUpdate).call(s.tasks,principal,chatTask[1]!,await readJson(req,64*1024))));
-    // The owner may read all of their own data from a live owner-private turn.
-    // Fixed read views map onto existing owner handlers; no mutation is reachable.
+    // The owner may read all of their own data from a live owner-private turn, and a schedule's run there, such as a morning
+    // brief, may too (ADR-0266). Fixed read views map onto existing owner handlers; no mutation is reachable.
     const ownerView=path.match(/^\/v1\/owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)$/);
     if(req.method==='GET'&&ownerView) {
-      await s.knowledge.ownerTurn(principal);
+      await s.knowledge.ownerReader(principal);
       const reader={admin:true,scope:null},view=ownerView[1]!,policy=s.access.policy();
       // Chats with people Nocheh doesn't serve are named by those people; the turn never sees them.
       if(view==='telegram-identities') {

@@ -10,7 +10,7 @@ import {freshMembers,members} from '../members.js';
 import {telegramDestination} from '../chats-telegram.js';
 import {fillLine,labelName,placeLabel,quotedName} from '../chat-labels.js';
 import {allowedIn,servedDestination} from '../destinations.js';
-import {approvalLines,ownerPrompts,type ApprovalText} from '../prompts.js';
+import {approvalLines,ownerPrompts,scheduleNoticeLines,type ApprovalText} from '../prompts.js';
 import {telegramAddress,telegramTarget} from '../frontdoor/telegram.js';
 import type {RuntimeCall} from '../runtime.js';
 import {evaluate,recordEffect} from '../security/store.js';
@@ -160,11 +160,14 @@ export class TelegramActionRepository {
       result.producer!=='hermes'||result.producer_version!=='managed-scheduler-v2'||canonical(result.operation_reference)!==canonical(row.source_reference))
       throw new HttpError(409,'run_result_conflict');
     const output=JSON.parse(result.content.toString());if(output.state!=='done')return {state:'withheld',reason:'run_not_complete'};
-    const text=string(output.text,1000000);
-    // A run with nothing new to say answers only [SILENT] (Hermes's marker) and sends nothing (ADR-0266).
-    if(version.configuration.deliver!=='telegram'||!text.trim()||silentResult(text))return {state:'local'};
+    const said=string(output.text,1000000),owner=row.scope===ownerChat(this.access.policy());
+    // A run with nothing new to say answers only [SILENT] (Hermes's marker) and sends nothing (ADR-0266), except a run the
+    // owner started with Run now in their private chat: they are waiting for it, so it says in one fixed line that there
+    // was nothing new.
+    const quiet=!said.trim()||silentResult(said),told=quiet&&owner&&row.fire_reason==='manual';
+    if(version.configuration.deliver!=='telegram'||quiet&&!told)return {state:'local'};
+    const text=told?scheduleNoticeLines((await ownerPrompts(this.stores.control))['schedules.notice_texts']).quiet:said;
     if(text.length>3500)return {state:'withheld',reason:'result_exceeds_telegram_limit'};
-    const owner=row.scope===ownerChat(this.access.policy());
     const audience:Reader={admin:false,scope:owner?null:row.scope,space:row.space_id,
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
     // The owner approved their private chat's schedules once (ADR-0266): each result goes there with no card. A group's
@@ -275,6 +278,9 @@ export class TelegramActionRepository {
         [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision,asker,sendClass]);
       const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
+      // The same request asked again once decided, such as a scheduled run's result delivered again, keeps its one decision:
+      // judged again it would be logged as waiting for approval although it was already approved or sent.
+      if(row.state!=='proposed'){await db.query('COMMIT');return {id,state:row.state,fingerprint,message:'This exact message was already decided; its state is '+row.state+'.'};}
       const effect=this.effect(row);let decision=await evaluate(db,effect);
       // The owner freedom setting lets the owner's own live private request
       // approve itself. Deny rules are evaluated first and still block it.
