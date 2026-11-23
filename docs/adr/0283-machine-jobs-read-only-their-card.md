@@ -1,4 +1,4 @@
-# ADR-0282: A machine job reads only what its card shows
+# ADR-0283: A machine job reads only what its card shows
 
 <status>
 Accepted on 2026-11-23. The owner approved this fix in the November security review
