@@ -329,8 +329,9 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3',topics,null],[workspace,'B'.repeat(21),'-100/topic/3',topics,null],
     [workspace,'C'.repeat(21),'-100/topic/3',topics,null]],'a hit counts only with its own receipt, in this audience or its group');
   assert.deepEqual(readSessions,[],'a group reader searches its own sessions');
-  // An answer reader searches the sessions of the groups frozen in its record, and a hit counts only with a receipt of one
-  // of them; Honcho's context and recall stay closed to it: plain search only (ADR-0249).
+  // An answer reader searches the sessions of the groups frozen in its record, inside the wall of exactly those groups
+  // (ADR-0284), and a hit counts only with a receipt of one of them; Honcho's context and recall stay closed to it: plain
+  // search only (ADR-0249).
   const answer={admin:false,scope:'123',space:'123',turnEvent:digest('start'),answer:'a'.repeat(32),
     reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
   queries.length=0;
@@ -340,20 +341,22 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   const frozen=['-100','-100/topic/3','-200'].map(id=>'read:'+id);
   assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);
   assert.deepEqual(queries.map(params=>params.at(-1)),[frozen,frozen,frozen]);
+  const readWall=memoryWallName(workspace,['-100','-100/topic/3','-200']);
+  assert.deepEqual(opened.at(-1),['-100','-100/topic/3','-200']);assert.equal(bodies.at(-1)!.body.scope,readWall,'its search stays inside its groups\' wall');
   assert.equal((await memory.context(answer)).limited_memory,true);
   assert.equal((await memory.recall(answer,'invoice')).limited_memory,true);
-  // A member's own private chat, its schedules included, is a bound reader too: it searches its groups' sessions, never
-  // through a wall (ADR-0284).
+  // A member's own private chat, its schedules included, is a bound reader too: it searches its groups inside their wall,
+  // and gets no learned notes (ADR-0284).
   const {answer:_answer,...unbound}=answer as any,member={...unbound,member:'a'.repeat(64)} as Reader;
   readSessions.length=0;await memory.search(member,'who sends the invoice',4);
-  assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);assert.equal(bodies.at(-1)!.body.scope,undefined);
+  assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);assert.equal(bodies.at(-1)!.body.scope,readWall);
   assert.equal((await memory.recall(member,'invoice')).limited_memory,true);
-  assert.deepEqual(opened,[['-100','-100/topic/3']],'only the group reader opened a wall');
+  const walls=opened.length;
   bodies.splice(1);
   // The owner, the morning brief and the owner's other schedules included, searches everything learned, with no wall.
   await memory.search({admin:false,scope:null,space:'123',turnEvent:digest('turn')} as Reader,'invoice',2);
   assert.deepEqual(bodies[1]!.body,{query:'checked: invoice',limit:6},'the owner searches everything learned');
-  assert.deepEqual(opened,[['-100','-100/topic/3']]);
+  assert.equal(opened.length,walls,'the owner opens no wall');
   learned=[];
   assert.deepEqual(await memory.search(group,'invoice',2),{ids:[],learned:false});
   assert.equal(bodies.length,2,'a chat that was not learned is not searched');

@@ -1521,8 +1521,10 @@ export class NativeMemoryRepository {
     // A bound reader searches the sessions of every group of its bound reads, and no other (ADR-0249): a member's own
     // private chat and an asked member's chat are never learned, so they have none (step 4).
     const set=!principal.admin&&boundReader(principal)!==null?this.contexts.access.reads(principal)!:null,reads=set?readSetParam(set):null;
-    // A group searches inside the wall of the chats its recall reads (ADR-0284); a bound reader still by its sessions.
-    const walled=set||audience==='owner'?null:await this.walls.open(id,group?[...group,audience]:[audience]);
+    // A group searches inside the wall of the chats its recall reads, and a bound reader (a member's private chat and its
+    // schedules, a private answer) inside the wall of its read set's groups (ADR-0284). The owner searches everything.
+    const chats=set?readSetIds(set):audience==='owner'?[]:group?[...group,audience]:[audience];
+    const walled=chats.length?await this.walls.open(id,chats):null;
     const sessions=set?await this.provenance.readSetSessions(id,set,1000):audience==='owner'?null:walled?walled.sessions:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};
     // The question is checked for secrets before it reaches the engine, as a recall question is.

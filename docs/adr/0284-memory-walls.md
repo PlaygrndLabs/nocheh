@@ -3,7 +3,8 @@
 <status>
 Accepted on 2026-11-23. The owner approved the design ("Memory walls with named
 scopes") after a cloud proof against Honcho 3.6.2. Members' private chats keep plain
-search, as today (the owner's choice). Learning from project connectors is a later step.
+search with no learned notes (the owner's choice), and that search goes through a wall too.
+Learning from project connectors is a later step.
 Builds on [ADR-0241](0241-honcho-runs-only-the-tools-it-offered.md) and
 [ADR-0267](0267-share-group-chats.md).
 </status>
@@ -36,12 +37,15 @@ workspace search, fact lists, peer cards and context, and on other scopes.
    search by meaning and its background learning ask read through the wall of the chats
    its recall reads: its own conversation, its group with every topic, or every group of
    its project while the project shares its group chats. The chat uses the wall's own
-   key (ten minutes); search uses the main key with the wall's name. The facts a recall
+   key (ten minutes); search uses the main key with the wall's name. A bound reader's
+   search (a member's private chat and its schedules, a private answer) goes through the
+   wall of its read set's groups; it still gets no learned notes. The facts a recall
    lists are the wall's own copies (`observer_id` `scope.<wall>`), and a stored fact
    records its wall so it opens from the same place.
-4. **Unchanged.** The owner's reads (main key, everything). A turn's session context
-   (`limit_to_session`), fact lists and bound readers (a member's private chat, "Answer
-   privately") still go by session lists with Nocheh's re-check. Sharing rules stay
+4. **Unchanged.** The owner's reads (main key, everything, the brief and every owner
+   schedule included). A turn's session context (`limit_to_session`) and fact lists still
+   go by session lists with Nocheh's re-check, and every search hit is still re-checked
+   against its receipt. Sharing rules stay
    one-way approved copies. Nocheh keeps the gateway tool guard and its hit re-checks as
    a second layer.
 5. **Keeping walls whole.** `memory_walls(workspace, wall, chats, members, ready)` records
