@@ -164,7 +164,9 @@ class TelegramService:
             last = polling.get('last_poll_at')
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() if last else None
             if age is None or age > 120: state = 'recovering'
-        return {**polling, **self.abilities, 'state': state, 'error_code': code}
+        # The bot's public @username, so the dashboard shows which bot is connected.
+        bot = {'bot_username': self.identity['username']} if (self.identity or {}).get('username') else {}
+        return {**polling, **self.abilities, **bot, 'state': state, 'error_code': code}
 
     def stop(self):
         self.stopping = True

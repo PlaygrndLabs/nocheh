@@ -244,6 +244,7 @@ export function GmailConnection() {
           description={
             data.connected
               ? 'Signed in' +
+                (data.email ? ' as ' + data.email : '') +
                 (data.connected_at ? ', ' + when(new Date(data.connected_at * 1000).toISOString()) : '') +
                 '. Nocheh only reads.'
               : data.reconnect

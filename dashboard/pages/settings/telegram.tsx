@@ -76,6 +76,9 @@ export function TelegramSettings() {
   const known = (identities.data?.groups ?? []).flatMap((g: any) => g.users ?? []).find((u: any) => u.id === owner);
   const enabled = s.value('TELEGRAM_ENABLED') === 'true';
   const token = s.field('TELEGRAM_BOT_TOKEN');
+  // Which bot the saved token belongs to, once Nocheh's Telegram service has asked Telegram.
+  const monitoring = useResource<any>('/monitoring');
+  const bot: string | undefined = monitoring.data?.runtime?.status?.telegram_details?.bot_username;
   const finder = useFindTelegramId();
   // Finding the ID reads the bot's messages, which only the saved token and Telegram turned off allow.
   const savedOn = s.saved('TELEGRAM_ENABLED') === 'true';
@@ -138,7 +141,7 @@ export function TelegramSettings() {
               }
               description={
                 token?.configured
-                  ? 'A token is saved. Paste a new one only to replace it.'
+                  ? `A token${bot && !s.changed('TELEGRAM_BOT_TOKEN') ? ' for @' + bot : ''} is saved. Paste a new one only to replace it.`
                   : 'From @BotFather in Telegram.'
               }
               htmlFor="telegram-token"

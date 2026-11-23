@@ -1110,6 +1110,7 @@ test('your Gmail takes your Google keys, signs in through Google and disconnects
   await card.getByRole('button', {name: 'Connect Gmail'}).click();
   await page.getByRole('status').filter({hasText: 'Gmail is connected.'}).waitFor();
   await card.getByText('Connected to owner@example.com').waitFor();
+  await card.getByText(/Signed in as owner@example\.com/).waitFor();
   assert.equal(new URL(page.url()).search, '');
   assert.match(page.url(), /#connections$/);
   await card.getByRole('button', {name: 'Disconnect'}).click();
@@ -1166,7 +1167,7 @@ test('GitHub is connected through its own app, lists the chosen repositories, co
   // GitHub creates the app, then asks which repositories it may read, and each time sends the browser back here.
   await card.getByRole('button', {name: 'Connect GitHub'}).click();
   await page.getByRole('status').filter({hasText: 'GitHub is connected.'}).waitFor();
-  await card.getByText('Connected', {exact: true}).waitFor();
+  await card.getByText('Connected to octo-example', {exact: true}).waitFor();
   await card.getByText('Nocheh reads through its app Nocheh-a1b2c3 on octo-example', {exact: false}).waitFor();
   assert.equal(new URL(page.url()).search, '');
   assert.match(page.url(), /#connections\?view=github$/);

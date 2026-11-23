@@ -308,7 +308,7 @@ export function GithubConnection() {
             </Badge>
           ) : data.connected ? (
             <Badge tone="good" dot>
-              Connected
+              Connected{data.app ? ' to ' + data.app.account : ''}
             </Badge>
           ) : (
             <Badge dot>Not connected</Badge>
