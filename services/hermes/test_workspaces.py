@@ -573,7 +573,7 @@ class ComposeTests(Machine):
             'project': 'nocheh',
             'images': ['nocheh-hermes:local', 'nocheh-management:local', 'nocheh-miniapp:local', 'nocheh-services:local', 'nocheh-store-postgres:local'],
             'networks': ['nocheh-agent', 'nocheh-memory', 'nocheh_default', 'nocheh_honcho-egress', 'nocheh_honcho-isolated', 'nocheh_miniapp', 'nocheh_miniapp-back', 'nocheh_workflows'],
-            'volumes': ['nocheh_honcho_database', 'nocheh_honcho_redis', 'nocheh_postgres_data'],
+            'volumes': ['nocheh_honcho_database', 'nocheh_honcho_redis', 'nocheh_postgres_data', 'nocheh_reader_socket'],
             'ports': [8780, 8782, 8783, 8785], 'bot': '878001',
             'turns': 'nocheh-hermes:local', 'boxes': 'nocheh-box:local', 'tools': 'nocheh-tools:local'})
         self.assertEqual(facts(acme), {
@@ -582,7 +582,7 @@ class ComposeTests(Machine):
                        'nocheh-acme-store-postgres:local'],
             'networks': ['nocheh-acme-agent', 'nocheh-acme-memory', 'nocheh-acme_default', 'nocheh-acme_honcho-egress', 'nocheh-acme_honcho-isolated',
                          'nocheh-acme_miniapp', 'nocheh-acme_miniapp-back', 'nocheh-acme_workflows'],
-            'volumes': ['nocheh-acme_honcho_database', 'nocheh-acme_honcho_redis', 'nocheh-acme_postgres_data'],
+            'volumes': ['nocheh-acme_honcho_database', 'nocheh-acme_honcho_redis', 'nocheh-acme_postgres_data', 'nocheh-acme_reader_socket'],
             'ports': [8790, 8792, 8793, 8795], 'bot': '879001',
             'turns': 'nocheh-acme-hermes:local', 'boxes': 'nocheh-acme-box:local', 'tools': 'nocheh-acme-tools:local'})
         # The mini app is on its tunnel's network and on miniapp-back only: an internal network it shares with the dashboard
@@ -611,7 +611,8 @@ class ComposeTests(Machine):
                 '-f', str(ROOT / 'deploy/acceptance/test-compose.yml'), '--profile', 'honcho', 'config', '--format', 'json']
             test = json.loads(subprocess.check_output(command, env=env, text=True, stderr=subprocess.PIPE, timeout=60))
         self.assertEqual(sorted(volume['name'] for volume in test['volumes'].values()),
-                         ['nocheh-test-synthetic_honcho_database', 'nocheh-test-synthetic_honcho_redis', 'nocheh-test-synthetic_postgres_data'])
+                         ['nocheh-test-synthetic_honcho_database', 'nocheh-test-synthetic_honcho_redis', 'nocheh-test-synthetic_postgres_data',
+                          'nocheh-test-synthetic_reader_socket'])
         self.assertEqual(sorted(network['name'] for network in test['networks'].values() if network['name'].endswith(('agent', 'memory'))),
                          ['nocheh-test-synthetic-agent', 'nocheh-test-synthetic-memory'])
         self.assertEqual(test['services']['nocheh-app']['image'], 'nocheh-acme-services:dev')

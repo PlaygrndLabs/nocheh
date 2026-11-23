@@ -35,7 +35,18 @@ def hermes(result, spent=None):
     return {'agent.aux_accounting': accounting, 'tools.vision_tools': tools}, tools
 
 
+def made(state='done'):
+    """nocheh-reader's answer: the picture made again as a PNG."""
+    def read(kind, data, hint):
+        return ({'state': state, 'format': 'png'}, b'\x89PNG\r\n\x1a\n' + data) if state == 'done' else ({'state': state}, b'')
+    return patch.object(image_text.reader_client, 'read', side_effect=read)
+
+
 class ImageTextTests(unittest.TestCase):
+    def setUp(self):
+        reader = made()
+        self.reader = reader.start()
+        self.addCleanup(reader.stop)
     def read(self, result, spent=None):
         modules, tools = hermes(result, spent)
         with patch.dict(sys.modules, modules):
@@ -128,6 +139,26 @@ class ImageTextTests(unittest.TestCase):
         body = {'bytes_base64': base64.b64encode(b'synthetic').decode()}
         with patch.dict('os.environ', ROUTE), patch.object(image_text.subprocess, 'run', side_effect=subprocess.TimeoutExpired('image', 1)):
             self.assertEqual(image_text.read_image(body), {'state': 'failed', 'reason': 'timed_out'})
+
+    def test_only_the_png_the_reader_made_reaches_the_model(self):
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'name': 'a.heic', 'mime_type': 'image/heic'}
+        seen = []
+
+        def run(command, **options):
+            seen.append(options['input'])
+            return subprocess.CompletedProcess(command, 0, b'{"state": "done", "text": "Synthetic"}', b'')
+        with patch.dict('os.environ', ROUTE), patch.object(image_text.subprocess, 'run', side_effect=run), \
+                patch.object(image_text.usage, 'record'), patch.object(image_text.usage, 'reader_done'):
+            self.assertEqual(image_text.read_image(body), {'state': 'done', 'text': 'Synthetic'})
+        self.reader.assert_called_once_with('image', b'synthetic', {'name': 'a.heic', 'mime_type': 'image/heic'})
+        self.assertEqual(seen, [b'\x89PNG\r\n\x1a\nsynthetic'])
+        for answer, state in (({'state': 'too_large'}, 'too_large'), ({'state': 'unreadable'}, 'unreadable'),
+                              ({'state': 'failed', 'reason': 'timed_out'}, 'unreadable')):
+            self.reader.side_effect = None
+            self.reader.return_value = (answer, b'')
+            with patch.dict('os.environ', ROUTE), patch.object(image_text.subprocess, 'run') as run:
+                self.assertEqual(image_text.read_image(body), {'state': state}, answer)
+                run.assert_not_called()
 
 
 if __name__ == '__main__':

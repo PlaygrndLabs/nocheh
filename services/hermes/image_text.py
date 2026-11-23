@@ -1,10 +1,11 @@
 """Text and a short description of an image for Nocheh's preparation step, by Hermes's own vision tool.
 
 Nocheh keeps the original image and checks this text for secrets; this only reads it.
-Hermes's vision tool detects the format, converts formats a model rejects and shrinks
-oversized images. The provider and model are the Images part of Settings › Models. Each
-image is read in a child process that holds only that provider's key, bounded in time and
-memory, with a Hermes home of its own; Hermes's own usage accounting reports its tokens.
+The picture is decoded by nocheh-reader, away from every key, in a process and login of its
+own (ADR-0285); only the PNG it made again, at most 2048 pixels a side, reaches the vision
+tool. The provider and model are the Images part of Settings › Models. That PNG is read in
+a child process that holds only that provider's key, bounded in time and memory, with a
+Hermes home of its own; Hermes's own usage accounting reports its tokens.
 A read that fails because a write found no room in the memory /tmp or was refused by the
 locked-down container (ADR-0251) is no model call: it is counted for the owner's problem
 notice instead.
@@ -19,7 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import usage
+from . import reader_client, usage
 from .prompts import text as prompt_text
 
 LIMIT = 50 * 1024 * 1024
@@ -49,6 +50,11 @@ def read_image(body):
     if len(data) > LIMIT:
         return {'state': 'too_large'}
     instruction = prompt_text(body.get('prompts'), 'images.read')
+    # The picture is decoded away from every key; only the PNG the reader made from it goes on to the model.
+    hint = {name: body.get(name) for name in ('name', 'mime_type') if isinstance(body.get(name), str)}
+    made, data = reader_client.read('image', data, hint)
+    if made.get('state') != 'done':
+        return {'state': 'too_large' if made.get('state') == 'too_large' else 'unreadable'}
 
     def bounded():
         import resource

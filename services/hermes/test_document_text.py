@@ -1,8 +1,6 @@
 """Documents read by Hermes's own reader for Nocheh's preparation step."""
 import base64
 import errno
-import json
-import subprocess
 import sys
 import tempfile
 import types
@@ -56,35 +54,20 @@ class DocumentTextTests(unittest.TestCase):
         long = self.read(reader('a' * (document_text.TEXT_LIMIT + 5)), 'a.docx')['text']
         self.assertTrue(long.startswith('a' * document_text.TEXT_LIMIT) and long.endswith('[The rest of this document is not included.]'))
 
-    def test_the_reading_runs_bounded_in_a_child_without_service_credentials(self):
-        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'name': 'a.docx'}
-        with patch.dict('os.environ', {'SERVICE_TOKEN': 'synthetic-service-token'}), \
-                patch.object(document_text.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'{"state": "done", "text": "Synthetic"}', b'')) as run:
+    def test_the_file_is_read_by_nocheh_reader(self):
+        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'name': 'a.docx', 'mime_type': 7}
+        with patch.object(document_text.reader_client, 'read', return_value=({'state': 'done', 'text': 'Synthetic', 'size': 0}, b'')) as read:
             self.assertEqual(document_text.extract(body), {'state': 'done', 'text': 'Synthetic'})
-        self.assertNotIn('SERVICE_TOKEN', run.call_args.kwargs['env'])
-        self.assertEqual(run.call_args.kwargs['timeout'], document_text.SECONDS)
-        for outcome in (subprocess.TimeoutExpired('reader', 1), subprocess.CompletedProcess([], 1, b'Traceback', b'')):
-            with patch.object(document_text.subprocess, 'run', side_effect=[outcome] if isinstance(outcome, Exception) else None,
-                              return_value=None if isinstance(outcome, Exception) else outcome):
+        read.assert_called_once_with('document', b'synthetic', {'name': 'a.docx', 'mime_type': ''})
+        for answer in ({'state': 'failed', 'reason': 'timed_out'}, {'state': 'surprise'}, {}):
+            with patch.object(document_text.reader_client, 'read', return_value=(answer, b'')):
                 self.assertEqual(document_text.extract(body), {'state': 'unreadable'})
-        with patch.object(document_text, 'LIMIT', 3), patch.object(document_text.subprocess, 'run') as run:
+        with patch.object(document_text.reader_client, 'read', side_effect=document_text.reader_client.ReaderUnavailable('busy')), \
+                self.assertRaises(document_text.reader_client.ReaderUnavailable):
+            document_text.extract(body)
+        with patch.object(document_text, 'LIMIT', 3), patch.object(document_text.reader_client, 'read') as read:
             self.assertEqual(document_text.extract(body), {'state': 'too_large'})
-            run.assert_not_called()
-
-    def test_each_read_has_its_own_temporary_folder_removed_after_it_even_after_a_timeout(self):
-        # /tmp is memory in the locked-down container: a hung reader's files must not stay there.
-        body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'name': 'a.pdf'}
-        seen = {}
-
-        def run(command, **options):
-            seen.update(options['env'])
-            Path(options['env']['TMPDIR'], 'left-by-the-converter').write_bytes(b'x' * 1024)
-            raise subprocess.TimeoutExpired('reader', 1)
-        with patch.object(document_text.subprocess, 'run', side_effect=run):
-            self.assertEqual(document_text.extract(body), {'state': 'unreadable'})
-        self.assertEqual(seen['HOME'], seen['TMPDIR'])
-        self.assertTrue(seen['TMPDIR'].startswith(tempfile.gettempdir()) and Path(seen['TMPDIR']).name.startswith('nocheh-document-'))
-        self.assertFalse(Path(seen['TMPDIR']).exists(), 'nothing of the read is left in /tmp')
+            read.assert_not_called()
 
     def test_a_write_that_found_no_room_or_was_refused_is_counted_once_and_a_broken_file_is_not(self):
         full = OSError(errno.ENOSPC, 'No space left on device')
@@ -104,30 +87,20 @@ class DocumentTextTests(unittest.TestCase):
             document_text.answer(b'x', hint)
 
         body = {'bytes_base64': base64.b64encode(b'synthetic').decode(), 'name': 'a.docx'}
-        child = lambda answer: subprocess.CompletedProcess([], 0, json.dumps(answer).encode(), b'')
+        child = lambda answer: patch.object(document_text.reader_client, 'read', return_value=(answer, b''))
         with tempfile.TemporaryDirectory() as state:
             target = Path(state) / 'hermes/usage/usage.sqlite'
             target.parent.mkdir(parents=True)
             with patch.object(usage, 'DATABASE', target):
-                with patch.object(document_text.subprocess, 'run', return_value=child({'state': 'unreadable', 'write_failure': 'temp_full'})):
+                with child({'state': 'unreadable', 'write_failure': 'temp_full'}):
                     self.assertEqual(document_text.extract(body), {'state': 'unreadable'}, 'the file gets today’s status')
-                with patch.object(document_text.subprocess, 'run', return_value=child({'state': 'unreadable'})), \
-                        patch.object(usage, 'temp_full', return_value=False):
+                with child({'state': 'unreadable', 'write_failure': 'made-up'}):
                     self.assertEqual(document_text.extract(body), {'state': 'unreadable'})
-                # A reader that failed while /tmp has no room for its file failed for want of room, whatever it said.
-                with patch.object(document_text.subprocess, 'run', return_value=child({'state': 'unreadable'})), \
-                        patch.object(usage, 'temp_full', return_value=True):
-                    document_text.extract(body)
-                # Its folder could not even be made.
-                with patch.object(document_text.tempfile, 'TemporaryDirectory', side_effect=full), \
-                        patch.object(document_text.subprocess, 'run') as run:
-                    self.assertEqual(document_text.extract(body), {'state': 'unreadable'})
-                    run.assert_not_called()
-                with patch.object(document_text.subprocess, 'run', return_value=child({'state': 'done', 'text': 'Synthetic'})):
+                with child({'state': 'done', 'text': 'Synthetic'}):
                     document_text.extract(body)
             day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
             self.assertEqual(provider_usage.reader_rows(state, day),
-                             [{'day': day, 'reader': 'document', 'done': 1, 'temp_full': 3, 'read_only': 0}])
+                             [{'day': day, 'reader': 'document', 'done': 1, 'temp_full': 1, 'read_only': 0}])
 
 
 if __name__ == '__main__':

@@ -146,6 +146,17 @@ services:
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
       - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
 
+  nocheh-reader:
+    image: ${NOCHEH_DEV_HERMES_BASE:?}
+    build: !reset null
+    restart: unless-stopped
+    entrypoint: [python, -m, tools.development.dev_reload]
+    # Its children read files with Hermes's document reader, so a change there restarts it too.
+    command: [--watch, /workspace/services/reader, --watch, /workspace/services/hermes, --, python, -m, services.reader.server]
+    volumes:
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/services:/workspace/services:ro
+      - ${NOCHEH_DEV_SOURCE_ROOT:-.}/tools:/workspace/tools:ro
+
   hermes-agent-sb:
     image: ${NOCHEH_DEV_HERMES_BASE:?}
     build: !reset null
