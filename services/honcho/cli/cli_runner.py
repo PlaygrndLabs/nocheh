@@ -42,7 +42,7 @@ def read_request(original, client, method, path, **kwargs):
 
 
 def admin_key(secret):
-    """Honcho's admin key, signed with the internal token Honcho checks keys with (ADR-0284): an HS256 JWT."""
+    """Honcho's admin key, signed with the internal token Honcho checks keys with (ADR-0286): an HS256 JWT."""
     import base64,hashlib,hmac,json
     part=lambda value:base64.urlsafe_b64encode(json.dumps(value,separators=(',',':')).encode()).rstrip(b'=').decode()
     body=part({'alg':'HS256','typ':'JWT'})+'.'+part({'t':'nocheh-cli','ad':True})

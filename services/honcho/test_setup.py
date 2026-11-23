@@ -42,7 +42,7 @@ class HonchoSetupTests(unittest.TestCase):
             with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
                 honcho_setup.initialize(state)
             values = read_env(state / 'honcho/honcho.env')
-            # Walls (ADR-0284): Honcho refuses any call without a key signed with the token the app holds.
+            # Walls (ADR-0286): Honcho refuses any call without a key signed with the token the app holds.
             self.assertEqual(values['AUTH_USE_AUTH'], 'true')
             self.assertEqual(values['AUTH_JWT_SECRET'], (state / 'honcho/internal_token').read_text().strip())
 

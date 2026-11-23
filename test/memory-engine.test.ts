@@ -350,7 +350,7 @@ const claims=(key:string,secret:string)=>{
   return JSON.parse(Buffer.from(body!,'base64url').toString());
 };
 
-test('Honcho keys are HS256 JWTs: the client\'s main key is an admin key, a wall key opens one wall for ten minutes (ADR-0284)',async()=>{
+test('Honcho keys are HS256 JWTs: the client\'s main key is an admin key, a wall key opens one wall for ten minutes (ADR-0286)',async()=>{
   assert.deepEqual(claims(honchoKey('secret',{t:'x',ad:true}),'secret'),{t:'x',ad:true});
   const now=Date.parse('2026-11-23T19:00:00Z'),wall=memoryWallName('space',['-100']);
   assert.deepEqual(claims(wallKey('secret','space',wall,now),'secret'),
@@ -369,7 +369,7 @@ test('Honcho keys are HS256 JWTs: the client\'s main key is an admin key, a wall
   }finally{server.closeAllConnections();server.close();await once(server,'close');}
 });
 
-test('a wall is named by its chats and asked by name with its own key; its facts are the wall\'s own copies (ADR-0284)',async()=>{
+test('a wall is named by its chats and asked by name with its own key; its facts are the wall\'s own copies (ADR-0286)',async()=>{
   assert.equal(memoryWallName('space',['-2','-1','-1']),memoryWallName('space',['-1','-2']));
   assert.notEqual(memoryWallName('space',['-1']),memoryWallName('space',['-1','-2']),'another chat makes another wall');
   assert.notEqual(memoryWallName('space',['-1']),memoryWallName('other',['-1']));

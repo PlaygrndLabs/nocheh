@@ -27,7 +27,7 @@ import type {TelegramActionRepository} from './telegram-actions.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {currentChats} from './chats.js';
 import {ManagedExecutionRepository,managedEventId,type ManagedInput} from './managed-execution.js';
-import {machineJob,machinePin,machineReady,machineTokenSet,type MachinePin} from './machines.js';
+import {machineJob,machinePin,machineReady,machineTokenSet,watchedPlace,type MachinePin} from './machines.js';
 import {followUpTurn} from './owner-autonomy.js';
 import {activeChatProject,ProjectRepository} from './projects.js';
 import {reordering,visible} from '../action-text.js';
@@ -137,7 +137,21 @@ const REPORT_PART=12000;
 // A job card with the longest line a decided card adds stays below Telegram's 4,096 UTF-16 units, so it can always be sent and settled.
 const CARD_LIMIT=3800;
 // The lines a decided card adds under its text (settleJob).
-const outcomes=['running','running_elsewhere','queued','paused','done','limited','stopped','stopping','failed','rejected','repo_removed','machine_off'];
+const outcomes=['running','running_elsewhere','queued','paused','done','limited','stopped','stopping','failed','rejected','repo_removed','machine_off','machine_admin_changed'];
+// The line a machine job's decided card adds once its start-up files were checked (machine jobs' start-up files), the longest
+// with FILES_SHOWN places, which a card keeps room for.
+const fileOutcomes=['files_same','files_changed','files_unchecked'],FILES_SHOWN=5;
+/** Watched start-up files and tools as a card names them: the first FILES_SHOWN, then how many more. */
+const watchedPlaces=(labels:unknown)=>{const all=Array.isArray(labels)?labels.map(label=>watchedPlace(String(label))):[];
+  return all.slice(0,FILES_SHOWN).join(', ')+(all.length>FILES_SHOWN?` and ${all.length-FILES_SHOWN} more`:'');};
+/** The line a machine job's decided card adds on its start-up files once they were checked; null before (settleJob). */
+export function filesLine(row:any,lines:Record<string,string>):string|null {
+  if(!row.machine)return null;
+  if(row.machine_check==='same')return lines.files_same||null;
+  if(row.machine_check==='unchecked')return lines.files_unchecked||null;
+  if(row.machine_check==='changed'&&lines.files_changed)return fillTemplate(lines.files_changed,{files:watchedPlaces(row.machine_changed)});
+  return null;
+}
 /** A machine job's plan as its card and run show it: one numbered line a step. */
 const numbered=(steps:string[])=>steps.map((step,index)=>`${index+1}. ${step}`).join('\n');
 export const closedStates=new Set(['done','failed','stopped','rejected']);
@@ -429,7 +443,9 @@ export class BackgroundJobRepository {
   /** Refuse a job whose card, with the longest line a decided card adds, would not fit Telegram: it could never be approved. */
   private async cardFits(row:any,shown:{title:string;instruction:string}):Promise<void> {
     const {text,lines}=await this.cardText(row,shown);
-    if(text.length+2+Math.max(...outcomes.map(name=>(lines[name]??'').length))>CARD_LIMIT)throw new HttpError(409,'job_card_too_long');
+    // A machine job's card keeps room for its start-up files line too, with the longest list it may name.
+    const files=row.machine?1+Math.max(...fileOutcomes.map(name=>(name==='files_changed'?fillTemplate(lines[name]??'',{files:'x'.repeat(160)}):lines[name]??'').length)):0;
+    if(text.length+2+Math.max(...outcomes.map(name=>(lines[name]??'').length))+files>CARD_LIMIT)throw new HttpError(409,'job_card_too_long');
   }
   /** Ask to start a job: count and price what it reads, then record the proposal its card shows.
    * Nothing runs until whoever approves it presses Approve. */
@@ -572,7 +588,13 @@ export class BackgroundJobRepository {
       repo:row.repo?fillTemplate(lines.repo!,{repo_name:row.repo.name,repo_branch:row.repo.branch,repo_commit:row.repo.commit.slice(0,7),
         repo_copied:row.repo.copied_at.slice(0,16).replace('T',' ')+' UTC',repo_size:Math.ceil(row.repo.bytes/1e6)+' MB, '+count(row.repo.files,'file','files')}):null,
       // From the job's own pin too, and the plan exactly as approved.
-      machine:row.machine?fillTemplate(lines.machine!,{machine_name:row.machine.name,machine_login:row.machine.login,machine_address:row.machine.address}):null,
+      // Whether the login can act as admin, and what the last checked job changed there, from the pin, so the card never
+      // differs from what is approved (machine jobs' start-up files).
+      machine:row.machine?[fillTemplate(lines.machine!,{machine_name:row.machine.name,machine_login:row.machine.login,machine_address:row.machine.address}),
+        row.machine.admin&&lines.machine_admin?'🔑 '+lines.machine_admin:null,
+        row.machine.changed===null&&lines.machine_unchecked?'⚠️ '+fillTemplate(lines.machine_unchecked,{machine_name:row.machine.name}):
+        Array.isArray(row.machine.changed)&&lines.machine_changed?'⚠️ '+fillTemplate(lines.machine_changed,{machine_name:row.machine.name,files:watchedPlaces(row.machine.changed)}):null]
+        .filter(Boolean).join('\n'):null,
       steps:row.steps?.length?lines.steps+'\n'+numbered(row.steps.map((step:string)=>visible(step))):null,
       checked:lines.checked||null};
     // Where it was asked, when the card is elsewhere, and what the job may do without asking are always on its card: a
@@ -833,7 +855,8 @@ export class BackgroundJobRepository {
       await this.stopped(row.id);
     // A machine job that ran and failed or was stopped has its programs on the machine ended; one that ends well leaves them,
     // also when only its report then fails. A limit or a Stop while it reports has set its cleanup already.
-    const changed=await this.control.query(`UPDATE background_jobs SET state=$2,error_code=$3,finished_at=now(),machine_cleanup=CASE WHEN machine IS NOT NULL
+    // A machine job stopped because its login's admin rights were not what its card said keeps that reason (machines.ts).
+    const changed=await this.control.query(`UPDATE background_jobs SET state=$2,error_code=CASE WHEN $3::text IS NULL AND $2='stopped' AND error_code='job_machine_admin_changed' THEN error_code ELSE $3 END,finished_at=now(),machine_cleanup=CASE WHEN machine IS NOT NULL
       AND started_at IS NOT NULL AND state<>'reporting' AND $2 IN ('failed','stopped') THEN coalesce(machine_cleanup,'pending') ELSE machine_cleanup END,revision=revision+1,updated_at=now()
       WHERE id=$1 AND state NOT IN ('done','failed','stopped','rejected')`,[row.id,state,code]);
     if(changed.rowCount)await this.settled(row.id);

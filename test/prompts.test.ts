@@ -198,7 +198,7 @@ test('a machine job has its own instruction text, which must keep the plan, and 
   const lines=labeledLines(backgroundTexts,undefined);
   assert.equal(fillTemplate(lines.machine!,{machine_name:'build-vm',machine_login:'nocheh',machine_address:'192.0.2.10'}),
     'It works on build-vm (nocheh@192.0.2.10) over SSH: one approval lets it run any command nocheh can run there. The plan guides it but does not limit it, '+
-    'and what it reads can change what it does. Stop ends the programs it started there, but not ones the system started for it, such as with open or brew services.');
+    'and what it reads can change what it does. Stop ends the programs it started there, but not ones the system started for it, such as with open, brew services or sudo.');
   // A machine job's card says it reads only its chat and period, frozen at Approve, and only the Notion pages it names (machine jobs' reads).
   assert.equal(fillTemplate(lines.machine_reads!,{place:'your private chat',size:'3 messages, 2026-01-01 – 2026-01-02'}),
     'Reads only your private chat: 3 messages, 2026-01-01 – 2026-01-02. Nothing sent after you approve reaches it, and it cannot search your other chats or memory.');

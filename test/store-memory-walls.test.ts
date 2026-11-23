@@ -9,7 +9,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {installChatsForTest} from '../src/chats.js';
 import {seededDirectory} from './fixture-seeded-chats.js';
 
-test('a wall holds every learned session of its chats, is reused while nothing changed and refuses a read until its copy is done (ADR-0284)',
+test('a wall holds every learned session of its chats, is reused while nothing changed and refuses a read until its copy is done (ADR-0286)',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:120000},async t=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}

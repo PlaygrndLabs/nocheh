@@ -24,7 +24,7 @@ const recallChats=()=>legacyDirectory(['-100','-100/topic/3','-200'],{owner:'123
 /** Control answers for recall cases where the owner's forwards and files hold nothing learned. */
 const nothingForwarded={query:async(sql:string)=>{if(sql.includes('r.peer_id=$2'))return {rowCount:0,rows:[]};throw Error('unexpected_control_query');}};
 
-/** Stands in for the walls store: a group reads through the wall of the chats it asks, holding these sessions (ADR-0284). */
+/** Stands in for the walls store: a group reads through the wall of the chats it asks, holding these sessions (ADR-0286). */
 const fakeWalls=(sessions:()=>string[],opened:string[][]=[])=>({of:async()=>[],
   open:async(workspace:string,chats:readonly string[])=>{opened.push([...new Set(chats)].sort());return {wall:memoryWallName(workspace,chats),sessions:sessions()};}});
 
@@ -330,7 +330,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
     [workspace,'C'.repeat(21),'-100/topic/3',topics,null]],'a hit counts only with its own receipt, in this audience or its group');
   assert.deepEqual(readSessions,[],'a group reader searches its own sessions');
   // An answer reader searches the sessions of the groups frozen in its record, inside the wall of exactly those groups
-  // (ADR-0284), and a hit counts only with a receipt of one of them; Honcho's context and recall stay closed to it: plain
+  // (ADR-0286), and a hit counts only with a receipt of one of them; Honcho's context and recall stay closed to it: plain
   // search only (ADR-0249).
   const answer={admin:false,scope:'123',space:'123',turnEvent:digest('start'),answer:'a'.repeat(32),
     reads:{home:'-100/topic/3',exact:[],whole:['-100','-200'],project:null}} as Reader;
@@ -346,7 +346,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.equal((await memory.context(answer)).limited_memory,true);
   assert.equal((await memory.recall(answer,'invoice')).limited_memory,true);
   // A member's own private chat, its schedules included, is a bound reader too: it searches its groups inside their wall,
-  // and gets no learned notes (ADR-0284).
+  // and gets no learned notes (ADR-0286).
   const {answer:_answer,...unbound}=answer as any,member={...unbound,member:'a'.repeat(64)} as Reader;
   readSessions.length=0;await memory.search(member,'who sends the invoice',4);
   assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);assert.equal(bodies.at(-1)!.body.scope,readWall);
@@ -431,7 +431,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       return {literals:text.includes('saffronpass')?['saffronpass']:text.includes('Steered recall')?['user','fixture-recall-model'].filter(word=>text.includes(word)):[]};
     },
     memoryEngine:honchoEngine(async(path,body:any,method)=>{
-      // Walls copy at once here (ADR-0284).
+      // Walls copy at once here (ADR-0286).
       if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push({path,body,...(method?{method}:{})});
       const session=/^\/v3\/workspaces\/([^/]+)\/sessions(?:\/([^/?]+))?/.exec(path);
@@ -577,7 +577,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const chat=calls.filter(c=>c.path.endsWith('/chat')).at(-1)!;
     assert.ok(!String(chat.body.query).includes('saffronpass'));
     const groupSessions=(await stores.control.query('SELECT session_id FROM memory_sessions WHERE audience=$1',[group])).rows.map(row=>row.session_id).sort();
-    // Group recall is confined to the wall of its own chat, which holds exactly its learned sessions (ADR-0284).
+    // Group recall is confined to the wall of its own chat, which holds exactly its learned sessions (ADR-0286).
     assert.match(chat.body.scope,/^wall-[a-f0-9]{40}$/);assert.equal(chat.body.filters,undefined);
     const joined=calls.filter(c=>c.path.endsWith('/scopes/'+chat.body.scope+'/sessions')).flatMap(c=>c.body.session_ids).sort();
     assert.deepEqual(joined,groupSessions,'group recall is confined to its own sessions');
@@ -711,7 +711,7 @@ test('foreground recall requires independent source evidence while background co
   const calls:string[]=[];let sequence=0;
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any)=>{
-      // Walls copy at once here (ADR-0284).
+      // Walls copy at once here (ADR-0286).
       if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push(path);
       if(path.endsWith('/messages/list'))return {items:[]};
@@ -773,7 +773,7 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
   const calls:{path:string;body:any}[]=[];let sequence=0;
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any)=>{
-      // Walls copy at once here (ADR-0284).
+      // Walls copy at once here (ADR-0286).
       if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push({path,body});
       if(path.endsWith('/messages/list'))return {items:[]};
@@ -1123,7 +1123,7 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     const groupAsk=calls.slice(asked).find(call=>call.path.endsWith('/peers/'+materialPeer+'/chat'))!;
     const groupSessions=(await stores.control.query('SELECT session_id FROM memory_sessions WHERE audience=$1',[group])).rows.map(row=>row.session_id).sort();
     assert.ok(groupAsk,'a group asks them once they wrote something there');
-    // Asked inside the group's wall, which holds only the group's sessions (ADR-0284).
+    // Asked inside the group's wall, which holds only the group's sessions (ADR-0286).
     const joined=calls.filter(call=>call.path.endsWith('/scopes/'+groupAsk.body.scope+'/sessions')).flatMap(call=>call.body.session_ids);
     assert.ok(joined.length&&joined.every((id:string)=>groupSessions.includes(id)));
 

@@ -92,7 +92,7 @@ export class FactSourceRepository {
  *  when its source line names only where and when (factPlaceOnly). */
 export type StoredFact={n:number;conclusion:string;peer?:string;exact:boolean;by:TagBy;time?:string|null;sources:string[];more:number;complete:boolean;
   session:string|null;place?:boolean;
-  /** The wall a group's recall read the fact in: the fact is the wall's own copy (ADR-0284). */
+  /** The wall a group's recall read the fact in: the fact is the wall's own copy (ADR-0286). */
   wall?:string};
 /** A record of facts a turn read, by the id the model sees: its own row (configuration, kind, the guarded text) and the
  *  facts its unguarded parent keeps. */

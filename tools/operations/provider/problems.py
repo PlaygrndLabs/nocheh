@@ -34,7 +34,8 @@ SOURCES = {'application': 'application', 'service': 'services', 'models': 'route
            'failed': 'work', 'uncertain': 'work', 'spool': 'spool', 'sends': 'sends', 'github': 'github', 'telegram': 'telegram',
            'reader': 'readers', 'notes': 'notes', 'memory_read': 'notes', 'note_labels': 'store_notes', 'forwards_read': 'store_notes',
            'source_tags': 'store_notes', 'note_refs': 'store_notes',
-           'backup': 'backups', 'backup_unreadable': 'backups', 'backup_skipped': 'backups', 'offsite': 'backups', 'offsite_skipped': 'backups'}
+           'backup': 'backups', 'backup_unreadable': 'backups', 'backup_skipped': 'backups', 'offsite': 'backups', 'offsite_skipped': 'backups',
+           'machine_cleanup': 'machines'}
 # A part's model calls, a reader's files, the steps that tell where notes came from and turns that read long-term
 # memory, counted per day with those that worked: they clear once one works after the last failure a check saw. Hermes's
 # steps (notes, memory_read) and the stores' (note_labels, forwards_read, source_tags, note_refs) are lines of their own, so a step
@@ -200,6 +201,11 @@ def problems(monitoring, usage_rows, today):
         add('backup_skipped', count('skipped_days'), 'backup_skipped')
         add('offsite', count('offsite_failed'), 'offsite', reason=backups.get('offsite_reason'))
         add('offsite_skipped', count('offsite_skipped'), 'offsite_skipped')
+    # Stopped machine jobs whose programs Nocheh could not end, over the last 7 days: each one is news, since programs a
+    # job started may still run on the owner's machine (machine jobs' start-up files).
+    machines = monitoring.get('machines')
+    if isinstance(machines, dict) and not machines.get('unavailable') and type(machines.get('cleanup_failed')) is int:
+        add('machine_cleanup', machines['cleanup_failed'], 'machine_cleanup')
     return found
 
 
@@ -304,6 +310,9 @@ def text(problem, new):
     if kind == 'note_refs':
         return (f"Memory labels: note refs couldn’t be kept {_plural(count, 'time', 'times')} today; those notes went out "
                 'with their sources named but could not be opened by ref. The notes are kept.')
+    if kind == 'machine_cleanup':
+        return (f"Machines: Nocheh couldn’t end the programs of {_plural(count, 'stopped job', 'stopped jobs')} in the last 7 days. "
+                'They may still run on the machine: see System › Machine log, and end them yourself.')
     if kind == 'backup':
         reason = BACKUP_REASONS.get(problem.get('reason'), BACKUP_REASONS['backup_failed'])
         if count == 1:
@@ -407,6 +416,9 @@ def readable(monitoring):
     backups = monitoring.get('backups')
     if isinstance(backups, dict) and not backups.get('unavailable'):
         found.add('backups')
+    machines = monitoring.get('machines')
+    if isinstance(machines, dict) and not machines.get('unavailable') and type(machines.get('cleanup_failed')) is int:
+        found.add('machines')
     if ((monitoring.get('runtime') or {}).get('status') or {}).get('telegram') == 'connected':
         found.add('telegram')
     if isinstance(monitoring.get('reader_problems'), list):

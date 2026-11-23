@@ -1,4 +1,4 @@
-# ADR-0284: Memory walls (Honcho named scopes)
+# ADR-0286: Memory walls (Honcho named scopes)
 
 <status>
 Accepted on 2026-11-23. The owner approved the design ("Memory walls with named

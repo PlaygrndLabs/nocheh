@@ -47,11 +47,17 @@ test('only the owner\'s own request in their private chat or an active project\'
     for(let piece=Buffer.alloc(600,'y');size<8*1024*1024-5;size+=piece.length+5){piece=piece.subarray(0,Math.min(600,8*1024*1024-5-size));parts.push(frame('O',piece));}
     return flood=Buffer.concat([...parts,frame('O',Buffer.from('\n[machine: output capped at 8 MiB]\n')),exitFrame(0)]);
   };
+  // What /probe answers (machine jobs' start-up files): whether the login acts as admin and its watched files; kept apart
+  // from `calls`, so each probe is counted on its own.
+  const probes:any[]=[];let probe:{admin:boolean;files:Record<string,string|null>|null;error?:string}={admin:false,files:{'.zshrc':'sha256:'+'1'.repeat(64),'.bashrc':null}};
   const fake=createServer(async(req,res)=>{
     const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(chunk as Buffer);
     const send=(status:number,value:unknown)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value));};
     if(req.headers.authorization!=='Bearer '+machineToken)return send(401,{error:'machine_not_allowed'});
-    const path=req.url!,body=JSON.parse(Buffer.concat(chunks).toString()||'null');calls.push({path,body});events.push(path);
+    const path=req.url!,body=JSON.parse(Buffer.concat(chunks).toString()||'null');
+    if(path==='/probe'){probes.push(body);return send(200,probe.error?{ok:false,error:probe.error}:probe.files?{ok:true,admin:probe.admin,files:probe.files}:
+      {ok:true,admin:probe.admin,files:null,files_error:'machine_files_unavailable'});}
+    calls.push({path,body});events.push(path);
     if(path==='/keys')return send(200,{public_key:'ssh-ed25519 '+'A'.repeat(68)+' '+body.comment});
     if(path==='/test')return testMode==='refused'?send(200,{ok:false,error:'machine_auth_failed'}):testMode==='nokey'?send(200,{ok:false,error:'machine_key_missing',detail:'This machine has no key.'}):
       send(200,{ok:true,host_key:testMode==='ok'?hostKey:otherKey,system:'Made-up OS 1.0\n'});
@@ -142,7 +148,7 @@ test('only the owner\'s own request in their private chat or an active project\'
   const rows=async(where:string,params:unknown[]=[])=>(await stores.control.query('SELECT * FROM machine_commands WHERE '+where+' ORDER BY id',params)).rows;
   const settledWith=(id:string,line:string)=>until(()=>approvals.some(input=>input.kind==='settle'&&input.id===id&&String(input.text).endsWith('\n\n'+line)),'the card of '+id+' says '+line);
   const machineLine='🖥 It works on build-vm (nocheh@192.0.2.10) over SSH: one approval lets it run any command nocheh can run there. The plan guides it but does not limit it, '+
-    'and what it reads can change what it does. Stop ends the programs it started there, but not ones the system started for it, such as with open or brew services.';
+    'and what it reads can change what it does. Stop ends the programs it started there, but not ones the system started for it, such as with open, brew services or sudo.';
   const planLine='📋 Plan (a guide, not a limit):\n1. Install the made-up tool\n2. Run its tests',withdrawn='🚫 Withdrawn: its machine was turned off or changed. Nothing runs.';
   try {
     await s.guards.reconcile();await s.guards.setMode('on');await s.configuration.configure(policy,'on');
@@ -150,7 +156,7 @@ test('only the owner\'s own request in their private chat or an active project\'
     await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[project,projectId]);
 
     // Settings › Machines: nothing yet, machine control on, and set up.
-    assert.deepEqual(await route('GET','/v1/machines'),{status:200,body:{available:true,enabled:true,revision:0,machines:[]}});
+    assert.deepEqual(await route('GET','/v1/machines'),{status:200,body:{available:true,enabled:true,revision:0,machines:[],cleanup_failed:0}});
     for(const body of [{name:'bad/name',address:'192.0.2.10',login:'nocheh'},{name:'build-vm',address:'-oProxyCommand=made-up',login:'nocheh'},{name:'build-vm',address:'192.0.2.10',port:0,login:'nocheh'},
       {name:'build-vm',address:'192.0.2.10',port:65536,login:'nocheh'},{name:'build-vm',address:'192.0.2.10',login:'Root'},{name:'build-vm',address:'192.0.2.10',login:'nocheh',key:'made-up'},
       {name:' ',address:'192.0.2.10',login:'nocheh'}])
@@ -165,7 +171,7 @@ test('only the owner\'s own request in their private chat or an active project\'
     assert.equal(created.status,200);
     const build=created.body.id as string;assert.match(build,/^[a-f0-9]{32}$/);
     assert.deepEqual(calls,[{path:'/keys',body:{id:build,comment:'nocheh build-vm'}}],'nocheh-machines makes the key; storage never sees it');
-    assert.deepEqual(Object.keys(created.body).sort(),['address','created_at','enabled','host_key','id','jobs','login','name','port','public_key','revision','test_error','tested_at']);
+    assert.deepEqual(Object.keys(created.body).sort(),['address','admin','changed','created_at','enabled','host_key','id','jobs','login','name','port','public_key','revision','test_error','tested_at']);
     assert.deepEqual([created.body.name,created.body.port,created.body.host_key,created.body.enabled,created.body.jobs],['build-vm',22,null,true,0]);
     assert.equal(created.body.public_key,'ssh-ed25519 '+'A'.repeat(68)+' nocheh build-vm');
     assert.equal((await stores.control.query('SELECT key_ref FROM machines WHERE id=$1',[build])).rows[0].key_ref,'machines/'+build+'/key','only where nocheh-machines keeps it');
@@ -179,13 +185,14 @@ test('only the owner\'s own request in their private chat or an active project\'
     assert.deepEqual([refused.status,refused.body.result,refused.body.machine.test_error,refused.body.machine.host_key],[200,{ok:false,error:'machine_auth_failed'},'machine_auth_failed',null]);
     testMode='ok';
     const tested=await route('POST','/v1/machines/'+build+'/test');
-    assert.deepEqual(tested.body.result,{ok:true,host_key:hostKey,system:'Made-up OS 1.0'});
+    assert.deepEqual(tested.body.result,{ok:true,host_key:hostKey,admin:false,system:'Made-up OS 1.0'});
+    assert.deepEqual(probes.at(-1),{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey},'a passing test asks whether the login acts as admin');
     assert.deepEqual([tested.body.machine.host_key,tested.body.machine.test_error],[hostKey,null]);assert.ok(tested.body.machine.tested_at);
     assert.deepEqual(calls.map(call=>call.body),[{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:null},{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:null}]);
     testMode='other';
     const changed=await s.machines.test(owner,build);
     assert.deepEqual([changed.result,changed.machine.host_key,changed.machine.test_error],[{ok:false,error:'machine_host_key_changed'},hostKey,'machine_host_key_changed']);
-    testMode='ok';assert.deepEqual((await s.machines.test(owner,build)).result,{ok:true,host_key:hostKey,system:'Made-up OS 1.0'});
+    testMode='ok';assert.deepEqual((await s.machines.test(owner,build)).result,{ok:true,host_key:hostKey,admin:false,system:'Made-up OS 1.0'});
     assert.equal(lastCall().body.host_key,hostKey,'the trusted key goes with each later test');
     assert.deepEqual((await rows('machine_id=$1',[build])).map(row=>[row.kind,row.command,row.state,row.error_code]),
       [['test','ssh test','failed','machine_auth_failed'],['test','ssh test','done',null],['test','ssh test','failed','machine_host_key_changed'],['test','ssh test','done',null]]);
@@ -349,7 +356,13 @@ test('only the owner\'s own request in their private chat or an active project\'
     assert.deepEqual([logged.machine_id,logged.machine_name,logged.run_event_id,logged.kind,logged.command,logged.state,logged.exit_code,logged.output_sha256,Number(logged.output_bytes),logged.script_sha256,logged.error_code],
       [build,'build-vm',a.step,'command','printf hello','done',0,sha('hello\n'),6,sha('printf hello'),null]);
     assert.ok(logged.finished_at);
+    // Before its first command, once: the login is still not admin, as the card said, and its start-up files are read.
+    assert.deepEqual(probes.slice(-1),[{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey}]);
+    assert.deepEqual([(await job(asked.id)).machine_check,(await job(asked.id)).machine_files],['pending',probe.files]);
+    assert.deepEqual((await rows("job_id=$1 AND kind='test'",[asked.id])).map(row=>[row.command,row.state]),[['check admin rights and start-up files before the job','done']]);
+    const probed=probes.length;
     await exec(brokerBase,a.credential,execBody({timeout:3600}));
+    assert.equal(probes.length,probed,'only before the first command');
     assert.equal(lastCall().body.timeout,870,'a command ends on the machine before the broker\'s 15 minutes do');
     await exec(brokerBase,a.credential,execBody({kind:'file',stdin:'made-up file',login:true,command:'write_file notes.txt',script:'cat > notes.txt'}));
     assert.deepEqual([lastCall().body.stdin,lastCall().body.login_shell],['made-up file',true]);
@@ -580,6 +593,45 @@ test('only the owner\'s own request in their private chat or an active project\'
     await s.machines.cleanupTick();
     assert.deepEqual((await rows('id=ANY($1::bigint[])',[ids])).map(row=>row.state),['ambiguous','ambiguous','running']);
     await stores.control.query("UPDATE machine_commands SET state='done' WHERE id=$1",[ids[2]]);
+
+    // Start-up files (machine jobs' start-up files). An admin login: every card says so, and a job whose login is no longer
+    // admin when it starts is stopped before anything runs, and the machine needs a test.
+    probe={admin:true,files:{'.zshrc':'sha256:'+'1'.repeat(64),'.bashrc':null,'Library/LaunchAgents/':'sha256:'+'2'.repeat(64)}};
+    assert.equal((await s.machines.test(owner,build)).machine.admin,true);
+    const adminJob=await ask('123',123);
+    assert.match((await s.jobs.card(adminJob.id)).text,/\n🔑 It can also act as admin there: any step can use it\.\n/);
+    const adminRun=await start(adminJob);probe={...probe,admin:false};
+    assert.deepEqual(await exec(brokerBase,adminRun.credential,execBody()).then(answer=>[answer.status,answer.body]),[409,{error:'machine_admin_changed'}]);
+    assert.ok(!calls.some(call=>call.path==='/exec'&&(call.body as any).job===adminJob.id),'nothing ran');
+    assert.deepEqual([(await job(adminJob.id)).cancel_requested,(await job(adminJob.id)).error_code],[true,'job_machine_admin_changed']);
+    assert.equal((await route('GET','/v1/machines')).body.machines.find((m:any)=>m.id===build).test_error,'machine_admin_changed');
+    await finishStopped(adminJob.id);
+    await settledWith(adminJob.id,"⛔ Stopped before its first command: the login's admin rights are not what this card says. Test the machine, then ask again.");
+    assert.equal((await s.machines.test(owner,build)).machine.admin,false);
+    // A job that changed start-up files: its settled card and the next cards for the machine say which, until a test.
+    const planted=await ask('123',123),plantedRun=await start(planted);
+    assert.doesNotMatch((await s.jobs.card(planted.id)).text,/🔑|⚠️/);
+    assert.equal((await exec(brokerBase,plantedRun.credential,execBody())).status,200);
+    probe={...probe,files:{...probe.files!,'.bashrc':'sha256:'+'3'.repeat(64)}};
+    await stores.control.query("UPDATE background_jobs SET state='done',finished_at=now() WHERE id=$1",[planted.id]);
+    await s.machines.cleanupTick();
+    await until(async()=>(await job(planted.id)).machine_check==='changed','the job\'s start-up files are checked after it ends');
+    assert.deepEqual((await job(planted.id)).machine_changed,['.bashrc']);
+    await until(()=>approvals.some(input=>input.kind==='settle'&&input.id===planted.id&&
+      String(input.text).endsWith("\n⚠️ It changed start-up files or tools: ~/.bashrc. Check them: Stop can't be trusted while they may hold something it left.")),'the settled card names the changed file');
+    const warned=await ask('123',123);
+    assert.match((await s.jobs.card(warned.id)).text,/\n⚠️ The last job on build-vm changed start-up files or tools: ~\/\.bashrc\. Check them before you approve/i);
+    assert.deepEqual((await route('GET','/v1/machines')).body.machines.find((m:any)=>m.id===build).changed,{job:planted.id,files:['.bashrc']});
+    // Start-up files that can't be read leave a job unchecked, which its card and the next cards say.
+    probe={...probe,files:null};
+    const blind=await start(warned);
+    assert.equal((await exec(brokerBase,blind.credential,execBody())).status,200);
+    assert.equal((await job(warned.id)).machine_check,'unchecked');
+    assert.match((await s.jobs.card((await ask('123',123)).id)).text,/\n⚠️ Nocheh couldn.t check whether the last job on build-vm changed start-up files or tools\.\n/i);
+    // A test clears the warning, which the owner has now seen.
+    probe={...probe,files:{'.zshrc':'sha256:'+'1'.repeat(64)}};
+    assert.equal((await s.machines.test(owner,build)).machine.changed,null);
+    assert.doesNotMatch((await s.jobs.card((await ask('123',123)).id)).text,/⚠️/);
 
     // System › Machine log: newest first, Hermes's own commands only when asked for, one machine's or one job's, a page at a time.
     const all=(await s.machines.commands(owner,{kind:'all',limit:100})).commands;

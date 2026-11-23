@@ -25,7 +25,7 @@ Nocheh is in development mode and not yet released. Everything below is built an
 - Workspaces: several installs run side by side on one machine ([ADR-0245](docs/adr/0245-several-workspaces-on-one-machine.md)).
 - Memory: fact sources and People pages ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md)); memory search stays on
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)); a group's recall, search and learning read
-  through a memory wall that only holds its own chats ([ADR-0284](docs/adr/0284-memory-walls.md)).
+  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)).
 - People: the name the owner sets in Memory › People is the person's name everywhere, and each
   person has a private note only the owner reads
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
@@ -52,8 +52,9 @@ Nocheh is in development mode and not yet released. Everything below is built an
   asking chat ([ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md), [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md), [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)); only addresses no model built open without a
   card ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
 - Security: the 2026-11 security review's fixes parts 1 to 5 are merged; machine jobs read only their
-  card's chat, period and named Notion pages ([ADR-0283](docs/adr/0283-machine-jobs-read-only-their-card.md)); the rest of the
-  machine-jobs fix and a separate file reader are still to build ([ADR-0250](docs/adr/0250-cards-and-forwards-say-whose-words-they-are.md) to [ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
+  card's chat, period and named Notion pages ([ADR-0283](docs/adr/0283-machine-jobs-read-only-their-card.md)), and
+  watch start-up files and admin rights ([ADR-0284](docs/adr/0284-machine-jobs-watch-start-up-files-and-admin.md)); a separate
+  file reader is still to build ([ADR-0250](docs/adr/0250-cards-and-forwards-say-whose-words-they-are.md) to [ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
   Connections, Members and Sent to apps pages.
 - Operations: daily backups, export and import, an encrypted off-site copy (off until the owner
@@ -89,7 +90,7 @@ Checks and follow-ups:
   owner before redoing any.
 
 Next:
-- Security review: the machine-jobs fix, then a separate file reader.
+- Security review: a separate file reader.
 - After go-live: members connect their own accounts, then Slack.
 - After MVP: undo an import, Notion "Switch account", approval-card rule notes and "No, do this
   instead", Nocheh's own chat page in place of the temporary Hermes chat link.

@@ -6,7 +6,7 @@ import {engineId,engineInvalid,engineRejected,engineUnavailable,type EngineCover
   type EngineWrite,type EngineWriteInput,type ForgetStep,type MemoryEngine,type ParticipantRole} from './engine.js';
 
 /** GET without a body, POST with one. DELETE treats an already absent resource as deleted. `key` replaces the main key
- *  for this one call: a wall's key (ADR-0284). */
+ *  for this one call: a wall's key (ADR-0286). */
 export type HonchoCall=(path:string,body?:unknown,method?:'DELETE'|'PUT',key?:string)=>Promise<any>;
 const base64url=(value:unknown)=>Buffer.from(JSON.stringify(value)).toString('base64url');
 /** A Honcho key: a JWT signed with the secret Honcho checks keys with (HS256, H:src/security.py). */
@@ -19,7 +19,7 @@ export function honchoKey(secret:string,claims:Record<string,unknown>):string {
 const namedScopeAudience='honcho:named-scope';
 /** How long a wall key lives: one recall, with its slowest answer (480 s), and a margin. */
 const wallKeySeconds=600;
-/** A key that opens one wall of one space, and nothing else, for ten minutes (ADR-0284). */
+/** A key that opens one wall of one space, and nothing else, for ten minutes (ADR-0286). */
 export const wallKey=(secret:string,space:string,wall:string,now=Date.now())=>
   honchoKey(secret,{t:new Date(now).toISOString(),w:space,sc:wall,exp:Math.floor(now/1000)+wallKeySeconds,aud:namedScopeAudience});
 /** Honcho's HTTP API. Failures use the memory socket's codes, so Nocheh can act on them without knowing the engine.
@@ -118,7 +118,7 @@ export class HonchoEngine implements MemoryEngine {
   readonly questionLimits={characters:honchoQueryCharacters,bytes:honchoQueryBytes};
   /** The dashboard's browser reads Honcho through its own command-line tool. */
   readonly inspectable=true;
-  /** `secret` signs wall keys; without it a wall is still asked for by name, with the main key (ADR-0284). */
+  /** `secret` signs wall keys; without it a wall is still asked for by name, with the main key (ADR-0286). */
   constructor(readonly call:HonchoCall,private readonly secret=''){}
   private base(space:string){return '/v3/workspaces/'+space;}
   /** A wall is a Honcho named scope: a peer named `scope.<wall>` that observes the wall's sessions (H:src/utils/scopes.py). */
@@ -196,7 +196,7 @@ export class HonchoEngine implements MemoryEngine {
   }
   async ask(space:string,participant:string,question:string,options:{sessions:string[]|null;wall?:string;evidence:boolean;format?:Record<string,unknown>}) {
     // A wall is asked by name and with its own key: Honcho answers from the wall's own view only, and refuses the key
-    // anywhere else (ADR-0284). The name goes too, so a Honcho that checks no keys still keeps to the wall.
+    // anywhere else (ADR-0286). The name goes too, so a Honcho that checks no keys still keeps to the wall.
     if(options.wall!==undefined&&!wallName.test(options.wall))throw new HttpError(400,'invalid_memory_wall');
     const response=await this.call(this.base(space)+'/peers/'+participant+'/chat',{query:question,reasoning_level:'low',stream:false,
       ...(options.evidence?{include_evidence:true}:{}),...(options.format?{response_format:options.format}:{}),
