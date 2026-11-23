@@ -57,8 +57,12 @@ function nextRun(row: Schedule): string {
 }
 
 export default function Schedules() {
-  const {data, error} = useResource<{schedules: Schedule[]}>('/schedules', 15000);
+  // While a run starts or runs, the page follows it every two seconds, so its result shows without a reload.
+  const [poll, setPoll] = React.useState(15000);
+  const {data, error} = useResource<{schedules: Schedule[]}>('/schedules', poll);
   const rows = data?.schedules ?? [];
+  const active = rows.some(row => row.running || row.pending);
+  React.useEffect(() => setPoll(active ? 2000 : 15000), [active]);
   return (
     <Page
       title="Schedules"
@@ -166,7 +170,10 @@ function ScheduleRow({row}: {row: Schedule}) {
           <Badge tone={result.tone} dot title={row.last_run_at ? dateTime(row.last_run_at) : undefined}>
             {result.label}
           </Badge>
-          {row.last_run_at && <span className="text-xs text-muted">{ago(row.last_run_at)}</span>}
+          {/* The time is the last finished run's; a run under way has none yet. */}
+          {row.last_run_at && !row.running && !row.pending && (
+            <span className="text-xs text-muted">{ago(row.last_run_at)}</span>
+          )}
         </span>
       </Td>
       <Td className="whitespace-nowrap text-right">
