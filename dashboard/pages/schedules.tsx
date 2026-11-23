@@ -30,6 +30,7 @@ export type Schedule = {
   pending: boolean;
   set_in_chat: boolean;
   owner_chat: boolean;
+  member_chat?: boolean;
   chat_title: string | null;
 };
 type Operation = 'pause' | 'resume' | 'run' | 'delete';
@@ -72,8 +73,10 @@ const runTime = new Intl.DateTimeFormat(undefined, {
 const triggers: Record<ScheduleRun['trigger'], string> = {timed: 'Timed', run_now: 'Run now', catch_up: 'Catch-up'};
 
 /** Where a schedule's results go, as the owner sees it. */
-export function scheduleChat(row: Pick<Schedule, 'owner_chat' | 'chat_title'>): string {
-  return row.owner_chat ? 'Your private chat' : (row.chat_title ?? 'A group');
+export function scheduleChat(row: Pick<Schedule, 'owner_chat' | 'member_chat' | 'chat_title'>): string {
+  if (row.owner_chat) return 'Your private chat';
+  if (row.member_chat) return `Private chat of ${row.chat_title ?? 'a member'}`;
+  return row.chat_title ?? 'A group';
 }
 
 /** How the last run went, in a word, with its tone. */

@@ -355,7 +355,7 @@ class ServiceTests(unittest.TestCase):
         def check(body):
             asked.append(body)
             if not core['up']: return None
-            if body['id'] in authorized or body['id'] == 'f' * 64: return False
+            if body['id'] in authorized or body['id'] in ('f' * 64, '9' * 64): return False
             authorized.add(body['id']); return True
         text = '⏰ Book the hall\n📁 P1\n\n👤 Set by you'
         reminder = {'id': 'a' * 64, 'chat_id': MEMBER_CHAT, 'text': text, 'send_class': 'reminder'}
@@ -384,7 +384,7 @@ class ServiceTests(unittest.TestCase):
             # Anything else to a chat that is not the owner's is refused before core is asked.
             count = len(asked)
             refused = {
-                'a problem notice': {**reminder, 'id': 'c' * 64, 'send_class': 'notice'},
+                'a notice with a link button': {**reminder, 'id': 'c' * 64, 'send_class': 'notice', 'buttons': [[{'text': 'Open', 'url': 'https://example.test/open'}]]},
                 'no class': {key: value for key, value in {**reminder, 'id': 'c' * 64}.items() if key != 'send_class'},
                 'a topic': {**reminder, 'id': 'c' * 64, 'topic': 7},
                 'buttons': {**reminder, 'id': 'c' * 64, 'buttons': [{'text': 'Open', 'url': 'https://example.test/open'}]},
@@ -395,6 +395,11 @@ class ServiceTests(unittest.TestCase):
             for why, body in refused.items():
                 with self.subTest(why), self.assertRaises(ValueError): self.service.notice(body)
             self.assertEqual(len(asked), count)
+            # A plain notice, such as the message about a schedule the member set (members' schedules), takes core's yes
+            # for this chat and this text too: without it nothing is sent.
+            with self.assertRaises(ValueError): self.service.notice({**reminder, 'id': '9' * 64, 'send_class': 'notice'})
+            self.assertEqual(len(asked), count + 1)
+            count = len(asked)
             # The owner's chat works as before, with no question to core.
             self.assertEqual(self.service.notice({'id': 'd' * 64, 'chat_id': OWNER, 'text': 'A problem.'}), {'state': 'done'})
             self.assertEqual(self.service.notice({'id': 'e' * 64, 'chat_id': OWNER, 'text': text, 'send_class': 'reminder'}), {'state': 'done'})
@@ -691,6 +696,25 @@ class DisabledTests(unittest.TestCase):
             self.assertIsNone(service.loop)
             missing = TelegramService(Policy.of(True, OWNER, []), '', Path(directory) / 'spool', Path(directory) / 'state')
             self.assertEqual(missing.health()['state'], 'credentials_missing')
+
+
+class MemberNoticeShapeTests(unittest.TestCase):
+    def test_a_members_chat_takes_reminders_and_its_own_schedule_messages_only(self):
+        # Step 5 and members' schedules: a reminder with nothing else, or the message about a schedule the member set,
+        # sent or edited, with no buttons or only its Pause and Delete presses.
+        from services.telegram.gateway import member_notice_shape
+        press = lambda kind: {'text': kind, 'callback': 'nk' + kind + 'a' * 24 + 'b' * 12}
+        ok = [{'send_class': 'reminder'}, {'send_class': 'notice'}, {'send_class': 'notice', 'edit': True},
+              {'send_class': 'notice', 'buttons': [[press('p'), press('d')]]}, {'send_class': 'notice', 'buttons': [[press('p')]]}]
+        for body in ok:
+            self.assertTrue(member_notice_shape(body), body)
+        refused = [{'send_class': 'reminder', 'buttons': [[press('p')]]}, {'send_class': 'reminder', 'edit': True},
+                   {'send_class': 'notice', 'topic': '7'}, {'send_class': 'notice', 'edit': False}, {'send_class': 'answer'},
+                   {'send_class': 'notice', 'buttons': [[press('p'), press('d'), press('p')]]}, {'send_class': 'notice', 'buttons': [[press('p')], [press('d')]]},
+                   {'send_class': 'notice', 'buttons': [[{'text': 'Open', 'url': 'https://example.com'}]]},
+                   {'send_class': 'notice', 'buttons': [[{'text': 'x', 'callback': 'nka' + 'a' * 36}]]}, {'send_class': 'notice', 'buttons': []}]
+        for body in refused:
+            self.assertFalse(member_notice_shape(body), body)
 
 
 if __name__ == '__main__':

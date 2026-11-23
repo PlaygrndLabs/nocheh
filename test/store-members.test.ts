@@ -41,7 +41,7 @@ async function person(db:pg.Pool,external:string,name:string|null,rows:readonly 
 }
 const ref=(chat_id:string,title:string,state='active')=>({chat_id,title,state});
 const group=(chat_id:string,title:string,on:boolean,telegram:'in'|'left'|null,isNew=false,state='active')=>({...ref(chat_id,title,state),on,telegram,new:isNew});
-const allOn={talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true,reminders:true};
+const allOn={talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true,reminders:true,assistant:false};
 
 test('the owner adds, changes and removes members and sets the daily cap: idempotent, no guard epoch, and the directory follows at once',fixture,async()=>{
   const stores=await open(),db=stores.control,{start,restore}=await setup(db);
@@ -135,6 +135,18 @@ test('the owner adds, changes and removes members and sets the daily cap: idempo
     const cap=await repo.settings(owner,{operation_id:'cap-50',daily_messages:50});
     assert.deepEqual([cap.daily_messages,members().dailyMessages,(await repo.list(owner)).daily_messages],[50,50,50]);
     assert.deepEqual(await repo.settings(owner,{operation_id:'cap-50',daily_messages:50}),cap);
+    // Schedules per member (members' schedules): 5 by default, set alone, the daily cap kept.
+    assert.equal(cap.member_schedules,5);
+    const schedules=await repo.settings(owner,{operation_id:'schedules-3',member_schedules:3});
+    assert.deepEqual([schedules.daily_messages,schedules.member_schedules,(await repo.list(owner)).member_schedules],[50,3,3]);
+    // Personal assistant: off by default; on only with private chat on, as the directory reads it.
+    const helped=await change('sam-assistant',samId,{assistant:true});
+    assert.equal(helped.member.permissions.assistant,true);
+    assert.equal(members().assistant(sam),true);
+    await change('sam-assistant-private-off',samId,{private_chat:false});
+    assert.equal(members().assistant(sam),false,'no assistant without private chat');
+    await change('sam-assistant-back',samId,{private_chat:true,assistant:false});
+    assert.equal(members().assistant(sam),false);
 
     // Remove: the member and its switches go, its account stays and is unlinked, and it talks nowhere at once.
     const removed=await repo.remove(owner,memberIdFor(fresh),{operation_id:'remove-fresh'});

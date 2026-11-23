@@ -193,7 +193,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     const kind=boundReader(principal);
     // The owner's ask about a member reads only that member's chat: no task list (step 4b).
     if(kind==='memberRead')throw new HttpError(403,'task_project_required');
-    const {source}=await knowledge.liveGroupTurn(principal);
+    // A schedule's run in a member's own chat reads as their private chat does (members' schedules).
+    const {source}=kind==='member'?await knowledge.liveGroupTurn(principal).catch(async error=>{
+      const run=await knowledge.memberScheduledRun(principal).catch(()=>null);if(!run)throw error;
+      return {source:{reference:{id:run.event_id}} as Awaited<ReturnType<typeof knowledge.liveGroupTurn>>['source']};
+    }):await knowledge.liveGroupTurn(principal);
     // A member's private chat reads, and only reads, the whole list of each active project that holds one of their
     // joined groups, one view per project; never every list (D14, ADR-0276).
     // Each task in the shape the members' app shows it (ADR-0265 D6): "mine" and the member's own reminders by any of

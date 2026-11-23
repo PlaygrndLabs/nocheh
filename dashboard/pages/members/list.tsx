@@ -1,9 +1,11 @@
-/** The table of members, and the daily message cap every member shares. */
+/** The table of members, and the daily message and schedule caps every member shares. */
 import {useState} from 'react';
 import {Contact} from 'lucide-react';
 import {
   DAILY_MESSAGES_MAX,
   DAILY_MESSAGES_MIN,
+  MEMBER_SCHEDULES_MAX,
+  MEMBER_SCHEDULES_MIN,
   type MemberList as Members,
   type MemberSettingsResult,
 } from '../../../src/member-wire';
@@ -105,23 +107,45 @@ export function MemberList({
   );
 }
 
-/**
- * The daily message cap: how many times each member may talk to Nocheh in a UTC day, across all their groups. Unlike the
- * switches it is typed, so it has its own Save; the answer shows at once.
- */
-export function DailyMessages({value, onSaved}: {value: number; onSaved: (answer: MemberAnswer) => void}) {
+/** One whole number every member shares, typed with its own Save; the answer shows at once. */
+function MemberCap({
+  id,
+  field,
+  title,
+  line,
+  hint,
+  label,
+  min,
+  max,
+  success,
+  value,
+  onSaved,
+}: {
+  id: string;
+  field: 'daily_messages' | 'member_schedules';
+  title: string;
+  line: (value: number) => string;
+  hint: string;
+  label: string;
+  min: number;
+  max: number;
+  success: (value: number) => string;
+  value: number;
+  onSaved: (answer: MemberAnswer) => void;
+}) {
   const [draft, setDraft] = useState<string | null>(null);
   const action = useAction(memberError);
   const text = draft ?? String(value);
   const number = Number(text);
-  const valid = Number.isSafeInteger(number) && number >= DAILY_MESSAGES_MIN && number <= DAILY_MESSAGES_MAX;
+  const valid = Number.isSafeInteger(number) && number >= min && number <= max;
+  const range = `Choose a whole number from ${min} to ${max.toLocaleString()}.`;
   const save = async () => {
     if (!valid || number === value) return;
     const saved = await action.run<MemberSettingsResult>(
-      'daily',
+      id,
       '/members/settings',
-      {daily_messages: number},
-      {success: `Each member can talk to Nocheh ${number.toLocaleString()} times a day.`},
+      {[field]: number},
+      {success: success(number)},
     );
     if (saved) {
       onSaved(saved);
@@ -132,14 +156,10 @@ export function DailyMessages({value, onSaved}: {value: number; onSaved: (answer
     <Card className="px-5 py-4">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div className="min-w-0 flex-1 basis-80">
-          <h2 className="text-[15px] font-semibold">Daily messages</h2>
-          <p className="mt-0.5 text-[13px] text-muted">
-            {`Each member can talk to Nocheh ${value.toLocaleString()} ${value === 1 ? 'time' : 'times'} a day.`}
-          </p>
+          <h2 className="text-[15px] font-semibold">{title}</h2>
+          <p className="mt-0.5 text-[13px] text-muted">{line(value)}</p>
           <p className={cn('mt-1 text-xs', draft !== null && !valid ? 'text-bad' : 'text-muted')}>
-            {draft !== null && !valid
-              ? 'Choose a whole number from 1 to 10,000.'
-              : 'Across all their groups, per UTC day. Past it they get one short reply in that group. You have no limit.'}
+            {draft !== null && !valid ? range : hint}
           </p>
         </div>
         <form
@@ -149,32 +169,68 @@ export function DailyMessages({value, onSaved}: {value: number; onSaved: (answer
             void save();
           }}
         >
-          <Field
-            label="Times each member may ask Nocheh a day"
-            htmlFor="daily-messages"
-            className="w-80 min-w-0 shrink"
-          >
+          <Field label={label} htmlFor={id} className="w-80 min-w-0 shrink">
             <Input
-              id="daily-messages"
+              id={id}
               type="number"
               inputMode="numeric"
-              min={DAILY_MESSAGES_MIN}
-              max={DAILY_MESSAGES_MAX}
+              min={min}
+              max={max}
               step={1}
               value={text}
-              disabled={action.busy === 'daily'}
+              disabled={action.busy === id}
               onChange={event => {
                 setDraft(event.target.value);
                 action.clear();
               }}
             />
           </Field>
-          <Button type="submit" busy={action.busy === 'daily'} disabled={!valid || number === value}>
+          <Button type="submit" busy={action.busy === id} disabled={!valid || number === value}>
             Save
           </Button>
         </form>
       </div>
       <ActionError text={action.error} />
     </Card>
+  );
+}
+
+/** The daily message cap: how many times each member may talk to Nocheh in a UTC day, across all their groups. */
+export function DailyMessages({value, onSaved}: {value: number; onSaved: (answer: MemberAnswer) => void}) {
+  return (
+    <MemberCap
+      id="daily-messages"
+      field="daily_messages"
+      title="Daily messages"
+      line={value =>
+        `Each member can talk to Nocheh ${value.toLocaleString()} ${value === 1 ? 'time' : 'times'} a day.`
+      }
+      hint="Across all their groups, per UTC day. Past it they get one short reply in that group. You have no limit."
+      label="Times each member may ask Nocheh a day"
+      min={DAILY_MESSAGES_MIN}
+      max={DAILY_MESSAGES_MAX}
+      success={number => `Each member can talk to Nocheh ${number.toLocaleString()} times a day.`}
+      value={value}
+      onSaved={onSaved}
+    />
+  );
+}
+
+/** How many schedules each member with Personal assistant may keep. */
+export function MemberSchedules({value, onSaved}: {value: number; onSaved: (answer: MemberAnswer) => void}) {
+  return (
+    <MemberCap
+      id="member-schedules"
+      field="member_schedules"
+      title="Schedules per member"
+      line={value => `Each member with Personal assistant can keep ${value} ${value === 1 ? 'schedule' : 'schedules'}.`}
+      hint="They set them by asking in their private chat with Nocheh. Each run uses your provider. You have no limit."
+      label="Schedules each member may keep"
+      min={MEMBER_SCHEDULES_MIN}
+      max={MEMBER_SCHEDULES_MAX}
+      success={number => `Each member can keep ${number} ${number === 1 ? 'schedule' : 'schedules'}.`}
+      value={value}
+      onSaved={onSaved}
+    />
   );
 }

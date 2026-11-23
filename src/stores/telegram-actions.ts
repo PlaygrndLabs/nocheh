@@ -10,6 +10,7 @@ import {freshMembers,members} from '../members.js';
 import {telegramDestination} from '../chats-telegram.js';
 import {fillLine,labelName,placeLabel,quotedName} from '../chat-labels.js';
 import {allowedIn,servedDestination} from '../destinations.js';
+import {memberAssistant} from '../spaces.js';
 import {approvalLines,fillTemplate,ownerPrompts,scheduleNoticeLines,type ApprovalText} from '../prompts.js';
 import {cardName} from '../action-text.js';
 import {telegramAddress,telegramTarget} from '../frontdoor/telegram.js';
@@ -162,19 +163,21 @@ export class TelegramActionRepository {
       throw new HttpError(409,'run_result_conflict');
     const output=JSON.parse(result.content.toString());if(output.state!=='done')return {state:'withheld',reason:'run_not_complete'};
     const said=string(output.text,1000000),owner=row.scope===ownerChat(this.access.policy());
-    // A run with nothing new to say answers only [SILENT] (Hermes's marker) and sends nothing (ADR-0266), except a run the
-    // owner started with Run now in their private chat: they are waiting for it, so it says in one fixed line that there
-    // was nothing new.
-    const quiet=!said.trim()||silentResult(said),told=quiet&&owner&&row.fire_reason==='manual';
+    // A member's own chat with Personal assistant on: their own schedules, which they approved once by setting them there.
+    const member=!owner&&memberAssistant(row.scope);
+    // A run with nothing new to say answers only [SILENT] (Hermes's marker) and sends nothing (ADR-0266), except a run
+    // started with Run now in the owner's or the member's private chat: they are waiting for it, so it says in one fixed
+    // line that there was nothing new.
+    const quiet=!said.trim()||silentResult(said),told=quiet&&(owner||member)&&row.fire_reason==='manual';
     if(version.configuration.deliver!=='telegram'||quiet&&!told)return {state:'local'};
     const text=told?await this.quietLine(version.definition_reference):said;
     if(text.length>3500)return {state:'withheld',reason:'result_exceeds_telegram_limit'};
     const audience:Reader={admin:false,scope:owner?null:row.scope,space:row.space_id,
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
-    // The owner approved their private chat's schedules once (ADR-0266): each result goes there with no card. A group's
-    // result still waits for the owner's card.
+    // The owner approved their private chat's schedules once (ADR-0266), and a member with Personal assistant on their own
+    // chat's: each result goes there with no card. A group's result still waits for the owner's card.
     return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text},'scheduled_run',
-      undefined,null,owner?'owner_scheduled_chat':undefined);
+      undefined,null,owner?'owner_scheduled_chat':member?'member_scheduled_chat':undefined);
   }
   /** What Run now sends when it found nothing new, naming its schedule as the owner sees it on the Schedules page. */
   private async quietLine(definition:{id?:string}|null):Promise<string> {
@@ -255,7 +258,7 @@ export class TelegramActionRepository {
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
     source:SourceReference|OperationReference,input:Record<string,unknown>,sendClass:ActionSendClass,channel?:string,requester:string|null=null,
-    standing?:'owner_scheduled_chat'){
+    standing?:'owner_scheduled_chat'|'member_scheduled_chat'){
     // 'current' is the chat or topic of the live turn; anything else must name a chat the directory knows (ADR-0252), and
     // either must be a chat Nocheh serves (ADR-0254). An unknown chat and one not served answer alike, so nothing is learned
     // by asking. A turn with no live Telegram message (a job, a schedule, the web chat) has no 'current': a bad request as
@@ -304,7 +307,10 @@ export class TelegramActionRepository {
       const owner=ownerChat(this.access.policy()),toOwner=!!owner&&chatOf(destination)===owner;
       const group=source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?this.groupRequest(principal,turn,destination,requester):null;
       // A scheduled result for the owner's own private chat: the owner approved that chat's schedules once (ADR-0266).
+      // A member's scheduled result goes only to that same chat of theirs, while it is still theirs with Personal assistant on.
+      const toMember=standing==='member_scheduled_chat'&&destination===turn.scope&&memberAssistant(destination);
       const autonomy=standing==='owner_scheduled_chat'?(toOwner&&row.state==='proposed'&&decision.outcome==='ask'?standing:null):
+        standing==='member_scheduled_chat'?(toMember&&row.state==='proposed'&&decision.outcome==='ask'?standing:null):
         source.store==='archive'&&row.state==='proposed'&&decision.outcome==='ask'?
         (group==='owner_private_request'&&await followUpTurn(db,principal)?null:group)??(toOwner?await ownerAutonomyGrant(db,principal,turn):null):null;
       if(autonomy)decision=await evaluate(db,effect,autonomy);
@@ -317,6 +323,7 @@ export class TelegramActionRepository {
         await recordEffect(db,effect,'allowed',decision,source);await requestWorkflow(db,'actions',id);
         await db.query('COMMIT');return {id,state:'approved',fingerprint,message:autonomy==='owner_private_request'?'Approved: this goes to the owner\'s own private chat, so it is being sent there now. Confirm in one short sentence without repeating the message.':
           autonomy==='owner_scheduled_chat'?'Approved: a scheduled result for the owner\'s private chat; sending now.':
+          autonomy==='member_scheduled_chat'?'Approved: a member\'s scheduled result for their own private chat; sending now.':
           autonomy!=='same_group_request'?'Approved by your own request under the owner freedom setting; sending now.':
           destination===principal.space?'Approved: you were asked here for a message to this same chat, so it is being posted now. Do not repeat or announce it; return [NO_REPLY] unless something else needs an answer.':
           'Approved: this is for the same group, so it is being posted there now. Confirm in one short sentence without repeating the message.'};

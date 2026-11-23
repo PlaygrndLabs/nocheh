@@ -23,8 +23,10 @@ export const MEMBER_APP_WRITES_PER_10_MIN=60,MEMBER_APP_WRITES_PER_DAY=500;
 export const MEMBER_APP_STORAGE_KEYS={launch:'nocheh.member-launch',ui:'nocheh.member-ui'} as const;
 
 const TASK='[a-f0-9]{64}';
+/** A schedule's id in the agent's schedule store. */
+const SCHEDULE='[a-zA-Z0-9_-]{1,128}';
 /** Each route's name, as memberAppRoute answers it. */
-export type MemberAppRouteName='me'|'tasks'|'task'|'create'|'update'|'comment'|'reminders'|'sign_out';
+export type MemberAppRouteName='me'|'tasks'|'task'|'create'|'update'|'comment'|'reminders'|'schedules'|'schedule'|'sign_out';
 /**
  * Every route of the members' app, as [method, path after the prefix, name]. Nothing else is forwarded by the edge or
  * answered by the member listener (404). Only `GET /tasks` takes a query.
@@ -36,6 +38,8 @@ export type MemberAppRouteName='me'|'tasks'|'task'|'create'|'update'|'comment'|'
  *   own reminders {reminders:[...ISO times with an offset]})
  * - POST /tasks/:id/comments MemberTaskCommentRequest: MemberDetail
  * - GET /reminders: MemberReminder[]
+ * - GET /schedules: MemberSchedules (members' schedules: only with Personal assistant on)
+ * - POST /schedules/:id MemberScheduleRequest: MemberScheduleResult
  * - POST /sign-out (no body): {}
  */
 export const MEMBER_APP_ROUTES:readonly (readonly ['GET'|'POST',RegExp,MemberAppRouteName])[]=Object.freeze([
@@ -46,18 +50,20 @@ export const MEMBER_APP_ROUTES:readonly (readonly ['GET'|'POST',RegExp,MemberApp
   ['POST',new RegExp(`^/tasks/(${TASK})$`),'update'],
   ['POST',new RegExp(`^/tasks/(${TASK})/comments$`),'comment'],
   ['GET',/^\/reminders$/,'reminders'],
+  ['GET',/^\/schedules$/,'schedules'],
+  ['POST',new RegExp(`^/schedules/(${SCHEDULE})$`),'schedule'],
   ['POST',/^\/sign-out$/,'sign_out'],
 ] as const);
 /** The routes that write tasks: each needs write access and counts against the write limit (sign-out, which every member
  * has, does neither). */
 export const MEMBER_APP_TASK_WRITES:readonly MemberAppRouteName[]=['create','update','comment'];
-export interface MemberAppRouteMatch {name:MemberAppRouteName;task?:string}
+export interface MemberAppRouteMatch {name:MemberAppRouteName;task?:string;schedule?:string}
 /** The route `method path` names (path after the prefix, starting with '/', without the query), or null. */
 export function memberAppRoute(method:string,path:string):MemberAppRouteMatch|null {
   for(const [m,re,name] of MEMBER_APP_ROUTES) {
     if(m!==method)continue;
     const found=re.exec(path);
-    if(found)return found[1]?{name,task:found[1]}:{name};
+    if(found)return !found[1]?{name}:name==='schedule'?{name,schedule:found[1]}:{name,task:found[1]};
   }
   return null;
 }
@@ -95,12 +101,16 @@ export const memberAppErrors={
   remindersUnavailable:'member_reminders_unavailable',
   /** 409: the task changed since the page read it (expected_version). */
   conflict:'conflict',
+  /** 403: Personal assistant is off for this member, or their private chat is not open (members' schedules). */
+  schedulesOff:'member_schedules_off',
+  /** 404: no such schedule in the member's own private chat now. */
+  scheduleGone:'member_schedule_not_found',
 } as const;
 export type MemberAppError=typeof memberAppErrors[keyof typeof memberAppErrors];
 export const MEMBER_APP_ERROR_STATUS:Readonly<Record<MemberAppError,number>>={
   member_app_no_bearer:400,member_app_launch_invalid:401,member_required:403,member_app_closed:403,member_app_launch_old:401,
   member_app_signed_out:401,member_app_busy:429,task_read_only:403,task_field_not_allowed:403,task_filter_not_allowed:400,
-  task_reminders_off:403,member_reminders_unavailable:409,conflict:409,
+  task_reminders_off:403,member_reminders_unavailable:409,conflict:409,member_schedules_off:403,member_schedule_not_found:404,
 };
 
 /** Why "Remind me" is hidden: tasks read only, "Reminders to themselves" off, or the member's private chat with Nocheh
@@ -119,9 +129,22 @@ export interface MemberBoardGroup {id:string;title:string|null}
  * each), by name, each with `groups`: every group assigned to that project now, the member's own and the others, sorted
  * by title (the member listener always sends it). A board holds the project's whole list, so a task's `group` may be any
  * of them; the page names it from there and may offer them as the group filter and a task's group (ADR-0276). `groups`
- * stays the groups the member is in. Nothing here names the owner, other members, or the owner's time zone. */
+ * stays the groups the member is in. `assistant`: Personal assistant is on and their private chat is open, so they may
+ * set schedules there and see them here (members' schedules). Nothing here names the owner, other members, or the
+ * owner's time zone. */
 export interface MemberMe {name:string;mode:MemberTasks;reminders:MemberRemindersState;projects:{id:string;name:string;groups:MemberBoardGroup[]}[];
-  groups:MemberMeGroup[]}
+  groups:MemberMeGroup[];assistant:boolean}
+
+/** One of the member's own schedules, set in their private chat (members' schedules). `schedule` is how it repeats as
+ * the agent wrote it; times are UTC (the page shows them in the phone's time). No prompt text and no time zone name. */
+export interface MemberSchedule {id:string;name:string;schedule:string;state:'scheduled'|'paused'|'running'|'finished';
+  next_run_at:string|null;last_run_at:string|null;last_ok:boolean|null}
+/** GET /schedules: the schedules of the member's private chat, and how many they may keep. */
+export interface MemberSchedules {schedules:MemberSchedule[];limit:number}
+/** POST /schedules/:id. `operation_id` is one uuid per action (a retry sends the same). */
+export interface MemberScheduleRequest {operation_id:string;action:'pause'|'resume'|'run'|'delete'}
+/** The schedule as it is now, or null once deleted. */
+export interface MemberScheduleResult {schedule:MemberSchedule|null}
 
 /** Who did something, as the app shows it: the owner, a member by their Telegram name, or Nocheh. Never the owner's
  * names for people. */

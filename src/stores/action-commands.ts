@@ -1,5 +1,6 @@
 import {canonical,digest} from '../archive.js';
-import {conversationScope,ownerChat} from '../assistant-policy.js';
+import {conversationScope,ownerChat,telegramAccount} from '../assistant-policy.js';
+import {memberAssistant} from '../spaces.js';
 import {chatShortId,chats,type ChatDirectory} from '../chats.js';
 import {telegramLink,telegramUsername} from '../chats-telegram.js';
 import {fillLine,labelName,nameKey,quotedName} from '../chat-labels.js';
@@ -849,8 +850,11 @@ export class ActionCommandRepository {
   private async schedulePressed(query:any,choice:ScheduleChoice,store:string,job:string,source:SourceReference):Promise<boolean> {
     const chat=String(query.message?.chat?.id??''),policy=this.access.policy(),owner=ownerChat(policy);
     const lines=scheduleNoticeLines((await ownerPrompts(this.access.stores.control))['schedules.notice_texts']);
-    let reply=lines.only_owner;
-    if(owner&&policy.owner_id&&String(query.from?.id??'')===policy.owner_id&&telegramChat(chat)===owner)reply=this.schedules?await this.schedules.press(choice,store,job,source.id):lines.changed;
+    let reply=lines.only_owner;const home=telegramChat(chat),presser=String(query.from?.id??'');
+    if(owner&&policy.owner_id&&presser===policy.owner_id&&home===owner)reply=this.schedules?await this.schedules.press(choice,store,job,source.id):lines.changed;
+    // A member's own schedule message, in their own chat with Personal assistant on: only their own press there.
+    else if(owner&&home&&home!==owner&&presser&&presser!==policy.owner_id&&memberAssistant(home)&&chats().get(home)?.account_id===telegramAccount(presser))
+      reply=this.schedules?await this.schedules.press(choice,store,job,source.id,home):lines.changed;
     await this.approval({kind:'answer',chat_id:chat,callback_query_id:query.id,text:Array.from(reply).slice(0,200).join('')},10000);
     return true;
   }

@@ -324,8 +324,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         from .isolated_profile import prepare
         from .profile_config import inherited_config,read,preferences
         prepare(profile)
-        if scope.owner and not background and body.get('channel','telegram')=='telegram':
-            # The owner's chat schedule store, which the sealed reply may get to set schedules (ADR-0266).
+        if (scope.owner or scope.member) and not background and body.get('channel','telegram')=='telegram':
+            # The owner's chat schedule store, or a member's own chat's, which the sealed reply may get to set schedules
+            # (ADR-0266, members' schedules). The launcher mounts it only when storage says the reply may.
             schedule_store(Path(profile).parent,scope.chat_id)
         request.update(scoped_transport(body['archive_credential'],transport['api_mode']))
         if 'preferences' not in request:

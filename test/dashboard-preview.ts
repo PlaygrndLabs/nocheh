@@ -88,13 +88,13 @@ const seenPeople:{telegram:string;name:string|null;username:string|null;presence
 const previewMember=(telegram:string,name:string|null,username:string|null,switches:[string,boolean][],presence:[string,'in'|'left'][],
  changes:Partial<Pick<PreviewMember,'state'|'permissions'|'added_at'>>={}):PreviewMember=>{const account=accountIdFor('telegram',telegram);
  return {id:memberIdFor(account),account,telegram,name,username,state:'active',added_at:'2026-11-10T09:00:00.000Z',
-  permissions:{talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true,reminders:true},switches:new Map(switches),presence:new Map(presence),...changes};};
+  permissions:{talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true,reminders:true,assistant:false},switches:new Map(switches),presence:new Map(presence),...changes};};
 const previewMembers:PreviewMember[]=[
  previewMember('73','Mira Chen','mira',[['-10042',true],['-10073',false]],[['-10042','in'],['-10073','in'],[UPGRADED,'in']]),
  previewMember('95',null,null,[['-10042',true]],[]),
- previewMember('84','Devon',null,[['-10073',true]],[['-10073','in']],{state:'paused',permissions:{talk:true,jobs:false,post:true,tools:true,tasks:'read',private_chat:true,reminders:true}}),
+ previewMember('84','Devon',null,[['-10073',true]],[['-10073','in']],{state:'paused',permissions:{talk:true,jobs:false,post:true,tools:true,tasks:'read',private_chat:true,reminders:true,assistant:false}}),
 ];
-let memberRevision=3,dailyMessages=200;
+let memberRevision=3,dailyMessages=200,memberSchedules=5;
 const memberReceipts=new Map<string,{request:string;result:unknown}>();
 function memberItem(member:PreviewMember):MemberItem {
  const joined=new Set(joinedGroups().map(chat=>chat.id));
@@ -109,7 +109,7 @@ function memberList():MemberList {
  const people:MemberPerson[]=seenPeople.map(person=>({account_id:accountIdFor('telegram',person.telegram),name:person.name,username:person.username,telegram_id:person.telegram,
   groups:person.presence.filter(([chat,state])=>state==='in'&&joined.has(chat)).map(([chat])=>groupRef(chat)).sort(byGroupTitle)}))
   .filter(person=>person.groups.length&&!linked.has(person.account_id));
- return {revision:memberRevision,daily_messages:dailyMessages,groups:joinedGroups().map(chat=>groupRef(chat.id)).sort(byGroupTitle),members:previewMembers.map(memberItem),people};
+ return {revision:memberRevision,daily_messages:dailyMessages,member_schedules:memberSchedules,groups:joinedGroups().map(chat=>groupRef(chat.id)).sort(byGroupTitle),members:previewMembers.map(memberItem),people};
 }
 /** One member command: a replayed operation id answers its receipt, the same id with another request is refused. */
 function memberCommand<T>(operation:string,request:unknown,change:()=>T):T {
@@ -136,7 +136,8 @@ function memberRoute(route:string,body:unknown):unknown {
    return {revision:memberRevision,member:memberItem(member)};
   });}
  if(route==='/members/settings'){const request=memberSettingsRequest(body);
-  return memberCommand(request.operation_id,request,()=>{dailyMessages=request.daily_messages;memberRevision++;return {revision:memberRevision,daily_messages:dailyMessages};});}
+  return memberCommand(request.operation_id,request,()=>{dailyMessages=request.daily_messages??dailyMessages;memberSchedules=request.member_schedules??memberSchedules;memberRevision++;
+   return {revision:memberRevision,daily_messages:dailyMessages,member_schedules:memberSchedules};});}
  const one=/^\/members\/([a-f0-9]{64})(\/remove)?$/.exec(route);
  if(!one)return null;
  const at=previewMembers.findIndex(member=>member.id===one[1]);
@@ -146,13 +147,13 @@ function memberRoute(route:string,body:unknown):unknown {
  const request=memberChangeRequest(body);
  return memberCommand(request.operation_id,{id:one[1],...request},()=>{
   const member=previewMembers[at];if(!member)throw new HttpError(404,'member_not_found');
-  const {state,talk,jobs,post,tools,tasks,private_chat,reminders,groups}=request.changes;
+  const {state,talk,jobs,post,tools,tasks,private_chat,reminders,assistant,groups}=request.changes;
   for(const [chat,on] of Object.entries(groups??{})){
    if(!joined(chat))throw new HttpError(400,'member_group_invalid');
    if(on&&!member.switches.has(chat)&&member.presence.get(chat)!=='in')throw new HttpError(409,'member_group_not_seen');
   }
   if(state)member.state=state;
-  Object.assign(member.permissions,Object.fromEntries(Object.entries({talk,jobs,post,tools,tasks,private_chat,reminders}).filter(([,value])=>value!==undefined)));
+  Object.assign(member.permissions,Object.fromEntries(Object.entries({talk,jobs,post,tools,tasks,private_chat,reminders,assistant}).filter(([,value])=>value!==undefined)));
   for(const [chat,on] of Object.entries(groups??{}))member.switches.set(chat,on);
   memberRevision++;return {revision:memberRevision,member:memberItem(member)};
  });
