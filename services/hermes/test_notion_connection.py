@@ -103,6 +103,44 @@ class NotionSignInTests(unittest.TestCase):
         self.assertEqual(execute(self.state, {'kind': 'mcp', 'arguments': {'connection': 'notion', 'operation': 'list'}}, remote),
                          {'exit_code': 1, 'error': 'notion_not_connected'}, 'nothing is sent without a sign-in')
 
+    def test_the_signed_in_account_is_looked_up_once_and_kept(self):
+        self.sign_in()
+        looked = []
+        def look(state, project): looked.append(project); return {'name': 'Sample Owner', 'email': 'owner@example.com'}
+        shown = notion.status(self.state, look=look)
+        self.assertEqual((shown['account_name'], shown['account_email']), ('Sample Owner', 'owner@example.com'))
+        notion.status(self.state, look=look)
+        self.assertEqual(looked, [None], 'a known account is not asked for again')
+        self.assertIsNone(notion.status(self.state, project='a' * 64, look=look)['account_name'], 'a project without a sign-in names nobody')
+        self.assertEqual(looked, [None])
+        # A sign-in that must be renewed still says whose it was.
+        def ended(url, body, form=True):
+            raise urllib.error.HTTPError(url, 400, 'Bad Request', {}, io.BytesIO(b'{"error":"invalid_grant"}'))
+        with self.assertRaises(ValueError): notion.bearer(self.state, post=ended, now=lambda: 10 ** 12)
+        self.assertEqual(notion.status(self.state)['account_email'], 'owner@example.com')
+
+    def test_an_account_notion_cannot_name_is_asked_again_only_after_an_hour(self):
+        notion.save_token(self.state, 'ntn_owner', check=lambda token: None)
+        looked = []
+        def look(state, project): looked.append(project); return None
+        notion.status(self.state, look=look, now=lambda: 1000)
+        notion.status(self.state, look=look, now=lambda: 1000 + notion.ACCOUNT_RETRY_SECONDS - 1)
+        self.assertEqual(len(looked), 1)
+        self.assertIsNone(notion.status(self.state, look=look, now=lambda: 1000 + notion.ACCOUNT_RETRY_SECONDS)['account_name'])
+        self.assertEqual(len(looked), 2)
+
+    def test_the_account_comes_from_notions_get_self_tool_and_a_failure_names_nobody(self):
+        calls = []
+        def call(args, state=None):
+            calls.append(args)
+            return {'response': {'content': [{'type': 'text', 'text': json.dumps(
+                {'workspace': {'name': 'Home'}, 'user': {'type': 'person', 'name': ' Sample Owner ', 'email': 'owner@example.com'}})}]}}
+        self.assertEqual(notion.account(self.state, 'a' * 64, call=call), {'name': 'Sample Owner', 'email': 'owner@example.com'})
+        self.assertEqual(calls, [{'connection': 'notion', 'project': 'a' * 64, 'tool': 'notion-get-self', 'input': {}}])
+        def failed(args, state=None): raise ValueError('notion_reconnect_needed')
+        self.assertIsNone(notion.account(self.state, call=failed))
+        self.assertIsNone(notion.account(self.state, call=lambda args, state=None: {'response': {'isError': True}, 'error': 'tool_reported_error'}))
+        self.assertIsNone(notion.account(self.state, call=lambda args, state=None: {'response': {'content': [{'type': 'text', 'text': 'not json'}]}}))
 
     def test_a_project_keeps_its_own_sign_in_apart_from_the_owner_and_other_projects(self):
         # ADR-0268: the owner's own sign-in keeps notion.json; each project's is its own file, used only for its calls.

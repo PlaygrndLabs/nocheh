@@ -187,7 +187,7 @@ def dispatch(body):
         request = body.get('request') or {}
         # The owner's own Notion, or a project's named by `project` (ADR-0268).
         project = request.get('project')
-        if operation == 'notion.status': return notion.status(state, project=project)
+        if operation == 'notion.status': return notion.status(state, project=project, look=notion.account)
         if operation == 'notion.start': return notion.start(state, request.get('redirect'), project=project)
         if operation == 'notion.finish': return notion.finish(state, request.get('code'), request.get('state'), project=project)
         if operation == 'notion.token': return notion.save_token(state, request.get('token'), project=project)

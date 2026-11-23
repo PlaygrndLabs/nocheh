@@ -40,7 +40,8 @@ Nocheh is in development mode and not yet released. Everything below is built an
 - Connections: a service connects to a project (shared) or a person (private). Notion per
   project or owner ([ADR-0268](docs/adr/0268-notion-per-project-or-person.md)), GitHub per project with live read-only lookups
   ([ADR-0269](docs/adr/0269-github-per-project.md), [ADR-0270](docs/adr/0270-github-live-lookups.md)), a Connections page ([ADR-0271](docs/adr/0271-connections-page.md)), the owner's Gmail read
-  only ([ADR-0272](docs/adr/0272-gmail-read-only.md)).
+  only ([ADR-0272](docs/adr/0272-gmail-read-only.md)). Each Notion sign-in shows its workspace and the signed-in
+  account's name and email, from Notion's notion-get-self tool.
 - Approvals: cards with scopes once, here and always this site; approved answers return to the
   asking chat ([ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md), [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md), [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)); only addresses no model built open without a
   card ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
@@ -56,7 +57,6 @@ Nocheh is in development mode and not yet released. Everything below is built an
 <open>
 
 Owner steps:
-- Reconnect the owner's own Notion once in Connections › Yours.
 - Gmail setup is paused by the owner; offer it again later.
 - One live check with a real member.
 - Machine jobs: the owner's own Stop test on the connected VM.

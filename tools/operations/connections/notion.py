@@ -27,6 +27,8 @@ AUTHORIZE, TOKEN, REGISTER = ISSUER + '/authorize', ISSUER + '/token', ISSUER + 
 # Notion answers with the newest version it supports; these are the ones this client speaks.
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26')
 PENDING_SECONDS = 600
+# How long an account lookup that Notion could not answer waits before the dashboard asks again.
+ACCOUNT_RETRY_SECONDS = 3600
 
 
 PROJECT = re.compile(r'[a-f0-9]{64}')
@@ -55,11 +57,46 @@ def post(url, body, form=True, opener=None):
         return json.loads(response.read(1024 * 1024) or b'{}')
 
 
-def status(state, project=None):
+def status(state, project=None, look=None, now=time.time):
+    """What the dashboard shows about a sign-in, never a token. With `look`, a sign-in whose Notion account is not
+    known yet asks Notion once who it is (again after an hour when Notion could not say), and keeps the answer."""
     grant = read(state, project).get('grant') or {}
+    checked = grant.get('account_checked_at')
+    if look and grant.get('access_token') and not grant.get('account') and (checked is None or checked + ACCOUNT_RETRY_SECONDS <= now()):
+        found = look(state, project)
+        with locked(state, project):
+            saved = read(state, project); current = saved.get('grant') or {}
+            # Kept only when the same sign-in is still there: a new one is looked up on its own.
+            if current.get('access_token') and current.get('connected_at') == grant.get('connected_at'):
+                current.update(account=found or {}, account_checked_at=int(now())); saved['grant'] = current; write(state, saved, project)
+                grant = current
+    account = grant.get('account') or {}
     return {'connected': bool(grant.get('access_token')), 'method': grant.get('method'),
-            'workspace': grant.get('workspace_name'), 'connected_at': grant.get('connected_at'),
-            'reconnect': bool(grant.get('reconnect'))}
+            'workspace': grant.get('workspace_name'), 'account_name': account.get('name'), 'account_email': account.get('email'),
+            'connected_at': grant.get('connected_at'), 'reconnect': bool(grant.get('reconnect'))}
+
+
+def text_field(value):
+    return value.strip()[:200] if isinstance(value, str) and value.strip() else None
+
+
+def account(state, project=None, call=None):
+    """The Notion account a sign-in belongs to, from Notion's own notion-get-self tool: its name and email,
+    or None when Notion could not say. A failure here never stops the sign-in."""
+    from tools.operations.security.tool_execution import mcp_call
+    try:
+        result = (call or mcp_call)({'connection': 'notion', 'project': project, 'tool': 'notion-get-self', 'input': {}}, state=state)
+        response = result.get('response') if not result.get('error') else None
+        found = response.get('structuredContent') if isinstance(response, dict) else None
+        if not isinstance(found, dict):
+            text = next((item.get('text') for item in (response or {}).get('content') or [] if isinstance(item, dict) and item.get('type') == 'text'), None)
+            found = json.loads(text) if isinstance(text, str) else None
+        user = found.get('user') if isinstance(found, dict) else None
+    except Exception:
+        return None
+    if not isinstance(user, dict): return None
+    known = {'name': text_field(user.get('name')), 'email': text_field(user.get('email'))}
+    return {key: value for key, value in known.items() if value} or None
 
 
 def redirect(address):
@@ -168,7 +205,7 @@ def bearer(state, post=post, now=time.time, project=None):
             except Exception: pass
             if error.code in (400, 401) and body.get('error') == 'invalid_grant':
                 # Terminal: forget the tokens and ask the owner to connect again; never retry.
-                saved['grant'] = {key: grant.get(key) for key in ('method', 'workspace_name', 'workspace_id', 'connected_at')} | {'reconnect': True}
+                saved['grant'] = {key: grant.get(key) for key in ('method', 'workspace_name', 'workspace_id', 'account', 'connected_at')} | {'reconnect': True}
                 write(state, saved, project)
                 raise ValueError('notion_reconnect_needed') from None
             raise ValueError('notion_unavailable') from None
