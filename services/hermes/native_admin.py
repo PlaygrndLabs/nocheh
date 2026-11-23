@@ -188,13 +188,11 @@ class Administration:
                 if any(len(values)!=1 for values in query.values()): raise ValueError('ambiguous_query')
                 name,home=self.profile(query.get('profile',[''])[0])
                 if resume:=query.get('resume',[''])[0]:
-                    from hermes_state import SessionDB
+                    from . import native_store
                     from .isolated_profile import database_path
                     if not database_path(home).is_file(): raise ValueError('session_not_in_profile')
-                    db=SessionDB(database_path(home),read_only=True)
-                    try:
-                        if not db.get_session(resume): raise ValueError('session_not_in_profile')
-                    finally: db.close()
+                    with native_store.reader(home) as db:
+                        if not native_store.session_row(db, resume): raise ValueError('session_not_in_profile')
                 query['profile']=[name]
                 if scope['path']!='/api/pub' and (channel:=query.get('channel',[''])[0]):
                     # Keep the transport attached while preparation advances the
@@ -422,7 +420,7 @@ class Administration:
                         with urllib.request.urlopen(telegram + '/health', timeout=3) as response: live = json.load(response)
                     except (OSError, ValueError): live = {}
                     running = live.get('telegram') == 'connected'
-                    result = {'version': '0.23.2', 'release_date': '', 'active_sessions': 0,
+                    result = {'version': '0.23.3', 'release_date': '', 'active_sessions': 0,
                               'config_version': 1, 'latest_config_version': 1, 'config_path': str(home / 'config.yaml'),
                               'env_path': 'Managed by Nocheh', 'hermes_home': str(home),
                               'gateway_running': running, 'gateway_state': 'running' if running else 'stopped',
@@ -455,7 +453,6 @@ class Administration:
 def create_app(root, model, policy, token, browser_enabled=False, revision_reader=None, presentation_home=None, profile_catalog=None):
     from hermes_cli import web_server as native
     from hermes_cli import web_server_sessions as sessions
-    from hermes_state import SessionDB
     from hermes_cli import web_server_profiles, web_server_cron
     app = Administration(native.app, root, model, policy, token, browser_enabled, revision_reader, profile_catalog)
     from .presentation import install
@@ -467,7 +464,7 @@ def create_app(root, model, policy, token, browser_enabled=False, revision_reade
     web_server_cron._cron_profile_home = lambda profile: app.profile(profile)
     # Inspection must never create/migrate native state.
     from .isolated_profile import database_path
-    sessions._open_session_db_for_profile = lambda profile, read_only: SessionDB(database_path(app.profile(profile)[1]), read_only=read_only)
+    sessions._session_db_path_for_profile = lambda profile: database_path(app.profile(profile)[1])
     @contextlib.asynccontextmanager
     async def lifespan(_): yield
     native.app.router.lifespan_context = lifespan

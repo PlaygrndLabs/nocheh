@@ -234,7 +234,8 @@ class ScopeTests(unittest.TestCase):
 
     def test_native_memory_and_session_search_cannot_open_other_profiles(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
-        from hermes_state import SessionDB
+        from .native_store import open_writer
+        from .store_fixture import add_message, add_session
         from tools.memory_tool import MemoryStore
         from tools.session_search_tool import session_search
         restore=restrict_session_search()
@@ -246,14 +247,14 @@ class ScopeTests(unittest.TestCase):
                     token=set_hermes_home_override(str(profile))
                     try:
                         memory=MemoryStore();memory.load_from_disk();self.assertTrue(memory.add('memory',marker)['success'])
-                        db=SessionDB(profile/'state.db');databases.append(db)
-                        db.create_session(marker,source='telegram');db.append_message(marker,role='user',content=marker)
+                        db=open_writer(profile);databases.append(db)
+                        add_session(db,marker);add_message(db,marker,'user',marker)
                         self.assertIn(marker,(profile/'memories/MEMORY.md').read_text())
                     finally:reset_hermes_home_override(token)
-                result=session_search(session_id='GROUP_B_MAPLE',db=databases[0]);self.assertFalse(json.loads(result)['success'])
-                self.assertFalse(json.loads(session_search(session_id='GROUP_B_MAPLE',profile='default',db=databases[0]))['success'])
-                self.assertFalse(json.loads(session_search(session_id='default/GROUP_B_MAPLE',db=databases[0]))['success'])
-                local=json.loads(session_search(session_id='GROUP_A_JUNIPER',db=databases[0]));self.assertTrue(local['success'])
+                result=session_search(session_id='GROUP_B_MAPLE',db=databases[0],persistence=databases[0]);self.assertFalse(json.loads(result)['success'])
+                self.assertFalse(json.loads(session_search(session_id='GROUP_B_MAPLE',profile='default',db=databases[0],persistence=databases[0]))['success'])
+                self.assertFalse(json.loads(session_search(session_id='default/GROUP_B_MAPLE',db=databases[0],persistence=databases[0]))['success'])
+                local=json.loads(session_search(session_id='GROUP_A_JUNIPER',db=databases[0],persistence=databases[0]));self.assertTrue(local['success'])
                 self.assertNotIn('GROUP_B_MAPLE',json.dumps(local))
             finally:
                 for db in databases:db.close()

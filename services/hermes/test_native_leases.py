@@ -10,6 +10,16 @@ from unittest.mock import patch
 
 from services.hermes.isolated_profile import database_path
 from services.hermes.native_memory import memory_lock
+from services.hermes import native_store
+from services.hermes.store_fixture import add_message, add_session
+
+
+def lease(db, holder, ttl_seconds=300.0):
+    return db.coordination.try_acquire_turn_lease(session_id='synthetic-session', holder=holder, ttl_seconds=ttl_seconds)
+
+
+def compression(db, holder, ttl_seconds=300.0):
+    return db.coordination.try_acquire_compression_lock(session_id='synthetic-session', holder=holder, ttl_seconds=ttl_seconds)
 
 
 class NativeLeaseRecoveryTests(unittest.TestCase):
@@ -23,29 +33,28 @@ class NativeLeaseRecoveryTests(unittest.TestCase):
         self.addCleanup(self.environment.stop)
 
     def seed(self):
-        from hermes_state import SessionDB
-        db = SessionDB(database_path(self.profile))
-        db.create_session('synthetic-session', source='telegram')
-        db.append_message('synthetic-session', 'user', 'Exact preserved history 😃\r\n  wording')
+        db = native_store.open_writer(self.profile)
+        add_session(db, 'synthetic-session')
+        add_message(db, 'synthetic-session', 'user', 'Exact preserved history 😃\r\n  wording')
         holder = f'pid={os.getpid()}:turn=previous-container'
-        self.assertTrue(db.try_acquire_session_turn_lease('synthetic-session', holder, ttl_seconds=3600))
-        self.assertTrue(db.try_acquire_compression_lock('synthetic-session', holder, ttl_seconds=3600))
+        self.assertTrue(lease(db, holder, ttl_seconds=3600))
+        self.assertTrue(compression(db, holder, ttl_seconds=3600))
         return db
 
     def test_reused_namespace_pid_is_reclaimed_and_history_is_preserved(self):
         db = self.seed()
         try:
-            before = db.get_messages_as_conversation('synthetic-session')
-            self.assertFalse(db.try_acquire_session_turn_lease('synthetic-session', 'next-turn'))
+            before = native_store.conversation(db, 'synthetic-session')
+            self.assertFalse(lease(db, 'next-turn'))
             with memory_lock(self.profile, reclaim_native=True):
-                self.assertTrue(db.try_acquire_session_turn_lease('synthetic-session', 'next-turn'))
-                self.assertFalse(db.try_acquire_session_turn_lease('synthetic-session', 'competing-turn'))
-                self.assertTrue(db.try_acquire_compression_lock('synthetic-session', 'next-compression'))
-                self.assertTrue(db.refresh_session_turn_lease('synthetic-session', 'next-turn'))
-                self.assertFalse(db.refresh_session_turn_lease('synthetic-session', 'previous-container'))
-                self.assertEqual(db.get_messages_as_conversation('synthetic-session'), before)
-                db.release_session_turn_lease('synthetic-session', 'next-turn')
-                self.assertTrue(db.try_acquire_session_turn_lease('synthetic-session', 'after-release'))
+                self.assertTrue(lease(db, 'next-turn'))
+                self.assertFalse(lease(db, 'competing-turn'))
+                self.assertTrue(compression(db, 'next-compression'))
+                self.assertTrue(db.coordination.refresh_turn_lease(session_id='synthetic-session', holder='next-turn'))
+                self.assertFalse(db.coordination.refresh_turn_lease(session_id='synthetic-session', holder='previous-container'))
+                self.assertEqual(native_store.conversation(db, 'synthetic-session'), before)
+                db.coordination.release_turn_lease(session_id='synthetic-session', holder='next-turn')
+                self.assertTrue(lease(db, 'after-release'))
         finally:
             db.close()
 
@@ -53,7 +62,7 @@ class NativeLeaseRecoveryTests(unittest.TestCase):
         db = self.seed()
         try:
             with memory_lock(self.profile):
-                self.assertFalse(db.try_acquire_session_turn_lease('synthetic-session', 'next-turn'))
+                self.assertFalse(lease(db, 'next-turn'))
         finally:
             db.close()
 

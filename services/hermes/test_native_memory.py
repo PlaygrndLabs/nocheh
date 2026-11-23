@@ -20,15 +20,16 @@ class NativeMemoryTests(unittest.TestCase):
             self.assertEqual([hit['text'] for hit in result['hits']],['Juniper current'])
 
     def test_owner_recalls_actual_native_notes_and_sessions_without_writes(self):
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             for scope in ('123','-20'):
                 profile=root/'profiles'/Scopes.profile(scope)
                 (profile/'memories').mkdir(parents=True)
                 (profile/'memories/MEMORY.md').write_text('Juniper launch Friday. nocheh:event:'+'a'*64)
-                db=SessionDB(profile/'state.db');db.create_session('session-'+scope,source='telegram')
-                db.append_message('session-'+scope,role='user',content='Juniper needs the checklist.');db.close()
+                with writer(profile) as db:
+                    add_session(db,'session-'+scope);add_message(db,'session-'+scope,'user','Juniper needs the checklist.')
             nothing_retired=lambda ids:{'revision':'0:','retired':[],'answered':[]}
             result=recall(root,{'query':'Juniper','limit':20},retirements=nothing_retired)
             self.assertEqual(len(result['hits']),4)
@@ -38,7 +39,8 @@ class NativeMemoryTests(unittest.TestCase):
     def test_each_recalled_hit_says_whose_profile_it_is_in(self):
         # Nocheh turns these into the label of the chat a hit came from (ADR-0251). A private answer's profile names the
         # owner's private chat but is never the owner's (ADR-0249), with or without the receipt of where it was asked.
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             profiles={'owner':{'space':'123','owner':True},'group':{'space':'-20/topic/4','owner':False},
@@ -47,8 +49,8 @@ class NativeMemoryTests(unittest.TestCase):
                 profile=root/'profiles'/Scopes.profile(name);(profile/'memories').mkdir(parents=True)
                 (profile/'memories/MEMORY.md').write_text('Juniper note in '+name)
                 (profile/'space.json').write_text(json.dumps({**metadata,'generation':'new','guard_epoch':4}))
-                db=SessionDB(profile/'state.db');db.create_session('session-'+name,source='telegram')
-                db.append_message('session-'+name,role='user',content='Juniper talk in '+name);db.close()
+                with writer(profile) as db:
+                    add_session(db,'session-'+name);add_message(db,'session-'+name,'user','Juniper talk in '+name)
             (root/'profiles'/Scopes.profile('answer')/'answer.json').write_text(json.dumps({'group':'“Synthetic Forum”','at':'2026-01-02T03:04:05+00:00'}))
             nothing_retired=lambda ids:{'revision':'0:','retired':[],'answered':[]}
             result=recall(root,{'query':'Juniper','limit':20,'generation':'new','guard_epoch':4},retirements=nothing_retired)
@@ -78,7 +80,8 @@ class NativeMemoryTests(unittest.TestCase):
 
     def test_each_recalled_note_line_carries_its_whole_notes_record_and_each_row_its_writer(self):
         # A hit is one line, but its source is the note it is in (ADR-0257): found by walking the file note by note.
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
         from . import note_sources
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);profile=root/'profiles'/Scopes.profile('family');(profile/'memories').mkdir(parents=True)
@@ -87,8 +90,8 @@ class NativeMemoryTests(unittest.TestCase):
             (profile/'space.json').write_text(json.dumps({'space':'chat-family','owner':False}))
             origin={'by':'review','review':'a'*64}
             note_sources.save(profile,{note_sources.key('memory',first):{'origins':[origin],'more':0,'at':'2026-11-08'}})
-            db=SessionDB(profile/'state.db');db.create_session('s',source='telegram')
-            db.append_message('s',role='user',content='Juniper walk at noon?');db.append_message('s',role='assistant',content='Juniper walk is set.');db.close()
+            with writer(profile) as db:
+                add_session(db,'s');add_message(db,'s','user','Juniper walk at noon?');add_message(db,'s','assistant','Juniper walk is set.')
             nothing_retired=lambda ids:{'revision':'0:','retired':[],'answered':[]}
             hits=recall(root,{'query':'Juniper','limit':20},retirements=nothing_retired)['hits']
             notes={hit['text']:hit['note'] for hit in hits if hit['kind']=='native_note'}
@@ -101,25 +104,27 @@ class NativeMemoryTests(unittest.TestCase):
         # Hermes's search drops a hit's content and, unless its fields leave it out, adds the rows before and after it,
         # without their ids (`context`). A stale profile's next turn withholds those neighbours here (a retired turn
         # message, and a turn quoting a retired recent message); recall reads the hit's own snippet and time instead.
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
         from .retired_history import withheld_ids
         retired,quoted,source='a'*64,'b'*64,'c'*64
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);profile=root/'profiles'/Scopes.profile('123');(profile/'memories').mkdir(parents=True)
-            db=SessionDB(profile/'state.db');db.create_session('s',source='telegram')
-            db.append_message('s',role='user',content='Bob PIN is 4321, keep it.\n\n[Archive source: nocheh:event:'+retired+']')
-            db.append_message('s',role='assistant',content='Juniper walk is set for noon, as nocheh:event:'+source+' says.')
-            db.append_message('s',role='user',content='[Recent messages in this group that were not addressed to you, oldest first]\n\n'
-                              '[Group message from Bob] (source nocheh:event:'+quoted+')\nvault code 9876\n\n[End of recent messages]\n\nok'
-                              '\n\n[Archive source: nocheh:event:'+'d'*64+']')
-            db.close()
+            with writer(profile) as db:
+                add_session(db,'s')
+                add_message(db,'s','user','Bob PIN is 4321, keep it.\n\n[Archive source: nocheh:event:'+retired+']')
+                add_message(db,'s','assistant','Juniper walk is set for noon, as nocheh:event:'+source+' says.')
+                add_message(db,'s','user','[Recent messages in this group that were not addressed to you, oldest first]\n\n'
+                            '[Group message from Bob] (source nocheh:event:'+quoted+')\nvault code 9876\n\n[End of recent messages]\n\nok'
+                            '\n\n[Archive source: nocheh:event:'+'d'*64+']')
             lookup=lambda ids:{'revision':'1:','retired':[i for i in ids if i in (retired,quoted)],'answered':{}}
             self.assertEqual(withheld_ids(profile/'state.db',lookup),{1,3},'both neighbours are withheld rows')
             asked=[]
-            original=SessionDB.search_messages
+            from persistence.sqlite.conversation.search import SQLiteSessionSearch
+            original=SQLiteSessionSearch.search_messages
             def search(db,*args,**kwargs):
                 asked.append(kwargs.get('fields'));return original(db,*args,**kwargs)
-            with patch.object(SessionDB,'search_messages',search):
+            with patch.object(SQLiteSessionSearch,'search_messages',search):
                 hits=recall(root,{'query':'Juniper','limit':20},retirements=lookup)['hits']
             rows=[hit for hit in hits if hit['kind']=='native_session']
             self.assertEqual(len(rows),1)
@@ -256,11 +261,8 @@ class FullNotesReviewTests(unittest.TestCase):
         self.assertIn(NEW,saved);self.assertNotIn('Stale note 0:',saved);self.assertIn('Stale note 3:',saved)
         self.assertFalse((profile/'pending').exists(),'nothing is held for an approval no one can give')
         # The review's own empty session is removed, so reviews leave no sessions behind.
-        from hermes_state import SessionDB
-        from .isolated_profile import database_path
-        db=SessionDB(database_path(profile),read_only=True)
-        try:self.assertIsNone(db.get_session('review-'+'a'*64))
-        finally:db.close()
+        from .native_store import reader
+        with reader(profile) as db:self.assertIsNone(db.sessions.get('review-'+'a'*64))
 
     def test_a_refused_batch_on_full_notes_leaves_room_to_try_again(self):
         # At a live-sized prompt per call, a review that needs a second try (here a patch whose

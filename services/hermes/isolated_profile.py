@@ -23,34 +23,11 @@ def native_path(path):
 
 def install_database_paths():
     """Native APIs that open a profile DB must see the same migrated history."""
-    import hermes_state
-    import hermes_state_registry
-    original=hermes_state._default_db_path
-    if getattr(original,'_nocheh_data_path',False):return lambda:None
-    def current():
-        return native_path(original())
-    current._nocheh_data_path=True
-    hermes_state._default_db_path=current
-    originals=[(hermes_state,'_default_db_path',original)]
-    # Native modules also open ``<home>/state.db`` by explicit path (goal
-    # migration during compaction, dashboard routes). The shared registry
-    # keys handles by path, so map before it to keep one writer per database.
-    acquire=hermes_state_registry.acquire;initialize=hermes_state.SessionDB.__init__
-    def mapped_acquire(db_path=None):
-        return acquire(None if db_path is None else native_path(db_path))
-    def mapped_initialize(self,db_path=None,read_only=False):
-        return initialize(self,None if db_path is None else native_path(db_path),read_only)
-    originals+=[(hermes_state_registry,'acquire',acquire),(hermes_state.SessionDB,'__init__',initialize)]
-    hermes_state_registry.acquire=mapped_acquire;hermes_state.SessionDB.__init__=mapped_initialize
-    # The pinned process registry opens its delegation ledger during import,
-    # using sqlite3 directly. Keep that ledger in the same durable database.
-    from tools import async_delegation
-    from gateway import delivery_ledger
-    for module in (async_delegation,delivery_ledger):
-        prior=module._db_path;originals.append((module,'_db_path',prior))
-        def mapped(fn=prior):
-            return native_path(fn())
-        module._db_path=mapped
+    from .native_store import install_store_paths
+    if getattr(install_database_paths,'_installed',False):return lambda:None
+    # Every store Hermes opens (sessions, the delegation and delivery ledgers) is the profile's durable one.
+    unmap=install_store_paths()
+    originals=[]
     # Nocheh owns each profile's SOUL.md (the owner-set role, empty when unset)
     # and writes config.yaml itself. Hermes would otherwise seed its own
     # identity as a role and copy config.yaml into backups/ whenever a profile
@@ -62,8 +39,10 @@ def install_database_paths():
         return None if reason=='good' else backup(config_path,reason,**kwargs)
     originals+=[(hermes_config,'_ensure_default_soul_md',seed),(config_backups,'backup_config',backup)]
     hermes_config._ensure_default_soul_md=no_seed;config_backups.backup_config=backup_without_good
+    install_database_paths._installed=True
     def restore():
         for module,name,prior in reversed(originals):setattr(module,name,prior)
+        unmap();install_database_paths._installed=False
     return restore
 
 def prepare(profile):

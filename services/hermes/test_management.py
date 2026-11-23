@@ -9,16 +9,17 @@ from .management import dispatch, profile_path
 
 class ManagementTests(unittest.TestCase):
     def test_native_notes_sessions_pagination_and_wrong_profile(self):
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
         policy=Scopes({'enabled':True},Served.of('123',groups=['-20','-30']))
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             for chat in ('-20','-30'):
                 profile=profile_path(root,chat,policy);(profile/'memories').mkdir(parents=True)
                 (profile/'memories/MEMORY.md').write_text('  note '+chat+'\n'+'nocheh:event:'+'a'*64)
-                db=SessionDB(profile/'state.db');db.create_session('session'+chat,source='telegram')
-                for i in range(52):db.append_message('session'+chat,role='user',content=f'{chat}: {i}')
-                db.close()
+                with writer(profile) as db:
+                    add_session(db,'session'+chat)
+                    for i in range(52):add_message(db,'session'+chat,'user',f'{chat}: {i}')
             call=lambda **body:dispatch(root,'test-model',policy,body)
             result=call(action='memory',scope='-20');self.assertEqual(result['memories'][0]['text'][:2],'  ')
             self.assertEqual(result['memories'][0]['citations'],['a'*64]);self.assertEqual(len(result['sessions']),1)
@@ -35,19 +36,19 @@ class ManagementTests(unittest.TestCase):
     def test_past_conversations_leave_out_empty_and_hidden_sessions_and_name_each_one(self):
         # A memory review hides its own session and an empty one has nothing to read; neither is a past conversation.
         # Each listed one carries its title, its first message without Nocheh's archive source, and when it went on.
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
         policy=Scopes({'enabled':True},Served.of('123'))
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);profile=profile_path(root,'123',policy);profile.mkdir(parents=True)
-            db=SessionDB(profile/'state.db')
-            db.create_session('nocheh-chat',source='telegram');db.set_session_title('nocheh-chat','Private chat')
-            db.append_message('nocheh-chat',role='user',content='Plan the trip\n\n[Archive source: nocheh:event:'+'a'*64+']')
-            db.append_message('nocheh-chat',role='assistant',content='Sure.')
-            db.create_session('browser-1',source='browser');db.append_message('browser-1',role='user',content='What did I save?')
-            db.create_session('review-1',source='telegram');db.append_message('review-1',role='user',content='review text')
-            db.set_session_hidden('review-1',True)
-            db.create_session('empty-1',source='telegram')
-            db.close()
+            with writer(profile) as db:
+                add_session(db,'nocheh-chat');db.sessions.set_title('nocheh-chat','Private chat')
+                add_message(db,'nocheh-chat','user','Plan the trip\n\n[Archive source: nocheh:event:'+'a'*64+']')
+                add_message(db,'nocheh-chat','assistant','Sure.')
+                add_session(db,'browser-1','browser');add_message(db,'browser-1','user','What did I save?')
+                add_session(db,'review-1');add_message(db,'review-1','user','review text')
+                db.sessions.set_hidden('review-1',True)
+                add_session(db,'empty-1')
             call=lambda **body:dispatch(root,'test-model',policy,body)
             rows={row['id']:row for row in call(action='memory',scope='123')['sessions']}
             self.assertEqual(set(rows),{'nocheh-chat','browser-1'})

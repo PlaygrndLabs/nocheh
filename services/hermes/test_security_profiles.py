@@ -30,15 +30,13 @@ class SecurityProfileTests(unittest.TestCase):
             self.assertEqual(database_path(root),root/'state.db')
 
     def test_native_default_reader_follows_the_same_history_path(self):
-        import hermes_state
-        from unittest.mock import patch
+        from persistence_assembly import profile_scope, store_location
         from .isolated_profile import install_database_paths
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);(root/'native-state').mkdir();(root/'native-state'/'state.db').touch()
-            with patch.object(hermes_state,'_default_db_path',lambda:root/'state.db'):
-                restore=install_database_paths()
-                try:self.assertEqual(hermes_state._default_db_path(),root/'native-state'/'state.db')
-                finally:restore()
+            root=Path(folder).resolve();(root/'native-state').mkdir();(root/'native-state'/'state.db').touch()
+            restore=install_database_paths()
+            try:self.assertEqual(store_location(profile_scope(home=root)),root/'native-state'/'state.db')
+            finally:restore()
 
     def test_native_imports_cannot_create_a_temporary_legacy_database(self):
         import os,subprocess,sys
@@ -47,8 +45,8 @@ class SecurityProfileTests(unittest.TestCase):
             code='''from services.hermes.isolated_profile import install_database_paths
 install_database_paths()
 import run_agent
-from hermes_state import SessionDB
-db=SessionDB();db.close()
+from persistence_assembly import open_persistence, profile_scope
+open_persistence(profile_scope(),eager=True).close()
 '''
             result=subprocess.run([sys.executable,'-c',code],env={**os.environ,'HERMES_HOME':folder},capture_output=True,timeout=30)
             self.assertEqual(result.returncode,0,result.stderr[-500:])
@@ -56,7 +54,7 @@ db=SessionDB();db.close()
             self.assertFalse((root/'state.db').exists())
 
     def test_explicit_profile_database_opens_use_the_durable_history(self):
-        # Native goal migration and dashboard routes name <home>/state.db directly.
+        # Native goal migration, the dashboard routes and session search name <home>/state.db directly.
         import os,subprocess,sys
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'native-state').mkdir()
@@ -64,11 +62,13 @@ db=SessionDB();db.close()
 from pathlib import Path
 from services.hermes.isolated_profile import install_database_paths
 install_database_paths()
-from hermes_state import SessionDB
-from hermes_state_registry import acquire,release_or_close
+from persistence.sqlite import _registry
+from persistence.sqlite._holder import StoreHolder
+from persistence_assembly import open_persistence_reader
 home=Path(sys.argv[1])
-shared=acquire(home/'state.db');release_or_close(shared)
-db=SessionDB(home/'state.db');db.close()
+_registry.release(_registry.acquire(home/'state.db'))
+StoreHolder(home/'state.db').close()
+with open_persistence_reader(home/'state.db') as reader:reader.ready()
 '''
             result=subprocess.run([sys.executable,'-c',code,folder],env={**os.environ,'HERMES_HOME':folder},capture_output=True,timeout=30)
             self.assertEqual(result.returncode,0,result.stderr[-500:])

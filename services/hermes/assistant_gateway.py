@@ -145,15 +145,14 @@ def session_title(message,owner,answer=False,member=False,member_read=False):
 def title_session(profile,session_id,message,owner,answer=False,member=False,member_read=False):
     """Name a Telegram session after its chat. It is Hermes's top automatic title: it replaces a first-message
     title and stays once set, and Hermes keeps a title set by hand over it."""
-    from hermes_state import SessionDB
-    from .isolated_profile import database_path
+    from persistence.conversation.sessions import TitleSource
+    from .native_store import writer
     title=session_title(message,owner,answer,member,member_read)
-    db=SessionDB(database_path(profile))
-    try:
-        if not db.get_session(session_id) or db.get_session_title_source(session_id) in (SessionDB.TITLE_SOURCE_LLM,SessionDB.TITLE_SOURCE_USER):return
-        try:db.set_auto_title(session_id,title,source=SessionDB.TITLE_SOURCE_LLM)
-        except ValueError:db.set_auto_title(session_id,db.get_next_title_in_lineage(title),source=SessionDB.TITLE_SOURCE_LLM)
-    finally:db.close()
+    with writer(profile) as db:
+        record=db.sessions.get(session_id)
+        if record is None or record.title_source in (TitleSource.LLM,TitleSource.USER):return
+        try:db.sessions.set_auto_title(session_id,title,source=TitleSource.LLM)
+        except ValueError:db.sessions.set_auto_title(session_id,db.sessions.next_title_in_lineage(title),source=TitleSource.LLM)
 
 
 def check_delivery_policy(credential):

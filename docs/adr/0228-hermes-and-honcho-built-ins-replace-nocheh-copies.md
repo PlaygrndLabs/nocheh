@@ -23,7 +23,8 @@ and dreams stay off ([ADR-0225](0225-member-safety-rules.md)).
   prompt cache stays warm. Nocheh kept its own per-session marker
   (`native-state/persona-prompt.json`) and, on each turn whose role revision
   differed, cleared that session's stored prompt and tool list. Hermes 0.23 has
-  its own refresh: `SessionDB.request_prompt_refresh()` records an epoch in the
+  its own refresh: `SessionDB.request_prompt_refresh()` (since Hermes 0.23.3
+  `sessions.request_prompt_refresh()` on its storage interface) records an epoch in the
   profile's `state.db`, a session whose stored prompt predates it rebuilds once
   on its next turn, keeping its history and tool list, and compaction carries the
   epoch to the child session.

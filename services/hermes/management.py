@@ -146,14 +146,13 @@ def dispatch(root, model, policy, body):
     if not database.exists(): return result
     offset = body.get('offset', 0)
     if type(offset) is not int or not 0 <= offset <= 100000: raise ValueError('invalid_offset')
-    from hermes_state import SessionDB
-    db = SessionDB(database, read_only=True)
-    try:
+    from . import native_store
+    with native_store.reader(path) as db:
         session = body.get('session')
         if session:
-            if not isinstance(session, str) or len(session) > 256 or not db.get_session(session):
+            if not isinstance(session, str) or len(session) > 256 or not native_store.session_row(db, session):
                 raise ValueError('session_not_in_profile')
-            messages = db.get_messages(session, limit=51, offset=offset)
+            messages = native_store.messages(db, session, limit=51, offset=offset)
             result['messages'] = [{'id': m.get('id'), 'role': m.get('role'),
                 'content': str(m.get('content') or '')[:20000], 'timestamp': m.get('timestamp'),
                 'truncated': len(str(m.get('content') or '')) > 20000} for m in messages[:50]]
@@ -161,12 +160,10 @@ def dispatch(root, model, policy, body):
         else:
             limit = body.get('limit', 50)
             if type(limit) is not int or not 1 <= limit <= 50: raise ValueError('invalid_limit')
-            # Hermes's own session list: no empty sessions, no hidden ones (a memory review hides its own), and a
-            # conversation that went on after its history was shortened listed once, by its latest part.
-            sessions = db.list_sessions_rich(limit=limit + 1, offset=offset, min_message_count=1, order_by_last_active=True)
+            # A memory review hides its own session, so it is never listed.
+            sessions = native_store.recent_sessions(db, limit + 1, offset)
             result['sessions'] = [session_row(s) for s in sessions[:limit]]
             if len(sessions) > limit: result['next_offset'] = offset + limit
-    finally: db.close()
     return result
 
 

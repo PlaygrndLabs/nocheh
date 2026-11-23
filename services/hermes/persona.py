@@ -158,10 +158,8 @@ def _refresh_prompts(path):
     or a project's, is left as it is."""
     database = database_path(path)
     if not database.exists(): return
-    from hermes_state import SessionDB
-    sessions = SessionDB(database)
-    try: sessions.request_prompt_refresh()
-    finally: sessions.close()
+    from .native_store import writer
+    with writer(path) as store: store.sessions.request_prompt_refresh()
 
 
 def save(path, role, skills, expected):
