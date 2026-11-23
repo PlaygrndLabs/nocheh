@@ -161,11 +161,13 @@ function ScheduleRow({row}: {row: Schedule}) {
         {row.timezone && <span className="text-muted"> · {row.timezone}</span>}
       </Td>
       <Td className="hidden whitespace-nowrap sm:table-cell">{nextRun(row)}</Td>
-      <Td className="hidden sm:table-cell">
-        <Badge tone={result.tone} dot title={row.last_run_at ? dateTime(row.last_run_at) : undefined}>
-          {result.label}
-        </Badge>
-        {row.last_run_at && <div className="mt-0.5 text-xs text-muted">{ago(row.last_run_at)}</div>}
+      <Td className="hidden whitespace-nowrap sm:table-cell">
+        <span className="inline-flex items-center gap-2">
+          <Badge tone={result.tone} dot title={row.last_run_at ? dateTime(row.last_run_at) : undefined}>
+            {result.label}
+          </Badge>
+          {row.last_run_at && <span className="text-xs text-muted">{ago(row.last_run_at)}</span>}
+        </span>
       </Td>
       <Td className="whitespace-nowrap text-right">
         <div className="inline-flex gap-1">
