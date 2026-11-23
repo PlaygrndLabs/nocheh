@@ -298,7 +298,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   const workspace=digest('search-workspace'),sessions=[digest('search-session')],ref=(name:string)=>({store:'archive',kind:'event',id:digest(name),revision:'1',input_hash:digest(name+'-hash')});
   const receipts:Record<string,unknown>={[digest('receipt-a')]:{source_reference:ref('first'),source_references:[]},
     [digest('receipt-c')]:{source_reference:ref('first'),source_references:[ref('first'),ref('second')]}};
-  const queries:unknown[][]=[],bodies:{path:string;body:any}[]=[],asked:string[]=[];let learned=sessions;
+  const queries:unknown[][]=[],bodies:{path:string;body:any}[]=[],asked:string[]=[],opened:string[][]=[];let learned=sessions;
   const contexts={access:{stores:{control:{query:async(_sql:string,params:unknown[])=>{queries.push(params);const row=receipts[String(params[0])];return {rows:row?[row]:[]};}}},
     policy:()=>({owner_id:'123'}),recall:(principal:Reader)=>({space:principal.space,group:'-100'}),reads:(principal:Reader)=>principal.reads},guards:{}};
   const binding={generation:'fixture',epoch:1,mode:'on'};
@@ -311,7 +311,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
       {id:'not-native',metadata:{nocheh_receipt:digest('receipt-a')}},{id:'C'.repeat(21),metadata:{nocheh_receipt:digest('receipt-c')}}];
   }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}}),
-    wallStore:fakeWalls(()=>learned)});
+    wallStore:fakeWalls(()=>learned,opened)});
   const group={admin:false,scope:'-100',space:'-100/topic/3',turnEvent:digest('turn')} as Reader;
   // Each id says the batch it came from and its place there, so the first 3 of a batch are named by source (ADR-0261).
   const batches=[{receipt:digest('receipt-a'),position:0},{receipt:digest('receipt-c'),position:1}];
@@ -342,9 +342,18 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.deepEqual(queries.map(params=>params.at(-1)),[frozen,frozen,frozen]);
   assert.equal((await memory.context(answer)).limited_memory,true);
   assert.equal((await memory.recall(answer,'invoice')).limited_memory,true);
+  // A member's own private chat, its schedules included, is a bound reader too: it searches its groups' sessions, never
+  // through a wall (ADR-0283).
+  const {answer:_answer,...unbound}=answer as any,member={...unbound,member:'a'.repeat(64)} as Reader;
+  readSessions.length=0;await memory.search(member,'who sends the invoice',4);
+  assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);assert.equal(bodies.at(-1)!.body.scope,undefined);
+  assert.equal((await memory.recall(member,'invoice')).limited_memory,true);
+  assert.deepEqual(opened,[['-100','-100/topic/3']],'only the group reader opened a wall');
   bodies.splice(1);
+  // The owner, the morning brief and the owner's other schedules included, searches everything learned, with no wall.
   await memory.search({admin:false,scope:null,space:'123',turnEvent:digest('turn')} as Reader,'invoice',2);
   assert.deepEqual(bodies[1]!.body,{query:'checked: invoice',limit:6},'the owner searches everything learned');
+  assert.deepEqual(opened,[['-100','-100/topic/3']]);
   learned=[];
   assert.deepEqual(await memory.search(group,'invoice',2),{ids:[],learned:false});
   assert.equal(bodies.length,2,'a chat that was not learned is not searched');
