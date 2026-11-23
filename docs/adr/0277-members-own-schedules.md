@@ -36,7 +36,8 @@ without any run reaching more than that member may read.
    `/v1/schedules/turn` also gives the cap, "Schedules per member" on the Members page
    (`member_directory_state.member_schedules`, 1 to 50, default 5), and how many the chat
    keeps now; the gate refuses a new one past it. A member's schedule runs in the owner's
-   time zone unless they name another. The member's reply prompt is editable
+   time zone unless they name another (their own setting since
+   [ADR-0281](0281-members-own-time-zone.md)). The member's reply prompt is editable
    (`reply.member_schedules`).
 3. **A run reads as that member.** A captured run in a member's chat runs only while
    Personal assistant is on. Storage binds it as that member, with the reads their private

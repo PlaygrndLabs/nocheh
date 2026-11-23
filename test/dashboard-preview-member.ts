@@ -55,7 +55,7 @@ const members:Member[]=[
 ];
 type Stored=Omit<MemberDetail,'version'|'mine'|'reminders'|'subtasks'|'children'|'comments'>&{revision:number;made_by:string|null;
  reminders:{id:string;at:string;by:string}[];others:number;comment_count?:number};
-type State={tasks:Stored[];signedOut:Map<string,number>;receipts:Map<string,{request:string;result:unknown}>;schedules:MemberSchedule[]};
+type State={tasks:Stored[];signedOut:Map<string,number>;receipts:Map<string,{request:string;result:unknown}>;schedules:MemberSchedule[];timeZone:string|null};
 const SCHEDULE_LIMIT=5;
 let state:State;
 const day=(days:number)=>new Date(Date.now()+days*864e5).toISOString().slice(0,10);
@@ -85,7 +85,7 @@ function seed():State {
   task('beds',{title:'Measure the beds',project:G,group:'-30002',due_on:day(5)}),
   // A project the preview's members are in none of the groups of: nothing of it may ever show.
   task('hidden',{title:'HIDDENMARK budget sheet',project:PREVIEW_MEMBER_PROJECTS.hidden,group:'-30005'}),
- ],signedOut:new Map(),receipts:new Map(),schedules:[
+ ],signedOut:new Map(),receipts:new Map(),timeZone:null,schedules:[
   {id:'a1b2c3d4e5f6',name:'Morning brief',schedule:'0 8 * * *',state:'scheduled',next_run_at:at(1),last_run_at:at(0),last_ok:true},
   {id:'f6e5d4c3b2a1',name:'Friday wrap-up',schedule:'0 17 * * 5',state:'paused',next_run_at:null,last_run_at:null,last_ok:null}]};
 }
@@ -278,7 +278,7 @@ export async function memberAppPreview(req:IncomingMessage,res:ServerResponse,ur
   // The member's own schedules: only with Personal assistant on and their private chat open.
   case 'schedules':
    if(!me(member).assistant)throw new HttpError(403,memberAppErrors.schedulesOff);
-   return json(res,200,{schedules:state.schedules,limit:SCHEDULE_LIMIT}),true;
+   return json(res,200,{schedules:state.schedules,limit:SCHEDULE_LIMIT,time_zone:state.timeZone}),true;
   case 'schedule':{
    if(!me(member).assistant)throw new HttpError(403,memberAppErrors.schedulesOff);
    const item=state.schedules.find(entry=>entry.id===route.schedule);if(!item)throw new HttpError(404,memberAppErrors.scheduleGone);
@@ -289,6 +289,14 @@ export async function memberAppPreview(req:IncomingMessage,res:ServerResponse,ur
    else if(body.action==='run'){item.last_run_at=new Date().toISOString();item.last_ok=true;}
    else throw new HttpError(400,'invalid_schedule_action');
    return json(res,200,{schedule:item}),true;
+  }
+  // The member's own time zone for new schedules; null is the owner's.
+  case 'time_zone':{
+   if(!me(member).assistant)throw new HttpError(403,memberAppErrors.schedulesOff);
+   if(typeof body.operation_id!=='string'||!/^[0-9a-f-]{36}$/.test(body.operation_id))throw new HttpError(400,'invalid_time_zone');
+   const zone=body.time_zone===null||body.time_zone===''?null:String(body.time_zone);
+   if(zone!==null)try{new Intl.DateTimeFormat('en',{timeZone:zone});}catch{throw new HttpError(400,'invalid_time_zone');}
+   state.timeZone=zone;return json(res,200,{time_zone:zone}),true;
   }
   // Every launch opened before now, on every phone: up to this one's, or now less the minute of slack (D13).
   case 'sign_out':state.signedOut.set(member.telegram,Math.max(who.auth,Math.floor(Date.now()/1000)-60));return json(res,200,{}),true;

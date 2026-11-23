@@ -83,6 +83,8 @@ test('each bound reader reaches only its own read routes, refused with its own c
   // Its projects' Notion and GitHub (ADR-0278): their lists, a lookup and its result; the store refuses all but reads with no card.
   for(const path of ['/v1/notion/connections','/v1/github/repos','/v1/tools/actions/'+'b'.repeat(64)])assert.ok(privateAnswerRoute('GET',path,'member'),path);
   assert.ok(privateAnswerRoute('POST','/v1/tools/propose','member'));
+  assert.ok(privateAnswerRoute('POST','/v1/members/time-zone','member'),'its own time zone (members\' time zones)');
+  for(const kind of ['answer','memberRead'] as const)assert.equal(privateAnswerRoute('POST','/v1/members/time-zone',kind),false,kind);
   for(const kind of ['answer','memberRead'] as const)for(const [method,path] of [['GET','/v1/notion/connections'],['GET','/v1/github/repos'],
     ['GET','/v1/tools/actions/'+'b'.repeat(64)],['POST','/v1/tools/propose']] as const)assert.equal(privateAnswerRoute(method,path,kind),false,kind+' '+path);
   for(const [method,path] of [['GET','/v1/tools/actions'],['POST','/v1/tools/decide'],['GET','/v1/notion/connections/x']] as const)
@@ -106,7 +108,7 @@ test('each bound reader reaches only its own read routes, refused with its own c
 
 test('a member reads with the read tools, tasks and its projects\' Notion and GitHub; the owner\'s ask reads the archive alone; no notes or memory tool',()=>{
   assert.equal(boundReaderTools.answer,privateAnswerTools);
-  assert.deepEqual([...boundReaderTools.member].sort(),['action_status','archive_page','archive_read','archive_search','github','memory_search','notion','tasks']);
+  assert.deepEqual([...boundReaderTools.member].sort(),['action_status','archive_page','archive_read','archive_search','github','memory_search','my_time_zone','notion','tasks']);
   assert.deepEqual([...boundReaderTools.memberRead].sort(),['archive_page','archive_read','archive_search']);
   for(const set of Object.values(boundReaderTools))for(const tool of ['notes','memory','knowledge','telegram','jobs','browser','web_search'])assert.equal(set.has(tool),false,tool);
 });

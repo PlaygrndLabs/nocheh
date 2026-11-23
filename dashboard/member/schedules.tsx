@@ -5,7 +5,7 @@
 import * as React from 'react';
 import {CalendarClock} from 'lucide-react';
 import type {MemberSchedule, MemberScheduleRequest, MemberSchedules} from '../../src/member-app-wire';
-import {Button, Card, Skeleton} from '../ui/core';
+import {Button, Card, Field, Select, Skeleton} from '../ui/core';
 import {memberApi, MemberApiError, operationId} from './api';
 import {type WordKey} from './i18n';
 import {useToast, useWords} from './shared';
@@ -16,6 +16,73 @@ const toasts: Record<MemberScheduleRequest['action'], WordKey> = {
   run: 'schedule_started_toast',
   delete: 'schedule_deleted_toast',
 };
+
+/** The time zones this phone knows, and the one it is in; a saved zone it does not list is still offered. */
+const phoneZone = (): string | null => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+};
+const knownZones = (): string[] => {
+  try {
+    return (Intl as unknown as {supportedValuesOf(key: string): string[]}).supportedValuesOf('timeZone');
+  } catch {
+    return [];
+  }
+};
+
+/** The member's own time zone for new schedules: one from the list, this phone's, or the owner's (empty). */
+function TimeZonePicker({value, onSaved}: {value: string | null; onSaved: (zone: string | null) => void}) {
+  const {t} = useWords();
+  const toast = useToast();
+  const [busy, setBusy] = React.useState(false);
+  const here = phoneZone();
+  const zones = React.useMemo(() => {
+    const all = new Set(knownZones());
+    for (const zone of [value, here]) if (zone) all.add(zone);
+    return [...all].sort();
+  }, [value, here]);
+  const save = async (zone: string | null) => {
+    setBusy(true);
+    try {
+      const saved = await memberApi.timeZone({operation_id: operationId(), time_zone: zone});
+      onSaved(saved.time_zone);
+      toast(t('time_zone_saved'));
+    } catch (error) {
+      if (error instanceof MemberApiError && error.status === 400) toast(t('time_zone_invalid'), true);
+      else if (error instanceof MemberApiError && error.status === 429) toast(t('busy'), true);
+      else if (!(error instanceof MemberApiError) || error.status !== 401) toast(t('failed'), true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-2">
+      <Field label={t('time_zone_label')} htmlFor="member-time-zone" hint={t('time_zone_hint')}>
+        <Select
+          id="member-time-zone"
+          value={value ?? ''}
+          disabled={busy}
+          onChange={event => void save(event.target.value || null)}
+        >
+          <option value="">{t('time_zone_owner')}</option>
+          {zones.map(zone => (
+            <option key={zone} value={zone}>
+              {zone.replaceAll('_', ' ')}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {here && here !== value && (
+        <Button size="sm" variant="ghost" busy={busy} disabled={busy} onClick={() => void save(here)}>
+          {t('time_zone_phone')}
+        </Button>
+      )}
+    </div>
+  );
+}
 
 export function MemberScheduleList() {
   const {t, moment} = useWords();
@@ -83,6 +150,12 @@ export function MemberScheduleList() {
           </p>
         )}
       </div>
+      {value && (
+        <TimeZonePicker
+          value={value.time_zone}
+          onSaved={zone => setValue(now => (now ? {...now, time_zone: zone} : now))}
+        />
+      )}
       {!value && !failed && <Skeleton className="h-10 w-full" />}
       {failed && <p className="text-[13px] text-bad">{t('failed')}</p>}
       {value && !value.schedules.length && <p className="text-[13px] text-muted">{t('schedules_none')}</p>}

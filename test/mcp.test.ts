@@ -33,7 +33,7 @@ const close=async(server:Server)=>{server.closeAllConnections();await new Promis
 test('the data tools keep their names, closed schemas and engine-neutral words',()=>{
   // The agent sees each one as mcp__nocheh__<name>, one for one with the plugin tool nocheh_<name> it replaces (ADR-0233).
   assert.deepEqual(mcpTools.map(item=>item.name),['archive_search','archive_read','archive_page','memory_search','memory_recall','action_request','background_job',
-    'telegram_destinations','shell','browser','mcp','ask_member_chat','owner_read','tasks','notion','github','gmail','action_status','knowledge_inspect','knowledge_propose','knowledge_status']);
+    'telegram_destinations','shell','browser','mcp','ask_member_chat','owner_read','tasks','notion','github','my_time_zone','gmail','action_status','knowledge_inspect','knowledge_propose','knowledge_status']);
   for(const item of mcpTools) {
     assert.equal(item.inputSchema.type,'object',item.name);assert.equal(item.inputSchema.additionalProperties,false,item.name);
     // No memory engine's name and no old plugin tool name reaches the agent.

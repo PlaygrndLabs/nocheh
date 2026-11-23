@@ -10,7 +10,7 @@ import type {GuardBinding} from './guards.js';
 import {OperationRepository} from './operations.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {forwardedMessage} from './owner-member-asks.js';
-import {ownerTimeZone} from './task-settings.js';
+import {ownerTimeZone,timeZone} from './task-settings.js';
 
 export const scheduleStorageSchema=`
 CREATE TABLE IF NOT EXISTS schedule_versions (
@@ -170,20 +170,20 @@ type TurnSource={channel?:string;kind:string;origin:string;reference:{id:string}
  * (ownerTurn, which refuses anything else) to the owner's own Telegram message, not a forward. A schedule runs in the
  * owner's time zone (Settings › Tasks). Or a member's live reply in their own private chat (members' schedules), bound
  * to that chat, while they have Personal assistant on: the same, with how many schedules they may keep (Members ›
- * Schedules per member) and how many that chat keeps now. A member's schedule runs in the owner's time zone too, unless
- * they name another.
+ * Schedules per member) and how many that chat keeps now. A member's schedule runs in their own time zone when they set
+ * one (members' time zones), else in the owner's, unless they name another for that schedule.
  */
 export async function scheduleTurn(s:ScheduleTurnServices,principal:Reader):Promise<ScheduleTurnRules> {
   const refused={allowed:false,time_zone:'UTC',limit:null,count:null};
   const member=boundReader(principal)==='member';
-  let limits:{limit:number|null;count:number|null}={limit:null,count:null};
+  let limits:{limit:number|null;count:number|null}={limit:null,count:null},zone:string|null=null;
   if(member) {
     const chat=principal.memberChat;
     if(!chat||principal.scope!==chat||principal.space!==chat)return refused;
-    const row=(await s.stores.control.query<{limit:number}>(`SELECT d.member_schedules AS limit FROM members m CROSS JOIN member_directory_state d
+    const row=(await s.stores.control.query<{limit:number;time_zone:string|null}>(`SELECT d.member_schedules AS limit,m.time_zone FROM members m CROSS JOIN member_directory_state d
       WHERE m.id=$1 AND m.state='active' AND m.private_chat AND m.assistant AND d.singleton`,[principal.member])).rows[0];
     if(!row)return refused;
-    limits={limit:Number(row.limit),count:await chatSchedules(s.stores.control,chat)};
+    limits={limit:Number(row.limit),count:await chatSchedules(s.stores.control,chat)};zone=row.time_zone;
   }
   const {source}=member?await s.knowledge.liveGroupTurn(principal):await s.knowledge.ownerTurn(principal);
   if(source.channel!=='telegram'||source.kind!=='telegram_update'||source.origin!=='live')return refused;
@@ -191,7 +191,32 @@ export async function scheduleTurn(s:ScheduleTurnServices,principal:Reader):Prom
   let message:unknown=null;
   try{message=original?(JSON.parse(original.payload.toString()) as {message?:unknown}).message:null;}catch{message=null;}
   if(!message||typeof message!=='object'||forwardedMessage(message as Record<string,unknown>))return refused;
-  return {allowed:true,time_zone:await ownerTimeZone(s.stores.control),...limits};
+  return {allowed:true,time_zone:zone??await ownerTimeZone(s.stores.control),...limits};
+}
+
+/** A member's own time zone for new schedules as asked: an IANA name such as Europe/Berlin, or null (or "") for the
+ *  owner's. 400 `invalid_time_zone` otherwise. */
+export function memberTimeZoneValue(value:unknown):string|null {
+  if(value===null||value==='')return null;
+  try{return timeZone(value);}catch{throw new HttpError(400,'invalid_time_zone');}
+}
+/** Saves a member's own time zone (members' time zones); returns it. Their schedules already set keep their own. */
+export async function setMemberTimeZone(db:Pick<pg.Pool,'query'>,member:string,value:unknown):Promise<string|null> {
+  const zone=memberTimeZoneValue(value);
+  await db.query('UPDATE members SET time_zone=$2,updated_at=now() WHERE id=$1',[member,zone]);
+  return zone;
+}
+
+/**
+ * A member sets their own time zone by asking in their own private chat (members' time zones): the same live, not
+ * forwarded, own message of a member with Personal assistant on that may set schedules (scheduleTurn). Refused with 403
+ * `member_time_zone_not_here` otherwise.
+ */
+export async function memberTimeZoneTurn(s:ScheduleTurnServices,principal:Reader,value:unknown):Promise<{time_zone:string|null}> {
+  if(boundReader(principal)!=='member'||!(await scheduleTurn(s,principal)).allowed)throw new HttpError(403,'member_time_zone_not_here');
+  const body=object(value);
+  if(Object.keys(body).some(key=>key!=='time_zone'))throw new HttpError(400,'invalid_time_zone');
+  return {time_zone:await setMemberTimeZone(s.stores.control,principal.member!,body.time_zone)};
 }
 /** How many schedules a chat keeps now: each one captured and not removed. */
 export async function chatSchedules(control:Pick<pg.Pool,'query'>,chat:string):Promise<number> {

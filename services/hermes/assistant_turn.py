@@ -28,8 +28,9 @@ ANSWER_TOOLS={'session_search','skills_list','skill_view'}|ANSWER_DATA_TOOLS
 ANSWER_TOOLSETS=['session_search','mcp-nocheh','skills']
 # A member's own private chat (step 4, ADR-0262) reads as an answer does: these tools exactly, tasks only listed and
 # read, and no native memory, so it writes no notes (saved notes wait for a later step). It also reads its projects'
-# Notion and GitHub, and their results (ADR-0278); Nocheh runs only reads that need no card.
-MEMBER_DATA_TOOLS=ANSWER_DATA_TOOLS|{'mcp__nocheh__notion','mcp__nocheh__github','mcp__nocheh__action_status'}
+# Notion and GitHub, and their results (ADR-0278); Nocheh runs only reads that need no card. With Personal assistant on,
+# the member's own message may set their time zone for new schedules (members' time zones).
+MEMBER_DATA_TOOLS=ANSWER_DATA_TOOLS|{'mcp__nocheh__notion','mcp__nocheh__github','mcp__nocheh__action_status','mcp__nocheh__my_time_zone'}
 MEMBER_TOOLS=ANSWER_TOOLS|MEMBER_DATA_TOOLS
 MEMBER_TOOLSETS=ANSWER_TOOLSETS
 # The owner's ask about a member (step 4b) only reads that member's own chat: the archive read tools alone, no memory,

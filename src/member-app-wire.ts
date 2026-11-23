@@ -26,7 +26,7 @@ const TASK='[a-f0-9]{64}';
 /** A schedule's id in the agent's schedule store. */
 const SCHEDULE='[a-zA-Z0-9_-]{1,128}';
 /** Each route's name, as memberAppRoute answers it. */
-export type MemberAppRouteName='me'|'tasks'|'task'|'create'|'update'|'comment'|'reminders'|'schedules'|'schedule'|'sign_out';
+export type MemberAppRouteName='me'|'tasks'|'task'|'create'|'update'|'comment'|'reminders'|'schedules'|'schedule'|'time_zone'|'sign_out';
 /**
  * Every route of the members' app, as [method, path after the prefix, name]. Nothing else is forwarded by the edge or
  * answered by the member listener (404). Only `GET /tasks` takes a query.
@@ -40,6 +40,7 @@ export type MemberAppRouteName='me'|'tasks'|'task'|'create'|'update'|'comment'|'
  * - GET /reminders: MemberReminder[]
  * - GET /schedules: MemberSchedules (members' schedules: only with Personal assistant on)
  * - POST /schedules/:id MemberScheduleRequest: MemberScheduleResult
+ * - POST /time-zone MemberTimeZoneRequest: MemberTimeZone (the member's own time zone for new schedules)
  * - POST /sign-out (no body): {}
  */
 export const MEMBER_APP_ROUTES:readonly (readonly ['GET'|'POST',RegExp,MemberAppRouteName])[]=Object.freeze([
@@ -52,6 +53,7 @@ export const MEMBER_APP_ROUTES:readonly (readonly ['GET'|'POST',RegExp,MemberApp
   ['GET',/^\/reminders$/,'reminders'],
   ['GET',/^\/schedules$/,'schedules'],
   ['POST',new RegExp(`^/schedules/(${SCHEDULE})$`),'schedule'],
+  ['POST',/^\/time-zone$/,'time_zone'],
   ['POST',/^\/sign-out$/,'sign_out'],
 ] as const);
 /** The routes that write tasks: each needs write access and counts against the write limit (sign-out, which every member
@@ -139,8 +141,13 @@ export interface MemberMe {name:string;mode:MemberTasks;reminders:MemberReminder
  * the agent wrote it; times are UTC (the page shows them in the phone's time). No prompt text and no time zone name. */
 export interface MemberSchedule {id:string;name:string;schedule:string;state:'scheduled'|'paused'|'running'|'finished';
   next_run_at:string|null;last_run_at:string|null;last_ok:boolean|null}
-/** GET /schedules: the schedules of the member's private chat, and how many they may keep. */
-export interface MemberSchedules {schedules:MemberSchedule[];limit:number}
+/** GET /schedules: the schedules of the member's private chat, how many they may keep, and the member's own time zone
+ * for new schedules (null: the owner's, which is never named). */
+export interface MemberSchedules {schedules:MemberSchedule[];limit:number;time_zone:string|null}
+/** POST /time-zone: an IANA time zone such as Europe/Berlin, or null for the owner's. `operation_id` as for a schedule. */
+export interface MemberTimeZoneRequest {operation_id:string;time_zone:string|null}
+/** The member's own time zone now. */
+export interface MemberTimeZone {time_zone:string|null}
 /** POST /schedules/:id. `operation_id` is one uuid per action (a retry sends the same). */
 export interface MemberScheduleRequest {operation_id:string;action:'pause'|'resume'|'run'|'delete'}
 /** The schedule as it is now, or null once deleted. */

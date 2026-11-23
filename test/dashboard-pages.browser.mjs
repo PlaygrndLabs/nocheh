@@ -3904,6 +3904,22 @@ test('the members’ app lists the member’s own schedules in Settings, which t
     ['/api/member/schedules/a1b2c3d4e5f6', 'run'],
     ['/api/member/schedules/f6e5d4c3b2a1', 'delete'],
   ]);
+  // Their own time zone for new schedules: one from the list, this phone's, or the owner's again.
+  const zone = page.getByLabel('Time zone for new schedules');
+  assert.equal(await zone.inputValue(), '');
+  await zone.selectOption('Asia/Tokyo');
+  await page.getByText('Time zone saved. New schedules use it.').waitFor();
+  assert.equal(await zone.inputValue(), 'Asia/Tokyo');
+  const phone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+  await page.getByRole('button', {name: 'Use this phone’s time zone'}).click();
+  await page.waitForFunction(() => document.querySelector('#member-time-zone')?.value !== 'Asia/Tokyo');
+  assert.equal(await zone.inputValue(), phone);
+  await zone.selectOption('');
+  await page.waitForFunction(() => document.querySelector('#member-time-zone')?.value === '');
+  const zones = answers
+    .filter(answer => answer.path === '/api/member/time-zone')
+    .map(answer => JSON.parse(answer.request).time_zone);
+  assert.deepEqual(zones, ['Asia/Tokyo', phone, null]);
   assert.deepEqual(problems, []);
   await page.close();
   // A member without Personal assistant sees no Schedules card.

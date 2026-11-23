@@ -246,7 +246,7 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     await members.settings(admin,{operation_id:'three schedules',member_schedules:3});
     assert.equal((await plan('/me')).body.assistant,true);
     const listed=await plan('/schedules');
-    assert.deepEqual(listed,{status:200,body:{limit:3,schedules:[
+    assert.deepEqual(listed,{status:200,body:{limit:3,time_zone:null,schedules:[
       {id:'mine1',name:'Brief mine1',schedule:'0 8 * * *',state:'scheduled',next_run_at:'2026-11-24T07:00:00.000Z',last_run_at:null,last_ok:null},
       {id:'mine2',name:'Brief mine2',schedule:'0 8 * * *',state:'paused',next_run_at:'2026-11-24T07:00:00.000Z',last_run_at:null,last_ok:false}]}});
     assert.ok(!/never shown|Europe|nocheh-c|owners|nils/.test(JSON.stringify(listed.body)));
@@ -259,6 +259,14 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     assert.deepEqual(await plan('/schedules/mine2',{operation_id:'55555555-5555-4555-8555-555555555555',action:'delete'}),{status:200,body:{schedule:null}});
     assert.deepEqual(jobs.map(item=>item.id),['mine1','owners','nils']);
     assert.equal((await db.query('SELECT window_writes FROM member_app_limits WHERE member_id=$1',[MEMBER_GP_ID])).rows[0].window_writes,4,'each change counts, refused ones too');
+    // Her own time zone for new schedules (members' time zones): a known name, or null for the owner's, which is never named.
+    for(const body of [{operation_id:'66666666-6666-4666-8666-666666666666',time_zone:'Mars/Olympus'},{operation_id:'x',time_zone:'Asia/Tokyo'},
+      {operation_id:'77777777-7777-4777-8777-777777777777',time_zone:'Asia/Tokyo',extra:1}])
+      assert.deepEqual(await plan('/time-zone',body),{status:400,body:{error:'invalid_time_zone'}},JSON.stringify(body));
+    assert.deepEqual(await plan('/time-zone',{operation_id:'88888888-8888-4888-8888-888888888888',time_zone:'Asia/Tokyo'}),{status:200,body:{time_zone:'Asia/Tokyo'}});
+    assert.equal((await db.query('SELECT time_zone FROM members WHERE id=$1',[MEMBER_GP_ID])).rows[0].time_zone,'Asia/Tokyo');
+    assert.equal((await plan('/schedules')).body.time_zone,'Asia/Tokyo');
+    assert.deepEqual(await plan('/time-zone',{operation_id:'99999999-9999-4999-8999-999999999999',time_zone:null}),{status:200,body:{time_zone:null}});
     // Private chat off: Personal assistant stays on but closes with it.
     await members.change(admin,MEMBER_GP_ID,{operation_id:'assistant private off',changes:{private_chat:false}});
     assert.deepEqual(await plan('/schedules'),{status:403,body:{error:'member_schedules_off'}});
