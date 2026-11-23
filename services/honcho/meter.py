@@ -69,7 +69,9 @@ def thinking_cost(model, usage):
     prompt=count('prompt_tokens') or count('input_tokens')
     output=count('completion_tokens') or count('output_tokens')
     if not prompt and not output: return None
-    if prompt>CLAUDE_LONG_PROMPT: rates=CLAUDE_LONG_PROMPT_PRICES.get(claude_name(model),rates)
+    # A day's totals pass the average call's prompt as card_prompt_tokens to pick the rate card.
+    card=usage.get('card_prompt_tokens') if type(usage.get('card_prompt_tokens')) is int else prompt
+    if card>CLAUDE_LONG_PROMPT: rates=CLAUDE_LONG_PROMPT_PRICES.get(claude_name(model),rates)
     total=Decimal(prompt)*Decimal(str(rates[0]))+Decimal(output)*Decimal(str(rates[1]))
     return int(total.to_integral_value(rounding=ROUND_CEILING))
 
@@ -137,6 +139,17 @@ class Ledger:
                        'input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, '
                        'cost_microdollars INTEGER NOT NULL DEFAULT 0, priced_calls INTEGER NOT NULL DEFAULT 0, '
                        'PRIMARY KEY(day,route,provider,model))')
+            # Thinking recorded before the meter priced it, or a day's calls without a usage report, is priced from
+            # the day's token totals, as the Usage page does, so this month's spend counts every call (ADR-0279).
+            for day,route,provider,model,calls,failed,inputs,outputs in db.execute(
+                    "SELECT day,route,provider,model,calls,failed,input_tokens,output_tokens FROM usage_daily "
+                    "WHERE route='/v1/chat/completions' AND priced_calls<calls-failed").fetchall():
+                if claude_rates(model) is None: continue
+                answered=max(1,calls-failed)
+                # A run of calls takes the rate card of its average prompt.
+                cost=thinking_cost(model,{'prompt_tokens':inputs,'completion_tokens':outputs,'card_prompt_tokens':inputs//answered})
+                db.execute('UPDATE usage_daily SET cost_microdollars=?,priced_calls=calls-failed WHERE day=? AND route=? AND provider=? AND model=?',
+                           (cost or 0,day,route,provider,model))
         self._rolled=None
         self.roll_up()
 

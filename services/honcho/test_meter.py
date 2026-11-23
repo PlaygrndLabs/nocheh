@@ -187,6 +187,24 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(summary['thinking_unpriced_requests'],1)
             self.assertAlmostEqual(summary['thinking_spent_usd'],3+0.00003)
 
+    def test_thinking_recorded_before_pricing_is_priced_from_the_days_totals(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'budget.sqlite';ledger=Ledger(path)
+            self.thinking(ledger,1_000,100)
+            self.thinking(ledger,0,0,status=401,outcome='http_error')
+            self.thinking(ledger,500,50,model='other-model')
+            haiku=[self.thinking(ledger,150_000,0,model='claude-haiku-5-5') for _ in range(2)]
+            with ledger.connect() as db:
+                # As the meter recorded thinking before it priced it: tokens, no cost.
+                db.execute("UPDATE usage_daily SET cost_microdollars=0,priced_calls=0 WHERE route='/v1/chat/completions'")
+                # A day priced in part, as on the day the pricing meter started.
+                db.execute("INSERT INTO usage_daily VALUES('2000-01-31','/v1/chat/completions','anthropic','claude-sonnet-5-5',3,0,3000,300,1,1)")
+            summary=Ledger(path).summary()
+            self.assertAlmostEqual(summary['thinking_spent_usd'],(1_000*2+100*10+300_000*0.5)/1e6)
+            self.assertEqual(summary['thinking_unpriced_requests'],1,'only the model with no price stays unpriced')
+            rows={(r['day'],r['model']):r for r in Ledger(path).usage('2000-01-01')}
+            self.assertEqual((rows[('2000-01-31','claude-sonnet-5-5')]['cost_microdollars'],rows[('2000-01-31','claude-sonnet-5-5')]['priced_calls']),(9_000,3))
+
     def test_long_prompts_take_the_long_prompt_card(self):
         from .meter import thinking_cost
         self.assertEqual(thinking_cost('claude-haiku-5-5',{'prompt_tokens':100_000,'completion_tokens':0}),10_000)
