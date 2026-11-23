@@ -107,6 +107,19 @@ export class KnowledgeManagementRepository {
   return {turn,source,binding:await this.s.guards.state()};
  }
 
+ /**
+  * A schedule's run in the owner's private chat (ADR-0266): running now and not stopped, under its own run's binding.
+  * It is not the owner's live message, so it gets only what a schedule's run may do, such as reading the task lists.
+  */
+ async ownerScheduledRun(principal:Reader) {
+  if(principal.admin||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'||!principal.turnEvent)throw new HttpError(403,'owner_private_turn_required');
+  const turn=await this.s.turns.binding(principal),owner=ownerChat(this.s.access.policy());
+  const run=(await this.stores.control.query(`SELECT scope,job_id FROM managed_runs WHERE event_id=$1 AND channel='scheduler' AND state='running'
+   AND NOT cancel_requested`,[principal.turnEvent])).rows[0];
+  if(!turn.owner||!turn.job||!run||!owner||run.scope!==owner||turn.scope!==owner||run.job_id!==turn.job)throw new HttpError(403,'owner_private_turn_required');
+  return {turn,event_id:principal.turnEvent};
+ }
+
  /** A current live turn in a group or topic, not a job or review run; the space is the turn's own. */
  async liveGroupTurn(principal:Reader) {
   if(principal.admin||principal.scope===null||(principal.purpose??'assistant')!=='assistant')throw new HttpError(403,'group_turn_required');
