@@ -211,7 +211,7 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
     job_turn:['{place}','{date}','{read}'],more:['{count}']},
   'telegram.member_read_texts':{source:['{member}'],closed:['{member}'],failed:['{member}']},
   'members.reminder_texts':{note_line:['{line}']},
-  'schedules.notice_texts':{set:['{name}'],when:['{when}'],next:['{next}']},
+  'schedules.notice_texts':{set:['{name}'],when:['{when}'],next:['{next}'],quiet:['{name}']},
 };
 /** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
  *  Object property ('constructor', '__proto__') is just a line; a text with no such lines is not read at all. */
@@ -431,12 +431,13 @@ export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerTe
 /** The message Nocheh posts in the owner's private chat when a reply set a schedule there with the agent's own schedule
  * tool (ADR-0266), one "name: text" line each: set, when, next and note are its lines ({name}, {when}, {next}), with the pause and delete
  * buttons; paused and deleted answer a press and are added under it; unnamed stands in for a schedule with no name and
- * no_next for one with no next run; changed and only_owner answer a press that cannot act. Code writes it, never a model. */
+ * no_next for one with no next run; changed and only_owner answer a press that cannot act; quiet is what Run now sends there
+ * when the run has nothing new ({name}). Code writes it, never a model. */
 export const scheduleNoticeTexts=['set: ⏰ New schedule: {name}','when: 🔁 {when}','next: ⏭ Next run: {next}',
   'note: Each result comes here, and a run with nothing new sends nothing. All schedules are on the Schedules page.',
   'pause: ⏸ Pause','delete: 🗑 Delete','paused: ⏸ Paused. Resume it on the Schedules page.','deleted: 🗑 Deleted.',
   'unnamed: a schedule','no_next: none','changed: This schedule changed or is gone. See the Schedules page.','only_owner: Only the owner can do this.',
-  'quiet: ✅ Ran now: nothing new right now.'].join('\n');
+  'quiet: ✅ {name}: ran now, nothing new right now.'].join('\n');
 export type ScheduleNoticeText='set'|'when'|'next'|'note'|'pause'|'delete'|'paused'|'deleted'|'unnamed'|'no_next'|'changed'|'only_owner'|'quiet';
 /** The schedule notice lines, with any line the owner removed or left empty, or stored without a value it must keep, taken
  * from the default. */
