@@ -38,7 +38,8 @@ test('knowledge broker exposes only typed routes and preserves the scoped creden
     assert.equal((await request('/v1/knowledge/proposals',input,secret)).status,403,'service credential is not a runtime turn');
     assert.equal((await request('/v1/knowledge/proposals',input,credential(null,'filter'))).status,403);
     assert.equal((await request('/v1/knowledge/proposals',input,credential(null,'memory-review'))).status,403);
-    scheduled=true;assert.equal((await request('/v1/knowledge/proposals',input)).status,403);scheduled=false;
+    scheduled=true;assert.equal((await request('/v1/knowledge/proposals',input)).status,403);
+    assert.equal((await request('/v1/knowledge/context',undefined)).status,403,'a job reads no knowledge context');scheduled=false;
     for(const path of ['/v1/organization/delegations','/v1/knowledge/proposals/'+proposal+'/decide','/v1/knowledge/proposals/'+proposal+'/undo'])
       assert.equal((await request(path,input)).status,403);
     valid=false;assert.equal((await request('/v1/knowledge/context',undefined)).status,409);
@@ -86,10 +87,13 @@ test('task routes reach storage only from a live owner-private or group turn and
     assert.equal((await request('/v1/owner/tasks?state=open',undefined,credential('-10'))).status,403);
     assert.equal((await request('/v1/owner/tasks?state=open',undefined)).status,200);
     assert.equal((await request('/v1/owner/tasks/'+task,undefined)).status,200);
+    // The owner's views too: read only and only in the owner's private chat.
+    assert.equal((await request('/v1/owner/conversations',undefined)).status,200);
+    assert.equal((await request('/v1/owner/conversations',undefined,credential('-10'))).status,403);
     scheduled=false;
     for(const path of ['/v1/tasks','/v1/tasks/'+task])assert.equal((await request(path,{operation_id:'x',title:'Dashboard only'})).status,403);
-    assert.deepEqual(calls.slice(reached),['/v1/owner/tasks','/v1/owner/tasks/'+task],'only a job\'s reads in the owner\'s private chat reach storage');
-    assert.equal(calls.length,reached+2,'other owner views, job changes, reviews and dashboard task routes never reach storage');
+    assert.deepEqual(calls.slice(reached),['/v1/owner/tasks','/v1/owner/tasks/'+task,'/v1/owner/conversations'],'only a job\'s reads in the owner\'s private chat reach storage');
+    assert.equal(calls.length,reached+3,'other owner views, job changes, reviews and dashboard task routes never reach storage');
     assert.equal(scopedRoute('POST','/v1/owner/tasks/'+task+'/delete'),false);
   }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });

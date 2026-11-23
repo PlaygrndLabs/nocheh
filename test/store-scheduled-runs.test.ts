@@ -41,12 +41,17 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const claim=await s.scheduled.claim(context);claims.set(id,claim);assert.equal(claim.claimed,true);assert.ok(!claim.text!.includes('fixture-secret'));
     const principal=reader({headers:{authorization:'Bearer '+claim.archive_credential}} as any,token);
     const binding=await s.turns.binding(principal);assert.equal(binding.reference!.store,'control');assert.equal(binding.job,context.job_id);
-    // A schedule's run in the owner's private chat, such as a morning brief, reads the task lists and changes none;
-    // a group's schedule run gets none (ADR-0266).
+    // A schedule's run in the owner's private chat, such as a morning brief, reads the task lists and the owner's views and
+    // changes none; a group's schedule run gets none (ADR-0266).
     if(claim.scope==='123') {
       assert.ok(await s.tasks.chatList(principal,{}));tasksRead.push(id);
       await assert.rejects(s.tasks.chatCreate(principal,{title:'From a schedule'}),{code:'task_read_only'});
-    } else await assert.rejects(s.tasks.chatList(principal,{}),{status:403});
+      assert.equal(await s.knowledge.ownerReader(principal),id);
+      await assert.rejects(s.knowledge.ownerTurn(principal),{code:'owner_private_turn_required'},'a run is not the owner\'s live message');
+    } else {
+      await assert.rejects(s.tasks.chatList(principal,{}),{status:403});
+      await assert.rejects(s.knowledge.ownerReader(principal),{status:403});
+    }
     assert.equal((await s.scheduled.claim(context)).claimed,false);assert.deepEqual(await s.scheduled.prepare(context),{transcripts:[],files:[]});
     native.set(id,{state:'running'});if(mode==='running')return {state:'running'};
     await s.scheduled.finish({event_id:id,actor:context.actor,state:'done',session:context.conversation,text:answer});
@@ -75,6 +80,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
     assert.ok(tasksRead.includes(local.event_id),'the owner chat\'s run read its tasks');
     await assert.rejects(s.tasks.chatList(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token),{}),{code:'runtime_turn_changed'},'a finished run reads nothing');
+    await assert.rejects(s.knowledge.ownerReader(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
     const delivered=await capture({scope:'-123',deliver:'telegram'});await run(delivered.event_id);
     const proposal=await s.scheduled.delivery(delivered);assert.equal(proposal.state,'proposed');assert.ok('id' in proposal);
     const inspected=await s.telegramActions.inspect(owner,proposal.id!);assert.ok(!JSON.stringify(inspected).includes('fixture-secret'));
