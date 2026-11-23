@@ -57,7 +57,8 @@ from the owner's own and from every other project's.
 - The existing Notion setting is dropped: the sign-in file is kept, and the owner
   turns the owner's own Notion on once again.
 - Known gaps, accepted for now: a member's private chat can't use a project's Notion
-  yet (members can't call tools there; step 5 of the plan); a card names "Project
+  yet (members can't call tools there; step 5 of the plan; closed by
+  [ADR-0278](0278-member-private-chat-reads-project-connectors.md)); a card names "Project
   Notion" without the project's name (its details carry the id, its origin line the
   group).
 - Checks: `test/store-notion-project.test.ts`, `test/store-notion.test.ts`, owner

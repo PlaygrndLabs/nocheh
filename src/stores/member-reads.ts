@@ -97,6 +97,20 @@ export async function memberReads(db:Db,chat:string,owner:string|null=ownerChatN
   return {member:own.member,chat:own.chat,groups:sorted(true),stale:sorted(false)};
 }
 
+/**
+ * The active projects whose connectors a member's own open private chat `chat` reads, read only (ADR-0278): every active
+ * project a group it reads (memberReads' groups) is assigned to, whether or not that project shares its group chats.
+ * Sorted. Null when `chat` is not an open member private chat now; with no such group, none.
+ */
+export async function memberChatProjects(db:Db,chat:string,owner:string|null=ownerChatNow()):Promise<{member:string;projects:readonly string[]}|null> {
+  const reads=await memberReads(db,chat,owner);if(!reads)return null;
+  const groups=reads.groups.map(group=>group.chat);
+  const projects=!groups.length?[]:(await db.query<{project_id:string}>(`SELECT DISTINCT a.project_id FROM project_assignments a
+    JOIN projects p ON p.id=a.project_id AND p.state='active' WHERE a.space_id=ANY($1::text[]) AND a.mode='assigned' ORDER BY a.project_id`,[groups]))
+    .rows.map(row=>row.project_id);
+  return {member:reads.member,projects};
+}
+
 /** What the owner's ask about a member reads (step 4b): the ask, the owner's message that asked it (`event`), its member
  * and that member's own private chat. */
 export interface MemberAskReads {readonly ask:string;readonly event:string;readonly member:string;readonly chat:string}

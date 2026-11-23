@@ -18,7 +18,7 @@ from unittest.mock import patch
 from services.chats import Served
 from services.durable import canonical, digest
 from .assistant_gateway import prepare_profile, session_title
-from .assistant_turn import ALLOWED_TOOLS, ANSWER_TOOLS, MEMBER_TOOLS, MEMBER_TOOLSETS, OWNER_SET_TOOLS, turn_tools
+from .assistant_turn import ALLOWED_TOOLS, ANSWER_TOOLS, MEMBER_DATA_TOOLS, MEMBER_TOOLS, MEMBER_TOOLSETS, OWNER_SET_TOOLS, turn_tools
 from .async_runs import CLOSED
 from .agent_turns import AgentTurns
 from .native_memory import recall
@@ -164,15 +164,18 @@ class MemberScopeTests(unittest.TestCase):
 
     def test_a_member_turn_reads_only_answers_tools_with_the_member_rules(self):
         removed, allowed = turn_tools(False, False, member=True)
-        self.assertEqual(allowed, ANSWER_TOOLS)
-        self.assertEqual(MEMBER_TOOLS, ANSWER_TOOLS)
+        # An answer's tools, and its projects' Notion and GitHub with their results (ADR-0278).
+        lookups = {'mcp__nocheh__notion', 'mcp__nocheh__github', 'mcp__nocheh__action_status'}
+        self.assertEqual(allowed, ANSWER_TOOLS | lookups)
+        self.assertEqual(MEMBER_TOOLS, ANSWER_TOOLS | lookups)
+        self.assertLessEqual(lookups, MEMBER_DATA_TOOLS)
         self.assertNotIn('memory', allowed, 'saved notes wait for a later step')
         self.assertNotIn('memory', MEMBER_TOOLSETS)
         self.assertIn('mcp__nocheh__tasks', allowed, 'tasks are read only (D14)')
         self.assertFalse(allowed & {'mcp__nocheh__action_request', 'mcp__nocheh__background_job', 'mcp__nocheh__shell', 'mcp__nocheh__browser',
-                                    'mcp__nocheh__mcp', 'mcp__nocheh__owner_read', 'mcp__nocheh__notion', 'mcp__nocheh__memory_recall',
+                                    'mcp__nocheh__mcp', 'mcp__nocheh__owner_read', 'mcp__nocheh__gmail', 'mcp__nocheh__memory_recall',
                                     'mcp__nocheh__telegram_destinations', 'mcp__nocheh__knowledge_propose'})
-        self.assertEqual(removed, OWNER_SET_TOOLS | (ALLOWED_TOOLS - ANSWER_TOOLS))
+        self.assertEqual(removed, OWNER_SET_TOOLS | (ALLOWED_TOOLS - MEMBER_TOOLS))
         rules = reply({'reply.member': 'MEMBERRULES'}, False, member=True)
         self.assertTrue(rules.endswith('MEMBERRULES'))
         self.assertIn('the owner can read it', reply({}, False, member=True))

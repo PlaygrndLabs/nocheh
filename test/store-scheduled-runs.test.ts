@@ -13,6 +13,8 @@ import {workflowDetail} from '../src/workflows/owner.js';
 import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {githubRunRefusal} from '../src/stores/github-lookups.js';
+import {notionRunRefusal} from '../src/stores/notion.js';
 
 test('scheduled execution uses guarded operation roots and stages exact delivery without reopening a closed turn',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -20,7 +22,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-scheduled-runs-')),base=Date.now(),token=digest('scheduled-'+base);
-  let failCompletion=false,mode='done',serial=0,answer='Scheduled answer fixture-secret';const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>(),tasksRead:string[]=[];
+  let failCompletion=false,mode='done',serial=0,answer='Scheduled answer fixture-secret';const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>(),tasksRead:string[]=[],lookups:{state:string;id:string}[]=[],refusals:(string|null)[]=[];
   // The groups the owner serves, which a test turns off as the owner would; `deselect` turns them off as a run finishes.
   // Notices to the owner are kept apart: the bot sends each id once.
   let groups=['-123'],deselect=false;const notices:any[]=[];
@@ -48,6 +50,15 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
       await assert.rejects(s.tasks.chatCreate(principal,{title:'From a schedule'}),{code:'task_read_only'});
       assert.equal(await s.knowledge.ownerReader(principal),id);
       await assert.rejects(s.knowledge.ownerTurn(principal),{code:'owner_private_turn_required'},'a run is not the owner\'s live message');
+      // It reads the owner's GitHub and Notion with no card; a change still asks (ADR-0278).
+      if(!lookups.length) {
+        const ask=async(args:Record<string,unknown>)=>s.controlledActions.propose(principal,{kind:'mcp',arguments:args}) as Promise<{state:string;id:string}>;
+        lookups.push(await ask(github),await ask({connection:'notion',tool:'notion-search',input:{query:'reading list'}}),
+          await ask({connection:'notion',tool:'notion-create-pages',input:{pages:[{properties:{title:'Plan'}}]}}));
+        const row=(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[0]!.id])).rows[0];
+        refusals.push(await githubRunRefusal(stores.control,row,'123',github),
+          await notionRunRefusal(stores.control,{...(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[1]!.id])).rows[0]},'123',{}));
+      }
     } else {
       await assert.rejects(s.tasks.chatList(principal,{}),{status:403});
       await assert.rejects(s.knowledge.ownerReader(principal),{status:403});
@@ -61,6 +72,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const s=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:groups}),runtime,
     memoryEngine:honchoEngine(async()=>{throw Error('no providers');})}),owner={admin:true,scope:null};
   const authority=async()=>({owner:'inngest' as const,epoch:(await s.schedules.ownership()).epoch});
+  const github={connection:'github',tool:'search_code',input:{repo:'example-org/mine',query:'made up'}};
   const capture=async(options:Record<string,unknown>={})=>{
     const scope=String(options.scope??'123'),profile='nocheh-'+digest(scope).slice(0,24),job='execution-'+base+'-'+(++serial);
     const definition={profile,name:'Fixture',prompt:'Prompt fixture-secret',schedule:{kind:'interval',minutes:60},deliver:'local',repeat:null,enabled:true,removed:false,
@@ -73,8 +85,12 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const run=async(id:string)=>{const result=await storageWorkflowOperations(s,runtime).schedules!('run:'+id,await authority());safeMetadata(result);return result;};
   const saved=async(id:string)=>(await stores.control.query('SELECT * FROM managed_runs WHERE event_id=$1',[id])).rows[0];
   try{
-    await s.guards.reconcile();await s.guards.setMode('on');
+    await s.guards.reconcile();await s.guards.setMode('on');await s.notion.save(owner,{enabled:true,expected_revision:0});
     const local=await capture();mode='ack_lost';assert.equal((await run(local.event_id)).state,'waiting');assert.equal((await run(local.event_id)).state,'completed');
+    assert.deepEqual(lookups.map(item=>item.state),['approved','approved','proposed'],'reads run with no card, a change asks');
+    assert.deepEqual(refusals,[null,null],'while the run goes on');
+    const looked=(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[0]!.id])).rows[0];
+    assert.equal(await githubRunRefusal(stores.control,looked,'123',github),'github_not_here','once the run ended');
     assert.equal((await s.scheduled.delivery(local)).state,'local');
     assert.equal(calls.filter(call=>call.op==='run.start'&&call.body.event_id===local.event_id).length,1);
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
