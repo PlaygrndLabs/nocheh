@@ -10,7 +10,8 @@ import {freshMembers,members} from '../members.js';
 import {telegramDestination} from '../chats-telegram.js';
 import {fillLine,labelName,placeLabel,quotedName} from '../chat-labels.js';
 import {allowedIn,servedDestination} from '../destinations.js';
-import {approvalLines,ownerPrompts,scheduleNoticeLines,type ApprovalText} from '../prompts.js';
+import {approvalLines,fillTemplate,ownerPrompts,scheduleNoticeLines,type ApprovalText} from '../prompts.js';
+import {cardName} from '../action-text.js';
 import {telegramAddress,telegramTarget} from '../frontdoor/telegram.js';
 import type {RuntimeCall} from '../runtime.js';
 import {evaluate,recordEffect} from '../security/store.js';
@@ -166,7 +167,7 @@ export class TelegramActionRepository {
     // was nothing new.
     const quiet=!said.trim()||silentResult(said),told=quiet&&owner&&row.fire_reason==='manual';
     if(version.configuration.deliver!=='telegram'||quiet&&!told)return {state:'local'};
-    const text=told?scheduleNoticeLines((await ownerPrompts(this.stores.control))['schedules.notice_texts']).quiet:said;
+    const text=told?await this.quietLine(version.definition_reference):said;
     if(text.length>3500)return {state:'withheld',reason:'result_exceeds_telegram_limit'};
     const audience:Reader={admin:false,scope:owner?null:row.scope,space:row.space_id,
       turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};
@@ -174,6 +175,13 @@ export class TelegramActionRepository {
     // result still waits for the owner's card.
     return this.propose(audience,{scope:row.scope,logical_profile:row.logical_profile},row.binding,row.source_reference,{destination:row.scope,text},'scheduled_run',
       undefined,null,owner?'owner_scheduled_chat':undefined);
+  }
+  /** What Run now sends when it found nothing new, naming its schedule as the owner sees it on the Schedules page. */
+  private async quietLine(definition:{id?:string}|null):Promise<string> {
+    const lines=scheduleNoticeLines((await ownerPrompts(this.stores.control))['schedules.notice_texts']);
+    const row=definition?.id?(await this.stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[definition.id])).rows[0]:null;
+    let name:string|null=null;try{name=row?cardName(JSON.parse(row.content.toString()).name,80):null;}catch{name=null;}
+    return fillTemplate(lines.quiet,{name:name??lines.unnamed});
   }
   /** The person who wrote a live group turn, when they may talk to Nocheh there (the owner or a member who talks there);
    *  null for the owner's private chat. */

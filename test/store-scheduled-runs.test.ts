@@ -106,7 +106,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const pressed=await capture({scope:'123',deliver:'telegram'});await run(pressed.event_id);
     const told=await s.scheduled.delivery(pressed);assert.equal(told.state,'approved');assert.ok('id' in told);
     assert.equal((await stores.control.query('SELECT text_hash FROM telegram_action_requests WHERE id=$1',[told.id])).rows[0].text_hash,
-      digest('✅ Ran now: nothing new right now.'),'a Run now with nothing new says so');
+      digest('✅ Fixture: ran now, nothing new right now.'),'a Run now with nothing new says so');
     const group=await capture({scope:'-123',deliver:'telegram'});await run(group.event_id);
     assert.deepEqual(await s.scheduled.delivery(group),{state:'local'},'a group\'s Run now with nothing new sends nothing');
     answer='Scheduled answer fixture-secret';
