@@ -8,7 +8,8 @@ import {allowedIn,servedDestination} from '../destinations.js';
 import {members} from '../members.js';
 import {parentSpace,servedGroup} from '../spaces.js';
 import {HttpError,object,string} from '../http.js';
-import {backgroundBox,backgroundCard,backgroundJob,backgroundLimit,backgroundMachine,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
+import {approvalLines,backgroundBox,backgroundLines,backgroundCard,backgroundJob,backgroundLimit,backgroundMachine,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
+import {placeLabel} from '../chat-labels.js';
 import type {RuntimeCall} from '../runtime.js';
 import type {Agent} from '../agent/agent.js';
 import {observation,type Observation} from '../workflows/pipeline.js';
@@ -18,7 +19,7 @@ import type {SourceAccessRepository} from './access.js';
 import type {SourceReference} from './archive.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
 import {afterPending,carriesForward,type GuardBinding} from './guards.js';
-import {notionJobReads} from './notion.js';
+import {notionJobFetch,notionJobReads} from './notion.js';
 import {OperationRepository} from './operations.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {SourceRepository} from './retrieval.js';
@@ -111,6 +112,10 @@ ALTER TABLE background_settings ADD COLUMN IF NOT EXISTS member_notice_usd numer
 ALTER TABLE background_settings ADD COLUMN IF NOT EXISTS member_pause_usd numeric NOT NULL DEFAULT 100 CHECK(member_pause_usd>0 AND member_pause_usd<=10000);
 -- Whether a job a member approved waits for member jobs to resume, so its card says so, and is settled again when it goes on.
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS held boolean NOT NULL DEFAULT false;
+-- What a job on the owner's machine reads, frozen with its card (machine jobs' reads): the Notion pages its card names, and
+-- the archive's last capture sequence when it was approved, so nothing captured after Approve reaches it.
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS notion_pages jsonb;
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS reads_until bigint;
 ${memberJobSchema}`;
 
 const protocol='background-job-v1';
@@ -211,6 +216,14 @@ export function planSteps(value:unknown):string[] {
     if(!text||text.length>200)throw new HttpError(400,'invalid_job_request');
     if(reordering(text))throw new HttpError(400,'job_hidden_characters');return text;
   });
+}
+/** The Notion pages a machine job may read without asking, as its card names them (machine jobs' reads): 1 to 5 pages of the
+ *  owner's own Notion, each by its raw id or plain notion.so address, as a job's fetch takes it (notionJobFetch). */
+export function notionPages(value:unknown):string[] {
+  if(!Array.isArray(value)||value.length<1||value.length>5)throw new HttpError(400,'invalid_job_request');
+  const pages=value.map(page=>typeof page==='string'?page.trim():'');
+  if(pages.some(page=>!page||page.length>300||!notionJobFetch({id:page})))throw new HttpError(400,'invalid_job_request');
+  return [...new Set(pages)];
 }
 /** A job's instruction as its card shows it and the fingerprint covers it: no-break spaces read as spaces and no space
  *  ends a line, so nothing on the card differs from what runs without showing. */
@@ -423,11 +436,13 @@ export class BackgroundJobRepository {
   async start(principal:Reader,input:unknown) {
     // A private answer, a member's private chat and the owner's ask about a member only read and talk (ADR-0249, step 4).
     assertActingReader(principal);
-    const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box','repo','machine','steps'].includes(key))||
+    const body=object(input);if(Object.keys(body).some(key=>!['title','instruction','chat','from','to','box','repo','machine','steps','notion_pages'].includes(key))||
       body.box!==undefined&&typeof body.box!=='boolean'||body.repo!==undefined&&(typeof body.repo!=='string'||!body.repo||body.repo.length>140)||
-      body.machine!==undefined&&(typeof body.machine!=='string'||!body.machine.trim()||body.machine.length>40)||(body.machine===undefined)!==(body.steps===undefined))
+      body.machine!==undefined&&(typeof body.machine!=='string'||!body.machine.trim()||body.machine.length>40)||(body.machine===undefined)!==(body.steps===undefined)||
+      body.notion_pages!==undefined&&body.machine===undefined)
       throw new HttpError(400,'invalid_job_request');
     const title=string(body.title,100).replace(/\s+/g,' ').trim(),instruction=instructionText(string(body.instruction,8000)),steps=body.steps===undefined?null:planSteps(body.steps);
+    const pages=body.notion_pages===undefined?null:notionPages(body.notion_pages);
     if(!title||!instruction)throw new HttpError(400,'invalid_job_request');
     // A direction override or a tag character can make a card read in another order than the job runs (ADR-0250).
     if(reordering(title)||reordering(instruction))throw new HttpError(400,'job_hidden_characters');
@@ -451,7 +466,10 @@ export class BackgroundJobRepository {
     const repo=pin?pinnedRepo(pin):null;
     // Whether the card offers Notion reads, kept with the job so its card and its runs never say more (ADR-0225).
     // Not part of the fingerprint: it only narrows, and a setting saved meanwhile must not turn a repeat into job_changed.
-    const notion=own&&await notionJobReads(this.control);
+    // A machine job reads no Notion but the pages its card names, and only where the owner's own Notion reads without asking
+    // (machine jobs' reads).
+    const notion=own&&(!machine||!!pages)&&await notionJobReads(this.control);
+    if(pages&&!notion)throw new HttpError(409,'job_notion_not_allowed');
     const estimate=await this.estimate(size);
     // A member's job over the owner's limit, or on a model whose cost cannot be measured, waits for the owner instead. A machine
     // job's card always goes to the owner's private chat, wherever it was asked.
@@ -464,7 +482,8 @@ export class BackgroundJobRepository {
     // Refused before the secret check spends anything: the agent narrows the period or splits the work.
     if(minutesLimit>JOB_MINUTES)throw new HttpError(409,'job_too_long');
     // A card Telegram would refuse could never be approved: refused before the secret check, and again with the checked text.
-    const cardRow={estimate:{...estimate,from:from||null,to:to||null},rates:estimate.rates,cost_limit_usd:costLimit,minutes_limit:minutesLimit,notion_reads:notion,box,repo,requester,machine,steps};
+    const cardRow={estimate:{...estimate,from:from||null,to:to||null},rates:estimate.rates,cost_limit_usd:costLimit,minutes_limit:minutesLimit,notion_reads:notion,box,repo,requester,machine,steps,
+      notion_pages:pages,target:size.chat};
     await this.cardFits(cardRow,{title,instruction});
     const id=digest(canonical([protocol,source,binding,title,instruction,size.chat,from,to]));
     // A machine job's plan is checked for secrets with its title and instruction; another plan for the same request is
@@ -477,11 +496,12 @@ export class BackgroundJobRepository {
     await this.cardFits({...cardRow,steps:plan},{title:String(shown.title),instruction:String(shown.instruction)});
     // The pinned copy and machine and the plan are part of what is approved; a job without them keeps the fingerprint it had before them.
     const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box,byte_budget:bytes,
-      ...(repo?{repo}:{}),...(machine?{machine,steps:plan}:{})}));
+      ...(repo?{repo}:{}),...(machine?{machine,steps:plan,...(pages?{notion_pages:pages}:{})}:{})}));
     const insert=(db:Pick<pg.PoolClient,'query'>)=>db.query(`INSERT INTO background_jobs(id,source_reference,proposal_reference,guard_revision,binding,scope,space_id,target,logical_profile,requester,approver,
-      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo,notion_reads,machine,steps) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) ON CONFLICT DO NOTHING`,
+      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo,notion_reads,machine,steps,notion_pages) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) ON CONFLICT DO NOTHING`,
       [id,source,proposal,representation.revision,binding,scope,space,size.chat,'job-'+id.slice(0,24),requester,approver,fingerprint,
-        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes,repo,notion,machine,plan===null?null:JSON.stringify(plan)]);
+        {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes,repo,notion,machine,plan===null?null:JSON.stringify(plan),
+        pages===null?null:JSON.stringify(pages)]);
     if(!repo&&!machine)await insert(this.control);
     else {
       // The copy or machine row is locked before the job row exists, the order Remove takes them in: Remove waits for this
@@ -535,15 +555,19 @@ export class BackgroundJobRepository {
   /** A card's text from a job's values and the exact proposal it shows; also for a job not yet recorded. */
   private async cardText(row:any,shown:{title:string;instruction:string},origin:string|null=null) {
     const prompts=await ownerPrompts(this.control),estimate=row.estimate;
-    const lines=labeledLines(backgroundTexts,prompts['background.texts']);
-    const period=estimate.from||estimate.to?[estimate.from??'…',estimate.to??'…'].join(' – '):null;
+    const lines=backgroundLines(prompts['background.texts']);
+    const period=estimate.from||estimate.to?[estimate.from??'…',estimate.to??'…'].join(' – '):null,size=[sizeLine(estimate),period].filter(Boolean).join(', ');
+    // A job on the owner's machine says it reads only its chat and period, frozen when it is approved, and only the Notion
+    // pages its card names (machine jobs' reads).
+    const place=row.machine?placeLabel(row.target,approvalLines(prompts['telegram.approval_texts'])):null;
+    const pages=row.machine&&row.notion_reads&&Array.isArray(row.notion_pages)?row.notion_pages.map((page:string)=>visible(page)).join(', '):null;
     // What the asker wrote shows one character at a time: a hidden one is written out where it stands (ADR-0250).
     const values:Record<string,string|null|undefined>={title:visible(shown.title),instruction:visible(shown.instruction,true),
-      size:[sizeLine(estimate),period].filter(Boolean).join(', '),minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
+      size:place?fillTemplate(lines.machine_reads!,{place,size}):size,minutes:String(estimate.minutes),cost:estimate.cost_usd===null?'cost unknown':'about '+money(estimate.cost_usd),
       // Without a price only the time limit applies, and the card says so instead of a cost limit.
       // The cap to the cent, so it never reads as less than it is (ADR-0251).
       cost_limit:jobPriced(row.rates)?cents(Number(row.cost_limit_usd)):null,unpriced:jobPriced(row.rates)?null:lines.unpriced,minutes_limit:String(row.minutes_limit),origin,
-      notion:row.notion_reads?lines.notion_reads:null,box:row.box?(row.repo?lines.box_repo:lines.box):null,
+      notion:pages?fillTemplate(lines.notion_pages!,{pages}):row.notion_reads&&!row.machine?lines.notion_reads:null,box:row.box?(row.repo?lines.box_repo:lines.box):null,
       // From the job's own pin, so a card settled after Remove still shows what was asked.
       repo:row.repo?fillTemplate(lines.repo!,{repo_name:row.repo.name,repo_branch:row.repo.branch,repo_commit:row.repo.commit.slice(0,7),
         repo_copied:row.repo.copied_at.slice(0,16).replace('T',' ')+' UTC',repo_size:Math.ceil(row.repo.bytes/1e6)+' MB, '+count(row.repo.files,'file','files')}):null,
@@ -565,6 +589,9 @@ export class BackgroundJobRepository {
     const body=object(input),row=await this.row(body.id);
     if(body.fingerprint!==row.fingerprint)throw new HttpError(409,'job_changed');
     await this.access.archive.verify(source);
+    // Where the archive stands when the owner approves: a job on the owner's machine reads nothing captured after it
+    // (machine jobs' reads). Read first, so a message captured while this commits is left out, never let in.
+    const until=body.decision==='approve'?String((await this.access.stores.archive.query('SELECT coalesce(max(capture_sequence),0)::text AS until FROM events')).rows[0].until):null;
     const db=await this.control.connect();
     try {
       await db.query('BEGIN');
@@ -578,7 +605,8 @@ export class BackgroundJobRepository {
       // than its card said; Reject leaves the line its card showed (ADR-0225).
       const reads=approve&&!!current.notion_reads&&await notionJobReads(db);
       await db.query(`UPDATE background_jobs SET state=$2,decision_reference=$3,decided_by=$4,finished_at=CASE WHEN $2='rejected' THEN now() END,
-        notion_reads=CASE WHEN $2='approved' THEN $5::boolean ELSE notion_reads END,revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,approve?'approved':'rejected',source,by,reads]);
+        notion_reads=CASE WHEN $2='approved' THEN $5::boolean ELSE notion_reads END,reads_until=$6::bigint,revision=revision+1,updated_at=now() WHERE id=$1`,
+        [row.id,approve?'approved':'rejected',source,by,reads,until]);
       if(approve)await requestWorkflow(db,'background','job:'+row.id);
       await db.query('COMMIT');return {id:row.id,state:approve?'approved':'rejected'};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}

@@ -49,8 +49,9 @@ Nocheh is in development mode and not yet released. Everything below is built an
 - Approvals: cards with scopes once, here and always this site; approved answers return to the
   asking chat ([ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md), [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md), [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)); only addresses no model built open without a
   card ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
-- Security: the 2026-11 security review's fixes parts 1 to 5 are merged; the machine-jobs fix and a
-  separate file reader are still to build ([ADR-0250](docs/adr/0250-cards-and-forwards-say-whose-words-they-are.md) to [ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
+- Security: the 2026-11 security review's fixes parts 1 to 5 are merged; machine jobs read only their
+  card's chat, period and named Notion pages ([ADR-0282](docs/adr/0282-machine-jobs-read-only-their-card.md)); the rest of the
+  machine-jobs fix and a separate file reader are still to build ([ADR-0250](docs/adr/0250-cards-and-forwards-say-whose-words-they-are.md) to [ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
   Connections, Members and Sent to apps pages.
 - Operations: daily backups, export and import, an encrypted off-site copy (off until the owner

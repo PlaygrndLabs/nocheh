@@ -94,9 +94,9 @@ export class ProviderFailure extends HttpError {
   constructor(readonly providerStatus:number){super([401,403,429].includes(providerStatus)?providerStatus:503,'provider_request_failed');}
 }
 export {jobErrors};
-/** What a proposal may be told: the owner turned this tool off for the chat, or the member who asked may not use web pages
- * and outside tools (ADR-0260). */
-const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted']);
+/** What a proposal may be told: the owner turned this tool off for the chat, the member who asked may not use web pages
+ * and outside tools (ADR-0260), or a machine job's card named no such Notion page (machine jobs' reads). */
+const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted','notion_page_not_on_card']);
 /** What a machine command may be told, as services/hermes/machine_box.py names it: a refusal or a failure on the machine's side. */
 export {machineErrors};
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */

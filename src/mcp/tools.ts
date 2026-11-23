@@ -14,7 +14,7 @@ type Value=Record<string,unknown>;
 export const memoryRoutes={recall:'/v1/memory/longterm/recall',search:'/v1/memory/longterm/search',notes:'/v1/memory/recall',shared:'/v1/memory/context'} as const;
 /** What a job request may be told to correct; any other refusal stays opaque. The broker relays exactly these. */
 export const jobErrors=new Set(['invalid_job_request','job_not_permitted','job_not_found','job_not_running','job_in_a_job','job_box_not_allowed','job_changed','job_too_long','job_repo_not_allowed',
-  'job_machine_not_allowed','job_machine_not_found','job_card_too_long','job_hidden_characters']);
+  'job_machine_not_allowed','job_machine_not_found','job_card_too_long','job_hidden_characters','job_notion_not_allowed']);
 /** What a message request may be told: the chat is not one Nocheh serves (ADR-0254), or the member who asked may not post
  * to their other groups (ADR-0260). The broker relays exactly these. */
 export const actionErrors=new Set(['destination_not_served','member_post_not_allowed']);
@@ -22,7 +22,8 @@ export const actionErrors=new Set(['destination_not_served','member_post_not_all
  * relays exactly these. */
 export const taskErrors=new Set(['task_reminder_past','task_reminder_limit','invalid_task_reminders','invalid_task_reminder','task_reminders_off']);
 /** What the owner must do first, for a refusal the agent cannot correct by itself. */
-const jobNotes:Record<string,string>={job_machine_not_found:'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '+
+const jobNotes:Record<string,string>={job_notion_not_allowed:'A machine job reads the owner\'s own Notion pages only while the owner\'s Notion is on and lets reads run '+
+    'without asking. Ask without notion_pages, or put what the job needs from Notion in the instruction.',job_machine_not_found:'No machine of that name is ready for jobs. The owner must add it in Settings › Machines and press Test '+
   'there until the test passes. In the owner\'s private chat action=status lists the machines and whether each is ready; a group never lists them, so ask the owner for the exact name.'};
 
 /** A route's refusal: its status and the small error body, if any. */
@@ -144,6 +145,7 @@ async function backgroundJob(args:Value,context:ToolContext) {
     if(action==='start'&&typeof args.repo==='string'&&args.repo)body.repo=args.repo;
     if(action==='start'&&typeof args.machine==='string'&&args.machine)body.machine=args.machine;
     if(action==='start'&&Array.isArray(args.steps))body.steps=args.steps;
+    if(action==='start'&&Array.isArray(args.notion_pages))body.notion_pages=args.notion_pages;
     // Only the isolated runtime has sealed boxes, and only its broker reaches a machine.
     if(body.box&&!context.isolated)return text({error:'job_box_not_allowed'});
     if(body.machine&&!context.isolated)return text({error:'isolated_runtime_required'});
@@ -424,6 +426,8 @@ async function notion(args:Value,context:ToolContext) {
     return text({id:proposed.id,state:'running',note:'Still running; read it later with mcp__nocheh__action_status.'});
   }catch(error) {
     if(error instanceof Refused)return text(error.status===403&&code(error)==='tool_disabled_by_owner'?DISABLED:
+      error.status===403&&code(error)==='notion_page_not_on_card'?{error:'notion_page_not_on_card',note:'This job on the owner\'s machine reads only the Notion pages its card named, '+
+        'with notion-fetch and the page\'s id or address. Say in your report what else it would have needed.'}:
       {error:({400:'invalid_notion_call',403:'notion_not_usable_here',409:'notion_is_off_or_changed'} as Record<number,string>)[error.status]??'notion_unavailable'});
     return text({error:'notion_unavailable'});
   }
@@ -614,7 +618,10 @@ export const mcpTools:readonly McpTool[]=[
         'of 1-12 steps the owner approves on one card. Only for the owner\'s own request in their private chat or a project group. '+
         'Your terminal and file tools then run on that machine.'},
       steps:{type:'array',minItems:1,maxItems:12,items:{type:'string',maxLength:200},
-        description:'With start and machine: the plan, one short step per item, in order. The owner approves exactly this plan.'}},['action']),run:backgroundJob},
+        description:'With start and machine: the plan, one short step per item, in order. The owner approves exactly this plan.'},
+      notion_pages:{type:'array',minItems:1,maxItems:5,items:{type:'string',maxLength:300},
+        description:'With start and machine, only when the job must read pages of the owner\'s own Notion: each page\'s id or notion.so address. '+
+        'A machine job reads only the chat and period on its card, from before the owner approves, and only the Notion pages named here.'}},['action']),run:backgroundJob},
   {name:'telegram_destinations',description:'In a group: list the groups, with names and exact IDs, the person asking may post to through Nocheh: this group, and for the owner or a member who may post to their other groups, those groups. Use an exact ID from here as an action destination; a message to another group waits for a card.',
     inputSchema:shape({}),run:destinations},
   {name:'shell',description:'Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval, a standing permission or a rule the owner set for this chat is required; when one already allows it, this call returns its result.',
