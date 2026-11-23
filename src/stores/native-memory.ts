@@ -29,6 +29,7 @@ import {RECALL_FACT_LIMIT,guardedFactLine,planFactBlock,recallFactText,recallFac
 import {headerSource,sourceMoment,unavailableTag,type TagBy} from '../source-tags.js';
 import {bucketOf} from '../source-facts.js';
 import type {EngineFact} from '../memory/engine.js';
+import {MemoryWalls} from './memory-walls.js';
 
 /** The assistant is a peer whose messages are saved but never observed (ADR-0109). */
 export const assistantPeer='nocheh_assistant';
@@ -138,6 +139,9 @@ export class NativeMemoryRepository {
     readonly provenance:MemoryProvenanceRepository,readonly engine:MemoryEngine,readonly detect:(text:string,background?:boolean)=>Promise<unknown>,
     readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy(),contexts.access),
     readonly tags:SourceTagRepository|null=null){}
+  /** The walls group reads go through (ADR-0286). */
+  private wallStore:MemoryWalls|null=null;
+  get walls(){return this.wallStore??=new MemoryWalls(this.control,this.engine);}
   /** Where recalled facts came from (ADR-0261). */
   get factSources(){return new FactSourceRepository(this.control,this.contexts.access,this.sources);}
   private get protocol(){return this.engine.protocol;}
@@ -673,7 +677,9 @@ export class NativeMemoryRepository {
         const peers=(Array.isArray(row.peer_ids)&&row.peer_ids.length?row.peer_ids:[row.peer_id]).filter((value:unknown)=>typeof value==='string') as string[];
         const role=(peer:string)=>peer===assistantPeer?'silent' as const:peer===row.peer_id?'writer' as const:'subject' as const;
         for(const peer of peers){await this.authorizedReceipt(row);await this.engine.addParticipant(space,peer,role(peer));}
-        await this.authorizedReceipt(row);await this.engine.openSession(space,session,Object.fromEntries(peers.map(peer=>[peer,role(peer)])));
+        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned (ADR-0286).
+        const walls=await this.walls.of(space,row.audience);
+        await this.authorizedReceipt(row);await this.engine.openSession(space,session,Object.fromEntries(peers.map(peer=>[peer,role(peer)])),walls);
         let remote=this.observed(row,await this.engine.findWrites(space,session,id));
         if(!remote) {
           const createdAt=await this.occurredAt(row);
@@ -850,7 +856,7 @@ export class NativeMemoryRepository {
         if(step.done) {
           await db.query('BEGIN');
           try {
-            for(const table of ['memory_session_deletions','memory_sessions'])await db.query(`DELETE FROM ${table} WHERE workspace=$1`,[id]);
+            for(const table of ['memory_session_deletions','memory_walls','memory_sessions'])await db.query(`DELETE FROM ${table} WHERE workspace=$1`,[id]);
             await db.query('DELETE FROM memory_ingestion_receipts WHERE generation=$1',[id]);
             await db.query('DELETE FROM memory_generations WHERE id=$1',[id]);
             await db.query("UPDATE memory_workspace_deletions SET state='done',completed_at=now() WHERE workspace=$1",[id]);
@@ -1301,8 +1307,10 @@ export class NativeMemoryRepository {
       const syncing=current.row.state==='building';
       if(connected.clarification)return {sources:corrections,limited_memory:false,syncing,clarification_required:true,note:connected.clarification};
       // Group and topic recall reads only that audience's own sessions, or every session of its group when
-      // the group's topics share memory; owner recall spans the space.
-      const sessions=audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
+      // the group's topics share memory, or of its project's groups while the project shares them; owner recall spans
+      // the space. The engine keeps a group's reads inside the wall of exactly those chats (ADR-0286).
+      const walled=audience==='owner'?null:await this.walls.open(id,group?[...group,audience]:[audience]);
+      const sessions=audience==='owner'?null:walled?walled.sessions:await this.provenance.sessions(id,audience,1000,group),wall=walled?.wall;
       // Each peer is asked side by side, so recall waits for the slowest engine answer rather than their sum. The owner's
       // forwards and files are asked too, beyond the four, when they hold something learned before this question: in a
       // group only within its own sessions, and headed as other people's words.
@@ -1312,7 +1320,7 @@ export class NativeMemoryRepository {
       // The forwards-and-files ask fails on its own: the people and projects asked keep their answers, the result says
       // what is missing, and the stores count it for the owner's notice. Any other failed ask fails the recall, as before.
       const responses=await Promise.all(asked.map(item=>{
-        const ask=this.engine.ask(id,item.peer,String(question),{sessions,evidence:true});
+        const ask=this.engine.ask(id,item.peer,String(question),{sessions,...wall?{wall}:{},evidence:true});
         return item.peer===materialPeer?ask.then(response=>typeof response.text==='string'?response:null,()=>null):ask;
       }));
       const read=asked.flatMap((item,index)=>responses[index]?[{item,response:responses[index]!}]:[]);
@@ -1342,7 +1350,7 @@ export class NativeMemoryRepository {
       await this.current(id);await this.guards.prepareContext(output,this.protocol,actor,this.prepared,this.detect);
       const value=(await this.guards.read('derived_artifacts:'+output.id,current.binding)).value as {text:string};
       // The facts the answers read, each with its sources (B3.6): listed, and every one stored in a record of its own.
-      const facts=await this.recallFacts(current,principal,actor,{audience,group},sessions,
+      const facts=await this.recallFacts(current,principal,actor,{audience,group},sessions,wall,
         included.map(({item,response})=>({peer:item.peer,evidence:response.evidence})),root,output,requestId);
       await this.current(id);await this.prepared.audience.assert(principal);await this.prepared.allow(principal,value);
       // The answer is named by its record and the facts by theirs, so a stored tool row cites both and a retired source
@@ -1365,7 +1373,7 @@ export class NativeMemoryRepository {
    * Null for an engine that cannot list facts; a failed read says so (recall_facts_unavailable, counted). Either way the
    * caller lists the archived messages instead, as before.
    */
-  private async recallFacts(current:Current,principal:Reader,actor:Reader,scope:FactAudience,sessions:string[]|null,
+  private async recallFacts(current:Current,principal:Reader,actor:Reader,scope:FactAudience,sessions:string[]|null,wall:string|undefined,
     asked:readonly {peer:string;evidence:readonly string[]}[],root:Awaited<ReturnType<PreparedContextRepository['root']>>,answer:DerivativeReference,requestId:string):
     Promise<{record:string|null;listed:RecallFact[];count:number;limitations:string[];failed?:true}|null> {
     if(!this.engine.factsById||!this.tags)return null;
@@ -1376,7 +1384,8 @@ export class NativeMemoryRepository {
         .filter(item=>item.ids.length);
       const over=asked.reduce((total,item)=>total+new Set(item.evidence.filter(engineId)).size,0)>RECALL_FACT_LIMIT?['recall_fact_limit']:[];
       if(!wanted.length)return {record:null,listed:[],count:0,limitations:over};
-      const read=await Promise.all(wanted.map(item=>this.engine.factsById!(id,item.peer,item.ids,{sessions})));
+      // A wall's answer names the wall's own copies of facts (ADR-0286).
+      const read=await Promise.all(wanted.map(item=>this.engine.factsById!(id,item.peer,item.ids,{sessions,...wall?{wall}:{}})));
       await this.factBatchesFailed(read.flatMap(page=>page.limitations));
       const sourced=await Promise.all(wanted.map((item,index)=>this.factSources.sourced(principal,binding,id,item.peer,read[index]!.facts,scope)));
       const all=sourced.flatMap((list,index)=>list.map(item=>({peer:wanted[index]!.peer,item})));
@@ -1386,7 +1395,7 @@ export class NativeMemoryRepository {
         ...ordered.some(({item})=>!item.exact)?['some_facts_cite_only_their_batch']:[]])].sort();
       if(!ordered.length)return {record:null,listed:[],count:0,limitations};
       const stored:StoredFact[]=ordered.map(({n,peer,item})=>({n,conclusion:item.fact.id,peer,exact:item.exact,by:item.by,sources:item.sources,more:item.more,
-        complete:item.complete,session:item.fact.session,...item.place?{place:true}:{}}));
+        complete:item.complete,session:item.fact.session,...item.place?{place:true}:{},...wall?{wall}:{}}));
       // The facts with every source go on a record the guard never reads; only the text lines are guarded (factRecords).
       const text=Buffer.from(recallFactText(ordered.map(({n,item})=>({n,content:item.fact.content}))));
       const sources=await this.derived.record({operation_id:'native-recall-facts:'+requestId,source:root,parents:[answer],kind:'memory_result',
@@ -1433,7 +1442,9 @@ export class NativeMemoryRepository {
     if(!row||configuration.workspace!==current.row.id||audience!=='owner'&&configuration.audience!==audience)throw factUnavailable();
     // Whose fact it is: a recall's record names each one's participant, a per-turn block its one subject.
     const peerOf=(fact:StoredFact)=>typeof fact.peer==='string'?fact.peer:row.subject;
+    const wallOf=(fact:StoredFact)=>typeof fact.wall==='string'?fact.wall:undefined;
     const valid=(fact:StoredFact)=>Number.isSafeInteger(fact?.n)&&engineId(fact.conclusion)&&Array.isArray(fact.sources)&&
+      (fact.wall===undefined||typeof fact.wall==='string'&&/^wall-[a-f0-9]{40}$/.test(fact.wall))&&
       fact.sources.every(id=>typeof id==='string'&&/^[a-f0-9]{64}$/.test(id))&&engineId(peerOf(fact));
     const chosen=n===null?facts.slice(0,openedListed):facts.filter(fact=>fact?.n===n);
     if(!chosen.length||!chosen.every(valid))throw factUnavailable();
@@ -1455,9 +1466,11 @@ export class NativeMemoryRepository {
     };
     if(n===null) {
       // The first facts and the source each one's line names; one still held by the engine and with no retired source.
-      const peers=[...new Set(chosen.map(fact=>peerOf(fact)!))];
-      const held=forgotten?new Set<string>():new Set((await Promise.all(peers.map(peer=>this.engine.factsById!(space,peer,
-        chosen.filter(fact=>peerOf(fact)===peer).map(fact=>fact.conclusion),{sessions:null}))))
+      // Asked of whoever holds them: the participant, or the wall a group's recall read them in (ADR-0286).
+      const holderOf=(fact:StoredFact)=>canonical([peerOf(fact),wallOf(fact)??null]);
+      const holders=[...new Map(chosen.map(fact=>[holderOf(fact),{peer:peerOf(fact)!,wall:wallOf(fact)}])).entries()];
+      const held=forgotten?new Set<string>():new Set((await Promise.all(holders.map(([key,{peer,wall}])=>this.engine.factsById!(space,peer,
+        chosen.filter(fact=>holderOf(fact)===key).map(fact=>fact.conclusion),{sessions:null,...wall?{wall}:{}}))))
         .flatMap(page=>page.facts.map(fact=>fact.id)));
       const heads=chosen.map(fact=>forgotten||!held.has(fact.conclusion)?null:shown(fact)[0]??null);
       const tags=await this.tags.tags(principal,current.binding,heads.filter((head):head is SourceReference=>head!==null),
@@ -1470,7 +1483,7 @@ export class NativeMemoryRepository {
       })};
     }
     const fact=chosen[0]!;
-    if(forgotten||!await this.engine.factExists(space,peerOf(fact)!,fact.conclusion))throw factUnavailable();
+    if(forgotten||!await this.engine.factExists(space,peerOf(fact)!,fact.conclusion,wallOf(fact)))throw factUnavailable();
     // The record's guarded copy, prepared and read under the current binding, as recall reads its answer.
     await this.guards.prepareContext({store:'derived',kind:'artifact',id:row.id,input_hash:row.content_hash},this.protocol,actor,this.prepared,this.detect);
     const value=(await this.guards.read('derived_artifacts:'+row.id,current.binding)).value as {text?:unknown};
@@ -1508,11 +1521,15 @@ export class NativeMemoryRepository {
     // A bound reader searches the sessions of every group of its bound reads, and no other (ADR-0249): a member's own
     // private chat and an asked member's chat are never learned, so they have none (step 4).
     const set=!principal.admin&&boundReader(principal)!==null?this.contexts.access.reads(principal)!:null,reads=set?readSetParam(set):null;
-    const sessions=set?await this.provenance.readSetSessions(id,set,1000):audience==='owner'?null:await this.provenance.sessions(id,audience,1000,group);
+    // A group searches inside the wall of the chats its recall reads, and a bound reader (a member's private chat and its
+    // schedules, a private answer) inside the wall of its read set's groups (ADR-0286). The owner searches everything.
+    const chats=set?readSetIds(set):audience==='owner'?[]:group?[...group,audience]:[audience];
+    const walled=chats.length?await this.walls.open(id,chats):null;
+    const sessions=set?await this.provenance.readSetSessions(id,set,1000):audience==='owner'?null:walled?walled.sessions:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};
     // The question is checked for secrets before it reaches the engine, as a recall question is.
     const question=await this.prepared.prepare(actor,query,this.detect);
-    const found=await this.engine.search(id,String(question),{limit:Math.min(50,count*3),sessions});
+    const found=await this.engine.search(id,String(question),{limit:Math.min(50,count*3),sessions,...walled?{wall:walled.wall}:{}});
     const ids:string[]=[],from:{receipt:string;position:number}[]=[];
     for(const message of found.slice(0,50)) {
       if(!engineId(message.id)||!/^[a-f0-9]{64}$/.test(message.receipt))continue;

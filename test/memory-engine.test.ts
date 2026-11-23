@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {engineErrors,engineRejected,engineSummary} from '../src/memory/engine.js';
-import {HonchoEngine,honchoClient,readingInstructions,type HonchoCall} from '../src/memory/honcho.js';
+import {createHmac} from 'node:crypto';
+import {HonchoEngine,honchoClient,honchoKey,readingInstructions,wallKey,type HonchoCall} from '../src/memory/honcho.js';
+import {memoryWallName} from '../src/stores/memory-walls.js';
 import {materialPeer} from '../src/stores/native-memory.js';
 import {modelSourceWords} from '../src/source-labels.js';
 
@@ -338,4 +340,69 @@ test('citation coverage is counts only, and must add up',async()=>{
   const {calls,engine}=fake(()=>({explicit:10,cited:6,batch_only:3,none:2}));
   await assert.rejects(engine.citationCoverage('space'),{code:engineErrors.invalid});
   assert.equal(calls[0]!.path,'/v3/workspaces/space/nocheh/citation-coverage');
+});
+
+/** A Honcho key's claims, after checking its HS256 signature with `secret`. */
+const claims=(key:string,secret:string)=>{
+  const [header,body,signature]=key.split('.');
+  assert.equal(createHmac('sha256',secret).update(header+'.'+body).digest('base64url'),signature);
+  assert.deepEqual(JSON.parse(Buffer.from(header!,'base64url').toString()),{alg:'HS256',typ:'JWT'});
+  return JSON.parse(Buffer.from(body!,'base64url').toString());
+};
+
+test('Honcho keys are HS256 JWTs: the client\'s main key is an admin key, a wall key opens one wall for ten minutes (ADR-0286)',async()=>{
+  assert.deepEqual(claims(honchoKey('secret',{t:'x',ad:true}),'secret'),{t:'x',ad:true});
+  const now=Date.parse('2026-11-23T19:00:00Z'),wall=memoryWallName('space',['-100']);
+  assert.deepEqual(claims(wallKey('secret','space',wall,now),'secret'),
+    {t:'2026-11-23T19:00:00.000Z',w:'space',sc:wall,exp:now/1000+600,aud:'honcho:named-scope'});
+  const seen:(string|undefined)[]=[];
+  const server=createServer((req,res)=>{seen.push(req.headers.authorization);if(req.url?.endsWith('/sessions')){res.statusCode=204;res.end();}else res.end('{}');});
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  const address=server.address();assert.ok(address&&typeof address!=='string');
+  try {
+    const signed=honchoClient('http://127.0.0.1:'+address.port,'secret'),plain=honchoClient('http://127.0.0.1:'+address.port);
+    await signed('/v3/workspaces',{id:'x'});await signed('/v3/workspaces/x/peers/p/chat',{},undefined,'wall-key');await plain('/v3/workspaces',{id:'x'});
+    assert.deepEqual(claims(seen[0]!.replace('Bearer ',''),'secret'),{t:'nocheh',ad:true});
+    assert.equal(seen[1],'Bearer wall-key','a call that names its key sends that key only');
+    assert.equal(seen[2],undefined,'without a secret no key is sent');
+    assert.equal(await signed('/v3/workspaces/x/scopes/w/sessions',{session_ids:['s']}),null,'adding sessions to a wall answers 204 with no body');
+  }finally{server.closeAllConnections();server.close();await once(server,'close');}
+});
+
+test('a wall is named by its chats and asked by name with its own key; its facts are the wall\'s own copies (ADR-0286)',async()=>{
+  assert.equal(memoryWallName('space',['-2','-1','-1']),memoryWallName('space',['-1','-2']));
+  assert.notEqual(memoryWallName('space',['-1']),memoryWallName('space',['-1','-2']),'another chat makes another wall');
+  assert.notEqual(memoryWallName('space',['-1']),memoryWallName('other',['-1']));
+  assert.match(memoryWallName('space',['-1']),/^wall-[a-f0-9]{40}$/);
+  const wall=memoryWallName('space',['-1']),calls:{path:string;body:any;key:string|undefined}[]=[];
+  let status:Record<string,unknown>={a:{state:'pending'}};
+  const call:HonchoCall=async(path,body,_method,key)=>{calls.push({path,body,key});
+    if(path.endsWith('/chat'))return {content:'answer',evidence:{conclusions:[{id:id(1)}]}};
+    if(path.endsWith('/status'))return {backfill_status:status};
+    if(path.endsWith('/search'))return [];
+    if(path.includes('/conclusions/list'))return {items:[conclusion(1,{observer_id:'scope.'+wall})],next_page:null};
+    return {};};
+  const engine=new HonchoEngine(call,'secret');
+  await engine.ask('space','person','question?',{sessions:['s1'],wall,evidence:true});
+  assert.deepEqual(calls.at(-1)!.body,{query:'question?',reasoning_level:'low',stream:false,include_evidence:true,scope:wall},'the wall replaces the session list');
+  assert.equal(claims(calls.at(-1)!.key!,'secret').sc,wall);
+  await engine.search('space','query',{limit:5,sessions:['s1'],wall});
+  assert.deepEqual(calls.at(-1)!.body,{query:'query',limit:5,scope:wall});
+  assert.equal(calls.at(-1)!.key,undefined,'search goes by the wall\'s name with the main key');
+  const found=await engine.factsById('space','person',[id(1)],{sessions:['s1'],wall});
+  assert.deepEqual(found.facts.map(f=>f.id),[id(1)]);
+  assert.equal(calls.filter(c=>c.path.includes('/conclusions/list')).at(-1)!.body.filters.observer_id,'scope.'+wall);
+  assert.equal(await engine.factExists('space','person',id(1),wall),true);
+  await assert.rejects(engine.ask('space','person','q',{sessions:null,wall:'scope.other',evidence:false}),{code:'invalid_memory_wall'});
+  // A wall is made, sessions added a hundred a call, and it is ready once nothing is still being copied.
+  calls.length=0;
+  await engine.openWall('space',wall,Array.from({length:150},(_,n)=>'s'+n));
+  assert.deepEqual(calls.map(c=>[c.path,c.body?.session_ids?.length??c.body]),[
+    ['/v3/workspaces/space/scopes',{id:wall}],['/v3/workspaces/space/scopes/'+wall+'/sessions',100],['/v3/workspaces/space/scopes/'+wall+'/sessions',50]]);
+  assert.equal(await engine.wallReady('space',wall),false);
+  status={a:{state:'completed'}};assert.equal(await engine.wallReady('space',wall),true);
+  status={};assert.equal(await engine.wallReady('space',wall),true,'nothing to copy is ready');
+  status={a:{state:'failed'}};await assert.rejects(engine.wallReady('space',wall),{code:'memory_wall_copy_failed'});
+  await engine.openSession('space','s1',{person:'writer'},[wall]);
+  assert.deepEqual(calls.at(-1)!.body.scopes,[wall],'a new session joins its chat\'s walls');
 });

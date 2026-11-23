@@ -37,7 +37,9 @@ def honcho_env(password, token, model):
     """The fixture Honcho's settings: its own database, cache and provider gateway, with the real setup's limits and the
     way it asks its model for answers (honcho_setup.py), so the tester's Honcho takes and answers what Nocheh's does."""
     native = {'DB_CONNECTION_URI': f'postgresql+psycopg://experiment:{password}@honcho-postgres:5432/honcho_experiment',
-        'CACHE_URL': 'redis://honcho-redis:6379/0?suppress=true', 'CACHE_ENABLED': 'true', 'AUTH_USE_AUTH': 'false',
+        'CACHE_URL': 'redis://honcho-redis:6379/0?suppress=true', 'CACHE_ENABLED': 'true',
+        # Keys are checked, as in the real setup (ADR-0286): signed with the token the fixture's app holds.
+        'AUTH_USE_AUTH': 'true', 'AUTH_JWT_SECRET': token,
         'PYTHON_DOTENV_DISABLED': '1', 'HONCHO_CONFIG_TOML_DISABLED': '1', 'LLM_OPENAI_API_KEY': token,
         'EXPERIMENT_INTERNAL_TOKEN': token, 'DERIVER_WORKERS': '1', 'DERIVER_FLUSH_ENABLED': 'true',
         'DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS': '0', 'DERIVER_REPRESENTATION_BATCH_MAX_AGE_SECONDS': '1',

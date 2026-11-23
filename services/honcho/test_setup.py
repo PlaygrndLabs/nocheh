@@ -34,6 +34,18 @@ class HonchoSetupTests(unittest.TestCase):
             self.assertEqual(values['DERIVER_FLUSH_ENABLED'], 'true')
             self.assertEqual(values['DERIVER_REPRESENTATION_BATCH_WORK_UNIT_TARGET_TOKENS'], '0')
 
+    def test_setup_checks_keys_signed_with_the_token_the_app_holds(self):
+        from tools.operations.installation.configuration import initialize, read_env
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            initialize(state)
+            with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
+                honcho_setup.initialize(state)
+            values = read_env(state / 'honcho/honcho.env')
+            # Walls (ADR-0286): Honcho refuses any call without a key signed with the token the app holds.
+            self.assertEqual(values['AUTH_USE_AUTH'], 'true')
+            self.assertEqual(values['AUTH_JWT_SECRET'], (state / 'honcho/internal_token').read_text().strip())
+
     def test_setup_takes_the_longest_query_and_keeps_model_inputs_within_the_guard(self):
         from tools.operations.installation.configuration import initialize, read_env
         with tempfile.TemporaryDirectory() as folder:

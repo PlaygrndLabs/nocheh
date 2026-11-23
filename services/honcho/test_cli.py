@@ -2,9 +2,17 @@ import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-from .cli.cli_runner import validate,read_request
+from .cli.cli_runner import admin_key,validate,read_request
 
 class CliTests(unittest.TestCase):
+    def test_admin_key_is_an_hs256_admin_jwt(self):
+        import base64,hashlib,hmac
+        header,claims,signature=admin_key('synthetic-secret').split('.')
+        decode=lambda part:json.loads(base64.urlsafe_b64decode(part+'='*(-len(part)%4)))
+        self.assertEqual(decode(header),{'alg':'HS256','typ':'JWT'});self.assertEqual(decode(claims),{'t':'nocheh-cli','ad':True})
+        expected=base64.urlsafe_b64encode(hmac.new(b'synthetic-secret',(header+'.'+claims).encode(),hashlib.sha256).digest()).rstrip(b'=').decode()
+        self.assertEqual(signature,expected)
+
     def test_read_lookup_never_creates_and_missing_is_error(self):
         calls=[]
         def original(client,method,path,**kwargs):

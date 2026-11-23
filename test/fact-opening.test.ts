@@ -8,6 +8,7 @@ import {mcpTools} from '../src/mcp/tools.js';
 import {privateAnswerRoute} from '../src/stores/private-answers.js';
 import {scopedRoute} from '../src/security/broker.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
+import {memoryWallName} from '../src/stores/memory-walls.js';
 import {factRecords} from '../src/stores/fact-sources.js';
 import {installChatsForTest} from '../src/chats.js';
 import {legacyDirectory} from './fixture-groups.js';
@@ -89,7 +90,9 @@ function recallFixture(state:{conclusions:Conclusion[];evidence:string[];guard?:
   const memory=new NativeMemoryRepository(contexts as any,derived as any,prepared as any,provenance as any,engine,async()=>[],notes as any,tags as any);
   const current={row:{id:workspace,root_reference:root,state:'ready',last_ready_at:new Date()},binding,principal:{}};
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],current:async()=>current,
-    connectedPeers:async()=>({items:[{peer:BOB,path:'speaker → Bob'}],partial:false})});
+    connectedPeers:async()=>({items:[{peer:BOB,path:'speaker → Bob'}],partial:false}),
+    // The group reads through its wall, which holds its two sessions (ADR-0286).
+    wallStore:{of:async()=>[],open:async(id:string,chats:readonly string[])=>({wall:memoryWallName(id,chats),sessions:groupSessions})}});
   const reader={admin:false,scope:GP1,space:GP1,turnEvent:root.id} as Reader;
   return {memory,reader,records,lists,tagged,problems,allowed,workspace,groupSessions};
 }
@@ -113,8 +116,9 @@ test('a recall lists the facts its answer read with their sources, cited first, 
   // Only the text lines are guarded: every source id stays on its unguarded parent (M1).
   assert.deepEqual([text.provenance.facts,text.provenance.parents[0].id,text.content],[undefined,facts.id,facts.content]);
   assert.ok(!('evidence_sources' in source),'the facts list replaces the archived-message list');
-  assert.deepEqual(fixture.lists.at(-1),{observer_id:BOB,observed_id:BOB,level:'explicit',id:{in:[batch.id,pin.id,likes.id,elsewhere.id]},session_id:{in:fixture.groupSessions}},
-    'the facts are read by id, within the sessions the group\'s recall asked');
+  assert.deepEqual(fixture.lists.at(-1),{observer_id:'scope.'+memoryWallName(fixture.workspace,[GP1]),observed_id:BOB,level:'explicit',
+    id:{in:[batch.id,pin.id,likes.id,elsewhere.id]},session_id:{in:fixture.groupSessions}},
+    'the facts are read by id as the wall\'s own copies, within the sessions the group\'s recall asked (ADR-0286)');
   assert.equal(source.evidence_count,3,'a fact outside the group\'s sessions is never read');
   assert.deepEqual(source.facts.map((fact:any)=>[fact.n,fact.text,fact.exact,fact.by,fact.more]),[
     [1,'Fact pinfact second line',true,'person',0],[2,'Fact teafact second line',false,'person',0],[3,'Fact batchfact second line',false,'person',0]],

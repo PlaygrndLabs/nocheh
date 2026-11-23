@@ -38,11 +38,17 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
     source_id:String(payload.message?.message_id??payload.message_reaction?.message_id),revision:String(payload.update_id),occurred_at:null,text:payload.message?.text??null,payload});
   const detect=async(text:string)=>text.includes('fixture-secret')?['fixture-secret']:[];
   const authority={owner:'inngest' as const,epoch:1};let calls=0,response:unknown;
+  const walls=new Map<string,string[]>();
   const call=async(path:string,body:any)=>{
+    // Topic learning reasons inside the wall of that topic alone, which holds its learned sessions (ADR-0286).
+    const scope=/\/scopes\/([^/]+)\/(sessions|status)$/.exec(path);
+    if(path.endsWith('/scopes'))return {};
+    if(scope?.[2]==='sessions'){walls.set(scope[1]!,[...walls.get(scope[1]!)??[],...body.session_ids]);return {};}
+    if(scope?.[2]==='status')return {backfill_status:{}};
     calls++;assert.match(path,/\/peers\/person_[a-f0-9]{64}\/chat$/,'the only effect is bounded Honcho reasoning for the actual speaker');
     assert.ok(body.query.includes('message_reaction'));assert.ok(!body.query.includes('fixture-secret'));
     assert.ok(!body.query.includes('nested-unverified-target'));
-    assert.ok(Array.isArray(body.filters?.session_id)&&body.filters.session_id.length>0,'topic learning reasons only over that topic\'s own sessions');
+    assert.ok(body.filters===undefined&&(walls.get(body.scope)?.length??0)>0,'topic learning reasons only over that topic\'s own sessions');
     assert.deepEqual(body.response_format,learningResultSchema,'Honcho checks and repairs the answer\'s JSON');
     return {content:typeof response==='string'?response:JSON.stringify(response)};
   };

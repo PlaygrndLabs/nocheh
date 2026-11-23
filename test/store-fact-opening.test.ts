@@ -29,11 +29,18 @@ test('a recall\'s facts open by their record and number until a source is retire
   const first=session('first'),second=session('second');
   type Conclusion={id:string;content:string;observer_id:string;observed_id:string;level:'explicit';session_id:string;times_derived:number;created_at:string;source_message_ids:string[]|null};
   const conclusions:Conclusion[]=[],batches=new Map<string,{message_id:string;receipt_id:string}[]>();let evidence:string[]=[];
+  // A wall's copies of facts are its own, observed by the wall (ADR-0286); here they keep the copied fact's id.
+  const walls=new Map<string,Set<string>>();
   const engine=honchoEngine(async(path:string,body:any)=>{
+    const scope=/\/scopes\/([^/]+)\/(sessions|status)$/.exec(path);
+    if(path.endsWith('/scopes'))return {};
+    if(scope?.[2]==='sessions'){for(const id of body.session_ids)(walls.get(scope[1]!)??walls.set(scope[1]!,new Set()).get(scope[1]!)!).add(id);return {};}
+    if(scope?.[2]==='status')return {backfill_status:{}};
     if(path.endsWith('/chat'))return {content:'Bob gave his PIN and likes tea.',evidence:{conclusions:evidence.map(id=>({id})),messages:[],tool_calls:[]}};
     if(path.includes('/conclusions/list')) {
       const f=body.filters,size=Number(new URL('http://h'+path).searchParams.get('size'));
-      const items=conclusions.filter(c=>c.observer_id===f.observer_id&&c.observed_id===f.observed_id&&c.level===f.level&&(!f.session_id||f.session_id.in.includes(c.session_id))&&
+      const wall=String(f.observer_id).startsWith('scope.')?walls.get(f.observer_id.slice(6))??new Set():null;
+      const items=conclusions.flatMap(c=>wall&&c.observer_id===c.observed_id&&wall.has(c.session_id)?[{...c,observer_id:f.observer_id}]:[c]).filter(c=>c.observer_id===f.observer_id&&c.observed_id===f.observed_id&&c.level===f.level&&(!f.session_id||f.session_id.in.includes(c.session_id))&&
         (!f.id||f.id.in.includes(c.id)));
       return {items:items.slice(0,size),next_page:items.length>size?'next':null};
     }
