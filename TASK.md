@@ -30,8 +30,8 @@ Nocheh is in development mode and not yet released. Everything below is built an
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
   Nocheh's records by fixed reading instructions, and mentioned people keep no unread copies
   ([ADR-0275](docs/adr/0275-honcho-3-6-2-and-reading-instructions.md)). Memory thinking is priced as it
-  runs and may get a monthly dollar limit, off by default, in place of the request count
-  ([ADR-0277](docs/adr/0277-memory-thinking-has-a-dollar-limit.md), proposed).
+  runs and has an optional monthly dollar limit, off by default, in place of the request count
+  ([ADR-0277](docs/adr/0277-memory-thinking-has-a-dollar-limit.md)).
 - Assistant: a "what matters now" list and a morning brief through Hermes notes and its
   scheduler; a schedule approved once sends to the owner's private chat without a card.
 - Connections: a service connects to a project (shared) or a person (private). Notion per

@@ -1,7 +1,8 @@
 # ADR-0277: Memory thinking has a dollar limit
 
 <status>
-Proposed on 2026-11-23, waiting for the owner's choice on a decision card. Amends
+Accepted on 2026-11-23. The owner chose, on a decision card, "Thinking dollar limit, off by
+default" over counting thinking in the memory search cap or only renaming. Amends
 [ADR-0079](0079-separated-honcho-budgets-and-settlement.md) and
 [ADR-0078](0078-owner-honcho-budget-control.md): memory thinking's request-count limit becomes a
 monthly dollar limit. Keeps the earlier owner rule that thinking runs freely until the owner
