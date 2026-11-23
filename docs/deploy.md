@@ -391,8 +391,10 @@ login that has bash, also your own, since Stop ends only the programs a job star
 With coreutils' `timeout` (on macOS, Homebrew's `gtimeout`, on the PATH that SSH
 commands get, for example from `~/.zshenv`), a command past its time limit also ends
 on the machine; with bash 4 or later too, a command's reply ends when its script does,
-even when it leaves a program running. Set `Subsystem sftp internal-sftp` in the
-machine's `sshd_config`, in place of its other `sftp` line, and restart SSH: Nocheh reads
+even when it leaves a program running. The setup command the Machines page copies
+also sets `Subsystem sftp internal-sftp` in the machine's `sshd_config`, in place of its
+`sftp` line (it asks for the password once, keeps the old file as `sshd_config.nocheh`
+and puts it back if `sshd -t` refuses the change): Nocheh reads
 the login's start-up files and tools over SFTP before and after each job, and with this
 setting no program of the login runs to answer, so nothing a job left there can change
 what Nocheh reads. A Test also checks whether the login can act as admin (`sudo -n true`),

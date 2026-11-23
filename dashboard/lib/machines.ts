@@ -119,16 +119,31 @@ export const endpoint = (machine: Pick<Machine, 'login' | 'address' | 'port'>) =
 
 /** The one line that tells the owner how the public key gets on the machine. */
 export const setupLine = (login: string) =>
-  `On the machine, signed in as ${login}, paste the setup command into a terminal, or add the public key to ~${login}/.ssh/authorized_keys yourself. Then press Test.`;
+  `On the machine, signed in as ${login}, paste the setup command into a terminal: it adds the public key to ~${login}/.ssh/authorized_keys and sets “Subsystem sftp internal-sftp” for SSH, asking for the password once. Then press Test.`;
 
+const SFTP = 'Subsystem sftp internal-sftp';
 /** A shell command, for the owner to paste on the machine, that adds the public key to the login's authorized_keys once,
- *  on a line of its own (also after a last line with no newline), with the modes SSH asks for. */
-export const setupCommand = (publicKey: string) => {
+ *  on a line of its own (also after a last line with no newline), with the modes SSH asks for; then turns the sftp line
+ *  of sshd_config into `internal-sftp` (ADR-0284). A config with no sftp line, or one sshd -t refuses after the change,
+ *  is left as it was. `place` is for tests. */
+export const setupCommand = (
+  publicKey: string,
+  place = {config: '/etc/ssh/sshd_config', sudo: 'sudo ', sshd: '/usr/sbin/sshd', systemctl: 'systemctl'},
+) => {
   const key = `'${publicKey.replaceAll("'", `'\\''`)}'`;
   const file = '~/.ssh/authorized_keys';
+  const {config, sudo, sshd, systemctl} = place;
+  const kept = `${config}.nocheh`;
   return (
     `mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ${file} && chmod 600 ${file} && ` +
-    `{ grep -qxF -- ${key} ${file} || { [ -z "$(tail -c 1 ${file})" ] || echo >> ${file}; printf '%s\\n' ${key} >> ${file}; }; }`
+    `{ grep -qxF -- ${key} ${file} || { [ -z "$(tail -c 1 ${file})" ] || echo >> ${file}; printf '%s\\n' ${key} >> ${file}; }; } && ` +
+    `if grep -qx '${SFTP}' ${config}; then echo 'SSH already uses internal-sftp.'; ` +
+    `elif ! grep -qE '^[[:space:]]*Subsystem[[:space:]]+sftp[[:space:]]' ${config}; then echo 'Add "${SFTP}" to ${config} yourself.'; ` +
+    `else ${sudo}cp -p ${config} ${kept} && ` +
+    `sed -E 's/^[[:space:]]*Subsystem[[:space:]]+sftp[[:space:]].*/${SFTP}/' ${kept} | ${sudo}tee ${config} >/dev/null && ` +
+    `if [ -x ${sshd} ] && ! ${sudo}${sshd} -t; then ${sudo}cp -p ${kept} ${config}; echo 'SSH refused the change; nothing changed.'; ` +
+    `else { ! command -v ${systemctl} >/dev/null || ${sudo}${systemctl} reload ssh 2>/dev/null || ${sudo}${systemctl} reload sshd 2>/dev/null || true; }; ` +
+    `echo 'SSH now uses internal-sftp.'; fi; fi`
   );
 };
 
@@ -177,7 +192,7 @@ export function machineErrorPhrase(code: string | null | undefined): string {
 
 /** The one VM setting the start-up files check needs (machine jobs' start-up files). */
 export const sftpHint =
-  'Add “Subsystem sftp internal-sftp” to the machine’s sshd_config, in place of its other sftp line, and restart SSH: then nothing a job leaves there can change what Nocheh reads.';
+  'Paste the setup command on the machine again: it sets “Subsystem sftp internal-sftp” in sshd_config, so nothing a job leaves there can change what Nocheh reads. Then press Test.';
 /** What a machine's row says of its admin rights and of what the last job changed, in short lines. */
 export function machineNotes(machine: Machine): {text: string; tone: 'warn' | 'muted'}[] {
   const notes: {text: string; tone: 'warn' | 'muted'}[] = [];
