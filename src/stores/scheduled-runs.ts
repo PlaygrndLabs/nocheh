@@ -11,7 +11,7 @@ import type {RuntimeTurnRepository} from './turns.js';
 import {OperationRepository} from './operations.js';
 import {ManagedExecutionRepository,managedEventId,managedIdentity,type ManagedInput} from './managed-execution.js';
 import type {ScheduleRepository} from './schedules.js';
-import type {TelegramActionRepository} from './telegram-actions.js';
+import {silentResult,type TelegramActionRepository} from './telegram-actions.js';
 import {ownerChat} from '../assistant-policy.js';
 import {servedDestination} from '../destinations.js';
 import {currentChats} from './chats.js';
@@ -100,6 +100,37 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
       runs.push({event_id:row.event_id,state:row.state,created_at:row.created_at,error_code:row.error_code,text:observed.text,
         native_session:session,payload:{profile:observed.visible?this.turns.profile(this.principal(row),row.binding):null,logical_profile:profile}});
     }return {runs};
+  }
+  /** One schedule's runs for the Schedules page, newest first: when each began and ended, whether it was timed or Run now,
+   *  and how it ended; never what it said (ADR-0266). A schedule is named by its chat and job, as the page lists it. */
+  async runLog(scope:string,job:string){
+    const chat=string(scope,200),id=managedIdentity(job);
+    const rows=(await this.control.query(`SELECT r.event_id,r.created_at,r.updated_at,r.state,r.fire_reason,r.error_code,r.result_reference,
+      v.configuration->>'deliver' AS deliver,(SELECT a.state FROM telegram_action_requests a WHERE a.source_reference->>'id'=r.event_id
+      ORDER BY a.created_at DESC LIMIT 1) AS send
+      FROM managed_runs r LEFT JOIN schedule_versions v ON v.id=r.schedule_version
+      WHERE r.channel='scheduler' AND r.scope=$1 AND r.job_id=$2 ORDER BY r.created_at DESC,r.event_id DESC LIMIT 50`,[chat,id])).rows;
+    const runs=[];
+    for(const row of rows) {
+      let result:string;
+      if(['captured','running'].includes(row.state))result='running';
+      else if(row.state==='cancelled')result=['missed','overlap'].includes(row.fire_reason)?'skipped':'stopped';
+      else if(row.state!=='done')result='failed';
+      else {
+        // A run with only [SILENT] had nothing new; Run now in the owner's private chat said so in one line.
+        const receipt=row.result_reference?await this.derived.checkpoint('scheduler-result:'+row.event_id):null;
+        const said=receipt?String(JSON.parse(receipt.content.toString()).text??''):'';
+        if(!said.trim()||silentResult(said))result='nothing_new';
+        else if(row.send==='done')result='sent';
+        else if(row.send==='proposed')result='waiting';
+        else if(row.send==='rejected')result='declined';
+        else if(['approved','running'].includes(row.send))result='sending';
+        else result=row.deliver==='telegram'?'not_sent':'kept';
+      }
+      runs.push({id:row.event_id.slice(0,12),started_at:row.created_at,finished_at:result==='running'?null:row.updated_at,
+        trigger:row.fire_reason==='manual'?'run_now':row.fire_reason==='catch_up'?'catch_up':'timed',result,error_code:row.error_code??null});
+    }
+    return {runs};
   }
   async delivery(input:unknown){return this.actions.requestScheduled({admin:true,scope:null},managedEventId(object(input).event_id));}
   override async run(id:string,authority:ExecutionAuthority):Promise<Observation>{const result=await super.run(id,authority);

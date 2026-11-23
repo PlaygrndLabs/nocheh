@@ -853,6 +853,11 @@ const server=createServer((req,res)=>{void(async()=>{
       running:false,pending:false,set_in_chat:true,owner_chat:true,chat_title:null},
     {id:'0f9e8d7c6b5a',profile:'nocheh-'+'2'.repeat(24),scope:'-10042',name:'Weekly review',schedule:'0 17 * * 5',timezone:null,enabled:false,state:'paused',
       next_run_at:null,last_run_at:null,last_status:null,last_error:null,last_delivery_error:null,running:false,pending:false,set_in_chat:false,owner_chat:false,chat_title:'Fixture group'}]});
+  if(route==='/schedules/runs'){const at=(hours:number,seconds:number)=>({started_at:new Date(Date.now()-hours*36e5).toISOString(),finished_at:new Date(Date.now()-hours*36e5+seconds*1000).toISOString()});
+   return json(res,200,{runs:url.searchParams.get('job_id')!=='a1b2c3d4e5f6'?[]:[
+    {id:'aaaaaaaaaaa1',...at(1,32),trigger:'run_now',result:'nothing_new',error_code:null},
+    {id:'aaaaaaaaaaa2',...at(24,41),trigger:'timed',result:'sent',error_code:null},
+    {id:'aaaaaaaaaaa3',...at(48,12),trigger:'timed',result:'failed',error_code:'runtime_execution_interrupted'}]});}
   if(route==='/memory/profiles'){const current=[{owner:true,scope:'42',profile},{owner:false,scope:'-10042',profile:'fixture-group'}];
    // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
    // After a reinstall: an earlier setup's notes for the private chat, listed first by Hermes; the page still opens on

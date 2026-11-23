@@ -132,6 +132,19 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const uncertain=await capture();mode='running';await run(uncertain.event_id);native.delete(uncertain.event_id);
     assert.equal((await run(uncertain.event_id)).state,'ambiguous');assert.equal((await s.scheduled.delivery(uncertain)).state,'withheld');
     const cancelled=await capture();await s.scheduled.cancel(cancelled);assert.equal((await run(cancelled.event_id)).state,'cancelled');
+    // Each schedule's runs for the Schedules page: when, timed or Run now, and how each ended, never what it said (ADR-0266).
+    const log=async(item:{scope:string;job:string})=>(await s.scheduled.runLog(item.scope,item.job)).runs;
+    assert.deepEqual((await log(own)).map(item=>[item.trigger,item.result]),[['run_now','sending']]);
+    await stores.control.query("UPDATE telegram_action_requests SET state='done' WHERE id=$1",[sent.id]);
+    assert.deepEqual((await log(own)).map(item=>item.result),['sent']);
+    assert.deepEqual((await log(quiet)).map(item=>[item.trigger,item.result]),[['timed','nothing_new']]);
+    assert.deepEqual((await log(pressed)).map(item=>item.result),['nothing_new']);
+    assert.deepEqual((await log(delivered)).map(item=>item.result),['waiting']);
+    assert.deepEqual((await log(local)).map(item=>item.result),['kept']);
+    assert.deepEqual((await log(cancelled)).map(item=>item.result),['stopped']);
+    assert.ok(!JSON.stringify(await log(own)).includes('fixture-secret'),'a run log never carries what a run said');
+    assert.deepEqual(await log({scope:'-123',job:own.job}),[],'a job is listed only in its own chat');
+    await assert.rejects(s.scheduled.runLog('123','../x'),{code:'invalid_run_identity'});
     // The owner stopped serving the group as its run finished: the result is held back, and the owner is told once, by the
     // run (ADR-0254). Nothing is proposed.
     mode='done';const unserved=await capture({scope:'-123',deliver:'telegram',prompt:'Group result fixture'});deselect=true;
