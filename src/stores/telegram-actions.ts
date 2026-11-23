@@ -278,6 +278,9 @@ export class TelegramActionRepository {
         [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision,asker,sendClass]);
       const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
+      // The same request asked again once decided, such as a scheduled run's result delivered again, keeps its one decision:
+      // judged again it would be logged as waiting for approval although it was already approved or sent.
+      if(row.state!=='proposed'){await db.query('COMMIT');return {id,state:row.state,fingerprint,message:'This exact message was already decided; its state is '+row.state+'.'};}
       const effect=this.effect(row);let decision=await evaluate(db,effect);
       // The owner freedom setting lets the owner's own live private request
       // approve itself. Deny rules are evaluated first and still block it.

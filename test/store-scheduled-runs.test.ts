@@ -99,6 +99,8 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.deepEqual(row,{state:'approved',send_class:'scheduled_run',destination:'123'});
     assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM security_events WHERE state='allowed' AND rule='owner_scheduled_chat'")).rows[0].n,1);
     assert.equal(((await s.scheduled.delivery(own)) as {id?:string}).id,sent.id,'one send for the run');
+    assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM security_events WHERE effect_id=$1 AND state='awaiting_approval'",[sent.id])).rows[0].n,0,
+      'delivering again logs no wait for approval');
     answer='[SILENT]';const quiet=await capture({scope:'123',deliver:'telegram',fire_reason:'scheduled'});await run(quiet.event_id);
     assert.deepEqual(await s.scheduled.delivery(quiet),{state:'local'});
     const pressed=await capture({scope:'123',deliver:'telegram'});await run(pressed.event_id);
