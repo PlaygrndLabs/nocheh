@@ -15,7 +15,7 @@ import {MEMBER_APP_BODY_MAX,MEMBER_APP_CORE_PREFIX,MEMBER_APP_PAGE,MEMBER_APP_PU
  * owner's own Telegram ID is read.
  */
 const routes:[string,RegExp][]=[
-  ['GET',/^\/(?:status|settings|decisions|tools\/actions|tasks|schedules|memory-access\/requests|conversations|entities|monitoring)$/],
+  ['GET',/^\/(?:status|settings|decisions|tools\/actions|tasks|schedules|schedules\/runs|memory-access\/requests|conversations|entities|monitoring)$/],
   // Pause, Resume, Run now or Delete on a schedule (ADR-0266).
   ['POST',/^\/schedules$/],
   ['POST',/^\/workflows\/retry-failed$/],

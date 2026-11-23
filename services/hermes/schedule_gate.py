@@ -1,4 +1,5 @@
-"""Hermes's own schedule tool (cronjob_manage) in the owner's private chat, within what Nocheh runs (ADR-0266).
+"""Hermes's own schedule tool (cronjob_manage) in the owner's private chat, or a member's own with Personal assistant on
+(members' schedules), within what Nocheh runs (ADR-0266). A member's turn binds how many schedules they may keep.
 
 The turn writes the chat's own Hermes schedule store, mounted into the sealed turn; Nocheh's scheduler captures each new
 or changed schedule there before it may run, fires it as a sealed turn and sends its result to this chat. Hermes's
@@ -19,12 +20,16 @@ EMPTY=(None,'',False,[],{})
 RUN_REFUSED=("Nocheh runs each schedule at its own time and sends the result to this chat; it cannot run one inside this "
              "reply. To change when it runs, update its schedule.")
 OPTION_REFUSED="Nocheh runs a schedule only as a prompt on its schedule, sent to this chat. Leave out: {names}."
-UNBOUND="Schedules can be set only from the owner's own message in their private chat."
+UNBOUND="Schedules can be set only from the owner's own message in their private chat, or a member's own in theirs."
 ZONE_REFUSED="{zone} is not a time zone name. Use one such as Europe/Berlin, or leave it out for the owner's own."
 LIMIT="This chat already has {count} schedules, the most allowed. Remove one first."
 NOTE=("Nocheh runs this at its time as a fresh reply with this chat's tools and memory, and sends the result to this chat. "
       "A run with nothing worth sending should answer only [SILENT]. The owner sees and manages schedules on the "
       "dashboard's Schedules page and in the mini app.")
+# A member's own schedules (members' schedules): they see and manage them in the members' app; the owner sees them too.
+MEMBER_NOTE=("Nocheh runs this at its time as a fresh reply in this chat, reading only what this chat reads, and sends the "
+             "result to this chat. A run with nothing worth sending should answer only [SILENT]. The member sees and manages "
+             "their schedules in the members' app, and the owner sees them too.")
 # What a result keeps: Hermes's own warnings speak of its gateway and its delivery targets, which Nocheh replaces.
 KEPT={'success','error','job_id','name','schedule','repeat','next_run_at','count','jobs','removed_job','job'}
 
@@ -91,7 +96,7 @@ def tool_result(tool_name='',result=None,**_):
         if not isinstance(value,dict):return None
         kept={key:value[key] for key in KEPT if key in value}
         if value.get('success') is True:
-            kept['note']=NOTE
+            kept['note']=NOTE if _BOUND['limit'] is None else MEMBER_NOTE
             if isinstance(kept.get('job_id'),str) and _BOUND['count'] is not None:
                 with _LOCK:_BOUND['count']+=1
         return json.dumps(kept,ensure_ascii=False)

@@ -247,6 +247,25 @@ export function MemberDetail({
                     )
                   }
                 />
+                <Row
+                  id="member-assistant"
+                  title="Personal assistant"
+                  hint={
+                    allowed.private_chat
+                      ? 'They set their own schedules by asking in their private chat, such as a morning brief, and each result comes there with no card. Runs read only what they may read. They see their schedules in the members’ app; you see all of them on the Schedules page. Off, their schedules stop running and are kept.'
+                      : 'Needs Private chat with Nocheh. Their switch is kept for when you give it back.'
+                  }
+                  nested
+                  checked={allowed.assistant}
+                  disabled={busy || !allowed.private_chat}
+                  onChange={on =>
+                    void change(
+                      'assistant',
+                      {assistant: on},
+                      on ? `${name} can set their own schedules.` : `${name}’s schedules stop now.`,
+                    )
+                  }
+                />
               </div>
             </Card>
             <Card>

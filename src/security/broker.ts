@@ -194,8 +194,13 @@ export function brokerServer(options:BrokerOptions) {
         const transport=object(await rpc(options.hermes,'/internal/security/transport',{metadata:true},'Bearer '+options.token));
         if(!Number.isSafeInteger(transport.model_context_length)||Number(transport.model_context_length)<1)throw new HttpError(503,'model_context_metadata_required');
         // Without the box token the launcher can fill no box, so no step gets one.
+        // A member's own live turn in their private chat, with Personal assistant on: the launcher mounts that chat's
+        // schedule store, as for the owner's own reply (members' schedules). Storage still checks each turn's tool.
+        const memberSchedules=boundReader(principal)==='member'&&!binding.job&&!binding.owner&&principal.scope!==null&&principal.memberChat===principal.scope&&
+          !!(await options.pool.query(`SELECT 1 FROM chats c JOIN chat_accounts a ON a.id=c.account_id JOIN members m ON m.id=a.member_id
+            WHERE c.id=$1 AND c.kind='private' AND m.id=$2 AND m.state='active' AND m.private_chat AND m.assistant`,[principal.scope,principal.member])).rowCount;
         return json(res,200,{...binding,box:box&&boxTokenSet()?await box.binding(binding):null,machine:machines?await machines.binding(binding):null,
-          model:options.model,model_context_length:transport.model_context_length,plugin:manifest});
+          model:options.model,model_context_length:transport.model_context_length,plugin:manifest,...(memberSchedules?{member_schedules:true}:{})});
       }
       if(path==='/v1/guard'&&req.method==='POST') {
         const body=object(await readJson(req,1024*1024));
@@ -225,7 +230,9 @@ export function brokerServer(options:BrokerOptions) {
         if(knowledge&&!tasks&&(!binding.owner||(binding.job&&!ownerRead)||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');
         // A task list is also a project's, in that project's chat (ADR-0164, ADR-0243): a live turn, the owner's private one or a
         // group's, never a review. Storage checks which list and shows a project's chat only its board view.
-        if(tasks&&((binding.job&&!ownerRead)||binding.owner!==(principal.scope===null)||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'task_turn_required');
+        // A schedule's run in a member's own chat reads that member's task lists the same way, which storage checks.
+        const memberRead=req.method==='GET'&&tasks&&!binding.owner&&principal.scope!==null&&boundReader(principal)==='member';
+        if(tasks&&((binding.job&&!ownerRead&&!memberRead)||binding.owner!==(principal.scope===null)||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'task_turn_required');
         const input=req.method==='POST'?await readJson(req,exec?MACHINE_BODY:1024*1024):undefined,body=input===undefined?undefined:JSON.stringify(input);
         // A job asks for the box only where one can be filled: refused now, not failed at every step.
         if(relay==='/v1/jobs/start'&&(input as {box?:unknown}|null)?.box===true&&!boxTokenSet())throw new HttpError(409,'job_box_not_allowed');

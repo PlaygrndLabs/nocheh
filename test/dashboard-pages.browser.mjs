@@ -3385,6 +3385,55 @@ test('a member’s private chat with Nocheh is its own switch, kept apart from g
   await page.close();
 });
 
+test('Personal assistant is a member’s own switch under Private chat, and the schedule cap is saved for every member', async () => {
+  const {page, problems} = await open('members?member=' + MIRA);
+  const posts = memberPosts(page);
+  await page.getByRole('heading', {name: 'Mira Chen', level: 2}).waitFor();
+  const toast = text => page.getByRole('status').filter({hasText: text}).last().waitFor();
+  await memberPart(page, 'Private chat and groups');
+  const assistant = page.getByRole('switch', {name: 'Personal assistant', checked: false});
+  await page.getByText('They set their own schedules by asking in their private chat', {exact: false}).waitFor();
+  await assistant.click();
+  await toast('Mira Chen can set their own schedules.');
+  await page.getByRole('switch', {name: 'Personal assistant', checked: true}).click();
+  await toast('Mira Chen’s schedules stop now.');
+  // Without a private chat it can't be switched, and says why.
+  await page.getByRole('switch', {name: 'Private chat with Nocheh', checked: true}).click();
+  await page.getByText('Needs Private chat with Nocheh.', {exact: false}).waitFor();
+  assert.equal(await page.getByRole('switch', {name: 'Personal assistant'}).isDisabled(), true);
+  await page.getByRole('switch', {name: 'Private chat with Nocheh', checked: false}).click();
+  await page.getByRole('switch', {name: 'Personal assistant'}).and(page.locator(':not([disabled])')).waitFor();
+  assert.deepEqual(
+    posts.map(({path, body}) => [path, body.changes]),
+    [
+      ['/members/' + MIRA, {assistant: true}],
+      ['/members/' + MIRA, {assistant: false}],
+      ['/members/' + MIRA, {private_chat: false}],
+      ['/members/' + MIRA, {private_chat: true}],
+    ],
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+  // The cap every member shares, with its own Save.
+  const caps = await open('members');
+  await caps.page.getByRole('heading', {name: 'Schedules per member'}).waitFor();
+  await caps.page.getByText('Each member with Personal assistant can keep 5 schedules.').waitFor();
+  const field = caps.page.getByLabel('Schedules each member may keep');
+  const save = caps.page.locator('form', {has: field}).getByRole('button', {name: 'Save'});
+  const saved = text => caps.page.getByRole('status').filter({hasText: text}).last().waitFor();
+  await field.fill('0');
+  await caps.page.getByText('Choose a whole number from 1 to 50.').waitFor();
+  await field.fill('3');
+  await save.click();
+  await saved('Each member can keep 3 schedules.');
+  await caps.page.getByText('Each member with Personal assistant can keep 3 schedules.').waitFor();
+  await field.fill('5');
+  await save.click();
+  await saved('Each member can keep 5 schedules.');
+  assert.deepEqual(caps.problems, []);
+  await caps.page.close();
+});
+
 test('the Members page shows the owner-only local laws line, from a text the owner can edit', async () => {
   const {page, problems} = await open('members');
   const line = page.getByTestId('members-local-laws');
@@ -3816,6 +3865,51 @@ test('the members’ app still removes the member’s own reminders when new one
   await page.getByText('You have no reminders waiting.').waitFor();
   assert.deepEqual(problems, []);
   await page.close();
+  await resetMembers();
+});
+
+test('the members’ app lists the member’s own schedules in Settings, which they pause, resume, run now and delete', async () => {
+  await resetMembers();
+  const {page, problems, answers} = await openMember(201);
+  await memberTab(page, 'Settings').click();
+  const list = page.getByRole('list', {name: 'Schedules'});
+  await settles(list.getByRole('listitem'), 2);
+  await page.getByText('2 of 5 schedules').waitFor();
+  await page
+    .getByText('Ask Nocheh in your private chat to set one, such as a morning brief.', {exact: false})
+    .waitFor();
+  const brief = list.getByRole('listitem').filter({hasText: 'Morning brief'});
+  const wrap = list.getByRole('listitem').filter({hasText: 'Friday wrap-up'});
+  await wrap.getByText('Paused', {exact: false}).waitFor();
+  await brief.getByRole('button', {name: 'Pause'}).click();
+  await page.getByText('Schedule paused.').waitFor();
+  await brief.getByRole('button', {name: 'Resume'}).click();
+  await page.getByText('Schedule resumed.').waitFor();
+  await brief.getByRole('button', {name: 'Run now'}).click();
+  await page.getByText('Running now. The result comes to your private chat.').waitFor();
+  // Delete asks once more on the same button.
+  await wrap.getByRole('button', {name: 'Delete'}).click();
+  await wrap.getByRole('button', {name: 'Tap again to delete'}).click();
+  await page.getByText('Schedule deleted.').waitFor();
+  await settles(list.getByRole('listitem'), 1);
+  const posted = answers
+    .filter(answer => answer.path.startsWith('/api/member/schedules/'))
+    .map(answer => [answer.path, JSON.parse(answer.request).action]);
+  assert.deepEqual(posted, [
+    ['/api/member/schedules/a1b2c3d4e5f6', 'pause'],
+    ['/api/member/schedules/a1b2c3d4e5f6', 'resume'],
+    ['/api/member/schedules/a1b2c3d4e5f6', 'run'],
+    ['/api/member/schedules/f6e5d4c3b2a1', 'delete'],
+  ]);
+  assert.deepEqual(problems, []);
+  await page.close();
+  // A member without Personal assistant sees no Schedules card.
+  const other = await openMember(202);
+  await memberTab(other.page, 'Settings').click();
+  await other.page.getByRole('heading', {name: 'Reminders', exact: true}).waitFor();
+  assert.equal(await other.page.getByRole('heading', {name: 'Schedules'}).count(), 0);
+  assert.ok(!other.answers.some(answer => answer.path === '/api/member/schedules'));
+  await other.page.close();
   await resetMembers();
 });
 
