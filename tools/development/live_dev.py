@@ -22,7 +22,7 @@ def dev_images(project):
     return project + '-dev'
 SERVICES = ('nocheh-db', 'nocheh-app', 'nocheh-dashboard', 'nocheh-executor', 'nocheh-machines',
             'nocheh-security', 'hermes-agent-sb', 'inngest-redis', 'inngest-server',
-            'hermes', 'nocheh-telegram', 'honcho-postgres', 'honcho-redis',
+            'nocheh-reader', 'hermes', 'nocheh-telegram', 'honcho-postgres', 'honcho-redis',
             'honcho-provider-gateway', 'honcho-api', 'honcho-deriver')
 PORTS = (8780, 8783, 8785)
 FIXTURE_PROJECT = re.compile(r'nocheh-installation-[0-9a-f]{12}')

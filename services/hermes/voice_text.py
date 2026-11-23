@@ -1,6 +1,9 @@
 """Text of a voice note or audio file for Nocheh's preparation step, by Hermes's own transcriber.
 
 Nocheh keeps the original audio and checks this text for secrets; this only transcribes it.
+The recording is decoded by nocheh-reader, away from every key, in a process and login of its
+own (ADR-0285), and made again as mono Ogg Opus without metadata or pictures; only that reaches
+the transcriber, with the length the reader measured.
 Hermes's transcriber converts audio a provider rejects, trims silence and splits long
 recordings. The provider and model are chosen in Settings › Models (Voice notes). Each
 recording is transcribed in a child process that holds only that provider's key, bounded in
@@ -21,7 +24,7 @@ import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from . import usage
+from . import reader_client, usage
 
 LIMIT = 50 * 1024 * 1024
 TEXT_LIMIT = 1_000_000
@@ -64,7 +67,15 @@ def transcribe(body):
     if len(data) > LIMIT:
         return {'state': 'too_large'}
     hint = {name: body.get(name) if isinstance(body.get(name), str) else '' for name in ('name', 'mime_type', 'kind')}
-    hint['duration'] = body.get('duration') if type(body.get('duration')) in (int, float) and 0 <= body['duration'] < 10**6 else None
+    stated = body.get('duration') if type(body.get('duration')) in (int, float) and 0 <= body['duration'] < 10**6 else None
+    # The recording is decoded away from every key; only the mono Ogg Opus the reader made from it is transcribed.
+    made, data = reader_client.read('audio', data, hint)
+    if made.get('state') != 'done':
+        return {'state': made['state'] if made.get('state') in ('unsupported', 'too_large') else
+                'too_large' if made.get('reason') == 'timed_out' else 'unsupported'}
+    seconds = made.get('seconds')
+    hint = {'name': 'voice.ogg', 'mime_type': 'audio/ogg', 'kind': hint['kind'],
+            'duration': seconds if type(seconds) in (int, float) and 0 <= seconds < 10**6 else stated}
 
     def bounded():
         import resource
@@ -122,16 +133,6 @@ def suffix(hint):
     return ''
 
 
-def duration(path):
-    try:
-        found = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path],
-                               capture_output=True, text=True, timeout=30, check=False).stdout.strip()
-        value = float(found)
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        return None
-    return value if math.isfinite(value) and value >= 0 else None
-
-
 def reason(error):
     """Why Hermes's transcriber failed, as one of the usage tracker's reasons."""
     if error.startswith(('Connection error', 'Request timeout')):
@@ -160,7 +161,7 @@ def read(data, hint):
     with tempfile.TemporaryDirectory(prefix='voice-') as work:
         path = str(Path(work, 'voice' + kind))
         Path(path).write_bytes(data)
-        seconds = duration(path)
+        seconds = hint.get('duration')
         result = transcribe_audio(path)
     text = result.get('transcript') if isinstance(result, dict) else None
     if isinstance(result, dict) and result.get('success') and isinstance(text, str) and text.strip():
