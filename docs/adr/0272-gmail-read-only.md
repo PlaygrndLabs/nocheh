@@ -33,17 +33,20 @@ mode can't be changed later.
    - `read_thread {id}`: a whole conversation, up to 60,000 characters in all.
 
    Each input is checked (`src/gmail-arguments.ts`).
-4. **Only the owner's private chat.** The owner's private chat, in a live turn, runs a lookup
-   with no card (authority `gmail_read:own`). A lookup is refused, with 403 `gmail_not_here`, in
-   a group (even a project's), a member's or stranger's private chat, or a job. It is checked
+4. **Only the owner's private chat.** The owner's private chat, in a live turn or a schedule's
+   running run, runs a lookup with no card (authority `gmail_read:own`). A lookup is refused, with
+   403 `gmail_not_here`, in a group (even a project's), a member's or stranger's private chat, or
+   a background job. It is checked
    again right before it runs (`gmailRunRefusal`).
 5. **The answer** goes through the same secret check as every operation result. Nothing is
    copied into memory.
 
 ## Consequences
 
-- Scheduled runs and background jobs can't read mail yet. A morning brief that reads mail
-  would need a job rule like Notion's (ADR-0225).
+- A schedule's running run in the owner's private chat, such as a morning brief, reads mail
+  as a live turn does, with no card (added 2026-11-23, as for Notion and GitHub in ADR-0278).
+  It is checked again before it runs and refused once the run has ended. Background jobs still
+  can't read mail.
 - Each member who later connects their own Gmail (step 5) needs their own Personal mode project.
 - If the Gmail API is off in the project, the owner sees `gmail_api_off` in plain words.
 - Checks: `services/hermes/test_gmail_connection.py`, `test/store-gmail-lookups.test.ts`, the

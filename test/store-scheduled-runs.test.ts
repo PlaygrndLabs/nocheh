@@ -14,6 +14,7 @@ import {controlStorageWorkflow} from '../src/stores/workflow-owner.js';
 import {safeMetadata} from '../src/workflows/boundary.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {githubRunRefusal} from '../src/stores/github-lookups.js';
+import {gmailRunRefusal} from '../src/stores/gmail-lookups.js';
 import {notionRunRefusal} from '../src/stores/notion.js';
 
 test('scheduled execution uses guarded operation roots and stages exact delivery without reopening a closed turn',
@@ -50,14 +51,15 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
       await assert.rejects(s.tasks.chatCreate(principal,{title:'From a schedule'}),{code:'task_read_only'});
       assert.equal(await s.knowledge.ownerReader(principal),id);
       await assert.rejects(s.knowledge.ownerTurn(principal),{code:'owner_private_turn_required'},'a run is not the owner\'s live message');
-      // It reads the owner's GitHub and Notion with no card; a change still asks (ADR-0278).
+      // It reads the owner's GitHub, Notion and Gmail with no card; a change still asks (ADR-0278, ADR-0272).
       if(!lookups.length) {
         const ask=async(args:Record<string,unknown>)=>s.controlledActions.propose(principal,{kind:'mcp',arguments:args}) as Promise<{state:string;id:string}>;
         lookups.push(await ask(github),await ask({connection:'notion',tool:'notion-search',input:{query:'reading list'}}),
-          await ask({connection:'notion',tool:'notion-create-pages',input:{pages:[{properties:{title:'Plan'}}]}}));
+          await ask({connection:'notion',tool:'notion-create-pages',input:{pages:[{properties:{title:'Plan'}}]}}),await ask(gmail));
         const row=(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[0]!.id])).rows[0];
         refusals.push(await githubRunRefusal(stores.control,row,'123',github),
-          await notionRunRefusal(stores.control,{...(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[1]!.id])).rows[0]},'123',{}));
+          await notionRunRefusal(stores.control,{...(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[1]!.id])).rows[0]},'123',{}),
+          await gmailRunRefusal(stores.control,(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[3]!.id])).rows[0],'123'));
       }
     } else {
       await assert.rejects(s.tasks.chatList(principal,{}),{status:403});
@@ -72,7 +74,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const s=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>({enabled:true,owner_id:'123',group_ids:groups}),runtime,
     memoryEngine:honchoEngine(async()=>{throw Error('no providers');})}),owner={admin:true,scope:null};
   const authority=async()=>({owner:'inngest' as const,epoch:(await s.schedules.ownership()).epoch});
-  const github={connection:'github',tool:'search_code',input:{repo:'example-org/mine',query:'made up'}};
+  const github={connection:'github',tool:'search_code',input:{repo:'example-org/mine',query:'made up'}},gmail={connection:'gmail',tool:'search_mail',input:{query:'invoice'}};
   const capture=async(options:Record<string,unknown>={})=>{
     const scope=String(options.scope??'123'),profile='nocheh-'+digest(scope).slice(0,24),job='execution-'+base+'-'+(++serial);
     const definition={profile,name:'Fixture',prompt:'Prompt fixture-secret',schedule:{kind:'interval',minutes:60},deliver:'local',repeat:null,enabled:true,removed:false,
@@ -87,10 +89,11 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   try{
     await s.guards.reconcile();await s.guards.setMode('on');await s.notion.save(owner,{enabled:true,expected_revision:0});
     const local=await capture();mode='ack_lost';assert.equal((await run(local.event_id)).state,'waiting');assert.equal((await run(local.event_id)).state,'completed');
-    assert.deepEqual(lookups.map(item=>item.state),['approved','approved','proposed'],'reads run with no card, a change asks');
-    assert.deepEqual(refusals,[null,null],'while the run goes on');
+    assert.deepEqual(lookups.map(item=>item.state),['approved','approved','proposed','approved'],'reads run with no card, a change asks');
+    assert.deepEqual(refusals,[null,null,null],'while the run goes on');
     const looked=(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[0]!.id])).rows[0];
     assert.equal(await githubRunRefusal(stores.control,looked,'123',github),'github_not_here','once the run ended');
+    assert.equal(await gmailRunRefusal(stores.control,(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[3]!.id])).rows[0],'123'),'gmail_not_here');
     assert.equal((await s.scheduled.delivery(local)).state,'local');
     assert.equal(calls.filter(call=>call.op==='run.start'&&call.body.event_id===local.event_id).length,1);
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
