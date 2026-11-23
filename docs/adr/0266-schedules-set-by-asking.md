@@ -55,7 +55,9 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
 6. **Results with no card in the owner's private chat.** A scheduled result for the
    owner's private chat is sent there as a trusted `scheduled_run` send, through the
    usual guard and delivery path, with no card. A group's result still waits for the
-   owner's card. A result that is only `[SILENT]` or `[NO_REPLY]` is not sent.
+   owner's card. A result that is only `[SILENT]` or `[NO_REPLY]` is not sent, except
+   after Run now in the owner's private chat: the owner is waiting, so one fixed,
+   editable line says there was nothing new.
 7. **One Schedules page.** The dashboard's Schedules page and the mini app's
    Schedules tab list every chat's schedules in one table (name, chat, when, next
    run, last result) with Pause or Resume, Run now and Delete, through the brain's

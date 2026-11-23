@@ -435,8 +435,9 @@ export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerTe
 export const scheduleNoticeTexts=['set: ⏰ New schedule: {name}','when: 🔁 {when}','next: ⏭ Next run: {next}',
   'note: Each result comes here, and a run with nothing new sends nothing. All schedules are on the Schedules page.',
   'pause: ⏸ Pause','delete: 🗑 Delete','paused: ⏸ Paused. Resume it on the Schedules page.','deleted: 🗑 Deleted.',
-  'unnamed: a schedule','no_next: none','changed: This schedule changed or is gone. See the Schedules page.','only_owner: Only the owner can do this.'].join('\n');
-export type ScheduleNoticeText='set'|'when'|'next'|'note'|'pause'|'delete'|'paused'|'deleted'|'unnamed'|'no_next'|'changed'|'only_owner';
+  'unnamed: a schedule','no_next: none','changed: This schedule changed or is gone. See the Schedules page.','only_owner: Only the owner can do this.',
+  'quiet: ✅ Ran now: nothing new right now.'].join('\n');
+export type ScheduleNoticeText='set'|'when'|'next'|'note'|'pause'|'delete'|'paused'|'deleted'|'unnamed'|'no_next'|'changed'|'only_owner'|'quiet';
 /** The schedule notice lines, with any line the owner removed or left empty, or stored without a value it must keep, taken
  * from the default. */
 export function scheduleNoticeLines(text:string|undefined):Record<ScheduleNoticeText,string> {

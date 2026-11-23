@@ -282,7 +282,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'schedules.notice_texts',
     title: 'Schedules: when one is set in your chat',
-    hint: 'One “name: text” line each: set ({name}), when ({when}), next ({next}) and note are the lines of the message after a reply sets a schedule in your private chat; pause and delete are its buttons; paused and deleted answer a press; unnamed and no_next stand in for a missing name or next run; changed and only_owner answer a press that cannot act. A line you remove keeps its default.',
+    hint: 'One “name: text” line each: set ({name}), when ({when}), next ({next}) and note are the lines of the message after a reply sets a schedule in your private chat; pause and delete are its buttons; paused and deleted answer a press; unnamed and no_next stand in for a missing name or next run; changed and only_owner answer a press that cannot act; quiet is what Run now sends there when there is nothing new. A line you remove keeps its default.',
   },
   {
     key: 'telegram.chat_adds',
