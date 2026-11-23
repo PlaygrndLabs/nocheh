@@ -28,7 +28,7 @@ AUTHORIZE, TOKEN, REGISTER = ISSUER + '/authorize', ISSUER + '/token', ISSUER + 
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26')
 PENDING_SECONDS = 600
 # How long an account lookup that Notion could not answer waits before the dashboard asks again.
-ACCOUNT_RETRY_SECONDS = 3600
+ACCOUNT_RETRY_SECONDS = 300
 
 
 PROJECT = re.compile(r'[a-f0-9]{64}')
@@ -59,7 +59,7 @@ def post(url, body, form=True, opener=None):
 
 def status(state, project=None, look=None, now=time.time):
     """What the dashboard shows about a sign-in, never a token. With `look`, a sign-in whose Notion account is not
-    known yet asks Notion once who it is (again after an hour when Notion could not say), and keeps the answer."""
+    known yet asks Notion once who it is (again after five minutes when Notion could not say), and keeps the answer."""
     grant = read(state, project).get('grant') or {}
     checked = grant.get('account_checked_at')
     if look and grant.get('access_token') and not grant.get('account') and (checked is None or checked + ACCOUNT_RETRY_SECONDS <= now()):

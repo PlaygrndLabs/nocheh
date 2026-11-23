@@ -80,6 +80,7 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
             health = service.health()
             self.assertEqual({key: health[key] for key in ABILITIES if key in health},
                              {'can_join_groups': True, 'can_read_all_group_messages': False, 'supports_inline_queries': True})
+            self.assertEqual(health['bot_username'], 'synthetic_fixture_bot', 'the dashboard shows which bot is connected')
 
     def test_connected_needs_a_recent_poll(self):
         with tempfile.TemporaryDirectory() as folder:

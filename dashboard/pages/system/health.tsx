@@ -384,10 +384,15 @@ function Connections({m}: {m: any}) {
                 detail={
                   !m.telegram_enabled
                     ? 'Nocheh doesn’t receive or answer Telegram messages.'
-                    : telegramReason(status.telegram_details?.error_code) ||
-                      (status.telegram_details?.last_poll_at
-                        ? `Last checked for messages ${ago(status.telegram_details.last_poll_at)}`
-                        : undefined)
+                    : [
+                        status.telegram_details?.bot_username ? '@' + status.telegram_details.bot_username : '',
+                        telegramReason(status.telegram_details?.error_code) ||
+                          (status.telegram_details?.last_poll_at
+                            ? `Last checked for messages ${ago(status.telegram_details.last_poll_at)}`
+                            : ''),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || undefined
                 }
               />
               <ConnectionRow

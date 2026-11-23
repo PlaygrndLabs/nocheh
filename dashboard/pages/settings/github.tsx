@@ -18,6 +18,7 @@ import {
   Button,
   Card,
   CardHeader,
+  Facts,
   Details,
   Input,
   LoadError,
@@ -308,7 +309,7 @@ export function GithubConnection() {
             </Badge>
           ) : data.connected ? (
             <Badge tone="good" dot>
-              Connected
+              Connected{data.app ? ' to ' + data.app.account : ''}
             </Badge>
           ) : (
             <Badge dot>Not connected</Badge>
@@ -336,16 +337,24 @@ export function GithubConnection() {
           title="GitHub app"
           stack={!data.connected}
           description={
-            data.connected && data.app
-              ? 'Nocheh reads through its app ' +
-                data.app.name +
-                ' on ' +
-                data.app.account +
-                (connectedAt ? ', made ' + dateTime(connectedAt) : '') +
-                '. Choose which repositories it may read on GitHub.'
-              : data.reconnect
-                ? reconnectHelp
-                : connectHelp
+            data.connected && data.app ? (
+              <>
+                <Facts
+                  rows={[
+                    ['Account', data.app.account],
+                    ['App', data.app.name],
+                    ['Made', connectedAt ? dateTime(connectedAt) : ''],
+                  ]}
+                />
+                <span className="mt-1.5 block">
+                  Nocheh reads through this app. Choose which repositories it may read on GitHub.
+                </span>
+              </>
+            ) : data.reconnect ? (
+              reconnectHelp
+            ) : (
+              connectHelp
+            )
           }
         >
           {data.connected && data.app ? (

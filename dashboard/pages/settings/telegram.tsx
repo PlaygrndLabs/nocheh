@@ -2,7 +2,7 @@ import {useSubTab} from '../../lib/navigation';
 import {useResource} from '../../lib/resource';
 import {useSettings} from '../../lib/settings';
 import {href} from '../../lib/routes';
-import {Badge, Card, CardHeader, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
+import {Badge, Card, CardHeader, Facts, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
 import {LinkButton} from '../../ui/link-button';
 import {SubPanel, SubTabs} from '../../ui/page';
 import {FindIdButton, FoundPeople, useFindTelegramId} from './telegram-id';
@@ -76,6 +76,9 @@ export function TelegramSettings() {
   const known = (identities.data?.groups ?? []).flatMap((g: any) => g.users ?? []).find((u: any) => u.id === owner);
   const enabled = s.value('TELEGRAM_ENABLED') === 'true';
   const token = s.field('TELEGRAM_BOT_TOKEN');
+  // Which bot the saved token belongs to, once Nocheh's Telegram service has asked Telegram.
+  const monitoring = useResource<any>('/monitoring');
+  const bot: string | undefined = monitoring.data?.runtime?.status?.telegram_details?.bot_username;
   const finder = useFindTelegramId();
   // Finding the ID reads the bot's messages, which only the saved token and Telegram turned off allow.
   const savedOn = s.saved('TELEGRAM_ENABLED') === 'true';
@@ -137,9 +140,16 @@ export function TelegramSettings() {
                 </>
               }
               description={
-                token?.configured
-                  ? 'A token is saved. Paste a new one only to replace it.'
-                  : 'From @BotFather in Telegram.'
+                token?.configured ? (
+                  <>
+                    <Facts rows={[['Bot', bot && !s.changed('TELEGRAM_BOT_TOKEN') ? '@' + bot : '']]} />
+                    <span className={bot ? 'mt-1.5 block' : undefined}>
+                      A token is saved. Paste a new one only to replace it.
+                    </span>
+                  </>
+                ) : (
+                  'From @BotFather in Telegram.'
+                )
               }
               htmlFor="telegram-token"
             >

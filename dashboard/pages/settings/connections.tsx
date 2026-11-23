@@ -15,6 +15,7 @@ import {
   Button,
   Card,
   CardHeader,
+  Facts,
   Details,
   Input,
   LoadError,
@@ -273,14 +274,27 @@ export function NotionConnection({
         <SettingRow
           title="Notion sign-in"
           description={
-            status.connected
-              ? (status.method === 'token' ? 'Signed in with an MCP token' : 'Signed in through Notion') +
-                (notionAccount(status) ? ' as ' + notionAccount(status) : '') +
-                (status.connected_at ? ', ' + when(new Date(status.connected_at * 1000).toISOString()) : '') +
-                '. Notion decides which pages Nocheh can see.'
-              : status.reconnect
-                ? 'Notion ended the sign-in. Connect again to keep using it.'
-                : 'Notion opens in this tab. Pick the workspace and the pages Nocheh may use, then press Allow.'
+            status.connected ? (
+              <>
+                <Facts
+                  rows={[
+                    ['Account', status.account_name],
+                    ['Email', status.account_email],
+                    ['Workspace', status.workspace],
+                    [
+                      'Signed in',
+                      (status.connected_at ? when(new Date(status.connected_at * 1000).toISOString()) : '') +
+                        (status.method === 'token' ? ' with an MCP token' : ''),
+                    ],
+                  ]}
+                />
+                <span className="mt-1.5 block">Notion decides which pages Nocheh can see.</span>
+              </>
+            ) : status.reconnect ? (
+              'Notion ended the sign-in. Connect again to keep using it.'
+            ) : (
+              'Notion opens in this tab. Pick the workspace and the pages Nocheh may use, then press Allow.'
+            )
           }
         >
           <div className="flex flex-wrap gap-2 sm:justify-end">
