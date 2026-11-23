@@ -47,11 +47,13 @@ class ProfileCatalog:
 
     def validate(self, entry):
         try:
-            # The owner's private chat, or a served group or one of its topics, as the app's served list has them (ADR-0252).
+            # The owner's private chat, or a served group or one of its topics, as the app's served list has them (ADR-0252),
+            # or a member's own chat whose member has Personal assistant on, for its schedules (it has no topics).
             chat, space, owner = entry['scope'], entry['space'], entry['owner']
             served = self.policy.current(None, 5.0, lambda served: served.chat_of(space) is not None)
+            assistant = not owner and served.member_assistant(chat) and space == chat
             if (type(owner) is not bool or not served.owner_chat or owner != (chat == served.owner_chat) or
-                chat != served.owner_chat and served.group(chat) != chat or
+                chat != served.owner_chat and served.group(chat) != chat and not assistant or
                 not isinstance(space, str) or served.chat_of(space) != chat or space != chat and owner):
                 raise ValueError()
             logical, preference = entry['logical_profile'], entry['preference_profile']

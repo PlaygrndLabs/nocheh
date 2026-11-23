@@ -1,6 +1,6 @@
 import {blockingPublications} from './publications.js';
 import type pg from 'pg';
-import {admin,type Reader} from '../access.js';
+import {admin,boundReader,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {enterFamily,leaveFamily,releaseOperation,requestWorkflow} from '../workflows/store.js';
@@ -161,32 +161,59 @@ export class ScheduleRepository {
 /** What a reply may do with Hermes's schedule tool (ADR-0266). */
 export interface ScheduleTurnRules {allowed:boolean;time_zone:string;limit:number|null;count:number|null}
 interface ScheduleTurnServices {
-  knowledge:{ownerTurn(principal:Reader):Promise<{source:{channel?:string;kind:string;origin:string;reference:{id:string}}}>};
+  knowledge:{ownerTurn(principal:Reader):Promise<{source:TurnSource}>;liveGroupTurn(principal:Reader):Promise<{source:TurnSource}>};
   stores:{archive:pg.Pool;control:pg.Pool};
 }
+type TurnSource={channel?:string;kind:string;origin:string;reference:{id:string}};
 /**
  * Whether a reply may set the chat's schedules with Hermes's schedule tool: a live reply in the owner's private chat
  * (ownerTurn, which refuses anything else) to the owner's own Telegram message, not a forward. A schedule runs in the
- * owner's time zone (Settings › Tasks). Members are step 3: their own limit and count come with it.
+ * owner's time zone (Settings › Tasks). Or a member's live reply in their own private chat (members' schedules), bound
+ * to that chat, while they have Personal assistant on: the same, with how many schedules they may keep (Members ›
+ * Schedules per member) and how many that chat keeps now. A member's schedule runs in the owner's time zone too, unless
+ * they name another.
  */
 export async function scheduleTurn(s:ScheduleTurnServices,principal:Reader):Promise<ScheduleTurnRules> {
-  const {source}=await s.knowledge.ownerTurn(principal);
   const refused={allowed:false,time_zone:'UTC',limit:null,count:null};
+  const member=boundReader(principal)==='member';
+  let limits:{limit:number|null;count:number|null}={limit:null,count:null};
+  if(member) {
+    const chat=principal.memberChat;
+    if(!chat||principal.scope!==chat||principal.space!==chat)return refused;
+    const row=(await s.stores.control.query<{limit:number}>(`SELECT d.member_schedules AS limit FROM members m CROSS JOIN member_directory_state d
+      WHERE m.id=$1 AND m.state='active' AND m.private_chat AND m.assistant AND d.singleton`,[principal.member])).rows[0];
+    if(!row)return refused;
+    limits={limit:Number(row.limit),count:await chatSchedules(s.stores.control,chat)};
+  }
+  const {source}=member?await s.knowledge.liveGroupTurn(principal):await s.knowledge.ownerTurn(principal);
   if(source.channel!=='telegram'||source.kind!=='telegram_update'||source.origin!=='live')return refused;
   const original=(await s.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.reference.id])).rows[0];
   let message:unknown=null;
   try{message=original?(JSON.parse(original.payload.toString()) as {message?:unknown}).message:null;}catch{message=null;}
   if(!message||typeof message!=='object'||forwardedMessage(message as Record<string,unknown>))return refused;
-  return {allowed:true,time_zone:await ownerTimeZone(s.stores.control),limit:null,count:null};
+  return {allowed:true,time_zone:await ownerTimeZone(s.stores.control),...limits};
+}
+/** How many schedules a chat keeps now: each one captured and not removed. */
+export async function chatSchedules(control:Pick<pg.Pool,'query'>,chat:string):Promise<number> {
+  return Number((await control.query(`SELECT count(*) AS count FROM workflow_schedules s JOIN schedule_versions v ON v.id=s.version_id
+    WHERE s.scope=$1 AND NOT coalesce((v.configuration->>'removed')::boolean,false)`,[chat])).rows[0].count);
 }
 
 /** The Schedules pages' list (ADR-0266): each schedule with its chat as the owner sees it, the owner's private chat first
- *  and then groups by their title; a group with no title shows none. Other answers pass through. */
+ *  and then groups and members' private chats by their title (a member's by the member's name, member_chat); a chat
+ *  with no title shows none. Other answers pass through. */
 export async function scheduleChats(control:pg.Pool,owner:string|null|undefined,value:Record<string,unknown>):Promise<Record<string,unknown>> {
   if(!Array.isArray(value.schedules))return value;
   const scopes=[...new Set(value.schedules.map((item:any)=>String(item?.scope??'')))];
-  const titles=new Map((await control.query('SELECT id,title FROM chats WHERE id=ANY($1::text[])',[scopes])).rows.map(row=>[String(row.id),row.title as string|null]));
-  const schedules=value.schedules.map((item:any)=>({...item,owner_chat:item?.scope===owner,chat_title:item?.scope===owner?null:titles.get(String(item?.scope))??null}));
+  // A member's private chat (members' schedules) is named by the member's name, as the Members page shows it.
+  const rows=(await control.query(`SELECT c.id,c.title,c.kind,a.member_id,coalesce(a.display_name,a.username) AS member_name FROM chats c
+      LEFT JOIN chat_accounts a ON c.kind='private' AND a.id=c.account_id AND a.member_id IS NOT NULL WHERE c.id=ANY($1::text[])`,[scopes])).rows;
+  const chats=new Map(rows.map(row=>[String(row.id),row]));
+  const schedules=value.schedules.map((item:any)=>{
+    const row=chats.get(String(item?.scope)),member=item?.scope!==owner&&!!row?.member_id;
+    return {...item,owner_chat:item?.scope===owner,member_chat:member,
+      chat_title:item?.scope===owner?null:member?(row?.member_name as string|null)??null:(row?.title as string|null)??null};
+  });
   schedules.sort((a:any,b:any)=>Number(b.owner_chat)-Number(a.owner_chat)||String(a.chat_title??'').localeCompare(String(b.chat_title??''))||String(a.name).localeCompare(String(b.name)));
   return {...value,schedules};
 }

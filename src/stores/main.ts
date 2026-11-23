@@ -5,6 +5,7 @@ import {memoryEngine} from '../memory/engines.js';
 import {combinedAdapter,runtimeCall} from '../runtime.js';
 import {agentWithPrompts,withPrompts} from '../prompts.js';
 import {agent} from '../agent/agents.js';
+import {agentOperation} from '../agent/agent.js';
 import {runtimeStoreGroups} from './runtime-pools.js';
 import {storageServices} from './services.js';
 import {storageServer} from './server.js';
@@ -40,7 +41,9 @@ transport?.attach(server);
 // Long-term memory is on by default once its engine's service (Honcho) is enabled; an owner's own attach or detach stands.
 if(config.honchoEnabled)void services.memory.attachByDefault().catch(error=>console.warn(JSON.stringify({event:'memory_default_attach_failed',code:error?.code??'unknown'})));
 // The members' app's own listener (ADR-0265 D3): only /v1/member-app/*, reached by nocheh-miniapp alone.
-const memberApp=memberAppServer({control:services.stores.control,tasks:services.tasks,policy:()=>services.access.policy(),call,dataDir:config.dataDir},
+// A member's own schedules go through the same agent operation as the owner's Schedules page (members' schedules).
+const memberApp=memberAppServer({control:services.stores.control,tasks:services.tasks,policy:()=>services.access.policy(),call,dataDir:config.dataDir,
+  ...(services.agent.manageSchedules?{schedules:agentOperation(services.agent,'manageSchedules')}:{})},
   {botId:memberBot,key:memberKey});
 memberApp.listen(MEMBER_APP_PORT,config.host,()=>console.log(JSON.stringify({event:'member_app_ready',port:MEMBER_APP_PORT})));
 server.listen(config.port,config.host,()=>console.log(JSON.stringify({event:'ready',service:config.service,storage_layout:'original-only-v1',port:(server.address() as {port:number}).port})));

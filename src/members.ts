@@ -26,9 +26,10 @@ export function memberIdFor(account:string):string {
   return sha256(`[${JSON.stringify('member')},${JSON.stringify(account)}]`);
 }
 
-/** A members row as the loader reads it. private_chat is "Private chat with Nocheh" (step 4). */
+/** A members row as the loader reads it. private_chat is "Private chat with Nocheh" (step 4); assistant is "Personal
+ * assistant" (members' schedules), false when a fixture leaves it out. */
 export interface MemberRow {id:string;state:MemberState;group_talk:boolean;group_jobs:boolean;group_post_other:boolean;group_tools:boolean;tasks:MemberTasks;
-  private_chat:boolean}
+  private_chat:boolean;assistant?:boolean}
 /** A chat_accounts row linked to a member (member_id is not null). */
 export interface MemberAccountRow {account_id:string;member_id:string}
 /** A member_chats row: a member's switch for one group (a group chat id; a topic follows its group). */
@@ -47,7 +48,7 @@ export interface MemberSnapshot {members:readonly MemberRow[];accounts:readonly 
  * off), privateChat (members.private_chat, independent of talk) and the member's accounts, sorted, never the owner's. */
 export interface Member {
   readonly id:string;readonly state:MemberState;readonly talk:boolean;readonly jobs:boolean;readonly post:boolean;readonly tools:boolean;
-  readonly tasks:MemberTasks;readonly privateChat:boolean;readonly accounts:readonly string[];
+  readonly tasks:MemberTasks;readonly privateChat:boolean;readonly assistant:boolean;readonly accounts:readonly string[];
 }
 
 /**
@@ -95,6 +96,9 @@ export interface MemberDirectory {
    * whose account_id is this account (memberPrivate in src/spaces.ts).
    */
   privateTalks(account:string|null|undefined):boolean;
+  /** privateTalks, and the member has Personal assistant on: they keep their own schedules in their private chat, and
+   *  those run. */
+  assistant(account:string|null|undefined):boolean;
   /** Every member account that reaches at least one served group, with those groups (group chat ids), sorted. Never the
    * owner's account. */
   accounts(directory?:ChatDirectory):ReadonlyMap<string,readonly string[]>;
@@ -119,7 +123,8 @@ class SnapshotMembers implements MemberDirectory {
     for(const row of snapshot.members) {
       if(!isDigest(row.id)||rows.has(row.id))throw invalid('member_id');
       if(!(memberStates as readonly string[]).includes(row.state)||!(memberTaskModes as readonly string[]).includes(row.tasks)||
-        [row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.private_chat].some(value=>typeof value!=='boolean'))throw invalid('member_row');
+        [row.group_talk,row.group_jobs,row.group_post_other,row.group_tools,row.private_chat].some(value=>typeof value!=='boolean')||
+        row.assistant!==undefined&&typeof row.assistant!=='boolean')throw invalid('member_row');
       rows.set(row.id,row);links.set(row.id,[]);
     }
     const linked=new Set<string>();
@@ -142,7 +147,7 @@ class SnapshotMembers implements MemberDirectory {
     }
     for(const row of rows.values()) {
       const member:Member=Object.freeze({id:row.id,state:row.state,talk:row.group_talk,jobs:row.group_jobs,post:row.group_post_other,tools:row.group_tools,
-        tasks:row.tasks,privateChat:row.private_chat,accounts:Object.freeze([...links.get(row.id)!].sort())});
+        tasks:row.tasks,privateChat:row.private_chat,assistant:row.assistant===true,accounts:Object.freeze([...links.get(row.id)!].sort())});
       this.byId.set(row.id,member);for(const account of member.accounts)this.byAccount.set(account,member);
     }
     this.sorted=Object.freeze([...this.byId.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0));
@@ -178,6 +183,9 @@ class SnapshotMembers implements MemberDirectory {
   privateTalks(account:string|null|undefined):boolean {
     const member=this.memberOf(account);
     return !!member&&member.state==='active'&&member.privateChat===true;
+  }
+  assistant(account:string|null|undefined):boolean {
+    return this.privateTalks(account)&&this.memberOf(account)!.assistant;
   }
   accounts(directory:ChatDirectory=chats()):ReadonlyMap<string,readonly string[]> {
     const cached=this.reached.get(directory);if(cached)return cached;

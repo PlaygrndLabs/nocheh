@@ -245,7 +245,7 @@ test('the member listener checks every call in order and answers only with fixed
     } finally {other.server.close();}
   }
   assert.equal(calls.length,before);
-  assert.equal(MEMBER_APP_WRITES_PER_10_MIN,60);assert.ok(MEMBER_APP_ROUTES.length===8);
+  assert.equal(MEMBER_APP_WRITES_PER_10_MIN,60);assert.ok(MEMBER_APP_ROUTES.length===10);
 });
 
 test('"Remind me" needs write access, Reminders to themselves, and the member\'s open private chat; the owner can switch reminders',()=>{

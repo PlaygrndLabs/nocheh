@@ -41,6 +41,7 @@ import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {currentChats,otherPrivateScopes} from './chats.js';
 import {scheduleChats,scheduleTurn} from './schedules.js';
+import {authorizeScheduleNotice} from './schedule-notices.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
@@ -49,7 +50,7 @@ import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
 import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
-import {memberPrivate,readSetGroups} from '../spaces.js';
+import {memberAssistant,memberPrivate,readSetGroups} from '../spaces.js';
 import {noticeAuthorizeRequest,type NoticeAuthorizeResponse} from '../notice-authorize.js';
 import {authorizeNotice} from './task-reminder-delivery.js';
 import type {hostTransport} from '../workflows/host-transport.js';
@@ -75,7 +76,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       // one-time yes. A malformed body is a no, never an error the gateway could read as something else.
       authorize(req,config.token);let request;
       try{request=noticeAuthorizeRequest(await readJson(req,1024));}catch{return json(res,200,{allowed:false} satisfies NoticeAuthorizeResponse);}
-      return json(res,200,{allowed:await authorizeNotice(s.stores.control,request,await currentChats())} satisfies NoticeAuthorizeResponse);
+      // A member's schedule message into their own chat (members' schedules) takes its one ask the same way.
+      const allowed=await authorizeNotice(s.stores.control,request,await currentChats())||await authorizeScheduleNotice(s.stores.control,request);
+      return json(res,200,{allowed} satisfies NoticeAuthorizeResponse);
     }
     if(req.method==='GET'&&path==='/internal/chats') {
       // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
@@ -83,7 +86,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       // so the bot takes a member pass only there (step 4). A member change moves no epoch: the bot reads this list
       // again when it is old or misses a chat, and storage checks every member pass again anyway.
       authorize(req,config.token);const owner=s.access.policy().owner_id,directory=await currentChats();
-      return json(res,200,servedChats(directory,owner?{app:'telegram',external:owner}:null,id=>memberPrivate(id,directory)));
+      // A member's chat whose member has Personal assistant on is marked member_assistant too: their schedules run there.
+      return json(res,200,servedChats(directory,owner?{app:'telegram',external:owner}:null,id=>memberPrivate(id,directory),id=>memberAssistant(id,directory)));
     }
     if(req.method==='POST'&&path==='/internal/chats/leave') {
       // The bot asks right before Nocheh leaves a group (ADR-0253): is it still pending from this add?

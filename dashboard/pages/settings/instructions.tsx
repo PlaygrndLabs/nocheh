@@ -70,6 +70,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Added in your private chat: how Nocheh sets a schedule, such as a morning brief, when you ask for one.',
   },
   {
+    key: 'reply.member_schedules',
+    title: 'Members setting schedules',
+    hint: 'Added in a member’s private chat when they have Personal assistant on: how Nocheh sets their own schedules when they ask.',
+  },
+  {
     key: 'reply.scheduled',
     title: 'Scheduled runs',
     hint: 'Added when a schedule runs. Its answer is sent to its chat by itself; [SILENT] means there is nothing to send.',

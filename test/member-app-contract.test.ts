@@ -75,7 +75,12 @@ test('the fixture launch key is honoured only in the installation fixture with t
 
 test('the members\' app answers only its own routes, and lists take only its own filters',()=>{
   const id='a'.repeat(64);
-  assert.equal(MEMBER_APP_ROUTES.length,8);
+  assert.equal(MEMBER_APP_ROUTES.length,10);
+  // A member's own schedules (members' schedules): the list, and one schedule by its id.
+  assert.deepEqual(memberAppRoute('GET','/schedules'),{name:'schedules'});
+  assert.deepEqual(memberAppRoute('POST','/schedules/a1b2c3d4e5f6'),{name:'schedule',schedule:'a1b2c3d4e5f6'});
+  for(const path of ['/schedules/','/schedules/a b','/schedules/'+'a'.repeat(129),'/schedules/x/run'])assert.equal(memberAppRoute('POST',path),null,path);
+  assert.equal(memberAppRoute('GET','/schedules/a1b2c3d4e5f6'),null);
   for(const [method,path,name,task] of [['GET','/me','me'],['GET','/tasks','tasks'],['GET','/tasks/'+id,'task',id],['POST','/tasks','create'],['POST','/tasks/'+id,'update',id],
     ['POST','/tasks/'+id+'/comments','comment',id],['GET','/reminders','reminders'],['POST','/sign-out','sign_out']] as const)
     assert.deepEqual(memberAppRoute(method,path),task?{name,task}:{name},method+' '+path);
@@ -91,8 +96,8 @@ test('the members\' app answers only its own routes, and lists take only its own
     assert.throws(()=>memberTaskQuery(new URLSearchParams(query)),{status:400,code:'task_filter_not_allowed'},query);
   assert.deepEqual(Object.keys(MEMBER_APP_ERROR_STATUS).sort(),Object.values(memberAppErrors).sort(),'every error has its status');
   assert.deepEqual(Object.values(memberAppErrors).sort(),['conflict','member_app_busy','member_app_closed','member_app_launch_invalid','member_app_launch_old',
-    'member_app_no_bearer','member_app_signed_out','member_reminders_unavailable','member_required','task_field_not_allowed','task_filter_not_allowed',
-    'task_read_only','task_reminders_off']);
+    'member_app_no_bearer','member_app_signed_out','member_reminders_unavailable','member_required','member_schedule_not_found','member_schedules_off',
+    'task_field_not_allowed','task_filter_not_allowed','task_read_only','task_reminders_off']);
 });
 
 test('the member reminder texts are editable, English by default, and name no writer or place; the owner\'s lines gain the app\'s place',()=>{

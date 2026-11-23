@@ -22,6 +22,32 @@ class DeliveryPolicyTests(unittest.TestCase):
             self.assertEqual(ask('default'),'local')
             self.assertEqual(ask(Scopes.profile('-10'),deliver='telegram'),'review_each_result')
 
+    def test_a_members_own_chat_sends_each_result_only_with_personal_assistant_on(self):
+        # Members' schedules: a member's own private chat with Personal assistant on gets each result with no card, as the
+        # owner's does; a member's chat without it never runs as a member, and never sends without a card.
+        from .native_cron import delivery_policy
+        from .scheduler import scheduled_member
+        from .scopes import Scope
+        member,other='a'*64,'b'*64
+        served=Served.of('42',groups=['-10'],members=['701','702'],assistants=['701'])
+        bound=lambda chat:Scope(chat_id=chat,user_id='',owner=False,profile=Scopes.profile(chat),space=chat)
+        self.assertTrue(served.member_assistant('701'))
+        self.assertFalse(served.member_assistant('702'))
+        self.assertFalse(served.member_assistant('-10'))
+        self.assertEqual(delivery_policy({'deliver':'telegram'},bound('701'),served),'send_each_result')
+        self.assertEqual(delivery_policy({'deliver':'telegram'},bound('702'),served),'review_each_result')
+        self.assertEqual(delivery_policy({'deliver':'telegram'},bound('701')),'review_each_result','no served list: fail closed')
+        self.assertEqual(delivery_policy({'deliver':'local'},bound('701'),served),'local')
+        # The run's scope: that member, as storage names them; a mismatch, a missing member or a member named for any
+        # other chat refuses it.
+        self.assertEqual(scheduled_member(bound('701'),{'member':member},served).member,member)
+        for context in ({},{'member':'x'},{'member':None}):
+            self.assertIsNone(scheduled_member(bound('701'),context,served),context)
+        self.assertIsNone(scheduled_member(bound('702'),{'member':other},served))
+        self.assertEqual(scheduled_member(bound('702'),{},served),bound('702'))
+        self.assertIsNone(scheduled_member(bound('-10'),{'member':member},served))
+        self.assertFalse(Served.of('42',assistants=['701']).member_assistant('701'),'only a member\'s own open chat')
+
 
 class SchedulerTests(unittest.TestCase):
     def setUp(self):

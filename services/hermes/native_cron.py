@@ -102,17 +102,19 @@ def profiles(admin):
         yield name,logical,bound
 
 
-def delivery_policy(job,bound):
-    """How a schedule's results go out (ADR-0266): kept local; sent to the owner's private chat with no card, since the
-    owner approved that chat's schedules once; or, for a group, each result waits for the owner's card."""
+def delivery_policy(job,bound,served=None):
+    """How a schedule's results go out (ADR-0266): kept local; sent to the owner's private chat, or a member's own chat
+    with Personal assistant on, with no card, since its person approved that chat's schedules once; or, for a group,
+    each result waits for the owner's card."""
     if job.get('deliver','local')=='local':return 'local'
-    return 'send_each_result' if bound.owner else 'review_each_result'
+    member=served is not None and not bound.owner and served.member_assistant(bound.chat_id)
+    return 'send_each_result' if bound.owner or member else 'review_each_result'
 
 
-def annotate(job,home,selected,bound):
+def _annotate(job,home,selected,bound,served=None):
     return {**job,'profile':selected,'profile_name':selected,'hermes_home':str(home),
         '_nocheh_revision':revision(job,home.name),'managed':bool(job.get('nocheh_registered')),
-        'delivery_policy':delivery_policy(job,bound)}
+        'delivery_policy':delivery_policy(job,bound,served)}
 
 
 def manage(admin,path,method,query,body,headers,call=None):
@@ -125,6 +127,8 @@ def manage(admin,path,method,query,body,headers,call=None):
     match=re.fullmatch(r'/api/cron/jobs(?:/([a-zA-Z0-9_-]{1,128})(?:/(runs|pause|resume|trigger|catch-up|cancel))?)?',path)
     if not match:raise ValueError('cron_operation_unavailable')
     job_id,operation=match.groups();selected=query.get('profile',['default'])[0]
+    policy=getattr(admin,'policy',None);served=policy.current() if policy is not None else None
+    annotate=lambda job,home,name,bound:_annotate(job,home,name,bound,served)
     if selected=='all' and method=='GET' and not job_id:
         return [annotate(job,home,name,bound) for name,home,bound in profiles(admin) for job in inspect(home) if not job.get('nocheh_removed')]
     name,physical=admin.profile(selected);bound=admin.binding(name);home=admin.preference_home(name,physical)

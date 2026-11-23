@@ -22,7 +22,7 @@ from services.durable import canonical, digest, immutable_file
 from . import settings
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, SEND_ANSWERS, SEND_CLASS
 from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, check_leave_policy, check_notice_policy,
-                     delivery_failure, leave_check, no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
+                     SCHEDULE_CALLBACK, delivery_failure, leave_check, no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
 from .sends import GONE, route_class
 
 # Telegram shows "typing…" for about five seconds per chat action, so presence renews it a little sooner.
@@ -57,9 +57,16 @@ def topic_of(value):
 
 
 def member_notice_shape(body):
-    """Whether a notice has the only shape a member's own private chat takes (step 5): a task reminder, with no topic,
-    buttons or edit."""
-    return body.get('send_class')=='reminder' and body.get('topic') in (None,'') and body.get('buttons') is None and body.get('edit') is None
+    """Whether a notice has one of the only shapes a member's own private chat takes: a task reminder, with no topic,
+    buttons or edit (step 5); or the message about a schedule the member set there, with no topic, and only its Pause and
+    Delete presses or no buttons, sent or edited (members' schedules)."""
+    if body.get('topic') not in (None,''):return False
+    if body.get('send_class')=='reminder':return body.get('buttons') is None and body.get('edit') is None
+    buttons=body.get('buttons')
+    presses=buttons is None or isinstance(buttons,list) and len(buttons)==1 and isinstance(buttons[0],list) and 0<len(buttons[0])<=2 and all(
+        isinstance(button,dict) and set(button)=={'text','callback'} and isinstance(button['callback'],str) and SCHEDULE_CALLBACK.fullmatch(button['callback'])
+        for button in buttons[0])
+    return body.get('send_class')=='notice' and body.get('edit') in (None,True) and presses
 
 
 class Presence:

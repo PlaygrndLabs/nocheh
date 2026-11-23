@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import {admin,type Reader} from '../access.js';
+import {admin,boundReader,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {groupSpace,parentSpace,servedGroups,validateSpace} from '../spaces.js';
@@ -117,6 +117,21 @@ export class KnowledgeManagementRepository {
   const run=(await this.stores.control.query(`SELECT scope,job_id FROM managed_runs WHERE event_id=$1 AND channel='scheduler' AND state='running'
    AND NOT cancel_requested`,[principal.turnEvent])).rows[0];
   if(!turn.owner||!turn.job||!run||!owner||run.scope!==owner||turn.scope!==owner||run.job_id!==turn.job)throw new HttpError(403,'owner_private_turn_required');
+  return {turn,event_id:principal.turnEvent};
+ }
+
+ /**
+  * A schedule's run in a member's own chat (members' schedules): running now and not stopped, under its own run's
+  * binding, as that member with their chat bound. It is not the member's live message, so it gets only what their
+  * private chat may do, which is reading.
+  */
+ async memberScheduledRun(principal:Reader) {
+  if(principal.admin||principal.scope===null||boundReader(principal)!=='member'||principal.memberChat!==principal.scope||
+   (principal.purpose??'assistant')!=='assistant'||!principal.turnEvent)throw new HttpError(403,'group_turn_required');
+  const turn=await this.s.turns.binding(principal);
+  const run=(await this.stores.control.query(`SELECT scope,job_id FROM managed_runs WHERE event_id=$1 AND channel='scheduler' AND state='running'
+   AND NOT cancel_requested`,[principal.turnEvent])).rows[0];
+  if(turn.owner||!turn.job||!run||run.scope!==principal.scope||turn.scope!==principal.scope||run.job_id!==turn.job)throw new HttpError(403,'group_turn_required');
   return {turn,event_id:principal.turnEvent};
  }
 
