@@ -45,8 +45,8 @@ test('broker supports only explicit scoped routes and the configured reply provi
     ['POST','/v1/machines/'+'a'.repeat(32)],['POST','/v1/machines/'+'a'.repeat(32)+'/test'],['POST','/v1/machines/'+'a'.repeat(32)+'/remove'],['POST','/v1/machines/exec/x']])
     assert.equal(scopedRoute(method!,route!),false,method+' '+route);
   for(const code of ['job_machine_not_allowed','job_machine_not_found','job_card_too_long'])assert.ok(jobErrors.has(code),code);
-  assert.deepEqual([...machineErrors].sort(),['invalid_machine_request','machine_auth_failed','machine_changed','machine_cleanup_failed','machine_host_key_changed',
-    'machine_host_key_unknown','machine_key_missing','machine_not_allowed','machine_off','machine_script_too_long','machine_time_up','machine_timeout','machine_unavailable',
+  assert.deepEqual([...machineErrors].sort(),['invalid_machine_request','machine_admin_changed','machine_auth_failed','machine_changed','machine_cleanup_failed',
+    'machine_files_unavailable','machine_host_key_changed','machine_host_key_unknown','machine_key_missing','machine_not_allowed','machine_off','machine_script_too_long','machine_time_up','machine_timeout','machine_unavailable',
     'machine_unreachable']);
   // Settings › Models may name one HTTPS reply provider; any other address stays denied.
   const gateway='https://gateway.example.test/v1';

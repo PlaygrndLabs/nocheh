@@ -18,6 +18,7 @@ import {
   machineEdit,
   machineErrorWords,
   machineProblems,
+  machineNotes,
   machineStatus,
   setupCommand,
   setupLine,
@@ -51,7 +52,7 @@ import {LinkButton} from '../../ui/link-button';
 import {Dialog, useFeedback} from '../../ui/overlay';
 
 const loginHint =
-  'Nocheh may use your own login: Stop ends only the programs a job started there, never yours. The machine needs bash; bash 4 or later and GNU timeout work best.';
+  'Nocheh may use your own login: Stop ends only the programs a job started there, never yours. The machine needs bash; bash 4 or later and GNU timeout work best. Set “Subsystem sftp internal-sftp” in its sshd_config, so Nocheh can check its start-up files after each job.';
 const offText =
   'Cards waiting for your approval are withdrawn. Running machine jobs stop, and the programs they started on the machine are ended.';
 const removeText = (machine: Machine) =>
@@ -364,6 +365,11 @@ function MachineRow(props: {
           {machine.jobs > 0 && ` · ${machine.jobs === 1 ? '1 job works' : `${machine.jobs} jobs work`} on it`}
         </p>
         {error && <p className="mt-1 text-xs text-warn">{machineAdvice(error, machine.login)}</p>}
+        {machineNotes(machine).map(note => (
+          <p key={note.text} className={`mt-1 text-xs ${note.tone === 'warn' ? 'text-warn' : 'text-muted'}`}>
+            {note.text}
+          </p>
+        ))}
       </Td>
       <Td>
         <Switch

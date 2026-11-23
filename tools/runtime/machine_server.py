@@ -12,6 +12,9 @@ start-up noise, ssh's own warnings) is dropped and, when ssh ends before it, tel
 failure; once the marker came it answers 200 with frames, as tools/runtime/box_server.py does: b'O', a 4-byte length
 and output bytes, then b'X', 4 and the exit code as a signed 4-byte int (124 at the time limit). A client that goes
 away ends ssh. A machine whose key file is missing (keys are not in backups) answers machine_key_missing.
+POST /probe says whether the login can act as admin (`sudo -n true`) and, read over SFTP (sshd's internal-sftp runs no
+program of the login), the digests of the login's start-up files and tools (WATCHED_FILES, WATCHED_FOLDERS), so the store
+can compare them before and after a job (ADR-0284).
 """
 import base64
 import hashlib
@@ -231,7 +234,23 @@ while :; do
   fi
   sleep 1
 done'''
-REQUESTS={'/keys':('id','comment'),'/test':('id','address','port','login','host_key'),
+# What a job could change on the machine to outlive Stop or steer later jobs (machine jobs' start-up files): the login's
+# shell start-up files, what SSH runs or lets in, programs the login asks the system to start, and the tools the wrapper
+# runs. They are read over SFTP and hashed here, never by a shell on the machine: with sshd's `Subsystem sftp internal-sftp`
+# no program of the login runs to answer, so nothing a job planted there can change what is read. Paths without a slash
+# first are in the login's home. A folder counts with each entry's name, kind, size, time and link target, and with
+# CONTENTS the bytes of each file in it too.
+WATCHED_FILES=('.zshenv','.zprofile','.zshrc','.zlogin','.zlogout','.bash_profile','.bash_login','.bashrc','.bash_logout','.profile',
+               '.ssh/authorized_keys','.ssh/authorized_keys2','.ssh/rc','.ssh/environment',
+               '/opt/homebrew/bin/bash','/opt/homebrew/bin/gtimeout','/usr/local/bin/bash','/usr/local/bin/gtimeout','/usr/bin/timeout','/bin/bash')
+WATCHED_FOLDERS=('Library/LaunchAgents','.config/systemd/user','.config/autostart','/opt/homebrew/bin','/usr/local/bin')
+CONTENTS=('Library/LaunchAgents','.config/systemd/user','.config/autostart')
+# How much one look reads, at most: a folder's entries, a file's bytes, all bytes, and the time it takes.
+FOLDER_ENTRIES=5000
+FILE_BYTES=64<<20
+ALL_BYTES=256<<20
+LOOKING=90
+REQUESTS={'/keys':('id','comment'),'/probe':('id','address','port','login','host_key'),'/test':('id','address','port','login','host_key'),
           '/exec':('id','address','port','login','host_key','job','script','stdin','timeout','login_shell'),
           '/cleanup':('id','address','port','login','host_key','job'),'/forget':('id',),'/remove':('id',)}
 KEYS=threading.Lock()
@@ -330,6 +349,158 @@ def feed(pipe,data):
         except OSError:pass
 
 
+class SftpFailed(Exception):pass
+
+
+class Sftp:
+    """A minimal SFTP version 3 client over ssh's sftp subsystem: it opens, reads and lists, and never writes. Each request
+    waits for its answer, within one deadline for the whole look; `budget` counts the file bytes still allowed."""
+    def __init__(self,proc,deadline):self.proc,self.deadline,self.next,self.budget=proc,deadline,0,ALL_BYTES
+
+    def read(self,size):
+        data=b'';output=self.proc.stdout.fileno()
+        while len(data)<size:
+            left=self.deadline-time.monotonic()
+            if left<=0:raise SftpFailed('timeout')
+            if not select.select([output],[],[],min(left,1))[0]:continue
+            chunk=os.read(output,size-len(data))
+            if not chunk:raise SftpFailed('closed')
+            data+=chunk
+        return data
+
+    def send(self,kind,payload):
+        data=bytes([kind])+payload
+        try:self.proc.stdin.write(struct.pack('>I',len(data))+data);self.proc.stdin.flush()
+        except (OSError,ValueError):raise SftpFailed('closed') from None
+
+    def packet(self):
+        size=struct.unpack('>I',self.read(4))[0]
+        if not 1<=size<=(1<<20)+1024:raise SftpFailed('invalid')
+        data=self.read(size);return data[0],data[1:]
+
+    def start(self):
+        self.send(1,struct.pack('>I',3))
+        kind,_=self.packet()
+        if kind!=2:raise SftpFailed('invalid')
+
+    def request(self,kind,payload):
+        self.next=(self.next+1)&0xffffffff;self.send(kind,struct.pack('>I',self.next)+payload)
+        reply,data=self.packet()
+        if len(data)<4 or struct.unpack('>I',data[:4])[0]!=self.next:raise SftpFailed('invalid')
+        data=data[4:]
+        if reply==101:
+            code=struct.unpack('>I',data[:4])[0] if len(data)>=4 else 4
+            # Done (a close), end of file or of a folder, no such file, or permission denied; anything else is a failed look.
+            if code in (0,1,2,3):return code,None
+            raise SftpFailed('status')
+        return reply,data
+
+    @staticmethod
+    def string(data,at):
+        if at+4>len(data):raise SftpFailed('invalid')
+        size=struct.unpack('>I',data[at:at+4])[0]
+        if at+4+size>len(data):raise SftpFailed('invalid')
+        return data[at+4:at+4+size],at+4+size
+
+    @staticmethod
+    def attrs(data,at):
+        def number(fmt,at):
+            size=struct.calcsize(fmt)
+            if at+size>len(data):raise SftpFailed('invalid')
+            return struct.unpack(fmt,data[at:at+size])[0],at+size
+        flags,at=number('>I',at);found={}
+        if flags&1:found['size'],at=number('>Q',at)
+        if flags&2:_,at=number('>I',at);_,at=number('>I',at)
+        if flags&4:found['mode'],at=number('>I',at)
+        if flags&8:_,at=number('>I',at);found['mtime'],at=number('>I',at)
+        if flags&0x80000000:
+            count,at=number('>I',at)
+            for _ in range(count):_,at=Sftp.string(data,at);_,at=Sftp.string(data,at)
+        return found,at
+
+    @staticmethod
+    def path(name):return struct.pack('>I',len(name))+name
+
+    def handle(self,kind,payload):
+        reply,data=self.request(kind,payload)
+        if data is None:return reply,None
+        if reply!=102:raise SftpFailed('invalid')
+        return None,self.string(data,0)[0]
+
+    def close(self,handle):self.request(4,self.path(handle))
+
+    def stat(self,name,follow=True):
+        """A path's attributes, following a link unless not `follow`; None when it is not there, 'unreadable' when refused."""
+        reply,data=self.request(17 if follow else 7,self.path(name))
+        if data is None:return None if reply==2 else 'unreadable'
+        if reply!=105:raise SftpFailed('invalid')
+        return self.attrs(data,0)[0]
+
+    def link(self,name):
+        reply,data=self.request(19,self.path(name))
+        if data is None or reply!=104:return None
+        count=struct.unpack('>I',data[:4])[0] if len(data)>=4 else 0
+        return self.string(data,4)[0] if count else None
+
+    def digest(self,name):
+        """'sha256:<hex>' of a file's bytes (through a link), None when it is not there, else why not: unreadable,
+        folder, special or too_large."""
+        found=self.stat(name)
+        if not isinstance(found,dict):return found
+        kind=found.get('mode',0)&0o170000
+        if kind==0o040000:return 'folder'
+        if kind not in (0o100000,0):return 'special'
+        if found.get('size',0)>min(FILE_BYTES,self.budget):return 'too_large'
+        reply,handle=self.handle(3,self.path(name)+struct.pack('>II',1,0))
+        if handle is None:return None if reply==2 else 'unreadable'
+        hash_=hashlib.sha256();offset=0
+        try:
+            while True:
+                reply,data=self.request(5,self.path(handle)+struct.pack('>QI',offset,32768))
+                if data is None:
+                    if reply==1:break
+                    return 'unreadable'
+                if reply!=103:raise SftpFailed('invalid')
+                chunk=self.string(data,0)[0]
+                if not chunk:break
+                offset+=len(chunk);self.budget-=len(chunk)
+                if offset>FILE_BYTES or self.budget<0:return 'too_large'
+                hash_.update(chunk)
+        finally:self.close(handle)
+        return 'sha256:'+hash_.hexdigest()
+
+    def folder(self,name,contents):
+        """'sha256:<hex>' of a folder's entries: each one's name, kind, size, time and link target, and with `contents`
+        each file's own digest; None when it is not there, else unreadable, not_folder or too_large."""
+        found=self.stat(name)
+        if not isinstance(found,dict):return found
+        if found.get('mode',0)&0o170000!=0o040000:return 'not_folder'
+        reply,handle=self.handle(11,self.path(name))
+        if handle is None:return None if reply==2 else 'unreadable'
+        entries=[]
+        try:
+            while True:
+                reply,data=self.request(12,self.path(handle))
+                if data is None:
+                    if reply==1:break
+                    return 'unreadable'
+                if reply!=104:raise SftpFailed('invalid')
+                count=struct.unpack('>I',data[:4])[0];at=4
+                for _ in range(count):
+                    entry,at=self.string(data,at);_,at=self.string(data,at);attrs,at=self.attrs(data,at)
+                    if entry not in (b'.',b'..'):entries.append((entry,attrs))
+                if len(entries)>FOLDER_ENTRIES:return 'too_large'
+        finally:self.close(handle)
+        listed=[]
+        for entry,attrs in sorted(entries):
+            path=name+b'/'+entry;kind=attrs.get('mode',0)&0o170000
+            target=self.link(path) if kind==0o120000 else None
+            listed.append([entry.decode('utf-8','surrogateescape'),kind,attrs.get('size'),attrs.get('mtime'),
+                           None if target is None else target.decode('utf-8','surrogateescape'),
+                           self.digest(path) if contents and kind in (0o100000,0o120000) else None])
+        return 'sha256:'+hashlib.sha256(json.dumps(listed).encode()).hexdigest()
+
+
 class Machines:
     def __init__(self,root,token):self.root,self.token,self.cleaning=Path(root),token if len(token or '')>=32 else '',{}
 
@@ -347,13 +518,13 @@ class Machines:
             except (OSError,subprocess.SubprocessError):pass
             path.unlink(missing_ok=True)
 
-    def ssh(self,ident,address,port,login,remote,stdin,trust=False,shared=True):
+    def ssh(self,ident,address,port,login,remote,stdin,trust=False,shared=True,subsystem=False):
         folder=self.root/ident
         return ['ssh','-F','/dev/null','-i',str(folder/'key'),'-o','IdentitiesOnly=yes','-o','BatchMode=yes',
                 '-o','StrictHostKeyChecking='+('accept-new' if trust else 'yes'),'-o','UserKnownHostsFile='+str(folder/'known_hosts'),
                 '-o','GlobalKnownHostsFile=/dev/null','-o','UpdateHostKeys=no','-o','ConnectTimeout=10','-o','ServerAliveInterval=15',
                 '-o','ServerAliveCountMax=3',*(['-o','ControlMaster=auto','-o','ControlPersist=60','-o',f'ControlPath={CONTROL}/cm-{ident}-%C']
-                if shared else ['-o','ControlMaster=no','-o','ControlPath=none']),'-e','none',*([] if stdin else ['-n']),
+                if shared else ['-o','ControlMaster=no','-o','ControlPath=none']),'-e','none',*([] if stdin else ['-n']),*(['-s'] if subsystem else []),
                 '-p',str(port),'-l',login,'--',address,remote]
 
     def untrusted(self,ident,host_key):
@@ -458,6 +629,42 @@ class Machines:
         if len(found)!=1 or host_key is not None and found!={host_key}:
             return {'ok':False,'error':'machine_host_key_unknown','detail':'The machine did not send exactly one host key.'}
         return {'ok':True,'host_key':next(iter(found)),'system':line(result[0])}
+
+    def probe(self,value):
+        """What a job may change on the machine, before it starts and after it ends: whether the login can act as admin
+        (`sudo -n true` works, asked through the login's shell) and the digests of the watched files and folders, read
+        over SFTP (`files`: label -> digest, None when not there, or why not). `files` is null with `files_error` when SFTP
+        could not be used; then nothing can be compared."""
+        ident,address,port,login,host_key=target(value,exec_=True)
+        self.folder(ident)
+        if refused:=self.untrusted(ident,host_key):return {'ok':False,'error':refused}
+        code,*result=self.short(ident,address,port,login,b'exec sudo -n true </dev/null >/dev/null 2>&1',shared=False)
+        if code is None:return {'ok':False,'error':result[0]}
+        files=self.files(ident,address,port,login)
+        return {'ok':True,'admin':code==0,**files}
+
+    def files(self,ident,address,port,login):
+        known=self.root/ident/'known_hosts'
+        proc=subprocess.Popen(self.ssh(ident,address,port,login,'sftp',True,shared=False,subsystem=True),env=environment(),
+                              stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+        sftp=Sftp(proc,time.monotonic()+LOOKING)
+        try:
+            sftp.start();found={}
+            for name in WATCHED_FILES:found[name]=sftp.digest(name.encode())
+            for name in WATCHED_FOLDERS:found[name+'/']=sftp.folder(name.encode(),name in CONTENTS)
+            return {'files':found}
+        except SftpFailed as why:
+            kill(proc)
+            said=b''
+            try:said=proc.stderr.read(65536) or b''
+            except (OSError,ValueError):pass
+            error=failure(said,known) if b'Permission denied' in said or b'Host key' in said or b'HOST IDENTIFICATION' in said else 'machine_files_unavailable'
+            return {'files':None,'files_error':error,'detail':line(said) or str(why)}
+        finally:
+            kill(proc)
+            if proc.stderr is not None:
+                try:proc.stderr.close()
+                except OSError:pass
 
     def cleanup(self,value):
         ident,address,port,login,host_key=target(value,exec_=True);job=job_of(value)

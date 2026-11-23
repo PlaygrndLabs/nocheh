@@ -52,6 +52,8 @@ REFUSALS={
     'machine_script_too_long':'This command is too long to send to the machine.',
     'machine_timeout':'The command ran out of time on the machine.',
     'machine_key_missing':'Nocheh has no key for this machine. The owner must remove it and add it again in Settings › Machines.'+STOP,
+    'machine_admin_changed':"The login's admin rights on the machine are not what the owner approved, so nothing ran and the job stops."+STOP,
+    'machine_files_unavailable':"Nocheh could not read the machine's start-up files."
 }
 REFUSED='Nocheh could not run this command on the machine.'
 UNREACHABLE='Nocheh could not be reached, so nothing ran on the machine.'

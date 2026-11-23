@@ -73,7 +73,7 @@ test('a job on the owner\'s machine asked in a group reports to the owner\'s pri
     await s.guards.reconcile();await s.guards.setMode('on');await s.configuration.configure(policy,'on');
     await stores.control.query("INSERT INTO projects(id,name,state,revision) VALUES($1,'Made-up project','active',1)",[projectId]);
     await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[project,projectId]);
-    await stores.control.query(`INSERT INTO machines(id,name,address,login,key_ref,public_key,host_key,tested_at) VALUES($1,'build-vm','192.0.2.10','nocheh',$2,$3,$4,now())`,
+    await stores.control.query(`INSERT INTO machines(id,name,address,login,key_ref,public_key,host_key,tested_at,admin) VALUES($1,'build-vm','192.0.2.10','nocheh',$2,$3,$4,now(),false)`,
       ['a'.repeat(32),'machines/'+'a'.repeat(32)+'/key','ssh-ed25519 '+'A'.repeat(68)+' nocheh build-vm','SHA256:'+'A'.repeat(43)]);
 
     // Asked by the owner in the project's group: the start result there names no machine and no plan.
