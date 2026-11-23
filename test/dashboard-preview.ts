@@ -440,9 +440,9 @@ const fingerprint=(text:string)=>createHash('sha256').update(text).digest('base6
 const machineView=(name:string,id:string)=>({id,name,public_key:'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI'+fingerprint('key:'+id)+' nocheh '+name});
 let machineControl={enabled:true,revision:0};
 const machines:any[]=[
-  {...machineView('build-vm','ab12'.repeat(8)),address:'192.0.2.10',port:22,login:'nocheh',host_key:'SHA256:'+fingerprint('build-vm'),enabled:true,tested_at:minutesAgo(40),test_error:null,revision:2,created_at:minutesAgo(900),jobs:1},
-  {...machineView('test-vm','cd34'.repeat(8)),address:'host.docker.internal',port:2222,login:'nocheh',host_key:null,enabled:true,tested_at:null,test_error:'machine_auth_failed',revision:3,created_at:minutesAgo(300),jobs:0},
-  {...machineView('spare-vm','ef56'.repeat(8)),address:'spare-vm.example.invalid',port:22,login:'nocheh',host_key:null,enabled:false,tested_at:null,test_error:null,revision:1,created_at:minutesAgo(200),jobs:0}];
+  {...machineView('build-vm','ab12'.repeat(8)),address:'192.0.2.10',port:22,login:'nocheh',host_key:'SHA256:'+fingerprint('build-vm'),enabled:true,tested_at:minutesAgo(40),test_error:null,admin:true,changed:{job:hx('9c'),files:['.zshrc']},revision:2,created_at:minutesAgo(900),jobs:1},
+  {...machineView('test-vm','cd34'.repeat(8)),address:'host.docker.internal',port:2222,login:'nocheh',host_key:null,enabled:true,tested_at:null,test_error:'machine_auth_failed',admin:null,changed:null,revision:3,created_at:minutesAgo(300),jobs:0},
+  {...machineView('spare-vm','ef56'.repeat(8)),address:'spare-vm.example.invalid',port:22,login:'nocheh',host_key:null,enabled:false,tested_at:null,test_error:null,admin:null,changed:null,revision:1,created_at:minutesAgo(200),jobs:0}];
 let machineCommandId=40;
 const machineCommand=(machine:any,row:any)=>({id:++machineCommandId,machine_id:machine.id,machine_name:machine.name,job_id:null,job_title:null,kind:'command',state:'done',exit_code:0,
   script_sha256:['test','cleanup'].includes(row.kind)?null:createHash('sha256').update('script:'+row.command).digest('hex'),output_sha256:createHash('sha256').update('output:'+row.command).digest('hex'),output_bytes:0,error_code:null,started_at:new Date().toISOString(),finished_at:new Date().toISOString(),...row});

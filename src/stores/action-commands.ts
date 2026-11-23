@@ -20,7 +20,7 @@ import type {SourceReference} from './archive.js';
 import type {SourceAccessRepository} from './access.js';
 import type {TelegramActionRepository} from './telegram-actions.js';
 import type {ControlledActionRepository} from './controlled-actions.js';
-import {closedStates,type BackgroundJobRepository} from './background-jobs.js';
+import {closedStates,filesLine,type BackgroundJobRepository} from './background-jobs.js';
 import {memberPause,memberResume} from './member-job-spend.js';
 import type {TaskRepository} from './tasks.js';
 import type {PrivateAnswerRepository} from './private-answers.js';
@@ -554,7 +554,8 @@ export class ActionCommandRepository {
   private async settleJob(id:string,seen?:Seen) {
     if(!this.jobs)return;
     const card=await this.jobs.card(id,await this.jobOrigin(id)),place=await this.jobPlace(card.row),row=card.row,{line}=await this.texts();
-    const state=row.error_code==='job_repo_removed'?'repo_removed':row.error_code==='job_machine_off'?'machine_off':row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
+    const state=row.error_code==='job_repo_removed'?'repo_removed':row.error_code==='job_machine_off'?'machine_off':
+      row.error_code==='job_machine_admin_changed'&&row.state==='stopped'?'machine_admin_changed':row.cancel_requested&&!closedStates.has(row.state)?'stopping':row.cancel_requested&&row.state!=='done'?'stopped':
       row.state==='done'&&row.ended?'limited':row.state;
     // A card in another chat than the one the job reports to does not say the report comes here. A job on the owner's machine
     // reports to the owner's private chat, wherever it was asked (ADR-0244).
@@ -562,7 +563,9 @@ export class ActionCommandRepository {
     // A job a member approved while member jobs are paused waits to start, which its card says (ADR-0251).
     const outcome=state==='approved'&&card.paused?card.lines.paused:state==='approved'&&card.waiting?card.lines.queued:['approved','running','reporting'].includes(state)?card.lines[away?'running_elsewhere':'running']:card.lines[state];
     const buttons=['approved','running','reporting'].includes(state)?[[line.stop.slice(0,40),'ns'+id.slice(0,40)+card.fingerprint.slice(0,16)]]:null;
-    if(outcome)await this.post(place.space,{kind:'settle',id,text:`${card.text}\n\n${outcome}`,links:[],...(buttons?{buttons}:{}),...seenIn(seen,place.space)});
+    // A machine job's start-up files, once checked after it ended (machine jobs' start-up files).
+    const files=closedStates.has(row.state)?filesLine(row,card.lines):null;
+    if(outcome)await this.post(place.space,{kind:'settle',id,text:`${card.text}\n\n${outcome}${files?'\n'+files:''}`,links:[],...(buttons?{buttons}:{}),...seenIn(seen,place.space)});
     if(['done','failed','limited'].includes(state)&&!row.cancel_requested)await this.offerList(row);
   }
   /** The changes a job left waiting, on as few cards as Telegram allows; each card is decided as a whole.

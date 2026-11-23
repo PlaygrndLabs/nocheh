@@ -6,6 +6,10 @@ use themselves on their machine, while they keep working there at the same time.
 Amends [ADR-0231](0231-owner-approved-jobs-work-on-the-owners-machines-over-ssh.md):
 its "Ending programs" and "A separate login" rules change as below; everything
 else stays.
+Amended on 2026-11-23 by [ADR-0284](0284-machine-jobs-watch-start-up-files-and-admin.md):
+programs started with `sudo` are root's and Stop leaves them too; a cleanup that ends
+well means the machine reported the job's programs ended, which can't be trusted after a
+job changed the login's start-up files or tools.
 </status>
 
 <context>

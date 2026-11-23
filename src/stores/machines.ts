@@ -48,6 +48,16 @@ ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS steps jsonb;
 -- Ending what a stopped machine job left on the machine: pending -> done | failed (after 3 tries).
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS machine_cleanup text CHECK(machine_cleanup IN ('pending','done','failed'));
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS machine_cleanup_attempts integer NOT NULL DEFAULT 0;
+-- Whether the login can act as admin (sudo -n true worked at its last test), which every card for it says; and what the last
+-- checked job changed in the login's start-up files and tools ({job,files}, files null when it could not be checked), which the
+-- next cards say until a test (machine jobs' start-up files).
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS admin boolean;
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS changed jsonb;
+-- A machine job's start-up files and tools as read when it started, and whether they were the same when it ended:
+-- pending (read at start) -> same | changed (machine_changed: the labels) | unchecked; unchecked also when they could not be read at start.
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS machine_files jsonb;
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS machine_check text CHECK(machine_check IN ('pending','same','changed','unchecked'));
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS machine_changed jsonb;
 ALTER TABLE background_jobs DROP CONSTRAINT IF EXISTS background_jobs_machine_box;
 ALTER TABLE background_jobs ADD CONSTRAINT background_jobs_machine_box CHECK(machine IS NULL OR NOT box);
 `;
@@ -57,7 +67,7 @@ ALTER TABLE background_jobs ADD CONSTRAINT background_jobs_machine_box CHECK(mac
  *  machine_cleanup_failed when the cleanup ran there but did not end the programs (no ps, say). */
 export const machineErrors=new Set(['invalid_machine_request','machine_not_allowed','machine_off','machine_changed','machine_time_up','machine_unavailable',
   'machine_unreachable','machine_auth_failed','machine_host_key_changed','machine_host_key_unknown','machine_script_too_long','machine_timeout',
-  'machine_key_missing','machine_cleanup_failed']);
+  'machine_key_missing','machine_cleanup_failed','machine_files_unavailable','machine_admin_changed']);
 const NAME=/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/,ADDRESS=/^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/,LOGIN=/^[a-z_][a-z0-9_-]{0,31}$/,ID=/^[a-f0-9]{32}$/,HOST_KEY=/^SHA256:[A-Za-z0-9+/]{43}$/;
 // A command's script goes as one remote argument; what it reads comes on its stdin. Frames as tools/runtime/box_server.py writes them.
 const SCRIPT_MAX=96*1024,STDIN_MAX=4*1024*1024,FRAME_MAX=1024*1024,COMMAND_MAX=4000,CLEANUP_TRIES=3;
@@ -117,14 +127,19 @@ async function machinesJson(path:string,body:unknown,signal?:AbortSignal):Promis
 }
 
 /** The machine a job works on, pinned from its row when the job is asked: every command of the job goes to this pin. */
-export type MachinePin={id:string;name:string;address:string;port:number;login:string;host_key:string};
-export const machinePin=(row:any):MachinePin=>({id:String(row.id),name:String(row.name),address:String(row.address),port:Number(row.port),login:String(row.login),host_key:String(row.host_key)});
+/** `admin`: the login could act as admin at the machine's last test; `changed`: what the last checked job changed there
+ *  (labels, or null when it could not be checked), absent when nothing; both shown on the card and part of what is approved. */
+export type MachinePin={id:string;name:string;address:string;port:number;login:string;host_key:string;admin:boolean;changed?:string[]|null};
+export const machinePin=(row:any):MachinePin=>({id:String(row.id),name:String(row.name),address:String(row.address),port:Number(row.port),login:String(row.login),host_key:String(row.host_key),
+  admin:row.admin===true,...(row.changed?{changed:Array.isArray(row.changed.files)?row.changed.files.map(String):null}:{})});
+/** A label of a watched file or folder as the owner reads it: in the login's home unless it starts with /. */
+export const watchedPlace=(label:string)=>label.startsWith('/')?label:'~/'+label;
 /** SQL over a machine row `m` and a job row `j`: whether the machine is still the one the job pinned. */
 export const pinKept=`m.id=j.machine->>'id' AND m.address=j.machine->>'address' AND m.port=(j.machine->>'port')::integer AND m.login=j.machine->>'login'
   AND m.host_key=j.machine->>'host_key'`;
 /** SQL over a machines row: whether a new job may ask for it. It is on, a test trusted its host key, and its last test passed;
  *  a failed test keeps new jobs off it until a test passes again. A job already asked keeps its pin's rules (`machineRun`). */
-export const machineReady='enabled AND host_key IS NOT NULL AND test_error IS NULL';
+export const machineReady='enabled AND host_key IS NOT NULL AND test_error IS NULL AND admin IS NOT NULL';
 const target=(pin:MachinePin)=>({id:pin.id,address:pin.address,port:pin.port,login:pin.login,host_key:pin.host_key});
 
 /** Why a run may not work on its job's machine, or its job when it may: a run of a running job the owner asked for in their own
@@ -166,7 +181,7 @@ const exitFrame=(code:number)=>{const value=Buffer.alloc(4);value.writeInt32BE(c
 /** A command as the log keeps it: as Hermes asked for it, cut to 4,000 characters with … */
 const logged=(text:string)=>{const clean=text.replace(unstorable,'�');return clean.length>COMMAND_MAX?clean.slice(0,COMMAND_MAX-1).replace(/[\ud800-\udbff]$/,'')+'…':clean;};
 // The log rows this process is working on, which the cleanup loop leaves to it, and the cleanups it runs, by job.
-const live=new Set<string>(),cleaning=new Map<string,Promise<void>>();
+const live=new Set<string>(),cleaning=new Map<string,Promise<void>>(),beginning=new Map<string,Promise<void>>(),checking=new Set<string>();
 /** Whether `promise` settles before `until`. */
 const settlesBy=(promise:Promise<unknown>,until:number)=>new Promise<boolean>(resolve=>{
   const timer=setTimeout(()=>resolve(false),Math.max(0,until-Date.now()));
@@ -196,7 +211,8 @@ function machineFields(body:Record<string,unknown>,partial:boolean) {
 const taken=(error:unknown)=>(error as {code?:string})?.code==='23505';
 /** A machine as the dashboard shows it: never its key, which only nocheh-machines holds. */
 const shown=(row:any)=>({id:row.id,name:row.name,address:row.address,port:row.port,login:row.login,public_key:row.public_key,host_key:row.host_key,enabled:row.enabled,
-  tested_at:row.tested_at,test_error:row.test_error,revision:row.revision,created_at:row.created_at,jobs:Number(row.jobs??0)});
+  tested_at:row.tested_at,test_error:row.test_error,admin:row.admin??null,changed:row.changed?{job:row.changed.job,files:row.changed.files??null}:null,
+  revision:row.revision,created_at:row.created_at,jobs:Number(row.jobs??0)});
 const machineRows=`SELECT m.*,(SELECT count(*) FROM background_jobs j WHERE j.machine->>'id'=m.id AND j.state IN ('approved','running')) AS jobs FROM machines m`;
 
 /**
@@ -212,7 +228,9 @@ export class MachineRepository {
     admin(principal);
     const settings=(await this.control.query('SELECT enabled,revision FROM machine_settings WHERE singleton')).rows[0];
     const machines=(await this.control.query(machineRows+' ORDER BY lower(m.name)')).rows.map(shown);
-    return {available:machineTokenSet(),enabled:settings.enabled as boolean,revision:settings.revision as number,machines};
+    // Stopped jobs whose programs Nocheh could not end, over the last 7 days: the owner's problem notice counts them.
+    const failed=Number((await this.control.query(`SELECT count(*) AS n FROM background_jobs WHERE machine_cleanup='failed' AND coalesce(finished_at,updated_at)>now()-interval '7 days'`)).rows[0].n);
+    return {available:machineTokenSet(),enabled:settings.enabled as boolean,revision:settings.revision as number,machines,cleanup_failed:failed};
   }
   /** Add a machine: nocheh-machines makes its key and gives back only the public key, for the owner to add on the machine. */
   async create(principal:Reader,input:unknown) {
@@ -266,15 +284,24 @@ export class MachineRepository {
       try{answer=await machinesJson('/test',{id:row.id,address:row.address,port:row.port,login:row.login,host_key:row.host_key},AbortSignal.timeout(90000));}
       catch(error){if(!(error instanceof HttpError)){await this.close(log,'failed',{error_code:'machine_unavailable'});throw error;}answer={ok:false,error:error.code};}
       const key=typeof answer.host_key==='string'&&HOST_KEY.test(answer.host_key)?answer.host_key:null;
-      const error=answer.ok===true?!key?'machine_unavailable':row.host_key&&row.host_key!==key?'machine_host_key_changed':null:
+      let error=answer.ok===true?!key?'machine_unavailable':row.host_key&&row.host_key!==key?'machine_host_key_changed':null:
         typeof answer.error==='string'&&machineErrors.has(answer.error)?answer.error:'machine_unreachable';
       const system=typeof answer.system==='string'?answer.system.replace(/[\0-\x1f\x7f]+/g,' ').trim().slice(0,200):'';
-      // Saved only for the machine as it was tested: a change made meanwhile wins.
-      if(!error)await this.control.query(`UPDATE machines SET host_key=coalesce(host_key,$3),tested_at=now(),test_error=NULL,revision=revision+1,updated_at=now()
-        WHERE id=$1 AND revision=$2`,[row.id,row.revision,key]);
+      // Whether the login can act as admin, which every card for this machine then says (machine jobs' start-up files).
+      let admin:boolean|null=null;
+      if(!error) {
+        try{const probe=await machinesJson('/probe',{id:row.id,address:row.address,port:row.port,login:row.login,host_key:key},AbortSignal.timeout(150000));
+          if(probe.ok===true&&typeof probe.admin==='boolean')admin=probe.admin;
+          else error=typeof probe.error==='string'&&machineErrors.has(probe.error)?probe.error:'machine_unreachable';}
+        catch(failed){if(!(failed instanceof HttpError))throw failed;error=failed.code;}
+      }
+      // Saved only for the machine as it was tested: a change made meanwhile wins. A test that passes clears the warning of
+      // what the last job changed, which the owner has now seen.
+      if(!error)await this.control.query(`UPDATE machines SET host_key=coalesce(host_key,$3),admin=$4,changed=NULL,tested_at=now(),test_error=NULL,revision=revision+1,updated_at=now()
+        WHERE id=$1 AND revision=$2`,[row.id,row.revision,key,admin]);
       else await this.control.query('UPDATE machines SET test_error=$3,revision=revision+1,updated_at=now() WHERE id=$1 AND revision=$2',[row.id,row.revision,error]);
       await this.close(log,error?'failed':'done',{exit_code:error?null:0,error_code:error});
-      return {machine:await this.machine(row.id),result:error?{ok:false,error}:{ok:true,host_key:key,...(system?{system}:{})}};
+      return {machine:await this.machine(row.id),result:error?{ok:false,error}:{ok:true,host_key:key,admin,...(system?{system}:{})}};
     } finally {live.delete(log);}
   }
   /** Forget a machine's host key, for a machine that was set up again: its next test trusts the key it then finds, and the
@@ -409,6 +436,8 @@ export class MachineRepository {
     const left=Math.floor((jobDeadlines(job).hard-Date.now())/1000)-30;
     if(left<=0)throw new HttpError(409,'machine_time_up');
     const pin=job.machine as MachinePin,timeout=Math.min(body.timeout,left,COMMAND_SECONDS);
+    // Before its first command: the login still acts as admin as its card said, and its start-up files are read.
+    await this.begin(job.id,pin);
     if(controller.signal.aborted)return;
     const log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:job.id,run_event_id:source.id,kind:body.kind,command:body.command,
       script_sha256:createHash('sha256').update(body.script).digest('hex')});
@@ -470,6 +499,68 @@ export class MachineRepository {
       if(ending==='gone')res.destroy();else res.end();
     } finally {clearInterval(timer);live.delete(log);}
   }
+  /** Before a job's first command, once (machine jobs' start-up files): whether the login acts as admin as its card said, and
+   *  its start-up files and tools as they are, to compare when it ends. A login whose admin rights are not what the card said
+   *  stops the job before anything runs, and the machine needs a new test. A machine that cannot be reached fails the command,
+   *  as one would; start-up files that cannot be read leave the job unchecked, and its card says so when it ends. */
+  private async begin(id:string,pin:MachinePin):Promise<void> {
+    let running=beginning.get(id);
+    if(!running){running=this.probeStart(id,pin).finally(()=>beginning.delete(id));beginning.set(id,running);}
+    await running;
+  }
+  private async probeStart(id:string,pin:MachinePin):Promise<void> {
+    if((await this.control.query('SELECT machine_check FROM background_jobs WHERE id=$1',[id])).rows[0]?.machine_check)return;
+    const log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:id,kind:'test',command:'check admin rights and start-up files before the job'});
+    let answer:Record<string,unknown>;
+    try{answer=await machinesJson('/probe',target(pin),AbortSignal.timeout(150000));}
+    catch(error){answer={ok:false,error:error instanceof HttpError?error.code:'machine_unavailable'};}
+    if(answer.ok!==true) {
+      const code=typeof answer.error==='string'&&machineErrors.has(answer.error)?answer.error:'machine_unreachable';
+      await this.close(log,'failed',{error_code:code});await this.keyMissing(pin.id,code);
+      throw new HttpError(502,code);
+    }
+    if(answer.admin!==pin.admin) {
+      await this.close(log,'failed',{error_code:'machine_admin_changed'});
+      await this.control.query(`UPDATE machines SET test_error='machine_admin_changed',revision=revision+1,updated_at=now() WHERE id=$1`,[pin.id]);
+      const halted=(await this.control.query(`UPDATE background_jobs SET cancel_requested=true,error_code='job_machine_admin_changed',revision=revision+1,updated_at=now()
+        WHERE id=$1 AND state='running' RETURNING id`,[id])).rows.map(row=>row.id as string);
+      await this.stopped({withdrawn:[],halted},null);
+      throw new HttpError(409,'machine_admin_changed');
+    }
+    const files=answer.files&&typeof answer.files==='object'&&!Array.isArray(answer.files)?answer.files:null;
+    const saved=await this.control.query(`UPDATE background_jobs SET machine_files=$2,machine_check=$3 WHERE id=$1 AND machine_check IS NULL`,
+      [id,files?JSON.stringify(files):null,files?'pending':'unchecked']);
+    // Not to be checked when it ends: the next cards say so, as for a check that failed.
+    if(saved.rowCount&&!files)await this.control.query('UPDATE machines SET changed=$2,revision=revision+1,updated_at=now() WHERE id=$1',[pin.id,JSON.stringify({job:id,files:null})]);
+    await this.close(log,'done',{exit_code:0,error_code:files?null:'machine_files_unavailable'});
+  }
+  /** After a job ended and its programs were ended (when it was stopped): its start-up files and tools again, compared with
+   *  those read before its first command. The job's card and the next cards for its machine say what changed, or that it
+   *  could not be checked. */
+  private async checkJob(id:string):Promise<void> {
+    if(checking.has(id))return;checking.add(id);let log:string|undefined;
+    try {
+      const job=(await this.control.query("SELECT id,machine,machine_files FROM background_jobs WHERE id=$1 AND machine_check='pending'",[id])).rows[0];
+      if(!job?.machine)return;
+      const pin=job.machine as MachinePin,before=job.machine_files as Record<string,unknown>|null;
+      log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:id,kind:'test',command:'check start-up files after the job'});
+      let after:Record<string,unknown>|null=null,code:string|null=null;
+      try {
+        const answer=await machinesJson('/probe',target(pin),AbortSignal.timeout(150000));
+        if(answer.ok===true&&answer.files&&typeof answer.files==='object'&&!Array.isArray(answer.files))after=answer.files as Record<string,unknown>;
+        else code=typeof answer.error==='string'&&machineErrors.has(answer.error)?answer.error:typeof answer.files_error==='string'&&machineErrors.has(answer.files_error)?answer.files_error:'machine_unreachable';
+      }catch(error){code=error instanceof HttpError&&machineErrors.has(error.code)?error.code:'machine_unavailable';}
+      const changed=before&&after?[...new Set([...Object.keys(before),...Object.keys(after)])].filter(label=>JSON.stringify(before[label]??null)!==JSON.stringify(after![label]??null)).sort():null;
+      await this.close(log,code?'failed':'done',{exit_code:code?null:0,error_code:code});
+      const result=changed===null?'unchecked':changed.length?'changed':'same';
+      if(!(await this.control.query(`UPDATE background_jobs SET machine_check=$2,machine_changed=$3 WHERE id=$1 AND machine_check='pending'`,
+        [id,result,changed?.length?JSON.stringify(changed):null])).rowCount)return;
+      // The next cards for the machine warn of it, until a test; a job that changed nothing clears an earlier warning.
+      await this.control.query('UPDATE machines SET changed=$2,revision=revision+1,updated_at=now() WHERE id=$1',
+        [pin.id,result==='same'?null:JSON.stringify({job:id,files:changed})]);
+      void this.jobs?.settled(id).catch(()=>{});
+    } finally {checking.delete(id);if(log)live.delete(log);}
+  }
   /** Wait, at most 5 seconds, for a stopped job's commands still streaming here to end: each ends within about 2 seconds of
    *  the stop, so no program it starts outlives the cleanup that follows. */
   private async quiet(id:string):Promise<void> {
@@ -516,5 +607,11 @@ export class MachineRepository {
       AND NOT EXISTS (SELECT 1 FROM machine_commands c WHERE c.job_id=j.id AND c.state='running' AND c.kind IN ('command','file','internal'))
       ORDER BY j.updated_at,j.id LIMIT 10`)).rows;
     await Promise.all(due.map(row=>this.cleanJob(row.id)));
+    // Jobs that ended, whose programs were ended if they had to be, and whose commands no longer run: their start-up files.
+    const ended=(await this.control.query(`SELECT j.id FROM background_jobs j WHERE j.machine_check='pending' AND j.state IN ('done','failed','stopped')
+      AND coalesce(j.machine_cleanup,'done')<>'pending'
+      AND NOT EXISTS (SELECT 1 FROM machine_commands c WHERE c.job_id=j.id AND c.state='running' AND c.kind IN ('command','file','internal'))
+      ORDER BY j.updated_at,j.id LIMIT 5`)).rows;
+    for(const row of ended)void this.checkJob(row.id).catch(()=>{});
   }
 }

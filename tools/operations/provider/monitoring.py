@@ -56,6 +56,7 @@ def status(state):
     result['note_problems']=attempt(lambda:note_problems(state,archive=result['archive']))
     result['github']=attempt(lambda:github_flags(state))
     result['backups']=attempt(lambda:backup_health(state,config))
+    result['machines']=attempt(lambda:machine_health())
     result['keys']=internal_keys(config)
     result['checked_at']=datetime.now(timezone.utc).isoformat()
     result['telegram_enabled']=config.get('TELEGRAM_ENABLED')=='true'
@@ -76,6 +77,12 @@ def github_flags(state):
     """Whether Nocheh's GitHub app is connected or GitHub refused it: the app's file only, never its key."""
     from tools.operations.connections import github
     return github.flags(state)
+
+
+def machine_health():
+    """Stopped machine jobs whose programs Nocheh could not end, over the last 7 days, as a count; nothing about the machines."""
+    answer=API().call('/v1/machines',timeout=5)
+    return {'cleanup_failed':answer['cleanup_failed']} if isinstance(answer,dict) and type(answer.get('cleanup_failed')) is int else {'unavailable':True}
 
 
 def backup_health(state,config):

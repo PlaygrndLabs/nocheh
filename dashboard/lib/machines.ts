@@ -15,13 +15,20 @@ export type Machine = {
   enabled: boolean;
   tested_at: string | null;
   test_error: string | null;
+  /** Whether the login could act as admin (sudo) at its last good test; null before one. */
+  admin: boolean | null;
+  /** What the last checked job changed in its start-up files and tools; files null when it couldn't be checked. */
+  changed: {job: string; files: string[] | null} | null;
   revision: number;
   created_at: string;
   /** Approved or running jobs that work on it. */
   jobs: number;
 };
 export type Machines = {available: boolean; enabled: boolean; revision: number; machines: Machine[]};
-export type MachineTest = {machine: Machine; result: {ok: boolean; error?: string; host_key?: string; system?: string}};
+export type MachineTest = {
+  machine: Machine;
+  result: {ok: boolean; error?: string; host_key?: string; admin?: boolean; system?: string};
+};
 export type MachineCommand = {
   id: number;
   machine_id: string;
@@ -132,6 +139,8 @@ const words: Record<string, string> = {
   machine_host_key_unknown: 'Nocheh lost the machine’s host key',
   machine_key_missing: 'Nocheh has no key for this machine',
   machine_cleanup_failed: 'Nocheh couldn’t end the job’s programs',
+  machine_admin_changed: 'Its admin rights changed since its last test',
+  machine_files_unavailable: 'Nocheh couldn’t read its start-up files over SFTP',
   machine_unavailable: 'Machine control isn’t running',
   machine_off: 'Machine control is off',
   machine_timeout: 'The machine took too long',
@@ -147,6 +156,7 @@ const words: Record<string, string> = {
   machine_not_found: 'This machine was removed',
   job_machine_off: 'Its machine was turned off or changed',
   job_machine_unavailable: 'Its run couldn’t be set up for its machine',
+  job_machine_admin_changed: 'Its login’s admin rights weren’t what its card said',
   job_stopped: 'The job was stopped',
 };
 
@@ -163,6 +173,23 @@ export function machineErrorWords(code: string | null | undefined): string {
 export function machineErrorPhrase(code: string | null | undefined): string {
   const text = machineErrorWords(code);
   return text.startsWith('Nocheh') ? text : text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+/** The one VM setting the start-up files check needs (machine jobs' start-up files). */
+export const sftpHint =
+  'Add “Subsystem sftp internal-sftp” to the machine’s sshd_config, in place of its other sftp line, and restart SSH: then nothing a job leaves there can change what Nocheh reads.';
+/** What a machine's row says of its admin rights and of what the last job changed, in short lines. */
+export function machineNotes(machine: Machine): {text: string; tone: 'warn' | 'muted'}[] {
+  const notes: {text: string; tone: 'warn' | 'muted'}[] = [];
+  if (machine.admin) notes.push({text: 'Its login can act as admin: every job card says so.', tone: 'muted'});
+  if (machine.changed)
+    notes.push({
+      text: machine.changed.files
+        ? `The last job changed ${machine.changed.files.map(file => (file.startsWith('/') ? file : '~/' + file)).join(', ')}. Check them, then press Test.`
+        : 'Nocheh couldn’t check what the last job changed. ' + sftpHint,
+      tone: 'warn',
+    });
+  return notes;
 }
 
 const keyMissing = 'Machine keys aren’t kept in backups. Remove this machine and add it again.';
@@ -185,6 +212,7 @@ export function machineAdvice(code: string, login: string): string {
     machine_not_found: 'Reload the page to see your machines.',
     machine_key_missing: keyMissing,
     machine_cleanup_failed: cleanupFailed,
+    machine_admin_changed: 'Press Test: cards then say again whether jobs can act as admin there.',
   };
   if (advice[code]) return advice[code]!;
   return /conflict|changed/.test(code) ? 'Check it and try again.' : 'Try again in a minute.';
@@ -196,6 +224,7 @@ export function commandAdvice(code: string | null | undefined): string {
     machine_key_missing:
       'Machine keys aren’t kept in backups. Remove the machine in Settings › Machines and add it again.',
     machine_cleanup_failed: cleanupFailed,
+    machine_files_unavailable: sftpHint,
   };
   return (code && advice[code]) || '';
 }

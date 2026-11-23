@@ -53,6 +53,11 @@ if options['StrictHostKeyChecking']=='accept-new' and not os.path.exists(known):
     sys.stderr.write("Warning: Permanently added '[%s]:%s' (ED25519) to the list of known hosts.\\n"%(address,port))
 elif not os.path.exists(known):
     sys.stderr.write('Host key verification failed.\\n');sys.exit(255)
+if '-s' in args:
+    # The sftp subsystem: a real sftp-server in the login's home, as sshd's internal-sftp answers, unless the scenario says
+    # the machine has none.
+    if remote!='sftp' or scenario.get('sftp')=='none':sys.stderr.write('subsystem request failed on channel 0\\n');sys.exit(255)
+    os.chdir(os.environ['HOME']);os.execv(scenario.get('sftp_server','/usr/lib/openssh/sftp-server'),['sftp-server'])
 sys.stdout.write(scenario.get('noise',''));sys.stdout.flush()
 shell=scenario.get('shell','sh');env=dict(os.environ,**scenario.get('env',{{}}))
 if 'lsof' in remote:
@@ -394,6 +399,54 @@ class MachineServerTests(unittest.TestCase):
         self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':HOST_KEY,'job':JOB}),(200,{'ok':False,'error':'machine_cleanup_failed'}))
         self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':OTHER,'job':JOB}),(200,{'ok':False,'error':'machine_host_key_changed'}))
         self.assertEqual(self.post('/cleanup',{**TARGET,'host_key':None,'job':JOB}),(400,{'error':'invalid_machine_request'}))
+
+    def sudo(self,works):
+        """A stand-in sudo on the machine: `sudo -n true` works or asks for a password."""
+        (self.bin/'sudo').write_text('#!/bin/sh\n'+('exit 0' if works else 'echo "sudo: a password is required" >&2; exit 1')+'\n');(self.bin/'sudo').chmod(0o755)
+
+    def probe(self,host_key=HOST_KEY):return self.post('/probe',{**TARGET,'host_key':host_key})
+
+    def test_probe_says_whether_the_login_is_admin_and_hashes_the_watched_files_over_sftp(self):
+        if not os.path.exists('/usr/lib/openssh/sftp-server'):self.skipTest('no sftp-server here')
+        self.machine();self.sudo(False)
+        (self.home/'.zshrc').write_text('export PATH=/opt/homebrew/bin:$PATH\n')
+        agents=self.home/'Library/LaunchAgents';agents.mkdir(parents=True)
+        (agents/'local.made-up.plist').write_text('<plist/>\n')
+        status,first=self.probe()
+        self.assertEqual(status,200);self.assertEqual((first['ok'],first['admin']),(True,False))
+        files=first['files'];self.assertEqual(set(files),{*ms.WATCHED_FILES,*(name+'/' for name in ms.WATCHED_FOLDERS)})
+        self.assertEqual(files['.zshrc'],'sha256:'+hashlib.sha256(b'export PATH=/opt/homebrew/bin:$PATH\n').hexdigest())
+        self.assertIsNone(files['.bashrc']);self.assertIsNone(files['.config/autostart/'])
+        self.assertRegex(files['Library/LaunchAgents/'],r'^sha256:[0-9a-f]{64}$')
+        # The subsystem runs no shell: the call asks for sftp with -s and gives no command line.
+        call=next(call for call in self.calls() if '-s' in call)
+        self.assertEqual(call[call.index('--')+2:],['sftp']);self.assertIn('ControlPath=none',call)
+        self.assertIn('StrictHostKeyChecking=yes',call)
+        # Nothing changed: the same digests. A plist's bytes, a new agent, a changed rc file and sudo all show.
+        self.assertEqual(self.probe()[1]['files'],files)
+        (agents/'local.made-up.plist').write_text('<plist>changed</plist>\n')
+        changed=self.probe()[1]['files']
+        self.assertNotEqual(changed['Library/LaunchAgents/'],files['Library/LaunchAgents/'])
+        self.assertEqual({k for k in files if files[k]!=changed[k]},{'Library/LaunchAgents/'})
+        (self.home/'.bashrc').write_text('echo planted\n');(self.home/'.ssh').mkdir();(self.home/'.ssh/rc').write_text('true\n')
+        self.sudo(True);last=self.probe()[1]
+        self.assertTrue(last['admin'])
+        self.assertEqual({k for k in changed if changed[k]!=last['files'][k]},{'.bashrc','.ssh/rc'})
+        # A link counts with its target, and a file that can't be read says so.
+        (agents/'link.plist').symlink_to(agents/'local.made-up.plist')
+        self.assertNotEqual(self.probe()[1]['files']['Library/LaunchAgents/'],last['files']['Library/LaunchAgents/'])
+        if os.geteuid()!=0:
+            (self.home/'.profile').write_text('x');(self.home/'.profile').chmod(0)
+            self.assertEqual(self.probe()[1]['files']['.profile'],'unreadable')
+
+    def test_probe_without_sftp_still_says_admin_and_why_files_were_not_read(self):
+        self.machine();self.sudo(True);self.scenario({'sftp':'none'})
+        status,answer=self.probe()
+        self.assertEqual((status,answer['ok'],answer['admin'],answer['files'],answer['files_error']),(200,True,True,None,'machine_files_unavailable'))
+        self.assertEqual(self.probe(OTHER),(200,{'ok':False,'error':'machine_host_key_changed'}))
+        self.assertEqual(self.probe(None),(400,{'error':'invalid_machine_request'}))
+        self.scenario({'mode':'fail','before':'Permission denied (publickey).\n'})
+        self.assertEqual(self.probe(),(200,{'ok':False,'error':'machine_auth_failed'}))
 
     def cleanup_here(self,script=None,path=None,home=None):
         """Runs a cleanup script here as the remote command does, for JOB: its exit code."""

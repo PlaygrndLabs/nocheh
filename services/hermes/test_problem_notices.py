@@ -351,6 +351,22 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 86640, backups())
         self.assertEqual((self.edits[-1]['id'], self.edits[-1]['resolved']), (self.sent[-1]['id'], ['Fixed at 12:04 UTC']))
 
+    def test_each_machine_cleanup_that_fails_is_news_and_it_clears_when_none_is_left(self):
+        machines = lambda count: {**monitoring(), 'machines': {'cleanup_failed': count}}
+        self.check(NOW, machines(0))
+        self.check(NOW + 120, machines(1))
+        self.assertEqual(self.sent[-1]['problems'], ['Machines: Nocheh couldn’t end the programs of 1 stopped job in the last 7 days. '
+                                                     'They may still run on the machine: see System › Machine log, and end them yourself.'])
+        self.check(NOW + 240, machines(1))
+        self.assertEqual(len(self.sent), 1, 'one notice for one cleanup')
+        self.check(NOW + 86400, machines(2))
+        self.assertEqual(len(self.sent), 2, 'another job left programs: news again')
+        # The machine list could not be read: the line stays open.
+        self.check(NOW + 86520, {**monitoring(), 'machines': {'unavailable': True}})
+        self.assertEqual(self.edits, [])
+        self.check(NOW + 86640, machines(0))
+        self.assertEqual(self.edits[-1]['resolved'][0][:9], 'Fixed at ')
+
     def test_backup_and_off_site_lines_never_name_a_file(self):
         found = problems.problems({**monitoring(), 'backups': {'failed': 3, 'reason': 'backup_disk_full', 'unreadable': 2, 'skipped_days': 2,
                                                                'offsite_failed': 1, 'offsite_reason': 'offsite_low_disk', 'offsite_skipped': 1,
