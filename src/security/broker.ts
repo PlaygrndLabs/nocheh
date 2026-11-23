@@ -221,8 +221,11 @@ export function brokerServer(options:BrokerOptions) {
         // Storage independently verifies a current live owner-private turn.
         if(knowledge&&!tasks&&(!binding.owner||binding.job||principal.scope!==null||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'owner_private_turn_required');
         // A task list is also a project's, in that project's chat (ADR-0164, ADR-0243): a live turn, the owner's private one or a
-        // group's, never a job or a review. Storage checks which list and shows a project's chat only its board view.
-        if(tasks&&(binding.job||binding.owner!==(principal.scope===null)||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'task_turn_required');
+        // group's, never a review. Storage checks which list and shows a project's chat only its board view.
+        // A job's run reaches a list only to read it and only in the owner's private chat; storage lets only a schedule's
+        // running run there through, such as a morning brief, and refuses every other job (ADR-0266).
+        const ownerRead=req.method==='GET'&&binding.owner&&principal.scope===null;
+        if(tasks&&((binding.job&&!ownerRead)||binding.owner!==(principal.scope===null)||(principal.purpose??'assistant')!=='assistant'))throw new HttpError(403,'task_turn_required');
         const input=req.method==='POST'?await readJson(req,exec?MACHINE_BODY:1024*1024):undefined,body=input===undefined?undefined:JSON.stringify(input);
         // A job asks for the box only where one can be filled: refused now, not failed at every step.
         if(relay==='/v1/jobs/start'&&(input as {box?:unknown}|null)?.box===true&&!boxTokenSet())throw new HttpError(409,'job_box_not_allowed');
