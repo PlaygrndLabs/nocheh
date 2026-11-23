@@ -561,6 +561,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const file=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
       if(file){const bytes=await s.sources.bytes(principal,file[1]!);res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store','content-length':bytes.length});return res.end(bytes);}
       admin(principal);
+      // One schedule's runs for the owner's Schedules page (ADR-0266).
+      if(path==='/v1/schedules/runs')return json(res,200,await s.scheduled.runLog(url.searchParams.get('scope')??'',url.searchParams.get('job_id')??''));
       if(path==='/v1/scopes') {
         const rows=(await s.stores.archive.query("SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 AND origin<>'generated' AND kind<>'telegram_wire' GROUP BY scope ORDER BY scope LIMIT 101",[url.searchParams.get('after')??''])).rows;
         return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99].scope:null});

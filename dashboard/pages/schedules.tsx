@@ -3,11 +3,11 @@
  * Each row can be paused, resumed, run now or deleted. The same page is a tab of the mini app.
  */
 import * as React from 'react';
-import {CalendarClock, Pause, Play, PlayCircle, Trash2} from 'lucide-react';
+import {CalendarClock, History, Pause, Play, PlayCircle, Trash2} from 'lucide-react';
 import {apiPost} from '../lib/api';
 import {problemText} from '../lib/messages-format';
 import {refreshResources, useResource} from '../lib/resource';
-import {ago, dateTime} from '../lib/system-format';
+import {ago, dateTime, duration} from '../lib/system-format';
 import {Badge, Button, Card, Empty, LoadError, LoadingRows, Table, Td, Th, type Tone} from '../ui/core';
 import {useFeedback} from '../ui/overlay';
 import {Page} from '../ui/page';
@@ -33,6 +33,43 @@ export type Schedule = {
   chat_title: string | null;
 };
 type Operation = 'pause' | 'resume' | 'run' | 'delete';
+/** One run in a schedule's log: when, timed or Run now, and how it ended; never what it said. */
+export type ScheduleRun = {
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  trigger: 'timed' | 'run_now' | 'catch_up';
+  result: string;
+  error_code: string | null;
+};
+
+/** How a run ended, in a word, with its tone. */
+export function runResult(run: Pick<ScheduleRun, 'result'>): {label: string; tone: Tone} {
+  return (
+    (
+      {
+        running: {label: 'Running', tone: 'info'},
+        sent: {label: 'Sent', tone: 'good'},
+        nothing_new: {label: 'Nothing new', tone: 'neutral'},
+        waiting: {label: 'Waiting for your yes', tone: 'info'},
+        sending: {label: 'Sending', tone: 'info'},
+        declined: {label: 'Declined', tone: 'neutral'},
+        kept: {label: 'Kept in Nocheh', tone: 'neutral'},
+        not_sent: {label: 'Not sent', tone: 'warn'},
+        skipped: {label: 'Skipped', tone: 'warn'},
+        stopped: {label: 'Stopped', tone: 'neutral'},
+        failed: {label: 'Failed', tone: 'bad'},
+      } as Record<string, {label: string; tone: Tone}>
+    )[run.result] ?? {label: 'Unknown', tone: 'neutral'}
+  );
+}
+const runTime = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+});
+const triggers: Record<ScheduleRun['trigger'], string> = {timed: 'Timed', run_now: 'Run now', catch_up: 'Catch-up'};
 
 /** Where a schedule's results go, as the owner sees it. */
 export function scheduleChat(row: Pick<Schedule, 'owner_chat' | 'chat_title'>): string {
@@ -116,6 +153,7 @@ export default function Schedules() {
 function ScheduleRow({row}: {row: Schedule}) {
   const feedback = useFeedback();
   const [busy, setBusy] = React.useState<Operation | null>(null);
+  const [log, setLog] = React.useState(false);
   const result = lastResult(row);
   const act = async (operation: Operation) => {
     if (
@@ -149,72 +187,141 @@ function ScheduleRow({row}: {row: Schedule}) {
     }
   };
   return (
-    <tr>
-      <Td>
-        <div className="font-medium" dir="auto">
-          {row.name || 'Unnamed schedule'}
-        </div>
-        <div className="text-xs text-muted md:hidden">{scheduleChat(row)}</div>
-        <div className="text-xs text-muted sm:hidden">Next: {nextRun(row)}</div>
-      </Td>
-      <Td className="hidden md:table-cell" dir="auto">
-        {scheduleChat(row)}
-      </Td>
-      <Td className="hidden whitespace-nowrap sm:table-cell">
-        {row.schedule || '—'}
-        {row.timezone && <span className="text-muted"> · {row.timezone}</span>}
-      </Td>
-      <Td className="hidden whitespace-nowrap sm:table-cell">{nextRun(row)}</Td>
-      <Td className="hidden whitespace-nowrap sm:table-cell">
-        <span className="inline-flex items-center gap-2">
-          <Badge tone={result.tone} dot title={row.last_run_at ? dateTime(row.last_run_at) : undefined}>
-            {result.label}
-          </Badge>
-          {/* The time is the last finished run's; a run under way has none yet. */}
-          {row.last_run_at && !row.running && !row.pending && (
-            <span className="text-xs text-muted">{ago(row.last_run_at)}</span>
-          )}
-        </span>
-      </Td>
-      <Td className="whitespace-nowrap text-right">
-        <div className="inline-flex gap-1">
-          {row.state !== 'completed' && (
+    <>
+      <tr>
+        <Td>
+          <div className="font-medium" dir="auto">
+            {row.name || 'Unnamed schedule'}
+          </div>
+          <div className="text-xs text-muted md:hidden">{scheduleChat(row)}</div>
+          <div className="text-xs text-muted sm:hidden">Next: {nextRun(row)}</div>
+        </Td>
+        <Td className="hidden md:table-cell" dir="auto">
+          {scheduleChat(row)}
+        </Td>
+        <Td className="hidden whitespace-nowrap sm:table-cell">
+          {row.schedule || '—'}
+          {row.timezone && <span className="text-muted"> · {row.timezone}</span>}
+        </Td>
+        <Td className="hidden whitespace-nowrap sm:table-cell">{nextRun(row)}</Td>
+        <Td className="hidden whitespace-nowrap sm:table-cell">
+          <span className="inline-flex items-center gap-2">
+            <Badge tone={result.tone} dot title={row.last_run_at ? dateTime(row.last_run_at) : undefined}>
+              {result.label}
+            </Badge>
+            {/* The time is the last finished run's; a run under way has none yet. */}
+            {row.last_run_at && !row.running && !row.pending && (
+              <span className="text-xs text-muted">{ago(row.last_run_at)}</span>
+            )}
+          </span>
+        </Td>
+        <Td className="whitespace-nowrap text-right">
+          <div className="inline-flex gap-1">
             <Button
               size="icon-sm"
               variant="ghost"
-              busy={busy === (row.enabled ? 'pause' : 'resume')}
-              disabled={!!busy}
-              onClick={() => act(row.enabled ? 'pause' : 'resume')}
-              aria-label={row.enabled ? 'Pause' : 'Resume'}
-              title={row.enabled ? 'Pause' : 'Resume'}
+              onClick={() => setLog(open => !open)}
+              aria-label="Runs"
+              aria-expanded={log}
+              title="Runs"
             >
-              {row.enabled ? <Pause aria-hidden /> : <Play aria-hidden />}
+              <History aria-hidden />
             </Button>
-          )}
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            busy={busy === 'run'}
-            disabled={!!busy || row.running || row.pending}
-            onClick={() => act('run')}
-            aria-label="Run now"
-            title="Run now"
-          >
-            <PlayCircle aria-hidden />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            busy={busy === 'delete'}
-            disabled={!!busy}
-            onClick={() => act('delete')}
-            aria-label="Delete"
-            title="Delete"
-          >
-            <Trash2 aria-hidden />
-          </Button>
-        </div>
-      </Td>
-    </tr>
+            {row.state !== 'completed' && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                busy={busy === (row.enabled ? 'pause' : 'resume')}
+                disabled={!!busy}
+                onClick={() => act(row.enabled ? 'pause' : 'resume')}
+                aria-label={row.enabled ? 'Pause' : 'Resume'}
+                title={row.enabled ? 'Pause' : 'Resume'}
+              >
+                {row.enabled ? <Pause aria-hidden /> : <Play aria-hidden />}
+              </Button>
+            )}
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              busy={busy === 'run'}
+              disabled={!!busy || row.running || row.pending}
+              onClick={() => act('run')}
+              aria-label="Run now"
+              title="Run now"
+            >
+              <PlayCircle aria-hidden />
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              busy={busy === 'delete'}
+              disabled={!!busy}
+              onClick={() => act('delete')}
+              aria-label="Delete"
+              title="Delete"
+            >
+              <Trash2 aria-hidden />
+            </Button>
+          </div>
+        </Td>
+      </tr>
+      {log && (
+        <tr>
+          <td colSpan={6} className="bg-subtle/60 px-2 py-2 sm:px-4">
+            <ScheduleRuns row={row} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** A schedule's runs, newest first, followed live while one runs. */
+function ScheduleRuns({row}: {row: Schedule}) {
+  const query = new URLSearchParams({scope: row.scope, job_id: row.id}).toString();
+  const {data, error} = useResource<{runs: ScheduleRun[]}>(
+    '/schedules/runs?' + query,
+    row.running || row.pending ? 2000 : 15000,
+  );
+  if (error) return <LoadError what="the runs" />;
+  if (!data) return <LoadingRows rows={2} />;
+  if (!data.runs.length) return <p className="py-1 text-sm text-muted">No runs yet.</p>;
+  return (
+    <Table aria-label={`Runs of ${row.name || 'this schedule'}`}>
+      <thead>
+        <tr>
+          <Th scope="col">Started</Th>
+          <Th scope="col" className="hidden sm:table-cell">
+            How
+          </Th>
+          <Th scope="col">Result</Th>
+          <Th scope="col" className="hidden sm:table-cell">
+            Took
+          </Th>
+        </tr>
+      </thead>
+      <tbody>
+        {data.runs.map(run => {
+          const result = runResult(run);
+          return (
+            <tr key={run.id}>
+              <Td className="whitespace-nowrap" title={dateTime(run.started_at)}>
+                {runTime.format(new Date(run.started_at))}
+                <div className="text-xs text-muted sm:hidden">{triggers[run.trigger] ?? run.trigger}</div>
+              </Td>
+              <Td className="hidden whitespace-nowrap sm:table-cell">{triggers[run.trigger] ?? run.trigger}</Td>
+              <Td className="whitespace-nowrap">
+                <Badge tone={result.tone} dot title={run.error_code ?? undefined}>
+                  {result.label}
+                </Badge>
+              </Td>
+              <Td className="hidden whitespace-nowrap sm:table-cell">
+                {run.finished_at ? duration(Date.parse(run.finished_at) - Date.parse(run.started_at)) : '—'}
+              </Td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
   );
 }

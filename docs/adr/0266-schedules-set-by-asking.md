@@ -62,6 +62,8 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
    Schedules tab list every chat's schedules in one table (name, chat, when, next
    run, last result) with Pause or Resume, Run now and Delete, through the brain's
    `manageSchedules` operation and the same owner adapter as the command line.
+   Each schedule's runs open below it, read from Nocheh's own run records: when,
+   timed or Run now, and how each ended, never what it said.
 8. **A run reads the owner's tasks and views.** A schedule's run in the owner's
    private chat, while it runs and not stopped, reads every task list and the
    owner's read views (chats, projects, people, memory map), as a morning brief
