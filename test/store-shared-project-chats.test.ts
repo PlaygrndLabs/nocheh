@@ -97,9 +97,36 @@ test('a project that shares its group chats lets each of its groups read the oth
     assert.deepEqual(readSetGroups(member.reads!),[GP1,GP2,GP3]);
     assert.deepEqual(await reads(member),[true,true,true,false,false,false,false,true]);
 
+    // The tick list (ADR-0287): GP3 unticked reads only itself and no ticked group reads it; GP1 and GP2 still read each
+    // other, the member's private chat follows, and the button comes back for both sides, as their answers miss a group.
+    const projects=new ProjectRepository(db,()=>served),current=async()=>(await projects.list({admin:true,scope:null})).projects.find((row:{id:string})=>row.id===P1);
+    const tick=async(own_groups:string[],label:string)=>{const p1=await current();
+      return projects.save({admin:true,scope:null},{id:P1,name:p1.name,description:p1.description,state:'active',own_groups,expected_revision:p1.revision,operation_id:key+':'+label});};
+    for(const bad of [[GP1_TOPIC],[OWNER],[MEMBER_GP_CHAT],['x'],[1]])
+      await assert.rejects(tick(bad as string[],'bad:'+JSON.stringify(bad)),{status:400,code:'invalid_project'},JSON.stringify(bad));
+    const ticked=await tick([GP3,GP3],'gp3');
+    assert.deepEqual([ticked.share_chats,ticked.own_groups],[true,[GP3]],'kept once, sharing still on');
+    assert.deepEqual(await sharedProjectGroups(db,GP1,served),{project:P1,groups:[GP1,GP2]});
+    assert.equal(await sharedProjectGroups(db,GP3,served),null);
+    const fresh=async()=>{const now=await s.guards.state();return {generation:now.generation,guard_epoch:now.epoch,revision:now.epoch};};
+    const pair=await s.access.bindReads({...group(GP1),...await fresh()});
+    assert.deepEqual(readSetGroups(pair.reads!),[GP1,GP2]);
+    assert.deepEqual((await answers.offerable(GP1))?.groups,[GP1,GP2,GP3]);
+    assert.deepEqual((await answers.offerable(GP3))?.groups,[GP1,GP2,GP3]);
+    const paired=await s.access.bindReads({admin:false,scope:MEMBER_GP_CHAT,space:MEMBER_GP_CHAT,turnEvent:inMember.id,member:MEMBER_GP_ID,...await fresh()});
+    assert.deepEqual(readSetGroups(paired.reads!),[GP1,GP2]);
+    // One ticked group has no one to share with.
+    await tick([GP2,GP3],'gp1-alone');
+    assert.equal(await sharedProjectGroups(db,GP1,served),null);
+    // A change that does not name the ticks keeps them.
+    const kept=await current();
+    assert.deepEqual((await projects.save({admin:true,scope:null},{id:P1,name:kept.name,description:'Renamed',state:'active',expected_revision:kept.revision,operation_id:key+':keep'})).own_groups,[GP2,GP3]);
+    await tick([],'all');
+    assert.deepEqual(await sharedProjectGroups(db,GP1,served),{project:P1,groups:[GP1,GP2,GP3]});
+
     // Turned off by the owner, as a project change: each group reads only itself again, the member only GP1, and the
     // button comes back.
-    const projects=new ProjectRepository(db,()=>served),p1=(await projects.list({admin:true,scope:null})).projects.find((row:{id:string})=>row.id===P1);
+    const p1=await current();
     const off=await projects.save({admin:true,scope:null},{id:P1,name:p1.name,description:p1.description,state:'active',share_chats:false,expected_revision:p1.revision,operation_id:key+':off'});
     assert.equal(off.share_chats,false);
     const after=await s.guards.state(),now={generation:after.generation,guard_epoch:after.epoch,revision:after.epoch};

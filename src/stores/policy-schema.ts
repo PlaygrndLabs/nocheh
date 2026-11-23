@@ -30,6 +30,8 @@ ALTER TABLE project_assignments DROP COLUMN IF EXISTS share_into;
 -- "Share group chats" (ADR-0267): on, every group of the project reads every other served group of it; on for every
 -- project, old and new.
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_chats boolean NOT NULL DEFAULT true;
+-- The project's groups left unticked in its tick list (ADR-0287): each reads only itself while the ticked ones share.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS own_groups text[] NOT NULL DEFAULT '{}';
 -- A topic always follows its group's project (ADR-0247): a topic's own choice saved earlier becomes "follows its group".
 -- Which rows are topics comes from their chats rows (ADR-0252), never from the id; the chat records are made later in
 -- the control schema, so a fresh store has neither and skips this.

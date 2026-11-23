@@ -50,12 +50,12 @@ export const ruleAudienceText = (group: string | null) =>
 
 /**
  * Shown wherever a group joins a project: everyone in it, members or not, sees every task on the project's list, and
- * members change them where they may write tasks, whatever "Share group chats" says (ADR-0276).
+ * members change them where they may write tasks, whatever "Groups that share memory" says (ADR-0276, ADR-0287).
  */
 export const projectTasksWarning = (chat: string, projects: string[]) =>
   `Everyone in ${chat}, members or not, will see every task on the list of ` +
   (projects.length < 2 ? (projects[0] ?? '') : projects.slice(0, -1).join(', ') + ' and ' + projects.at(-1)) +
-  ', whatever “Share group chats” says. Members can change them where they may write tasks.';
+  ', whatever “Groups that share memory” says. Members can change them where they may write tasks.';
 
 /**
  * Shown before a group leaves its project for none: its tasks, its topics' too, stay on that project's list, which the

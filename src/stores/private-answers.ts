@@ -6,7 +6,7 @@ import {HttpError} from '../http.js';
 import {groupSpace,readSet,servedGroups} from '../spaces.js';
 import {accountIdFor,chatIdListSql,chatIdSql,chats} from '../chats.js';
 import {isTelegramAccount,legacyShapeSql,telegramAccountSource} from '../chats-telegram.js';
-import {projectGroups,projectGroupsSql} from './project-groups.js';
+import {projectGroups,projectGroupsSql,sharedProjectGroups} from './project-groups.js';
 
 /**
  * One row per "Answer privately" button Nocheh offered (ADR-0249): who asked, where, in which project, which groups
@@ -157,18 +157,21 @@ export class PrivateAnswerRepository {
   constructor(readonly control:pg.Pool,readonly policy:()=>AssistantPolicy){}
   /**
    * The project a group or topic answer may offer the button for, and that project's groups, as projectGroups gives
-   * them: the asking group is served and assigned to an active project that has at least one other served group.
-   * Null otherwise, which means no button: also for a project whose "Share group chats" is on, whose group answer
-   * already reads every group of it (ADR-0267). A topic follows its group's project.
+   * them: the asking group is served and assigned to an active project that has at least one other served group its
+   * group answer does not already read. Null otherwise, which means no button: also for a group whose answer already
+   * reads every group of its project, as a ticked group does while every group is ticked (ADR-0267, ADR-0287). A topic
+   * follows its group's project.
    */
   async offerable(space:string,db:Database=this.control):Promise<{project_id:string;groups:string[]}|null> {
     const policy=this.policy(),group=chats().groupOf(space);
     if(!policy.enabled||!policy.owner_id||group===null||!chats().served(group))return null;
     const row=(await db.query(`SELECT a.project_id FROM project_assignments a JOIN projects p ON p.id=a.project_id
-      WHERE a.space_id=$1 AND a.mode='assigned' AND p.state='active' AND NOT p.share_chats`,[group])).rows[0];
+      WHERE a.space_id=$1 AND a.mode='assigned' AND p.state='active'`,[group])).rows[0];
     if(!row)return null;
     const groups=await projectGroups(db,row.project_id,servedGroups());
-    return groups.includes(group)&&groups.length>1?{project_id:row.project_id,groups}:null;
+    if(!groups.includes(group)||groups.length<2)return null;
+    const shared=await sharedProjectGroups(db,group,servedGroups());
+    return (shared?.groups.length??1)<groups.length?{project_id:row.project_id,groups}:null;
   }
   /** Records the button under the owner's group answer; repeating it for the same question returns the same row. A new
    * row needs a question the owner asked (step 2; members get the button in step 4) and the place to be offerable for
