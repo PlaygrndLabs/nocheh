@@ -383,7 +383,7 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(turn_tools(False,False),(OWNER_SET_TOOLS,REPLY_TOOLS))
         self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job'},JOB_TOOLS))
         self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_BOX_TOOLS))
-        self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|(ALLOWED_TOOLS-JOB_MACHINE_TOOLS),JOB_MACHINE_TOOLS))
+        self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'mcp__nocheh__my_time_zone'}|(ALLOWED_TOOLS-JOB_MACHINE_TOOLS),JOB_MACHINE_TOOLS))
         self.assertIn('mcp__nocheh__background_job',REPLY_TOOLS)
         for tools in (JOB_TOOLS,JOB_BOX_TOOLS,JOB_MACHINE_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
         # A private answer only reads (ADR-0249): no native memory, no tool that sends, changes, starts or asks.

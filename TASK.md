@@ -40,7 +40,8 @@ Nocheh is in development mode and not yet released. Everything below is built an
   card, the Notion and GitHub of each project holding a group it reads
   ([ADR-0278](docs/adr/0278-member-private-chat-reads-project-connectors.md)). A member's new
   schedules run in their own time zone, set in the members' app or by asking
-  ([ADR-0281](docs/adr/0281-members-own-time-zone.md)).
+  ([ADR-0281](docs/adr/0281-members-own-time-zone.md)). The owner sets theirs on the Schedules
+  page or by asking ([ADR-0282](docs/adr/0282-owners-time-zone-where-schedules-are.md)).
 - Connections: a service connects to a project (shared) or a person (private). Notion per
   project or owner ([ADR-0268](docs/adr/0268-notion-per-project-or-person.md)), GitHub per project with live read-only lookups
   ([ADR-0269](docs/adr/0269-github-per-project.md), [ADR-0270](docs/adr/0270-github-live-lookups.md)), a Connections page ([ADR-0271](docs/adr/0271-connections-page.md)), the owner's Gmail read

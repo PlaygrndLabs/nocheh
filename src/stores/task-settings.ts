@@ -104,6 +104,15 @@ export async function ownerTimeZone(db:{query(text:string,values?:unknown[]):Pro
   return storedTaskSettings(row?.settings).time_zone;
 }
 
+/** Set the owner's time zone alone, the one their new schedules and task dates use; 400 `invalid_task_time_zone` for a
+ *  zone this server's clock does not know. The other task settings, and schedules already set, keep theirs. */
+export async function setOwnerTimeZone(db:{query(text:string,values?:unknown[]):Promise<{rows:any[]}>},value:unknown):Promise<string> {
+  const zone=timeZone(value);
+  await db.query(`UPDATE owner_task_settings SET settings=settings||jsonb_build_object('time_zone',$1::text),revision=revision+1,updated_at=now()
+    WHERE singleton`,[zone]);
+  return zone;
+}
+
 export type Repeat={every:number;unit:'day'|'week'|'month'|'year';weekdays?:number[];from:'due'|'done'};
 /** How a task repeats: every N days, weeks (optionally on chosen weekdays, 0 is Sunday), months or years. */
 export function readRepeat(value:unknown):Repeat|null {

@@ -5,12 +5,14 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import pg from 'pg';
 import {canonical,digest} from '../src/archive.js';
+import {HttpError} from '../src/http.js';
 import {reader,type Reader} from '../src/access.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {installMembersForTest} from '../src/members.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {RuntimeProfileRepository} from '../src/stores/runtime-profiles.js';
-import {chatSchedules,memberTimeZoneTurn,scheduleTurn} from '../src/stores/schedules.js';
+import {chatSchedules,scheduleTurn,timeZoneTurn} from '../src/stores/schedules.js';
+import {ownerTimeZone,setOwnerTimeZone} from '../src/stores/task-settings.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {fixtureServices,type FakeCall} from './fixture-agent.js';
 import {GP1,GP2,GP3,GP_GROUP_IDS,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_NG_CHAT,NG_GROUP_IDS,OWNER,P1,fixtureMemberDirectory,fixtureChats,groupsPolicy,
@@ -106,7 +108,7 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM security_events WHERE state='allowed' AND rule='member_scheduled_chat'")).rows[0].n,1);
 
     // A reply in her chat may set schedules within her limit; a bound reader of another chat, or with assistant off, may not.
-    const live={knowledge:{ownerTurn:async()=>{throw Error('not the owner');},liveGroupTurn:async()=>({source:{channel:'telegram',kind:'telegram_update',origin:'live',reference:{id:'e1'}}})},
+    const live={knowledge:{ownerTurn:async()=>{throw new HttpError(403,'owner_private_turn_required');},liveGroupTurn:async()=>({source:{channel:'telegram',kind:'telegram_update',origin:'live',reference:{id:'e1'}}})},
       stores:{control:stores.control,archive:{query:async()=>({rows:[{payload:Buffer.from(JSON.stringify({message:{message_id:1,text:'every morning'}}))}]})} as any}};
     const member:Reader={admin:false,scope:MEMBER_GP_CHAT,space:MEMBER_GP_CHAT,member:MEMBER_GP_ID,memberChat:MEMBER_GP_CHAT,reads:{home:MEMBER_GP_CHAT,whole:[GP1]}} as any;
     const allowed=await scheduleTurn(live,member);
@@ -117,13 +119,25 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     // Her own time zone (members' time zones): the owner's until she sets one, by asking in her own chat; never from
     // another chat, and only a known name.
     const ownerZone=(await scheduleTurn(live,member)).time_zone;
-    assert.deepEqual(await memberTimeZoneTurn(live,member,{time_zone:'Pacific/Auckland'}),{time_zone:'Pacific/Auckland'});
+    assert.deepEqual(await timeZoneTurn(live,member,{time_zone:'Pacific/Auckland'}),{time_zone:'Pacific/Auckland'});
     assert.equal((await scheduleTurn(live,member)).time_zone,'Pacific/Auckland');
-    await assert.rejects(memberTimeZoneTurn(live,member,{time_zone:'Mars/Olympus'}),{status:400,code:'invalid_time_zone'});
-    await assert.rejects(memberTimeZoneTurn(live,{...member,scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT} as any,{time_zone:'UTC'}),{status:403,code:'member_time_zone_not_here'});
-    await assert.rejects(memberTimeZoneTurn(live,{admin:false,scope:null,space:OWNER} as any,{time_zone:'UTC'}),{status:403,code:'member_time_zone_not_here'});
-    assert.deepEqual(await memberTimeZoneTurn(live,member,{time_zone:null}),{time_zone:null});
+    await assert.rejects(timeZoneTurn(live,member,{time_zone:'Mars/Olympus'}),{status:400,code:'invalid_time_zone'});
+    await assert.rejects(timeZoneTurn(live,{...member,scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT} as any,{time_zone:'UTC'}),{status:403,code:'time_zone_not_here'});
+    await assert.rejects(timeZoneTurn(live,{admin:false,scope:null,space:OWNER} as any,{time_zone:'UTC'}),{status:403,code:'time_zone_not_here'});
+    assert.deepEqual(await timeZoneTurn(live,member,{time_zone:null}),{time_zone:null});
     assert.equal((await scheduleTurn(live,member)).time_zone,ownerZone,'back to the owner\'s');
+    // The owner sets theirs the same way, in their own private chat (ADR-0282): never null, never from a group's turn.
+    const ownerLive={...live,knowledge:{...live.knowledge,ownerTurn:async()=>({source:{channel:'telegram',kind:'telegram_update',origin:'live',reference:{id:'e2'}}})}};
+    const ownerTurn:Reader={admin:false,scope:null} as any;
+    assert.deepEqual(await timeZoneTurn(ownerLive,ownerTurn,{time_zone:'America/Chicago'}),{time_zone:'America/Chicago'});
+    assert.equal(await ownerTimeZone(stores.control),'America/Chicago');
+    assert.equal((await scheduleTurn(live,member)).time_zone,'America/Chicago','a member with no zone of their own follows it');
+    await assert.rejects(timeZoneTurn(ownerLive,ownerTurn,{time_zone:null}),{status:400,code:'invalid_time_zone'});
+    await assert.rejects(timeZoneTurn(ownerLive,ownerTurn,{time_zone:'Mars/Olympus'}),{status:400,code:'invalid_time_zone'});
+    await assert.rejects(timeZoneTurn(ownerLive,ownerTurn,{time_zone:'UTC',revision:1}),{status:400,code:'invalid_time_zone'});
+    await assert.rejects(timeZoneTurn(ownerLive,{admin:false,scope:null,space:OWNER,answer:true} as any,{time_zone:'UTC'}),{status:403,code:'time_zone_not_here'});
+    assert.equal(await ownerTimeZone(stores.control),'America/Chicago');
+    await setOwnerTimeZone(stores.control,ownerZone);
 
     // Personal assistant off: her chat stops being a profile, nothing new is captured, and a reply may set none.
     await stores.control.query('UPDATE members SET assistant=false WHERE id=$1',[MEMBER_GP_ID]);

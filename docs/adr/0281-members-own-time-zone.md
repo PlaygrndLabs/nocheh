@@ -25,8 +25,8 @@ that one schedule. A member in another city had to name it every time.
    knows), "Use this phone's time zone", and "Same as the owner", which never names the
    owner's zone. `POST /time-zone {operation_id, time_zone|null}` counts against the
    member's write limit. `GET /schedules` returns `time_zone`, the member's own or null.
-4. **By asking.** The MCP tool `my_time_zone` (`POST /v1/members/time-zone`), offered only
-   to a member's own private chat, sets it from the member's own live message there, not
+4. **By asking.** The MCP tool `my_time_zone` (`POST /v1/schedules/time-zone` since
+   [ADR-0282](0282-owners-time-zone-where-schedules-are.md), which also lets the owner use it), in a member's own private chat, sets it from the member's own live message there, not
    a forward, with Personal assistant on: the same check that lets them set schedules
    (`scheduleTurn`). Anything else is refused with `member_time_zone_not_here`; an
    unknown name with `invalid_time_zone`.

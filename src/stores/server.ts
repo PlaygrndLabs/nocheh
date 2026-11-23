@@ -40,7 +40,7 @@ import {searchTagged} from './native-memory.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {currentChats,otherPrivateScopes} from './chats.js';
-import {memberTimeZoneTurn,scheduleChats,scheduleTurn} from './schedules.js';
+import {scheduleChats,scheduleTurn,timeZoneTurn} from './schedules.js';
 import {authorizeScheduleNotice} from './schedule-notices.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
@@ -221,8 +221,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // Whether this reply may set schedules with Hermes's schedule tool (ADR-0266): only the owner's own live Telegram
     // message in their private chat, not a forward. The schedules run in the owner's time zone.
     if(req.method==='POST'&&path==='/v1/schedules/turn')return json(res,200,await scheduleTurn(s,principal));
-    // A member sets their own time zone by asking in their own private chat (members' time zones).
-    if(req.method==='POST'&&path==='/v1/members/time-zone')return json(res,200,await memberTimeZoneTurn(s,principal,await readJson(req)));
+    // The owner or a member sets their own time zone by asking in their own private chat (ADR-0281, ADR-0282).
+    if(req.method==='POST'&&path==='/v1/schedules/time-zone')return json(res,200,await timeZoneTurn(s,principal,await readJson(req)));
     if(req.method==='POST'&&path==='/v1/member-asks')return json(res,200,await s.memberAsks.ask(principal,await readJson(req,16*1024)));
     if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
     const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);

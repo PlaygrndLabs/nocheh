@@ -18,6 +18,7 @@
  {"path": "/v1/machines/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/remove", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks/settings", "owner_storage": true, "allowed_path": true},
+ {"path": "/v1/tasks/time-zone", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks/archive-finished", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner_storage": true, "allowed_path": true},
  {"path": "/v1/tasks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/comments", "owner_storage": true, "allowed_path": true},
