@@ -26,11 +26,16 @@ showed two faults. Amends 0275's reading instructions and the write time of
    No note is dated by its write.
 2. **Reading instructions.** `readingInstructions` in `src/memory/honcho.ts` now says:
    - a record's `source` or `kind` says whose words or conclusions it holds;
-   - only a record whose `source` names Nocheh's reply holds Nocheh's words, not every record;
+   - a `source` names each part of a message, separated by "; ", and only a part named the
+     sender's own words or transcribed voice or video note holds the sender's words;
+   - a record whose `source` begins with "Nocheh's" (a reply, follow-up, private answer, report,
+     scheduled result, post or note) holds other people's words, like a forward; a learned note
+     is no longer read that way;
    - a `learned_interpretation` by the owner is a fact that replaces earlier notes on the same
-     thing; one by a participant (a convention or an explicit statement, backed by a quote) is a
-     standing fact or rule within its scope; any other note is kept at most as "Nocheh inferred",
-     with its uncertainty;
+     thing; one by a participant (backed by a quote from a message it cites) is kept within its
+     scope as a standing rule (a convention), a fact (a meaning) or true on its date (a state),
+     without naming who said it; any other note is kept at most as "Nocheh inferred", with its
+     uncertainty;
    - a note is never anyone's own words, and no health, sexual or other sensitive personal state
      is kept from a note.
    `openSpace` sends the new text to each space once, as in 0275.
@@ -40,3 +45,7 @@ showed two faults. Amends 0275's reading instructions and the write time of
 - New writes follow both rules. Notes written before keep their dates and Honcho's conclusions
   from them until a re-learn, which needs the owner's yes.
 - The instructions stay under Honcho's 2,000-token budget for them.
+- Known limit: learning may cite a reply written after the message that set it off (an import,
+  or work that ran late). A relative date taken from that later reply still reads against the
+  earlier day. The learning context carries no message times, so a note cannot write absolute
+  dates itself.
