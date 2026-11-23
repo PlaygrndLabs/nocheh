@@ -8,7 +8,7 @@ import {activeChatProject} from './projects.js';
 import {chatToolAllowed} from './chat-tools.js';
 import {ownerApprovedJob,relaunchedRun} from './background-jobs.js';
 import type pg from 'pg';
-import {admin,type Reader} from '../access.js';
+import {admin,boundReader,boundReaderReadOnly,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {actionArguments,ruleKey} from '../action-arguments.js';
 import {freeRead,sameAddress,type FreeRead} from '../link-check.js';
@@ -56,6 +56,12 @@ export const covers=(grant:any,row:any)=>grant.grain==='chat'?row.job_id===null&
 export type GroupAsker={owner:true;account:null}|{owner:false;account:string};
 /** Whether an operation is one a group's permission for web pages and outside tools covers: a web page read, or an
  *  outside MCP tool that is not a connection the owner set up (Notion stays the owner's own). A command never is. */
+/** Whether a request is a lookup a member's own private chat may make: a call on Notion or GitHub (ADR-0278). Where and
+ *  what it may read is checked as for every call; it runs only with no card, or is refused. */
+const memberConnectorCall=(value:unknown)=>{
+  const body=value&&typeof value==='object'?value as Record<string,unknown>:{},args=body.arguments&&typeof body.arguments==='object'?body.arguments as Record<string,unknown>:{};
+  return body.kind==='mcp'&&(args.connection==='notion'||args.connection==='github');
+};
 export const groupToolKind=(kind:unknown,args:object)=>(kind==='browser'||kind==='mcp')&&!('connection' in args);
 /**
  * The one switch for the owner's own web page and outside tool requests in a group: on lets them run without a card, as a
@@ -117,8 +123,10 @@ export class ControlledActionRepository {
   private async proposeOnce(principal:Reader,value:unknown) {
     if(principal.admin||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'external_effect_scope_denied');
     // A private answer, a member's private chat and the owner's ask about a member only read and talk (ADR-0249, step 4):
-    // no tool runs and no card is made for them, not even the owner's.
-    assertActingReader(principal);
+    // no tool runs and no card is made for them, not even the owner's. A member's private chat may only read a project's
+    // Notion or GitHub, and only what runs with no card (ADR-0278).
+    const memberRead=boundReader(principal)==='member'&&memberConnectorCall(value);
+    if(!memberRead)assertActingReader(principal);
     const body=exact(value,['kind','arguments','summary']),note=summaryOf(body.summary);let raw=actionArguments(body.kind,body.arguments);
     const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=ownerChat(this.access.policy());
     // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.
@@ -144,7 +152,7 @@ export class ControlledActionRepository {
       if(original.origin!=='live'||intake?.transport==='import'||intake?.state==='pending')throw new HttpError(403,'external_effect_requires_live_turn');
       telegram=original.channel==='telegram';
       // Who asked in a group's live turn (step 3); a job's run asks for no one.
-      if(telegram&&principal.scope!==null&&!turn.job) {
+      if(telegram&&principal.scope!==null&&!turn.job&&!memberRead) {
         const event=(await this.access.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.id])).rows[0];
         asker=event?messageSender(this.access.policy(),JSON.parse(event.payload.toString()),original.scope):null;
       }
@@ -216,6 +224,9 @@ export class ControlledActionRepository {
       const free=own&&outward&&left&&left.all>0?await this.freeRead(body.kind as string,args,source.id,left.pages>0):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:own&&(!outward||free)?own:null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
+      // A member's lookup never makes a card: what would ask is refused, and nothing of it is kept, so a row already there
+      // is the same lookup asked again in this turn (ADR-0278).
+      if(memberRead&&row.state==='proposed'&&!(autonomy===notion&&decision.outcome==='allow'))throw new HttpError(403,boundReaderReadOnly.member);
       if(autonomy&&decision.outcome==='allow')
         await db.query("UPDATE controlled_actions SET state='approved',decision_reference=$2,free_read=$3,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source,free]);
       // A group's permission for web pages and outside tools lets a live group request run without a card (step 3); deny

@@ -49,6 +49,7 @@ only one repository's code.
   Metadata. Adding them would need the owner to accept new permissions on GitHub.
 - GitHub's code search reads only a repository's default branch.
 - Known gaps, accepted for now: members' private chats can't look up a project's
-  repositories yet (step 5).
+  repositories yet (step 5; closed by
+  [ADR-0278](0278-member-private-chat-reads-project-connectors.md)).
 - Checks: `test/store-github-lookups.test.ts`, the MCP unit test, and the lookup tests
   in `services/hermes/test_github_connection.py`.

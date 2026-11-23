@@ -339,11 +339,13 @@ const answerRoutes:readonly [string,RegExp][]=[
  * The routes a member's private chat may call (step 4, ADR-0262): an answer's reads, but no shared or approved context
  * opened by its id (a member's chat is given none), and its task reads only list and read (D14). The memory context
  * route answers it with nothing shared or granted. With Personal assistant on, its own live turn may also ask whether
- * it may set schedules (members' schedules): Hermes's own tool then writes them, never these routes.
+ * it may set schedules (members' schedules): Hermes's own tool then writes them, never these routes. It may list and
+ * ask for reads of its projects' Notion and GitHub, and read their results (ADR-0278): the store runs only those that
+ * need no card and refuses the rest.
  */
 const memberRoutes:readonly [string,RegExp][]=[
-  ['GET',/^\/v1\/(?:search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|owner\/tasks(?:\/[a-f0-9]{64})?|security\/binding|turn-files\/[a-f0-9]{64})$/],
-  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions|schedules\/turn)|anthropic\/v1\/messages)$/],
+  ['GET',/^\/v1\/(?:search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|owner\/tasks(?:\/[a-f0-9]{64})?|security\/binding|turn-files\/[a-f0-9]{64}|notion\/connections|github\/repos|tools\/actions\/[a-f0-9]{64})$/],
+  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions|schedules\/turn|tools\/propose)|anthropic\/v1\/messages)$/],
 ];
 /**
  * The routes the owner's ask about a member may call (step 4b): the archive reads of that member's chat, the turn's
@@ -366,7 +368,9 @@ export function assertPrivateAnswerRoute(principal:Reader,method:string|undefine
 export const privateAnswerTools:ReadonlySet<string>=new Set(['archive_search','archive_read','archive_page','memory_search','tasks']);
 export const privateAnswerTaskActions:ReadonlySet<string>=new Set(['list','get']);
 /** The data tools each bound reader is offered and may run, each in read mode only (tasks: list and get). A member's
- * private chat reads as an answer does, tasks included (read only, D14); the owner's ask about a member reads only the
- * archive, which holds that member's chat. Neither gets a notes or memory-writing tool. */
-export const boundReaderTools:Readonly<Record<BoundReader,ReadonlySet<string>>>={answer:privateAnswerTools,member:privateAnswerTools,
+ * private chat reads as an answer does, tasks included (read only, D14), and also its projects' Notion and GitHub with
+ * the results of those reads (ADR-0278); the owner's ask about a member reads only the archive, which holds that member's
+ * chat. Neither gets a notes or memory-writing tool. */
+export const boundReaderTools:Readonly<Record<BoundReader,ReadonlySet<string>>>={answer:privateAnswerTools,
+  member:new Set([...privateAnswerTools,'notion','github','action_status']),
   memberRead:new Set(['archive_search','archive_read','archive_page'])};

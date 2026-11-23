@@ -671,7 +671,7 @@ export const mcpTools:readonly McpTool[]=[
   {name:'notion',description:'Notion, through Notion\'s MCP server, on a connection the owner set up and turned on: the owner\'s own Notion, or '+
     'a project\'s Notion. The owner\'s own is used only in the owner\'s private conversation and in background jobs the owner approved there; in a '+
     'job, changes always wait for the owner. A project\'s Notion is used in that project\'s groups and in the owner\'s private conversation, never in a '+
-    'job. operation=connections lists the connections usable here, each with its connection value; leave connection out to use this chat\'s own '+
+    'job; in a member\'s private conversation, it only reads, from each project holding a group they are in, and a change is refused. operation=connections lists the connections usable here, each with its connection value; leave connection out to use this chat\'s own '+
     '(the owner\'s own in the owner\'s private conversation, the project\'s in a group), or pass one to choose. operation=list returns Notion\'s '+
     'tools with their input schemas; operation=call runs one tool (such as notion-search, notion-fetch, '+
     'notion-create-pages or notion-update-page) with its input. Reads may run right away and changes may wait for the owner to approve the exact call, '+
@@ -682,7 +682,7 @@ export const mcpTools:readonly McpTool[]=[
       input:{type:'object'},summary:SUMMARY},['operation']),run:notion},
   {name:'github',description:'Look up a GitHub repository live, read only, through Nocheh\'s GitHub app. A repository linked to a project is looked up in '+
     'that project\'s groups and in the owner\'s private conversation; any other repository the app reads is the owner\'s own, looked up only in the owner\'s '+
-    'private conversation. Never in a background job. operation=repos lists the repositories usable here. operation=call runs one tool with input: '+
+    'private conversation. In a member\'s private conversation, the repositories of each project holding a group they are in. Never in a background job. operation=repos lists the repositories usable here. operation=call runs one tool with input: '+
     'search_code {repo, query} finds files by their code; read_file {repo, path, ref?} reads one file; list_files {repo, path?, ref?} lists a folder; '+
     'list_commits {repo, path?, since?, until?, ref?} lists recent commits (dates as YYYY-MM-DD); get_commit {repo, sha} shows one commit and its changes. '+
     'repo is owner/name. A long result comes in parts; read every part with mcp__nocheh__action_status before relying on it. For work over a whole '+
