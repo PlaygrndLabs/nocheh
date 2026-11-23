@@ -435,6 +435,10 @@ export async function startManagement() {
       if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'agent.manage',request:{action:'profiles'}}));
       // Every chat's schedules, and Pause, Resume, Run now or Delete on one (ADR-0266).
       if (req.method === 'GET' && route === '/schedules') return json(res, 200, await python({operation:'agent.manage',request:{action:'schedules',operation:'list'}}));
+      if (req.method === 'GET' && route === '/schedules/runs') {
+        const query=new URLSearchParams({scope:url.searchParams.get('scope')??'',job_id:url.searchParams.get('job_id')??''});
+        return json(res,200,await archive('/v1/schedules/runs?'+query.toString()));
+      }
       if (req.method === 'POST' && route === '/schedules') {
         const body=object(await readJson(req,4096));
         return json(res,200,await python({operation:'agent.manage',request:{action:'schedules',operation:body.operation,profile:body.profile,job_id:body.job_id,request_id:body.request_id}}));
