@@ -8,6 +8,7 @@ import {parentSpace} from '../spaces.js';
 import {chats} from '../chats.js';
 import {activeChatProject} from './projects.js';
 import {memberChatProjects} from './member-reads.js';
+import {scheduleRunning} from './scheduled-lookups.js';
 import type {OwnerIds} from '../assistant-policy.js';
 
 /**
@@ -173,10 +174,11 @@ export class NotionRepository {
  * group it reads is in that active project, to read only (ADR-0278). No job reaches a project's Notion. Throws 403
  * `notion_owner_private_only` for the owner's own and `notion_not_here` for a project's.
  */
-export async function assertNotionHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null},target:NotionTarget) {
+export async function assertNotionHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null;scheduled?:boolean},target:NotionTarget) {
   if(principal.admin)throw new HttpError(403,target===null?'notion_owner_private_only':'notion_not_here');
   if(target===null){if(principal.scope!==null||!turn.owner)throw new HttpError(403,'notion_owner_private_only');return;}
-  if(turn.job)throw new HttpError(403,'notion_not_here');
+  // A schedule's run reads a project's Notion where its chat may (ADR-0278); a background job never does.
+  if(turn.job&&!turn.scheduled)throw new HttpError(403,'notion_not_here');
   // A member's own private chat: a project holding a group it reads, whether or not that project shares its chats (ADR-0278).
   if(boundReader(principal)==='member') {
     const own=principal.scope===null||(principal.space??principal.scope)!==principal.scope?null:await memberChatProjects(db,principal.scope);
@@ -200,7 +202,7 @@ export async function assertNotionHere(db:Pick<pg.PoolClient,'query'>,principal:
  * while nothing outside is fetched: an outside read of an address the owner gave this turn (`given`), and a change
  * whose outside addresses are given or plain links (ADR-0263).
  */
-export async function notionAuthority(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null},
+export async function notionAuthority(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null;scheduled?:boolean},
   args:{operation?:string;tool?:string;input?:unknown;project?:unknown},allowed:boolean,given:(address:string)=>boolean=()=>false):Promise<string|null> {
   const target=notionTarget(args.project);
   await assertNotionHere(db,principal,turn,target);
@@ -240,7 +242,7 @@ export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ow
   const {chat:owner,account}=typeof ownerIds==='string'||!ownerIds?{chat:ownerIds,account:ownerIds}:ownerIds;
   const ownChat=!!owner&&row.scope===owner&&(parentSpace(row.space_id)??row.space_id)===owner;
   if(target!==null) {
-    if(row.job_id)return 'notion_not_here';
+    if(row.job_id&&!await scheduleRunning(db,row.job_id))return 'notion_not_here';
     if(ownChat)return (await db.query("SELECT 1 FROM projects WHERE id=$1 AND state='active'",[target])).rowCount?null:'notion_not_here';
     if(row.scope!==owner&&await activeChatProject(db,row.space_id)===target)return null;
     // A member's own private chat: still open, still reading a group of that active project, and only a read (ADR-0278).
@@ -248,7 +250,8 @@ export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ow
     return member?.projects.includes(target)&&notionMemberRead(args)?null:'notion_not_here';
   }
   if(!owner||!account||!ownChat)return 'notion_owner_private_only';
-  if(!row.job_id)return null;
+  // A schedule's run in the owner's private chat, still running (ADR-0278).
+  if(!row.job_id||await scheduleRunning(db,row.job_id))return null;
   const bySetting=row.state==='approved'&&canonical(row.decision_reference)===canonical(row.source_reference);
   const job=(await db.query('SELECT scope,requester,decided_by,logical_profile,notion_reads FROM background_jobs WHERE id=$1',[row.job_id])).rows[0];
   if(!job)return bySetting?'notion_job_not_approved':null;
@@ -264,7 +267,7 @@ export const notionMemberRead=(args:{operation?:unknown;tool?:unknown;input?:unk
 /** The Notion connections a turn may use, named for the agent (ADR-0268): the owner's own and every active project's
  *  in the owner's private chat; its own project's in a group or topic; in a member's private chat, each project holding a
  *  group it reads, to read only (ADR-0278). Only those that are on. */
-export async function notionConnectionsHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null}) {
+export async function notionConnectionsHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null;scheduled?:boolean}) {
   const rows=(await db.query(`SELECT c.project_id,p.name FROM connections c LEFT JOIN projects p ON p.id=c.project_id
     WHERE c.enabled AND (c.project_id IS NULL OR p.state='active') ORDER BY c.project_id IS NOT NULL,p.name,c.id`)).rows;
   const usable=[];

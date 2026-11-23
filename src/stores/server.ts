@@ -49,6 +49,7 @@ import {MACHINE_BODY} from './machines.js';
 import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
+import {lookupTurn} from './scheduled-lookups.js';
 import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
 import {memberAssistant,memberPrivate,readSetGroups} from '../spaces.js';
 import {noticeAuthorizeRequest,type NoticeAuthorizeResponse} from '../notice-authorize.js';
@@ -385,12 +386,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // The Notion connections this turn may use, named for the agent (ADR-0268).
     if(path==='/v1/notion/connections'&&req.method==='GET') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');
-      return result({connections:await notionConnectionsHere(s.stores.control,principal,await s.turns.binding(principal))});
+      return result({connections:await notionConnectionsHere(s.stores.control,principal,await lookupTurn(s.stores.control,principal,await s.turns.binding(principal)))});
     }
     // The GitHub repositories this turn may look up (ADR-0270).
     if(path==='/v1/github/repos'&&req.method==='GET') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');
-      return result(await githubReposHere(s.stores.control,principal,await s.turns.binding(principal)));
+      return result(await githubReposHere(s.stores.control,principal,await lookupTurn(s.stores.control,principal,await s.turns.binding(principal))));
     }
     if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.actionCommands.offer('controlled',await s.controlledActions.propose(principal,await readJson(req))));
     if(req.method==='POST'&&/^\/v1\/jobs\/(?:start|status|stop)$/.test(path)) {

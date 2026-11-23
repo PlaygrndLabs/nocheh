@@ -3,11 +3,15 @@
 <status>
 Accepted on 2026-11-23. The owner asked on 2026-11-23 that a member's private chat and
 their schedules work by project, to cover connectors, and that a group in no project, or
-in a project that does not share its group chats, keep working by group. Closes the
+in a project that does not share its group chats, keep working by group; and chose, on
+the same day, that schedules read Notion and GitHub with no card. Closes the
 known gaps of [ADR-0268](0268-notion-per-project-or-person.md) and
 [ADR-0270](0270-github-live-lookups.md) ("a member's private chat can't use a
 project's Notion or look up its repositories yet"). Amends
-[ADR-0262](0262-member-private-chat.md), whose private chat ran no outside tool.
+[ADR-0262](0262-member-private-chat.md), whose private chat ran no outside tool, and
+[ADR-0203](0203-owner-approved-jobs-read-notion.md) and
+[ADR-0225](0225-member-safety-rules.md), under which every Notion call from a scheduled
+task asked first.
 </status>
 
 ## Context
@@ -43,6 +47,15 @@ private questions.
    MCP tools and Hermes's member tool set add `notion`, `github` and `action_status`. A
    member chat never gets a follow-up turn ([ADR-0212](0212-approved-operations-answer-in-the-chat-that-asked.md)),
    so a lookup's answer is read in the turn that asked.
+6. **Schedules read too.** A schedule's run, which Hermes's scheduler runs under the
+   schedule's own job id, is no background job (`scheduleRunning`: a `managed_runs`
+   scheduler run of that job, running and not stopped, with no `background_jobs` row).
+   While it runs, it reads Notion and GitHub where its chat may, with no card, as a live
+   turn there does: the owner's schedules the owner's own and every active project's, a
+   member's schedules their projects' (decision 1), a group's schedules its project's. A
+   Notion fetch keeps a job's rule (by ID only). A change still asks the owner, and a
+   member's is refused. Background jobs keep their rules. The checks before it runs accept
+   a schedule's operation only while its run is still running.
 
 ## Consequences
 
@@ -50,7 +63,8 @@ private questions.
   Nocheh read there.
 - The owner's Notion setting for a project ("reads run" or "everything asks") also
   decides whether its members can read it from their private chats.
-- Schedules run with no live turn; whether a schedule's run may read connectors is
-  decided apart.
-- Checks: `test/store-member-connectors.test.ts`, `test/member-bound-readers.test.ts`,
+- A schedule's brief can read Notion pages and code with no card each morning; what it
+  reads goes only to the chat the schedule belongs to.
+- Checks: `test/store-member-connectors.test.ts`, `test/store-member-schedules.test.ts`,
+  `test/store-scheduled-runs.test.ts`, `test/member-bound-readers.test.ts`,
   `services/hermes/test_member_private.py`.

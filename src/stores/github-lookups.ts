@@ -6,6 +6,7 @@ import {chats} from '../chats.js';
 import type {OwnerIds} from '../assistant-policy.js';
 import {activeChatProject} from './projects.js';
 import {memberChatProjects} from './member-reads.js';
+import {scheduleRunning} from './scheduled-lookups.js';
 
 /**
  * Live GitHub lookups (ADR-0270): a few fixed read-only calls on one repository, run by the executor with a key GitHub
@@ -22,9 +23,10 @@ const linkOf=async(db:Pick<pg.PoolClient,'query'>,repo:string,lock=false)=>
  *  active project's; a group or topic of an active project reads only that project's; a member's own private chat reads
  *  those of each active project holding a group it reads (ADR-0278). Refused in a job, a stranger's private chat, and a
  *  group in no project (403 `github_not_here`). */
-export async function assertGithubHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null},repo:string,lock=false):Promise<string|null> {
+export async function assertGithubHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null;scheduled?:boolean},repo:string,lock=false):Promise<string|null> {
   const refused=new HttpError(403,'github_not_here');
-  if(principal.admin||turn.job||(principal.purpose??'assistant')!=='assistant')throw refused;
+  // A schedule's run looks up where its chat may (ADR-0278); a background job never does.
+  if(principal.admin||turn.job&&!turn.scheduled||(principal.purpose??'assistant')!=='assistant')throw refused;
   const project=await linkOf(db,repo,lock);
   if(principal.scope===null) {
     if(!turn.owner)throw refused;
@@ -42,7 +44,7 @@ export async function assertGithubHere(db:Pick<pg.PoolClient,'query'>,principal:
 }
 
 /** Why a lookup may run without a card: every lookup reads, so one asked where it may run, in a live turn, runs. */
-export async function githubAuthority(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null},
+export async function githubAuthority(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null;scheduled?:boolean},
   args:{input?:unknown},live:boolean,lock=false):Promise<string|null> {
   const repo=String((args.input as Record<string,unknown>|undefined)?.repo??'');
   const project=await assertGithubHere(db,principal,turn,repo,lock);
@@ -53,7 +55,7 @@ export async function githubAuthority(db:Pick<pg.PoolClient,'query'>,principal:R
  *  chat, a group still in the active project its repository is linked to, or a member's private chat still reading a
  *  group of that project (`github_not_here`). Null when it may run. */
 export async function githubRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ownerIds:OwnerIds|string|null,args:{input?:unknown}):Promise<string|null> {
-  if(row.job_id)return 'github_not_here';
+  if(row.job_id&&!await scheduleRunning(db,row.job_id))return 'github_not_here';
   const repo=String((args.input as Record<string,unknown>|undefined)?.repo??'');
   if(!GITHUB_REPO.test(repo))return 'github_not_here';
   const {chat:owner}=typeof ownerIds==='string'||!ownerIds?{chat:ownerIds}:ownerIds;
@@ -70,8 +72,8 @@ export async function githubRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ow
 /** The repositories this chat may look up: in the owner's private chat every linked repository of an active project and,
  *  as the owner's own, those the GitHub card lists (`own`); in a project's group only that project's; in a member's private
  *  chat those of each project holding a group it reads (ADR-0278). */
-export async function githubReposHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null}) {
-  if(principal.admin||turn.job)throw new HttpError(403,'github_not_here');
+export async function githubReposHere(db:Pick<pg.PoolClient,'query'>,principal:Reader,turn:{owner?:boolean;job?:string|null;scheduled?:boolean}) {
+  if(principal.admin||turn.job&&!turn.scheduled)throw new HttpError(403,'github_not_here');
   if(principal.scope===null) {
     if(!turn.owner)throw new HttpError(403,'github_not_here');
     const linked=(await db.query(`SELECT g.repo,p.name FROM github_projects g JOIN projects p ON p.id=g.project_id AND p.state='active' ORDER BY g.repo`)).rows;

@@ -3,6 +3,7 @@ import {followUpTurn,ownerAutonomyGrant} from './owner-autonomy.js';
 import {followUpLeft} from './action-continuations.js';
 import {notionAuthority} from './notion.js';
 import {githubAuthority} from './github-lookups.js';
+import {lookupTurn} from './scheduled-lookups.js';
 import {gmailAuthority} from './gmail-lookups.js';
 import {activeChatProject} from './projects.js';
 import {chatToolAllowed} from './chat-tools.js';
@@ -144,8 +145,10 @@ export class ControlledActionRepository {
     }
     // A GitHub lookup only where its repository may be looked up (ADR-0270).
     // A Gmail lookup only in the owner's private chat (ADR-0272).
-    if('connection' in raw)await (raw.connection==='github'?githubAuthority(this.control,principal,turn,raw,false):
-      raw.connection==='gmail'?gmailAuthority(principal,turn,false):notionAuthority(this.control,principal,turn,raw,false));
+    // A schedule's running run reads Notion and GitHub as a live turn does, with no card; its changes still ask (ADR-0278).
+    const where=await lookupTurn(this.control,principal,turn),scheduled=where.scheduled===true;
+    if('connection' in raw)await (raw.connection==='github'?githubAuthority(this.control,principal,where,raw,false):
+      raw.connection==='gmail'?gmailAuthority(principal,turn,false):notionAuthority(this.control,principal,where,raw,false));
     let telegram=false,asker:GroupAsker|null=null;
     if(source.store==='archive') {
       const original=await this.access.archive.verify(source),intake=(await this.control.query('SELECT transport,state FROM source_intakes WHERE event_id=$1',[source.id])).rows[0];
@@ -213,9 +216,9 @@ export class ControlledActionRepository {
       const given=connected&&live&&!turn.job?await turnMessageLinks(this.access.stores.archive,source.id):null;
       const provided=(address:string)=>{const exact=sameAddress(address);return !!given&&!!exact&&(given.typed.has(exact)||given.forwarded.has(exact));};
       // A GitHub lookup reads only, so one asked where it may run, in a live turn, runs (ADR-0270).
-      const notion=!connected?null:args.connection==='github'?await githubAuthority(db,principal,turn,args,live&&!turn.job,true):
+      const notion=!connected?null:args.connection==='github'?await githubAuthority(db,principal,where,args,live&&!turn.job||scheduled,true):
         args.connection==='gmail'?gmailAuthority(principal,turn,live&&!turn.job):
-        await notionAuthority(db,principal,turn,args,turn.job?fresh&&await ownerApprovedJob(db,ownerIds(this.access.policy()),source,turn,true):live,provided);
+        await notionAuthority(db,principal,where,args,scheduled||(turn.job?fresh&&await ownerApprovedJob(db,ownerIds(this.access.policy()),source,turn,true):live),provided);
       // "Do what I ask" runs a command the owner asks for in their private chat. A web read, or another server's list of
       // tools, runs only when no model built its address: a link the owner gave, one on a page opened for this message, or
       // a site the owner named with nothing after it but their words. Everything else asks, and a tool call always does
