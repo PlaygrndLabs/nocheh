@@ -81,9 +81,15 @@ test('task routes reach storage only from a live owner-private or group turn and
     for(const purpose of ['filter','memory-review'] as const)assert.equal((await request('/v1/owner/tasks',undefined,credential('-10',purpose))).status,403,purpose);
     scheduled=true;
     for(const key of [credential(null),credential('-10')])assert.equal((await request('/v1/owner/tasks',{title:'From a job'},key)).status,403);
+    // A job's run in a group reads no list; in the owner's private chat its read reaches storage, which lets only a schedule's
+    // running run through (ADR-0266).
+    assert.equal((await request('/v1/owner/tasks?state=open',undefined,credential('-10'))).status,403);
+    assert.equal((await request('/v1/owner/tasks?state=open',undefined)).status,200);
+    assert.equal((await request('/v1/owner/tasks/'+task,undefined)).status,200);
     scheduled=false;
     for(const path of ['/v1/tasks','/v1/tasks/'+task])assert.equal((await request(path,{operation_id:'x',title:'Dashboard only'})).status,403);
-    assert.equal(calls.length,reached,'other owner views, jobs, reviews and dashboard task routes never reach storage');
+    assert.deepEqual(calls.slice(reached),['/v1/owner/tasks','/v1/owner/tasks/'+task],'only a job\'s reads in the owner\'s private chat reach storage');
+    assert.equal(calls.length,reached+2,'other owner views, job changes, reviews and dashboard task routes never reach storage');
     assert.equal(scopedRoute('POST','/v1/owner/tasks/'+task+'/delete'),false);
   }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
