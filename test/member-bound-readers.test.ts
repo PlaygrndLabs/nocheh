@@ -80,10 +80,17 @@ test('each bound reader reaches only its own read routes, refused with its own c
   // by id, and no write.
   for(const path of ['/v1/owner/tasks','/v1/owner/tasks/'+'b'.repeat(64),'/v1/imports/pending','/v1/memory/context'])assert.ok(privateAnswerRoute('GET',path,'member'),path);
   for(const path of ['/v1/memory/longterm/search','/v1/memory/longterm/context'])assert.ok(privateAnswerRoute('POST',path,'member'),path);
+  // Its projects' Notion and GitHub (ADR-0278): their lists, a lookup and its result; the store refuses all but reads with no card.
+  for(const path of ['/v1/notion/connections','/v1/github/repos','/v1/tools/actions/'+'b'.repeat(64)])assert.ok(privateAnswerRoute('GET',path,'member'),path);
+  assert.ok(privateAnswerRoute('POST','/v1/tools/propose','member'));
+  for(const kind of ['answer','memberRead'] as const)for(const [method,path] of [['GET','/v1/notion/connections'],['GET','/v1/github/repos'],
+    ['GET','/v1/tools/actions/'+'b'.repeat(64)],['POST','/v1/tools/propose']] as const)assert.equal(privateAnswerRoute(method,path,kind),false,kind+' '+path);
+  for(const [method,path] of [['GET','/v1/tools/actions'],['POST','/v1/tools/decide'],['GET','/v1/notion/connections/x']] as const)
+    assert.equal(privateAnswerRoute(method,path,'member'),false,method+' '+path);
   for(const path of ['/v1/memory/shared/'+'b'.repeat(64),'/v1/memory/filtered/'+'b'.repeat(64),'/v1/memory/grants/'+'b'.repeat(64),'/v1/memory/recall'])
     assert.equal(privateAnswerRoute('GET',path,'member'),false,path);
   for(const [method,path] of [['POST','/v1/owner/tasks'],['POST','/v1/owner/tasks/'+'b'.repeat(64)],['POST','/v1/memory/recall'],['POST','/v1/memory/longterm/recall'],
-    ['POST','/v1/tools/propose'],['POST','/v1/action-requests'],['POST','/v1/jobs/start'],['POST','/v1/knowledge/proposals'],['POST','/v1/telegram/send'],['GET','/v1/data'],
+    ['POST','/v1/action-requests'],['POST','/v1/jobs/start'],['POST','/v1/knowledge/proposals'],['POST','/v1/telegram/send'],['GET','/v1/data'],
     ['GET','/v1/memory/facts/'+'b'.repeat(64)],['GET','/v1/memory/facts/'+'b'.repeat(64)+'/3']] as const)
     for(const kind of ['answer','member','memberRead'] as const)assert.equal(privateAnswerRoute(method,path,kind),false,kind+' '+method+' '+path);
   // The owner's ask about a member: the archive only; no tasks, no long-term memory, no imports, no context.
@@ -97,9 +104,9 @@ test('each bound reader reaches only its own read routes, refused with its own c
   assert.doesNotThrow(()=>assertPrivateAnswerRoute({scope:GP1,space:GP1,admin:false},'POST','/v1/owner/tasks'));
 });
 
-test('a member reads with the read tools and tasks; the owner\'s ask reads the archive alone; no notes or memory tool',()=>{
+test('a member reads with the read tools, tasks and its projects\' Notion and GitHub; the owner\'s ask reads the archive alone; no notes or memory tool',()=>{
   assert.equal(boundReaderTools.answer,privateAnswerTools);
-  assert.deepEqual([...boundReaderTools.member].sort(),['archive_page','archive_read','archive_search','memory_search','tasks']);
+  assert.deepEqual([...boundReaderTools.member].sort(),['action_status','archive_page','archive_read','archive_search','github','memory_search','notion','tasks']);
   assert.deepEqual([...boundReaderTools.memberRead].sort(),['archive_page','archive_read','archive_search']);
   for(const set of Object.values(boundReaderTools))for(const tool of ['notes','memory','knowledge','telegram','jobs','browser','web_search'])assert.equal(set.has(tool),false,tool);
 });

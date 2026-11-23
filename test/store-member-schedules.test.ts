@@ -13,8 +13,8 @@ import {RuntimeProfileRepository} from '../src/stores/runtime-profiles.js';
 import {chatSchedules,scheduleTurn} from '../src/stores/schedules.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {fixtureServices,type FakeCall} from './fixture-agent.js';
-import {GP1,GP2,GP3,GP_GROUP_IDS,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_NG_CHAT,NG_GROUP_IDS,OWNER,fixtureMemberDirectory,fixtureChats,groupsPolicy,
-  seedChats,seedMembers} from './fixture-groups.js';
+import {GP1,GP2,GP3,GP_GROUP_IDS,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_NG_CHAT,NG_GROUP_IDS,OWNER,P1,fixtureMemberDirectory,fixtureChats,groupsPolicy,
+  seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
 /*
  * Members' schedules: a member with Personal assistant on keeps schedules in their own private chat. A run there reads as
@@ -30,7 +30,9 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-member-schedules-')),base=Date.now(),token=digest('member-schedules-'+base);
   const policy=groupsPolicy({group_ids:[...GP_GROUP_IDS,...NG_GROUP_IDS]});
   let restore=installMembersForTest(fixtureMemberDirectory({[MEMBER_GP_ID]:{assistant:true}}));
-  const seen:{scope:string;member:unknown;memberChat:unknown;reads:unknown;tasks:boolean;owner:boolean;create:boolean}[]=[];
+  const seen:{scope:string;member:unknown;memberChat:unknown;reads:unknown;tasks:boolean;owner:boolean;create:boolean;lookups:string[]}[]=[];
+  const lookup=(args:Record<string,unknown>)=>({kind:'mcp',arguments:args});
+  const github={connection:'github',tool:'search_code',input:{repo:'example-org/widgets',query:'made up'}};
   let serial=0;const native=new Map<string,Record<string,unknown>>();
   const runtime:FakeCall=async(op,body)=>{
     if(op==='guard.detect')return {literals:[]};
@@ -50,7 +52,11 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     seen.push({scope:String(claim.scope),member:context.member,memberChat:bound.memberChat,reads:bound.reads,
       tasks:await s.tasks.chatList(bound,{}).then(()=>true,error=>error?.code==='task_project_required'),
       owner:await s.knowledge.ownerReader(bound).then(()=>true,()=>false),
-      create:await s.tasks.chatCreate(bound,{title:'From a schedule'}).then(()=>true,()=>false)});
+      create:await s.tasks.chatCreate(bound,{title:'From a schedule'}).then(()=>true,()=>false),
+      // P1 holds GP1 and does not share its chats: its GitHub and Notion read with no card, a change is refused (ADR-0278).
+      lookups:await Promise.all([lookup(github),lookup({connection:'notion',project:P1,tool:'notion-search',input:{query:'brief'}}),
+        lookup({connection:'notion',project:P1,tool:'notion-create-pages',input:{pages:[]}})].map(value=>
+        s.controlledActions.propose(bound,value).then(result=>String(result.state),error=>String(error?.code))))});
     await s.scheduled.finish({event_id:id,actor:context.actor,state:'done',session:context.conversation,text:'Member brief'});
     native.set(id,{state:'done'});return {state:'done'};
   };
@@ -69,10 +75,11 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
   const run=async(id:string)=>storageWorkflowOperations(s,runtime).schedules!('run:'+id,await authority());
   try {
     await seedChats(stores.control,fixtureChats([...GP_GROUP_IDS,...NG_GROUP_IDS]));await seedMembers(stores.control);
-    await stores.control.query('UPDATE members SET assistant=true WHERE id=$1',[MEMBER_GP_ID]);
+    await stores.control.query('UPDATE members SET assistant=true WHERE id=$1',[MEMBER_GP_ID]);await seedGroups(stores.control);
     // Telegram confirmed her in GP1 and GP3 lately; GP3 is switched off for her, and she left GP2.
     await stores.control.query('UPDATE chat_memberships SET checked_at=now() WHERE account_id=$1',[MEMBER_GP_ACCOUNT]);
     await s.guards.reconcile();await s.guards.setMode('on');
+    await s.notion.save(owner,{project:P1,enabled:true,expected_revision:0});await s.jobs.setRepoProject(owner,{repo:'example-org/widgets',project:P1});
 
     // Her own chat is one of the agent's profiles; another member's (assistant off) is not.
     const profiles=(await new RuntimeProfileRepository(s.access).list(owner)).profiles as {scope:string;name:string}[];
@@ -89,6 +96,7 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     const reads=JSON.stringify(first!.reads);
     assert.ok(reads.includes(GP1)&&!reads.includes(GP2)&&!reads.includes(GP3)&&!reads.includes('"'+OWNER+'"'),reads);
     assert.deepEqual([first!.tasks,first!.owner,first!.create],[true,false,false],'its tasks read only, never the owner\'s data');
+    assert.deepEqual(first!.lookups,['approved','approved','member_private_read_only']);
     assert.equal(await chatSchedules(stores.control,MEMBER_GP_CHAT),1);
 
     // Its result goes to her chat with no card, as a trusted scheduled send.

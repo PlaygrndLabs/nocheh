@@ -27,8 +27,10 @@ ANSWER_DATA_TOOLS={'mcp__nocheh__archive_search','mcp__nocheh__archive_read','mc
 ANSWER_TOOLS={'session_search','skills_list','skill_view'}|ANSWER_DATA_TOOLS
 ANSWER_TOOLSETS=['session_search','mcp-nocheh','skills']
 # A member's own private chat (step 4, ADR-0262) reads as an answer does: these tools exactly, tasks only listed and
-# read, and no native memory, so it writes no notes (saved notes wait for a later step).
-MEMBER_TOOLS=ANSWER_TOOLS
+# read, and no native memory, so it writes no notes (saved notes wait for a later step). It also reads its projects'
+# Notion and GitHub, and their results (ADR-0278); Nocheh runs only reads that need no card.
+MEMBER_DATA_TOOLS=ANSWER_DATA_TOOLS|{'mcp__nocheh__notion','mcp__nocheh__github','mcp__nocheh__action_status'}
+MEMBER_TOOLS=ANSWER_TOOLS|MEMBER_DATA_TOOLS
 MEMBER_TOOLSETS=ANSWER_TOOLSETS
 # The owner's ask about a member (step 4b) only reads that member's own chat: the archive read tools alone, no memory,
 # no tasks, no history search and no skills.
@@ -380,7 +382,7 @@ def run(body, emit=None, relay=None):
         job_progress.bind(relay or (lambda event:None),body['background'])
     try:
         # Nocheh's data tools, from its MCP endpoint with this turn's credential; a review only keeps native notes.
-        if not review:connect_data_tools(body['archive_credential'],body['turn_deadline_epoch'],MEMBER_READ_DATA_TOOLS if member_read else ANSWER_DATA_TOOLS if answer or member else DATA_TOOLS)
+        if not review:connect_data_tools(body['archive_credential'],body['turn_deadline_epoch'],MEMBER_READ_DATA_TOOLS if member_read else MEMBER_DATA_TOOLS if member else ANSWER_DATA_TOOLS if answer else DATA_TOOLS)
         agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
             api_key=credentials.access_token,base_url=credentials.base_url,
             enabled_toolsets=['memory'] if review else MEMBER_READ_TOOLSETS if member_read else (MEMBER_TOOLSETS+['cronjob'] if schedules else MEMBER_TOOLSETS) if member else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else SCHEDULE_TOOLSETS if schedules else TURN_TOOLSETS,
