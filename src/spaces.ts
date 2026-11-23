@@ -103,6 +103,10 @@ export function memberPrivate(id:string|null|undefined,directory:ChatDirectory=c
   const chat=directory.get(id);
   return !!chat&&chat.kind==='private'&&!chat.owner&&chat.account_id!==null&&people.privateTalks(chat.account_id);
 }
+/** memberPrivate, and that member has Personal assistant on: their own schedules live and run in this chat. */
+export function memberAssistant(id:string|null|undefined,directory:ChatDirectory=chats(),people:MemberDirectory=memberDirectoryNow()):boolean {
+  return memberPrivate(id,directory,people)&&people.assistant(directory.get(id)!.account_id);
+}
 /** The conversations a group or topic turn recalls: its own, or, when the group's topics share
  * memory, the group's base conversation and every one of its topics. Owner turns read everything.
  * The single-conversation form that ReadSet generalizes; inRecall and recallCondition keep their

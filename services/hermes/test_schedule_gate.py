@@ -136,6 +136,15 @@ class TurnTests(unittest.TestCase):
             self.assertFalse(gate.bound())
             self.assertTrue(assistant_turn.schedule_turn(body,profile))
             self.assertEqual((answers,gate._BOUND['time_zone'],os.environ.get('HERMES_GATEWAY_SESSION')),(['/v1/schedules/turn'],'Asia/Tokyo','1'))
+            # A member's own reply in their private chat (members' schedules): not the owner's, with the member's limit.
+            gate._BOUND=None;answers.clear()
+            member={'owner':False,'channel':'telegram'}
+            self.assertFalse(assistant_turn.schedule_turn(member,profile),'not a member turn')
+            with patch('services.hermes.archive_tools.request',lambda *a,**k:{'allowed':True,'time_zone':'Asia/Tokyo','limit':5,'count':2}):
+                for flags in ({'member':True,'member_read':True},{'member':True,'background':True},{'member':True,'answer':True}):
+                    self.assertFalse(assistant_turn.schedule_turn(member,profile,**flags),flags)
+                self.assertTrue(assistant_turn.schedule_turn(member,profile,member=True))
+            self.assertEqual((gate._BOUND['limit'],gate._BOUND['count']),(5,2))
             os.environ.pop('HERMES_GATEWAY_SESSION',None);os.environ.pop('NOCHEH_SCHEDULE_STORE',None)
         with patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'0','NOCHEH_SCHEDULE_STORE':'1'}):
             gate._BOUND=None;self.assertFalse(assistant_turn.schedule_turn(body,Path('/nonexistent')),'never outside a sealed turn')

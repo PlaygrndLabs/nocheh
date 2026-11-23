@@ -265,8 +265,13 @@ export class SourceAccessRepository {
       if(!found||found.member!==principal.member||found.chat!==principal.scope)throw closed();
       // The groups this turn leaves out (re-checks past the cap), as its dispatch wrote them; a turn with none written
       // reads nothing.
-      const left=(await this.stores.control.query<{left_out:string[]}>('SELECT left_out FROM member_turns WHERE member_id=$1 AND event_id=$2 AND left_out IS NOT NULL',
+      let left=(await this.stores.control.query<{left_out:string[]}>('SELECT left_out FROM member_turns WHERE member_id=$1 AND event_id=$2 AND left_out IS NOT NULL',
         [found.member,principal.turnEvent])).rows[0]?.left_out;
+      // A run of one of the member's own schedules in this chat, while the member has Personal assistant on, leaves out no
+      // joined group (members' schedules): it reads what their private chat reads.
+      if(!left&&(await this.stores.control.query(`SELECT 1 FROM managed_runs r JOIN members m ON m.id=$3 AND m.assistant
+        WHERE r.event_id=$1 AND r.channel='scheduler' AND r.scope=$2 AND r.space_id=$2 AND r.state IN ('captured','running')`,
+        [principal.turnEvent,found.chat,found.member])).rowCount)left=[];
       if(!left)throw closed();
       // Each joined group brings the other served groups of its project while that project shares its group chats (ADR-0267).
       const joined=found.groups.map(group=>group.chat).filter(group=>!left.includes(group));

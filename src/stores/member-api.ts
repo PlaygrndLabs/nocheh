@@ -2,7 +2,7 @@ import type {Reader} from '../access.js';
 import {isTelegramAccount} from '../chats-telegram.js';
 import {isChatId} from '../chats.js';
 import {HttpError,object,string} from '../http.js';
-import {DAILY_MESSAGES_MAX,DAILY_MESSAGES_MIN,memberStates,memberTaskModes,type MemberAddRequest,type MemberChangeRequest,type MemberChanges,
+import {DAILY_MESSAGES_MAX,DAILY_MESSAGES_MIN,MEMBER_SCHEDULES_MAX,MEMBER_SCHEDULES_MIN,memberStates,memberTaskModes,type MemberAddRequest,type MemberChangeRequest,type MemberChanges,
   type MemberList,type MemberRemoved,type MemberRemoveRequest,type MemberResult,type MemberSettingsRequest,type MemberSettingsResult} from '../member-wire.js';
 
 /*
@@ -22,12 +22,12 @@ import {DAILY_MESSAGES_MAX,DAILY_MESSAGES_MIN,memberStates,memberTaskModes,type 
  *   proxy id), and its groups may be any group Nocheh is in. A group that is no group Nocheh is in is 400
  *   member_group_invalid; an account already linked to a member is 409 member_exists.
  * - change: POST /v1/members/:id (404 member_not_found). private_chat switches "Private chat with Nocheh" (step 4),
- *   reminders "Reminders to themselves" (step 5). Un-pausing a member (state paused to active) sets members.app_since, so
+ *   reminders "Reminders to themselves" (step 5), assistant "Personal assistant" (members' schedules). Un-pausing a member (state paused to active) sets members.app_since, so
  *   every members' app launch from before it is refused (ADR-0265 D4); no other change does. A group set to false writes or switches a row for any group
  *   Nocheh is in; set to true it switches an existing row, or makes one only where the member's newest Telegram row says
  *   'in' (409 member_group_not_seen).
  * - remove: POST /v1/members/:id/remove (404 member_not_found).
- * - settings: POST /v1/members/settings, the daily message cap.
+ * - settings: POST /v1/members/settings, the daily message cap and how many schedules each member may keep.
  */
 export interface MemberRepository {
   list(principal:Reader):Promise<MemberList>;
@@ -63,7 +63,7 @@ export function memberAddRequest(input:unknown):MemberAddRequest {
 /** POST /v1/members/:id: at least one change. */
 export function memberChangeRequest(input:unknown):MemberChangeRequest {
   const body=exact(input,['operation_id','changes']),raw=object(body.changes),changes:MemberChanges={};
-  if(Object.keys(raw).some(key=>!['state','talk','jobs','post','tools','tasks','private_chat','reminders','groups'].includes(key)))throw new HttpError(400,'unknown_member_field');
+  if(Object.keys(raw).some(key=>!['state','talk','jobs','post','tools','tasks','private_chat','reminders','assistant','groups'].includes(key)))throw new HttpError(400,'unknown_member_field');
   if(raw.state!==undefined){if(!(memberStates as readonly unknown[]).includes(raw.state))throw new HttpError(400,'invalid_member_request');changes.state=raw.state as MemberChanges['state'] & string;}
   if(raw.talk!==undefined)changes.talk=flag(raw.talk);
   if(raw.jobs!==undefined)changes.jobs=flag(raw.jobs);
@@ -72,6 +72,7 @@ export function memberChangeRequest(input:unknown):MemberChangeRequest {
   if(raw.tasks!==undefined){if(!(memberTaskModes as readonly unknown[]).includes(raw.tasks))throw new HttpError(400,'invalid_member_request');changes.tasks=raw.tasks as MemberChanges['tasks'] & string;}
   if(raw.private_chat!==undefined)changes.private_chat=flag(raw.private_chat);
   if(raw.reminders!==undefined)changes.reminders=flag(raw.reminders);
+  if(raw.assistant!==undefined)changes.assistant=flag(raw.assistant);
   if(raw.groups!==undefined)changes.groups=groupSwitches(raw.groups);
   if(!Object.keys(changes).length||changes.groups&&!Object.keys(changes.groups).length&&Object.keys(changes).length===1)throw new HttpError(400,'member_change_empty');
   return {operation_id:operation(body.operation_id),changes};
@@ -80,9 +81,14 @@ export function memberChangeRequest(input:unknown):MemberChangeRequest {
 export function memberRemoveRequest(input:unknown):MemberRemoveRequest {
   return {operation_id:operation(exact(input,['operation_id']).operation_id)};
 }
-/** POST /v1/members/settings: the daily message cap, a whole number from 1 to 10000. */
+/** POST /v1/members/settings: the daily message cap, a whole number from 1 to 10000, and how many schedules each member
+ *  may keep, from 1 to 50; at least one. */
 export function memberSettingsRequest(input:unknown):MemberSettingsRequest {
-  const body=exact(input,['operation_id','daily_messages']),daily=body.daily_messages;
-  if(typeof daily!=='number'||!Number.isSafeInteger(daily)||daily<DAILY_MESSAGES_MIN||daily>DAILY_MESSAGES_MAX)throw new HttpError(400,'invalid_daily_messages');
-  return {operation_id:operation(body.operation_id),daily_messages:daily};
+  const body=exact(input,['operation_id','daily_messages','member_schedules']),daily=body.daily_messages,schedules=body.member_schedules;
+  const whole=(value:unknown,min:number,max:number)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=min&&value<=max;
+  if(daily!==undefined&&!whole(daily,DAILY_MESSAGES_MIN,DAILY_MESSAGES_MAX))throw new HttpError(400,'invalid_daily_messages');
+  if(schedules!==undefined&&!whole(schedules,MEMBER_SCHEDULES_MIN,MEMBER_SCHEDULES_MAX))throw new HttpError(400,'invalid_member_schedules');
+  if(daily===undefined&&schedules===undefined)throw new HttpError(400,'member_change_empty');
+  return {operation_id:operation(body.operation_id),...(daily!==undefined?{daily_messages:daily as number}:{}),
+    ...(schedules!==undefined?{member_schedules:schedules as number}:{})};
 }

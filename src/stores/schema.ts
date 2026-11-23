@@ -11,6 +11,7 @@ import {runtimeContextSchema} from './prepared-context.js';
 import {runtimeTurnSchema} from './turns.js';
 import {managedStorageSchema} from './browser-runs.js';
 import {scheduleStorageSchema} from './schedules.js';
+import {scheduleNoticeSchema} from './schedule-notices.js';
 import {backgroundJobSchema} from './background-jobs.js';
 import {machineSchema} from './machines.js';
 import {runtimeProfileSchema} from './runtime-profiles.js';
@@ -152,6 +153,7 @@ ${runtimeTurnSchema}
 ${runtimeProfileSchema}
 ${managedStorageSchema}
 ${scheduleStorageSchema}
+${scheduleNoticeSchema}
 ${backgroundJobSchema}
 ${machineSchema}
 ${securityCoreSchema}

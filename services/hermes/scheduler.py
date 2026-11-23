@@ -11,6 +11,18 @@ from .native_memory import save_receipt
 
 
 def now():return datetime.now(timezone.utc)
+
+
+def scheduled_member(bound,context,served):
+    """The scope a scheduled run runs as: a member's own chat whose member has Personal assistant on runs as that member,
+    whom storage names in the run's context; any other chat names no member. None when the two disagree."""
+    import re
+    from dataclasses import replace
+    member=context.get('member')
+    if served.member_assistant(bound.chat_id):
+        if bound.owner or bound.space!=bound.chat_id or not isinstance(member,str) or not re.fullmatch(r'[a-f0-9]{64}',member):return None
+        return replace(bound,member=member)
+    return None if member is not None else bound
 def date(value):return datetime.fromisoformat(value.replace('Z','+00:00')).astimezone(timezone.utc)
 
 
@@ -156,6 +168,10 @@ class Scheduler:
                 if not job or job.get('nocheh_removed') or selected!=context['profile'] or job.get('nocheh_definition_version')!=context['definition'].get('execution_version'):
                     self.call('cancel',{'event_id':context['event_id']});return {'state':'cancelled'}
                 if job.get('nocheh_running')!=context['event_id']:return {'state':'waiting'}
+                # A member's own chat with Personal assistant on runs as that member, as storage names them; any other
+                # chat names none.
+                bound=scheduled_member(bound,context,self.admin.policy.current())
+                if bound is None:self.call('cancel',{'event_id':context['event_id']});return {'state':'cancelled'}
                 return {'state':'ready','context':context,'scope':bound,**({'claim':self.call('claim',context)} if claim else {})}
         self.call('cancel',{'event_id':context['event_id']});return {'state':'cancelled'}
 

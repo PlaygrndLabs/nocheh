@@ -1,6 +1,6 @@
 /**
  * The Settings tab: where the member's reminders go and the ones waiting, each removable with write even while new
- * ones can't reach the member, and Sign out, which ends every launch opened before it on every phone (ADR-0265 D13).
+ * ones can't reach the member, their own schedules while Personal assistant is on (members' schedules), and Sign out, which ends every launch opened before it on every phone (ADR-0265 D13).
  */
 import * as React from 'react';
 import {Bell, LogOut} from 'lucide-react';
@@ -10,6 +10,7 @@ import {Button, Card, Skeleton} from '../ui/core';
 import {memberApi, MemberApiError, operationId} from './api';
 import {type WordKey} from './i18n';
 import {useToast, useWords} from './shared';
+import {MemberScheduleList} from './schedules';
 
 const offWords: Record<string, WordKey> = {
   private_chat_off: 'off_private_chat',
@@ -116,6 +117,7 @@ export function MemberSettings({me, onSignedOut}: {me: MemberMe; onSignedOut: ()
           )}
         </div>
       </Card>
+      {me.assistant && <MemberScheduleList />}
       <Card className="space-y-3 p-4">
         <h2 className="text-sm font-semibold">{t('sign_out')}</h2>
         <p className="text-[13px] text-muted">{t('sign_out_line')}</p>

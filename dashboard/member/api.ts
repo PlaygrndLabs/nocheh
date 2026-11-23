@@ -10,6 +10,9 @@ import {
   type MemberDetail,
   type MemberMe,
   type MemberReminder,
+  type MemberScheduleRequest,
+  type MemberScheduleResult,
+  type MemberSchedules,
   type MemberTaskCommentRequest,
   type MemberTaskCreateRequest,
   type MemberTaskPage,
@@ -96,5 +99,8 @@ export const memberApi = {
   comment: (id: string, request: MemberTaskCommentRequest) =>
     call<MemberDetail>('POST', '/tasks/' + id + '/comments', request),
   reminders: () => call<MemberReminder[]>('GET', '/reminders'),
+  schedules: () => call<MemberSchedules>('GET', '/schedules'),
+  schedule: (id: string, request: MemberScheduleRequest) =>
+    call<MemberScheduleResult>('POST', '/schedules/' + encodeURIComponent(id), request),
   signOut: () => call<Record<string, never>>('POST', '/sign-out'),
 };

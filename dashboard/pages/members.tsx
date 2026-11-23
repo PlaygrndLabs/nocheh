@@ -15,7 +15,7 @@ import {Page} from '../ui/page';
 import {AddMember} from './members/add';
 import {MemberDetail} from './members/detail';
 import {useKnownPeople, useLocalLaws, useMembers} from './members/hooks';
-import {DailyMessages, MemberList} from './members/list';
+import {DailyMessages, MemberList, MemberSchedules} from './members/list';
 import {withAnswers, type MemberAnswer} from './members/model';
 
 export default function MembersPage() {
@@ -73,6 +73,7 @@ export default function MembersPage() {
         <div className="space-y-5">
           <MemberList list={data} loading={!data && !list.error} known={known} />
           {data && <DailyMessages value={data.daily_messages} onSaved={answered} />}
+          {data && <MemberSchedules value={data.member_schedules} onSaved={answered} />}
         </div>
       )}
       {adding && data && (
