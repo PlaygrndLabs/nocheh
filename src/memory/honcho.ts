@@ -1,19 +1,38 @@
+import {createHmac} from 'node:crypto';
 import {canonical} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {longFetch} from '../long-fetch.js';
 import {engineId,engineInvalid,engineRejected,engineUnavailable,type EngineCoverage,type EngineFact,type EngineFactPage,type EngineTrace,type ParticipantFact,
   type EngineWrite,type EngineWriteInput,type ForgetStep,type MemoryEngine,type ParticipantRole} from './engine.js';
 
-/** GET without a body, POST with one. DELETE treats an already absent resource as deleted. */
-export type HonchoCall=(path:string,body?:unknown,method?:'DELETE'|'PUT')=>Promise<any>;
-/** Honcho's HTTP API. Failures use the memory socket's codes, so Nocheh can act on them without knowing the engine. */
-export function honchoClient(base:string):HonchoCall {
+/** GET without a body, POST with one. DELETE treats an already absent resource as deleted. `key` replaces the main key
+ *  for this one call: a wall's key (ADR-0282). */
+export type HonchoCall=(path:string,body?:unknown,method?:'DELETE'|'PUT',key?:string)=>Promise<any>;
+const base64url=(value:unknown)=>Buffer.from(JSON.stringify(value)).toString('base64url');
+/** A Honcho key: a JWT signed with the secret Honcho checks keys with (HS256, H:src/security.py). */
+export function honchoKey(secret:string,claims:Record<string,unknown>):string {
+  const body=base64url({alg:'HS256',typ:'JWT'})+'.'+base64url(claims);
+  return body+'.'+createHmac('sha256',secret).update(body).digest('base64url');
+}
+/** Honcho's audience for a key bound to one named scope: a server too old to know it refuses the key rather than
+ *  reading it as a workspace key (H:src/security.py). */
+const namedScopeAudience='honcho:named-scope';
+/** How long a wall key lives: one recall, with its slowest answer (480 s), and a margin. */
+const wallKeySeconds=600;
+/** A key that opens one wall of one space, and nothing else, for ten minutes (ADR-0282). */
+export const wallKey=(secret:string,space:string,wall:string,now=Date.now())=>
+  honchoKey(secret,{t:new Date(now).toISOString(),w:space,sc:wall,exp:Math.floor(now/1000)+wallKeySeconds,aud:namedScopeAudience});
+/** Honcho's HTTP API. Failures use the memory socket's codes, so Nocheh can act on them without knowing the engine.
+ *  With `secret`, every call carries Honcho's admin key signed with it, unless the call names its own key. */
+export function honchoClient(base:string,secret=''):HonchoCall {
  const url=new URL(base);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('invalid_honcho_url');
- return async(path,body,method)=>{
+ const main=secret?honchoKey(secret,{t:'nocheh',ad:true}):'';
+ return async(path,body,method,key)=>{
+  const bearer=key??main;
   // Recall includes guarded query preparation, embeddings and subscription reasoning, so a chat may take longer
   // than Node's own fetch waits; longFetch ends a call only at this deadline.
   let response:Response;try{response=await longFetch(url.origin+path,{method:method??(body===undefined?'GET':'POST'),signal:AbortSignal.timeout(path.endsWith('/chat')?480000:120000),
-   headers:{'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});}catch{throw engineUnavailable();}
+   headers:{'content-type':'application/json',...bearer?{authorization:'Bearer '+bearer}:{}},...(body===undefined?{}:{body:JSON.stringify(body)})});}catch{throw engineUnavailable();}
   if(method==='DELETE'&&response.status===404)return {deleted:false};
   if(!response.ok) {
    // Name the rejection without content: a validation error echoes its input, so only its field and type are kept.
@@ -23,6 +42,8 @@ export function honchoClient(base:string):HonchoCall {
   }
   const text=await response.text();if(text.length>2*1024*1024)throw new HttpError(503,'honcho_response_limit');
   if(method==='DELETE')return {deleted:true};
+  // Adding sessions to a scope answers 204 with no body.
+  if(response.status===204)return null;
   return JSON.parse(text);
  };
 }
@@ -33,6 +54,8 @@ export function honchoClient(base:string):HonchoCall {
  * bytes, half the tokens at 3 bytes a token. Learning queries measure about 2.4 (id-heavy JSON) to 6.4 (Persian text)
  * bytes a token, so an id-heavy query can take up to about 61% of the tokens; the request stays far below the guard. */
 export const honchoQueryCharacters=200000,honchoInputTokens=61440,honchoQueryBytes=honchoInputTokens/2*3;
+/** A wall's name: a Honcho scope id (H:src/schemas/api.py), as Nocheh makes them (memoryWallName). */
+const wallName=/^wall-[a-f0-9]{40}$/;
 /** Honcho's own ids for messages and conclusions. */
 const nativeId=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9_-]{21}$/.test(value);
 const receiptId=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -55,9 +78,9 @@ const instant=(value:unknown)=>{
 type Listed={fact:EngineFact;key:string;uncited:boolean};
 /** One conclusion from Honcho's stock list, checked against what was asked: a fact about someone else, from a session
  * the read was not limited to, or of a derived level is a broken answer, never something to show. */
-function listed(item:any,participant:string,sessions:Set<string>|null):Listed {
+function listed(item:any,participant:string,sessions:Set<string>|null,observer=participant):Listed {
   const cited=item?.source_message_ids,key=instant(item?.created_at);
-  if(!nativeId(item?.id)||typeof item.content!=='string'||item.content.length>65535||item.observer_id!==participant||item.observed_id!==participant||
+  if(!nativeId(item?.id)||typeof item.content!=='string'||item.content.length>65535||item.observer_id!==observer||item.observed_id!==participant||
     item.level!=='explicit'||!(item.session_id===null||engineId(item.session_id))||(sessions&&!sessions.has(item.session_id))||
     !Number.isSafeInteger(item.times_derived)||item.times_derived<1||key===null||
     !(cited===null||cited===undefined||Array.isArray(cited)&&cited.every(nativeId)))throw engineInvalid();
@@ -95,8 +118,12 @@ export class HonchoEngine implements MemoryEngine {
   readonly questionLimits={characters:honchoQueryCharacters,bytes:honchoQueryBytes};
   /** The dashboard's browser reads Honcho through its own command-line tool. */
   readonly inspectable=true;
-  constructor(readonly call:HonchoCall){}
+  /** `secret` signs wall keys; without it a wall is still asked for by name, with the main key (ADR-0282). */
+  constructor(readonly call:HonchoCall,private readonly secret=''){}
   private base(space:string){return '/v3/workspaces/'+space;}
+  /** A wall is a Honcho named scope: a peer named `scope.<wall>` that observes the wall's sessions (H:src/utils/scopes.py). */
+  private observer(wall:string|undefined,participant:string){return wall?'scope.'+wall:participant;}
+  private wallKey(space:string,wall:string){return this.secret?wallKey(this.secret,space,wall):undefined;}
 
   async openSpace(space:string) {
     const found=await this.call('/v3/workspaces',{id:space,configuration:{custom_instructions:readingInstructions}});
@@ -108,8 +135,26 @@ export class HonchoEngine implements MemoryEngine {
   async addParticipant(space:string,participant:string,role:ParticipantRole) {
     await this.call(this.base(space)+'/peers',role==='silent'?{id:participant,configuration:{observe_me:false}}:{id:participant});
   }
-  async openSession(space:string,session:string,participants:Record<string,ParticipantRole>) {
-    await this.call(this.base(space)+'/sessions',{id:session,peers:Object.fromEntries(Object.entries(participants).map(([peer,role])=>[peer,observation[role]]))});
+  async openSession(space:string,session:string,participants:Record<string,ParticipantRole>,walls:readonly string[]=[]) {
+    if(walls.some(wall=>!wallName.test(wall)))throw new HttpError(400,'invalid_memory_wall');
+    await this.call(this.base(space)+'/sessions',{id:session,peers:Object.fromEntries(Object.entries(participants).map(([peer,role])=>[peer,observation[role]])),
+      ...walls.length?{scopes:[...walls]}:{}});
+  }
+  /** Make the wall and add these sessions to it, a hundred a call. Honcho copies what each already learned into the wall
+   *  in the background, without a model (H:src/deriver/scope_backfill.py); wallReady says when that is done. */
+  async openWall(space:string,wall:string,sessions:readonly string[]) {
+    if(!wallName.test(wall)||sessions.some(session=>!engineId(session)))throw new HttpError(400,'invalid_memory_wall');
+    await this.call(this.base(space)+'/scopes',{id:wall});
+    for(let start=0;start<sessions.length;start+=100)
+      await this.call(this.base(space)+'/scopes/'+wall+'/sessions',{session_ids:sessions.slice(start,start+100)});
+  }
+  async wallReady(space:string,wall:string) {
+    if(!wallName.test(wall))throw new HttpError(400,'invalid_memory_wall');
+    const found=await this.call(this.base(space)+'/scopes/'+wall+'/status');
+    const states=found?.backfill_status&&typeof found.backfill_status==='object'?Object.values(found.backfill_status).map((item:any)=>item?.state):null;
+    if(!states||states.some(state=>!['pending','completed','failed'].includes(state)))throw engineInvalid();
+    if(states.includes('failed'))throw new HttpError(503,'memory_wall_copy_failed');
+    return !states.includes('pending');
   }
   async findWrites(space:string,session:string,receipt:string) {
     return writes((await this.call(this.base(space)+'/sessions/'+session+'/messages/list',{filters:{metadata:{nocheh_receipt:receipt}}}))?.items);
@@ -149,16 +194,21 @@ export class HonchoEngine implements MemoryEngine {
   async profile(space:string,participant:string) {
     return string((await this.call(this.base(space)+'/peers/'+participant+'/representation',{include_most_frequent:true,max_conclusions:50}))?.representation,2*1024*1024);
   }
-  async ask(space:string,participant:string,question:string,options:{sessions:string[]|null;evidence:boolean;format?:Record<string,unknown>}) {
+  async ask(space:string,participant:string,question:string,options:{sessions:string[]|null;wall?:string;evidence:boolean;format?:Record<string,unknown>}) {
+    // A wall is asked by name and with its own key: Honcho answers from the wall's own view only, and refuses the key
+    // anywhere else (ADR-0282). The name goes too, so a Honcho that checks no keys still keeps to the wall.
+    if(options.wall!==undefined&&!wallName.test(options.wall))throw new HttpError(400,'invalid_memory_wall');
     const response=await this.call(this.base(space)+'/peers/'+participant+'/chat',{query:question,reasoning_level:'low',stream:false,
       ...(options.evidence?{include_evidence:true}:{}),...(options.format?{response_format:options.format}:{}),
-      ...(options.sessions?{filters:{session_id:options.sessions}}:{})});
+      ...(options.wall?{scope:options.wall}:options.sessions?{filters:{session_id:options.sessions}}:{})},undefined,options.wall?this.wallKey(space,options.wall):undefined);
     if(typeof response?.content!=='string')throw engineInvalid();
     const evidence=Array.isArray(response?.evidence?.conclusions)?response.evidence.conclusions.map((item:any)=>item?.id).filter(nativeId):[];
     return {text:response.content as string,evidence:[...new Set<string>(evidence)]};
   }
-  async search(space:string,query:string,options:{limit:number;sessions:string[]|null}) {
-    const found=await this.call(this.base(space)+'/search',{query,limit:options.limit,...(options.sessions?{filters:{session_id:{in:options.sessions}}}:{})});
+  async search(space:string,query:string,options:{limit:number;sessions:string[]|null;wall?:string}) {
+    if(options.wall!==undefined&&!wallName.test(options.wall))throw new HttpError(400,'invalid_memory_wall');
+    const found=await this.call(this.base(space)+'/search',{query,limit:options.limit,
+      ...(options.wall?{scope:options.wall}:options.sessions?{filters:{session_id:{in:options.sessions}}}:{})});
     if(!Array.isArray(found))throw new HttpError(502,'invalid_honcho_search');
     return found.slice(0,50).filter((message:any)=>nativeId(message?.id)&&receiptId(message?.metadata?.nocheh_receipt))
       .map((message:any)=>({id:message.id as string,receipt:message.metadata.nocheh_receipt as string}));
@@ -203,11 +253,12 @@ export class HonchoEngine implements MemoryEngine {
     return {items:page.items as any[],next:page.next_page as string|null};
   }
   /** Honcho's stock conclusion list for what a peer learned about itself, a cursor page at a time. */
-  private async list(space:string,participant:string,sessions:string[]|null,size:number,cursor:string,extra:Record<string,unknown>={}) {
-    if(!engineId(participant)||sessions?.some(session=>!engineId(session)))throw new HttpError(400,'invalid_fact_request');
-    const page=await this.page(space,size,cursor,{observer_id:participant,observed_id:participant,...(sessions?{session_id:{in:sessions}}:{}),...extra});
+  private async list(space:string,participant:string,sessions:string[]|null,size:number,cursor:string,extra:Record<string,unknown>={},wall?:string) {
+    if(!engineId(participant)||sessions?.some(session=>!engineId(session))||wall!==undefined&&!wallName.test(wall))throw new HttpError(400,'invalid_fact_request');
+    const observer=this.observer(wall,participant);
+    const page=await this.page(space,size,cursor,{observer_id:observer,observed_id:participant,...(sessions?{session_id:{in:sessions}}:{}),...extra});
     const allowed=sessions&&new Set(sessions);
-    return {items:page.items.map((item:any)=>listed(item,participant,allowed)) as Listed[],next:page.next};
+    return {items:page.items.map((item:any)=>listed(item,participant,allowed,observer)) as Listed[],next:page.next};
   }
   /** Honcho's list names the messages a fact cites. For a fact without citations, Nocheh's plugin names a few messages
    * of the batch it was learned from, which is never exact. Facts it cannot answer for keep no writes, and say why. */
@@ -252,20 +303,20 @@ export class HonchoEngine implements MemoryEngine {
     const page=await this.list(space,participant,options.sessions,options.size,options.cursor??'');
     return {facts:page.items.map(item=>item.fact),next:page.next,limitations:options.batches===false?[]:await this.batches(space,page.items)};
   }
-  async factsById(space:string,participant:string,ids:string[],options:{sessions:string[]|null}) {
+  async factsById(space:string,participant:string,ids:string[],options:{sessions:string[]|null;wall?:string}) {
     if(!Array.isArray(ids)||ids.length>256||ids.some(id=>!nativeId(id)))throw new HttpError(400,'invalid_fact_request');
     const wanted=[...new Set(ids)],found=new Map<string,Listed>();
     if(!(options.sessions&&!options.sessions.length))for(let start=0;start<wanted.length;start+=listIds) {
-      const chunk=wanted.slice(start,start+listIds),page=await this.list(space,participant,options.sessions,listIds,'',{id:{in:chunk}});
+      const chunk=wanted.slice(start,start+listIds),page=await this.list(space,participant,options.sessions,listIds,'',{id:{in:chunk}},options.wall);
       if(page.next!==null||page.items.some(item=>!chunk.includes(item.fact.id)))throw engineInvalid();
       for(const item of page.items)found.set(item.fact.id,item);
     }
     const items=wanted.flatMap(id=>found.get(id)??[]);
     return {facts:items.map(item=>item.fact),limitations:await this.batches(space,items)};
   }
-  async factExists(space:string,participant:string,id:string) {
+  async factExists(space:string,participant:string,id:string,wall?:string) {
     if(!nativeId(id))throw new HttpError(400,'invalid_fact_request');
-    const page=await this.list(space,participant,null,1,'',{id:{in:[id]}});
+    const page=await this.list(space,participant,null,1,'',{id:{in:[id]}},wall);
     return page.items.some(item=>item.fact.id===id);
   }
   /** Honcho's profile takes its most-derived half by `times_derived desc, created_at desc, id`
@@ -311,4 +362,4 @@ export class HonchoEngine implements MemoryEngine {
     return {explicit:found.explicit,cited:found.cited,batchOnly:found.batch_only,none:found.none};
   }
 }
-export const honchoEngine=(call:HonchoCall)=>new HonchoEngine(call);
+export const honchoEngine=(call:HonchoCall,secret='')=>new HonchoEngine(call,secret);

@@ -15,6 +15,7 @@ import {captureEvidence} from '../src/stores/generated-capture.js';
 import {honchoPointer,honchoSource} from '../src/source-labels.js';
 import {HttpError} from '../src/http.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {memoryWallName} from '../src/stores/memory-walls.js';
 import {installChatsForTest} from '../src/chats.js';
 import {legacyDirectory} from './fixture-groups.js';
 
@@ -22,6 +23,10 @@ import {legacyDirectory} from './fixture-groups.js';
 const recallChats=()=>legacyDirectory(['-100','-100/topic/3','-200'],{owner:'123',served:['-100','-200']});
 /** Control answers for recall cases where the owner's forwards and files hold nothing learned. */
 const nothingForwarded={query:async(sql:string)=>{if(sql.includes('r.peer_id=$2'))return {rowCount:0,rows:[]};throw Error('unexpected_control_query');}};
+
+/** Stands in for the walls store: a group reads through the wall of the chats it asks, holding these sessions (ADR-0282). */
+const fakeWalls=(sessions:()=>string[],opened:string[][]=[])=>({of:async()=>[],
+  open:async(workspace:string,chats:readonly string[])=>{opened.push([...new Set(chats)].sort());return {wall:memoryWallName(workspace,chats),sessions:sessions()};}});
 
 test('reply context reads Honcho on arrival, limits other audiences to their own session and reuses identical guarded results',async()=>{
   const workspace=digest('installation-workspace'),groupSession=digest('group-session'),ownerSession=digest('owner-session');
@@ -115,7 +120,7 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
 test('recall asks every connected peer side by side, keeps each inside the group\'s sessions and their order',async t=>{
   t.after(installChatsForTest(recallChats()));
   const workspace=digest('recall-workspace'),root={store:'archive',kind:'event',id:digest('recall-root'),revision:'1',input_hash:digest('recall-root-hash')};
-  const groupSessions=[digest('group-session-a'),digest('group-session-b')],peers=['person_a','person_b','project_c'];
+  const groupSessions=[digest('group-session-a'),digest('group-session-b')],opened:string[][]=[],peers=['person_a','person_b','project_c'];
   const asked:{peer:string;body:any}[]=[],waiting:(()=>void)[]=[];let recorded='';
   const contexts={access:{stores:{control:nothingForwarded},policy:()=>({owner_id:'123'}),
     recall:(principal:Reader)=>({space:principal.space,group:'-100'})},
@@ -134,11 +139,12 @@ test('recall asks every connected peer side by side, keeps each inside the group
   }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],correcting:async()=>false,
     current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
-    connectedPeers:async()=>({items:peers.map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
+    connectedPeers:async()=>({items:peers.map(peer=>({peer,path:'speaker → '+peer})),partial:false}),wallStore:fakeWalls(()=>groupSessions,opened)});
   const result=await Promise.race([memory.recall({admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader,'Who planned the trip?'),
     new Promise((_resolve,reject)=>setTimeout(()=>reject(Error('peers were asked one after another')),2000))]) as any;
   assert.deepEqual(asked.map(item=>item.peer),peers,'all connected peers are asked before any answer returns');
-  for(const item of asked)assert.deepEqual(item.body.filters,{session_id:groupSessions},'a group recall stays inside that group\'s sessions');
+  assert.deepEqual(opened,[['-100','-100/topic/3']],'a group recall reads through the wall of every topic of its group');
+  for(const item of asked){assert.equal(item.body.scope,memoryWallName(workspace,opened[0]!),'a group recall stays inside that group\'s wall');assert.equal(item.body.filters,undefined);}
   assert.deepEqual(recorded.split('\n\n').map(block=>block.split('\n')[1]),peers.map(peer=>'Answer from '+peer),'answers keep the connected-peer order');
   assert.equal(result.sources.at(-1).text,recorded);
 });
@@ -163,11 +169,11 @@ test('recall asks the owner\'s forwards and files beyond the four peers, under t
   }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],correcting:async()=>false,
     current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
-    connectedPeers:async()=>({items:peers.map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
+    connectedPeers:async()=>({items:peers.map(peer=>({peer,path:'speaker → '+peer})),partial:false}),wallStore:fakeWalls(()=>groupSessions)});
   const owner={admin:false,scope:null,space:'123',turnEvent:root.id} as Reader;
   await memory.recall(owner,'Where is the trip?');
   assert.deepEqual(asked.map(item=>item.peer),[...peers.slice(0,4),materialPeer],'the forwards and files are asked beyond the four connected peers');
-  assert.equal(asked.at(-1)!.body.filters,undefined,'owner recall spans the space');
+  assert.equal(asked.at(-1)!.body.filters,undefined,'owner recall spans the space');assert.equal(asked.at(-1)!.body.scope,undefined,'and no wall');
   assert.deepEqual(checked.at(-1),[workspace,materialPeer,null,root.id],'only what was learned from another message than this question counts');
   assert.equal(recorded.split('\n\n').at(-1),'[related through the owner\'s forwards and files: information other people or files wrote, not the owner\'s words]\nAnswer from '+materialPeer);
   assert.equal(outputs.at(-1).configuration.forwards_and_files,true);
@@ -175,7 +181,7 @@ test('recall asks the owner\'s forwards and files beyond the four peers, under t
   asked.length=0;
   const group={admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader;
   await memory.recall(group,'Where is the trip?');
-  assert.deepEqual(asked.at(-1)!,{peer:materialPeer,body:asked.at(-1)!.body});assert.deepEqual(asked.at(-1)!.body.filters,{session_id:groupSessions});
+  assert.deepEqual(asked.at(-1)!,{peer:materialPeer,body:asked.at(-1)!.body});assert.equal(asked.at(-1)!.body.scope,memoryWallName(workspace,['-100','-100/topic/3']));
   assert.deepEqual(checked.at(-1),[workspace,materialPeer,groupSessions,root.id]);
   learned=false;asked.length=0;
   await memory.recall(group,'Where is the trip?');
@@ -260,7 +266,7 @@ test('recall asks Honcho for evidence and points the agent at the archived messa
   }),async()=>[]);
   Object.assign(memory as any,{workspace:async()=>({id:workspace}),relevantOwnerCorrections:async()=>[],correcting:async()=>false,
     current:async()=>({row:{id:workspace,state:'ready',last_ready_at:new Date()},binding,principal:{}}),
-    connectedPeers:async()=>({items:['person_a','person_b'].map(peer=>({peer,path:'speaker → '+peer})),partial:false})});
+    connectedPeers:async()=>({items:['person_a','person_b'].map(peer=>({peer,path:'speaker → '+peer})),partial:false}),wallStore:fakeWalls(()=>sessions)});
   const reader={admin:false,scope:'-100',space:'-100',turnEvent:root.id} as Reader;
   const result=await memory.recall(reader,'Who planned the trip?') as any;
   assert.ok(bodies.every(body=>body.include_evidence===true),'every peer answer carries Honcho\'s evidence');
@@ -304,7 +310,8 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
     return [{id:'A'.repeat(21),metadata:{nocheh_receipt:digest('receipt-a')}},{id:'B'.repeat(21),metadata:{nocheh_receipt:digest('receipt-b')}},
       {id:'not-native',metadata:{nocheh_receipt:digest('receipt-a')}},{id:'C'.repeat(21),metadata:{nocheh_receipt:digest('receipt-c')}}];
   }),async()=>[]);
-  Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}})});
+  Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}}),
+    wallStore:fakeWalls(()=>learned)});
   const group={admin:false,scope:'-100',space:'-100/topic/3',turnEvent:digest('turn')} as Reader;
   // Each id says the batch it came from and its place there, so the first 3 of a batch are named by source (ADR-0261).
   const batches=[{receipt:digest('receipt-a'),position:0},{receipt:digest('receipt-c'),position:1}];
@@ -314,7 +321,8 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.deepEqual([...searchTagged({ids:['a','b','c','d','e'],from:[0,1,2,3,0].map(position=>({receipt:'r',position}))})],['a','b','c','e'],
     'a batch\'s fourth message and later keep today\'s fields alone');
   assert.deepEqual([...searchTagged({ids:['a']})],[],'without positions, nothing is named');
-  assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,filters:{session_id:{in:sessions}}}});
+  assert.deepEqual(bodies[0],{path:'/v3/workspaces/'+workspace+'/search',body:{query:'checked: who sends the invoice',limit:12,scope:memoryWallName(workspace,['-100','-100/topic/3'])}},
+    'a group searches inside its wall, with the main key');
   assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
   // The group is bound as its id and its topics' ids, from the chat rows (ADR-0252).
   const topics=['-100','-100/topic/3'];
@@ -411,6 +419,8 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       return {literals:text.includes('saffronpass')?['saffronpass']:text.includes('Steered recall')?['user','fixture-recall-model'].filter(word=>text.includes(word)):[]};
     },
     memoryEngine:honchoEngine(async(path,body:any,method)=>{
+      // Walls copy at once here (ADR-0282).
+      if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push({path,body,...(method?{method}:{})});
       const session=/^\/v3\/workspaces\/([^/]+)\/sessions(?:\/([^/?]+))?/.exec(path);
       if(method==='DELETE'){if(session?.[2])active.get(session[1]!)?.delete(session[2]);return {deleted:true};}
@@ -555,7 +565,10 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const chat=calls.filter(c=>c.path.endsWith('/chat')).at(-1)!;
     assert.ok(!String(chat.body.query).includes('saffronpass'));
     const groupSessions=(await stores.control.query('SELECT session_id FROM memory_sessions WHERE audience=$1',[group])).rows.map(row=>row.session_id).sort();
-    assert.deepEqual([...chat.body.filters.session_id].sort(),groupSessions,'group recall is confined to its own sessions');
+    // Group recall is confined to the wall of its own chat, which holds exactly its learned sessions (ADR-0282).
+    assert.match(chat.body.scope,/^wall-[a-f0-9]{40}$/);assert.equal(chat.body.filters,undefined);
+    const joined=calls.filter(c=>c.path.endsWith('/scopes/'+chat.body.scope+'/sessions')).flatMap(c=>c.body.session_ids).sort();
+    assert.deepEqual(joined,groupSessions,'group recall is confined to its own sessions');
     assert.equal((await stores.archive.query('SELECT count(*) FROM events')).rows[0].count,originalCount,'memory and context never become original evidence');
     assert.ok(!JSON.stringify(calls.filter(c=>c.path.endsWith('/messages'))).includes('saffronpass'),'only guarded inputs reach native ingestion');
     const receiptColumns=(await stores.control.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='memory_ingestion_receipts'")).rows.map(r=>r.column_name);
@@ -686,6 +699,8 @@ test('foreground recall requires independent source evidence while background co
   const calls:string[]=[];let sequence=0;
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any)=>{
+      // Walls copy at once here (ADR-0282).
+      if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push(path);
       if(path.endsWith('/messages/list'))return {items:[]};
       if(path.endsWith('/messages'))return [{...body.messages[0],id:String(++sequence).padStart(21,'r')}];
@@ -746,6 +761,8 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
   const calls:{path:string;body:any}[]=[];let sequence=0;
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any)=>{
+      // Walls copy at once here (ADR-0282).
+      if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push({path,body});
       if(path.endsWith('/messages/list'))return {items:[]};
       if(path.endsWith('/messages'))return [{...body.messages[0],id:String(++sequence).padStart(21,'m')}];
@@ -1093,7 +1110,10 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     await services.memory.recall(groupReader,'Where is the venue?');
     const groupAsk=calls.slice(asked).find(call=>call.path.endsWith('/peers/'+materialPeer+'/chat'))!;
     const groupSessions=(await stores.control.query('SELECT session_id FROM memory_sessions WHERE audience=$1',[group])).rows.map(row=>row.session_id).sort();
-    assert.ok(groupAsk,'a group asks them once they wrote something there');assert.ok(groupAsk.body.filters.session_id.every((id:string)=>groupSessions.includes(id)));
+    assert.ok(groupAsk,'a group asks them once they wrote something there');
+    // Asked inside the group's wall, which holds only the group's sessions (ADR-0282).
+    const joined=calls.filter(call=>call.path.endsWith('/scopes/'+groupAsk.body.scope+'/sessions')).flatMap(call=>call.body.session_ids);
+    assert.ok(joined.length&&joined.every((id:string)=>groupSessions.includes(id)));
 
     // An owner turn reads the private chat and the forwards and files side by side; a prefetch serves both.
     assert.equal(await services.memory.observe(workspace),true);await swept();

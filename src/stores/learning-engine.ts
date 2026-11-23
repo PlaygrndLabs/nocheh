@@ -1,3 +1,4 @@
+import {MemoryWalls} from './memory-walls.js';
 import type pg from 'pg';
 import {canonical,digest} from '../archive.js';
 import {HttpError,string} from '../http.js';
@@ -167,9 +168,10 @@ export class ContextualLearningRepository {
           const query=learningQuery(citable=>learningInstruction(prompt,{trigger_id:context.source.id,citable_ids:canonical(citable)}),context,this.engine.questionLimits);
           await this.provenance.current(job.workspace,job.audience,job.binding);
           const peer=context.entities.speaker?memoryPeerId(context.entities.speaker):evidencePeerId(context.source);
-          // A group or topic interpretation reasons only over that audience's own sessions.
+          // A group or topic interpretation reasons only over that audience's own sessions, inside their wall (ADR-0282).
           const sessions=await this.provenance.chatScope(job.workspace,job.audience);
-          const response=await this.engine.ask(job.workspace,peer,query,{sessions,evidence:false,format:learningResultSchema});
+          const walled=sessions?await new MemoryWalls(this.contexts.access.stores.control,this.engine).open(job.workspace,[job.audience]):null;
+          const response=await this.engine.ask(job.workspace,peer,query,{sessions,...walled?{wall:walled.wall}:{},evidence:false,format:learningResultSchema});
           // Preserve the completed reasoning result before validation, publication or job completion.
           const output=await this.derived.record({operation_id:operation,source:job.source_reference,parents:[job.input_reference],kind:'learning_result',
             content:Buffer.from(string(response.text,200000)),producer:this.engine.id,producer_version:protocol,configuration:{reasoning_level:'low',peer},

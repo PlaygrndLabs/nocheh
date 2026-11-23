@@ -53,7 +53,7 @@ export type MemoryEngine={
   // Feed in. Each call is idempotent; Nocheh checks the write is still allowed before each one.
   openSpace(space:string):Promise<void>;
   addParticipant(space:string,participant:string,role:ParticipantRole):Promise<void>;
-  openSession(space:string,session:string,participants:Record<string,ParticipantRole>):Promise<void>;
+  openSession(space:string,session:string,participants:Record<string,ParticipantRole>,walls?:readonly string[]):Promise<void>;
   /** Writes in a session that carry a receipt. A deleted session is a rejection. */
   findWrites(space:string,session:string,receipt:string):Promise<EngineWrite[]>;
   /** Write once. The answer lists the write as the engine stored it. */
@@ -78,9 +78,17 @@ export type MemoryEngine={
   profile(space:string,participant:string):Promise<string>;
   /** Answer a question about a participant. `evidence` lists the facts the engine read while answering.
    * `format` is a JSON schema the answer must follow. */
-  ask(space:string,participant:string,question:string,options:{sessions:string[]|null;evidence:boolean;format?:Record<string,unknown>}):Promise<{text:string;evidence:string[]}>;
+  ask(space:string,participant:string,question:string,options:{sessions:string[]|null;wall?:string;evidence:boolean;format?:Record<string,unknown>}):Promise<{text:string;evidence:string[]}>;
   /** Writes that match by meaning, best first. */
-  search(space:string,query:string,options:{limit:number;sessions:string[]|null}):Promise<{id:string;receipt:string}[]>;
+  search(space:string,query:string,options:{limit:number;sessions:string[]|null;wall?:string}):Promise<{id:string;receipt:string}[]>;
+
+  // Walls (ADR-0282): a named set of sessions the engine itself keeps reads inside. A read given a `wall` answers only
+  // from what was learned in the wall's sessions, and the facts it names are the wall's own copies; `sessions` is then
+  // ignored. Absent when the engine has no walls: Nocheh then limits reads by `sessions`, as before.
+  /** Make the wall and add these sessions to it. What they already learned reaches the wall in the background. */
+  openWall?(space:string,wall:string,sessions:readonly string[]):Promise<void>;
+  /** Whether everything already learned in the wall's sessions has reached it. */
+  wallReady?(space:string,wall:string):Promise<boolean>;
 
   // Corrections and deletions, one bounded step per call.
   /** Delete facts learned from a session, then the session itself. */
@@ -98,9 +106,9 @@ export type MemoryEngine={
    *  Fills them in place and gives the limitations. */
   factBatches?(space:string,facts:EngineFact[]):Promise<string[]>;
   /** The named facts that still exist, in the order named. */
-  factsById?(space:string,participant:string,ids:string[],options:{sessions:string[]|null}):Promise<{facts:EngineFact[];limitations:string[]}>;
+  factsById?(space:string,participant:string,ids:string[],options:{sessions:string[]|null;wall?:string}):Promise<{facts:EngineFact[];limitations:string[]}>;
   /** Whether a fact still exists; a correction deletes the facts it replaces. */
-  factExists?(space:string,participant:string,id:string):Promise<boolean>;
+  factExists?(space:string,participant:string,id:string,wall?:string):Promise<boolean>;
   /** Facts learned more than once, most often first and then newest. `complete` is false when there were more than it reads. */
   mostDerived?(space:string,participant:string,options:{sessions:string[]|null;batches?:boolean}):Promise<{facts:EngineFact[];complete:boolean;limitations:string[]}>;
   /** Facts any participant learned about itself, newest first, a page at a time, for the owner's dashboard: within

@@ -41,6 +41,14 @@ def read_request(original, client, method, path, **kwargs):
     return original(client,method,path,**kwargs)
 
 
+def admin_key(secret):
+    """Honcho's admin key, signed with the internal token Honcho checks keys with (ADR-0282): an HS256 JWT."""
+    import base64,hashlib,hmac,json
+    part=lambda value:base64.urlsafe_b64encode(json.dumps(value,separators=(',',':')).encode()).rstrip(b'=').decode()
+    body=part({'alg':'HS256','typ':'JWT'})+'.'+part({'t':'nocheh-cli','ad':True})
+    return body+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).rstrip(b'=').decode()
+
+
 def main(args=None):
     args=validate(args if args is not None else sys.argv[1:])
     # Never load an ambient global CLI account or OAuth grant.
@@ -48,7 +56,7 @@ def main(args=None):
     with tempfile.TemporaryDirectory() as config:
         for key in list(os.environ):
             if key.startswith('HONCHO_'): del os.environ[key]
-        os.environ.update(HONCHO_CONFIG_DIR=config,HONCHO_API_KEY=Path('/state/internal_token').read_text().strip(),
+        os.environ.update(HONCHO_CONFIG_DIR=config,HONCHO_API_KEY=admin_key(Path('/state/internal_token').read_text().strip()),
                           HONCHO_BASE_URL='http://honcho-api:8000',HONCHO_NO_UPDATE_CHECK='1',HONCHO_JSON='1')
         from honcho.http.client import HonchoHTTPClient
         original=HonchoHTTPClient.request
