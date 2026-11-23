@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {execFileSync} from 'node:child_process';
-import {mkdtempSync, readFileSync, rmSync, statSync} from 'node:fs';
+import {chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
@@ -31,7 +31,7 @@ const {
   machineErrorWords,
   machineProblems,
   machineStatus,
-  setupCommand,
+  setupCommand: setup,
   setupLine,
 } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
 
@@ -232,13 +232,16 @@ test('error codes become plain words and a next step', () => {
   assert.match(machineAdvice('machine_unavailable', 'nocheh'), /\.\/bin\/nocheh up/);
   assert.equal(
     setupLine('nocheh'),
-    'On the machine, signed in as nocheh, paste the setup command into a terminal, or add the public key to ~nocheh/.ssh/authorized_keys yourself. Then press Test.',
+    'On the machine, signed in as nocheh, paste the setup command into a terminal: it adds the public key to ~nocheh/.ssh/authorized_keys and sets “Subsystem sftp internal-sftp” for SSH, asking for the password once. Then press Test.',
   );
 });
 
 test('the setup command adds the public key once, with the modes SSH asks for', () => {
   const key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDutBo6f45zuPJ6cSri5hzM1HbEERM2PrLAkkXefdFxZ nocheh build-vm';
   const home = mkdtempSync(join(tmpdir(), 'machine-setup-'));
+  const place = {config: join(home, 'sshd_config'), sudo: '', sshd: '/nonexistent/sshd', systemctl: '/nonexistent/systemctl'};
+  const setupCommand = key => setup(key, place);
+  writeFileSync(place.config, 'Subsystem sftp internal-sftp\n');
   try {
     for (const shell of ['sh', 'bash']) {
       // Run twice: the line is added once. A key line already there for another machine stays.
@@ -259,6 +262,35 @@ test('the setup command adds the public key once, with the modes SSH asks for', 
     execFileSync('sh', ['-c', setupCommand("ssh-ed25519 AAAA it's; touch ~/oops")], {env: {...process.env, HOME: home}});
     assert.equal(readFileSync(join(home, '.ssh/authorized_keys'), 'utf8'), "ssh-ed25519 AAAA it's; touch ~/oops\n");
     assert.throws(() => statSync(join(home, 'oops')));
+  } finally {
+    rmSync(home, {recursive: true, force: true});
+  }
+});
+
+test('the setup command turns the sftp line of sshd_config into internal-sftp, and keeps a config SSH refuses', () => {
+  const key = 'ssh-ed25519 AAAA nocheh build-vm';
+  const home = mkdtempSync(join(tmpdir(), 'machine-sftp-'));
+  const config = join(home, 'sshd_config');
+  const place = {config, sudo: '', sshd: '/nonexistent/sshd', systemctl: '/nonexistent/systemctl'};
+  const run = (where = place) => execFileSync('sh', ['-c', setup(key, where)], {env: {...process.env, HOME: home}, encoding: 'utf8'});
+  try {
+    const original = '# Subsystem sftp /old\nPort 22\nSubsystem\tsftp\t/usr/libexec/sftp-server\nMatch User other\n  X11Forwarding no\n';
+    writeFileSync(config, original);
+    assert.match(run(), /SSH now uses internal-sftp/);
+    assert.equal(readFileSync(config, 'utf8'), original.replace('Subsystem\tsftp\t/usr/libexec/sftp-server', 'Subsystem sftp internal-sftp'));
+    assert.equal(readFileSync(config + '.nocheh', 'utf8'), original, 'the old config is kept beside it');
+    assert.match(run(), /already uses internal-sftp/);
+    // A config with no sftp line is not guessed at: a line added after a Match block would stop SSH.
+    writeFileSync(config, 'Port 22\n');
+    assert.match(run(), /yourself/);
+    assert.equal(readFileSync(config, 'utf8'), 'Port 22\n');
+    // sshd -t refusing the change puts the old config back.
+    const refusing = join(home, 'sshd');
+    writeFileSync(refusing, '#!/bin/sh\nexit 1\n');
+    chmodSync(refusing, 0o755);
+    writeFileSync(config, 'Subsystem sftp /usr/lib/openssh/sftp-server\n');
+    assert.match(run({...place, sshd: refusing}), /nothing changed/);
+    assert.equal(readFileSync(config, 'utf8'), 'Subsystem sftp /usr/lib/openssh/sftp-server\n');
   } finally {
     rmSync(home, {recursive: true, force: true});
   }
