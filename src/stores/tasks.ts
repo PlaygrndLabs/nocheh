@@ -26,7 +26,7 @@ import {memberLane,skippedLine,skippedReference,type MemberSend,type ReminderSki
 import {currentChats} from './chats.js';
 import {peopleNames} from './people-names.js';
 import {accountPeopleNames} from './entities.js';
-import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
+import {addDays,daysBetween,nextRepeat,readRepeat,readTaskSettings,setOwnerTimeZone,stateOf,storedTaskSettings,type StatusCategory,type TaskSettings} from './task-settings.js';
 
 export const taskSchema=`
 -- Dev mode: a list made before statuses existed is replaced, not converted.
@@ -895,6 +895,14 @@ export class TaskRepository {
       await db.query('UPDATE owner_task_settings SET settings=$1,revision=revision+1,updated_at=now() WHERE singleton',[JSON.stringify(next)]);
       await db.query('COMMIT');
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    return this.settings(principal);
+  }
+
+  /** Only the owner's time zone, from the Schedules page or the mini app (owner's time zone): the rest stays as saved. */
+  async saveTimeZone(principal:Reader,input:unknown) {
+    admin(principal);const body=object(input);
+    if(Object.keys(body).some(key=>key!=='time_zone'))throw new HttpError(400,'unknown_task_setting');
+    await setOwnerTimeZone(this.control,body.time_zone);
     return this.settings(principal);
   }
 

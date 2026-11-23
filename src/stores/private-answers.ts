@@ -345,7 +345,7 @@ const answerRoutes:readonly [string,RegExp][]=[
  */
 const memberRoutes:readonly [string,RegExp][]=[
   ['GET',/^\/v1\/(?:search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|owner\/tasks(?:\/[a-f0-9]{64})?|security\/binding|turn-files\/[a-f0-9]{64}|notion\/connections|github\/repos|tools\/actions\/[a-f0-9]{64})$/],
-  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions|schedules\/turn|tools\/propose|members\/time-zone)|anthropic\/v1\/messages)$/],
+  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions|schedules\/(?:turn|time-zone)|tools\/propose)|anthropic\/v1\/messages)$/],
 ];
 /**
  * The routes the owner's ask about a member may call (step 4b): the archive reads of that member's chat, the turn's
@@ -371,8 +371,6 @@ export const privateAnswerTaskActions:ReadonlySet<string>=new Set(['list','get']
  * private chat reads as an answer does, tasks included (read only, D14), and also its projects' Notion and GitHub with
  * the results of those reads (ADR-0278); the owner's ask about a member reads only the archive, which holds that member's
  * chat. Neither gets a notes or memory-writing tool. */
-/** The tools only a member's own private chat is offered: setting their own time zone (members' time zones). */
-export const memberOnlyTools:ReadonlySet<string>=new Set(['my_time_zone']);
 export const boundReaderTools:Readonly<Record<BoundReader,ReadonlySet<string>>>={answer:privateAnswerTools,
   member:new Set([...privateAnswerTools,'notion','github','action_status','my_time_zone']),
   memberRead:new Set(['archive_search','archive_read','archive_page'])};
