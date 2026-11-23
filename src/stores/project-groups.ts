@@ -46,3 +46,15 @@ export async function sharedProjectGroups(db:Database,group:string,served:readon
   const found=(row?.groups??[]).filter(groupChatId);
   return row&&found.includes(group)&&found.length>1?{project:row.project,groups:found}:null;
 }
+
+/**
+ * A member's groups with, for each, the other served groups of its project while that project shares its group chats
+ * (ADR-0267, ADR-0276), sorted. `joined` must already be only the groups the caller keeps for the member (fresh, not
+ * left out): a group that is not one of them never adds anything, and the groups added are read, never joined. A
+ * member's private chat, the members' app and reminder delivery all widen through this one rule.
+ */
+export async function withSharedGroups(db:Database,joined:readonly string[],served:readonly string[]):Promise<string[]> {
+  const whole=new Set(joined);
+  for(const group of joined)for(const other of (await sharedProjectGroups(db,group,served))?.groups??[])whole.add(other);
+  return [...whole].sort();
+}

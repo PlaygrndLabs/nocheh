@@ -106,10 +106,18 @@ export function problem(error: unknown): {word: WordKey; reload: boolean} | null
   return {word: 'failed', reload: false};
 }
 
-/** A group's Telegram title, from the member's own groups. */
+/** The groups of a board's project, by Telegram title: every group assigned to it now, the member's own and the others
+ * (ADR-0276). Only the member's own groups there when the server names none. */
+export function boardGroups(me: MemberMe, project: string | null): {id: string; title: string | null}[] {
+  const listed = me.projects.find(item => item.id === project)?.groups;
+  return listed ?? me.groups.filter(item => item.board === 'open' && item.project === project);
+}
+
+/** A group's Telegram title, from the groups of the member's boards; a task's group label is always one of them. */
 export function groupTitle(me: MemberMe, group: string | null, t: Translate): string {
   if (!group) return t('whole_project');
-  return me.groups.find(item => item.id === group)?.title?.trim() || t('unnamed_group');
+  const found = [...me.projects.flatMap(item => item.groups ?? []), ...me.groups].find(item => item.id === group);
+  return found?.title?.trim() || t('unnamed_group');
 }
 
 /** Only http(s) links are ever followed; anything else is shown as text. */
@@ -166,12 +174,12 @@ export const tagList = (value: string) => [
   ),
 ];
 
-/** Says who will see a task in this group, or in the whole project. */
-export function AudienceLine({me, group, projectName}: {me: MemberMe; group: string; projectName: string}) {
+/** Says who will see a task: everyone in the project's groups, whatever its group, which is only a label (ADR-0276). */
+export function AudienceLine({projectName}: {projectName: string}) {
   const {t} = useWords();
   return (
     <p className="text-xs text-muted" dir="auto">
-      {group ? t('group_line', {group: groupTitle(me, group, t)}) : t('whole_project_line', {project: projectName})}
+      {t('whole_project_line', {project: projectName})}
     </p>
   );
 }

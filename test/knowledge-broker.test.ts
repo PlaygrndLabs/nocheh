@@ -4,7 +4,6 @@ import type pg from 'pg';
 import {HttpError} from '../src/http.js';
 import {turnToken,type Reader} from '../src/access.js';
 import {brokerServer,scopedRoute,type TurnBinding} from '../src/security/broker.js';
-import {readSet} from '../src/spaces.js';
 import {TASK_PROJECTS_NAMED,TaskProjectRequired} from '../src/stores/tasks.js';
 
 test('knowledge broker exposes only typed routes and preserves the scoped credential',async()=>{
@@ -116,7 +115,7 @@ test('a task refusal naming 50 projects with long non-Latin names reaches the tu
 });
 
 test('storage names at most 50 projects in a task_project_required refusal and says when there are more',()=>{
-  const views=Array.from({length:TASK_PROJECTS_NAMED+3},(_,n)=>({project:String(n).padStart(2,'0').repeat(32),name:'Project '+n,reach:readSet({home:'-10'})}));
+  const views=Array.from({length:TASK_PROJECTS_NAMED+3},(_,n)=>({project:String(n).padStart(2,'0').repeat(32),name:'Project '+n,home:'-10'}));
   assert.equal(TASK_PROJECTS_NAMED,50);
   const many=new TaskProjectRequired(views);
   assert.deepEqual([many.details.projects.length,many.details.more,many.details.projects.at(-1)],[50,true,{id:views[49]!.project,name:'Project 49'}]);

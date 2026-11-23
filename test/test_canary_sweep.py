@@ -163,15 +163,15 @@ class SavedMarksTests(unittest.TestCase):
 class MemberAppSweepTests(unittest.TestCase):
     """The members' app (ADR-0265) reads no chat, so any mark in any of its answers is a leak, a member's own included;
     the reminders in members' own chats are swept for the app's marks and for people's Telegram names."""
-    MARKS = {'MEMBERMARK7said', 'PRIVATEMARK12', 'GP2MARK9', 'OWNERNAMEMARK9'}
+    MARKS = {'MEMBERMARK7said', 'PRIVATEMARK12', 'OTHERPROJECTMARK9', 'OWNERNAMEMARK9'}
 
     def test_any_mark_in_any_answer_is_a_leak_and_a_clean_answer_is_not(self):
         responses = [{'user': MEMBER, 'method': 'GET', 'path': '/tasks', 'status': 200, 'body': json.dumps({'tasks': [{'title': 'Seen APPSEEN9'}]})},
                      {'user': MEMBER, 'method': 'GET', 'path': '/me', 'status': 200, 'body': '{"name":"MEMBERMARK7said"}'},
-                     {'user': MEMBER, 'method': 'GET', 'path': '/tasks/x', 'status': 404, 'body': {'error': 'GP2MARK9'}},
-                     {'user': 779, 'method': 'GET', 'path': '/me', 'status': 200, 'body': 'GP2MARK91 is another mark'}]
+                     {'user': MEMBER, 'method': 'GET', 'path': '/tasks/x', 'status': 404, 'body': {'error': 'OTHERPROJECTMARK9'}},
+                     {'user': 779, 'method': 'GET', 'path': '/me', 'status': 200, 'body': 'OTHERPROJECTMARK91 is another mark'}]
         hits = canaries.leaks_http(responses, self.MARKS)
-        self.assertEqual([(hit['path'], hit['mark']) for hit in hits], [('/me', 'MEMBERMARK7said'), ('/tasks/x', 'GP2MARK9')])
+        self.assertEqual([(hit['path'], hit['mark']) for hit in hits], [('/me', 'MEMBERMARK7said'), ('/tasks/x', 'OTHERPROJECTMARK9')])
         self.assertEqual(canaries.leaks_http(responses[:1], self.MARKS), [])
 
     def test_answers_and_marks_are_kept_and_never_pass_on_nothing(self):
@@ -184,20 +184,20 @@ class MemberAppSweepTests(unittest.TestCase):
             canaries.log_http(folder, {'user': MEMBER, 'path': '/tasks', 'status': 200, 'body': '{"tasks":[]}'})
             self.assertEqual([row['path'] for row in canaries.load_http(folder)], ['/me', '/tasks'])
             self.assertEqual(oct((Path(folder)/canaries.HTTP_FILE).stat().st_mode & 0o777), '0o600')
-            canaries.save_app_marks(folder, {'GP2MARK9': 'GP2 task'}, {'APPSEEN9': 'GP1 task'})
+            canaries.save_app_marks(folder, {'OTHERPROJECTMARK9': 'another project\'s task'}, {'APPSEEN9': 'GP1 task'})
             value = canaries.save_app_marks(folder, {'PREJOINMARK9': 'comment'}, {})
             self.assertEqual(value, canaries.load_app_marks(folder))
-            self.assertEqual(set(value['hidden']), {'GP2MARK9', 'PREJOINMARK9'})
+            self.assertEqual(set(value['hidden']), {'OTHERPROJECTMARK9', 'PREJOINMARK9'})
             with self.assertRaisesRegex(ValueError, 'member_app_marks_overlap'):
                 canaries.save_app_marks(folder, {'APPSEEN9': 'now hidden'}, {})
 
     def test_reminders_in_members_chats_are_swept_on_what_they_read(self):
         reminder = sent(MEMBER, '\u23f0 Pack the tent\n\U0001f4c1 App P1\n\n\U0001f464 Set by you', 41)
         reminder['message']['from'] = {'id': 123456, 'is_bot': True, 'first_name': 'Synthetic'}
-        leaked = sent(779, '\u23f0 GP2MARK9 tent\n\U0001f464 Set by you', 42, edits=('\u23f0 tent, as Synthetic 778 said',))
-        other = [sent(MEMBER, 'A private reply that names GP2MARK9', 43), sent(OWNER, '\u23f0 GP2MARK9 for you', 44), sent(GROUP, '\u23f0 GP2MARK9', 45)]
+        leaked = sent(779, '\u23f0 OTHERPROJECTMARK9 tent\n\U0001f464 Set by you', 42, edits=('\u23f0 tent, as Synthetic 778 said',))
+        other = [sent(MEMBER, 'A private reply that names OTHERPROJECTMARK9', 43), sent(OWNER, '\u23f0 OTHERPROJECTMARK9 for you', 44), sent(GROUP, '\u23f0 OTHERPROJECTMARK9', 45)]
         found = canaries.leaks_reminders(state(sent=[reminder, leaked, *other]), self.MARKS | {'Synthetic'}, OWNER)
-        self.assertEqual(sorted((hit['message_id'], hit['mark']) for hit in found), [(42, 'GP2MARK9'), (42, 'Synthetic')])
+        self.assertEqual(sorted((hit['message_id'], hit['mark']) for hit in found), [(42, 'OTHERPROJECTMARK9'), (42, 'Synthetic')])
         self.assertEqual([row['message']['message_id'] for row in canaries.member_reminders(state(sent=[reminder, leaked, *other]), OWNER)], [41, 42])
 
     def test_app_sweep_runs_after_every_app_scenario_next_to_the_private_sweep(self):

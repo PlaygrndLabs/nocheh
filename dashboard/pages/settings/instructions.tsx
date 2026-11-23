@@ -57,7 +57,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'reply.member',
     title: 'Members’ private chats',
-    hint: 'Added after the rules above when Nocheh replies to a member in their own private chat with it. There it only reads the groups they joined and their own chat, and shows those groups’ tasks without changing them. Keep the line that says you can read the chat: Nocheh never tells a member their chat is private from you.',
+    hint: 'Added after the rules above when Nocheh replies to a member in their own private chat with it. There it only reads the groups they joined and their own chat, and shows the whole task list of each project with a group they joined, without changing it. Keep the line that says you can read the chat: Nocheh never tells a member their chat is private from you.',
   },
   {
     key: 'reply.member_read',

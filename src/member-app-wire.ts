@@ -111,11 +111,16 @@ export type MemberRemindersState={available:true}|{available:false;reason:Member
  * project is not active ('closed'). */
 export type MemberGroupBoard='open'|'none'|'closed';
 /** One group the member is in now and Nocheh serves, with its Telegram title. `project` (an id in MemberMe.projects)
- * and `open_count` only when board is 'open'. */
+ * and `open_count` (the open tasks labelled with that group or one of its topics) only when board is 'open'. */
 export interface MemberMeGroup {id:string;title:string|null;board:MemberGroupBoard;project:string|null;open_count?:number}
+/** One group of a board's project, by its Telegram title: a task's `group` label names one of these (ADR-0276). */
+export interface MemberBoardGroup {id:string;title:string|null}
 /** GET /me. `name` is the member's Telegram name; `projects` the active projects holding one of their groups (one board
- * each), by name. Nothing here names the owner, other members, or the owner's time zone. */
-export interface MemberMe {name:string;mode:MemberTasks;reminders:MemberRemindersState;projects:{id:string;name:string}[];
+ * each), by name, each with `groups`: every group assigned to that project now, the member's own and the others, sorted
+ * by title (the member listener always sends it). A board holds the project's whole list, so a task's `group` may be any
+ * of them; the page names it from there and may offer them as the group filter and a task's group (ADR-0276). `groups`
+ * stays the groups the member is in. Nothing here names the owner, other members, or the owner's time zone. */
+export interface MemberMe {name:string;mode:MemberTasks;reminders:MemberRemindersState;projects:{id:string;name:string;groups:MemberBoardGroup[]}[];
   groups:MemberMeGroup[]}
 
 /** Who did something, as the app shows it: the owner, a member by their Telegram name, or Nocheh. Never the owner's
@@ -129,11 +134,12 @@ export interface MemberTaskReminder {id:string;at:string;state:'pending'}
  * opaque and goes back as expected_version. `created_at` and `created_by` only when the task was made on this board,
  * `finished_by` only when it was finished there; otherwise `on_board_since` says when it joined. `properties` holds the
  * shared columns but person columns. `assignees` are those who do it, each by their Telegram name, shown only when the
- * owner linked them to a Telegram account that is in one of the member's groups on this board now; `assignees_other`
+ * owner linked them to a Telegram account that is in one of the groups of this board's project now; `assignees_other`
  * counts every other assignee (shown as "N other people"). Never the owner's own names for people, and never who the
- * task is about. `subtasks` counts only the subtasks the member sees. `mine`: the member made it, set a reminder on it,
- * or is one of its assignees. `group` is the group it is set on, a task in one of its topics included; null on the
- * whole project. */
+ * task is about. `subtasks` counts the subtasks on the board. `mine`: the member made it, set a reminder on it, or is one
+ * of its assignees. `group` is the group it is labelled with (one of the board's `groups` in MemberMe.projects), a task
+ * in one of its topics included; null on the whole project, and null too when its group is no longer one of the
+ * project's (ADR-0276). Every task of the board is the member's to read, and to change with write access. */
 export interface MemberTask {
   id:string;version:string;project:string;group:string|null;parent_id:string|null;
   title:string;status:string;state:'open'|'done'|'dropped';priority:number;
@@ -146,7 +152,7 @@ export interface MemberTask {
 }
 export interface MemberTaskLink {id:string;title:string;state:'open'|'done'|'dropped'}
 export interface MemberComment {id:string;body:string;author:MemberActor;created_at:string}
-/** One history entry from when the task joined this board, groups the member does not reach shown as none. */
+/** One history entry from when the task joined this board, a group that is not one of the project's now shown as none. */
 export interface MemberActivity {at:string;actor:MemberActor;changes:Record<string,unknown>}
 /** A task in the drawer: the row, its notes, the links and subtasks the member sees, web links, and the comments and
  * history from when it joined the board. */

@@ -45,12 +45,13 @@ export type Proposal = {
   affected_topics?: Record<string, string[]>;
   /**
    * Projects this change, or undoing it, moves a group into or out of, each with the other groups Nocheh serves there;
-   * worked out by the server. A project's groups share only the tasks set on the whole project, but people in two of
-   * them can get private answers that combine them (ADR-0247, ADR-0248).
+   * worked out by the server. A project's groups share one task list (ADR-0276), and people in two of them can get
+   * private answers that combine them (ADR-0247).
    */
   project_groups?: ProjectGroups[];
   undo_project_groups?: ProjectGroups[];
-  /** Projects with tasks that a chat this change, or undoing it, moves would join; it sees their whole list (ADR-0243). */
+  /** Projects with tasks that a chat this change, or undoing it, moves would join; it sees their whole list, whatever
+   * each task's group (ADR-0243, ADR-0276). */
   task_projects?: {id: string; name: string}[];
   undo_task_projects?: {id: string; name: string}[];
   /** For a fact share or correction: where the fact came from and who reads it without a share (null: only you). */

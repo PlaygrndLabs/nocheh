@@ -15,7 +15,6 @@ import {accountIdFor,installChatsForTest} from '../src/chats.js';
 import {HttpError} from '../src/http.js';
 import {legacyChats,legacyDirectory} from './fixture-groups.js';
 import {families} from './fixture-families.js';
-import {moveGroupTasks} from '../src/stores/tasks.js';
 import {installMembersForTest,memberIdFor} from '../src/members.js';
 import {grantMembers} from './fixture-member-grants.js';
 
@@ -787,39 +786,49 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
     await assert.rejects(s.tasks.update(owner,task.id,{operation_id:key+':more',expected_revision:both.revision,attachments:[...many,{kind:'message',id:digest(key+':m20')}]}),
       {code:'invalid_task_attachments'},'up to 20 archived messages');
 
-    // A task made and finished in another group stays that group's, even moved to this project's list: this group
-    // neither finds it nor takes it (ADR-0248).
+    // A task made and finished in another project's group and moved to this project's list is on this board like every
+    // other task of the project (ADR-0276): found, listed, changed and commented on here. Its group label is not one of
+    // this project's, so it shows as none, and who made or finished it shows only when that happened on this list.
     const porchTask=await s.tasks.create(owner,{operation_id:key+':porch',title:'Paint the porch',scope:house,group:porch});
     await stores.control.query(`UPDATE owner_tasks SET created_by='{"kind":"member","name":"Alice"}',finished_by='{"kind":"member","name":"Alice"}',state='done',
       status_id='done',done_at=now() WHERE id=$1`,[porchTask.id]);
     const painted=await s.tasks.get(owner,porchTask.id);
     const listedThere=await s.tasks.update(owner,porchTask.id,{operation_id:key+':porch-move',expected_revision:painted.revision,scope:launch});
-    await assert.rejects(s.tasks.chatGet(member,porchTask.id),{status:404},'another group\'s task is not found');
-    assert.deepEqual((await s.tasks.chatList(member,{group:porch,state:'all'})).tasks,[],'nor is a task found by that group');
-    assert.ok(!(await s.tasks.chatList(member,{state:'all'})).tasks.some((item:any)=>item.id===porchTask.id));
-    await assert.rejects(s.tasks.chatUpdate(member,porchTask.id,{expected_revision:listedThere.revision,group}),{status:404},'nor taken into this group');
-    await assert.rejects(s.tasks.chatComment(member,porchTask.id,{text:'Mine now'}),{status:404});
-    // Set on the project itself, every group of the project sees it from then on, and neither that group nor who made
-    // or finished it.
-    const opened=await s.tasks.update(owner,porchTask.id,{operation_id:key+':porch-open',expected_revision:listedThere.revision,group:null});
-    const repainted=await s.tasks.chatGet(member,porchTask.id);
-    assert.deepEqual([repainted.group_id,repainted.created_by,repainted.finished_by],[null,null,null]);
-    assert.deepEqual(repainted.activity.map((item:any)=>item.changes),[{group_id:{to:null}}],'its history starts when it was set on the project, which shows only where it went');
-    assert.ok(!JSON.stringify(repainted).includes(porch)&&!JSON.stringify(repainted).includes('Alice'),'another group and its people stay private');
-    const banner=await s.tasks.chatCreate(member,{title:'Hang the banner'});
-    assert.deepEqual([banner.group_id,banner.created_by],[group,{kind:'member',name:'Sara'}],'a task made in a group belongs to it and shows who made it');
-    assert.deepEqual((await s.tasks.chatList(member,{group,state:'all'})).tasks.map((item:any)=>item.id),[banner.id]);
-    const own=await s.tasks.get(owner,porchTask.id);
-    assert.deepEqual([own.group_id,own.created_by.name,own.revision],[null,'Alice',opened.revision],'the owner still sees who made it');
-    // The group can take a task set on the project; its history then starts again, from that change.
-    const regrouped=await s.tasks.chatUpdate(member,porchTask.id,{expected_revision:own.revision,group});
+    const found=await s.tasks.chatGet(member,porchTask.id);
+    assert.deepEqual([found.group_id,found.created_by,found.finished_by],[null,null,null]);
+    assert.deepEqual(found.activity.map((item:any)=>item.changes),[{project_id:{to:launch}}],'its history starts when it joined this list');
+    assert.ok(!JSON.stringify(found).includes(porch)&&!JSON.stringify(found).includes('Alice'),'another project\'s group and its people stay private');
+    assert.ok((await s.tasks.chatList(member,{state:'all'})).tasks.some((item:any)=>item.id===porchTask.id));
+    assert.deepEqual((await s.tasks.chatList(member,{group:porch,state:'all'})).tasks,[],'a group that is not the project\'s finds nothing');
+    await assert.rejects(s.tasks.chatUpdate(member,porchTask.id,{expected_revision:listedThere.revision,group:porch}),{status:403,code:'task_group_denied'},
+      'a project chat labels a task only with a group of the project');
+    await assert.rejects(s.tasks.chatUpdate(member,porchTask.id,{expected_revision:listedThere.revision,group:'123'}),{status:400,code:'invalid_task_group'},
+      'a private chat is never a label');
+    await assert.rejects(s.tasks.update(owner,porchTask.id,{operation_id:key+':porch-private',expected_revision:listedThere.revision,group:'123'}),
+      {status:400,code:'invalid_task_group'},'not even for the owner');
+    const said=await s.tasks.chatComment(member,porchTask.id,{text:'Seen it'});
+    assert.deepEqual(said.comments.map((item:any)=>item.body),['Seen it']);
+    // The group can take it: a change of label, not a move, so its joining time stays and its history goes on.
+    const since=async(id:string)=>String((await stores.control.query('SELECT project_since FROM owner_tasks WHERE id=$1',[id])).rows[0].project_since);
+    const joined=await since(porchTask.id);
+    const regrouped=await s.tasks.chatUpdate(member,porchTask.id,{expected_revision:(await s.tasks.get(owner,porchTask.id)).revision,group});
     assert.equal(regrouped.group_id,group);
+    assert.equal(await since(porchTask.id),joined,'a label change keeps the joining time');
     const groups=(value:any)=>value.activity.filter((item:any)=>item.changes.group_id).map((item:any)=>item.changes.group_id);
-    assert.deepEqual(groups(await s.tasks.chatGet(member,porchTask.id)),[{to:group}]);
-    // Moved back to the other group, it is not found here any more; the owner sees every change.
+    const relabel=await s.tasks.chatGet(member,porchTask.id);
+    assert.deepEqual(groups(relabel),[{from:null,to:group}],'a group outside the project shows as none');
+    assert.deepEqual(relabel.comments.map((item:any)=>item.body),['Seen it']);
+    // Labelled back with the other group, it stays on this board, its label shown as none; the owner sees every change.
     await s.tasks.update(owner,porchTask.id,{operation_id:key+':porch-back',expected_revision:regrouped.revision,group:porch});
-    await assert.rejects(s.tasks.chatGet(member,porchTask.id),{status:404});
-    assert.deepEqual(groups(await s.tasks.get(owner,porchTask.id)),[{from:group,to:porch},{from:null,to:group},{from:porch,to:null}],'the owner sees them all');
+    const back=await s.tasks.chatGet(member,porchTask.id);
+    assert.equal(back.group_id,null);
+    assert.deepEqual(groups(back),[{from:group,to:null},{from:null,to:group}]);
+    const own=await s.tasks.get(owner,porchTask.id);
+    assert.deepEqual([own.group_id,own.created_by.name],[porch,'Alice'],'the owner still sees its group and who made it');
+    assert.deepEqual(groups(own),[{from:group,to:porch},{from:porch,to:group}],'the owner sees them all');
+    const banner=await s.tasks.chatCreate(member,{title:'Hang the banner'});
+    assert.deepEqual([banner.group_id,banner.created_by],[group,{kind:'member',name:'Sara'}],'a task made in a group is labelled with it and shows who made it');
+    assert.deepEqual((await s.tasks.chatList(member,{group,state:'all'})).tasks.map((item:any)=>item.id),[banner.id]);
 
     // A personal task moved under a project's task joins that list with everything under it, from then on.
     const top=await s.tasks.create(owner,{operation_id:key+':top',title:'Plan the launch',scope:launch});
@@ -875,26 +884,17 @@ test('a project chat sees a task only as it is on that project\'s board, from wh
     assert.deepEqual([cut.project_id,cut.comments],[launch,[]]);
     assert.ok(!JSON.stringify(cut).includes('canary-race-'+mark));
 
-    // The same holds for a move into this group: a comment written meanwhile under the moved task, while it was the
-    // other group's, stays private (ADR-0248).
+    // A change of group label is no move (ADR-0276): the task keeps its joining time, the tasks under it keep their own
+    // labels, and what was written under it on this list stays on this board.
     const rack=await s.tasks.create(owner,{operation_id:key+':rack',title:'Build the rack',scope:launch,group:porch});
     const bolt=await s.tasks.create(owner,{operation_id:key+':bolt',title:'Buy the bolts',parent:rack.id});
     assert.deepEqual([bolt.project_id,bolt.group_id],[launch,porch],'a subtask takes its parent\'s list and group');
-    const lock=new pg.Client({...config,database:'nocheh_control'});await lock.connect();
-    try {
-      await lock.query('BEGIN');await lock.query('SELECT 1 FROM owner_tasks WHERE id=$1 FOR UPDATE',[rack.id]);
-      const moving=s.tasks.update(owner,rack.id,{operation_id:key+':rack-move',expected_revision:rack.revision,group});
-      const holder=(await lock.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
-      for(let tries=0;!(await lock.query('SELECT 1 FROM pg_locks WHERE NOT granted AND $1=ANY(pg_blocking_pids(pid))',[holder])).rows.length;tries++){
-        assert.ok(tries<200,'the move waits for the task');await new Promise(done=>setTimeout(done,25));
-      }
-      await s.tasks.comment(owner,bolt.id,{operation_id:key+':bolt-note',text:'canary-porch-'+mark});
-      await lock.query('COMMIT');
-      assert.equal((await moving).group_id,group);
-    }finally{await lock.end();}
+    await s.tasks.comment(owner,bolt.id,{operation_id:key+':bolt-note',text:'Two boxes'});
+    const racked=await since(rack.id);
+    const relabelled=await s.tasks.chatUpdate(member,rack.id,{expected_revision:(await s.tasks.get(owner,rack.id)).revision,group});
+    assert.deepEqual([relabelled.group_id,await since(rack.id)],[group,racked]);
     const bolted=await s.tasks.chatGet(member,bolt.id);
-    assert.deepEqual([bolted.group_id,bolted.comments],[group,[]],'the tasks under it move to the group with it');
-    assert.ok(!JSON.stringify(bolted).includes('canary-porch-'+mark)&&!JSON.stringify(bolted).includes(porch));
+    assert.deepEqual([bolted.group_id,bolted.comments.map((item:any)=>item.body)],[null,['Two boxes']],'the task under it keeps its own label, shown as none here');
   }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
@@ -1056,33 +1056,42 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
     assert.equal(last('answer').text,'✅ Approved and changed.');
     for(const title of ['Pack the crates','Label the crates','Old labels','Tape the crates'])assert.deepEqual((await tasks(title)).map(item=>item.project_id),[launch],title);
 
-    // A group's task is that group's alone: its card names only that group and says the project's other groups don't
-    // see it, and a chat added to the project in the meantime leaves the card as it was (ADR-0248).
+    // A task labelled with a group is on the project's whole list like any other (ADR-0276): its card names every chat
+    // of the project and says chats added later see it too; a chat added to the project in the meantime makes it stale.
     await s.actionCommands.offer('task',await s.tasks.chatCreate(chat,{title:'Set up the stage',scope:launch,group}));
-    assert.equal(last('card').text,'📋 Add a task to the list of “Launch”\n👥 Seen in “Launch team”. Other groups in this project don\'t see it.\n\nTitle: Set up the stage\nStatus: To do\nGroup: Launch team');
+    assert.equal(last('card').text,`📋 Add a task to the list of “Launch”\n${seenIn}\n\nTitle: Set up the stage\nStatus: To do\nGroup: Launch team`);
     await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[other,launch]);
     await s.actionCommands.callback(await press(last('card').buttons[0][1]));
-    assert.equal(last('answer').text,'✅ Approved and changed.','a chat added to the project does not see a group\'s task');
+    assert.match(last('answer').text,/^🚫 Not changed/,'a chat added to the project sees a group\'s task too');
     await stores.control.query('DELETE FROM project_assignments WHERE space_id=$1',[other]);
+    assert.deepEqual(await tasks('Set up the stage'),[]);
+    const stageChat=await actor((await ask('Add setting up the stage for the launch team')).id);
+    await s.actionCommands.offer('task',await s.tasks.chatCreate(stageChat,{title:'Set up the stage',scope:launch,group}));
+    await s.actionCommands.callback(await press(last('card').buttons[0][1]));
+    assert.equal(last('answer').text,'✅ Approved and changed.');
     const stage=await s.tasks.get(owner,(await tasks('Set up the stage'))[0].id);
     assert.deepEqual([stage.project_id,stage.group_id],[launch,group]);
-    // Changing the group of a task on the list is a move, which waits for a card naming the group it moves to.
-    const hall=await s.tasks.get(owner,made.id);
+    // A card stored under an earlier rule, which named fewer chats, changes nothing: the chats that see the task now differ.
+    await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,stage.id,{expected_revision:stage.revision,title:'Build the stage'}));
+    const stale=last('card');
+    await stores.control.query('UPDATE owner_task_requests SET chats=$2 WHERE id=$1',[stale.id,[group]]);
+    await s.actionCommands.callback(await press(stale.buttons[0][1]));
+    assert.match(last('answer').text,/^🚫 Not changed/);
+    assert.equal((await s.tasks.get(owner,stage.id)).title,'Set up the stage');
+    // Changing only the group label of a task on the list is no move: from the owner's private chat it is made at once,
+    // with no card, and keeps the task's joining time.
+    const hall=await s.tasks.get(owner,made.id),count0=cards.length;
+    const since=async(id:string)=>String((await stores.control.query('SELECT project_since FROM owner_tasks WHERE id=$1',[id])).rows[0].project_since);
+    const joined=await since(made.id);
     const regroup=await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:hall.revision,group}));
-    assert.equal(regroup.state,'proposed');
-    assert.ok(last('card').text.startsWith('📋 Move a task to “Launch team” in the list of “Launch”\n👥 Seen in “Launch team”. Other groups in this project don\'t see it.\n🔒 Its earlier comments'),last('card').text);
-    assert.equal((await s.tasks.get(owner,made.id)).group_id,null,'nothing moves before the owner approves');
-    await s.actionCommands.callback(await press(last('card').buttons[0][1]));
-    assert.equal((await s.tasks.get(owner,made.id)).group_id,group);
-    // Setting a group's task on its project itself says every group of the project gets it.
-    const grouped=await s.tasks.get(owner,made.id);
-    await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:grouped.revision,group:null}));
-    assert.ok(last('card').text.startsWith(`📋 Set a task on “Launch” itself, for every group in it\n${seenIn}\n🔒 Its earlier comments`),last('card').text);
-    await s.actionCommands.callback(await press(last('card').buttons[1][1]));
-    assert.equal((await s.tasks.get(owner,made.id)).group_id,group);
-    // A group's task in a project that group is not in is seen by no chat until the owner adds that group.
+    assert.deepEqual([regroup.request_id,regroup.group_id,cards.length,await since(made.id)],[undefined,group,count0,joined]);
+    const ungroup=await s.actionCommands.offer('task',await s.tasks.chatUpdate(chat,made.id,{expected_revision:regroup.revision,group:null}));
+    assert.deepEqual([ungroup.group_id,cards.length],[null,count0]);
+    // The owner's private chat may label a task with any group, even one not in its project; no chat sees that label.
+    // A private chat is never a label.
     await s.actionCommands.offer('task',await s.tasks.chatCreate(chat,{title:'Fix the fence',scope:house,group}));
-    assert.equal(last('card').text,'📋 Add a task to the list of “House”\n👥 Seen in no chat yet. “Launch team” will see it once you add that group to this project.\n\nTitle: Fix the fence\nStatus: To do\nGroup: Launch team');
+    assert.equal(last('card').text,'📋 Add a task to the list of “House”\n👥 Seen in no chat yet. Chats you add to this project later will see it too.\n\nTitle: Fix the fence\nStatus: To do');
+    await assert.rejects(s.tasks.chatCreate(chat,{title:'Mend the gate',scope:house,group:'456'}),{status:400,code:'invalid_task_group'});
 
     // A list no chat sees yet still asks first, and says so.
     await s.actionCommands.offer('task',await s.tasks.chatCreate(chat,{title:'Fix the gate',scope:house}));
@@ -1095,7 +1104,7 @@ test('from the owner\'s private chat, a change a project\'s chats would see wait
   }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
-for(const family of families)test(`a group or topic reaches only its own tasks and the tasks set on its project, never another group's (ADR-0248, ${family.name})`,
+for(const family of families)test(`every group and topic of a project reads and changes its whole list; a task's group is only a label (ADR-0276, ${family.name})`,
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
@@ -1126,269 +1135,186 @@ for(const family of families)test(`a group or topic reaches only its own tasks a
     await s.guards.reconcile();await s.guards.setMode('on');
     await stores.control.query('DELETE FROM owner_tasks');await stores.control.query("UPDATE owner_task_settings SET settings='{}'::jsonb");
     const mark=String(Date.now()),p1=digest(key+':p1'),p2=digest(key+':p2');
-    // Sharing off: each group reads only itself (ADR-0248); with "Share group chats" on they would read each other (ADR-0267).
+    const rev=async(task:string)=>(await s.tasks.get(owner,task)).revision as number;
+    // "Share group chats" stays off: it makes no difference to tasks (ADR-0276).
     for(const [id,name] of [[p1,'P1'],[p2,'P2']])await stores.control.query("INSERT INTO projects(id,name,state,revision,share_chats) VALUES($1,$2,'active',1,false)",[id,name]);
     for(const chat of [g1,g2])await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[chat,p1]);
 
-    // In P1: a task set on the project itself, a task of each group and one of a topic of the first group.
+    // In P1: a task with no group, one labelled with each group and one with a topic of the first group.
     const shared=await s.tasks.create(owner,{operation_id:key+':shared',title:'Book the hall',scope:p1,tags:['Hall']});
-    const first=await s.tasks.create(owner,{operation_id:key+':first',title:'canary-first-'+mark,scope:p1,group:g1,tags:['canary-tag-'+mark]});
+    const first=await s.tasks.create(owner,{operation_id:key+':first',title:'First-'+mark,scope:p1,group:g1,tags:['First-'+mark]});
     const topical=await s.tasks.create(owner,{operation_id:key+':topic',title:'Print the menus',scope:p1,group:at(t1,7)});
     const under=await s.tasks.create(owner,{operation_id:key+':under',title:'Pick the paper',parent:first.id});
-    assert.deepEqual([under.project_id,under.group_id],[p1,g1],'a subtask takes its parent\'s list and group');
-    await assert.rejects(s.tasks.create(owner,{operation_id:key+':astray',title:'Elsewhere',parent:first.id,group:g2}),{code:'task_parent_other_group'});
+    assert.deepEqual([under.project_id,under.group_id],[p1,g1],'a subtask takes its parent\'s list and group by default');
+    const astray=await s.tasks.create(owner,{operation_id:key+':astray',title:'Elsewhere',parent:first.id,group:g2});
+    assert.deepEqual([astray.parent_id,astray.group_id],[first.id,g2],'or another group, given one');
     const second=await s.tasks.create(owner,{operation_id:key+':second',title:'Hire the band',scope:p1,group:g2});
-    await s.tasks.comment(owner,first.id,{operation_id:key+':first-note',text:'canary-note-'+mark});
+    await s.tasks.comment(owner,first.id,{operation_id:key+':first-note',text:'note-'+mark});
 
-    // The second group lists its own task and the project's, and counts and names the tags of those only.
+    // The second group lists the project's whole list, whatever each task's group, and names all its tags.
     const bob=await ask(t2,'What is left to do?','Bob');
     const listed=await s.tasks.chatList(bob);
-    assert.deepEqual(ids(listed),[second.id,shared.id].sort());
-    assert.deepEqual([listed.counts.open,listed.scopes.map((row:any)=>[row.id,row.open])],[2,[[p1,2]]]);
-    assert.deepEqual(listed.tags.map((row:any)=>row.name),['Hall']);
-    assert.ok(!JSON.stringify(listed).includes(mark)&&!JSON.stringify(listed).includes(g1),'nothing of the first group\'s tasks');
-    // Another group's task is not found, changed, commented on, linked to or put under, and no filter finds it.
-    for(const id of [first.id,topical.id,under.id])await assert.rejects(s.tasks.chatGet(bob,id),{status:404});
-    await assert.rejects(s.tasks.chatUpdate(bob,first.id,{expected_revision:first.revision,state:'done'}),{status:404});
-    await assert.rejects(s.tasks.chatComment(bob,first.id,{text:'Done?'}),{status:404});
-    assert.deepEqual((await s.tasks.chatList(bob,{group:g1,state:'all'})).tasks,[]);
-    await assert.rejects(s.tasks.chatCreate(bob,{title:'Wait',blocked_by:[first.id]}),{status:404});
-    await assert.rejects(s.tasks.chatCreate(bob,{title:'Under it',parent:first.id}),{status:404});
-    await assert.rejects(s.tasks.chatUpdate(bob,second.id,{expected_revision:second.revision,related:[first.id]}),{status:404});
-    // It adds to its own group, or to the project itself when asked, never to another group.
-    await assert.rejects(s.tasks.chatCreate(bob,{title:'Theirs',group:g1}),{code:'task_group_denied'});
-    await assert.rejects(s.tasks.chatUpdate(bob,second.id,{expected_revision:second.revision,group:g1}),{code:'task_group_denied'});
+    assert.deepEqual(ids(listed),[shared.id,first.id,topical.id,under.id,astray.id,second.id].sort());
+    assert.deepEqual(listed.scopes.map((row:any)=>row.id),[p1]);
+    assert.deepEqual(listed.tags.map((row:any)=>row.name).sort(),['First-'+mark,'Hall'].sort());
+    // It reads every task with its group, a topic of the project's group as itself, and finds them by group.
+    const theirs=await s.tasks.chatGet(bob,first.id);
+    assert.deepEqual([theirs.group_id,theirs.comments.map((item:any)=>item.body),theirs.subtasks.map((item:any)=>item.id).sort()],
+      [g1,['note-'+mark],[under.id,astray.id].sort()]);
+    assert.equal((await s.tasks.chatGet(bob,topical.id)).group_id,at(t1,7));
+    // With "Share group chats" off, an answer that shows another group's task is marked, so the group learns nothing
+    // from it; its own and unlabelled tasks are not (ADR-0276).
+    assert.equal(listed.other_groups,true,'the list shows the first group\'s tasks');
+    assert.equal(theirs.other_groups,true,'so does reading one');
+    for(const task of [second,shared])assert.equal((await s.tasks.chatGet(bob,task.id)).other_groups,undefined,task.title);
+    assert.equal((await s.tasks.chatList(bob,{group:g2,state:'all'})).other_groups,true,'its own group\'s tasks, but the first group\'s tag');
+    // With it on, the reads bound for the turn hold the project's groups: nothing is marked.
+    const sharing=await actor(bob.turnEvent!,bob.scope,bob.space!,{reads:readSet({home:g2,whole:[g1,g2],project:p1})});
+    assert.equal((await s.tasks.chatList(sharing)).other_groups,undefined);
+    assert.equal((await s.tasks.chatGet(sharing,first.id)).other_groups,undefined);
+    const byFirst=ids(await s.tasks.chatList(bob,{group:g1,state:'all'}));
+    assert.ok([first.id,under.id,topical.id].every(item=>byFirst.includes(item))&&!byFirst.includes(second.id),'a group\'s filter finds its tasks and its topics\'');
+    assert.deepEqual((await s.tasks.chatList(bob,{group:g3,state:'all'})).tasks,[],'a group outside the project finds nothing');
+    // It changes, comments on, links to and adds under the other group's tasks.
+    const doing=await s.tasks.chatUpdate(bob,first.id,{expected_revision:await rev(first.id),status:'doing'});
+    assert.deepEqual([doing.status,doing.other_groups],['doing',true],'a change answers marked too');
+    assert.deepEqual((await s.tasks.chatComment(bob,first.id,{text:'Done soon?'})).comments.map((item:any)=>item.body),['note-'+mark,'Done soon?']);
+    const waits=await s.tasks.chatCreate(bob,{title:'Wait',blocked_by:[first.id]});
+    assert.deepEqual([waits.group_id,waits.blocked_by.map((item:any)=>item.id)],[g2,[first.id]]);
+    const below=await s.tasks.chatCreate(bob,{title:'Under it',parent:first.id});
+    assert.deepEqual([below.parent_id,below.group_id],[first.id,g1],'a new subtask takes its parent\'s group');
+    await s.tasks.chatUpdate(bob,second.id,{expected_revision:await rev(second.id),related:[first.id]});
+    const relating=await s.tasks.chatGet(bob,second.id);
+    assert.deepEqual([relating.related.map((item:any)=>item.id),relating.other_groups],[[first.id],true],'a linked task of another group marks it too');
+    assert.equal(relating.related[0].group_id,g1,'a linked task shows its group of the project');
+    // A linked task labelled with a group outside the project shows no group, as the task itself does.
+    const away=await s.tasks.create(owner,{operation_id:key+':away',title:'Away-'+mark,scope:p1,group:g3,related:[second.id]});
+    const linkedAway=(await s.tasks.chatGet(bob,second.id)).related.find((item:any)=>item.id===away.id);
+    assert.deepEqual([linkedAway.group_id,(await s.tasks.chatGet(bob,away.id)).group_id],[null,null]);
+    assert.ok(!JSON.stringify(await s.tasks.chatGet(bob,second.id)).includes(g3),'no answer names the outside group');
+    // The history entry made when a task last joined its audience shows only where each field went.
+    await stores.control.query('UPDATE owner_tasks SET project_since=now() WHERE id=$1',[away.id]);
+    await stores.control.query(`INSERT INTO owner_task_activity(task_id,at,actor,origin,changes) SELECT id,project_since,'{"kind":"owner"}','dashboard',$2::jsonb FROM owner_tasks WHERE id=$1`,
+      [away.id,JSON.stringify({group_id:{from:g1,to:g2},title:{from:'Before-'+mark,to:'Away-'+mark}})]);
+    const joining=(await s.tasks.chatGet(bob,away.id)).activity.find((item:any)=>item.changes.title);
+    assert.deepEqual(joining.changes,{group_id:{to:g2},title:{to:'Away-'+mark}});
+    await stores.control.query('DELETE FROM owner_tasks WHERE id=$1',[away.id]);
+    // It labels a task with any group or topic of the project, or none; never with a group outside it (403) or a
+    // private chat (400), which the owner cannot either.
+    const labelled=await s.tasks.chatCreate(bob,{title:'Theirs',group:g1});
+    assert.equal(labelled.group_id,g1);
+    assert.equal((await s.tasks.chatUpdate(bob,labelled.id,{expected_revision:labelled.revision,group:at(t1,7)})).group_id,at(t1,7));
+    await assert.rejects(s.tasks.chatCreate(bob,{title:'Outside',group:g3}),{status:403,code:'task_group_denied'});
+    await assert.rejects(s.tasks.chatUpdate(bob,second.id,{expected_revision:await rev(second.id),group:g3}),{status:403,code:'task_group_denied'});
+    await assert.rejects(s.tasks.chatCreate(bob,{title:'Private',group:'123'}),{status:400,code:'invalid_task_group'});
+    await assert.rejects(s.tasks.create(owner,{operation_id:key+':private',title:'Private',scope:p1,group:'123'}),{status:400,code:'invalid_task_group'});
     const own=await s.tasks.chatCreate(bob,{title:'Tune the guitars'});
-    assert.equal(own.group_id,g2,'a task added in a group belongs to it');
-    // A parent given as null or empty, or an empty group, names nothing: the task is still the group's own.
+    assert.equal(own.group_id,g2,'a task added in a group is labelled with it');
+    // A parent given as null or empty, or an empty group, names nothing: the task is still labelled with the group.
     const unnamed=[];
     for(const [index,extra] of [{parent:null},{parent:''},{group:''},{parent:null,group:''}].entries()){
-      const made=await s.tasks.chatCreate(bob,{title:'canary-unnamed-'+index+'-'+mark,...extra});
+      const made=await s.tasks.chatCreate(bob,{title:'unnamed-'+index+'-'+mark,...extra});
       assert.deepEqual([made.group_id,made.parent_id],[g2,null],JSON.stringify(extra));unnamed.push(made.id);
     }
-    // A group never learns a task's manual position, which counts every group's tasks.
+    await stores.control.query('DELETE FROM owner_tasks WHERE id=ANY($1)',[unnamed]);
+    // A group never learns a task's manual position.
     assert.ok(!('position' in own)&&(await s.tasks.chatList(bob)).tasks.every((item:any)=>!('position' in item))&&!('position' in await s.tasks.chatGet(bob,own.id)));
     assert.equal(typeof (await s.tasks.get(owner,own.id)).position,'number','the owner does');
     const all=await s.tasks.chatCreate(bob,{title:'Count the chairs',group:null});
-    assert.equal(all.group_id,null,'or to the project itself, which every group sees');
+    assert.equal(all.group_id,null,'or with no group');
     const step=await s.tasks.chatCreate(bob,{title:'Stack the chairs',parent:all.id});
     assert.equal(step.group_id,null,'a subtask takes its parent\'s group');
+    const otherStep=await s.tasks.create(owner,{operation_id:key+':other-step',title:'Count the tables',parent:all.id,group:g1});
+    assert.deepEqual((await s.tasks.chatList(bob)).tasks.find((item:any)=>item.id===all.id).subtasks,{open:2,total:2},'every task under it counts');
+    assert.deepEqual((await s.tasks.chatGet(bob,otherStep.id)).parent.id,all.id);
     // A group in no project reaches no list.
     await assert.rejects(s.tasks.chatList(await ask(t3,'Any tasks?','Bob')),{code:'task_project_required'});
 
-    // The first group sees its own, its topic's and the project's tasks, never the second group's.
+    // The first group and each of its topics read the same whole list, whatever the topics' memory setting.
+    const whole=ids(await s.tasks.chatList(bob));
+    for(const setting of ['group','topic'] as const){
+      memory=setting;
+      for(const reader of [await ask(t1,'And for us?','Alice'),await ask(t1,'And here?','Alice',6)])assert.deepEqual(ids(await s.tasks.chatList(reader)),whole,setting);
+    }
+    memory='group';
     const alice=await ask(t1,'And for us?','Alice');
-    assert.deepEqual(ids(await s.tasks.chatList(alice)),[shared.id,first.id,topical.id,under.id,all.id,step.id].sort());
-    for(const id of unnamed)await assert.rejects(s.tasks.chatGet(alice,id),{status:404});
-    await stores.control.query('DELETE FROM owner_tasks WHERE id=ANY($1)',[unnamed]);
-    await assert.rejects(s.tasks.chatGet(alice,own.id),{status:404});
-    const mine=await s.tasks.chatGet(alice,first.id);
-    assert.deepEqual([mine.subtasks.map((item:any)=>item.id),mine.comments.map((item:any)=>item.body)],[[under.id],['canary-note-'+mark]]);
+    // A task asked in a topic is labelled with it, and every chat of the project sees it.
+    const five=await ask(t1,'Add ordering the cake','Alice',5);
+    const cake=await s.tasks.chatCreate(five,{title:'Order the cake'});
+    assert.equal(cake.group_id,at(t1,5));
+    for(const reader of [alice,bob,await ask(t1,'Anything in six?','Alice',6)])assert.equal((await s.tasks.chatGet(reader,cake.id)).group_id,at(t1,5));
+    // Another topic marks it only while topics keep their own memory.
+    assert.equal((await s.tasks.chatGet(await ask(t1,'And in six?','Alice',6),cake.id)).other_groups,undefined,'topics share memory');
+    memory='topic';
+    assert.equal((await s.tasks.chatGet(await ask(t1,'And in six now?','Alice',6),cake.id)).other_groups,true,'topics keep their own');
+    assert.equal((await s.tasks.chatGet(await ask(t1,'And in five?','Alice',5),cake.id)).other_groups,undefined,'its own topic');
+    memory='group';
 
-    // A link from the project's task to a group's task shows only in that group, and the other group's edit keeps it.
-    const tied=await s.tasks.update(owner,shared.id,{operation_id:key+':tie',expected_revision:shared.revision,blocked_by:[first.id],related:[first.id,second.id]});
-    const links=async(reader:Reader)=>{const value=await s.tasks.chatGet(reader,shared.id);return [value.blocked_by.map((item:any)=>item.id),value.related.map((item:any)=>item.id)];};
-    assert.deepEqual(await links(bob),[[],[second.id]]);
-    assert.deepEqual(await links(alice),[[first.id],[first.id]]);
-    const retied=await s.tasks.chatUpdate(bob,shared.id,{expected_revision:tied.revision,related:[]});
-    assert.ok(!JSON.stringify(retied).includes(first.id));
-    assert.deepEqual((await s.tasks.get(owner,shared.id)).related.map((item:any)=>item.id),[first.id],'another group\'s link stays');
-    // A group's task under the project's task, written before subtasks followed their parent's group, is neither
-    // counted nor listed in the other group, which never sees its parent either.
-    const stray=digest(key+':stray');
-    await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
-      VALUES($1,'canary-stray-'||$2,'todo','open',$3,$4,$5,'dashboard',now())`,[stray,mark,p1,g1,all.id]);
-    assert.deepEqual((await s.tasks.chatList(bob)).tasks.find((item:any)=>item.id===all.id).subtasks,{open:1,total:1});
-    assert.deepEqual((await s.tasks.chatGet(bob,all.id)).subtasks.map((item:any)=>item.id),[step.id]);
-    assert.equal((await s.tasks.chatGet(alice,stray)).parent.id,all.id,'its own group sees it with the task it sits under');
-
-    // An "Answer privately" answer reads the tasks of the groups frozen in its record and of their project itself,
-    // and adds, changes and comments on nothing (ADR-0249).
+    // An "Answer privately" answer reads the whole list of the project bound to it, and adds, changes and comments on
+    // nothing (ADR-0249, ADR-0276).
     const start=await capture('123',123,'/start','Owner');
     const answering=await actor(start.id,'123','123',{answer:'a'.repeat(32),reads:readSet({home:g2,whole:[g2],project:p1})});
-    assert.deepEqual(ids(await s.tasks.chatList(answering)),[shared.id,second.id,own.id,all.id,step.id].sort());
-    await assert.rejects(s.tasks.chatGet(answering,first.id),{status:404});
-    const both=await actor(start.id,'123','123',{answer:'a'.repeat(32),reads:readSet({home:g2,whole:[g1,g2],project:p1})});
-    assert.deepEqual(ids(await s.tasks.chatList(both)),[shared.id,first.id,topical.id,under.id,stray,second.id,own.id,all.id,step.id].sort());
-    await assert.rejects(s.tasks.chatCreate(both,{title:'Sneak'}),{code:'task_read_only'});
-    await assert.rejects(s.tasks.chatUpdate(both,second.id,{expected_revision:second.revision,state:'done'}),{code:'task_read_only'});
-    await assert.rejects(s.tasks.chatComment(both,second.id,{text:'Sneak'}),{code:'task_read_only'});
-    // With no bound read set an answer cannot even read its own /start (ADR-0249); with groups but no project it
-    // reaches no project's tasks.
+    assert.deepEqual(ids(await s.tasks.chatList(answering)),ids(await s.tasks.chatList(alice)));
+    assert.equal((await s.tasks.chatGet(answering,first.id)).group_id,g1);
+    await assert.rejects(s.tasks.chatCreate(answering,{title:'Sneak'}),{code:'task_read_only'});
+    await assert.rejects(s.tasks.chatUpdate(answering,second.id,{expected_revision:await rev(second.id),state:'done'}),{code:'task_read_only'});
+    await assert.rejects(s.tasks.chatComment(answering,first.id,{text:'Sneak'}),{code:'task_read_only'});
     await assert.rejects(s.tasks.chatList(await actor(start.id,'123','123',{answer:'a'.repeat(32)})),{code:'turn_source_denied'},'an answer with no bound groups reads nothing');
     await assert.rejects(s.tasks.chatList(await actor(start.id,'123','123',{answer:'a'.repeat(32),reads:readSet({home:g2,whole:[g1,g2]})})),{code:'task_project_required'},
       'an answer with no bound project reads no project\'s tasks');
 
-    // Topics: when a group's topics share what they know, a task asked in a topic belongs to that topic and the whole
-    // group sees it; when each topic keeps its own, only that topic does.
-    const five=await ask(t1,'Add ordering the cake','Alice',5);
-    const cake=await s.tasks.chatCreate(five,{title:'Order the cake'});
-    assert.equal(cake.group_id,at(t1,5));
-    for(const reader of [alice,await ask(t1,'Anything in six?','Alice',6)])assert.equal((await s.tasks.chatGet(reader,cake.id)).id,cake.id);
-    memory='topic';
-    const general=await ask(t1,'What is open here?','Alice'),six=await ask(t1,'And here?','Alice',6);
-    for(const reader of [general,six])await assert.rejects(s.tasks.chatGet(reader,cake.id),{status:404});
-    const sixList=await s.tasks.chatList(six);
-    assert.deepEqual([ids(sixList),sixList.counts.open],[[shared.id,all.id,step.id].sort(),2],'the other topic lists and counts only the project\'s tasks');
-    assert.ok(!(await s.tasks.chatList(general)).tasks.some((item:any)=>item.id===topical.id),'nor does the group\'s own chat see a topic\'s task');
-    assert.equal((await s.tasks.chatGet(await ask(t1,'And in five?','Alice',5),cake.id)).group_id,at(t1,5));
-    await assert.rejects(s.tasks.chatCreate(five,{title:'Next door',group:at(t1,6)}),{code:'task_group_denied'});
-    // The owner's card and the dashboard name exactly these chats.
-    const seenBy=async(id:string,query:{scope?:string;group?:string|null}={})=>(await s.tasks.audience(owner,id,query)).chats;
-    assert.deepEqual(await seenBy(cake.id),[at(t1,5)],'with its own memory, only the topic sees its task');
-    memory='group';
-    assert.deepEqual(await seenBy(cake.id),[g1],'sharing memory, the whole group does');
+    // The owner's card and the dashboard name every chat of the project, whatever the task's group or the topics'
+    // memory setting.
+    const seenBy=async(task:string,query:{scope?:string;group?:string|null}={})=>(await s.tasks.audience(owner,task,query)).chats;
+    for(const setting of ['topic','group'] as const){memory=setting;assert.deepEqual(await seenBy(cake.id),[g1,g2].sort(),setting);}
     assert.deepEqual(await seenBy(shared.id),[g1,g2].sort(),'every group of the project, in id order');
-    assert.deepEqual(await s.tasks.audience(owner,shared.id,{group:g3}),{project:p1,group:g3,audience:'group',chats:[]},'a group in no project sees nothing');
-    assert.deepEqual(await s.tasks.audience(owner,under.id,{group:g2}),{project:p1,group:g1,audience:'group',chats:[g1]},'a subtask keeps its parent\'s group');
-    // A group's task on the list of a project its group is not in is seen by no chat, its topics included, as a topic
-    // always follows its group's project (ADR-0247).
+    assert.deepEqual(await s.tasks.audience(owner,shared.id,{group:g3}),{project:p1,group:g3,audience:'project',chats:[g1,g2].sort()},'a group outside it changes nothing');
+    assert.equal((await s.tasks.audience(owner,astray.id)).group,g2,'a subtask names its own group, not its parent\'s');
+    assert.equal((await s.tasks.audience(owner,astray.id,{group:at(t1,7)})).group,at(t1,7));
+    // A task on the list of a project its group is not in is seen by that project's chats only, with no group shown.
     const tent=await s.tasks.create(owner,{operation_id:key+':tent',title:'Rent the tent',scope:p2,group:at(t1,8)});
-    assert.deepEqual([await seenBy(tent.id),await seenBy(tent.id,{scope:p1})],[[],[g1]]);
+    assert.deepEqual([await seenBy(tent.id),await seenBy(tent.id,{scope:p1})],[[],[g1,g2].sort()]);
     for(const reader of [alice,await ask(t1,'Anything for the tent?','Alice',8)])await assert.rejects(s.tasks.chatGet(reader,tent.id),{status:404});
 
-    // Set on the project itself by the owner, a group's task shows the other group nothing from before.
-    await s.tasks.update(owner,first.id,{operation_id:key+':open-up',expected_revision:first.revision,group:null});
+    // A group label changed by the owner is no move: the task keeps its joining time, its comments and its history.
+    await s.tasks.update(owner,first.id,{operation_id:key+':open-up',expected_revision:await rev(first.id),group:null});
     const opened=await s.tasks.chatGet(bob,first.id);
-    assert.deepEqual([opened.comments,opened.activity.map((item:any)=>item.changes),opened.group_id],[[],[{group_id:{to:null}}],null]);
-    assert.ok(!JSON.stringify(opened).includes('canary-note-'+mark)&&!JSON.stringify(opened).includes(g1));
-    assert.equal((await s.tasks.chatGet(bob,under.id)).group_id,null,'the tasks under it move with it');
+    assert.deepEqual([opened.group_id,opened.comments.map((item:any)=>item.body)],[null,['note-'+mark,'Done soon?']]);
+    assert.deepEqual(opened.activity.find((item:any)=>item.changes.group_id).changes,{group_id:{from:g1,to:null}});
+    assert.equal((await s.tasks.chatGet(bob,under.id)).group_id,g1,'the tasks under it keep their own group');
 
-    // A task of the first group under the second group's task, written before subtasks followed their parent's group,
-    // shows the first group no parent, and no list by that parent finds it; it lists at the top.
-    const cross=digest(key+':cross');
-    await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
-      VALUES($1,'canary-cross-'||$2,'todo','open',$3,$4,$5,'dashboard',now())`,[cross,mark,p1,g1,second.id]);
-    const crossed=await s.tasks.chatGet(alice,cross);
-    assert.deepEqual([crossed.parent_id,crossed.parent],[null,null]);
-    assert.equal((await s.tasks.chatList(alice)).tasks.find((item:any)=>item.id===cross).parent_id,null);
-    assert.deepEqual((await s.tasks.chatList(alice,{parent:second.id,state:'all'})).tasks,[]);
-    assert.ok((await s.tasks.chatList(alice,{parent:'top'})).tasks.some((item:any)=>item.id===cross));
-    assert.deepEqual((await s.tasks.chatList(bob,{parent:second.id,state:'all'})).tasks,[]);
-    assert.deepEqual((await s.tasks.list(owner,{parent:second.id,state:'all'})).tasks.map((item:any)=>item.id),[cross],'the owner lists it under its parent');
-
-    // A group's tasks, its topics' too, move with it to another project with everything under them, and keep what
-    // the group saw; a task under them set on the project itself joins their group from then on, and another group's
-    // stays on the old list at the top.
-    const band=await s.tasks.chatComment(bob,second.id,{text:'Booked the band'});
+    // A group that moves to another project leaves its tasks on the old list (ADR-0276): the old project's chats still
+    // see them, with no group shown; the group now sees only its new project's list.
+    await s.tasks.comment(owner,second.id,{operation_id:key+':band',text:'Booked the band'});
     const lights=await s.tasks.create(owner,{operation_id:key+':lights',title:'Rent the lights',scope:p1,group:at(t2,3)});
-    const odd=digest(key+':odd');
-    await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
-      VALUES($1,'canary-odd-'||$2,'todo','open',$3,NULL,$4,'dashboard',now()-interval '1 hour')`,[odd,mark,p1,own.id]);
-    await stores.control.query("INSERT INTO owner_task_comments(id,task_id,body,author,origin,created_at) VALUES($1,$2,'canary-odd-note','{\"kind\":\"owner\"}','dashboard',now()-interval '1 minute')",[digest(key+':odd-note'),odd]);
-    const db=await stores.control.connect();
-    try {
-      await db.query('BEGIN');
-      assert.equal(await moveGroupTasks(db,g2,p1,p2),4,'its two tasks, its topic\'s and the one under one of them');
-      assert.equal(await moveGroupTasks(db,g2,p2,null),0,'leaving every project moves nothing');
-      assert.equal(await moveGroupTasks(db,g2,p2,p2),0);
-      await db.query('UPDATE project_assignments SET project_id=$2,revision=revision+1 WHERE space_id=$1',[g2,p2]);
-      await db.query('COMMIT');
-    }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
+    const before=await stores.control.query('SELECT id,project_id,group_id,project_since FROM owner_tasks ORDER BY id');
+    await s.projects.assign(owner,{space_id:g2,project_id:p2,mode:'assigned',expected_revision:1,operation_id:key+':move-g2'});
+    assert.deepEqual((await stores.control.query('SELECT id,project_id,group_id,project_since FROM owner_tasks ORDER BY id')).rows,before.rows,'no task moves');
     const after=await ask(t2,'What do we have now?','Bob');
-    assert.deepEqual(ids(await s.tasks.chatList(after)),[second.id,own.id,lights.id,odd].sort(),'its tasks moved with it, and the project\'s tasks stayed');
-    const kept=await s.tasks.chatGet(after,second.id);
-    assert.deepEqual([kept.project_id,kept.comments.map((item:any)=>item.body)],[p2,band.comments.map((item:any)=>item.body)],'it keeps what the group saw');
-    assert.deepEqual(kept.activity[0].changes,{project_id:{to:p2}});
-    const joined=await s.tasks.chatGet(after,odd);
-    assert.deepEqual([joined.group_id,joined.comments],[g2,[]],'a task under it from elsewhere joins its group from now on');
-    for(const id of [shared.id,all.id])await assert.rejects(s.tasks.chatGet(after,id),{status:404});
-    assert.ok(!(await s.tasks.chatList(alice)).tasks.some((item:any)=>[second.id,own.id,lights.id,odd].includes(item.id)));
-    assert.deepEqual((await s.tasks.get(owner,odd)).activity[0].changes,{project_id:{from:p1,to:p2},group_id:{from:null,to:g2}},'the owner sees the whole move');
-    const stayed=await s.tasks.get(owner,cross);
-    assert.deepEqual([stayed.project_id,stayed.group_id,stayed.parent_id],[p1,g1,null],'another group\'s task under them stays where its group sees it');
-    const still=await s.tasks.chatGet(alice,cross);
-    assert.deepEqual(still.activity[0].changes,{parent_id:{to:null}});
-    assert.ok(!JSON.stringify(still).includes(second.id),'never naming the task it sat under');
-    await assert.rejects(s.tasks.chatGet(after,cross),{status:404});
-  }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
-});
+    assert.deepEqual(ids(await s.tasks.chatList(after,{state:'all'})),[tent.id],'the group sees its new project\'s list');
+    for(const task of [second.id,own.id,lights.id,shared.id])await assert.rejects(s.tasks.chatGet(after,task),{status:404});
+    // The move changed the guard binding, so the first group asks again.
+    const still=await ask(t1,'And for us now?','Alice');
+    const stayed=await s.tasks.chatGet(still,second.id);
+    assert.deepEqual([stayed.project_id,stayed.group_id,stayed.comments.map((item:any)=>item.body)],[p1,null,['Booked the band']],'its old label shows to no chat');
+    assert.equal((await s.tasks.chatGet(still,lights.id)).group_id,null,'nor its topics\'');
+    const kept=await s.tasks.get(owner,second.id);
+    assert.deepEqual([kept.project_id,kept.group_id],[p1,g2],'the owner sees it as it is');
+    assert.equal((await s.tasks.chatGet(after,tent.id)).group_id,null,'a group of another project shows as none on this one');
 
-for(const family of families)test(`a group's move, archive or trash takes only the tasks under it that it sees; another group's stays where it is (ADR-0248, ${family.name})`,
- {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
-  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
-  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
-  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
-  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-tasks-')),key='tasks-family:'+Date.now(),stamp=String(Date.now()).slice(-9);
-  // Telegram's ids t1 and t2 (the archive keeps them); g1 and g2 are the chats' Nocheh ids in this family (ADR-0252).
-  const t1='-1001'+stamp,t2='-1002'+stamp,g1=family.id(t1),g2=family.id(t2);
-  const owner:Reader={admin:true,scope:null};
-  // The chats this test uses, as the seeder makes their rows (ADR-0252): the owner's chat and the groups served.
-  const restore=asMembers(installChatsForTest(family.directory([t1,t2],{owner:'123',served:[t1,t2]})));
-  const s=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:digest(key),policy:()=>({enabled:true,owner_id:'123',group_ids:[t1,t2],topic_memory:'group'}),
-    runtime:async operation=>{if(operation==='guard.detect')return {literals:[]};throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('no memory provider');})});
-  let serial=0;
-  // A turn in Telegram chat `chat`, read as its Nocheh chat.
-  const ask=async(chat:string,text:string,name:string):Promise<Reader>=>{
-    const label=String(++serial),value:Envelope={version:1,key:key+':'+label,origin:'live',kind:'telegram_update',bot_id:key,scope:chat,source_id:label,revision:'1',occurred_at:null,text,
-      payload:{message:{message_id:serial,date:1700000000,chat:{id:Number(chat),type:'supergroup'},from:{id:456,first_name:name},text}}};
-    const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);
-    const binding=await s.guards.state();return {admin:false,scope:family.id(chat),space:family.id(chat),turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
-  };
-  const stored=async(id:string)=>(await stores.control.query(`SELECT project_id,group_id,parent_id,revision,archived_at IS NOT NULL AS archived,deleted_at IS NOT NULL AS trashed,
-    project_since::text FROM owner_tasks WHERE id=$1`,[id])).rows[0];
-  try {
-    await s.guards.reconcile();await s.guards.setMode('on');
-    const mark=String(Date.now()),p1=digest(key+':p1');
-    // Sharing off: each group sees only its own tasks (ADR-0248, ADR-0267).
-    await stores.control.query("INSERT INTO projects(id,name,state,revision,share_chats) VALUES($1,'P1','active',1,false)",[p1]);
-    for(const chat of [g1,g2])await stores.control.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)",[chat,p1]);
-    // A task of the second group, with one of its own under it, under a task of the first group, as written before
-    // subtasks followed their parent's group.
-    const legacy=async(name:string,parent:string)=>{
-      const id=digest(key+':'+name),below=digest(key+':'+name+':below');
-      await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
-        VALUES($1,'canary-'||$2||'-'||$3,'todo','open',$4,$5,$6,'dashboard',now()-interval '1 hour')`,[id,name,mark,p1,g2,parent]);
-      await stores.control.query(`INSERT INTO owner_tasks(id,title,status_id,state,project_id,group_id,parent_id,origin,project_since)
-        VALUES($1,'canary-'||$2||'-below-'||$3,'todo','open',$4,$5,$6,'dashboard',now()-interval '1 hour')`,[below,name,mark,p1,g2,id]);
-      await stores.control.query("INSERT INTO owner_task_comments(id,task_id,body,author,origin) VALUES($1,$2,'canary-'||$3||'-note','{\"kind\":\"owner\"}','dashboard')",[digest(key+':'+name+':note'),id,name]);
-      return {id,below,before:await stored(id),under:await stored(below)};
-    };
-    const alice=await ask(t1,'Put the hall on the whole project','Alice'),bob=await ask(t2,'What is ours?','Bob');
-    // Its own task under the moving task goes with it; the second group's stays, no longer under it, where that group
-    // sees it as before, with everything under it.
-    const hall=await s.tasks.create(owner,{operation_id:key+':hall',title:'Book the hall',scope:p1,group:g1});
-    const keys=await s.tasks.create(owner,{operation_id:key+':keys',title:'Get the keys',parent:hall.id});
-    const band=await legacy('band',hall.id);
-    const moved=await s.tasks.chatUpdate(alice,hall.id,{expected_revision:hall.revision,group:null});
-    assert.equal(moved.group_id,null);
-    assert.deepEqual([(await stored(keys.id)).group_id,(await stored(keys.id)).parent_id],[null,hall.id],'its own task under it moves with it');
-    const left=await stored(band.id);
-    assert.deepEqual([left.project_id,left.group_id,left.parent_id,left.project_since,left.revision],[p1,g2,null,band.before.project_since,band.before.revision+1],
-      'the other group\'s task keeps its list, group and joining time, and no longer sits under it');
-    assert.deepEqual(await stored(band.below),band.under,'and what is under that task is not touched');
-    await assert.rejects(s.tasks.chatGet(alice,band.id),{status:404},'the moving group never sees it');
-    assert.ok(!JSON.stringify(await s.tasks.chatList(alice,{state:'all'})).includes('canary-band'),'nor learns of it');
-    const theirs=await s.tasks.chatGet(bob,band.id);
-    assert.deepEqual([theirs.group_id,theirs.parent_id,theirs.comments.map((item:any)=>item.body)],[g2,null,['canary-band-note']],'its own group still sees it, with its comments');
-    assert.deepEqual(theirs.activity[0].changes,{parent_id:{to:null}},'its history says only that it no longer sits under a task');
-    assert.deepEqual(theirs.activity[0].actor,{kind:'nocheh'},'never whose chat asked');
-    assert.ok(!JSON.stringify(theirs).includes(hall.id)&&!JSON.stringify(theirs).includes(g1));
-    assert.deepEqual((await s.tasks.chatGet(bob,band.below)).parent_id,band.id);
-
-    // Archiving and trashing from the first group take only its own tasks under it too.
-    for(const [name,change,flag] of [['archive',{archived:true},'archived'],['trash',{trashed:true},'trashed']] as const){
-      const top=await s.tasks.create(owner,{operation_id:key+':'+name,title:'Clean the '+name,scope:p1,group:g1});
-      const mine=await s.tasks.create(owner,{operation_id:key+':'+name+':mine',title:'Sweep the '+name,parent:top.id});
-      const other=await legacy(name,top.id);
-      const turn=await ask(t1,'Done with the '+name,'Alice');
-      await s.tasks.chatUpdate(turn,top.id,{expected_revision:top.revision,...change});
-      assert.equal((await stored(mine.id))[flag],true,name+': its own task under it goes with it');
-      const kept=await stored(other.id);
-      assert.deepEqual([kept[flag],kept.group_id,kept.parent_id],[false,g2,null],name+': the other group\'s task is left as it was, no longer under it');
-      assert.deepEqual(await stored(other.below),other.under,name+': with everything under it');
-      assert.ok((await s.tasks.chatList(bob)).tasks.some((item:any)=>item.id===other.id),name+': its group still lists it');
-      if(name==='trash'){
-        await s.tasks.remove(owner,top.id);
-        assert.ok(await stored(other.id),'deleting the trashed task for good never takes the other group\'s task with it');
-        assert.equal(await stored(mine.id),undefined);
-      }
-    }
-
-    // The owner sees every task, so the owner's own move still takes the whole family, as its card and the dashboard show.
-    const stage=await s.tasks.create(owner,{operation_id:key+':stage',title:'Build the stage',scope:p1,group:g1});
-    const lights=await legacy('lights',stage.id);
-    await s.tasks.update(owner,stage.id,{operation_id:key+':stage-move',expected_revision:stage.revision,group:null});
-    assert.deepEqual([(await stored(lights.id)).group_id,(await stored(lights.id)).parent_id],[null,stage.id]);
+    // The owner may take the group's tasks along instead: each task labelled with it or its topics moves with every
+    // task under it, and one under a staying task is cut loose. Tasks of other groups stay.
+    const ring=await s.tasks.create(owner,{operation_id:key+':ring',title:'Ring the hall',scope:p2,group:g2});
+    const keys=await s.tasks.create(owner,{operation_id:key+':keys',title:'Ask for the keys',scope:p2,parent:ring.id,group:at(t1,8)});
+    const chairs=await s.tasks.create(owner,{operation_id:key+':chairs',title:'Count the chairs',scope:p2,parent:tent.id,group:at(t2,3)});
+    const take=(tasks:unknown,operation:string)=>s.projects.assign(owner,{space_id:g2,project_id:p1,mode:'assigned',expected_revision:2,operation_id:key+operation,tasks} as any);
+    await assert.rejects(take('all',':take-bad'),{status:400,code:'invalid_project_assignment'});
+    await take('move',':take');
+    const where=async(id:string)=>{const task=await s.tasks.get(owner,id);return [task.project_id,task.parent_id];};
+    assert.deepEqual(await Promise.all([ring,keys,chairs,tent].map(task=>where(task.id))),[[p1,null],[p1,ring.id],[p1,null],[p2,null]]);
+    const back=await ask(t2,'What do we have back home?','Bob');
+    for(const task of [ring,keys,chairs,second])assert.equal((await s.tasks.chatGet(back,task.id)).project_id,p1);
+    const moved=await s.tasks.get(owner,chairs.id);
+    assert.deepEqual(moved.activity.find((item:any)=>item.changes.project_id).changes,{project_id:{from:p2,to:p1},parent_id:{to:null}});
   }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

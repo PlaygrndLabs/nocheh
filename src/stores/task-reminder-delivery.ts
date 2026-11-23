@@ -1,10 +1,9 @@
 import type pg from 'pg';
 import type {ChatDirectory} from '../chats.js';
 import {telegramAddress,type TelegramTarget} from '../frontdoor/telegram.js';
-import {inReadSet} from '../spaces.js';
 import {joinedGroups} from './member-reads.js';
 import {memberTaskViews} from './member-task-views.js';
-import type {TaskView,TopicMemory} from './tasks.js';
+import type {TaskView} from './tasks.js';
 
 /*
  * Who a person's task reminder goes to (step 5, ADR-0265 D9): the reminder goes to whoever set it. The recipient is
@@ -12,8 +11,9 @@ import type {TaskView,TopicMemory} from './tasks.js';
  *
  *   set_by_account_id → chat_accounts.member_id → an active member with "Reminders to themselves" (members.reminders) on
  *   → the open private chat of that account with Nocheh (private chat on, never a topic, never the owner's chat or account)
- *   → the task still on one of that member's boards (joinedGroups, then memberTaskViews: its project, and its group in
- *   the reach, or set on the project itself). As in the members' app, the member's groups are first asked of Telegram
+ *   → the task still on one of that member's boards (joinedGroups, then memberTaskViews: its project is one of an active
+ *   project holding a group they are in, whatever the task's group and the project's "Share group chats", ADR-0276). As
+ *   in the members' app, the member's groups are first asked of Telegram
  *   again (recheckMemberAppGroups, at most once per member every MEMBER_APP_RECHECK_MINUTES, capped) and only those
  *   confirmed within MEMBER_RECHECK_HOURS count; a re-check that cannot run reaches no board.
  *
@@ -36,10 +36,10 @@ export type ReminderRecipient={lane:'member';member:string;chat:string;target:Te
  * task's project and group. */
 export interface ReminderSetter {set_by:'owner'|'person';account:string|null;via:'chat'|'app';project:string|null;group:string|null}
 /** What resolving reads besides the store: the owner's private chat (null closes every member chat), the chat directory
- * (where each chat is in Telegram), how topics share their group's memory, how fresh a group's membership must be
- * (hours; default the member's private chat's own MEMBER_READ_STALE_DAYS), and `recheck`, which asks Telegram again
- * about a member's groups before they are read (a throw leaves that member no board: fail closed). */
-export interface RecipientContext {owner:string|null;directory:ChatDirectory;topicMemory:TopicMemory;freshHours?:number;
+ * (where each chat is in Telegram), how fresh a group's membership must be (hours; default the member's private chat's
+ * own MEMBER_READ_STALE_DAYS), and `recheck`, which asks Telegram again about a member's groups before they are read (a
+ * throw leaves that member no board: fail closed). */
+export interface RecipientContext {owner:string|null;directory:ChatDirectory;freshHours?:number;
   recheck?:(member:string)=>Promise<void>}
 
 /** One account's side of the chain, resolved once per pass: the member, why it stops, or the chat and boards. */
@@ -67,13 +67,12 @@ async function personOf(db:Db,account:string,context:RecipientContext):Promise<P
   if(context.recheck){try{await context.recheck(row.member);}catch{return none('not_visible',row.member);}}
   const groups=(await joinedGroups(db,row.member,{owner,...(context.freshHours===undefined?{}:{freshHours:context.freshHours})}))
     .filter(group=>group.fresh).map(group=>group.chat);
-  return {member:row.member,reason:null,chat:row.chat,target,views:await memberTaskViews(db,groups,context.topicMemory)};
+  return {member:row.member,reason:null,chat:row.chat,target,views:await memberTaskViews(db,groups)};
 }
 
-/** Whether a task, by its project and group, is on one of these boards: in that project, set on the project itself or in
- * a group the board reaches. A personal task (no project) never is. */
-const onBoards=(views:readonly TaskView[],task:{project:string|null;group:string|null})=>
-  task.project!==null&&views.some(view=>view.project===task.project&&(task.group===null||inReadSet(view.reach,task.group)));
+/** Whether a task is on one of these boards: its project is one of theirs, whatever its group (ADR-0276). A personal
+ * task (no project) never is. */
+const onBoards=(views:readonly TaskView[],task:{project:string|null})=>task.project!==null&&views.some(view=>view.project===task.project);
 
 /** What a person who cannot be reached means for their reminder: the owner for one set in a group or by a guest, a skip
  * for one set in the members' app. */

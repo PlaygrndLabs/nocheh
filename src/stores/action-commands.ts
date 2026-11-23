@@ -460,10 +460,10 @@ export class ActionCommandRepository {
     }catch(error){if(error instanceof HttpError)return result;throw error;}
   }
   /**
-   * A task card: what changes in which project's list, every group and topic that will see the task by name, and,
-   * for a task set on the project itself, that chats added later see it too, or, for a group's task, that the
-   * project's other groups don't; what stays private, then exactly what those chats will see, with each task that
-   * moves in under it. Null when it does not fit one Telegram card (ADR-0243, ADR-0248).
+   * A task card: what changes in which project's list, every group and topic of that project by name, since each of
+   * them sees the whole list whatever group a task is labelled with, and that chats added later see it too; what stays
+   * private, then exactly what those chats will see, with each task that moves in under it. Null when it does not fit
+   * one Telegram card (ADR-0243, ADR-0276).
    */
   private async taskCard(id:string) {
     const texts=await this.texts(),urls:string[]=[],owner={admin:true,scope:null};
@@ -475,11 +475,9 @@ export class ActionCommandRepository {
     const request=await this.tasks!.request(owner,id,space);
     const places=[];for(const chat of request.chats)places.push(await this.where(chat,line,mark,{showTopic:true}));
     const project=`“${(request.project??'').replace(controls,'')}”`,slot='\u0001\u0003';
-    const group=request.group?`“${(await space(request.group)).replace(controls,'')}”`:'';
-    // Chats added to the project later see only the tasks set on the project itself; a group's task stays its own.
-    const after=request.audience==='project'?line.task_later:places.length?line.task_group_only:fillTemplate(line.task_group_later,{group});
-    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project,group,count:String(request.subtasks)}),
-      chats:(places.length?places.join(', '):line.task_no_chats)+'. '+after,private:request.private?line[`task_private_${request.private}`]:null,fields:slot});
+    // A task's group is only its label, so chats added to the project later see it too (ADR-0276).
+    const filled=fillTemplate(texts.task.replace(controls,''),{change:fillTemplate(line[`task_${request.change}`],{project,count:String(request.subtasks)}),
+      chats:(places.length?places.join(', '):line.task_no_chats)+'. '+line.task_later,private:request.private?line[`task_private_${request.private}`]:null,fields:slot});
     const card=linked(filled.replaceAll(slot,()=>fields(request.fields)),urls);
     if(card.text.length>cardLimit-outcomeRoom||card.links.length>entityLimit)return null;
     return {...card,line,state:request.state,fingerprint:request.fingerprint,source:request.source_reference};

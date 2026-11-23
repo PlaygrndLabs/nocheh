@@ -10,7 +10,7 @@ import {Button, Card, CardBody, CardHeader, Notice, Select, Spinner} from '../..
 import {Dialog, useFeedback} from '../../ui/overlay';
 import {
   leaveTasksText,
-  moveTasksText,
+  MoveTasksChoice,
   otherGroupsText,
   projectNote,
   projectTasksWarning,
@@ -255,7 +255,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
   const unanswered = served && !!data && !answered(own) && choices.length > 0;
   const value = unanswered ? UNANSWERED : own?.mode === 'assigned' ? (own.project_id ?? NONE) : NONE;
 
-  const save = (next: string) => {
+  const save = (next: string, take = false) => {
     const target = choices.find(project => project.id === next);
     void action.run(
       'save',
@@ -263,6 +263,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
       {
         space_id: space,
         ...(target ? {mode: 'assigned', project_id: target.id} : {mode: 'none', project_id: null}),
+        ...(take ? {tasks: 'move'} : {}),
         expected_revision: own?.revision ?? 0,
       },
       {success: target ? `Moved to ${target.name}.` : unanswered ? 'Joins no project.' : 'Removed from its project.'},
@@ -272,7 +273,9 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
     if (next === value) return;
     const target = choices.find(project => project.id === next),
       current = data?.project ?? null;
-    // Joining a project is confirmed first, naming the groups already there; a move says its tasks go with it.
+    // Joining a project is confirmed first, naming the groups already there; a move says its tasks stay behind
+    // unless the owner takes them along.
+    let take = false;
     if (
       target &&
       !(await feedback.confirm({
@@ -280,14 +283,14 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
         body: (
           <div className="space-y-3">
             <JoinNotes space={space} name={name} project={target} names={names} />
-            {current && <p>{moveTasksText(current.name, target.name)}</p>}
+            {current && <MoveTasksChoice from={current.name} to={target.name} onChange={move => (take = move)} />}
           </div>
         ),
         confirm: current ? 'Move here' : 'Put it here',
       }))
     )
       return;
-    // Leaving a project for none asks too: its tasks stay on that project's list, where only the owner sees them.
+    // Leaving a project for none asks too: its tasks stay on that project's list, for that project's chats.
     if (
       !target &&
       current &&
@@ -298,7 +301,7 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
       }))
     )
       return;
-    save(next);
+    save(next, take);
   };
 
   const loading = !data || !projects.data;

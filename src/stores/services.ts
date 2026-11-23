@@ -145,13 +145,13 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const knowledge=new KnowledgeManagementRepository({stores,access,derived,guards,prepared,turns,learned,projects,entities,sharing,shared,memoryAccess,selections,detect});
   // The owner's asks about a member (step 4b): recorded only from a live owner-private turn, answered by their own worker.
   const memberAsks=new OwnerMemberAskRepository(stores.control,stores.archive,options.policy,principal=>knowledge.ownerTurn(principal));
-  // The owner's private chat reaches every list; a group or topic in a project only its own group's tasks and the project's.
+  // The owner's private chat reaches every list; a group or topic in a project that project's whole list (ADR-0276).
   // Who wrote the message a group turn answers: the owner, or a member, by their Telegram name, with their account (a
   // chat_accounts id; null for the owner), which a reminder they set keeps (ADR-0255). A member is checked again here, at
   // each task call, against the member directory as of now (step 3): one paused, removed or switched off in this group
   // since the turn began gets 403 member_access_changed, so their turn in flight writes no task or reminder; a member
   // whose tasks are read only gets a read-only turn, which lists and reads but adds, changes, comments on and sets
-  // reminders on nothing. Who sees which tasks is unchanged (ADR-0248).
+  // reminders on nothing.
   const sender=async(event:string,chat:string):Promise<{actor:TaskActor;account:string|null;readOnly?:true}>=>{
     const row=(await stores.archive.query('SELECT payload FROM events WHERE id=$1',[event])).rows[0];
     let from:any=null;try{const payload=JSON.parse(row.payload.toString());from=(payload.message??payload.edited_message)?.from;}catch{}
@@ -162,15 +162,13 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     if(!account||!directory.talks(account,chat,chatDirectory()))throw new HttpError(403,'member_access_changed');
     return {actor:name?{kind:'member',name}:{kind:'member'},account,...(directory.tasks(account)==='read'?{readOnly:true as const}:{})};
   };
-  // A group or topic reaches its own group's tasks, with its topics' when they share what they know, and the tasks set
-  // on its project itself; a task added there belongs to that group or topic (ADR-0248).
-  const topicMemory=()=>options.policy().topic_memory??'group';
   // A member's private chat (D14): one view per active project assigned one of the groups bindReads resolved for this
-  // request, reaching those groups (with their topics when topics share what they know). Groups in no project have no
-  // tasks; a reader without its binding has no view.
+  // request, each holding that project's whole list (ADR-0276). Those reads add a sharing project's other groups to the
+  // joined ones, which brings no other project, so the boards are those of the joined groups. Groups in no project have
+  // no tasks; a reader without its binding has no view.
   const memberTaskViews=async(principal:Reader):Promise<TaskView[]>=>{
     if(!principal.reads||!principal.memberChat)throw new HttpError(409,'member_chat_closed');
-    return memberTaskViewsOf(stores.control,readSetGroups(principal.reads),topicMemory());
+    return memberTaskViewsOf(stores.control,readSetGroups(principal.reads));
   };
   // Who wrote in a member's private chat: that member, by their Telegram name, with their account (read only anyway).
   const privateSender=async(event:string):Promise<{actor:TaskActor;account:string|null}>=>{
@@ -188,8 +186,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     // The owner's ask about a member reads only that member's chat: no task list (step 4b).
     if(kind==='memberRead')throw new HttpError(403,'task_project_required');
     const {source}=await knowledge.liveGroupTurn(principal);
-    // A member's private chat reads, and only reads, the tasks of each active project that holds one of their joined
-    // groups, one view per project reaching only those groups; never every list (D14).
+    // A member's private chat reads, and only reads, the whole list of each active project that holds one of their
+    // joined groups, one view per project; never every list (D14, ADR-0276).
     // Each task in the shape the members' app shows it (ADR-0265 D6): "mine" and the member's own reminders by any of
     // their accounts, never people, assignees or the owner's time zone.
     if(kind==='member'){
@@ -198,17 +196,21 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
         JOIN chat_accounts a ON a.member_id=o.member_id WHERE c.id=$1 ORDER BY a.id`,[principal.memberChat])).rows.map(row=>row.id as string);
       return {source,project:null,group:null,views,accounts,...from,readOnly:true};
     }
-    // An "Answer privately" answer reads only the tasks of the groups frozen in its record and of their project
-    // itself, as the server bound them for this request, and changes nothing (ADR-0248, ADR-0249).
+    // An "Answer privately" answer reads the whole list of the project the server bound for this request, and changes
+    // nothing (ADR-0249, ADR-0276).
     if(kind==='answer'){
       const reads=principal.reads,project=reads?.project?(await stores.control.query('SELECT state FROM projects WHERE id=$1',[reads.project])).rows[0]:null;
       if(!reads?.project||project?.state!=='active')throw new HttpError(403,'task_project_required');
-      return {source,project:reads.project,group:null,reach:reads,...await sender(source.reference.id,principal.space!),readOnly:true};
+      return {source,project:reads.project,group:null,...await sender(source.reference.id,principal.space!),readOnly:true};
     }
+    // A group or topic reads and changes its project's whole list, whatever "Share group chats" says; a task added
+    // there is labelled with that group or topic (ADR-0276).
     const space=principal.space!,project=(await projects.effective(space)).project;
     if(!project||project.state!=='active')throw new HttpError(403,'task_project_required');
-    return {source,project:project.id,group:space,reach:principal.reads??readSetOf(recallScope(space,topicMemory()),project.id),...await sender(source.reference.id,space)};
-  },{call:options.runtime,owner:()=>ownerChat(options.policy()),policy:options.policy,record:send=>chatSends.recordLocal(send)},topicMemory);
+    // Its reach, the conversations it shares what it knows with, only marks a read that shows another group's tasks.
+    const reach=principal.reads??readSetOf(recallScope(space,options.policy().topic_memory??'group'),project.id);
+    return {source,project:project.id,group:space,reach,...await sender(source.reference.id,space)};
+  },{call:options.runtime,owner:()=>ownerChat(options.policy()),policy:options.policy,record:send=>chatSends.recordLocal(send)});
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.agent,detect,options.serviceToken??'');
   const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers,chatAdds,scheduleNotices),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);

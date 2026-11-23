@@ -1902,12 +1902,13 @@ class ProductScenarios(Scenarios):
         return result, canaries.found(reply+'\n'+result, marks)
 
     def project_groups_stay_apart(self):
-        # Groups of one project (ADR-0247, ADR-0248, ADR-0249): OTHER_GROUP (GP1), THIRD_GROUP (GP2) and NEW_GROUP (NG1, a
+        # Groups of one project (ADR-0247, ADR-0249, ADR-0276): OTHER_GROUP (GP1), THIRD_GROUP (GP2) and NEW_GROUP (NG1, a
         # group first seen after step 2b, with a digest id, ADR-0252) join a new project with "Share group chats" off
         # (ADR-0267); GROUP (GP4) stays in none. Each
         # group, and the owner's private chat, holds its own mark next to one shared search word. A group answer reads only
-        # its own group: the owner's question in GP1 finds GP1's mark and its task, never GP2's mark, task, count or tag,
-        # and the same question in NG1 finds NG1's mark and neither group's task. Under the owner's answer there sits Answer
+        # its own group's messages: the owner's question in GP1 finds GP1's mark, never GP2's, and the same question in NG1
+        # finds NG1's mark alone. The project's tasks are one list whatever the switch: GP1 and NG1 both list GP1's and GP2's
+        # tasks and tags, each labelled with its group, and count both. Under the owner's answer there sits Answer
         # privately; a member's tap gets the only-asker popup and runs nothing; the owner's tap opens the private chat with
         # /start <id>, and that answer reads GP1, GP2 and NG1, never GP4 or the owner's private chat. Every send it took is
         # recorded. A PROBEMARK sits in an unaddressed message just before the question, which both answers get with the group's recent
@@ -1963,16 +1964,22 @@ class ProductScenarios(Scenarios):
             self.gate('group_search_finds_its_own_mark', gp1 in search, result=search[:300])
             self.gate('group_answer_uses_only_that_group', not canaries.found(text+'\n'+search, {gp2: 'GP2', ng1: 'NG1', gp4: 'GP4', private: 'private'}),
                       found=canaries.found(text+'\n'+search, {gp2: 'GP2', ng1: 'NG1', gp4: 'GP4', private: 'private'}))
-            # 2. GP1's task view: its own task, never GP2's title, count or tag (ADR-0248).
+            # 2. GP1's task view: the project's whole list, its own task and GP2's with their tags, labelled with their
+            # groups and both counted, though the project does not share its group chats (ADR-0276).
             try:
                 tasks = json.loads(listed)
             except ValueError:
                 tasks = {}
+            labels = lambda found: {mark: [task.get('group_id') for task in found.get('tasks') or [] if mark in (task.get('title') or '')]
+                                    for mark in (gp1_task, gp2_task)}
             self.gate('group_task_view_shows_its_own_task', gp1_task in listed, result=listed[:300])
-            self.gate('group_task_view_never_shows_another_groups_task', gp2_task not in listed and gp2_tag not in listed
-                      and (tasks.get('counts') or {}).get('open') == 1, counts=tasks.get('counts'), result=listed[:300])
+            self.gate('group_task_view_shows_the_projects_other_group_task', gp2_task in listed and gp2_tag in listed
+                      and (tasks.get('counts') or {}).get('open') == 2, counts=tasks.get('counts'), result=listed[:300])
+            self.gate('group_task_view_labels_each_task_with_its_group', labels(tasks) == {gp1_task: [members[OTHER_GROUP]], gp2_task: [members[THIRD_GROUP]]},
+                      labels=labels(tasks))
             # 2b. NG1, the group with a digest id whose archive is read through its Telegram ids (ADR-0252), reads only
-            # itself too: its own mark, never GP1's, GP2's or GP4's marks or tasks, though it shares their project.
+            # its own messages too: its own mark, never GP1's, GP2's or GP4's, though it shares their project; and the
+            # project's whole task list, GP1's and GP2's tasks among it.
             _, new_text = self.turn(self.f.message(NEW_GROUP, 'What do we have on crates? '+tools), NEW_GROUP, chunked=True)
             new_search = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__archive_search' and event['phase'] == 'final'][-1]['result']
             new_listed = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__tasks' and event['phase'] == 'final'][-1]['result']
@@ -1980,15 +1987,15 @@ class ProductScenarios(Scenarios):
                 new_tasks = json.loads(new_listed)
             except ValueError:
                 new_tasks = {}
-            others = {gp1: 'GP1', gp2: 'GP2', gp4: 'GP4', private: 'private', gp1_task: 'GP1 task', gp2_task: 'GP2 task',
-                      gp1_tag: 'GP1 tag', gp2_tag: 'GP2 tag'}
-            new_seen = new_text+'\n'+new_search+'\n'+new_listed
+            others = {gp1: 'GP1', gp2: 'GP2', gp4: 'GP4', private: 'private'}
+            new_seen = new_text+'\n'+new_search
             self.gate('new_id_group_search_finds_its_own_mark', ng1 in new_search, result=new_search[:300])
-            # Its open count is the open tasks it lists, so no other group's task hides in a number.
-            own_open = [task for task in new_tasks.get('tasks') or [] if task.get('state') == 'open' and not task.get('parent_id')]
-            self.gate('new_id_group_answer_uses_only_that_group', not canaries.found(new_seen, others)
-                      and (new_tasks.get('counts') or {}).get('open') == len(own_open),
-                      found=canaries.found(new_seen, others), counts=new_tasks.get('counts'), listed=len(own_open))
+            self.gate('new_id_group_answer_uses_only_that_groups_messages', not canaries.found(new_seen, others), found=canaries.found(new_seen, others))
+            # Its open count is the open tasks it lists: the project's two.
+            listed_open = [task for task in new_tasks.get('tasks') or [] if task.get('state') == 'open' and not task.get('parent_id')]
+            self.gate('new_id_group_lists_the_projects_whole_list', all(mark in new_listed for mark in (gp1_task, gp2_task, gp1_tag, gp2_tag))
+                      and labels(new_tasks) == labels(tasks) and len(listed_open) == 2 and (new_tasks.get('counts') or {}).get('open') == 2,
+                      counts=new_tasks.get('counts'), listed=len(listed_open), labels=labels(new_tasks))
             buttons = self.buttons(reply)
             self.gate('answer_privately_under_the_owners_answer', len(buttons) == 1 and re.fullmatch(r'np[a-f0-9]{32}', buttons[0]['callback_data'] or '')
                       and buttons[0]['text'] == '\U0001f512 Answer privately' and not any(self.buttons(row) for row in group_replies[:-1]),
@@ -2056,8 +2063,8 @@ class ProductScenarios(Scenarios):
                 return all(found)
             self.wait('every_send_recorded', recorded, 180)
 
-            # 6. The owner turns "Share group chats" on (ADR-0267): GP1's answer reads every group of the project and their
-            # tasks, never GP4 or the private chat, and no Answer privately sits under it.
+            # 6. The owner turns "Share group chats" on (ADR-0267): GP1's answer reads every group of the project, with
+            # the tasks as before, never GP4 or the private chat, and no Answer privately sits under it.
             shared = self.f.app('/v1/projects', {'id': project['id'], 'name': project['name'], 'description': project['description'],
                                                  'state': 'active', 'share_chats': True, 'expected_revision': project['revision'],
                                                  'operation_id': 'scenario-project-groups-share-'+number})
@@ -4536,17 +4543,18 @@ class ProductScenarios(Scenarios):
         self.gate(label+'_never_reached_a_model', not [event for event in self.f.agent()[agent:] if event.get('argument') in marks])
 
     @contextlib.contextmanager
-    def groups_in_projects(self, layout):
+    def groups_in_projects(self, layout, share=None):
         """Projects for one scenario, as the owner sets them on the dashboard: {name: Telegram group ids}; yields {name:
-        project}. Each group leaves its project again after, as later scenarios expect; a failure to do that fails a
-        scenario that passed."""
+        project}. `share` sets "Share group chats" (ADR-0267); None keeps the default (on). Each group leaves its project
+        again after, as later scenarios expect; a failure to do that fails a scenario that passed."""
         number = str(self.f.ids())
         made, assignments = {}, []
         failed = False
         try:
             for index, (name, groups) in enumerate(layout.items()):
                 made[name] = self.f.app('/v1/projects', {'name': name, 'description': '', 'state': 'active', 'expected_revision': 0,
-                                                         'operation_id': 'scenario-projects-'+number+'-'+str(index)})
+                                                         'operation_id': 'scenario-projects-'+number+'-'+str(index),
+                                                         **({} if share is None else {'share_chats': share})})
                 for group in groups:
                     chat = self.f.chat(group)
                     own = self.f.app('/v1/projects/effective?space='+urllib.parse.quote(chat, safe=''))['own_assignment']
@@ -4577,8 +4585,8 @@ class ProductScenarios(Scenarios):
         # A member in groups of two projects and in a group of none reads all three from their own private chat, and
         # nothing else: not a group they never joined, not the owner's private chat (step 4, ADR-0262). Its tasks are read
         # only, one project's list at a time (D14): asked without a project, the tool names the two lists to choose
-        # from; each list holds the tasks of the groups they joined and, while the project shares its group chats (on by
-        # default, ADR-0267 D1 and D4), of its other groups too; switched off, a task of a group they never joined is not found.
+        # from; each list is its project's whole list, a task of a group of it they never joined included, whatever the
+        # project's "Share group chats" (ADR-0276): switched off, that task is still listed and read.
         # The owner's own task is never found; adding one is refused. A message to a group is refused too, with no card.
         # OTHER_GROUP and NEW_GROUP (which the member never joins) are in project A, THIRD_GROUP in B; GROUP stays in none.
         person, number = self.fresh_person(), str(self.f.ids())
@@ -4618,26 +4626,27 @@ class ProductScenarios(Scenarios):
                 listed = lists()
                 self.gate('each_list_holds_its_joined_groups_tasks', titles['a'] in listed['a'] and titles['b'] in listed['b']
                           and titles['b'] not in listed['a'] and titles['a'] not in listed['b'], lists={key: value[:300] for key, value in listed.items()})
-                # Sharing is on by default: project A's list also reaches NEW_GROUP, which the member never joined.
-                self.gate('a_sharing_projects_list_holds_its_other_groups_task', titles['unjoined'] in listed['a']
+                # Project A's list holds the task of NEW_GROUP, which the member never joined, as every task of the project.
+                self.gate('a_projects_list_holds_its_other_groups_task', titles['unjoined'] in listed['a']
                           and titles['unjoined'] not in listed['b'], seen=seen(listed))
                 self.gate('a_list_never_holds_the_owners_task', not any(titles['personal'] in value for value in listed.values()), seen=seen(listed))
                 got = self.task_tool({'action': 'get', 'id': tasks['unjoined']}, chat=person, sender=person)
-                self.gate('reads_a_sharing_groups_task', titles['unjoined'] in json.dumps(got, ensure_ascii=False), result=str(got)[:300])
+                self.gate('reads_an_unjoined_groups_task', titles['unjoined'] in json.dumps(got, ensure_ascii=False), result=str(got)[:300])
                 first = self.f.app('/v1/projects', {'id': first['id'], 'name': first['name'], 'description': first['description'],
                                                     'state': 'active', 'share_chats': False, 'expected_revision': first['revision'],
                                                     'operation_id': 'scenario-joined-unshare-'+number})
                 self.gate('project_stops_sharing', first.get('share_chats') is False, project=first)
                 listed = lists()
-                self.gate('an_unshared_list_holds_only_its_joined_groups_tasks', titles['a'] in listed['a'] and titles['b'] in listed['b']
-                          and not any(titles[key] in value for key in ('unjoined', 'personal') for value in listed.values()), seen=seen(listed))
+                self.gate('an_unshared_list_still_holds_the_whole_project', titles['a'] in listed['a'] and titles['unjoined'] in listed['a']
+                          and titles['b'] in listed['b'] and titles['unjoined'] not in listed['b']
+                          and not any(titles['personal'] in value for value in listed.values()), seen=seen(listed))
                 for key in ('unjoined', 'personal', 'a'):
                     got = self.task_tool({'action': 'get', 'id': tasks[key]}, chat=person, sender=person)
-                    if key == 'a':
-                        self.gate('reads_a_joined_groups_task', titles['a'] in json.dumps(got, ensure_ascii=False), result=str(got)[:300])
-                    else:
-                        self.gate(key+'_task_not_found', got.get('error') == 'task_not_found' and titles[key] not in json.dumps(got, ensure_ascii=False),
+                    if key == 'personal':
+                        self.gate('personal_task_not_found', got.get('error') == 'task_not_found' and titles[key] not in json.dumps(got, ensure_ascii=False),
                                   result=str(got)[:300])
+                    else:
+                        self.gate('unshared_reads_'+key+'_task', titles[key] in json.dumps(got, ensure_ascii=False), result=str(got)[:300])
                 mark = 'Not added '+number
                 added = self.task_tool({'action': 'add', 'title': mark, 'scope': first['id']}, chat=person, sender=person)
                 # Nocheh's MCP server runs tasks only to list and read for a member's chat (src/mcp/server.ts).
@@ -5195,31 +5204,33 @@ class ProductScenarios(Scenarios):
     def member_app_tasks(self):
         # A member like Mira, in GP1 (GROUP) and GP3 (THIRD_GROUP) of project P1 and in NG1 (NEW_GROUP) of no project,
         # opens the members' app from their menu button (ADR-0265). P1 also holds GP2 (OTHER_GROUP), where the owner ticked
-        # them but Telegram never showed them. They see the tasks of GP1, GP3 and the whole of P1, never GP2's or the owner's
-        # personal ones, and on a task the owner moved onto GP1's board never the owner's private column, the owner's name
-        # for the person assigned, or a comment from before it joined the board. With write they add, finish, trash and
-        # restore and comment, never with a stale version or a refused field; with read they read only. Launch data from the
-        # owner, a stranger, a group or another key is refused. The marks are saved for member_app_never_leaks. P1 shares its
-        # group chats (the default), which the app does not follow (a known gap, ADR-0267): GP2 stays out here, while the
-        # member's private chat would read it (member_private_chat_reads_joined_groups).
+        # them but Telegram never showed them; P2 holds none of their groups. They see P1's whole list, GP2's task included
+        # (ADR-0276), never P2's task or the owner's personal ones, and on a task the owner moved onto GP1's board never the
+        # owner's private column or a comment from before it joined the board. The person assigned shows by their People
+        # name, which is their name everywhere (ADR-0274).
+        # With write they add, finish, trash and restore and comment, never with a stale version or a refused field; with
+        # read they read only. Launch data from the owner, a stranger, a group or another key is refused. The marks are
+        # saved for member_app_never_leaks.
         person, number = self.fresh_person(), str(self.f.ids())
-        hidden = {'GP2MARK'+number: 'a task title of a group the member never joined', 'PERSONALMARK'+number: 'the owner\'s personal task',
-                  'OWNERCOLMARK'+number: 'a private column on a task the member sees', 'OWNERNAMEMARK'+number: 'the owner\'s name for the person assigned',
+        hidden = {'OTHERPROJECTMARK'+number: 'a task title of a project the member is in no group of', 'PERSONALMARK'+number: 'the owner\'s personal task',
+                  'OWNERCOLMARK'+number: 'a private column on a task the member sees',
                   'PREJOINMARK'+number: 'a comment from before the task joined the board'}
-        seen = {name: 'APPSEEN'+name+'x'+number for name in ('gp1', 'gp3', 'p1', 'moved', 'shared', 'postjoin', 'made')}
+        seen = {name: 'APPSEEN'+name+'x'+number for name in ('gp1', 'gp2', 'gp3', 'p1', 'moved', 'shared', 'postjoin', 'made')}
+        people_name = 'APPNAME'+number
         canaries.save_app_marks(self.f.directory, hidden, {mark: name for name, mark in seen.items()})
-        gp2, personal, ownercol, ownername, prejoin = hidden
+        far, personal, ownercol, prejoin = hidden
         self.new_group_chat()
         item = self.add_member(person, (GROUP, OTHER_GROUP, THIRD_GROUP, NEW_GROUP))
         try:
             for group in (GROUP, THIRD_GROUP, NEW_GROUP):
                 self.said_in_group(person, group, 'سلام همه '+number)
-            with self.groups_in_projects({'App P1 '+number: (GROUP, OTHER_GROUP, THIRD_GROUP)}) as made, self.task_columns(number) as (private, shared), \
-                    self.owner_named(ownername) as named:
+            with self.groups_in_projects({'App P1 '+number: (GROUP, OTHER_GROUP, THIRD_GROUP), 'App P2 '+number: ()}) as made, \
+                    self.task_columns(number) as (private, shared), \
+                    self.owner_named(people_name) as named:
                 project = made['App P1 '+number]['id']
                 tasks = {'gp1': self.owner_task('Plan the trip '+seen['gp1'], project, GROUP), 'gp3': self.owner_task('Book seats '+seen['gp3'], project, THIRD_GROUP),
-                         'p1': self.owner_task('Whole trip '+seen['p1'], project), 'gp2': self.owner_task('Other group '+gp2, project, OTHER_GROUP),
-                         'personal': self.owner_task('My own '+personal)}
+                         'p1': self.owner_task('Whole trip '+seen['p1'], project), 'gp2': self.owner_task('Other group '+seen['gp2'], project, OTHER_GROUP),
+                         'far': self.owner_task('Other project '+far, made['App P2 '+number]['id']), 'personal': self.owner_task('My own '+personal)}
                 # A personal task with a private and a shared column, a person assigned and a comment, moved onto GP1's board.
                 moved = self.owner_task('Moved in '+seen['moved'], properties={private: ownercol, shared: seen['shared']}, assignees=[named])
                 self.f.app('/v1/tasks/'+moved+'/comments', {'operation_id': self.operation_id('owner-comment'), 'text': 'Before '+prejoin})
@@ -5242,31 +5253,43 @@ class ProductScenarios(Scenarios):
                 self.gate('their_joined_groups_only', boards == expected, boards=boards)
                 self.gate('their_one_board', [row.get('id') for row in me.get('projects') or []] == [project] and me.get('mode') == 'write',
                           me={key: me.get(key) for key in ('mode', 'reminders')})
+                # The board names every group of P1, GP2 among them, which its tasks' labels show; their own groups stay theirs.
+                named_groups = sorted(row.get('id') for board in me.get('projects') or [] for row in board.get('groups') or [])
+                self.gate('board_names_the_projects_groups', named_groups == sorted(self.f.chat(group) for group in (GROUP, OTHER_GROUP, THIRD_GROUP)),
+                          groups=len(named_groups))
                 self.gate('no_owner_clock_or_people', not {'time_zone', 'owner', 'members', 'people'} & set(me))
                 titles = self.app_titles(person, project)
-                self.gate('sees_gp1_gp3_and_p1', all(seen[name] in titles for name in ('gp1', 'gp3', 'p1', 'moved')), found=canaries.found(titles, set(seen.values())))
-                self.gate('never_gp2_or_personal', not canaries.found(titles, {gp2, personal}))
+                self.gate('sees_the_whole_project', all(seen[name] in titles for name in ('gp1', 'gp2', 'gp3', 'p1', 'moved')),
+                          found=canaries.found(titles, set(seen.values())))
+                self.gate('never_another_project_or_personal', not canaries.found(titles, {far, personal}))
                 listing = self.member_app('board_raw', '/tasks'+self.app_query(project=project), person)
                 rows = listing.get('tasks') or []
-                # The person the owner assigned shows by their own Telegram name when they are in one of the member's groups
-                # on this board, else is only counted; the owner's name for them never shows (ADR-0265 D6).
+                # The person the owner assigned shows by their People name, their name everywhere (ADR-0274), when Telegram
+                # shows them in one of the groups of this board's project, else is only counted (ADR-0265 D6, ADR-0276);
+                # which one depends on what earlier scenarios of the run did.
                 assigned = [(task.get('assignees') or [], task.get('assignees_other')) for task in rows if task.get('id') == moved]
                 self.gate('no_people_on_the_board', not any({'people', 'origin', 'external', 'revision'} & set(task) for task in rows)
                           and all(task.get('assignees') == [] and task.get('assignees_other') == 0 for task in rows if task.get('id') != moved)
-                          and not canaries.found(json.dumps(listing, ensure_ascii=False), {ownername})
-                          and len(assigned) == 1 and len(assigned[0][0])+assigned[0][1] == 1
-                          and all(set(row) == {'name'} and row['name'] and ownername not in row['name'] for row in assigned[0][0]),
+                          and assigned in ([([{'name': people_name}], 0)], [([], 1)]),
                           assigned=assigned)
                 only = self.app_titles(person, project, group=self.f.chat(THIRD_GROUP))
                 self.gate('group_filter', seen['gp3'] in only and seen['gp1'] not in only)
+                # GP2's task carries GP2 as its label, and the filter finds it by a group the member is not in.
+                labels = {task.get('id'): task.get('group') for task in rows if task.get('id') in (tasks['gp1'], tasks['gp2'], tasks['p1'])}
+                self.gate('tasks_labelled_with_their_groups', labels == {tasks['gp1']: self.f.chat(GROUP), tasks['gp2']: self.f.chat(OTHER_GROUP), tasks['p1']: None},
+                          labels=labels)
+                only = self.app_titles(person, project, group=self.f.chat(OTHER_GROUP))
+                self.gate('other_group_filter', seen['gp2'] in only and seen['gp1'] not in only)
                 self.member_app('person_filter_refused', '/tasks'+self.app_query(project=project, person='x'), person, status=400, error='task_filter_not_allowed')
-                for name in ('gp2', 'personal'):
+                self.member_app('other_project_board_refused', '/tasks'+self.app_query(project=made['App P2 '+number]['id']), person, status=403,
+                                error='task_scope_denied')
+                for name in ('far', 'personal'):
                     self.member_app(name+'_task_not_found', '/tasks/'+tasks[name], person, status=404)
                 detail = self.member_app('moved_task_opens', '/tasks/'+moved, person)
                 text = json.dumps(detail, ensure_ascii=False)
                 self.gate('moved_task_shows_what_joined_the_board', seen['postjoin'] in text and seen['shared'] in text and detail.get('on_board_since')
                           and 'created_at' not in detail and 'created_by' not in detail)
-                self.gate('moved_task_keeps_the_owners_side', not canaries.found(text, {ownercol, ownername, prejoin}) and private not in detail.get('properties', {}))
+                self.gate('moved_task_keeps_the_owners_side', not canaries.found(text, {ownercol, prejoin}) and private not in detail.get('properties', {}))
                 # Their changes, with write.
                 operation = 'app-create-'+number
                 body = {'operation_id': operation, 'project': project, 'title': 'Bring maps '+seen['made']}
@@ -5309,7 +5332,7 @@ class ProductScenarios(Scenarios):
                 self.change_member(self.member_item(person), tasks='write')
                 self.gate('write_again', self.member_app('write_me', '/me', person).get('mode') == 'write')
                 # The positive control: the owner's own view holds every mark the member never saw.
-                owner_side = json.dumps([self.owner_detail(task) for task in (moved, tasks['gp2'], tasks['personal'])], ensure_ascii=False)
+                owner_side = json.dumps([self.owner_detail(task) for task in (moved, tasks['far'], tasks['personal'])], ensure_ascii=False)
                 self.gate('owner_sees_every_mark', set(canaries.found(owner_side, set(hidden))) == set(hidden), found=canaries.found(owner_side, set(hidden)))
         finally:
             self.remove_member(item)
@@ -5348,32 +5371,107 @@ class ProductScenarios(Scenarios):
             self.remove_member(item)
 
     def member_app_drops_a_left_group(self):
-        # A member left GP1 (GROUP) while Nocheh missed it (D5). Opening the app asks Telegram about groups whose presence is
-        # more than 6 hours old: GROUP, where Telegram now says they left, drops out with its board and tasks, and
-        # OTHER_GROUP, where they still are, stays. The app reads joined groups alone even while the project shares its group
-        # chats (a known gap, ADR-0267), so GROUP's board drops out here.
+        # A member left GP1 (GROUP) and GP3 (THIRD_GROUP) while Nocheh missed it (D5). GROUP is their only group in project
+        # A; OTHER_GROUP, where they still are, and THIRD_GROUP are in project B. Opening the app asks Telegram about groups
+        # whose presence is more than 6 hours old: both left groups drop out of their groups, and A's board with its task,
+        # as GROUP was their last group there; B's board stays whole, THIRD_GROUP's task included, as a board is its
+        # project's whole list while one of their groups is in it (ADR-0276).
         person, number = self.fresh_person(), str(self.f.ids())
-        item = self.add_member(person, (GROUP, OTHER_GROUP))
+        left_groups, groups = (GROUP, THIRD_GROUP), (GROUP, OTHER_GROUP, THIRD_GROUP)
+        item = self.add_member(person, groups)
         try:
-            for group in (GROUP, OTHER_GROUP):
+            for group in groups:
                 self.said_in_group(person, group, 'سلام '+number)
-            with self.groups_in_projects({'App left '+number: (GROUP, OTHER_GROUP)}) as made:
-                project = made['App left '+number]['id']
-                left, kept = self.owner_task('Left board APPLEFT'+number, project, GROUP), self.owner_task('Kept board APPKEPT'+number, project, OTHER_GROUP)
-                # A board read asks Telegram nothing; it shows both while both are fresh.
-                titles = self.app_titles(person, project)
-                self.gate('both_boards_to_start_with', 'APPLEFT'+number in titles and 'APPKEPT'+number in titles)
-                for group in (GROUP, OTHER_GROUP):
+            with self.groups_in_projects({'App left A '+number: (GROUP,), 'App left B '+number: (OTHER_GROUP, THIRD_GROUP)}) as made:
+                first, second = made['App left A '+number]['id'], made['App left B '+number]['id']
+                left = self.owner_task('Left board APPLEFT'+number, first, GROUP)
+                kept, still = self.owner_task('Kept board APPKEPT'+number, second, OTHER_GROUP), self.owner_task('Still on board APPSTILL'+number, second, THIRD_GROUP)
+                # A board read asks Telegram nothing; it shows both boards while every group is fresh.
+                titles = self.app_titles(person, second)
+                self.gate('both_boards_to_start_with', 'APPLEFT'+number in self.app_titles(person, first)
+                          and all(mark+number in titles for mark in ('APPKEPT', 'APPSTILL')))
+                for group in groups:
                     self.age_presence(person, group, '7 hours')
-                self.f.control({'chat_members': [{'chat_id': GROUP, 'user_id': person, 'status': 'left'}]})
-                asked = {group: self.member_checks(person, group) for group in (GROUP, OTHER_GROUP)}
+                self.f.control({'chat_members': [{'chat_id': group, 'user_id': person, 'status': 'left'} for group in left_groups]})
+                asked = {group: self.member_checks(person, group) for group in groups}
                 me = self.member_app('opened_after_leaving', '/me', person)
-                self.gate('telegram_asked_about_both', all(self.member_checks(person, group) > asked[group] for group in (GROUP, OTHER_GROUP)))
+                self.gate('telegram_asked_about_each', all(self.member_checks(person, group) > asked[group] for group in groups))
                 ids = [row.get('id') for row in me.get('groups') or []]
-                self.gate('left_group_dropped', self.f.chat(GROUP) not in ids and self.f.chat(OTHER_GROUP) in ids, groups=len(ids))
-                self.member_app('left_groups_task_gone', '/tasks/'+left, person, status=404)
+                self.gate('left_groups_dropped', not any(self.f.chat(group) in ids for group in left_groups) and self.f.chat(OTHER_GROUP) in ids, groups=len(ids))
+                self.gate('board_drops_with_its_last_group', [row.get('id') for row in me.get('projects') or []] == [second],
+                          boards=len(me.get('projects') or []))
+                self.member_app('left_boards_task_gone', '/tasks/'+left, person, status=404)
+                self.member_app('left_board_refused', '/tasks'+self.app_query(project=first), person, status=403, error='task_scope_denied')
                 self.member_app('kept_groups_task_opens', '/tasks/'+kept, person)
-                self.wait('listed_as_left', lambda: self.member_presence(person, self.f.chat(GROUP)) == 'left', 60)
+                self.member_app('left_groups_task_stays_on_the_kept_board', '/tasks/'+still, person)
+                self.wait('listed_as_left', lambda: all(self.member_presence(person, self.f.chat(group)) == 'left' for group in left_groups), 60)
+        finally:
+            self.remove_member(item)
+
+    def member_app_sees_whole_project(self):
+        # A board is its project's whole list, whatever the project's "Share group chats" (ADR-0276). With sharing off, a
+        # member in GROUP alone reads the task of OTHER_GROUP, another group of the project, labelled with it; with write
+        # they change it, comment on it, add a subtask under it (labelled OTHER_GROUP, as its parent) and add a task to
+        # OTHER_GROUP by name, while a plain add lands in GROUP. Their own groups still name GROUP alone; the board names
+        # both. THIRD_GROUP, in another project, is never seen: its task is not found, its board is refused, and no task
+        # can be labelled with it. Turning sharing on changes nothing of this.
+        person, number = self.fresh_person(), str(self.f.ids())
+        own_mark, other_mark, far_mark = 'APPOWN'+number, 'APPSIBLING'+number, 'APPFAR'+number
+        item = self.add_member(person, (GROUP,))
+        try:
+            self.said_in_group(person, GROUP, 'سلام '+number)
+            with self.groups_in_projects({'App whole '+number: (GROUP, OTHER_GROUP), 'App far '+number: (THIRD_GROUP,)}, share=False) as made:
+                project, far_project = made['App whole '+number], made['App far '+number]
+                self.gate('project_starts_unshared', project.get('share_chats') is False, project=project)
+                own = self.owner_task('Own board '+own_mark, project['id'], GROUP)
+                other = self.owner_task('Sibling board '+other_mark, project['id'], OTHER_GROUP)
+                far = self.owner_task('Far board '+far_mark, far_project['id'], THIRD_GROUP)
+                me = self.member_app('me', '/me', person)
+                boards = me.get('projects') or []
+                self.gate('groups_name_only_their_own', [row.get('id') for row in me.get('groups') or []] == [self.f.chat(GROUP)], groups=len(me.get('groups') or []))
+                self.gate('one_board_naming_both_groups', [row.get('id') for row in boards] == [project['id']]
+                          and sorted(row.get('id') for row in boards[0].get('groups') or []) == sorted([self.f.chat(GROUP), self.f.chat(OTHER_GROUP)])
+                          and self.f.chat(THIRD_GROUP) not in json.dumps(me), boards=len(boards))
+                titles = self.app_titles(person, project['id'])
+                self.gate('reads_both_groups_tasks', own_mark in titles and other_mark in titles and far_mark not in titles,
+                          found=canaries.found(titles, {own_mark, other_mark, far_mark}))
+                rows = self.member_app('board_raw', '/tasks'+self.app_query(project=project['id']), person).get('tasks') or []
+                labels = {row.get('id'): row.get('group') for row in rows if row.get('id') in (own, other)}
+                self.gate('tasks_labelled_with_their_groups', labels == {own: self.f.chat(GROUP), other: self.f.chat(OTHER_GROUP)}
+                          and not any('read_only' in row for row in rows), labels=labels)
+                detail = self.member_app('other_opens', '/tasks/'+other, person)
+                self.gate('other_opens_like_their_own', 'read_only' not in detail and detail.get('group') == self.f.chat(OTHER_GROUP))
+                commented = self.member_app('other_commented', '/tasks/'+other+'/comments', person, {'operation_id': 'app-whole-comment-'+number,
+                                                                                                    'text': 'Seen '+number})
+                self.gate('other_comment_kept', any(row.get('body') == 'Seen '+number for row in commented.get('comment_list') or []))
+                under = self.member_app('added_under_other', '/tasks', person, {'operation_id': 'app-whole-under-'+number, 'project': project['id'],
+                                                                               'parent': other, 'title': 'Under '+number})
+                self.gate('subtask_takes_its_parents_group', under.get('parent_id') == other and under.get('group') == self.f.chat(OTHER_GROUP),
+                          group=under.get('group'))
+                named = self.member_app('added_to_other', '/tasks', person, {'operation_id': 'app-whole-add-'+number, 'project': project['id'],
+                                                                            'group': self.f.chat(OTHER_GROUP), 'title': 'Named '+number})
+                self.gate('add_to_other_lands_there', named.get('group') == self.f.chat(OTHER_GROUP), group=named.get('group'))
+                added = self.member_app('plain_add', '/tasks', person, {'operation_id': 'app-whole-plain-'+number, 'project': project['id'], 'title': 'Mine '+number})
+                self.gate('plain_add_lands_in_their_group', added.get('group') == self.f.chat(GROUP), group=added.get('group'))
+                version = self.member_app('other_reopens', '/tasks/'+other, person)['version']
+                done = self.member_app('other_finished', '/tasks/'+other, person, {'operation_id': 'app-whole-done-'+number, 'expected_version': version,
+                                                                                  'patch': {'state': 'done'}})
+                self.gate('other_changes', done.get('state') == 'done' and self.owner_detail(other).get('state') == 'done')
+                # Another project's group is never theirs to read or to label with.
+                self.member_app('far_task_not_found', '/tasks/'+far, person, status=404)
+                self.member_app('far_board_refused', '/tasks'+self.app_query(project=far_project['id']), person, status=403, error='task_scope_denied')
+                self.member_app('add_to_far_group_refused', '/tasks', person, {'operation_id': 'app-whole-far-'+number, 'project': project['id'],
+                                                                              'group': self.f.chat(THIRD_GROUP), 'title': 'No'}, status=403, error='task_group_denied')
+                self.gate('far_filter_finds_nothing', far_mark not in self.app_titles(person, project['id'], group=self.f.chat(THIRD_GROUP)))
+                # Sharing on reads the same: no more, no less.
+                shared = self.f.app('/v1/projects', {'id': project['id'], 'name': project['name'], 'description': project['description'],
+                                                     'state': 'active', 'share_chats': True, 'expected_revision': project['revision'],
+                                                     'operation_id': 'scenario-app-share-'+number})
+                self.gate('project_shares', shared.get('share_chats') is True, project=shared)
+                titles = self.app_titles(person, project['id'])
+                self.gate('shared_reads_the_same', all(mark in titles for mark in (own_mark, other_mark, 'Named '+number, 'Mine '+number))
+                          and far_mark not in titles, found=canaries.found(titles, {own_mark, other_mark, far_mark}))
+                self.member_app('far_task_still_not_found', '/tasks/'+far, person, status=404)
         finally:
             self.remove_member(item)
 
@@ -5437,7 +5535,7 @@ class ProductScenarios(Scenarios):
     def member_app_never_leaks(self):
         # The members' app sweep, next to private_canaries_never_left_the_owner: no answer the app gave anyone in this run
         # holds a private mark (PRIVATEMARK, PROBEMARK, any member's MEMBERMARK, a member's own included) or one of the
-        # app's own (GP2MARK, PERSONALMARK, OWNERCOLMARK, OWNERNAMEMARK, PREJOINMARK); and no reminder that reached a
+        # app's own (OTHERPROJECTMARK, PERSONALMARK, OWNERCOLMARK, PREJOINMARK); and no reminder that reached a
         # member's own chat holds one, or anyone's Telegram name. The visible marks show up in the answers, so the sweep
         # reads the right thing. Without saved answers or marks the sweep fails.
         responses = canaries.load_http(self.f.directory)
@@ -5507,5 +5605,5 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  # The members' app (step 5), ADR-0265; its sweep reads every answer the scenarios before it got, and the
                  # reminders scenario 5 and the app's own sent to members' chats.
                  'owner_mini_app_still_works', 'menu_button_on_apply', 'member_app_tasks', 'member_app_ends_on_removal', 'member_app_drops_a_left_group',
-                 'member_app_reminder_goes_to_setter', 'member_app_never_leaks',
+                 'member_app_sees_whole_project', 'member_app_reminder_goes_to_setter', 'member_app_never_leaks',
                  'private_canaries_never_left_the_owner']

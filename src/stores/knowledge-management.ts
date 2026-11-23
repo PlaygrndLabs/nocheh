@@ -354,14 +354,14 @@ export class KnowledgeManagementRepository {
   return Promise.all(rows.map(async row=>({id:row.id as string,name:row.name as string,groups:(await projectGroups(db,row.id,served)).filter(group=>!moved.has(group))})));
  }
 
- /** The projects with tasks set on the whole project that these moves bring a chat into from another project, or from
-  * none. A group sees those tasks, archived and in the trash too, besides its own; never another group's (ADR-0243,
-  * ADR-0248). The owner's review says so. */
+ /** The projects with tasks that these moves bring a chat into from another project, or from none. A group sees every
+  * task of the project's list, archived and in the trash too, whatever its group (ADR-0243, ADR-0276). The owner's
+  * review says so. */
  private async taskProjects(moves:{space_id:string;mode:string;project_id:string|null}[],db:Pick<pg.PoolClient,'query'>):Promise<{id:string;name:string}[]>{
   const ids=new Set<string>();
   for(const move of moves){const {now,next}=await this.moveProjects(move,db);if(next&&next!==now)ids.add(next);}
   return ids.size?(await db.query(`SELECT p.id,p.name FROM projects p WHERE p.id=ANY($1::text[])
-   AND EXISTS(SELECT 1 FROM owner_tasks t WHERE t.project_id=p.id AND t.group_id IS NULL) ORDER BY p.id`,[[...ids]])).rows:[];
+   AND EXISTS(SELECT 1 FROM owner_tasks t WHERE t.project_id=p.id) ORDER BY p.id`,[[...ids]])).rows:[];
  }
 
  private async baselineMatches(permission:OrganizationDelegation,space:string,db:Pick<pg.PoolClient,'query'>){

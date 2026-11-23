@@ -7,17 +7,17 @@ import {isTelegramAccount} from '../chats-telegram.js';
 import {HttpError,json,object} from '../http.js';
 import {MEMBER_APP_BODY_MAX,MEMBER_APP_CORE_PREFIX,MEMBER_APP_QUERY_MAX,MEMBER_APP_TASK_WRITES,MEMBER_APP_WRITES_PER_10_MIN,
   MEMBER_APP_WRITES_PER_DAY,MEMBER_LAUNCH_HEADER,memberAppErrors,memberAppRoute,memberTaskQuery,
-  type MemberGroupBoard,type MemberMe,type MemberMeGroup,type MemberRemindersState} from '../member-app-wire.js';
+  type MemberBoardGroup,type MemberGroupBoard,type MemberMe,type MemberMeGroup,type MemberRemindersState} from '../member-app-wire.js';
 import type {MemberTasks} from '../member-wire.js';
 import type {RuntimeCall} from '../runtime.js';
-import {readSet,readSetParam,readSetSql} from '../spaces.js';
+import {groupWithTopics} from '../spaces.js';
 import {MEMBER_LAUNCH_MAX_AGE,verifyLaunchUser,type LaunchUser} from '../telegram-launch.js';
 import {chatLabel} from './chats.js';
 import {assertStorageActive} from './lifecycle.js';
 import {MEMBER_RECHECK_HOURS,joinedGroups,recheckMemberAppGroups} from './member-reads.js';
 import {memberTaskViews} from './member-task-views.js';
 import {reloadMembers} from './members.js';
-import type {MemberAppPrincipal,TaskRepository,TopicMemory} from './tasks.js';
+import type {MemberAppPrincipal,TaskRepository} from './tasks.js';
 
 /*
  * The members' app's own listener in nocheh-app (step 5, ADR-0265 D2-D4, D13). nocheh-miniapp forwards the member page's
@@ -45,12 +45,12 @@ import type {MemberAppPrincipal,TaskRepository,TopicMemory} from './tasks.js';
  */
 
 /** What the member listener reads and calls: the control store, the task repository's member methods, the policy (who
- * the owner is, and how topics share their group's tasks), Nocheh's runtime calls (the group check) and the data folder
- * (a restored installation stays inactive). */
+ * the owner is), Nocheh's runtime calls (the group check) and the data folder (a restored installation stays
+ * inactive). */
 export interface MemberAppServices {
   control:pg.Pool;
   tasks:Pick<TaskRepository,'memberList'|'memberGet'|'memberCreate'|'memberUpdate'|'memberComment'|'memberReminders'>;
-  policy:()=>Pick<AssistantPolicy,'owner_id'|'owner_chat'|'topic_memory'>;
+  policy:()=>Pick<AssistantPolicy,'owner_id'|'owner_chat'>;
   call:RuntimeCall;
   dataDir?:string;
 }
@@ -122,9 +122,10 @@ export async function countMemberWrite(db:Pick<pg.Pool,'query'>,member:string):P
 }
 
 /** GET me: the member's name, Tasks permission, reminders, boards and groups (each with its Telegram title, its board,
- * and the open tasks of that group on an open board). Nothing names the owner, another member, or the owner's time
- * zone. */
-async function me(db:Pick<pg.Pool,'query'>,principal:MemberAppPrincipal,groups:readonly string[],topicMemory:TopicMemory):Promise<MemberMe> {
+ * and the open tasks labelled with that group or one of its topics on an open board). Each board also names the
+ * project's groups now, by Telegram title, which its tasks' group labels show (ADR-0276). Nothing names the owner,
+ * another member, or the owner's time zone. */
+async function me(db:Pick<pg.Pool,'query'>,principal:MemberAppPrincipal,groups:readonly string[]):Promise<MemberMe> {
   const rows=groups.length?(await db.query(`SELECT c.id,c.kind,c.title,c.app_type,d.username,p.id AS project,p.state AS project_state FROM chats c
       LEFT JOIN chat_details d ON d.chat_id=c.id LEFT JOIN project_assignments a ON a.space_id=c.id AND a.mode='assigned' LEFT JOIN projects p ON p.id=a.project_id
     WHERE c.id=ANY($1::text[]) AND c.kind='group'`,[[...groups]])).rows:[];
@@ -132,16 +133,20 @@ async function me(db:Pick<pg.Pool,'query'>,principal:MemberAppPrincipal,groups:r
   for(const row of rows) {
     const board:MemberGroupBoard=!row.project?'none':row.project_state==='active'&&open.has(row.project)?'open':'closed';
     const item:MemberMeGroup={id:row.id,title:chatLabel({kind:'group',title:row.title,app_type:row.app_type},row.username,null),board,project:board==='open'?row.project:null};
-    if(board==='open') {
-      const reach=readSet({home:row.id,project:row.project,...(topicMemory==='group'?{whole:[row.id]}:{exact:[row.id]})});
-      item.open_count=(await db.query(`SELECT count(*)::int AS n FROM owner_tasks WHERE project_id=$1 AND state='open' AND archived_at IS NULL AND deleted_at IS NULL
-        AND ${readSetSql('group_id',2)}`,[row.project,readSetParam(reach)])).rows[0].n;
-    }
+    if(board==='open')item.open_count=(await db.query(`SELECT count(*)::int AS n FROM owner_tasks WHERE project_id=$1 AND state='open' AND archived_at IS NULL
+      AND deleted_at IS NULL AND group_id=ANY($2::text[])`,[row.project,groupWithTopics(row.id)??[]])).rows[0].n;
     items.push(item);
   }
-  items.sort((a,b)=>(a.title??'').localeCompare(b.title??'')||(a.id<b.id?-1:a.id>b.id?1:0));
-  return {name:principal.name??'',mode:principal.mode,reminders:principal.reminders,projects:principal.views.map(view=>({id:view.project,name:view.name})),
-    groups:items};
+  const byTitle=(a:{id:string;title:string|null},b:{id:string;title:string|null})=>(a.title??'').localeCompare(b.title??'')||(a.id<b.id?-1:a.id>b.id?1:0);
+  items.sort(byTitle);
+  // Each board's groups: every group assigned to its project now, the member's own and the others alike.
+  const named=principal.views.length?(await db.query(`SELECT a.project_id AS project,c.id,c.title,c.app_type,d.username FROM project_assignments a
+      JOIN chats c ON c.id=a.space_id AND c.kind='group' LEFT JOIN chat_details d ON d.chat_id=c.id
+    WHERE a.project_id=ANY($1::text[]) AND a.mode='assigned'`,[principal.views.map(view=>view.project)])).rows:[];
+  const boardGroups=(project:string):MemberBoardGroup[]=>named.filter(row=>row.project===project)
+    .map(row=>({id:row.id as string,title:chatLabel({kind:'group',title:row.title,app_type:row.app_type},row.username,null)})).sort(byTitle);
+  return {name:principal.name??'',mode:principal.mode,reminders:principal.reminders,
+    projects:principal.views.map(view=>({id:view.project,name:view.name,groups:boardGroups(view.project)})),groups:items};
 }
 
 async function readBody(req:IncomingMessage):Promise<Buffer> {
@@ -228,14 +233,15 @@ async function handle(services:MemberAppServices,options:MemberAppOptions,req:In
     try{await countMemberWrite(db,identity.member);}
     catch(error){if((error as {code?:unknown})?.code==='23503')throw refuse('closed',403);throw error;}
   }
-  // 10. The member's boards from the groups confirmed lately; a group Telegram could not confirm is left out.
+  // 10. The member's boards from the groups confirmed lately; a group Telegram could not confirm is left out. Each board is
+  // its project's whole list, whatever the project's "Share group chats" (ADR-0276); the member's own list of groups (me)
+  // stays the groups they are in.
   const groups=(await joinedGroups(db,identity.member,{owner,freshHours:MEMBER_RECHECK_HOURS})).filter(group=>group.fresh).map(group=>group.chat);
-  const topicMemory:TopicMemory=policy.topic_memory??'group';
   const principal:MemberAppPrincipal=Object.freeze({member:identity.member,account:identity.account,accounts:Object.freeze([...identity.accounts]),
     name:launchName(init)??identity.display,mode:identity.mode,reminders:remindersState(identity),
-    views:Object.freeze(await memberTaskViews(db,groups,topicMemory)),chat:identity.chat});
+    views:Object.freeze(await memberTaskViews(db,groups)),chat:identity.chat});
   switch(route.name) {
-    case 'me':return json(res,200,await me(db,principal,groups,topicMemory));
+    case 'me':return json(res,200,await me(db,principal,groups));
     case 'tasks':return json(res,200,await services.tasks.memberList(principal,query!));
     case 'task':return json(res,200,await services.tasks.memberGet(principal,route.task!));
     case 'create':return json(res,200,await services.tasks.memberCreate(principal,body));

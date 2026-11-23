@@ -5,7 +5,8 @@
  * the real edge and member listener may trust them. Nothing here reaches the owner's data or routes.
  *
  * Members, by Telegram id: 201 Lena (read and write, in Aurora planning and Garden swap, each on a board, Weekend notes
- * with no board and Book club whose project is closed); 202 Ravi (read only, Aurora planning only); 203 Sana (read and
+ * with no board and Book club whose project is closed; Print crew, which she is not in, shares Aurora planning's board, so
+ * she sees its tasks and its name as their group, ADR-0276); 202 Ravi (read only, Aurora planning only); 203 Sana (read and
  * write, her private chat with Nocheh off, so no reminders); 204 Tom (paused); 205 Noor (no groups). The owner is 42;
  * anyone else is a stranger. The boards' statuses and shared columns are the owner's own names (PREVIEW_MEMBER_BOARD);
  * a task's assignees are already as the member listener sends them: Telegram names, and the rest counted.
@@ -31,15 +32,17 @@ export const PREVIEW_MEMBER_BOARD:{statuses:MemberTaskStatus[];columns:MemberTas
   {id:'c-rooms',name:'Rooms',type:'multi_select',options:[{id:'o-hall',name:'Hall'},{id:'o-yard',name:'Yard'}]},
   {id:'c-signed',name:'Signed off',type:'checkbox'}]};
 const hex=(seed:string)=>createHash('sha256').update('preview-member:'+seed).digest('hex');
-export const PREVIEW_MEMBER_PROJECTS={studio:hex('project:studio'),garden:hex('project:garden'),fair:hex('project:fair')};
-const projectNames:Record<string,string>={[PREVIEW_MEMBER_PROJECTS.studio]:'Studio launch',[PREVIEW_MEMBER_PROJECTS.garden]:'Garden redesign',[PREVIEW_MEMBER_PROJECTS.fair]:'Spring fair'};
+export const PREVIEW_MEMBER_PROJECTS={studio:hex('project:studio'),garden:hex('project:garden'),fair:hex('project:fair'),hidden:hex('project:hidden')};
+const projectNames:Record<string,string>={[PREVIEW_MEMBER_PROJECTS.studio]:'Studio launch',[PREVIEW_MEMBER_PROJECTS.garden]:'Garden redesign',[PREVIEW_MEMBER_PROJECTS.fair]:'Spring fair',
+ [PREVIEW_MEMBER_PROJECTS.hidden]:'Hidden project'};
 /** The groups, by a Nocheh chat id, their Telegram title and the project whose board they show (null: none). */
 const groups:{id:string;title:string;project:string|null;active:boolean}[]=[
  {id:'-30001',title:'Aurora planning',project:PREVIEW_MEMBER_PROJECTS.studio,active:true},
  {id:'-30002',title:'Garden swap',project:PREVIEW_MEMBER_PROJECTS.garden,active:true},
  {id:'-30003',title:'Weekend notes',project:null,active:true},
  {id:'-30004',title:'Book club',project:PREVIEW_MEMBER_PROJECTS.fair,active:false},
- {id:'-30005',title:'Hidden board',project:PREVIEW_MEMBER_PROJECTS.studio,active:true},
+ {id:'-30005',title:'Hidden board',project:PREVIEW_MEMBER_PROJECTS.hidden,active:true},
+ {id:'-30006',title:'Print crew',project:PREVIEW_MEMBER_PROJECTS.studio,active:true},
 ];
 type Member={telegram:string;name:string;state:'active'|'paused';tasks:'read'|'write';private_chat:boolean;reminders:boolean;groups:string[]};
 const members:Member[]=[
@@ -75,9 +78,11 @@ function seed():State {
   task('labels',{title:'<img src=x onerror=alert(1)> Label the seed trays',project:S,group:'-30001',tags:['Garden']}),
   task('thanks',{title:'Send the thank-you notes',project:S,group:'-30001',state:'done',status:'s-done',done_at:at(-1),finished_by:{kind:'member',name:'Ravi'}}),
   task('flyer',{title:'Old flyer draft',project:S,group:'-30001',trashed:true}),
+  // Another group's task on the same board: one list for the whole project, whatever its group (ADR-0276).
+  task('banner',{title:'Proof the banner',project:S,group:'-30006'}),
   task('beds',{title:'Measure the beds',project:G,group:'-30002',due_on:day(5)}),
-  // A board the preview's members never reach: nothing of it may ever show.
-  task('hidden',{title:'HIDDENMARK budget sheet',project:S,group:'-30005'}),
+  // A project the preview's members are in none of the groups of: nothing of it may ever show.
+  task('hidden',{title:'HIDDENMARK budget sheet',project:PREVIEW_MEMBER_PROJECTS.hidden,group:'-30005'}),
  ],signedOut:new Map(),receipts:new Map()};
 }
 state=seed();
@@ -98,15 +103,17 @@ function caller(req:IncomingMessage):Who {
 }
 const reminderState=(member:Member):MemberRemindersState=>member.tasks==='read'?{available:false,reason:'read_only'}:!member.reminders?{available:false,reason:'reminders_off'}:
  !member.private_chat?{available:false,reason:'private_chat_off'}:{available:true};
-/** The groups whose boards the member reaches, by project. */
+/** The member's own groups with a board, by project. */
 const reach=(member:Member)=>groups.filter(group=>member.groups.includes(group.id)&&group.active&&group.project);
-const visible=(member:Member,item:Stored)=>reach(member).some(group=>group.project===item.project&&(item.group===null||item.group===group.id))
- &&(item.group===null||member.groups.includes(item.group));
+/** A board is its project's whole list, whatever each task's group (ADR-0276). */
+const visible=(member:Member,item:Stored)=>reach(member).some(group=>group.project===item.project);
+/** Whether a group is one of a project's now: only such a group is a task's label, or one a task may take. */
+const inProject=(group:unknown,project:string)=>groups.some(item=>item.id===group&&item.project===project);
 const version=(item:Stored)=>hex('version:'+item.id+':'+item.revision).slice(0,32);
 function row(member:Member,item:Stored):MemberTask {
  const children=state.tasks.filter(other=>other.parent_id===item.id&&!other.trashed&&visible(member,other));
  const {revision,made_by,reminders,others,comment_list,notes,repeat,blocked_by,related,duplicate_of,attachments,activity,...rest}=item;
- return {...rest,version:version(item),subtasks:{open:children.filter(child=>child.state==='open').length,total:children.length},comments:comment_list.length,
+ return {...rest,group:inProject(item.group,item.project)?item.group:null,version:version(item),subtasks:{open:children.filter(child=>child.state==='open').length,total:children.length},comments:comment_list.length,
   mine:made_by===member.telegram||reminders.some(reminder=>reminder.by===member.telegram),
   reminders:{mine:reminders.filter(reminder=>reminder.by===member.telegram).map(reminder=>({id:reminder.id,at:reminder.at,state:'pending' as const})),
    others:others+reminders.filter(reminder=>reminder.by!==member.telegram).length}};
@@ -123,8 +130,10 @@ function find(member:Member,id:string):Stored {
  return item;
 }
 function me(member:Member):MemberMe {
- const seen=new Set<string>(),projects:{id:string;name:string}[]=[];
- for(const group of reach(member))if(!seen.has(group.project!)){seen.add(group.project!);projects.push({id:group.project!,name:projectNames[group.project!]!});}
+ const seen=new Set<string>(),projects:MemberMe['projects']=[];
+ const named=(project:string)=>groups.filter(group=>group.project===project).map(({id,title})=>({id,title})).sort((a,b)=>a.title.localeCompare(b.title));
+ for(const group of reach(member))if(!seen.has(group.project!)){seen.add(group.project!);
+  projects.push({id:group.project!,name:projectNames[group.project!]!,groups:named(group.project!)});}
  const items:MemberMeGroup[]=groups.filter(group=>member.groups.includes(group.id)).map(group=>!group.project?{id:group.id,title:group.title,board:'none',project:null}:
   !group.active?{id:group.id,title:group.title,board:'closed',project:null}:
   {id:group.id,title:group.title,board:'open',project:group.project,open_count:state.tasks.filter(item=>item.group===group.id&&item.state==='open'&&!item.trashed).length});
@@ -152,7 +161,7 @@ function apply(who:Who,item:Stored,fields:Record<string,unknown>) {
    if(!Array.isArray(value)||value.length>10||value.some(entry=>typeof entry!=='string'||!/[+-]\d{2}:\d{2}$|Z$/.test(entry)||Number.isNaN(Date.parse(entry))))throw new HttpError(400,'invalid_task_reminders');
    item.reminders=[...item.reminders.filter(entry=>entry.by!==member.telegram),...value.map(entry=>({id:hex('reminder:'+item.id+':'+entry+':'+member.telegram),at:new Date(entry as string).toISOString(),by:member.telegram}))];
   } else if(key==='group'){
-   if(value!==null&&!reach(member).some(group=>group.id===value&&group.project===item.project))throw new HttpError(403,memberAppErrors.fieldNotAllowed);
+   if(value!==null&&!inProject(value,item.project))throw new HttpError(403,'task_group_denied');
    item.group=value as string|null;changes.group_id={to:value};
   } else if(key==='state'){
    if(value!=='done'&&value!=='open')throw new HttpError(400,'invalid_task_state');
@@ -214,7 +223,7 @@ export async function memberAppPreview(req:IncomingMessage,res:ServerResponse,ur
   case 'tasks':{
    const query=memberTaskQuery(url.searchParams);
    if(!me(member).projects.some(project=>project.id===query.project))throw new HttpError(404,'project_not_found');
-   if(query.group&&!reach(member).some(group=>group.id===query.group&&group.project===query.project))throw new HttpError(400,memberAppErrors.filterNotAllowed);
+   if(query.group&&!inProject(query.group,query.project))throw new HttpError(400,memberAppErrors.filterNotAllowed);
    const all=state.tasks.filter(item=>item.project===query.project&&visible(member,item)&&(query.trash?item.trashed:!item.trashed&&(query.state==='done'?item.state!=='open':item.state==='open')));
    const tags=[...new Set(all.flatMap(item=>item.tags))].sort();
    const rows=all.filter(item=>(!query.group||item.group===query.group)&&(!query.tag||item.tags.includes(query.tag))).map(item=>row(member,item)).filter(item=>!query.mine||item.mine);
@@ -229,10 +238,9 @@ export async function memberAppPreview(req:IncomingMessage,res:ServerResponse,ur
     if(!me(member).projects.some(item=>item.id===project))throw new HttpError(403,memberAppErrors.fieldNotAllowed);
     for(const key of Object.keys(fields))if(!(MEMBER_TASK_CREATE_FIELDS as readonly string[]).includes(key))
      throw new HttpError((MEMBER_TASK_REFUSED_FIELDS as readonly string[]).includes(key)?403:400,(MEMBER_TASK_REFUSED_FIELDS as readonly string[]).includes(key)?memberAppErrors.fieldNotAllowed:'unknown_task_field');
-    // As the store: a subtask takes its parent's group, and one asked for elsewhere is refused; with no group and no
-    // parent, the member's first group on the board.
+    // As the store: a subtask takes its parent's group unless one is named; with no group and no parent, the member's
+    // first group on the board.
     const parent=fields.parent?find(member,String(fields.parent)):null;
-    if(parent&&'group' in fields&&fields.group!==parent.group)throw new HttpError(400,'task_parent_other_group');
     const home=reach(member).find(group=>group.project===project)?.id??null;
     const item=task('new:'+operation_id,{title:'',project:project as string,group:parent?parent.group:'group' in fields?null:home,made_by:member.telegram,
      created_at:new Date().toISOString(),created_by:actor(member),on_board_since:new Date().toISOString(),activity:[]});

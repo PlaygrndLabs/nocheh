@@ -178,7 +178,7 @@ export function MemberDetail({
                   <p className="text-sm font-medium">Tasks</p>
                   <p className="text-[13px] text-muted">
                     {allowed.tasks === 'read' ? 'Read only' : 'Read and write'}, in groups and the members’ app: the
-                    tasks of the groups they joined.
+                    whole task list of each project with a group they joined.
                   </p>
                 </div>
                 <Segmented
@@ -236,7 +236,7 @@ export function MemberDetail({
                 <Row
                   id="member-private-chat"
                   title="Private chat with Nocheh"
-                  hint="They can ask Nocheh about the groups they joined and see those groups’ tasks. There it only reads: no posts, jobs, web pages or task changes. You can read the chat under Messages › Members’ chats. Off, or paused, they get one short reply a day instead."
+                  hint="They can ask Nocheh about the groups they joined and see the tasks of those groups’ projects. There it only reads: no posts, jobs, web pages or task changes. You can read the chat under Messages › Members’ chats. Off, or paused, they get one short reply a day instead."
                   checked={allowed.private_chat}
                   disabled={busy}
                   onChange={on =>

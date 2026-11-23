@@ -290,7 +290,7 @@ guard epoch.
   to their other groups** (they confirm each post with their own card) and **Web
   pages and outside tools (no approval)**.
 - **Tasks**: **Read and write**, or **Read only**, where they list and read the
-  tasks their group reaches and change nothing. It counts in groups and in the
+  task list of their group's project and change nothing. It counts in groups and in the
   [members' app](#members-app) alike; write includes the trash. Under it,
   **Reminders to themselves**, on by default and only with read and write: off,
   they set no new reminder, in a group or the app (`task_reminders_off`), and can
@@ -402,8 +402,9 @@ an admin), a group not confirmed for 30 days is not read until they write there
 again.
 
 Tasks there are read only, one project at a time: each active project that holds
-a group they joined is one list, with the tasks set on that project and the
-tasks of those groups. Asked without a project when there are several, Nocheh
+a group they joined is one list, the project's whole list, whatever each task's
+group ([ADR-0276](adr/0276-a-projects-tasks-are-one-list.md)). Asked without a
+project when there are several, Nocheh
 names the lists to choose from. A group in no project has no tasks there.
 
 What the member may read is checked again on every read and tool call, so a
@@ -461,18 +462,23 @@ signed out gets "Open me again from the menu button".
 The app has four tabs:
 
 - **Tasks**: one board per active project that holds a group they joined, with
-  project chips when there are several. A board shows the tasks set on the
-  project itself and those of their groups in it, never another group's, never
-  your personal tasks. Each task shows as it is on that board: comments and
+  project chips when there are several. A board is the project's whole list,
+  whatever each task's group and whatever "Share group chats" says, never another
+  project's tasks, never your personal tasks; a task's group is only a label, named
+  by the group's Telegram title. Each task shows as it is on that board: comments and
   history from when it joined, shared columns only, never your own names for
-  people, an assignee by their Telegram name only when you linked them in Memory ›
-  People to an account in one of the member's groups (every other one is counted
+  people, an assignee only when you linked them in Memory ›
+  People to an account in one of the project's groups (every other one is counted
   as other people, so a row reads "Sara, Omid and 2 other people"), its status and
   shared columns by the names you gave them in Settings › Tasks, and "Made by" or
   "Finished by", with Telegram names, only when that happened there. **New task**
-  and **Edit** offer your statuses and a field for each shared column. Filters: Mine (tasks they made, set a reminder on or are
+  and **Edit** offer your statuses and a field for each shared column. A new task
+  is labelled with their first group there unless they pick another group of the
+  project or none, and the form says everyone in the project's groups will see
+  it. Filters: Mine (tasks they made, set a reminder on or are
   assigned to), Open,
-  Done, Trash (a subtask trashed on its own shows there too), a group and a tag;
+  Done, Trash (a subtask trashed on its own shows there too), a group of the
+  project and a tag;
   the group filter shows whenever one is on, so a group opened from **Groups** can
   be cleared. A subtask goes where the task it is under is. With **Read and write** they add, edit, finish,
   reopen, comment on, trash and restore any task they see, other people's
@@ -482,7 +488,7 @@ The app has four tabs:
   between, the drawer says so and reloads it. A member may make 60 changes in 10
   minutes and 500 a UTC day.
 - **Groups**: each group they are in that Nocheh serves, with its Telegram title,
-  its board and open tasks, "No task board" for a group in no project, or "Board
+  its board and the open tasks labelled with it, "No task board" for a group in no project, or "Board
   closed" for one whose project is not active.
 - **Chat**: greyed out, "Coming later."
 - **Settings**: where their reminders go, "Your private chat with Nocheh" or why they are off;
@@ -742,7 +748,8 @@ short ID the Chats page shows after the name
 A task reminder goes to whoever set it, at its time
 ([ADR-0265](adr/0265-member-mini-app.md)). A member's goes to their own private
 chat with Nocheh, one message each, while they are active with **Reminders to
-themselves** and private chat on and the task is still on one of their boards.
+themselves** and private chat on and the task is still on one of their boards,
+that is, its project still holds a group they joined, whatever the task's group.
 It shows the title, due day, project and notes (**Task reminder to a member**) and
 "👤 Set by you" (**Reminder lines to a member**), and never who else wrote or
 closed the task, or where. Before it sends into a member's chat, the bot asks the

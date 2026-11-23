@@ -6,7 +6,6 @@ import {groupChatId,groupSpace,groupWithTopics,parentSpace,recallCondition,valid
 import {chats} from '../chats.js';
 import {OwnerCommands} from './owner-commands.js';
 import {projectGroupsSql} from './project-groups.js';
-import {moveGroupTasks} from './tasks.js';
 
 /** The active project a group or topic belongs to, or null: a topic follows its group (ADR-0247). Used where a project's own
  *  connection may be used, such as its Notion (ADR-0268) and its GitHub copies (ADR-0269). */
@@ -53,7 +52,7 @@ export async function writeProject(db:pg.PoolClient,change:Omit<Project,'revisio
  * it (ADR-0247). A private chat, the owner's included, never joins one (ADR-0242). This one check covers the owner's
  * assignment, an applied organization proposal and its undo.
  */
-export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'revision'>&{expected_revision:number}):Promise<Assignment> {
+export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'revision'>&{expected_revision:number;tasks?:GroupTasks}):Promise<Assignment> {
   if(change.mode==='assigned'&&!groupSpace(change.space_id))throw new HttpError(400,'project_private_chat');
   if(parentSpace(change.space_id)&&change.mode!=='inherit')throw new HttpError(400,'project_topic_follows_group');
   const previous=(await db.query('SELECT revision,project_id,mode FROM project_assignments WHERE space_id=$1 FOR UPDATE',[change.space_id])).rows[0];
@@ -62,10 +61,40 @@ export async function writeAssignment(db:pg.PoolClient,change:Omit<Assignment,'r
   const result:Assignment={space_id:change.space_id,project_id:change.project_id,mode:change.mode,revision:change.expected_revision+1};
   await db.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,$3,$4)
     ON CONFLICT(space_id) DO UPDATE SET project_id=$2,mode=$3,revision=$4,updated_at=now()`,[result.space_id,result.project_id,result.mode,result.revision]);
-  // A group moving from one project to another takes its tasks and its topics' tasks with it; leaving every project
-  // leaves them on the old board, where only the owner sees them (ADR-0248).
-  if(groupChatId(change.space_id))await moveGroupTasks(db,change.space_id,previous?.mode==='assigned'?previous.project_id:null,result.mode==='assigned'?result.project_id:null);
+  // A group's tasks stay on its old project's list when it moves to another project or leaves every project, as the
+  // project's connections do; their group label then shows to no chat. Only the owner's move that asks to take them
+  // along moves them to the new project (ADR-0276).
+  if(change.tasks==='move'&&groupChatId(change.space_id)&&previous?.mode==='assigned'&&result.mode==='assigned')
+    await moveGroupTasks(db,change.space_id,previous.project_id,result.project_id);
   return result;
+}
+
+/** What happens to a group's tasks when the owner moves it to another project: they stay on the old project's list
+ * (the default), or move along with it. */
+export type GroupTasks='stay'|'move';
+/**
+ * Moves the tasks labelled with `group` or one of its topics from project `from` to project `to`, each with every task
+ * under it, whatever their labels, as a move of a task to another list does. One that sat under a task staying behind
+ * no longer sits under it. Every moved task joins its new list now (project_since), so the new project's chats see
+ * its comments and history only from here. Returns how many tasks moved.
+ */
+export async function moveGroupTasks(db:Pick<pg.PoolClient,'query'>,group:string,from:string|null,to:string|null):Promise<number> {
+  if(!groupChatId(group)||!from||!to||from===to)return 0;
+  const labels=groupWithTopics(group)??[group];
+  const moved=(await db.query(`WITH RECURSIVE top AS (
+      SELECT t.id FROM owner_tasks t WHERE t.project_id=$2 AND t.group_id=ANY($1::text[])
+        AND NOT EXISTS (SELECT 1 FROM owner_tasks p WHERE p.id=t.parent_id AND p.group_id=ANY($1::text[]))),
+    down AS (SELECT id FROM top UNION SELECT t.id FROM owner_tasks t JOIN down ON t.parent_id=down.id)
+    SELECT o.id,o.parent_id,o.parent_id IS NOT NULL AND o.id IN (SELECT id FROM top) AS cut FROM owner_tasks o JOIN down ON down.id=o.id ORDER BY o.id FOR UPDATE OF o`,
+    [labels,from])).rows;
+  if(!moved.length)return 0;
+  const at=(await db.query('SELECT clock_timestamp()::text AS at')).rows[0].at as string;
+  const ids=moved.map(task=>task.id as string),cut=moved.filter(task=>task.cut===true).map(task=>task.id as string);
+  await db.query(`UPDATE owner_tasks SET project_id=$2,parent_id=CASE WHEN id=ANY($3::text[]) THEN NULL ELSE parent_id END,project_since=$4::timestamptz,
+    revision=revision+1,updated_at=now() WHERE id=ANY($1::text[])`,[ids,to,cut,at]);
+  for(const id of ids)await db.query(`INSERT INTO owner_task_activity(task_id,actor,origin,changes,at) VALUES($1,'{"kind":"owner"}','dashboard',$2,$3::timestamptz)`,
+    [id,JSON.stringify({project_id:{from,to},...(cut.includes(id)?{parent_id:{to:null}}:{})}),at]);
+  return ids.length;
 }
 
 export class ProjectRepository {
@@ -82,13 +111,15 @@ export class ProjectRepository {
     return this.commands.run(principal,operationId,{kind:'project',...change},db=>writeProject(db,change));
   }
   async assign(principal:Reader,input:unknown):Promise<Assignment> {
-    admin(principal);const body=object(input);exact(body,['space_id','project_id','mode','expected_revision','operation_id']);
+    admin(principal);const body=object(input);exact(body,['space_id','project_id','mode','expected_revision','operation_id','tasks']);
+    if(body.tasks!==undefined&&body.tasks!=='stay'&&body.tasks!=='move')throw new HttpError(400,'invalid_project_assignment');
+    const tasks:GroupTasks=body.tasks==='move'?'move':'stay';
     const space=validateSpace(body.space_id),mode=body.mode as Assignment['mode'],expected=revision(body.expected_revision);
     if(!['assigned','none','inherit'].includes(mode))throw new HttpError(400,'invalid_project_assignment');
     const projectId=mode==='assigned'?id(body.project_id):null;
     if(mode!=='assigned'&&body.project_id!==undefined&&body.project_id!==null)throw new HttpError(400,'invalid_project_assignment');
-    return this.commands.run(principal,string(body.operation_id,200),{kind:'project_assignment',space,mode,projectId,expected},
-      db=>writeAssignment(db,{space_id:space,project_id:projectId,mode,expected_revision:expected}));
+    return this.commands.run(principal,string(body.operation_id,200),{kind:'project_assignment',space,mode,projectId,expected,...(tasks==='move'?{tasks}:{})},
+      db=>writeAssignment(db,{space_id:space,project_id:projectId,mode,expected_revision:expected,tasks}));
   }
   async effective(space:string):Promise<{space:string;own_assignment:Assignment|null;assignment:Assignment|null;project:Project|null;inherited:boolean}> {
     validateSpace(space);const parent=parentSpace(space);
