@@ -20,7 +20,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
   const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-scheduled-runs-')),base=Date.now(),token=digest('scheduled-'+base);
-  let failCompletion=false,mode='done',serial=0,answer='Scheduled answer fixture-secret';const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>();
+  let failCompletion=false,mode='done',serial=0,answer='Scheduled answer fixture-secret';const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>(),tasksRead:string[]=[];
   // The groups the owner serves, which a test turns off as the owner would; `deselect` turns them off as a run finishes.
   // Notices to the owner are kept apart: the bot sends each id once.
   let groups=['-123'],deselect=false;const notices:any[]=[];
@@ -41,6 +41,12 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const claim=await s.scheduled.claim(context);claims.set(id,claim);assert.equal(claim.claimed,true);assert.ok(!claim.text!.includes('fixture-secret'));
     const principal=reader({headers:{authorization:'Bearer '+claim.archive_credential}} as any,token);
     const binding=await s.turns.binding(principal);assert.equal(binding.reference!.store,'control');assert.equal(binding.job,context.job_id);
+    // A schedule's run in the owner's private chat, such as a morning brief, reads the task lists and changes none;
+    // a group's schedule run gets none (ADR-0266).
+    if(claim.scope==='123') {
+      assert.ok(await s.tasks.chatList(principal,{}));tasksRead.push(id);
+      await assert.rejects(s.tasks.chatCreate(principal,{title:'From a schedule'}),{code:'task_read_only'});
+    } else await assert.rejects(s.tasks.chatList(principal,{}),{status:403});
     assert.equal((await s.scheduled.claim(context)).claimed,false);assert.deepEqual(await s.scheduled.prepare(context),{transcripts:[],files:[]});
     native.set(id,{state:'running'});if(mode==='running')return {state:'running'};
     await s.scheduled.finish({event_id:id,actor:context.actor,state:'done',session:context.conversation,text:answer});
@@ -67,6 +73,8 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.equal((await s.scheduled.delivery(local)).state,'local');
     assert.equal(calls.filter(call=>call.op==='run.start'&&call.body.event_id===local.event_id).length,1);
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
+    assert.ok(tasksRead.includes(local.event_id),'the owner chat\'s run read its tasks');
+    await assert.rejects(s.tasks.chatList(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token),{}),{code:'runtime_turn_changed'},'a finished run reads nothing');
     const delivered=await capture({scope:'-123',deliver:'telegram'});await run(delivered.event_id);
     const proposal=await s.scheduled.delivery(delivered);assert.equal(proposal.state,'proposed');assert.ok('id' in proposal);
     const inspected=await s.telegramActions.inspect(owner,proposal.id!);assert.ok(!JSON.stringify(inspected).includes('fixture-secret'));

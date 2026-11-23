@@ -181,7 +181,15 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   // Send records for Health; a reminder Telegram refused or never confirmed is recorded here too (ADR-0255).
   const chatSends=new ChatSendRepository(stores.control,chats);
   const tasks=new TaskRepository(stores.control,async principal=>{
-    if(principal.scope===null)return {...await knowledge.ownerTurn(principal),project:null,group:null,actor:{kind:'owner'}};
+    if(principal.scope===null) {
+      try{return {...await knowledge.ownerTurn(principal),project:null,group:null,actor:{kind:'owner'}};}
+      catch(error) {
+        // A schedule's run in the owner's private chat, such as a morning brief, reads every list and changes none (ADR-0266).
+        const run=await knowledge.ownerScheduledRun(principal).catch(()=>null);
+        if(!run)throw error;
+        return {source:{reference:{id:run.event_id}},project:null,group:null,actor:{kind:'owner'},readOnly:true};
+      }
+    }
     const kind=boundReader(principal);
     // The owner's ask about a member reads only that member's chat: no task list (step 4b).
     if(kind==='memberRead')throw new HttpError(403,'task_project_required');
