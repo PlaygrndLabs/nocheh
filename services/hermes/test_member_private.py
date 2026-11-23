@@ -176,6 +176,19 @@ class MemberScopeTests(unittest.TestCase):
                                     'mcp__nocheh__mcp', 'mcp__nocheh__owner_read', 'mcp__nocheh__gmail', 'mcp__nocheh__memory_recall',
                                     'mcp__nocheh__telegram_destinations', 'mcp__nocheh__knowledge_propose'})
         self.assertEqual(removed, OWNER_SET_TOOLS | (ALLOWED_TOOLS - MEMBER_TOOLS))
+        # The owner's own live turn that may set schedules may also set the owner's time zone (ADR-0282); any other
+        # owner, group or job turn drops it, even with the schedule flag.
+        zone = 'mcp__nocheh__my_time_zone'
+        removed, allowed = turn_tools(False, False, schedules=True)
+        self.assertIn(zone, allowed)
+        self.assertNotIn(zone, removed)
+        for args in ((False, False), (True, False), (True, True), (True, False, True)):
+            removed, allowed = turn_tools(*args)
+            self.assertIn(zone, removed, args)
+            self.assertNotIn(zone, allowed, args)
+        for flags in ({'background': True}, {'box': True}, {'machine': True}):
+            removed, allowed = turn_tools(flags.get('background', False), flags.get('box', False), flags.get('machine', False), schedules=True)
+            self.assertIn(zone, removed, flags)
         rules = reply({'reply.member': 'MEMBERRULES'}, False, member=True)
         self.assertTrue(rules.endswith('MEMBERRULES'))
         self.assertIn('the owner can read it', reply({}, False, member=True))

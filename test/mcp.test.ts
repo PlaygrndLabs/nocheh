@@ -92,7 +92,7 @@ test('the MCP endpoint speaks JSON-only Streamable HTTP without sessions',async(
     assert.deepEqual((await rpc({jsonrpc:'2.0',method:'notifications/initialized'})),{status:202,body:null});
     assert.deepEqual((await rpc({jsonrpc:'2.0',id:5,method:'ping'},{'mcp-protocol-version':'2025-11-25'})).body,{jsonrpc:'2.0',id:5,result:{}});
     const listed=(await rpc({jsonrpc:'2.0',id:'list',method:'tools/list'})).body.result.tools;
-    assert.equal(listed.length,21);assert.deepEqual(Object.keys(listed[0]),['name','description','inputSchema']);
+    assert.equal(listed.length,mcpTools.length,'every tool: Hermes drops the time zone tool where it may not run');assert.deepEqual(Object.keys(listed[0]),['name','description','inputSchema']);
     const called=await rpc({jsonrpc:'2.0',id:6,method:'tools/call',params:{name:'archive_search',arguments:{query:'Friday',scope:'private'}}});
     assert.deepEqual(called.body,{jsonrpc:'2.0',id:6,result:{content:[{type:'text',text:JSON.stringify({sources:[],filter_status:null})}],isError:false}});
     assert.deepEqual(seen.map(call=>call.path),['/v1/imports/pending','/v1/search?q=Friday&limit=5'],'the model never chooses the scope');

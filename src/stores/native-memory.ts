@@ -139,7 +139,7 @@ export class NativeMemoryRepository {
     readonly provenance:MemoryProvenanceRepository,readonly engine:MemoryEngine,readonly detect:(text:string,background?:boolean)=>Promise<unknown>,
     readonly sources=new NoteSourceRepository(contexts.access.stores,()=>contexts.access.policy(),contexts.access),
     readonly tags:SourceTagRepository|null=null){}
-  /** The walls group reads go through (ADR-0282). */
+  /** The walls group reads go through (ADR-0283). */
   private wallStore:MemoryWalls|null=null;
   get walls(){return this.wallStore??=new MemoryWalls(this.control,this.engine);}
   /** Where recalled facts came from (ADR-0261). */
@@ -677,7 +677,7 @@ export class NativeMemoryRepository {
         const peers=(Array.isArray(row.peer_ids)&&row.peer_ids.length?row.peer_ids:[row.peer_id]).filter((value:unknown)=>typeof value==='string') as string[];
         const role=(peer:string)=>peer===assistantPeer?'silent' as const:peer===row.peer_id?'writer' as const:'subject' as const;
         for(const peer of peers){await this.authorizedReceipt(row);await this.engine.addParticipant(space,peer,role(peer));}
-        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned (ADR-0282).
+        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned (ADR-0283).
         const walls=await this.walls.of(space,row.audience);
         await this.authorizedReceipt(row);await this.engine.openSession(space,session,Object.fromEntries(peers.map(peer=>[peer,role(peer)])),walls);
         let remote=this.observed(row,await this.engine.findWrites(space,session,id));
@@ -1306,7 +1306,7 @@ export class NativeMemoryRepository {
       if(connected.clarification)return {sources:corrections,limited_memory:false,syncing,clarification_required:true,note:connected.clarification};
       // Group and topic recall reads only that audience's own sessions, or every session of its group when
       // the group's topics share memory, or of its project's groups while the project shares them; owner recall spans
-      // the space. The engine keeps a group's reads inside the wall of exactly those chats (ADR-0282).
+      // the space. The engine keeps a group's reads inside the wall of exactly those chats (ADR-0283).
       const walled=audience==='owner'?null:await this.walls.open(id,group?[...group,audience]:[audience]);
       const sessions=audience==='owner'?null:walled?walled.sessions:await this.provenance.sessions(id,audience,1000,group),wall=walled?.wall;
       // Each peer is asked side by side, so recall waits for the slowest engine answer rather than their sum. The owner's
@@ -1382,7 +1382,7 @@ export class NativeMemoryRepository {
         .filter(item=>item.ids.length);
       const over=asked.reduce((total,item)=>total+new Set(item.evidence.filter(engineId)).size,0)>RECALL_FACT_LIMIT?['recall_fact_limit']:[];
       if(!wanted.length)return {record:null,listed:[],count:0,limitations:over};
-      // A wall's answer names the wall's own copies of facts (ADR-0282).
+      // A wall's answer names the wall's own copies of facts (ADR-0283).
       const read=await Promise.all(wanted.map(item=>this.engine.factsById!(id,item.peer,item.ids,{sessions,...wall?{wall}:{}})));
       await this.factBatchesFailed(read.flatMap(page=>page.limitations));
       const sourced=await Promise.all(wanted.map((item,index)=>this.factSources.sourced(principal,binding,id,item.peer,read[index]!.facts,scope)));
@@ -1464,7 +1464,7 @@ export class NativeMemoryRepository {
     };
     if(n===null) {
       // The first facts and the source each one's line names; one still held by the engine and with no retired source.
-      // Asked of whoever holds them: the participant, or the wall a group's recall read them in (ADR-0282).
+      // Asked of whoever holds them: the participant, or the wall a group's recall read them in (ADR-0283).
       const holderOf=(fact:StoredFact)=>canonical([peerOf(fact),wallOf(fact)??null]);
       const holders=[...new Map(chosen.map(fact=>[holderOf(fact),{peer:peerOf(fact)!,wall:wallOf(fact)}])).entries()];
       const held=forgotten?new Set<string>():new Set((await Promise.all(holders.map(([key,{peer,wall}])=>this.engine.factsById!(space,peer,
@@ -1519,7 +1519,7 @@ export class NativeMemoryRepository {
     // A bound reader searches the sessions of every group of its bound reads, and no other (ADR-0249): a member's own
     // private chat and an asked member's chat are never learned, so they have none (step 4).
     const set=!principal.admin&&boundReader(principal)!==null?this.contexts.access.reads(principal)!:null,reads=set?readSetParam(set):null;
-    // A group searches inside the wall of the chats its recall reads (ADR-0282); a bound reader still by its sessions.
+    // A group searches inside the wall of the chats its recall reads (ADR-0283); a bound reader still by its sessions.
     const walled=set||audience==='owner'?null:await this.walls.open(id,group?[...group,audience]:[audience]);
     const sessions=set?await this.provenance.readSetSessions(id,set,1000):audience==='owner'?null:walled?walled.sessions:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};

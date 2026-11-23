@@ -29,7 +29,7 @@ test('a recall\'s facts open by their record and number until a source is retire
   const first=session('first'),second=session('second');
   type Conclusion={id:string;content:string;observer_id:string;observed_id:string;level:'explicit';session_id:string;times_derived:number;created_at:string;source_message_ids:string[]|null};
   const conclusions:Conclusion[]=[],batches=new Map<string,{message_id:string;receipt_id:string}[]>();let evidence:string[]=[];
-  // A wall's copies of facts are its own, observed by the wall (ADR-0282); here they keep the copied fact's id.
+  // A wall's copies of facts are its own, observed by the wall (ADR-0283); here they keep the copied fact's id.
   const walls=new Map<string,Set<string>>();
   const engine=honchoEngine(async(path:string,body:any)=>{
     const scope=/\/scopes\/([^/]+)\/(sessions|status)$/.exec(path);

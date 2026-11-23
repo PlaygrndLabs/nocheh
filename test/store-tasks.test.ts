@@ -207,6 +207,12 @@ test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, 
         {id:'link',name:'Link',type:'url'}],time_zone:'Asia/Kolkata'});
     await assert.rejects(s.tasks.saveSettings(owner,{revision:'0',time_zone:'UTC'}),{code:'configuration_conflict'});
     await assert.rejects(s.tasks.saveSettings(owner,{revision:settings.revision,time_zone:'Mars/Base'}),{code:'invalid_task_time_zone'});
+    // The time zone alone, from the Schedules page or the phone (ADR-0282): everything else stays as saved.
+    const zoned=await s.tasks.saveTimeZone(owner,{time_zone:'Europe/Lisbon'});
+    assert.equal(zoned.time_zone,'Europe/Lisbon');assert.deepEqual(zoned.statuses,settings.statuses);assert.notEqual(zoned.revision,settings.revision);
+    await assert.rejects(s.tasks.saveTimeZone(owner,{time_zone:'Mars/Base'}),{code:'invalid_task_time_zone'});
+    await assert.rejects(s.tasks.saveTimeZone(owner,{time_zone:'UTC',statuses:[]}),{code:'unknown_task_setting'});
+    settings=await s.tasks.saveTimeZone(owner,{time_zone:'Asia/Kolkata'});
     const moved=(await s.tasks.get(owner,task.id));
     assert.equal(moved.status,'doing','a removed status sends its tasks to the first status of the same kind');
     assert.equal((await add({title:'Now',priority:'now'})).priority,4,'renamed priorities are understood by name');

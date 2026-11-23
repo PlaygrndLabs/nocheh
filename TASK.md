@@ -25,7 +25,7 @@ Nocheh is in development mode and not yet released. Everything below is built an
 - Workspaces: several installs run side by side on one machine ([ADR-0245](docs/adr/0245-several-workspaces-on-one-machine.md)).
 - Memory: fact sources and People pages ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md)); memory search stays on
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)); a group's recall, search and learning read
-  through a memory wall that only holds its own chats ([ADR-0282](docs/adr/0282-memory-walls.md)).
+  through a memory wall that only holds its own chats ([ADR-0283](docs/adr/0283-memory-walls.md)).
 - People: the name the owner sets in Memory › People is the person's name everywhere, and each
   person has a private note only the owner reads
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
@@ -41,7 +41,8 @@ Nocheh is in development mode and not yet released. Everything below is built an
   card, the Notion and GitHub of each project holding a group it reads
   ([ADR-0278](docs/adr/0278-member-private-chat-reads-project-connectors.md)). A member's new
   schedules run in their own time zone, set in the members' app or by asking
-  ([ADR-0281](docs/adr/0281-members-own-time-zone.md)).
+  ([ADR-0281](docs/adr/0281-members-own-time-zone.md)). The owner sets theirs on the Schedules
+  page or by asking ([ADR-0282](docs/adr/0282-owners-time-zone-where-schedules-are.md)).
 - Connections: a service connects to a project (shared) or a person (private). Notion per
   project or owner ([ADR-0268](docs/adr/0268-notion-per-project-or-person.md)), GitHub per project with live read-only lookups
   ([ADR-0269](docs/adr/0269-github-per-project.md), [ADR-0270](docs/adr/0270-github-live-lookups.md)), a Connections page ([ADR-0271](docs/adr/0271-connections-page.md)), the owner's Gmail read

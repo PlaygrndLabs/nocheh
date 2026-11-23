@@ -3871,6 +3871,23 @@ test('the members’ app still removes the member’s own reminders when new one
   await resetMembers();
 });
 
+test('the Schedules page sets the owner’s time zone, the same one as Settings › Tasks', async () => {
+  const {page, problems} = await open('schedules');
+  const zone = page.locator('#owner-time-zone');
+  await zone.waitFor();
+  const before = await zone.inputValue();
+  const next = before === 'Asia/Tokyo' ? 'Europe/Lisbon' : 'Asia/Tokyo';
+  await zone.selectOption(next);
+  await page.getByText('Time zone saved. New schedules use it.').waitFor();
+  await page.reload();
+  await page.locator('#owner-time-zone').waitFor();
+  assert.equal(await page.locator('#owner-time-zone').inputValue(), next);
+  await page.locator('#owner-time-zone').selectOption(before);
+  await page.getByText('Time zone saved. New schedules use it.').first().waitFor();
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('the members’ app lists the member’s own schedules in Settings, which they pause, resume, run now and delete', async () => {
   await resetMembers();
   const {page, problems, answers} = await openMember(201);

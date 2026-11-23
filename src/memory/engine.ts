@@ -82,7 +82,7 @@ export type MemoryEngine={
   /** Writes that match by meaning, best first. */
   search(space:string,query:string,options:{limit:number;sessions:string[]|null;wall?:string}):Promise<{id:string;receipt:string}[]>;
 
-  // Walls (ADR-0282): a named set of sessions the engine itself keeps reads inside. A read given a `wall` answers only
+  // Walls (ADR-0283): a named set of sessions the engine itself keeps reads inside. A read given a `wall` answers only
   // from what was learned in the wall's sessions, and the facts it names are the wall's own copies; `sessions` is then
   // ignored. Absent when the engine has no walls: Nocheh then limits reads by `sessions`, as before.
   /** Make the wall and add these sessions to it. What they already learned reaches the wall in the background. */

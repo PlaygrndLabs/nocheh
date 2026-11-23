@@ -40,7 +40,7 @@ test('silent Honcho learning uses authorized relationship evidence and recovers 
   const authority={owner:'inngest' as const,epoch:1};let calls=0,response:unknown;
   const walls=new Map<string,string[]>();
   const call=async(path:string,body:any)=>{
-    // Topic learning reasons inside the wall of that topic alone, which holds its learned sessions (ADR-0282).
+    // Topic learning reasons inside the wall of that topic alone, which holds its learned sessions (ADR-0283).
     const scope=/\/scopes\/([^/]+)\/(sessions|status)$/.exec(path);
     if(path.endsWith('/scopes'))return {};
     if(scope?.[2]==='sessions'){walls.set(scope[1]!,[...walls.get(scope[1]!)??[],...body.session_ids]);return {};}

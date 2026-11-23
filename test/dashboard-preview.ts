@@ -1056,6 +1056,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/github/disconnect'){githubSignIn={connected:false,app:null,connected_at:null,reconnect:false,listed:[],listed_at:null};githubCopies=[];return json(res,200,githubStatus());}
   if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
   if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
+  if(route==='/tasks/time-zone')return json(res,200,await tasks.saveTimeZone(taskOwner,body));
   if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');
     const notice=body.member_notice_usd===undefined?jobLimits.member_notice_usd:Number(body.member_notice_usd),high=body.member_pause_usd===undefined?jobLimits.member_pause_usd:Number(body.member_pause_usd);
     if(!(high>=notice))throw new HttpError(400,'invalid_settings');

@@ -82,7 +82,7 @@ def initialize(provider_state=PROVIDER_STATE):
                                    f'NOCHEH_ROUTE_REVISION={revision}\n')
     env={'DB_CONNECTION_URI':f'postgresql+psycopg://experiment:{password}@database:5432/honcho_experiment',
          'CACHE_URL':'redis://redis:6379/0?suppress=true','CACHE_ENABLED':'true',
-         # Honcho checks every call's key, signed with the internal token Nocheh's app holds (ADR-0282): the app's main
+         # Honcho checks every call's key, signed with the internal token Nocheh's app holds (ADR-0283): the app's main
          # key, and the wall keys it gives each group read, which open one wall and nothing else.
          'AUTH_USE_AUTH':'true','AUTH_JWT_SECRET':token,
          'PYTHON_DOTENV_DISABLED':'1','HONCHO_CONFIG_TOML_DISABLED':'1',
