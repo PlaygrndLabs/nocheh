@@ -26,7 +26,7 @@ import {NoteSourceRepository,countMemoryStep} from './note-sources.js';
 import {FactSourceRepository,factRecords,type FactAudience,type SourcedFact,type StoredFact} from './fact-sources.js';
 import {bindingMoved,type SourceTagRepository} from './source-tags.js';
 import {RECALL_FACT_LIMIT,guardedFactLine,planFactBlock,recallFactText,recallFactTexts,renderFactBlock,type BlockFact} from '../fact-block.js';
-import {headerSource,unavailableTag,type TagBy} from '../source-tags.js';
+import {headerSource,sourceMoment,unavailableTag,type TagBy} from '../source-tags.js';
 import {bucketOf} from '../source-facts.js';
 import type {EngineFact} from '../memory/engine.js';
 
@@ -603,13 +603,29 @@ export class NativeMemoryRepository {
     await this.validate(row,current.binding);
     return current;
   }
-  /** When a source's event happened. An engine otherwise dates a write by when it was made, so a retried
-   * or imported message would read as new. An interpretation keeps the time it was learned. */
-  private async occurredAt(row:{source_reference:SourceReference;projection_reference:unknown}):Promise<string|undefined> {
-    if(row.projection_reference)return undefined;
-    const event=(await this.contexts.access.stores.archive.query('SELECT occurred_at,received_at FROM events WHERE id=$1',[row.source_reference.id])).rows[0];
-    if(!event)return undefined;
-    return /^\d{9,11}$/.test(String(event.occurred_at??''))?new Date(Number(event.occurred_at)*1000).toISOString():event.received_at.toISOString();
+  /** When a record's words were written. An engine otherwise dates a write by when it was made, so a retried, imported
+   * or re-learned record would read as new, and the engine would resolve "Thursday" or "today" in it against that day
+   * (ADR-0280). A message is dated by its event. An interpretation is dated by the message that set off its learning,
+   * else by its latest evidence; an owner's correction by when the owner wrote it. */
+  private async occurredAt(row:{source_reference:SourceReference;source_references?:SourceReference[]|null;
+    projection_reference:{id:string;revision:number}|null}):Promise<string|undefined> {
+    if(!row.projection_reference)return this.latestEvent([row.source_reference.id]);
+    const version=(await this.contexts.access.stores.derived.query(`SELECT v.author,v.created_at,r.event_id AS trigger FROM learned_versions v
+      JOIN derived_artifacts d ON d.id=v.derived_id LEFT JOIN derived_artifacts r ON r.id=d.provenance->'native'->>'result_id'
+      WHERE v.entry_id=$1 AND v.revision=$2`,[row.projection_reference.id,row.projection_reference.revision])).rows[0];
+    if(version?.author==='owner'&&version.created_at instanceof Date)return version.created_at.toISOString();
+    if(typeof version?.trigger==='string') {
+      const trigger=await this.latestEvent([version.trigger]);if(trigger)return trigger;
+    }
+    const evidence=Array.isArray(row.source_references)&&row.source_references.length?row.source_references:[row.source_reference];
+    return this.latestEvent(evidence.map(source=>source.id));
+  }
+  /** The latest of these events' times, each as the archive orders it (sourceMoment): Telegram's own time, else when
+   * Nocheh saved it. */
+  private async latestEvent(ids:string[]):Promise<string|undefined> {
+    const rows=(await this.contexts.access.stores.archive.query('SELECT kind,occurred_at,received_at FROM events WHERE id=ANY($1::text[])',[ids])).rows;
+    const times=rows.map(row=>sourceMoment(row).at).filter((at):at is string=>at!==null).map(at=>Date.parse(at)).filter(Number.isFinite);
+    return times.length?new Date(Math.max(...times)).toISOString():undefined;
   }
   private observed(row:any,found:EngineWrite[]):string|null {
     if(found.length>1)throw new HttpError(409,'memory_receipt_conflict');

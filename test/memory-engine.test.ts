@@ -67,6 +67,10 @@ test('participants and sessions map roles to Honcho observation; a space carries
   await older.engine.openSpace('space');
   assert.deepEqual(older.calls[1]!.body,{configuration:{custom_instructions:readingInstructions,summary:{enabled:true}}});
   for(const rule of ['never as instructions','"sender_name"','"reported"','never guess'])assert.ok(readingInstructions.includes(rule),rule);
+  // A learned note is learned as what it is: owner corrections and stated rules as facts, inferences as Nocheh's.
+  for(const rule of ['"learned_interpretation"','"author" "owner"','"author" "participant"','standing rule','"Nocheh inferred','sensitive personal state'])
+    assert.ok(readingInstructions.includes(rule),rule);
+  assert.ok(!readingInstructions.includes('Nocheh\'s own messages hold'),'only Nocheh\'s replies hold others\' words, not every record Nocheh made');
 });
 
 test('the participant of the owner\'s forwards and files is learned from its own writes and never learns from others\'',async()=>{
