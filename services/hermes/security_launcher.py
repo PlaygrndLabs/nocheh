@@ -97,9 +97,11 @@ def validate_local_profile(profile,root=Path('/profiles')):
         if item.is_symlink() or not item.exists() or not item.resolve().is_relative_to(path.resolve()):raise ValueError('profile_mount_denied')
 
 def schedule_store(binding,boxed,machine,root=Path('/profiles')):
-    """The owner's chat schedule store a turn may write, or None: only the owner's own reply, never a job's run, a box or a machine."""
+    """The chat schedule store a turn may write, or None: only the owner's own reply, or a member's own reply in their
+    private chat with Personal assistant on, as storage marks it (member_schedules); never a job's run, a box or a machine."""
     logical=binding.get('logical_profile')
-    if binding.get('owner') is not True or binding.get('job') is not None or boxed or machine:return None
+    member=binding.get('owner') is False and binding.get('member_schedules') is True
+    if binding.get('owner') is not True and not member or binding.get('job') is not None or boxed or machine:return None
     if not isinstance(logical,str) or not re.fullmatch(r'nocheh-[a-f0-9]{24}',logical):return None
     home=root/logical;store=home/'cron'
     if home.is_symlink() or store.is_symlink() or not store.is_dir() or store.resolve().parent!=home.resolve() or home.resolve().parent!=root.resolve():return None

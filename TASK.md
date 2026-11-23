@@ -31,9 +31,12 @@ Nocheh is in development mode and not yet released. Everything below is built an
   Nocheh's records by fixed reading instructions, and mentioned people keep no unread copies
   ([ADR-0275](docs/adr/0275-honcho-3-6-2-and-reading-instructions.md)). Memory thinking is priced as it
   runs and has an optional monthly dollar limit, off by default, in place of the request count
-  ([ADR-0277](docs/adr/0277-memory-thinking-has-a-dollar-limit.md)).
+  ([ADR-0279](docs/adr/0279-memory-thinking-has-a-dollar-limit.md)).
 - Assistant: a "what matters now" list and a morning brief through Hermes notes and its
   scheduler; a schedule approved once sends to the owner's private chat without a card.
+  Members with "Personal assistant" on set their own schedules the same way in their private
+  chat, up to the owner's cap, and each run reads only what that chat reads
+  ([ADR-0277](docs/adr/0277-members-own-schedules.md)).
 - Connections: a service connects to a project (shared) or a person (private). Notion per
   project or owner ([ADR-0268](docs/adr/0268-notion-per-project-or-person.md)), GitHub per project with live read-only lookups
   ([ADR-0269](docs/adr/0269-github-per-project.md), [ADR-0270](docs/adr/0270-github-live-lookups.md)), a Connections page ([ADR-0271](docs/adr/0271-connections-page.md)), the owner's Gmail read
@@ -67,6 +70,9 @@ Checks and follow-ups:
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,
   `member_app_drops_a_left_group` and `member_app_never_leaks`.
+- Members' own schedules ([ADR-0277](docs/adr/0277-members-own-schedules.md)): a full tester run of
+  `member_private_chat_reads_joined_groups` and `member_app_tasks`, then one live check with a
+  real member setting a morning brief.
 - Many entries in the old log end with "a live look on the owner's install after merge". These
   are not listed one by one; the old log in Git history has each one.
 - Older October checks are also only in the old log: learning keeps valid items ([ADR-0128](docs/adr/0128-learning-results-keep-valid-items.md)),

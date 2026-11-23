@@ -1,7 +1,7 @@
 import {admin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {validateSpace} from '../spaces.js';
+import {memberAssistant,validateSpace} from '../spaces.js';
 import {ownerChat} from '../assistant-policy.js';
 import {chats} from '../chats.js';
 import type {SourceAccessRepository} from './access.js';
@@ -17,8 +17,9 @@ CREATE TABLE IF NOT EXISTS runtime_profiles (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS active_runtime_profile_name ON runtime_profiles(owner_id,name) WHERE state='active';
 `;
-// A chat's own profile is listed as private-chat or group-<its name>-<its code>; those names stay reserved for chats.
-const reserved=(value:string)=>/^(private-chat$|group-)/i.test(value);
+// A chat's own profile is listed as private-chat, group-<its name>-<its code> or, for a member's own chat,
+// member-<their name>-<its code>; those names stay reserved for chats.
+const reserved=(value:string)=>/^(private-chat$|group-|member-)/i.test(value);
 const name=(value:unknown)=>{const result=string(value,64);
   if(!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(result)||result.startsWith('nocheh-')||/^profile-[a-f0-9]{48}$/.test(result)||['default','current','all'].includes(result)||reserved(result))
     throw new HttpError(400,'invalid_profile_name');return result;};
@@ -40,10 +41,17 @@ export class RuntimeProfileRepository {
     const directory=chats();
     return directory.all().map(chat=>chat.id).filter(id=>directory.kind(id)==='group'&&directory.served(id));
   }
+  /** Members' own private chats whose member has Personal assistant on (memberAssistant): their schedules live there. */
+  private assistants():string[] {
+    const directory=chats();
+    return directory.all().map(chat=>chat.id).filter(id=>memberAssistant(id,directory));
+  }
   private entry(space:string,binding:GuardBinding,custom?:any,label?:Label){
     // A profile's name and session are made from its chat id, unchanged for a chat stored before step 2b (ADR-0252).
     const owner=this.ownerChat(),directory=chats(),chat=directory.parentOf(space)??space;
-    if(chat!==owner&&!(directory.kind(chat)==='group'&&directory.served(chat)))throw new HttpError(403,'profile_scope_denied');
+    // A member's own chat with Personal assistant on has a profile of its own, for its schedules; it has no topics.
+    if(chat!==owner&&!(directory.kind(chat)==='group'&&directory.served(chat))&&!(chat===space&&memberAssistant(chat,directory)))
+      throw new HttpError(403,'profile_scope_denied');
     const audience:Reader={admin:false,scope:chat===owner?null:chat,space,revision:binding.epoch};
     const principal:Reader={...audience,logical_profile:custom?.id??defaultLogicalProfile(audience)};
     return {name:custom?.name??label?.name??'nocheh-'+digest(space).slice(0,24),display_name:custom?'':label?.display_name??'',logical_profile:principal.logical_profile,
@@ -69,11 +77,21 @@ export class RuntimeProfileRepository {
       labels.set(group,{name:label,display_name:chat?.title||(chat?.username?'@'+chat.username:'')});}
     return labels;
   }
+  /** Readable names for members' own chats: member-<their name>-<the chat's code>, shown with their name. */
+  private async memberLabels(members:string[],labels:Map<string,Label>,taken:Set<string>):Promise<void>{
+    const names=new Map((await this.control.query(`SELECT c.id,a.display_name,a.username FROM chats c JOIN chat_accounts a ON a.id=c.account_id
+      WHERE c.id=ANY($1::text[])`,[members])).rows.map(row=>[row.id as string,{name:row.display_name as string|null,username:row.username as string|null}]));
+    for(const member of members){
+      const person=names.get(member),code=digest(member),readable=slug(person?.name)||slug(person?.username);
+      const label=[6,12,24].map(size=>'member-'+(readable?readable+'-':'')+code.slice(0,size)).find(value=>!taken.has(value))??'nocheh-'+code.slice(0,24);
+      taken.add(label);labels.set(member,{name:label,display_name:person?.name||(person?.username?'@'+person.username:'')});}
+  }
   async list(principal:Reader){admin(principal);const owner=this.owner(),chat=this.ownerChat(),binding=await this.access.guards.state();
     const rows=(await this.control.query("SELECT * FROM runtime_profiles WHERE owner_id=$1 AND state='active' ORDER BY name LIMIT 101",[owner])).rows;
     if(rows.length>100)throw new HttpError(409,'profile_limit');
-    const spaces=[...new Set([chat,...this.groups()])];
-    const labels=await this.labels(chat,spaces,new Set(rows.map(row=>String(row.name).toLowerCase())));
+    const members=this.assistants(),spaces=[...new Set([chat,...this.groups(),...members])],taken=new Set(rows.map(row=>String(row.name).toLowerCase()));
+    const labels=await this.labels(chat,spaces.filter(space=>!members.includes(space)),taken);
+    await this.memberLabels(members,labels,taken);
     const profiles=spaces.map(space=>this.entry(space,binding,undefined,labels.get(space)));
     profiles.push(...rows.map(row=>this.entry(chat,binding,row)));await this.access.guards.assertCurrent(binding);
     return {profiles,revision:binding.epoch,generation:binding.generation};

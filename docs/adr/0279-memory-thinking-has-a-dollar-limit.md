@@ -1,4 +1,4 @@
-# ADR-0277: Memory thinking has a dollar limit
+# ADR-0279: Memory thinking has a dollar limit
 
 <status>
 Accepted on 2026-11-23. The owner chose, on a decision card, "Thinking dollar limit, off by

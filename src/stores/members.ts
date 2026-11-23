@@ -38,7 +38,7 @@ export async function loadMemberSnapshot(control:pg.Pool,policy:Policy):Promise<
   const db=await control.connect();
   try {
     await db.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const rows=(await db.query('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat FROM members')).rows;
+    const rows=(await db.query('SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,assistant FROM members')).rows;
     const accounts=(await db.query('SELECT id AS account_id,member_id FROM chat_accounts WHERE member_id IS NOT NULL')).rows;
     const chats=(await db.query('SELECT member_id,chat_id,enabled FROM member_chats')).rows;
     const presence=(await db.query<MemberPresenceRow>(`SELECT m.account_id,m.chat_id,m.state FROM chat_memberships m JOIN chat_accounts a ON a.id=m.account_id
@@ -119,13 +119,13 @@ const personName=(row:{display_name?:string|null;username?:string|null;external_
  * on groups or people.
  */
 export async function memberView(db:Db,owner:string|null,only:string|null=null,withPeople=only===null):Promise<MemberList> {
-  const state=(await db.query('SELECT revision,daily_messages FROM member_directory_state WHERE singleton')).rows[0];
+  const state=(await db.query('SELECT revision,daily_messages,member_schedules FROM member_directory_state WHERE singleton')).rows[0];
   const groupRows=(await db.query(`SELECT c.id,c.kind,c.title,c.app_type,c.state,d.username,i.external_id FROM chats c LEFT JOIN chat_details d ON d.chat_id=c.id
     LEFT JOIN chat_ids i ON i.chat_id=c.id AND i.state='current' WHERE c.kind='group'`)).rows;
   const groups=new Map<string,GroupRow>(groupRows.map(row=>[row.id as string,{chat_id:row.id,title:chatLabel(row,row.username,row.external_id),state:row.state}]));
   const isIn=(group:GroupRow|undefined)=>!!group&&!['left','removed','archived'].includes(group.state);
   const ref=(group:GroupRow):MemberGroupRef=>({chat_id:group.chat_id,title:group.title,state:group.state});
-  const memberRows=(await db.query(`SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,reminders,added_at FROM members
+  const memberRows=(await db.query(`SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,reminders,assistant,added_at FROM members
     WHERE $1::text IS NULL OR id=$1 ORDER BY added_at,id`,[only])).rows;
   const accountRows=(await db.query(`SELECT a.id,a.member_id,a.external_id,a.display_name,a.username FROM chat_accounts a
     WHERE a.member_id IS NOT NULL AND ($1::text IS NULL OR a.member_id=$1) ORDER BY a.id`,[only])).rows;
@@ -148,7 +148,7 @@ export async function memberView(db:Db,owner:string|null,only:string|null=null,w
     return {id:row.id,account_id:own?.id??'',state:row.state,name:own?.display_name??null,username:own?.username??null,telegram_id:own?.external_id??null,
       owner_linked:owner!==null&&accounts.some(account=>account.id===owner),added_at:new Date(row.added_at).toISOString(),
       permissions:{talk:row.group_talk,jobs:row.group_jobs,post:row.group_post_other,tools:row.group_tools,tasks:row.tasks,private_chat:row.private_chat,
-        reminders:row.reminders},
+        reminders:row.reminders,assistant:row.assistant},
       groups:memberGroups};
   });
   const people:MemberPerson[]=[];
@@ -168,7 +168,7 @@ export async function memberView(db:Db,owner:string|null,only:string|null=null,w
     people.sort((a,b)=>personName(a).localeCompare(personName(b))||(a.account_id<b.account_id?-1:1));
   }
   const joinedGroups=[...groups.values()].filter(group=>isIn(group)).map(ref).sort(byTitle);
-  return {revision:Number(state?.revision??0),daily_messages:Number(state?.daily_messages??200),groups:joinedGroups,members:items,people};
+  return {revision:Number(state?.revision??0),daily_messages:Number(state?.daily_messages??200),member_schedules:Number(state?.member_schedules??5),groups:joinedGroups,members:items,people};
 }
 
 /** The member revision after a bump in the same transaction. */
@@ -277,11 +277,12 @@ export class Members implements MemberRepository {
       if(!row)throw new HttpError(404,'member_not_found');
       const c=request.changes;
       const next={state:c.state??row.state,group_talk:c.talk??row.group_talk,group_jobs:c.jobs??row.group_jobs,group_post_other:c.post??row.group_post_other,
-        group_tools:c.tools??row.group_tools,tasks:c.tasks??row.tasks,private_chat:c.private_chat??row.private_chat,reminders:c.reminders??row.reminders};
+        group_tools:c.tools??row.group_tools,tasks:c.tasks??row.tasks,private_chat:c.private_chat??row.private_chat,reminders:c.reminders??row.reminders,
+        assistant:c.assistant??row.assistant};
       // Un-pausing sets app_since, so a members' app launch from before it is refused (ADR-0265 D4); a permission change does not.
       if(Object.entries(next).some(([key,value])=>row[key]!==value))await db.query(`UPDATE members SET state=$2,group_talk=$3,group_jobs=$4,group_post_other=$5,group_tools=$6,
-        tasks=$7,private_chat=$8,reminders=$9,app_since=CASE WHEN state='paused' AND $2='active' THEN now() ELSE app_since END,revision=revision+1,updated_at=now() WHERE id=$1`,
-        [id,next.state,next.group_talk,next.group_jobs,next.group_post_other,next.group_tools,next.tasks,next.private_chat,next.reminders]);
+        tasks=$7,private_chat=$8,reminders=$9,assistant=$10,app_since=CASE WHEN state='paused' AND $2='active' THEN now() ELSE app_since END,revision=revision+1,updated_at=now() WHERE id=$1`,
+        [id,next.state,next.group_talk,next.group_jobs,next.group_post_other,next.group_tools,next.tasks,next.private_chat,next.reminders,next.assistant]);
       if(c.groups) {
         const chats=Object.keys(c.groups),existing=new Set((await db.query('SELECT chat_id FROM member_chats WHERE member_id=$1 AND chat_id=ANY($2::text[])',
           [id,chats])).rows.map(item=>item.chat_id as string));
@@ -314,11 +315,13 @@ export class Members implements MemberRepository {
     return done;
   }
 
-  /** The daily message cap: turns per member per UTC day across all groups. */
+  /** The daily message cap (turns per member per UTC day across all groups) and how many schedules each member may keep. */
   async settings(principal:Reader,request:MemberSettingsRequest):Promise<MemberSettingsResult> {
-    const done=await this.commands.run(principal,request.operation_id,{kind:'member_settings',daily_messages:request.daily_messages},async db=>{
-      await db.query('UPDATE member_directory_state SET daily_messages=$1 WHERE singleton',[request.daily_messages]);
-      return {revision:await bump(db),daily_messages:request.daily_messages};
+    const {operation_id:_,...changes}=request;
+    const done=await this.commands.run(principal,request.operation_id,{kind:'member_settings',...changes},async db=>{
+      const row=(await db.query(`UPDATE member_directory_state SET daily_messages=COALESCE($1,daily_messages),member_schedules=COALESCE($2,member_schedules)
+        WHERE singleton RETURNING daily_messages,member_schedules`,[request.daily_messages??null,request.member_schedules??null])).rows[0];
+      return {revision:await bump(db),daily_messages:Number(row.daily_messages),member_schedules:Number(row.member_schedules)};
     },{epoch:false});
     await reloadMembers();
     return done;

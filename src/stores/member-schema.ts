@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import {DAILY_MESSAGES_DEFAULT,DAILY_MESSAGES_MAX,DAILY_MESSAGES_MIN,memberStates,memberTaskModes} from '../member-wire.js';
+import {DAILY_MESSAGES_DEFAULT,DAILY_MESSAGES_MAX,DAILY_MESSAGES_MIN,MEMBER_SCHEDULES_DEFAULT,MEMBER_SCHEDULES_MAX,MEMBER_SCHEDULES_MIN,memberStates,memberTaskModes} from '../member-wire.js';
 
 const list=(values:readonly string[])=>values.map(value=>`'${value}'`).join(',');
 const hex=(column:string)=>`${column} ~ '^[a-f0-9]{64}$'`;
@@ -13,13 +13,14 @@ const hex=(column:string)=>`${column} ~ '^[a-f0-9]{64}$'`;
  * - members: one per member, with Talk to Nocheh in groups they joined (group_talk) and its three sub-permissions, which
  *   keep their values while group_talk is off, Tasks (read and write, or read only), and Private chat with Nocheh
  *   (private_chat, step 4: on by default and independent of group_talk), Reminders to themselves (reminders, step 5: on
- *   by default) and app_since (step 5: when the member was added or last un-paused; a members' app launch from before
+ *   by default), Personal assistant (assistant: off by default; on, they set their own schedules) and app_since (step 5: when the member was added or last un-paused; a members' app launch from before
  *   it is refused). 'paused' stops everything.
  *   Remove deletes the row: its member_chats and member_turns go with it, and its accounts are unlinked.
  * - member_chats: a member's switch for one group; a topic follows its group, so only group chats have rows. A group
  *   with no row counts as on.
  * - member_directory_state: the member revision, moved by every commit that changes what the member directory holds
- *   (bumpMemberRevision); carried_at, set once the lists in force before step 3 were carried; and the daily message cap.
+ *   (bumpMemberRevision); carried_at, set once the lists in force before step 3 were carried; the daily message cap; and
+ *   member_schedules, how many schedules each member with Personal assistant may keep.
  * - member_turns: the daily cap's count, one row per member turn, so a retry of the same event counts once. On a
  *   member's private turn, left_out holds the joined groups that turn leaves out (re-checks past the cap, step 4): every
  *   read bound to that turn leaves them out too, and one with no list written reads nothing.
@@ -47,6 +48,8 @@ ALTER TABLE members ADD COLUMN IF NOT EXISTS private_chat boolean NOT NULL DEFAU
 -- so a launch of the members' app from before then is refused (ADR-0265 D4).
 ALTER TABLE members ADD COLUMN IF NOT EXISTS reminders boolean NOT NULL DEFAULT true;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS app_since timestamptz NOT NULL DEFAULT now();
+-- Members' schedules: "Personal assistant", off by default (the member sets their own schedules in their private chat).
+ALTER TABLE members ADD COLUMN IF NOT EXISTS assistant boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS member_chats (
  member_id text NOT NULL REFERENCES members(id) ON DELETE CASCADE,
  chat_id text NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -72,6 +75,9 @@ CREATE TABLE IF NOT EXISTS member_directory_state (
  daily_messages integer NOT NULL DEFAULT ${DAILY_MESSAGES_DEFAULT} CHECK(daily_messages BETWEEN ${DAILY_MESSAGES_MIN} AND ${DAILY_MESSAGES_MAX})
 );
 INSERT INTO member_directory_state(singleton) VALUES(true) ON CONFLICT DO NOTHING;
+-- How many schedules each member with Personal assistant may keep.
+ALTER TABLE member_directory_state ADD COLUMN IF NOT EXISTS member_schedules integer NOT NULL DEFAULT ${MEMBER_SCHEDULES_DEFAULT}
+ CHECK(member_schedules BETWEEN ${MEMBER_SCHEDULES_MIN} AND ${MEMBER_SCHEDULES_MAX});
 CREATE TABLE IF NOT EXISTS member_turns (
  member_id text NOT NULL REFERENCES members(id) ON DELETE CASCADE,
  event_id text NOT NULL CHECK(${hex('event_id')}),

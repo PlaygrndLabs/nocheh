@@ -26,7 +26,7 @@ MODEL = 'text-embedding-3-small'
 REASONING_MODEL = os.environ.get('NOCHEH_REASONING_MODEL') or os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5')
 PILOT_LIMIT_MICRODOLLARS = 5_000_000
 MAX_MONTHLY_LIMIT_CENTS = 1_500
-# The memory thinking spending limit: off until the owner turns it on (ADR-0277).
+# The memory thinking spending limit: off until the owner turns it on (ADR-0279).
 MAX_THINKING_LIMIT_CENTS = 100_000
 # Anthropic's list prices in USD per million tokens: input, output, cache read, 5-minute cache write.
 # The same table as CLAUDE_PRICES in services/hermes/usage.py, which this container cannot import; a test keeps

@@ -64,8 +64,8 @@ test('the members\' app listener: who is a member now, their groups confirmed la
   const tasks=Object.fromEntries(['memberList','memberGet','memberCreate','memberUpdate','memberComment','memberReminders'].map(name=>
     [name,async(principal:MemberAppPrincipal,...args:unknown[])=>{principals.push({name,principal,args});return {done:name};}])) as unknown as MemberAppServices['tasks'];
   const servers:Server[]=[];
-  const serve=async(repository:MemberAppServices['tasks']=tasks)=>{
-    const server=memberAppServer({control:db,tasks:repository,policy:()=>policy,call},{botId,key:publicKey});servers.push(server);
+  const serve=async(repository:MemberAppServices['tasks']=tasks,schedules?:MemberAppServices['schedules'])=>{
+    const server=memberAppServer({control:db,tasks:repository,policy:()=>policy,call,...(schedules?{schedules}:{})},{botId,key:publicKey});servers.push(server);
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
     return 'http://127.0.0.1:'+(server.address() as {port:number}).port+'/v1/member-app';
   };
@@ -95,7 +95,7 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     const p1Groups=[{id:GP1,title:'GP1'},{id:GP2,title:'GP2'},{id:GP3,title:'GP3'},{id:UNSERVED,title:'Unserved'}];
     assert.deepEqual(me.body,{name:'Mira',mode:'write',reminders:{available:true},projects:[{id:P1,name:'P1',groups:p1Groups}],
       groups:[{id:GP1,title:'GP1',board:'open',project:P1,open_count:0},{id:GP3,title:'GP3',board:'open',project:P1,open_count:0},
-        {id:GP4,title:'GP4',board:'none',project:null}]});
+        {id:GP4,title:'GP4',board:'none',project:null}],assistant:false});
     assert.ok(!JSON.stringify(me.body.groups).includes(GP2)&&!JSON.stringify(me.body.groups).includes(UNSERVED),'her groups: never GP2 or a group Nocheh does not serve');
     // Open counts: the open tasks labelled with a group or its topics, never trashed, archived, done, another group's or the
     // project's own.
@@ -218,6 +218,52 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     await db.query(`UPDATE member_app_limits SET day=day-1 WHERE member_id=$1`,[MEMBER_GP_ID]);
     assert.equal((await write()).status,200,'a new day');
 
+    // Her own schedules (members' schedules): only with Personal assistant on and her private chat open; only her private
+    // chat's are listed or changed; times in UTC, never a prompt, profile, chat or time zone; each change counts as a write.
+    await db.query(`DELETE FROM member_app_limits`);
+    const job=(id:string,scope:string,extra:Record<string,unknown>={})=>({id,profile:'nocheh-'+'c'.repeat(24),scope,space:scope,name:'Brief '+id,
+      schedule:'0 8 * * *',timezone:'Europe/Berlin',enabled:true,state:'scheduled',next_run_at:'2026-11-24T08:00:00+01:00',last_run_at:null,last_status:null,
+      running:false,pending:false,deliver:'telegram',prompt:'never shown',...extra});
+    const managed:Record<string,unknown>[]=[];
+    let jobs=[job('mine1',MEMBER_GP_CHAT),job('mine2',MEMBER_GP_CHAT,{enabled:false,state:'paused',last_status:'error'}),job('owners',OWNER),job('nils',MEMBER_NG_CHAT)];
+    const scheduled=await serve(tasks,async input=>{
+      managed.push(input);
+      if(input.operation==='list')return {schedules:jobs};
+      if(input.operation==='delete'){jobs=jobs.filter(item=>item.id!==input.job_id);return {ok:true};}
+      const item=jobs.find(entry=>entry.id===input.job_id)!;
+      if(input.operation==='pause'){item.enabled=false;item.state='paused';}
+      return {schedule:item};
+    });
+    const plan=async(path:string,body?:unknown)=>{
+      const answer=await fetch(scheduled+path,{method:body===undefined?'GET':'POST',headers:{'x-telegram-init-data':fresh},...(body===undefined?{}:{body:JSON.stringify(body)})});
+      return {status:answer.status,body:await answer.json() as any};
+    };
+    assert.equal((await plan('/me')).body.assistant,false,'off by default');
+    assert.deepEqual(await plan('/schedules'),{status:403,body:{error:'member_schedules_off'}});
+    assert.deepEqual(await plan('/schedules/mine1',{operation_id:'11111111-1111-4111-8111-111111111111',action:'pause'}),{status:403,body:{error:'member_schedules_off'}});
+    assert.equal(managed.length,0,'nothing asked of the agent while off');
+    await members.change(admin,MEMBER_GP_ID,{operation_id:'assistant on',changes:{assistant:true}});
+    await members.settings(admin,{operation_id:'three schedules',member_schedules:3});
+    assert.equal((await plan('/me')).body.assistant,true);
+    const listed=await plan('/schedules');
+    assert.deepEqual(listed,{status:200,body:{limit:3,schedules:[
+      {id:'mine1',name:'Brief mine1',schedule:'0 8 * * *',state:'scheduled',next_run_at:'2026-11-24T07:00:00.000Z',last_run_at:null,last_ok:null},
+      {id:'mine2',name:'Brief mine2',schedule:'0 8 * * *',state:'paused',next_run_at:'2026-11-24T07:00:00.000Z',last_run_at:null,last_ok:false}]}});
+    assert.ok(!/never shown|Europe|nocheh-c|owners|nils/.test(JSON.stringify(listed.body)));
+    // Another chat's schedule is not hers: not found, and the agent is never asked to change it.
+    assert.deepEqual(await plan('/schedules/owners',{operation_id:'22222222-2222-4222-8222-222222222222',action:'delete'}),{status:404,body:{error:'member_schedule_not_found'}});
+    assert.deepEqual(await plan('/schedules/mine1',{operation_id:'33333333-3333-4333-8333-333333333333',action:'explode'}),{status:400,body:{error:'invalid_schedule_action'}});
+    const paused=await plan('/schedules/mine1',{operation_id:'44444444-4444-4444-8444-444444444444',action:'pause'});
+    assert.deepEqual([paused.status,paused.body.schedule.state],[200,'paused']);
+    assert.deepEqual(managed.filter(item=>item.operation!=='list'),[{operation:'pause',profile:'nocheh-'+'c'.repeat(24),job_id:'mine1',request_id:'member-44444444-4444-4444-8444-444444444444'}]);
+    assert.deepEqual(await plan('/schedules/mine2',{operation_id:'55555555-5555-4555-8555-555555555555',action:'delete'}),{status:200,body:{schedule:null}});
+    assert.deepEqual(jobs.map(item=>item.id),['mine1','owners','nils']);
+    assert.equal((await db.query('SELECT window_writes FROM member_app_limits WHERE member_id=$1',[MEMBER_GP_ID])).rows[0].window_writes,4,'each change counts, refused ones too');
+    // Private chat off: Personal assistant stays on but closes with it.
+    await members.change(admin,MEMBER_GP_ID,{operation_id:'assistant private off',changes:{private_chat:false}});
+    assert.deepEqual(await plan('/schedules'),{status:403,body:{error:'member_schedules_off'}});
+    await members.change(admin,MEMBER_GP_ID,{operation_id:'assistant private on',changes:{private_chat:true,assistant:false}});
+
     // Removed: the next call is refused, and re-adding her kills every launch from before.
     await members.remove(admin,MEMBER_GP_ID,{operation_id:'remove'});
     await refused('/me',fresh,403,'member_app_closed');
@@ -237,7 +283,7 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     assert.deepEqual([principals.at(-1)!.principal.member,principals.at(-1)!.principal.chat,principals.at(-1)!.principal.views],[MEMBER_NG_ID,MEMBER_NG_CHAT,[]]);
     // A member with private chat off and never in a group: the app opens, empty, with reminders unavailable.
     const gita=await ask('/me',launch(MEMBER_GP_OFF,0,'Gita'));
-    assert.deepEqual(gita.body,{name:'Gita',mode:'write',reminders:{available:false,reason:'private_chat_off'},projects:[],groups:[]});
+    assert.deepEqual(gita.body,{name:'Gita',mode:'write',reminders:{available:false,reason:'private_chat_off'},projects:[],groups:[],assistant:false});
     // An account that is linked to nobody, and an owner's private chat that is unknown: closed.
     await db.query('UPDATE chat_accounts SET member_id=NULL WHERE id=$1',[MEMBER_NG_ACCOUNT]);
     await refused('/me',launch(MEMBER_NG,0,'Nils'),403,'member_app_closed');

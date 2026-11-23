@@ -1,5 +1,5 @@
 """Owner-facing Honcho budget summary and revision-checked changes: the memory search
-spending limit and the optional monthly memory thinking spending limit (ADR-0277)."""
+spending limit and the optional monthly memory thinking spending limit (ADR-0279)."""
 from services.honcho.meter import Ledger, Rejected
 from tools.operations.memory.honcho_setup import PROVIDER_STATE, state_for
 

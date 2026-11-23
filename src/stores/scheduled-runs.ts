@@ -11,14 +11,33 @@ import type {RuntimeTurnRepository} from './turns.js';
 import {OperationRepository} from './operations.js';
 import {ManagedExecutionRepository,managedEventId,managedIdentity,type ManagedInput} from './managed-execution.js';
 import type {ScheduleRepository} from './schedules.js';
-import type {TelegramActionRepository} from './telegram-actions.js';
+import {silentResult,type TelegramActionRepository} from './telegram-actions.js';
 import {ownerChat} from '../assistant-policy.js';
 import {servedDestination} from '../destinations.js';
 import {currentChats} from './chats.js';
+import {memberAssistant} from '../spaces.js';
+import {memberReads} from './member-reads.js';
 
 export class ScheduledRunRepository extends ManagedExecutionRepository {
   protected readonly channel='scheduler' as const;
   protected readonly family='schedules' as const;
+  /** A member's own chat whose member has Personal assistant on: their own schedules run there, as them. */
+  protected override otherScope(scope:string):boolean{return memberAssistant(scope);}
+  /** The member whose own chat this run is in, as storage has it now; null for the owner's chat or a group. A member's chat
+   *  that is no longer open, or whose member has Personal assistant off, has no runs. */
+  private async member(row:any):Promise<string|null> {
+    const owner=ownerChat(this.access.policy());if(!owner||row.scope===owner||!this.otherScope(row.scope))return null;
+    const found=await memberReads(this.control,row.scope,owner);
+    const on=found?(await this.control.query('SELECT 1 FROM members WHERE id=$1 AND assistant',[found.member])).rowCount:0;
+    if(!found||!on)throw new HttpError(403,'run_scope_denied');
+    return found.member;
+  }
+  /** Who the run reads as: the owner's chat or a group as before; a member's own chat as that member, with the reads
+   *  storage binds for them (their chat and their joined groups), never the owner's chat or another member's. */
+  private async runPrincipal(row:any):Promise<Reader> {
+    const principal=this.principal(row),member=await this.member(row);
+    return member===null?principal:this.access.bindReads({...principal,member});
+  }
   constructor(access:SourceAccessRepository,derived:DerivedRepository,turns:RuntimeTurnRepository,token:string,agent:Agent,
     readonly schedules:ScheduleRepository,readonly actions:TelegramActionRepository){super(access,derived,turns,token,agent);}
   protected async readiness(_row:any){return observation('completed','preparation');}
@@ -38,10 +57,11 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
       throw new HttpError(409,'run_input_conflict');
     if(binding.mode==='on')await this.guards.read('derived_artifacts:'+version.prompt_reference.id,binding);
   }
-  protected override async contextDetails(row:any){const version=await this.version(row);
-    return {logical_profile:row.logical_profile,job_id:row.job_id,job_revision:version.document_hash,definition:version.configuration};}
+  protected override async contextDetails(row:any){const version=await this.version(row),member=await this.member(row);
+    return {logical_profile:row.logical_profile,job_id:row.job_id,job_revision:version.document_hash,definition:version.configuration,
+      ...(member!==null?{member}:{})};}
   protected async build(row:any){
-    await this.current(row);const principal=this.principal(row),version=await this.version(row);
+    await this.current(row);const principal=await this.runPrincipal(row),version=await this.version(row);
     await this.turns.register(principal,{logical_profile:row.logical_profile,job:row.job_id});
     let text:string;
     if(row.binding.mode==='on')text=string(object((await this.guards.read('derived_artifacts:'+version.prompt_reference.id,row.binding)).value).text,100000);
@@ -80,6 +100,37 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
       runs.push({event_id:row.event_id,state:row.state,created_at:row.created_at,error_code:row.error_code,text:observed.text,
         native_session:session,payload:{profile:observed.visible?this.turns.profile(this.principal(row),row.binding):null,logical_profile:profile}});
     }return {runs};
+  }
+  /** One schedule's runs for the Schedules page, newest first: when each began and ended, whether it was timed or Run now,
+   *  and how it ended; never what it said (ADR-0266). A schedule is named by its chat and job, as the page lists it. */
+  async runLog(scope:string,job:string){
+    const chat=string(scope,200),id=managedIdentity(job);
+    const rows=(await this.control.query(`SELECT r.event_id,r.created_at,r.updated_at,r.state,r.fire_reason,r.error_code,r.result_reference,
+      v.configuration->>'deliver' AS deliver,(SELECT a.state FROM telegram_action_requests a WHERE a.source_reference->>'id'=r.event_id
+      ORDER BY a.created_at DESC LIMIT 1) AS send
+      FROM managed_runs r LEFT JOIN schedule_versions v ON v.id=r.schedule_version
+      WHERE r.channel='scheduler' AND r.scope=$1 AND r.job_id=$2 ORDER BY r.created_at DESC,r.event_id DESC LIMIT 50`,[chat,id])).rows;
+    const runs=[];
+    for(const row of rows) {
+      let result:string;
+      if(['captured','running'].includes(row.state))result='running';
+      else if(row.state==='cancelled')result=['missed','overlap'].includes(row.fire_reason)?'skipped':'stopped';
+      else if(row.state!=='done')result='failed';
+      else {
+        // A run with only [SILENT] had nothing new; Run now in the owner's private chat said so in one line.
+        const receipt=row.result_reference?await this.derived.checkpoint('scheduler-result:'+row.event_id):null;
+        const said=receipt?String(JSON.parse(receipt.content.toString()).text??''):'';
+        if(!said.trim()||silentResult(said))result='nothing_new';
+        else if(row.send==='done')result='sent';
+        else if(row.send==='proposed')result='waiting';
+        else if(row.send==='rejected')result='declined';
+        else if(['approved','running'].includes(row.send))result='sending';
+        else result=row.deliver==='telegram'?'not_sent':'kept';
+      }
+      runs.push({id:row.event_id.slice(0,12),started_at:row.created_at,finished_at:result==='running'?null:row.updated_at,
+        trigger:row.fire_reason==='manual'?'run_now':row.fire_reason==='catch_up'?'catch_up':'timed',result,error_code:row.error_code??null});
+    }
+    return {runs};
   }
   async delivery(input:unknown){return this.actions.requestScheduled({admin:true,scope:null},managedEventId(object(input).event_id));}
   override async run(id:string,authority:ExecutionAuthority):Promise<Observation>{const result=await super.run(id,authority);

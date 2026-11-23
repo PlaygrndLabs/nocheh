@@ -338,11 +338,12 @@ const answerRoutes:readonly [string,RegExp][]=[
 /**
  * The routes a member's private chat may call (step 4, ADR-0262): an answer's reads, but no shared or approved context
  * opened by its id (a member's chat is given none), and its task reads only list and read (D14). The memory context
- * route answers it with nothing shared or granted.
+ * route answers it with nothing shared or granted. With Personal assistant on, its own live turn may also ask whether
+ * it may set schedules (members' schedules): Hermes's own tool then writes them, never these routes.
  */
 const memberRoutes:readonly [string,RegExp][]=[
   ['GET',/^\/v1\/(?:search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|owner\/tasks(?:\/[a-f0-9]{64})?|security\/binding|turn-files\/[a-f0-9]{64})$/],
-  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions)|anthropic\/v1\/messages)$/],
+  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions|schedules\/turn)|anthropic\/v1\/messages)$/],
 ];
 /**
  * The routes the owner's ask about a member may call (step 4b): the archive reads of that member's chat, the turn's

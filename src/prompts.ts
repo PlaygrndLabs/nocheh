@@ -17,7 +17,7 @@ export const promptKeys=['reply.common','reply.owner','reply.group','reply.priva
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
   'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds','telegram.member_daily_limit','telegram.group_tools_texts',
   'telegram.member_private_daily_limit','members.local_laws','reply.member_read','telegram.member_read','telegram.member_read_texts',
-  'members.reminder','members.reminder_texts','reply.scheduled','reply.schedules','schedules.notice_texts'] as const;
+  'members.reminder','members.reminder_texts','reply.scheduled','reply.schedules','schedules.notice_texts','reply.member_schedules'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */

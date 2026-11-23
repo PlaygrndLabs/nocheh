@@ -59,8 +59,10 @@ export abstract class ManagedExecutionRepository {
   protected get control(){return this.access.stores.control;}
   protected get guards(){return this.access.guards;}
   protected async row(id:string){return (await this.control.query("SELECT * FROM managed_runs WHERE event_id=$1 AND channel=$2",[id,this.channel])).rows[0];}
+  /** Another chat this channel's runs may be in, besides the owner's private chat and the served groups: none here. */
+  protected otherScope(_scope:string):boolean{return false;}
   protected scope(value:unknown){const scope=string(value,64),policy=this.access.policy();
-    const owner=ownerChat(policy);if(!policy.owner_id||!owner||scope!==owner&&!servedGroup(scope))throw new HttpError(403,'run_scope_denied');return scope;}
+    const owner=ownerChat(policy);if(!policy.owner_id||!owner||scope!==owner&&!servedGroup(scope)&&!this.otherScope(scope))throw new HttpError(403,'run_scope_denied');return scope;}
   protected principal(row:any):Reader {return {admin:false,scope:row.scope===ownerChat(this.access.policy())?null:row.scope,space:row.space_id,
     turnEvent:row.event_id,logical_profile:row.logical_profile,generation:row.binding.generation,guard_epoch:row.binding.epoch,revision:row.binding.epoch};}
   protected async scoped(input:unknown){const body=object(input),id=managedEventId(body.event_id),scope=this.scope(body.scope),profile=managedIdentity(body.profile),row=await this.row(id);

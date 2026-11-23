@@ -151,7 +151,7 @@ export function withAnswers(list: MemberList | null, answers: readonly MemberAns
       };
     }
     if ('removed' in answer) return {...next, members: next.members.filter(item => item.id !== answer.removed)};
-    return {...next, daily_messages: answer.daily_messages};
+    return {...next, daily_messages: answer.daily_messages, member_schedules: answer.member_schedules};
   }, list);
 }
 
@@ -187,6 +187,7 @@ const memberErrors: Record<string, string> = {
     'Telegram hasn’t shown this person in that group yet. You can switch it on once they write there.',
   member_group_required: 'Tick at least one group.',
   invalid_daily_messages: 'Choose a whole number from 1 to 10,000.',
+  invalid_member_schedules: 'Choose a whole number from 1 to 50.',
   not_implemented: 'Members aren’t available on this installation yet.',
 };
 

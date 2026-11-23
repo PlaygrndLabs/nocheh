@@ -101,7 +101,7 @@ def honcho_rows(state, since):
     for row in rows:
         embedding = row['route'] == '/v1/embeddings'
         priced = row['priced_calls']
-        # The meter prices memory search, and memory thinking on a model it knows the price of (ADR-0277). A thinking
+        # The meter prices memory search, and memory thinking on a model it knows the price of (ADR-0279). A thinking
         # row it priced only in part, or not at all, is priced by Hermes when read.
         complete = priced == row['calls'] - row['failed']
         if not embedding and not (priced and complete):

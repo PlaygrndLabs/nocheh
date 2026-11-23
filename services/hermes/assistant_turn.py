@@ -61,10 +61,13 @@ SCHEDULE_TOOLSETS=TURN_TOOLSETS+['cronjob']
 
 
 def schedule_turn(body,profile,review=False,background=False,box=False,machine=False,answer=False,member=False,member_read=False):
-    """Whether this turn offers Hermes's schedule tool: the owner's own live Telegram turn, isolated, with the chat's
-    schedule store mounted, and Nocheh's word that the message is the owner's own (not forwarded). Fails closed."""
-    if (body.get('owner') is not True or body.get('channel','telegram')!='telegram' or review or background or box or machine
-            or answer or member or member_read or os.environ.get('NOCHEH_ISOLATED_TURN')!='1'):return False
+    """Whether this turn offers Hermes's schedule tool: the owner's own live Telegram turn, or a member's own in their
+    private chat (members' schedules), isolated, with the chat's schedule store mounted, and Nocheh's word that the
+    message is the owner's or that member's own (not forwarded) and, for a member, that they have Personal assistant on.
+    Fails closed."""
+    # Exactly one of the two: the owner's own turn, or a member's own (never a member flag on an owner's turn).
+    if ((body.get('owner') is True)==bool(member) or body.get('channel','telegram')!='telegram' or review or background or box or machine
+            or answer or member_read or os.environ.get('NOCHEH_ISOLATED_TURN')!='1'):return False
     # /profile is a scratch tmpfs where Hermes may make its own cron folder; a schedule written there is lost with the
     # turn. Only the launcher's word says the chat's store is mounted (ADR-0266).
     if os.environ.get('NOCHEH_SCHEDULE_STORE')!='1':return False
@@ -322,7 +325,8 @@ def run(body, emit=None, relay=None):
     if answer and (body['owner'] or review or body.get('channel','telegram')!='telegram'):raise ValueError('invalid_private_answer')
     # A member's own private chat (step 4): never the owner nor an answer, only in a Telegram turn, never a review or a job.
     member = body.get('member') is True
-    if member and (body['owner'] or answer or review or body.get('channel','telegram')!='telegram'):raise ValueError('invalid_member_turn')
+    # A run of one of the member's own schedules there is a member's turn too (members' schedules).
+    if member and (body['owner'] or answer or review or body.get('channel','telegram') not in ('telegram','scheduler')):raise ValueError('invalid_member_turn')
     # The owner's ask about a member (step 4b): the same, and never a private answer or a member's turn too.
     member_read = body.get('member_read') is True
     if member_read and (body['owner'] or answer or member or review or body.get('channel','telegram')!='telegram'):raise ValueError('invalid_member_read')
@@ -379,7 +383,7 @@ def run(body, emit=None, relay=None):
         if not review:connect_data_tools(body['archive_credential'],body['turn_deadline_epoch'],MEMBER_READ_DATA_TOOLS if member_read else ANSWER_DATA_TOOLS if answer or member else DATA_TOOLS)
         agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
             api_key=credentials.access_token,base_url=credentials.base_url,
-            enabled_toolsets=['memory'] if review else MEMBER_READ_TOOLSETS if member_read else MEMBER_TOOLSETS if member else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else SCHEDULE_TOOLSETS if schedules else TURN_TOOLSETS,
+            enabled_toolsets=['memory'] if review else MEMBER_READ_TOOLSETS if member_read else (MEMBER_TOOLSETS+['cronjob'] if schedules else MEMBER_TOOLSETS) if member else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else SCHEDULE_TOOLSETS if schedules else TURN_TOOLSETS,
             fallback_model=None,
             session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
             user_id=body['user_id'],chat_type='dm' if body['owner'] or answer or member or member_read else 'group',
@@ -391,7 +395,7 @@ def run(body, emit=None, relay=None):
                 (prompt('reply.common')+' '+prompt('reply.member_read') if member_read else reply(body.get('prompts'),body['owner'],answer,member))+
                 # A scheduled run's result goes to its chat by itself; one with nothing to send answers [SILENT] (ADR-0266).
                 (' '+prompt('reply.scheduled') if body.get('channel')=='scheduler' else '')+
-                (' '+prompt('reply.schedules') if schedules else '')+long_term))
+                (' '+prompt('reply.member_schedules' if member else 'reply.schedules') if schedules else '')+long_term))
     except BaseException:
         disconnect_data_tools();raise
     # The turn's tools are set below; Hermes's refresh at the start of a turn would bring back a tool the turn dropped.

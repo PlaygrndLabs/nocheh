@@ -4,10 +4,11 @@ import type pg from 'pg';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {accountIdFor} from '../chats.js';
 import {isTelegramAccount} from '../chats-telegram.js';
-import {HttpError,json,object} from '../http.js';
+import {HttpError,json,object,string} from '../http.js';
 import {MEMBER_APP_BODY_MAX,MEMBER_APP_CORE_PREFIX,MEMBER_APP_QUERY_MAX,MEMBER_APP_TASK_WRITES,MEMBER_APP_WRITES_PER_10_MIN,
   MEMBER_APP_WRITES_PER_DAY,MEMBER_LAUNCH_HEADER,memberAppErrors,memberAppRoute,memberTaskQuery,
-  type MemberBoardGroup,type MemberGroupBoard,type MemberMe,type MemberMeGroup,type MemberRemindersState} from '../member-app-wire.js';
+  type MemberBoardGroup,type MemberGroupBoard,type MemberMe,type MemberMeGroup,type MemberRemindersState,type MemberSchedule,
+  type MemberScheduleRequest,type MemberScheduleResult,type MemberSchedules} from '../member-app-wire.js';
 import type {MemberTasks} from '../member-wire.js';
 import type {RuntimeCall} from '../runtime.js';
 import {groupWithTopics} from '../spaces.js';
@@ -52,6 +53,8 @@ export interface MemberAppServices {
   tasks:Pick<TaskRepository,'memberList'|'memberGet'|'memberCreate'|'memberUpdate'|'memberComment'|'memberReminders'>;
   policy:()=>Pick<AssistantPolicy,'owner_id'|'owner_chat'>;
   call:RuntimeCall;
+  /** The agent's schedule list and actions, as the owner's Schedules page calls them (members' schedules). */
+  schedules?:(input:Record<string,unknown>)=>Promise<Record<string,unknown>>;
   dataDir?:string;
 }
 /** The public bot id and the key launch data is checked with (launchKey); `now` for tests. */
@@ -66,7 +69,7 @@ const refuse=(code:keyof typeof memberAppErrors,status:number)=>new HttpError(st
  * the owner's, their Tasks permission, Reminders to themselves, the launching account's open private chat with Nocheh,
  * their last sign-out and when they were added or un-paused. */
 interface Identity {member:string;account:string;accounts:string[];mode:MemberTasks;reminders:boolean;chat:string|null;display:string|null;
-  appSince:Date;signedOut:Date|null}
+  appSince:Date;signedOut:Date|null;assistant:boolean;scheduleLimit:number}
 
 /**
  * Check 6 in one query: the account of Telegram user `account` linked to an active member, never the owner's account
@@ -75,7 +78,8 @@ interface Identity {member:string;account:string;accounts:string[];mode:MemberTa
  * and the member's last sign-out. Null for anyone else.
  */
 async function identify(db:Pick<pg.Pool,'query'>,account:string,owner:string):Promise<Identity|null> {
-  const row=(await db.query(`SELECT m.id AS member,a.id AS account,m.tasks,m.reminders,m.app_since,a.display_name,p.signed_out_auth_date,
+  const row=(await db.query(`SELECT m.id AS member,a.id AS account,m.tasks,m.reminders,m.assistant,m.app_since,a.display_name,p.signed_out_auth_date,
+      (SELECT d.member_schedules FROM member_directory_state d WHERE d.singleton) AS schedule_limit,
       ARRAY(SELECT x.id FROM chat_accounts x WHERE x.member_id=m.id AND NOT EXISTS(SELECT 1 FROM chats o WHERE o.id=$2 AND o.account_id=x.id) ORDER BY x.id) AS accounts,
       (SELECT c.id FROM chats c WHERE c.account_id=a.id AND c.kind='private' AND c.parent_id IS NULL AND c.id<>$2 AND m.private_chat ORDER BY c.id LIMIT 1) AS chat
     FROM chat_accounts a JOIN chat_connections n ON n.id=a.connection_id AND n.app='telegram'
@@ -84,7 +88,8 @@ async function identify(db:Pick<pg.Pool,'query'>,account:string,owner:string):Pr
   [account,owner])).rows[0];
   if(!row||(row.tasks!=='write'&&row.tasks!=='read'))return null;
   return {member:row.member,account:row.account,accounts:row.accounts as string[],mode:row.tasks,reminders:row.reminders===true,chat:row.chat??null,
-    display:row.display_name??null,appSince:row.app_since,signedOut:row.signed_out_auth_date??null};
+    display:row.display_name??null,appSince:row.app_since,signedOut:row.signed_out_auth_date??null,assistant:row.assistant===true,
+    scheduleLimit:Number(row.schedule_limit??5)};
 }
 
 /** The Telegram name the signed launch data gives (first and last name), or null. */
@@ -125,7 +130,7 @@ export async function countMemberWrite(db:Pick<pg.Pool,'query'>,member:string):P
  * and the open tasks labelled with that group or one of its topics on an open board). Each board also names the
  * project's groups now, by Telegram title, which its tasks' group labels show (ADR-0276). Nothing names the owner,
  * another member, or the owner's time zone. */
-async function me(db:Pick<pg.Pool,'query'>,principal:MemberAppPrincipal,groups:readonly string[]):Promise<MemberMe> {
+async function me(db:Pick<pg.Pool,'query'>,principal:MemberAppPrincipal,groups:readonly string[],assistant:boolean):Promise<MemberMe> {
   const rows=groups.length?(await db.query(`SELECT c.id,c.kind,c.title,c.app_type,d.username,p.id AS project,p.state AS project_state FROM chats c
       LEFT JOIN chat_details d ON d.chat_id=c.id LEFT JOIN project_assignments a ON a.space_id=c.id AND a.mode='assigned' LEFT JOIN projects p ON p.id=a.project_id
     WHERE c.id=ANY($1::text[]) AND c.kind='group'`,[[...groups]])).rows:[];
@@ -146,7 +151,42 @@ async function me(db:Pick<pg.Pool,'query'>,principal:MemberAppPrincipal,groups:r
   const boardGroups=(project:string):MemberBoardGroup[]=>named.filter(row=>row.project===project)
     .map(row=>({id:row.id as string,title:chatLabel({kind:'group',title:row.title,app_type:row.app_type},row.username,null)})).sort(byTitle);
   return {name:principal.name??'',mode:principal.mode,reminders:principal.reminders,
-    projects:principal.views.map(view=>({id:view.project,name:view.name,groups:boardGroups(view.project)})),groups:items};
+    projects:principal.views.map(view=>({id:view.project,name:view.name,groups:boardGroups(view.project)})),groups:items,assistant};
+}
+
+/** A time the agent wrote, as UTC, so no offset of the owner's time zone shows; null when there is none. */
+const utc=(value:unknown):string|null=>{
+  if(typeof value!=='string'||!value)return null;
+  const at=new Date(value);return Number.isNaN(at.getTime())?null:at.toISOString();
+};
+/** What the members' app shows of one schedule the agent listed: no prompt text, profile, chat or time zone. */
+function memberSchedule(item:Record<string,unknown>):MemberSchedule {
+  const state:MemberSchedule['state']=item.running===true?'running':item.state==='completed'?'finished':item.enabled===false?'paused':'scheduled';
+  return {id:String(item.id),name:typeof item.name==='string'?item.name.slice(0,200):'',schedule:typeof item.schedule==='string'?item.schedule.slice(0,200):'',
+    state,next_run_at:utc(item.next_run_at),last_run_at:utc(item.last_run_at),
+    last_ok:item.last_status==='success'?true:item.last_status==='error'||item.last_status==='skipped'?false:null};
+}
+/** The schedules the agent keeps for this private chat now (the agent's list, filtered to the chat). */
+async function chatScheduleList(manage:NonNullable<MemberAppServices['schedules']>,chat:string):Promise<Record<string,unknown>[]> {
+  const listed=(await manage({operation:'list'})).schedules;
+  return Array.isArray(listed)?listed.filter((item:any)=>item&&typeof item==='object'&&item.scope===chat&&typeof item.id==='string'
+    &&typeof item.profile==='string'):[];
+}
+const SCHEDULE_ACTIONS:Record<MemberScheduleRequest['action'],string>={pause:'pause',resume:'resume',run:'run',delete:'delete'};
+/** POST /schedules/:id: one of the member's own schedules paused, resumed, run now or deleted, as the owner's Schedules
+ * page does it; the schedule must be one of their private chat's now. */
+async function changeSchedule(manage:NonNullable<MemberAppServices['schedules']>,chat:string,job:string,body:unknown):Promise<MemberScheduleResult> {
+  const request=object(body),action=string(request.action,10) as MemberScheduleRequest['action'],operation=string(request.operation_id,64);
+  if(!Object.hasOwn(SCHEDULE_ACTIONS,action))throw new HttpError(400,'invalid_schedule_action');
+  if(!/^[a-zA-Z0-9-]{8,64}$/.test(operation))throw new HttpError(400,'invalid_operation_id');
+  const found=(await chatScheduleList(manage,chat)).find(item=>item.id===job);
+  if(!found)throw refuse('scheduleGone',404);
+  let result:Record<string,unknown>;
+  try{result=await manage({operation:SCHEDULE_ACTIONS[action],profile:found.profile,job_id:job,request_id:'member-'+operation});}
+  catch(error){if(error instanceof HttpError&&error.status<500&&error.status!==429)throw refuse('scheduleGone',404);throw error;}
+  if(action==='delete')return {schedule:null};
+  const now=result.schedule&&typeof result.schedule==='object'?result.schedule as Record<string,unknown>:found;
+  return {schedule:memberSchedule(now)};
 }
 
 async function readBody(req:IncomingMessage):Promise<Buffer> {
@@ -220,6 +260,19 @@ async function handle(services:MemberAppServices,options:MemberAppOptions,req:In
       SET signed_out_auth_date=GREATEST(p.signed_out_auth_date,excluded.signed_out_auth_date),updated_at=now()`,[identity.member,cutoff]);
     return json(res,200,{});
   }
+  // The member's own schedules (members' schedules): Personal assistant on and their private chat open; each change counts
+  // as a write. Nothing else is read for them, and only their own private chat's schedules are listed or changed.
+  if(route.name==='schedules'||route.name==='schedule') {
+    if(!identity.assistant||!identity.chat||!services.schedules)throw refuse('schedulesOff',403);
+    if(route.name==='schedules') {
+      const answer:MemberSchedules={schedules:(await chatScheduleList(services.schedules,identity.chat)).map(memberSchedule),limit:identity.scheduleLimit};
+      return json(res,200,answer);
+    }
+    const body=parse(raw);
+    try{await countMemberWrite(db,identity.member);}
+    catch(error){if((error as {code?:unknown})?.code==='23503')throw refuse('closed',403);throw error;}
+    return json(res,200,await changeSchedule(services.schedules,identity.chat,route.schedule!,body));
+  }
   const write=MEMBER_APP_TASK_WRITES.includes(route.name);
   const body=write?parse(raw):undefined,query=route.name==='tasks'?memberTaskQuery(url.searchParams):undefined;
   // 8. The groups, asked of Telegram again on opening and before a change.
@@ -241,7 +294,7 @@ async function handle(services:MemberAppServices,options:MemberAppOptions,req:In
     name:launchName(init)??identity.display,mode:identity.mode,reminders:remindersState(identity),
     views:Object.freeze(await memberTaskViews(db,groups)),chat:identity.chat});
   switch(route.name) {
-    case 'me':return json(res,200,await me(db,principal,groups));
+    case 'me':return json(res,200,await me(db,principal,groups,identity.assistant&&!!identity.chat&&!!services.schedules));
     case 'tasks':return json(res,200,await services.tasks.memberList(principal,query!));
     case 'task':return json(res,200,await services.tasks.memberGet(principal,route.task!));
     case 'create':return json(res,200,await services.tasks.memberCreate(principal,body));

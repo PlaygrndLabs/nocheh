@@ -75,7 +75,7 @@ class UsageViewTests(unittest.TestCase):
         self.assertEqual(unavailable['sources'], {'hermes': 'empty', 'honcho': 'ok', 'pricing': 'unavailable'})
 
     def test_memory_thinking_the_meter_priced_shows_the_meters_cost(self):
-        # The same cost the thinking spending limit counts (ADR-0277); Hermes is not asked.
+        # The same cost the thinking spending limit counts (ADR-0279); Hermes is not asked.
         self.honcho('/v1/chat/completions', 200, {'prompt_tokens': 300_000, 'completion_tokens': 30_000}, 'anthropic', 'claude-sonnet-5-5')
         result = view_usage.view(self.state, 1, call=lambda *a, **k: self.fail('already priced'), now=DAY)
         self.assertEqual((result['rows'][0]['cost_usd'], result['rows'][0]['cost_complete']), (0.9, True))

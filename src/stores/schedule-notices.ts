@@ -2,6 +2,9 @@ import type pg from 'pg';
 import {digest} from '../archive.js';
 import {cardName} from '../action-text.js';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
+import {chats} from '../chats.js';
+import {noticeDigest} from '../notice-authorize.js';
+import {memberAssistant} from '../spaces.js';
 import type {Agent} from '../agent/agent.js';
 import {agentOperation} from '../agent/agent.js';
 import {telegramAddress} from '../frontdoor/telegram.js';
@@ -13,8 +16,27 @@ import type {RuntimeCall} from '../runtime.js';
  * The owner's own message when a reply in their private chat set a schedule with the agent's own schedule tool (ADR-0266).
  * The scheduler captures the new schedule, then asks for this message once: code writes it from the schedule's fields,
  * with Pause and Delete buttons that only the owner's press in that chat acts on. The schedule's results later come to
- * the same chat with no card each time.
+ * the same chat with no card each time. A member with Personal assistant on gets the same message in their own private
+ * chat for a schedule they set there, and only their own press there acts on it (members' schedules).
  */
+
+/** A member's schedule message, waiting for nocheh-telegram to ask before it sends it (/internal/notices/authorize):
+ *  its notice id, the member's chat and the digest of its exact text. The ask spends it. */
+export const scheduleNoticeSchema=`
+CREATE TABLE IF NOT EXISTS schedule_notice_grants (
+ id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{64}$'),chat_id text NOT NULL,text_digest text NOT NULL CHECK(text_digest ~ '^[a-f0-9]{64}$'),
+ created_at timestamptz NOT NULL DEFAULT now()
+);`;
+
+/** nocheh-telegram's one ask before it sends a member's schedule message: allowed once, for that notice id, that chat in
+ *  Telegram and that exact text, while the chat is a member's own with Personal assistant on. */
+export async function authorizeScheduleNotice(db:Pick<pg.Pool,'query'>,request:{id:string;chat:string;text_digest:string}):Promise<boolean> {
+  const row=(await db.query<{chat_id:string}>('DELETE FROM schedule_notice_grants WHERE id=$1 AND text_digest=$2 RETURNING chat_id',
+    [request.id,request.text_digest])).rows[0];
+  if(!row||!memberAssistant(row.chat_id))return false;
+  const target=telegramAddress(row.chat_id,chats());
+  return !!target&&target.topic===undefined&&target.chat_id===request.chat;
+}
 
 /** A button's data: `nk`, the choice (p pauses, d deletes), the 24 hex of the chat's schedule store and the schedule's
  *  12 hex id, as Hermes makes them. */
@@ -59,11 +81,15 @@ export class ScheduleNotices {
    */
   async announce(input:unknown):Promise<{state:string}> {
     const body=object(input),scope=string(body.scope,64),profile=string(body.profile,64),job=string(body.job_id,128);
-    const owner=ownerChat(this.policy()),target=telegramAddress(owner);
-    if(!owner||scope!==owner||!target)return {state:'skipped'};
+    const owner=ownerChat(this.policy()),member=!!owner&&scope!==owner&&memberAssistant(scope),target=telegramAddress(member?scope:owner);
+    if(!owner||scope!==owner&&!member||!target)return {state:'skipped'};
     if(!PROFILE.test(profile))throw new HttpError(400,'invalid_schedule_identity');
-    const lines=await this.lines(),text=this.text(lines,body);
-    const notice={id:ScheduleNotices.id(profile,job),...target,text,send_class:'notice'};
+    const lines=await this.lines(),text=this.text(lines,body),id=ScheduleNotices.id(profile,job);
+    const notice={id,...target,text,send_class:'notice'};
+    // A member's chat takes it only after nocheh-telegram's one ask (authorizeScheduleNotice), for each exact text it may
+    // send: with its buttons, or without them when Telegram refuses them.
+    if(member)await this.control.query(`INSERT INTO schedule_notice_grants(id,chat_id,text_digest) VALUES($1,$2,$3)
+      ON CONFLICT(id) DO UPDATE SET chat_id=$2,text_digest=$3,created_at=now()`,[id,scope,noticeDigest(text)]);
     const buttons=JOB.test(job)?[[{text:points(lines.pause,40),callback:'nkp'+profile.slice(7)+job},{text:points(lines.delete,40),callback:'nkd'+profile.slice(7)+job}]]:null;
     try{return {state:String((await this.call('telegram.notice',buttons?{...notice,buttons}:notice,30000))?.state??'failed')};}
     catch(error) {
@@ -73,16 +99,16 @@ export class ScheduleNotices {
   }
 
   /**
-   * A press on the message, already checked to be the owner's own in their private chat: pause or delete the schedule
-   * through the agent, as the Schedules page does. The message then shows the answer under its text and loses its
-   * buttons. Returns the answer to the press.
+   * A press on the message, already checked to be the owner's own in their private chat, or a member's own in theirs
+   * (`chat`): pause or delete that chat's schedule through the agent, as the Schedules page does. The message then shows
+   * the answer under its text and loses its buttons. Returns the answer to the press.
    */
-  async press(choice:ScheduleChoice,store:string,job:string,press:string):Promise<string> {
-    const lines=await this.lines(),profile='nocheh-'+store,owner=ownerChat(this.policy()),target=telegramAddress(owner);
+  async press(choice:ScheduleChoice,store:string,job:string,press:string,chat?:string):Promise<string> {
+    const lines=await this.lines(),profile='nocheh-'+store,owner=chat??ownerChat(this.policy()),target=telegramAddress(owner);
     const manage=agentOperation(this.agent,'manageSchedules');
     let reply:string,text:string;
     try {
-      // Only a schedule of the owner's private chat that is still there; its message shows it as it is now.
+      // Only a schedule of the pressed chat that is still there; its message shows it as it is now.
       const listed=(await manage({operation:'list'})).schedules;
       const found=Array.isArray(listed)?listed.find((item:any)=>item?.profile===profile&&item?.id===job&&item?.scope===owner):undefined;
       if(!found)return lines.changed;

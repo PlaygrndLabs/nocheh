@@ -7,7 +7,8 @@
  * Members, by Telegram id: 201 Lena (read and write, in Aurora planning and Garden swap, each on a board, Weekend notes
  * with no board and Book club whose project is closed; Print crew, which she is not in, shares Aurora planning's board, so
  * she sees its tasks and its name as their group, ADR-0276); 202 Ravi (read only, Aurora planning only); 203 Sana (read and
- * write, her private chat with Nocheh off, so no reminders); 204 Tom (paused); 205 Noor (no groups). The owner is 42;
+ * write, her private chat with Nocheh off, so no reminders); 204 Tom (paused); 205 Noor (no groups). Only Lena has
+ * Personal assistant on, with two schedules of her own (members' schedules). The owner is 42;
  * anyone else is a stranger. The boards' statuses and shared columns are the owner's own names (PREVIEW_MEMBER_BOARD);
  * a task's assignees are already as the member listener sends them: Telegram names, and the rest counted.
  */
@@ -17,7 +18,7 @@ import {readFile} from 'node:fs/promises';
 import {HttpError,json,object,readJson} from '../src/http.js';
 import {MEMBER_APP_PUBLIC_PREFIX,MEMBER_LAUNCH_HEADER,MEMBER_TASK_CREATE_FIELDS,MEMBER_TASK_PATCH_FIELDS,MEMBER_TASK_REFUSED_FIELDS,
   memberAppErrors,memberAppRoute,memberTaskQuery,type MemberActor,type MemberComment,type MemberDetail,type MemberMe,type MemberMeGroup,
-  type MemberReminder,type MemberRemindersState,type MemberTask,type MemberTaskColumn,type MemberTaskStatus} from '../src/member-app-wire.js';
+  type MemberReminder,type MemberRemindersState,type MemberSchedule,type MemberTask,type MemberTaskColumn,type MemberTaskStatus} from '../src/member-app-wire.js';
 
 /** The member page's policy, as nocheh-miniapp sends it: the owner page's, with Trusted Types required. */
 export const MEMBER_PAGE_CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; "+
@@ -44,9 +45,9 @@ const groups:{id:string;title:string;project:string|null;active:boolean}[]=[
  {id:'-30005',title:'Hidden board',project:PREVIEW_MEMBER_PROJECTS.hidden,active:true},
  {id:'-30006',title:'Print crew',project:PREVIEW_MEMBER_PROJECTS.studio,active:true},
 ];
-type Member={telegram:string;name:string;state:'active'|'paused';tasks:'read'|'write';private_chat:boolean;reminders:boolean;groups:string[]};
+type Member={telegram:string;name:string;state:'active'|'paused';tasks:'read'|'write';private_chat:boolean;reminders:boolean;groups:string[];assistant?:true};
 const members:Member[]=[
- {telegram:'201',name:'Lena',state:'active',tasks:'write',private_chat:true,reminders:true,groups:['-30001','-30002','-30003','-30004']},
+ {telegram:'201',name:'Lena',state:'active',tasks:'write',private_chat:true,reminders:true,groups:['-30001','-30002','-30003','-30004'],assistant:true},
  {telegram:'202',name:'Ravi',state:'active',tasks:'read',private_chat:true,reminders:true,groups:['-30001']},
  {telegram:'203',name:'Sana',state:'active',tasks:'write',private_chat:false,reminders:true,groups:['-30001']},
  {telegram:'204',name:'Tom',state:'paused',tasks:'write',private_chat:true,reminders:true,groups:['-30001']},
@@ -54,7 +55,8 @@ const members:Member[]=[
 ];
 type Stored=Omit<MemberDetail,'version'|'mine'|'reminders'|'subtasks'|'children'|'comments'>&{revision:number;made_by:string|null;
  reminders:{id:string;at:string;by:string}[];others:number;comment_count?:number};
-type State={tasks:Stored[];signedOut:Map<string,number>;receipts:Map<string,{request:string;result:unknown}>};
+type State={tasks:Stored[];signedOut:Map<string,number>;receipts:Map<string,{request:string;result:unknown}>;schedules:MemberSchedule[]};
+const SCHEDULE_LIMIT=5;
 let state:State;
 const day=(days:number)=>new Date(Date.now()+days*864e5).toISOString().slice(0,10);
 const at=(days:number)=>new Date(Math.floor((Date.now()+days*864e5)/60000)*60000).toISOString();
@@ -83,7 +85,9 @@ function seed():State {
   task('beds',{title:'Measure the beds',project:G,group:'-30002',due_on:day(5)}),
   // A project the preview's members are in none of the groups of: nothing of it may ever show.
   task('hidden',{title:'HIDDENMARK budget sheet',project:PREVIEW_MEMBER_PROJECTS.hidden,group:'-30005'}),
- ],signedOut:new Map(),receipts:new Map()};
+ ],signedOut:new Map(),receipts:new Map(),schedules:[
+  {id:'a1b2c3d4e5f6',name:'Morning brief',schedule:'0 8 * * *',state:'scheduled',next_run_at:at(1),last_run_at:at(0),last_ok:true},
+  {id:'f6e5d4c3b2a1',name:'Friday wrap-up',schedule:'0 17 * * 5',state:'paused',next_run_at:null,last_run_at:null,last_ok:null}]};
 }
 state=seed();
 
@@ -137,7 +141,7 @@ function me(member:Member):MemberMe {
  const items:MemberMeGroup[]=groups.filter(group=>member.groups.includes(group.id)).map(group=>!group.project?{id:group.id,title:group.title,board:'none',project:null}:
   !group.active?{id:group.id,title:group.title,board:'closed',project:null}:
   {id:group.id,title:group.title,board:'open',project:group.project,open_count:state.tasks.filter(item=>item.group===group.id&&item.state==='open'&&!item.trashed).length});
- return {name:member.name,mode:member.tasks,reminders:reminderState(member),projects,groups:items};
+ return {name:member.name,mode:member.tasks,reminders:reminderState(member),projects,groups:items,assistant:!!member.assistant&&member.private_chat};
 }
 /** A replayed operation answers what it answered; the same id with another request is a conflict. */
 function once<T>(who:Who,operation:unknown,request:unknown,change:()=>T):T {
@@ -270,6 +274,21 @@ export async function memberAppPreview(req:IncomingMessage,res:ServerResponse,ur
    const list:MemberReminder[]=state.tasks.filter(item=>!item.trashed&&visible(member,item)).flatMap(item=>item.reminders.filter(entry=>entry.by===member.telegram)
     .map(entry=>({id:entry.id,at:entry.at,task:{id:item.id,title:item.title,project:item.project}}))).sort((a,b)=>a.at.localeCompare(b.at));
    return json(res,200,list),true;
+  }
+  // The member's own schedules: only with Personal assistant on and their private chat open.
+  case 'schedules':
+   if(!me(member).assistant)throw new HttpError(403,memberAppErrors.schedulesOff);
+   return json(res,200,{schedules:state.schedules,limit:SCHEDULE_LIMIT}),true;
+  case 'schedule':{
+   if(!me(member).assistant)throw new HttpError(403,memberAppErrors.schedulesOff);
+   const item=state.schedules.find(entry=>entry.id===route.schedule);if(!item)throw new HttpError(404,memberAppErrors.scheduleGone);
+   if(typeof body.operation_id!=='string'||!/^[0-9a-f-]{36}$/.test(body.operation_id))throw new HttpError(400,'invalid_operation_id');
+   if(body.action==='delete'){state.schedules=state.schedules.filter(entry=>entry!==item);return json(res,200,{schedule:null}),true;}
+   if(body.action==='pause'){item.state='paused';item.next_run_at=null;}
+   else if(body.action==='resume'){item.state='scheduled';item.next_run_at=at(1);}
+   else if(body.action==='run'){item.last_run_at=new Date().toISOString();item.last_ok=true;}
+   else throw new HttpError(400,'invalid_schedule_action');
+   return json(res,200,{schedule:item}),true;
   }
   // Every launch opened before now, on every phone: up to this one's, or now less the minute of slack (D13).
   case 'sign_out':state.signedOut.set(member.telegram,Math.max(who.auth,Math.floor(Date.now()/1000)-60));return json(res,200,{}),true;
