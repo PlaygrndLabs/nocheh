@@ -47,7 +47,7 @@ CMD ["python", "-m", "services.hermes.runtime"]
 
 # Upstream installs its Node workspaces with the pnpm pinned in pm/lock.json.
 FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS frontend-tools
-RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=native-runtime /opt/hermes /opt/hermes
 COPY tools/build/install-pinned-pnpm.py /tmp/install-pinned-pnpm.py
 WORKDIR /opt/hermes
