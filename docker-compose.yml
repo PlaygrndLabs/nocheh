@@ -387,6 +387,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+      # In development it first waits up to 120 s for its build's store setup (src/stores/dev-schema.ts). Checks that
+      # fail before then do not count, so Compose never gives up on it while it waits; the first pass makes it healthy.
+      start_period: 180s
     depends_on:
       nocheh-app: {condition: service_healthy}
 

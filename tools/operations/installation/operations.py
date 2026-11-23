@@ -266,7 +266,7 @@ def _backup(state,output,leave_stopped,command,env,outcome,recovery=None):
 
 
 def _make(state,output,leave_stopped,command,env,recovery,outcome):
-    from tools.operations.workflows.workflow_worker import running as workflows_running,stop as stop_workflows,resume_existing as resume_workflows
+    from tools.operations.workflows.workflow_worker import running as workflows_running,stop as stop_workflows
     output.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     running=subprocess.check_output(command+['ps','--services','--status','running'],env=env,text=True).split()
     three_stores=env.get('NOCHEH_STORAGE_LAYOUT')=='original-only-v1'
@@ -359,15 +359,45 @@ def _make(state,output,leave_stopped,command,env,recovery,outcome):
             barrier.close()
             if three_stores:recovery.assert_maintenance()
             if coordinator:coordinator.assert_current()
-            # Resume the existing containers. A development stack may use a different
-            # Compose overlay or pinned image IDs than this checkout's configuration;
-            # `up` can recreate it or try to pull unavailable local image tags.
-            if stopped and not leave_stopped: subprocess.run(command+['start','--wait','--wait-timeout','180']+stopped,env=env,check=True)
-            if workflow_was_running and not leave_stopped:resume_workflows(state)
+            if not leave_stopped:_restart(command,env,stopped,state,workflow_was_running)
         finally:
             # An unfinished stage goes last, so removing gigabytes never keeps the stores locked or the assistant
             # stopped; anything left behind is swept by the schedule after 12 hours.
             if stage is not None and not outcome.get('finished'):shutil.rmtree(stage,ignore_errors=True)
+
+
+# Seconds Compose waits for the restarted services to be healthy. In development the app and the security service first
+# wait up to 120 s for their build's store setup (src/stores/dev-schema.ts); the agent starts only after them.
+RESTART_WAIT=300
+# A service can turn unhealthy before it settles, and Compose then gives up at once. One passing check makes it healthy
+# again, so the start is tried again every RESTART_PAUSE seconds for up to RESTART_PATIENCE seconds.
+RESTART_PATIENCE=600
+RESTART_PAUSE=15
+
+
+def _restart(command,env,services,state,workflows):
+    """Starts the existing containers the backup stopped, then the workflow host. Each step runs even when the one
+    before it failed, and a failed start is tried again, so one slow service never leaves the others stopped. Raises
+    the last failure once every step has run."""
+    from tools.operations.workflows.workflow_worker import resume_existing
+    failure=None
+    if services:
+        # Resume the existing containers. A development stack may use a different Compose overlay or pinned image IDs
+        # than this checkout's configuration; `up` can recreate it or try to pull unavailable local image tags.
+        deadline=time.monotonic()+RESTART_PATIENCE
+        while True:
+            try:
+                subprocess.run(command+['start','--wait','--wait-timeout',str(RESTART_WAIT)]+services,env=env,check=True)
+                failure=None;break
+            except Exception as error:
+                failure=error
+                if time.monotonic()+RESTART_PAUSE>=deadline:break
+                print('Backup restart: services are not healthy yet; trying again.',file=sys.stderr,flush=True)
+                time.sleep(RESTART_PAUSE)
+    if workflows:
+        try:resume_existing(state)
+        except Exception as error:failure=error
+    if failure is not None:raise failure
 
 
 def validate_snapshot(snapshot):
