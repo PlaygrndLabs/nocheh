@@ -22,7 +22,9 @@ from . import mcp_fixture
 REPLY_TOOLS={'memory','session_search','skills_list','skill_view',*('mcp__nocheh__'+name for name in mcp_fixture.TOOLS)}
 JOB_TOOLS=(REPLY_TOOLS-{'mcp__nocheh__background_job'})|{'todo_list'}
 JOB_BOX_TOOLS=(JOB_TOOLS-{'memory','mcp__nocheh__shell','mcp__nocheh__browser'})|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
-JOB_MACHINE_TOOLS=JOB_BOX_TOOLS-{'execute_code'}
+# A machine step reads only what its card showed (machine jobs' reads): these data tools, no notes recall or owner views.
+JOB_MACHINE_TOOLS=(JOB_BOX_TOOLS-{'execute_code'})-{'mcp__nocheh__'+name for name in ('memory_recall','telegram_destinations','owner_read','tasks','github','gmail',
+    'knowledge_inspect','knowledge_propose','knowledge_status','ask_member_chat')}
 
 
 # The Hermes profile of the owner's ask d*32 about a member at generation 1111..., epoch 5, in the owner's chat 123.
@@ -381,7 +383,7 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(turn_tools(False,False),(OWNER_SET_TOOLS,REPLY_TOOLS))
         self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job'},JOB_TOOLS))
         self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_BOX_TOOLS))
-        self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_MACHINE_TOOLS))
+        self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'mcp__nocheh__my_time_zone'}|(ALLOWED_TOOLS-JOB_MACHINE_TOOLS),JOB_MACHINE_TOOLS))
         self.assertIn('mcp__nocheh__background_job',REPLY_TOOLS)
         for tools in (JOB_TOOLS,JOB_BOX_TOOLS,JOB_MACHINE_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
         # A private answer only reads (ADR-0249): no native memory, no tool that sends, changes, starts or asks.

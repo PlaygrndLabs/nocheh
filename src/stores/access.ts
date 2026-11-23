@@ -1,4 +1,4 @@
-import type {Reader} from '../access.js';
+import type {MachineReads,Reader} from '../access.js';
 import {admin,boundReader,memberClaimId,sharedReads,type BoundReader} from '../access.js';
 import {outsideChat,ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {HttpError,object,string} from '../http.js';
@@ -15,6 +15,7 @@ import {chats} from '../chats.js';
 import {deliveredKinds,sendClassOf,unconsentableSendClasses,unlearnedSendClasses,type SendClass} from '../send-classes.js';
 import {memberAskReads,memberChatClosed,memberReads} from './member-reads.js';
 import {sharedProjectGroups,withSharedGroups} from './project-groups.js';
+import {pageDate} from '../conversation-page.js';
 
 /** The 409 a bound reader gets when its reads can't be bound now: an answer keeps ADR-0249's code; a member's private
  * chat and the owner's ask about a member share step 4's. */
@@ -60,6 +61,8 @@ export class SourceAccessRepository {
     }
     if(!principal.admin&&!this.privatelyOpen(principal,source))return false;
     if(!principal.admin&&deliveredKinds.has(source.kind)&&(await this.sendClasses([reference.id])).get(reference.id)==='member_read')return false;
+    // A run of a job on the owner's machine reads only what its card showed, the owner's pass included (machine jobs' reads).
+    if(!principal.admin&&principal.machineReads&&!(await this.onCard(principal.machineReads,[source])).has(reference.id))return false;
     if(principal.admin||principal.scope===null){await this.guards.assertCurrent(binding);return true;}
     if(!['telegram','browser'].includes(source.channel))return false;
     // A bound reader reads what bindReads resolved for this request (ADR-0249, ADR-0262): an answer the groups frozen in
@@ -90,6 +93,34 @@ export class SourceAccessRepository {
     const chat=sourceChat(source),mine=boundChat(principal),bound=mine!==null&&chat===mine;
     if(outsideChat(this.policy(),source)&&!bound)return false;
     return !otherPrivate(chat)||bound;
+  }
+  /**
+   * Of these originals, the ones a machine job's run may read (machine jobs' reads): in its card's chat (any topic of it),
+   * captured before the owner approved the job, and in its card's period, by the time a page of the chat shows each.
+   */
+  private async onCard(reads:MachineReads,sources:readonly CapturedSource[]):Promise<Set<string>> {
+    const until=BigInt(/^\d{1,19}$/.test(reads.until)?reads.until:'0');
+    const near=sources.filter(source=>sourceChat(source)===reads.chat&&/^\d{1,19}$/.test(source.sequence)&&BigInt(source.sequence)<=until);
+    if(!near.length||!reads.from&&!reads.to)return new Set(near.map(source=>source.reference.id));
+    const from=pageDate(reads.from??''),to=pageDate(reads.to??'',true);
+    const rows=(await this.stores.archive.query(`SELECT id FROM (SELECT id,CASE WHEN occurred_at ~ '^[0-9]{1,12}$' THEN to_timestamp(occurred_at::bigint) ELSE received_at END AS at
+      FROM events WHERE id=ANY($1::text[])) e WHERE ($2::timestamptz IS NULL OR e.at>=$2) AND ($3::timestamptz IS NULL OR e.at<$3)`,[near.map(source=>source.reference.id),from,to])).rows;
+    return new Set(rows.map(row=>row.id as string));
+  }
+  /**
+   * A pass whose turn is a run of a job on the owner's machine, with what that run may read bound from the job's row for
+   * this request (machine jobs' reads): its chat, period and approval cutoff, and the Notion pages its card named. Any
+   * other pass comes back as it is; a read set it came with is dropped, so only this decides. A job not yet approved has
+   * no cutoff and reads nothing.
+   */
+  async bindMachine(principal:Reader):Promise<Reader> {
+    const {machineReads:_given,...bare}=principal;
+    if(bare.admin||!bare.turnEvent)return bare;
+    const row=(await this.stores.control.query(`SELECT j.id,j.target,j.estimate,j.reads_until::text AS until,j.notion_pages,j.notion_reads FROM managed_runs r
+      JOIN background_jobs j ON j.id=r.job_id WHERE r.event_id=$1 AND r.channel='background' AND j.machine IS NOT NULL`,[bare.turnEvent])).rows[0];
+    if(!row)return bare;
+    return {...bare,machineReads:{job:row.id,chat:row.target,from:row.estimate?.from||null,to:row.estimate?.to||null,until:row.until??'0',
+      notion:row.notion_reads&&Array.isArray(row.notion_pages)?row.notion_pages.filter((page:unknown):page is string=>typeof page==='string'):[]}};
   }
   /** The send class each of these delivered messages was stamped with, by id; an id with none, or not a delivered
    * message, is left out. */
@@ -157,6 +188,9 @@ export class SourceAccessRepository {
       open=open.filter(item=>result.get(item.reference.id)!==false);
       const classes=await this.sendClasses(open.filter(item=>deliveredKinds.has(item.source.kind)).map(item=>item.reference.id));
       for(const item of open)if(classes.get(item.reference.id)==='member_read')deny(item.reference.id);
+      open=open.filter(item=>result.get(item.reference.id)!==false);
+      // canRead's machine step: only what the card of a machine job's run showed.
+      if(principal.machineReads){const shown=await this.onCard(principal.machineReads,open.map(item=>item.source));for(const item of open)if(!shown.has(item.reference.id))deny(item.reference.id);}
       open=open.filter(item=>result.get(item.reference.id)!==false);
     }
     if(principal.admin||principal.scope===null){for(const item of open)result.set(item.reference.id,true);await this.guards.assertCurrent(binding);return result;}

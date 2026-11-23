@@ -4,6 +4,7 @@ import {HttpError,readJson} from '../http.js';
 import {boundReader,type Reader} from '../access.js';
 import {mcpTools,type ToolContext,type Loopback} from './tools.js';
 import {boundReaderTools,privateAnswerTaskActions} from '../stores/private-answers.js';
+import {machineRunTools} from '../stores/machine-reads.js';
 
 /** MCP revisions this server speaks: Streamable HTTP without sessions or server-to-client requests (ADR-0233). */
 export const protocolVersions=['2025-11-25','2025-06-18','2025-03-26'];
@@ -90,7 +91,9 @@ export async function serveMcp(req:IncomingMessage,res:ServerResponse,options:{p
   if(method==='ping')return rpc(res,200,{jsonrpc:'2.0',id,result:{}});
   // A bound reader (an answer, a member's private chat, the owner's ask about a member) is offered and runs only its read
   // tools, and tasks only to list and read (ADR-0249, ADR-0262).
-  const bound=boundReader(options.principal),answering=bound!==null,tools=bound!==null?mcpTools.filter(item=>boundReaderTools[bound].has(item.name)):mcpTools;
+  // A machine job's run is offered only the tools that read what its card showed (machine jobs' reads).
+  const bound=boundReader(options.principal),answering=bound!==null,tools=bound!==null?mcpTools.filter(item=>boundReaderTools[bound].has(item.name)):
+    options.principal.machineReads?mcpTools.filter(item=>machineRunTools.has(item.name)):mcpTools;
   if(method==='tools/list')return rpc(res,200,{jsonrpc:'2.0',id,result:{tools:tools.map(({name,description,inputSchema})=>({name,description,inputSchema}))}});
   if(method==='tools/call') {
     const tool=tools.find(item=>item.name===input.name);

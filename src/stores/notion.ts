@@ -135,6 +135,23 @@ export function notionJobFetch(input:unknown):boolean {
   if(typeof id!=='string'||Object.entries(value!).some(([key,option])=>key!=='id'&&typeof option!=='boolean'))return false;
   return !/^(?:user|discussion):/i.test(id)&&notionAddress(id);
 }
+/** A Notion page as a machine job's card names it, to compare with what a run fetches (machine jobs' reads): the last
+ *  32-digit id in a raw id, a data source or view reference, or a notion.so address's path (never its query, where a peek
+ *  names another page), lower case and without dashes. Null when there is none. */
+export function notionPageKey(value:string):string|null {
+  let text=value;
+  if(/^https:\/\//i.test(value))try{text=new URL(value).pathname;}catch{return null;}
+  const found=text.toLowerCase().replace(/-/g,'').match(/[0-9a-f]{32}(?![0-9a-f])/g);
+  return found?found[found.length-1]!:null;
+}
+/** Whether a machine job's run may make this Notion call without its own card (machine jobs' reads): the list of tools, or
+ *  a fetch of a page its card named, as a job's fetch takes it. */
+export function notionMachineRead(args:{operation?:unknown;tool?:unknown;input?:unknown},pages:readonly string[]):boolean {
+  if(args.operation==='list')return true;
+  if(args.tool!=='notion-fetch'||!notionJobFetch(args.input))return false;
+  const key=notionPageKey(String((args.input as {id:string}).id));
+  return key!==null&&pages.some(page=>notionPageKey(page)===key);
+}
 
 /**
  * Whether Nocheh may use a Notion connection, and which of its calls ask first: the owner's own, or a project's
@@ -206,10 +223,14 @@ export async function notionAuthority(db:Pick<pg.PoolClient,'query'>,principal:R
   args:{operation?:string;tool?:string;input?:unknown;project?:unknown},allowed:boolean,given:(address:string)=>boolean=()=>false):Promise<string|null> {
   const target=notionTarget(args.project);
   await assertNotionHere(db,principal,turn,target);
+  // A machine job's run reads only the Notion pages its card named; any other read is refused, never offered as a card.
+  // Its changes still ask (machine jobs' reads).
+  const tool=String(args.tool??'');
+  if(principal.machineReads&&(args.operation==='list'||notionReads(tool))&&!notionMachineRead(args,principal.machineReads.notion))throw new HttpError(403,'notion_page_not_on_card');
   const row=(await db.query('SELECT enabled,approval,revision FROM connections WHERE id=$1 FOR SHARE',[notionConnectionId(target)])).rows[0];
   if(!row?.enabled)throw new HttpError(409,'notion_not_enabled');
   if(!allowed||(principal.purpose??'assistant')!=='assistant')return null;
-  const tool=String(args.tool??''),read=args.operation==='list'||notionReads(tool)&&notionOwnInput(args.input)&&(!turn.job||tool!=='notion-fetch'||notionJobFetch(args.input));
+  const read=args.operation==='list'||notionReads(tool)&&notionOwnInput(args.input)&&(!turn.job||tool!=='notion-fetch'||notionJobFetch(args.input));
   // Nothing asks me covers the page tools in a live turn: reads of the owner's Notion or of an address the owner gave, and
   // changes that leave nothing outside to fetch (ADR-0263).
   const nothing=row.approval==='nothing'&&target===null&&!turn.job&&(args.operation==='list'||notionPageTool(tool)&&
@@ -253,10 +274,12 @@ export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ow
   // A schedule's run in the owner's private chat, still running (ADR-0278).
   if(!row.job_id||await scheduleRunning(db,row.job_id))return null;
   const bySetting=row.state==='approved'&&canonical(row.decision_reference)===canonical(row.source_reference);
-  const job=(await db.query('SELECT scope,requester,decided_by,logical_profile,notion_reads FROM background_jobs WHERE id=$1',[row.job_id])).rows[0];
+  const job=(await db.query('SELECT scope,requester,decided_by,logical_profile,notion_reads,machine,notion_pages FROM background_jobs WHERE id=$1',[row.job_id])).rows[0];
   if(!job)return bySetting?'notion_job_not_approved':null;
-  return job.scope===owner&&job.requester===null&&job.decided_by===account&&job.logical_profile===row.logical_profile&&(!bySetting||job.notion_reads)?
-    null:'notion_job_not_approved';
+  // A machine job's read runs by the setting only for a page its card named (machine jobs' reads).
+  const pages=job.machine?Array.isArray(job.notion_pages)?job.notion_pages:[]:null;
+  return job.scope===owner&&job.requester===null&&job.decided_by===account&&job.logical_profile===row.logical_profile&&
+    (!bySetting||job.notion_reads&&(!pages||notionMachineRead(args,pages)))?null:'notion_job_not_approved';
 }
 
 /** Whether a call on a project's Notion only reads, as a member's private chat may ask (ADR-0278): Notion's list of tools, or

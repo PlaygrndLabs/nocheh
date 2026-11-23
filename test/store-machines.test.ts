@@ -216,6 +216,19 @@ test('only the owner\'s own request in their private chat or an active project\'
     await assert.rejects(ask('123',123,{steps:Array(12).fill('s'.repeat(200)),instruction:'i'.repeat(1500)}),{code:'job_card_too_long'});
     await assert.rejects(s.jobs.start(await said('123',123,'A long one'),{title:'Long made-up job',instruction:'i'.repeat(3900)}),{code:'job_card_too_long'},'also a job without a machine');
     assert.equal((await s.jobs.start(await said('123',123,'A shorter one'),{title:'Shorter made-up job',instruction:'i'.repeat(3000)})).state,'proposed');
+    // A machine job reads Notion only for pages its card names, and only while the owner's Notion reads without asking (machine jobs' reads).
+    const notionPage='0'.repeat(32);
+    await assert.rejects(s.jobs.start(await said('123',123,'Read my page'),{title:'Made-up page job',instruction:'Read it.',notion_pages:[notionPage]}),{code:'invalid_job_request'},
+      'Notion pages only with a machine');
+    await assert.rejects(ask('123',123,{notion_pages:[notionPage]}),{code:'job_notion_not_allowed'},'while the owner\'s Notion is off');
+    await stores.control.query("INSERT INTO connections(id,service,enabled) VALUES('notion:own','notion',true) ON CONFLICT(id) DO UPDATE SET enabled=true");
+    const noted=await ask('123',123,{notion_pages:['https://www.notion.so/Made-up-setup-'+notionPage]});
+    assert.match((await s.jobs.card(noted.id)).text,/\n📒 It can read only these Notion pages without asking: https:\/\/www\.notion\.so\/Made-up-setup-0{32}\. Changes still ask you\.\n/);
+    assert.deepEqual((await job(noted.id)).notion_pages,['https://www.notion.so/Made-up-setup-'+notionPage]);
+    await stores.control.query("UPDATE connections SET approval='everything' WHERE id='notion:own'");
+    await assert.rejects(ask('123',123,{notion_pages:[notionPage]}),{code:'job_notion_not_allowed'},'nor when every Notion call asks');
+    await stores.control.query("UPDATE connections SET enabled=false,approval='changes' WHERE id='notion:own'");
+    await s.jobs.stop(owner,{id:noted.id});
 
     // Asked in the private chat: its card answers the request there, with the machine and the plan.
     const privateTurn=await message('123',123,'Set up the made-up project'),privateMessage=String(sent);
@@ -226,6 +239,9 @@ test('only the owner\'s own request in their private chat or an active project\'
     assert.equal(approvals.length,1);assert.deepEqual([approvals[0].kind,approvals[0].chat_id,approvals[0].reply_to],['card','123',privateMessage]);
     assert.doesNotMatch(approvals[0].text,/💬 Asked in/,'a card under its own request does not say where it was asked');
     assert.ok(approvals[0].text.endsWith('\n'+machineLine+'\n'+planLine+'\n\nSet up the made-up project on the machine.'),approvals[0].text);
+    // It says it reads only its chat and period, frozen when the owner approves (machine jobs' reads).
+    assert.match(approvals[0].text,/\n📏 Reads only your private chat: [\d,]+ messages?\. Nothing sent after you approve reaches it, and it cannot search your other chats or memory\.\n/);
+    assert.doesNotMatch(approvals[0].text,/📒/,'no Notion line: a machine job reads no Notion page its card does not name');
     assert.match(String(offered.message),/^A card with Approve and Reject buttons for this job was posted here as the reply to the request/);
     // A saved card without the machine or plan line still shows them, at its end.
     await stores.control.query('UPDATE owner_prompts SET texts=$1::jsonb WHERE singleton',[JSON.stringify({'background.card':'Made-up card: {title}\n\n{instruction}'})]);
@@ -257,13 +273,41 @@ test('only the owner\'s own request in their private chat or an active project\'
 
     // Its run: its context, run text and binding carry the machine; a plain job's do not.
     const plainJob=await s.jobs.start(await said('123',123,'Count them'),{title:'Plain made-up check',instruction:'Count the made-up tasks.'});
+    // What the machine job may read, and what it may not: its own chat before Approve, never another chat or what comes after.
+    await message(project,123,'The made-up walnut plan for the group');await message('123',123,'The made-up walnut plan for the machine');
     const a=await start(asked),p=await start(plainJob);
+    await message('123',123,'A made-up walnut change after approval');
     // Its card, in the chat where it was asked, says the report comes there.
     await s.actionCommands.settle('background',asked.id);await settledWith(asked.id,'⏳ Approved. It runs now and reports here when done.');
     assert.equal(a.context.background.machine,true);assert.equal(p.context.background.machine,false);
-    assert.match(a.text,/\n\n\[Machine\]\nThis job works on the owner's machine "build-vm" over SSH as nocheh@192\.0\.2\.10\. Your terminal and file tools run there, not here;[^]*\nThe owner approved this plan:\n1\. Install the made-up tool\n2\. Run its tests\nDo only this plan\./);
+    assert.match(a.text,/\n\n\[Machine\]\nThis job works on the owner's machine "build-vm" over SSH as nocheh@192\.0\.2\.10\. Your terminal and file tools run there, not here\.\nYour archive tools read only the chat and period this job was approved for[^]*\nThe owner approved this plan:\n1\. Install the made-up tool\n2\. Run its tests\nDo only this plan\./);
     assert.doesNotMatch(p.text,/\[Machine\]/);
     assert.deepEqual(await binding(a.credential),{job:asked.id,machine:'build-vm'});assert.equal(await binding(p.credential),null);
+    // Its run reads only what its card showed (machine jobs' reads): its chat, from before Approve, through the broker and storage.
+    const read=async(credential:string,path:string,body?:unknown)=>{
+      const response=await fetch(brokerBase+path,{method:body===undefined?'GET':'POST',headers:{authorization:'Bearer '+credential,'content-type':'application/json'},
+        ...(body===undefined?{}:{body:JSON.stringify(body)})});
+      return {status:response.status,body:await response.json() as any};
+    };
+    const found=async(credential:string)=>{const answer=await read(credential,'/v1/search?q=walnut&limit=10');assert.equal(answer.status,200);
+      return (answer.body as any[]).map(hit=>String(hit.text)).sort();};
+    assert.deepEqual(await found(a.credential),['The made-up walnut plan for the machine'],'not the group, not after Approve');
+    assert.deepEqual(await found(p.credential),['A made-up walnut change after approval','The made-up walnut plan for the group',
+      'The made-up walnut plan for the machine'],'an owner job that works on no machine reads as before');
+    const paged=await read(a.credential,'/v1/archive/page?limit=50');
+    assert.equal(paged.status,200);assert.match(JSON.stringify(paged.body),/walnut plan for the machine/);assert.doesNotMatch(JSON.stringify(paged.body),/after approval|for the group/);
+    assert.equal((await read(a.credential,'/v1/archive/page?chat='+project)).status,403,'another chat is not paged');
+    const groupEvent=(await stores.archive.query("SELECT id FROM events WHERE convert_from(original_text,'UTF8') LIKE '%walnut plan for the group%'")).rows[0].id;
+    assert.equal((await read(a.credential,'/v1/events/'+groupEvent)).status,404,'nor opened by its id');
+    assert.equal((await read(p.credential,'/v1/events/'+groupEvent)).status,200);
+    // No notes recall, owner views or shared facts; long-term context and recall answer as limited.
+    assert.equal((await read(a.credential,'/v1/memory/recall',{query:'walnut'})).status,403);
+    assert.equal((await read(a.credential,'/v1/owner/people')).status,403);
+    assert.deepEqual((await read(a.credential,'/v1/memory/context?q=walnut')).body.sources,[]);
+    assert.equal((await read(a.credential,'/v1/memory/longterm/recall',{query:'walnut'})).body.limited_memory,true);
+    // Notion only for pages its card named: this card named none, so every read is refused, and never offered as a card.
+    const notionRead=await read(a.credential,'/v1/tools/propose',{kind:'mcp',arguments:{connection:'notion',tool:'notion-search',input:{query:'walnut'}}});
+    assert.deepEqual([notionRead.status,notionRead.body.error],[403,'notion_page_not_on_card']);
     assert.equal((await s.machines.list(owner)).machines.find(row=>row.id===build)!.jobs,1,'its running job is counted');
     // machineJob: the run of a running job the owner asked for and approved, while the switch, the machine and its pin hold.
     const reference={store:'control',id:a.step},profile='job-'+asked.id.slice(0,24),turn={job:asked.id,logical_profile:profile};

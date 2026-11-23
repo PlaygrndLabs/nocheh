@@ -20,7 +20,7 @@ import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {BOX_PAGE_BUDGET,PAGE_BUDGET,cursor,pageDate,pageEntry,pageItem} from '../conversation-page.js';
-import {archiveScopes,otherPrivate,parentSpace,readSetGroups,sourceChat} from '../spaces.js';
+import {archiveScopes,otherPrivate,parentSpace,readSetGroups,recallScope,sourceChat} from '../spaces.js';
 import {chats} from '../chats.js';
 import {ownerChat} from '../assistant-policy.js';
 import {albumMembers} from './albums.js';
@@ -101,12 +101,16 @@ export class SourceRepository {
    *  /start is in the owner's chat), which searches everything and is narrowed by canRead alone. A group reader whose
    *  project shares its group chats searches the project's groups (ADR-0267). */
   private boundScopes(principal:Reader):string[]|null {
+    // A machine job's run searches only its card's chat (machine jobs' reads).
+    if(principal.machineReads)return archiveScopes([principal.machineReads.chat]);
     const chat=boundChat(principal);
     if(chat===null){const shared=sharedReads(principal);return shared?archiveScopes(readSetGroups(shared)):null;}
     return archiveScopes([...readSetGroups(this.access.reads(principal)!),chat]);
   }
   /** Relations are shown within the conversations the principal recalls. */
   private relationAudience(principal:Reader):RelationshipAudience {
+    // A machine job's run sees relations within its card's chat (machine jobs' reads).
+    if(principal.machineReads)return {kind:'recall',scope:recallScope(principal.machineReads.chat,'group')};
     // A bound reader sees relations within its bound groups (an answer's frozen in its record, ADR-0249), and a member,
     // or the owner's ask about one, within that member's own chat too (step 4).
     if(boundReader(principal)!==null){const chat=boundChat(principal);return {kind:'reads',set:this.access.reads(principal)!,...(chat?{chat}:{})};}
@@ -540,6 +544,15 @@ export class SourceRepository {
     const from=pageDate(input.from),to=pageDate(input.to,true);
     const binding=principal.admin?null:await this.audience.assert(principal),owner=principal.admin||principal.scope===null;
     const kind=boundReader(principal);
+    // A machine job's run pages only its card's chat, within its card's period (machine jobs' reads); canRead also keeps
+    // out what came after the owner approved it.
+    const machine=principal.machineReads;
+    if(!principal.admin&&machine) {
+      const chat=input.chat||machine.chat;
+      if(chat!==machine.chat)throw new HttpError(403,'conversation_not_permitted');
+      const start=pageDate(machine.from??''),end=pageDate(machine.to??'',true);
+      return {chat,scopes:archiveScopes([chat]),from:start&&(!from||from<start)?start:from,to:end&&(!to||to>end)?end:to,binding};
+    }
     // An answer reader reads any group of its record, by default the asking one, and never its own private chat (ADR-0249).
     if(kind==='answer') {
       const reads=this.access.reads(principal)!,chat=input.chat||(parentSpace(reads.home)??reads.home);

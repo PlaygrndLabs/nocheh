@@ -1200,8 +1200,9 @@ export class NativeMemoryRepository {
    * fails, the rest is kept and says so (forwards_unavailable), so the turn's parent counts it. */
   async context(principal:Reader) {
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
-    // A bound reader reads long-term memory by plain search only: no summary or representation (ADR-0249, step 4).
-    if(!workspace||!principal.turnEvent||boundReader(principal)!==null)return limited;
+    // A bound reader reads long-term memory by plain search only: no summary or representation (ADR-0249, step 4); so does
+    // a machine job's run, whose search reads back only what its card showed (machine jobs' reads).
+    if(!workspace||!principal.turnEvent||boundReader(principal)!==null||principal.machineReads)return limited;
     try {
       const current=await this.current(workspace.id),audience=this.principalAudience(principal);
       if(await this.correcting(current))return correcting;
@@ -1281,8 +1282,9 @@ export class NativeMemoryRepository {
   async recall(principal:Reader,query:string) {
     string(query,2000);
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
-    // Plain search only for a bound reader: the engine's answers cite no exact messages (ADR-0249, step 4).
-    if(!workspace||boundReader(principal)!==null)return limited;
+    // Plain search only for a bound reader: the engine's answers cite no exact messages (ADR-0249, step 4). The same for a
+    // machine job's run, which reads only what its card showed (machine jobs' reads).
+    if(!workspace||boundReader(principal)!==null||principal.machineReads)return limited;
     let corrections:Awaited<ReturnType<NativeMemoryRepository['relevantOwnerCorrections']>>=[];
     try {
       const current=await this.current(workspace.id),id=current.row.id,actor=principal.admin?current.principal:principal;
