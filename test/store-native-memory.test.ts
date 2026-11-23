@@ -24,7 +24,7 @@ const recallChats=()=>legacyDirectory(['-100','-100/topic/3','-200'],{owner:'123
 /** Control answers for recall cases where the owner's forwards and files hold nothing learned. */
 const nothingForwarded={query:async(sql:string)=>{if(sql.includes('r.peer_id=$2'))return {rowCount:0,rows:[]};throw Error('unexpected_control_query');}};
 
-/** Stands in for the walls store: a group reads through the wall of the chats it asks, holding these sessions (ADR-0283). */
+/** Stands in for the walls store: a group reads through the wall of the chats it asks, holding these sessions (ADR-0284). */
 const fakeWalls=(sessions:()=>string[],opened:string[][]=[])=>({of:async()=>[],
   open:async(workspace:string,chats:readonly string[])=>{opened.push([...new Set(chats)].sort());return {wall:memoryWallName(workspace,chats),sessions:sessions()};}});
 
@@ -343,7 +343,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.equal((await memory.context(answer)).limited_memory,true);
   assert.equal((await memory.recall(answer,'invoice')).limited_memory,true);
   // A member's own private chat, its schedules included, is a bound reader too: it searches its groups' sessions, never
-  // through a wall (ADR-0283).
+  // through a wall (ADR-0284).
   const {answer:_answer,...unbound}=answer as any,member={...unbound,member:'a'.repeat(64)} as Reader;
   readSessions.length=0;await memory.search(member,'who sends the invoice',4);
   assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);assert.equal(bodies.at(-1)!.body.scope,undefined);
@@ -428,7 +428,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
       return {literals:text.includes('saffronpass')?['saffronpass']:text.includes('Steered recall')?['user','fixture-recall-model'].filter(word=>text.includes(word)):[]};
     },
     memoryEngine:honchoEngine(async(path,body:any,method)=>{
-      // Walls copy at once here (ADR-0283).
+      // Walls copy at once here (ADR-0284).
       if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push({path,body,...(method?{method}:{})});
       const session=/^\/v3\/workspaces\/([^/]+)\/sessions(?:\/([^/?]+))?/.exec(path);
@@ -574,7 +574,7 @@ test('native memory keeps content derived, reconciles uncertain writes and rebui
     const chat=calls.filter(c=>c.path.endsWith('/chat')).at(-1)!;
     assert.ok(!String(chat.body.query).includes('saffronpass'));
     const groupSessions=(await stores.control.query('SELECT session_id FROM memory_sessions WHERE audience=$1',[group])).rows.map(row=>row.session_id).sort();
-    // Group recall is confined to the wall of its own chat, which holds exactly its learned sessions (ADR-0283).
+    // Group recall is confined to the wall of its own chat, which holds exactly its learned sessions (ADR-0284).
     assert.match(chat.body.scope,/^wall-[a-f0-9]{40}$/);assert.equal(chat.body.filters,undefined);
     const joined=calls.filter(c=>c.path.endsWith('/scopes/'+chat.body.scope+'/sessions')).flatMap(c=>c.body.session_ids).sort();
     assert.deepEqual(joined,groupSessions,'group recall is confined to its own sessions');
@@ -708,7 +708,7 @@ test('foreground recall requires independent source evidence while background co
   const calls:string[]=[];let sequence=0;
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any)=>{
-      // Walls copy at once here (ADR-0283).
+      // Walls copy at once here (ADR-0284).
       if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push(path);
       if(path.endsWith('/messages/list'))return {items:[]};
@@ -770,7 +770,7 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
   const calls:{path:string;body:any}[]=[];let sequence=0;
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:[group]}),
     runtime:async()=>({literals:[]}),memoryEngine:honchoEngine(async(path,body:any)=>{
-      // Walls copy at once here (ADR-0283).
+      // Walls copy at once here (ADR-0284).
       if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       calls.push({path,body});
       if(path.endsWith('/messages/list'))return {items:[]};
@@ -1120,7 +1120,7 @@ test('forwards and files the owner sent are kept apart from the owner\'s own wor
     const groupAsk=calls.slice(asked).find(call=>call.path.endsWith('/peers/'+materialPeer+'/chat'))!;
     const groupSessions=(await stores.control.query('SELECT session_id FROM memory_sessions WHERE audience=$1',[group])).rows.map(row=>row.session_id).sort();
     assert.ok(groupAsk,'a group asks them once they wrote something there');
-    // Asked inside the group's wall, which holds only the group's sessions (ADR-0283).
+    // Asked inside the group's wall, which holds only the group's sessions (ADR-0284).
     const joined=calls.filter(call=>call.path.endsWith('/scopes/'+groupAsk.body.scope+'/sessions')).flatMap(call=>call.body.session_ids);
     assert.ok(joined.length&&joined.every((id:string)=>groupSessions.includes(id)));
 

@@ -51,9 +51,13 @@ BACKGROUND_TOOLSETS=TURN_TOOLSETS+['todo']
 BOX_STRIPPED={'mcp__nocheh__shell','mcp__nocheh__browser'}
 BOX_TOOLS=(BACKGROUND_TOOLS-{'memory'}-BOX_STRIPPED)|{'terminal','process_manage','read_file','write_file','patch','search_files','execute_code'}
 BOX_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal','file','code_execution']
-# A machine run runs Hermes's own terminal and file tools on the owner's machine, through Nocheh (machine_box.py).
-# It keeps and loses what a box run does, and has no code_execution.
-MACHINE_TOOLS=(BACKGROUND_TOOLS-{'memory'}-BOX_STRIPPED)|{'terminal','process_manage','read_file','write_file','patch','search_files'}
+# A machine run runs Hermes's own terminal and file tools on the owner's machine, through Nocheh (machine_box.py). It
+# loses what a box run loses, has no code_execution, and reads only what its card showed (machine jobs' reads): the
+# archive tools and memory search, which storage narrows to its card's chat, period and approval, Notion for the pages
+# its card named, and its own messages and operations. No notes recall, owner views, tasks, GitHub, Gmail, knowledge,
+# member asks or chat lists; storage refuses those routes to it too (src/stores/machine-reads.ts).
+MACHINE_DATA_TOOLS={'mcp__nocheh__'+name for name in ('archive_search','archive_read','archive_page','memory_search','action_request','mcp','notion','action_status')}
+MACHINE_TOOLS=MACHINE_DATA_TOOLS|{'session_search','skills_list','skill_view','todo_list','terminal','process_manage','read_file','write_file','patch','search_files'}
 MACHINE_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal','file']
 
 
@@ -113,8 +117,9 @@ def turn_tools(background,box,machine=False,answer=False,member=False,member_rea
     if member_read:return OWNER_SET_TOOLS|(ALLOWED_TOOLS-MEMBER_READ_TOOLS),MEMBER_READ_TOOLS
     if member:return OWNER_SET_TOOLS|(ALLOWED_TOOLS-MEMBER_TOOLS),MEMBER_TOOLS
     if answer:return OWNER_SET_TOOLS|(ALLOWED_TOOLS-ANSWER_TOOLS),ANSWER_TOOLS
+    if machine and not box:return OWNER_SET_TOOLS|{TIME_ZONE_TOOL}|(ALLOWED_TOOLS-MACHINE_TOOLS),MACHINE_TOOLS
     if schedules and not (background or box or machine):return OWNER_SET_TOOLS,ALLOWED_TOOLS|{TIME_ZONE_TOOL}
-    removed=OWNER_SET_TOOLS|{TIME_ZONE_TOOL}|(JOB_STRIPPED if background else set())|(BOX_STRIPPED if box or machine else set())
+    removed=OWNER_SET_TOOLS|{TIME_ZONE_TOOL}|(JOB_STRIPPED if background else set())|(BOX_STRIPPED if box else set())
     return removed,BOX_TOOLS if box else MACHINE_TOOLS if machine else BACKGROUND_TOOLS if background else ALLOWED_TOOLS
 
 

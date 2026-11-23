@@ -49,6 +49,7 @@ import {MACHINE_BODY} from './machines.js';
 import {afterPending,jobRun} from './guards.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
+import {assertMachineRunRoute} from './machine-reads.js';
 import {lookupTurn} from './scheduled-lookups.js';
 import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
 import {memberAssistant,memberPrivate,readSetGroups} from '../spaces.js';
@@ -125,8 +126,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // the broker does (ADR-0252).
     // Every scoped reader's reads are bound for the request: a bound reader's own, and a group reader's project groups
     // while its project shares its group chats (ADR-0267).
-    const parsed=await currentReader(req,config.token),principal=parsed.admin||parsed.scope===null?parsed:await s.access.bindReads(parsed);
+    // A run of a job on the owner's machine reads only what its card showed, and reaches only its own routes (machine jobs' reads).
+    const parsed=await currentReader(req,config.token),principal=parsed.admin?parsed:await s.access.bindMachine(parsed.scope===null?parsed:await s.access.bindReads(parsed));
     assertPrivateAnswerRoute(principal,req.method,path);
+    assertMachineRunRoute(principal,req.method,path);
     // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
     // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
     if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:false});
@@ -494,8 +497,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return result({sources:await s.sources.found(principal,found.ids,count,searchTagged(found)),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
     }
     if(path==='/v1/memory/context'&&req.method==='GET') {
-      // A member's private chat and the owner's ask about a member are given nothing shared or granted (step 4).
-      if(['member','memberRead'].includes(boundReader(principal)??''))return result({sources:[],filter_status:'disabled'},true);
+      // A member's private chat and the owner's ask about a member are given nothing shared or granted (step 4), nor is a
+      // machine job's run, which reads only what its card showed (machine jobs' reads).
+      if(['member','memberRead'].includes(boundReader(principal)??'')||principal.machineReads)return result({sources:[],filter_status:'disabled'},true);
       const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);
       return result({...existing,sources:[...existing.sources,...granted.sources]},true);
     }
@@ -553,6 +557,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(path==='/v1/imports/pending') {
         // A bound reader hears only about imports into its groups, never the owner's nor a private chat's (ADR-0249, step 4).
         if(boundReader(principal)!==null)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
+        // A machine job's run hears only about its own chat (machine jobs' reads).
+        if(principal.machineReads)return json(res,200,{imports:await pendingImports(s.stores.control,[principal.machineReads.chat])});
         const owner=principal.scope===null||principal.scope===ownerChat(s.access.policy());
         return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});
       }

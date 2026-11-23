@@ -19,7 +19,7 @@ test('owner runtime status names the plugged-in agent, reports Telegram polling 
     assert.equal(operation,'telegram.status');
     return {ok:true,service:'telegram',telegram:'connected',telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}};
   };
-  const capabilities={'guard.detect':true,'image.read':false,'telegram.status':true},access={bindReads:async(principal:unknown)=>principal};
+  const capabilities={'guard.detect':true,'image.read':false,'telegram.status':true},access={bindReads:async(principal:unknown)=>principal,bindMachine:async(principal:unknown)=>principal};
   const server=storageServer({agent,access} as unknown as StorageServices,config,bot,undefined,undefined,capabilities);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{

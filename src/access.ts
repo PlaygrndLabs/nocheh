@@ -30,7 +30,15 @@ export interface Reader {readonly scope:string|null; readonly admin:boolean;read
   /** The one private chat that is not the owner's which this reader may read: a member's own chat for a member reader,
    * the asked member's chat for a memberRead reader. Set only on the server, by bindReads, for every request; never
    * taken from a pass: a pass that names one is refused, as reads is. Every other reader reads no such chat. */
-  readonly memberChat?:string}
+  readonly memberChat?:string;
+  /** What a run of a job on the owner's machine may read: only what its card showed, frozen when the owner approved it
+   * (machine jobs' reads). Set only on the server, by bindMachine, for every request of a pass whose turn is such a run;
+   * never taken from a pass: a pass that names one is refused, as reads is. */
+  readonly machineReads?:MachineReads}
+/** A machine job's reads (machine jobs' reads): its one chat, its period (dates as the job was asked, or null for the
+ * whole chat), the last archive capture sequence when the owner approved it (a decimal string), and the Notion pages its
+ * card named. */
+export type MachineReads={readonly job:string;readonly chat:string;readonly from:string|null;readonly to:string|null;readonly until:string;readonly notion:readonly string[]};
 /** The id of an "Answer privately" record: also the button's data after `np` and the private chat's /start parameter. */
 export const answerId=/^[a-f0-9]{32}$/;
 /** A member id (members.id) and a lane (the member id of a member's turn, step 4): 64 hex. */
@@ -156,7 +164,8 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     if(claims.lane!==undefined&&(prefix!=='turn'||typeof claims.lane!=='string'||!memberClaimId.test(claims.lane)))throw Error();
     // What an answer, a member or an ask may read comes from the server, never from the pass; a claim spelled the
     // Reader's way is no claim and is refused rather than ignored.
-    if(claims.reads!==undefined||claims.member_chat!==undefined||claims.memberChat!==undefined||claims.memberRead!==undefined)throw Error();
+    if(claims.reads!==undefined||claims.member_chat!==undefined||claims.memberChat!==undefined||claims.memberRead!==undefined||
+      claims.machine_reads!==undefined||claims.machineReads!==undefined)throw Error();
     const app=claims.app===undefined?undefined:appBinding(claims.app);
     if(app!==undefined&&prefix!=='turn')throw Error();
     return {scope,admin:false,...(prefix==='turn'?{turnEvent:claims.event_id as string}:{}),...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.agent===undefined?{}:{agent:claims.agent as string}),...(claims.answer===undefined?{}:{answer:claims.answer as string}),...(app===undefined?{}:{app}),...(claims.member===undefined?{}:{member:claims.member as string}),...(claims.member_read===undefined?{}:{memberRead:claims.member_read as string})};

@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS memory_sessions_audience ON memory_sessions(workspace
 -- The owner's forwards and files have a session of their own (ADR-0257).
 ALTER TABLE memory_sessions DROP CONSTRAINT IF EXISTS memory_sessions_kind_check;
 ALTER TABLE memory_sessions ADD CONSTRAINT memory_sessions_kind_check CHECK(kind IN ('conversation','entity_evidence','projection','material'));
--- A memory wall: the sessions of a set of chats whose memory is read together (ADR-0283). members are the sessions
+-- A memory wall: the sessions of a set of chats whose memory is read together (ADR-0284). members are the sessions
 -- added to the wall; ready once what they had already learned has reached it.
 CREATE TABLE IF NOT EXISTS memory_walls (
  workspace text NOT NULL REFERENCES memory_generations(id),wall text NOT NULL,chats jsonb NOT NULL,

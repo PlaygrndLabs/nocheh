@@ -168,7 +168,7 @@ export class ContextualLearningRepository {
           const query=learningQuery(citable=>learningInstruction(prompt,{trigger_id:context.source.id,citable_ids:canonical(citable)}),context,this.engine.questionLimits);
           await this.provenance.current(job.workspace,job.audience,job.binding);
           const peer=context.entities.speaker?memoryPeerId(context.entities.speaker):evidencePeerId(context.source);
-          // A group or topic interpretation reasons only over that audience's own sessions, inside their wall (ADR-0283).
+          // A group or topic interpretation reasons only over that audience's own sessions, inside their wall (ADR-0284).
           const sessions=await this.provenance.chatScope(job.workspace,job.audience);
           const walled=sessions?await new MemoryWalls(this.contexts.access.stores.control,this.engine).open(job.workspace,[job.audience]):null;
           const response=await this.engine.ask(job.workspace,peer,query,{sessions,...walled?{wall:walled.wall}:{},evidence:false,format:learningResultSchema});

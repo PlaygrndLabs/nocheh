@@ -1,5 +1,5 @@
 /**
- * Memory walls (ADR-0283): one per set of chats whose memory is read together. A group's turns read through the wall
+ * Memory walls (ADR-0284): one per set of chats whose memory is read together. A group's turns read through the wall
  * of the chats its recall reads (its own conversation, its group with every topic, or every group of its project while
  * the project shares its group chats). The engine keeps each read inside the wall: Honcho answers from the wall's own
  * view, with a key that opens nothing else. The owner's private chat and every private chat are never in a wall.

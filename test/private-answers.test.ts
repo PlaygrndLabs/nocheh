@@ -66,7 +66,7 @@ test('storage binds an answer pass to its record on every request and refuses ev
   const bound=(principal:Reader)=>{calls.push(['bind',principal.answer,principal.turnEvent,'reads' in principal]);
     if(!open)throw new HttpError(409,'private_answer_closed');return {...principal,reads};};
   const s={stores:{control:{query:async(sql:string,values:unknown[])=>{calls.push(['imports',values[0]]);return {rows:[]};}},archive:{query:async()=>({rows:[]})}},
-    access:{bindReads:async(principal:Reader)=>bound(principal),reads:(principal:Reader)=>principal.reads,policy:()=>groupsPolicy()},
+    access:{bindReads:async(principal:Reader)=>bound(principal),bindMachine:async(principal:Reader)=>principal,reads:(principal:Reader)=>principal.reads,policy:()=>groupsPolicy()},
     turns:{assertAudience:async()=>{}},guards:{state:async()=>({mode:'on'})},configuration:{assert:async()=>{}},prepared:{allow:async()=>{}},
     sources:{search:async(principal:Reader,query:string)=>{calls.push(['search',principal.reads,query]);return [];}},
     telegramActions:{request:async()=>{calls.push(['request']);return {};}},actionCommands:{offer:async()=>({})}};
