@@ -119,7 +119,7 @@ class NotionSignInTests(unittest.TestCase):
         with self.assertRaises(ValueError): notion.bearer(self.state, post=ended, now=lambda: 10 ** 12)
         self.assertEqual(notion.status(self.state)['account_email'], 'owner@example.com')
 
-    def test_an_account_notion_cannot_name_is_asked_again_only_after_an_hour(self):
+    def test_an_account_notion_cannot_name_is_asked_again_after_a_wait(self):
         notion.save_token(self.state, 'ntn_owner', check=lambda token: None)
         looked = []
         def look(state, project): looked.append(project); return None
