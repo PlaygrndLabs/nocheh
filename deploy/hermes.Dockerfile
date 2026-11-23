@@ -16,8 +16,8 @@ ENV LD_LIBRARY_PATH=/opt/sqlite/lib PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
     UV_PROJECT_ENVIRONMENT=/opt/venv UV_PYTHON_DOWNLOADS=never \
     PYTHONPATH=/opt/hermes:/workspace PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin \
     HERMES_HOME=/workspace/data/local/hermes
-ARG HERMES_REVISION=2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19
-ARG HERMES_VERSION=0.23.0
+ARG HERMES_REVISION=ae2a81ccc00e9b7c06301523e5bb09608397149c
+ARG HERMES_VERSION=0.23.2
 COPY --from=hermes_source . /opt/hermes
 COPY deploy/hermes-plugin-requirements.txt /tmp/hermes-plugin-requirements.txt
 # The pinned upstream supports only Python 3.14; keep the interpreter explicit
@@ -45,40 +45,40 @@ USER nocheh
 CMD ["python", "-m", "services.hermes.runtime"]
 
 
-FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS tui-assets
-WORKDIR /opt/hermes
-COPY --from=native-runtime /opt/hermes/package.json /opt/hermes/package-lock.json ./
-COPY --from=native-runtime /opt/hermes/ui-tui ./ui-tui
-COPY --from=native-runtime /opt/hermes/apps/shared ./apps/shared
-COPY --from=native-runtime /opt/hermes/web/package.json ./web/package.json
-# The workspace build script compiles through the shared upstream frontend builders.
-COPY --from=native-runtime /opt/hermes/scripts/build ./scripts/build
-COPY tools/build/patch-native-tui.py /tmp/patch-native-tui.py
-RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/* && python3 /tmp/patch-native-tui.py /opt/hermes
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --workspace ui-tui --workspace apps/shared --ignore-scripts --no-audit --no-fund \
-      --fetch-retries=5 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=20000 --fetch-timeout=120000 && \
-    npm run build --workspace ui-tui && test -f /opt/hermes/ui-tui/dist/entry.js
-
-FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS dashboard-assets
-WORKDIR /opt/hermes
-COPY --from=native-runtime /opt/hermes/package.json /opt/hermes/package-lock.json ./
-COPY --from=native-runtime /opt/hermes/web ./web
-COPY --from=native-runtime /opt/hermes/apps/shared ./apps/shared
-COPY --from=native-runtime /opt/hermes/scripts/build ./scripts/build
+# Upstream installs its Node workspaces with the pnpm pinned in pm/lock.json.
+FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS frontend-tools
 RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
-RUN npm ci --workspace web --workspace apps/shared --ignore-scripts --no-audit --no-fund
+COPY --from=native-runtime /opt/hermes /opt/hermes
+COPY tools/build/install-pinned-pnpm.py /tmp/install-pinned-pnpm.py
+WORKDIR /opt/hermes
+RUN python3 /tmp/install-pinned-pnpm.py /opt/hermes /opt/pnpm && ln -s /opt/pnpm/pnpm /usr/local/bin/pnpm && pnpm --version
+
+FROM frontend-tools AS tui-assets
+COPY tools/build/patch-native-tui.py /tmp/patch-native-tui.py
+RUN python3 /tmp/patch-native-tui.py /opt/hermes
+RUN node scripts/build/node-deps.mjs --source /opt/hermes --workspace ui-tui && \
+    node scripts/build/tui.mjs --source /opt/hermes --out /opt/products/tui && test -f /opt/products/tui/dist/entry.js
+
+# The dashboard build takes prepared icons; upstream renders them with the pinned Python environment.
+FROM native-runtime AS icons
+RUN python -I /opt/hermes/scripts/generate_icons.py --source /opt/hermes --out /tmp/hermes-icons
+
+FROM frontend-tools AS dashboard-assets
 COPY tools/build/patch-native-dashboard.py /tmp/patch-native-dashboard.py
 COPY tools/build/native-browser-delivery.ts /tmp/native-browser-delivery.ts
 COPY tools/build/native-browser-recovery.tsx /tmp/native-browser-recovery.tsx
+COPY --from=icons /tmp/hermes-icons /tmp/hermes-icons
 # The patch sets the /hermes/ base in the Vite config; the upstream builder takes no build flags.
-RUN python3 /tmp/patch-native-dashboard.py /opt/hermes && cd /opt/hermes && npm run build --workspace web && \
-    test -f /opt/hermes/hermes_cli/web_dist/index.html
+RUN python3 /tmp/patch-native-dashboard.py /opt/hermes && \
+    node scripts/build/node-deps.mjs --source /opt/hermes --workspace web && \
+    node scripts/build/web.mjs --source /opt/hermes --icons /tmp/hermes-icons --out /opt/products/web && \
+    test -f /opt/products/web/index.html
 
 FROM native-runtime
-COPY --from=dashboard-assets /opt/hermes/hermes_cli/web_dist /opt/hermes/hermes_cli/web_dist
+COPY --from=dashboard-assets /opt/products/web /opt/hermes/hermes_cli/web_dist
 COPY --from=tui-assets /usr/local/bin/node /usr/local/bin/node
-COPY --from=tui-assets /opt/hermes/ui-tui/dist /opt/hermes/ui-tui/dist
+# The TUI product is its bundled dist plus a package.json that marks it as an ES module.
+COPY --from=tui-assets /opt/products/tui /opt/hermes/ui-tui
 # Each isolated turn starts a fresh interpreter on a read-only root. Compile
 # the pinned libraries during the image build instead of recompiling them on
 # every request (runtime bytecode writes remain disabled).

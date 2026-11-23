@@ -12,7 +12,8 @@ def patch(relative, replacements):
         source = source.replace(old, new)
     path.write_text(source)
 
-patch('ui-tui/src/gatewayClient.ts', [
+# The TUI's request method lives in the shared gateway client; only the TUI build stage patches this copy.
+patch('apps/shared/src/node/gateway-client.ts', [
     ('  request<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {', '''  private nochehInputs: Array<{text: string; event_id: string; session_id: unknown}> = []
 
   async request<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {

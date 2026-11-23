@@ -422,7 +422,7 @@ class Administration:
                         with urllib.request.urlopen(telegram + '/health', timeout=3) as response: live = json.load(response)
                     except (OSError, ValueError): live = {}
                     running = live.get('telegram') == 'connected'
-                    result = {'version': '0.23.0', 'release_date': '', 'active_sessions': 0,
+                    result = {'version': '0.23.2', 'release_date': '', 'active_sessions': 0,
                               'config_version': 1, 'latest_config_version': 1, 'config_path': str(home / 'config.yaml'),
                               'env_path': 'Managed by Nocheh', 'hermes_home': str(home),
                               'gateway_running': running, 'gateway_state': 'running' if running else 'stopped',

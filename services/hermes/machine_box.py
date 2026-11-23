@@ -192,7 +192,9 @@ def home(path):
     expands them in this turn, for a backend that is not a container, to this turn's own home."""
     from tools import file_tools,file_tools_paths,file_tools_write_guards
     expand=file_tools_paths._expand_tilde
-    def tilde(value):return path+value[1:] if isinstance(value,str) and (value=='~' or value.startswith('~/')) else expand(value)
+    # Hermes 0.23.2 passes the tool's task_id as a second argument.
+    def tilde(value,*args,**kwargs):
+        return path+value[1:] if isinstance(value,str) and (value=='~' or value.startswith('~/')) else expand(value,*args,**kwargs)
     for module in (file_tools_paths,file_tools,file_tools_write_guards):module._expand_tilde=tilde
 
 
