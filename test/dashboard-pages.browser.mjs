@@ -1066,6 +1066,7 @@ test('Notion is connected through its sign-in, turned on with an approval choice
   await card.getByRole('button', {name: 'Connect Notion'}).click();
   await page.getByRole('status').filter({hasText: 'Notion is connected.'}).waitFor();
   await card.getByText('Connected to Synthetic workspace').waitFor();
+  await card.getByText(/Signed in through Notion as Sample Owner \(owner@example\.com\)/).waitFor();
   assert.equal(new URL(page.url()).search, '');
   assert.match(page.url(), /#connections$/);
   await card.getByRole('switch', {name: 'Use Notion'}).click();

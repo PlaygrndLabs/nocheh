@@ -189,9 +189,9 @@ const notion=new NotionRepository(pool);
 const chatTools=new ChatToolSettingsRepository(pool,()=>'42');
 await pool.query("INSERT INTO chat_tool_settings(space_id,browser) VALUES('-10042',false),('-10042/topic/7',true)");
 // Notion's sign-in is kept by the management service; the preview stands in for Notion and returns at once.
-type NotionSignIn={connected:boolean;method:string|null;workspace:string|null;connected_at:number|null;reconnect:boolean};
+type NotionSignIn={connected:boolean;method:string|null;workspace:string|null;account_name:string|null;account_email:string|null;connected_at:number|null;reconnect:boolean};
 // One sign-in per Notion connection, as the management service keeps them: '' is the owner's own, else a project's id (ADR-0268).
-const notionSignIns=new Map<string,NotionSignIn>(),signedOut=():NotionSignIn=>({connected:false,method:null,workspace:null,connected_at:null,reconnect:false});
+const notionSignIns=new Map<string,NotionSignIn>(),signedOut=():NotionSignIn=>({connected:false,method:null,workspace:null,account_name:null,account_email:null,connected_at:null,reconnect:false});
 const notionSignIn=(project:unknown)=>notionSignIns.get(typeof project==='string'?project:'')??signedOut();
 const setNotionSignIn=(project:unknown,value:NotionSignIn)=>{notionSignIns.set(typeof project==='string'?project:'',value);return value;};
 // The owner's own Gmail (ADR-0272): the saved client and the sign-in, never a secret.
@@ -1014,9 +1014,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/connections/notion/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/?connect=notion')throw new HttpError(400,'invalid_notion_redirect');
     return json(res,200,{url:body.redirect+'&code=fixture-code&state=fixture-state'});}
   if(route==='/connections/notion/finish'){if(body.state!=='fixture-state')throw new HttpError(400,'notion_sign_in_expired');
-    return json(res,200,setNotionSignIn(body.project,{connected:true,method:'oauth',workspace:'Synthetic workspace',connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
+    return json(res,200,setNotionSignIn(body.project,{connected:true,method:'oauth',workspace:'Synthetic workspace',account_name:'Sample Owner',account_email:'owner@example.com',connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
   if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
-    return json(res,200,setNotionSignIn(body.project,{connected:true,method:'token',workspace:null,connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
+    return json(res,200,setNotionSignIn(body.project,{connected:true,method:'token',workspace:null,account_name:'Sample Owner',account_email:null,connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
   if(route==='/connections/notion/disconnect')return json(res,200,setNotionSignIn(body.project,signedOut()));
   if(route==='/connections/gmail/client'){if(typeof body.client_id!=='string'||!/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(body.client_id.trim())||typeof body.client_secret!=='string'||body.client_secret.trim().length<8)throw new HttpError(400,'invalid_gmail_client');
     gmail={...gmail,client:body.client_id.trim(),...(gmail.client===body.client_id.trim()?{}:{connected:false,email:null,connected_at:null})};return json(res,200,gmail);}

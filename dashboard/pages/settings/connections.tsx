@@ -33,6 +33,9 @@ type NotionSignIn = {
   connected: boolean;
   method: 'oauth' | 'token' | null;
   workspace: string | null;
+  /** The Notion account signed in, as Notion's own notion-get-self tool names it; null until Notion says. */
+  account_name: string | null;
+  account_email: string | null;
   connected_at: number | null;
   reconnect: boolean;
 };
@@ -54,6 +57,11 @@ const signInErrors: Record<string, string> = {
   notion_registration_failed: 'Notion did not register Nocheh. Try again in a minute.',
 };
 const signInWords = (e: unknown) => signInErrors[(e as ApiError)?.message ?? ''] ?? errorWords(e);
+/** Which Notion account a sign-in belongs to: `Name (email)`, either one alone, or empty when Notion has not said. */
+export const notionAccount = (status: Pick<NotionSignIn, 'account_name' | 'account_email'>) =>
+  status.account_name && status.account_email
+    ? `${status.account_name} (${status.account_email})`
+    : (status.account_name ?? status.account_email ?? '');
 
 /** Which Notion a sign-in started for: a project's id, or empty for your own. Notion's return address is the same for
  * every sign-in, so the dashboard remembers it in this tab until the sign-in comes back. */
@@ -267,6 +275,7 @@ export function NotionConnection({
           description={
             status.connected
               ? (status.method === 'token' ? 'Signed in with an MCP token' : 'Signed in through Notion') +
+                (notionAccount(status) ? ' as ' + notionAccount(status) : '') +
                 (status.connected_at ? ', ' + when(new Date(status.connected_at * 1000).toISOString()) : '') +
                 '. Notion decides which pages Nocheh can see.'
               : status.reconnect

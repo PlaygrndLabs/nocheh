@@ -10,7 +10,7 @@ import {refreshResources, useResource} from '../lib/resource';
 import {Badge, Card, CardHeader, LoadError, LoadingRows, Table, Td, Th} from '../ui/core';
 import {LinkButton} from '../ui/link-button';
 import {Page, Tabs} from '../ui/page';
-import {ConnectionSettings} from './settings/connections';
+import {ConnectionSettings, notionAccount} from './settings/connections';
 import {GithubConnection} from './settings/github';
 import {GmailConnection} from './settings/gmail';
 
@@ -31,7 +31,12 @@ function Panel({id, current, children}: {id: string; current: string; children: 
 /** One project's Notion state, read from its own card's addresses. */
 function ProjectNotion({project}: {project: string}) {
   const query = '?project=' + encodeURIComponent(project);
-  const signIn = useResource<{connected: boolean; reconnect: boolean}>('/connections/notion' + query);
+  const signIn = useResource<{
+    connected: boolean;
+    reconnect: boolean;
+    account_name: string | null;
+    account_email: string | null;
+  }>('/connections/notion' + query);
   const saved = useResource<{enabled: boolean}>('/notion' + query);
   if ((signIn.error && !signIn.data) || (saved.error && !saved.data))
     return <span className="text-muted">Couldn’t check</span>;
@@ -43,12 +48,18 @@ function ProjectNotion({project}: {project: string}) {
       </Badge>
     );
   if (!signIn.data.connected) return <span className="text-muted">None</span>;
-  return saved.data.enabled ? (
-    <Badge tone="good" dot>
-      On
-    </Badge>
-  ) : (
-    <Badge dot>Connected, off</Badge>
+  const account = notionAccount(signIn.data);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      {saved.data.enabled ? (
+        <Badge tone="good" dot>
+          On
+        </Badge>
+      ) : (
+        <Badge dot>Connected, off</Badge>
+      )}
+      {account && <span className="text-muted">{account}</span>}
+    </span>
   );
 }
 
