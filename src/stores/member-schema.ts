@@ -50,6 +50,8 @@ ALTER TABLE members ADD COLUMN IF NOT EXISTS reminders boolean NOT NULL DEFAULT 
 ALTER TABLE members ADD COLUMN IF NOT EXISTS app_since timestamptz NOT NULL DEFAULT now();
 -- Members' schedules: "Personal assistant", off by default (the member sets their own schedules in their private chat).
 ALTER TABLE members ADD COLUMN IF NOT EXISTS assistant boolean NOT NULL DEFAULT false;
+-- The member's own time zone for their new schedules, an IANA name; null uses the owner's (members' time zones).
+ALTER TABLE members ADD COLUMN IF NOT EXISTS time_zone text CHECK(time_zone IS NULL OR length(time_zone) BETWEEN 1 AND 64);
 CREATE TABLE IF NOT EXISTS member_chats (
  member_id text NOT NULL REFERENCES members(id) ON DELETE CASCADE,
  chat_id text NOT NULL REFERENCES chats(id) ON DELETE CASCADE,

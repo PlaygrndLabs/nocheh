@@ -164,8 +164,8 @@ class MemberScopeTests(unittest.TestCase):
 
     def test_a_member_turn_reads_only_answers_tools_with_the_member_rules(self):
         removed, allowed = turn_tools(False, False, member=True)
-        # An answer's tools, and its projects' Notion and GitHub with their results (ADR-0278).
-        lookups = {'mcp__nocheh__notion', 'mcp__nocheh__github', 'mcp__nocheh__action_status'}
+        # An answer's tools, its projects' Notion and GitHub with their results (ADR-0278), and the member's own time zone.
+        lookups = {'mcp__nocheh__notion', 'mcp__nocheh__github', 'mcp__nocheh__action_status', 'mcp__nocheh__my_time_zone'}
         self.assertEqual(allowed, ANSWER_TOOLS | lookups)
         self.assertEqual(MEMBER_TOOLS, ANSWER_TOOLS | lookups)
         self.assertLessEqual(lookups, MEMBER_DATA_TOOLS)

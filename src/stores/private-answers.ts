@@ -341,11 +341,11 @@ const answerRoutes:readonly [string,RegExp][]=[
  * route answers it with nothing shared or granted. With Personal assistant on, its own live turn may also ask whether
  * it may set schedules (members' schedules): Hermes's own tool then writes them, never these routes. It may list and
  * ask for reads of its projects' Notion and GitHub, and read their results (ADR-0278): the store runs only those that
- * need no card and refuses the rest.
+ * need no card and refuses the rest. With Personal assistant on, its own live turn may set the member's time zone.
  */
 const memberRoutes:readonly [string,RegExp][]=[
   ['GET',/^\/v1\/(?:search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|owner\/tasks(?:\/[a-f0-9]{64})?|security\/binding|turn-files\/[a-f0-9]{64}|notion\/connections|github\/repos|tools\/actions\/[a-f0-9]{64})$/],
-  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions|schedules\/turn|tools\/propose)|anthropic\/v1\/messages)$/],
+  ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|memory\/longterm\/(?:search|context)|guard|chat\/completions|schedules\/turn|tools\/propose|members\/time-zone)|anthropic\/v1\/messages)$/],
 ];
 /**
  * The routes the owner's ask about a member may call (step 4b): the archive reads of that member's chat, the turn's
@@ -371,6 +371,8 @@ export const privateAnswerTaskActions:ReadonlySet<string>=new Set(['list','get']
  * private chat reads as an answer does, tasks included (read only, D14), and also its projects' Notion and GitHub with
  * the results of those reads (ADR-0278); the owner's ask about a member reads only the archive, which holds that member's
  * chat. Neither gets a notes or memory-writing tool. */
+/** The tools only a member's own private chat is offered: setting their own time zone (members' time zones). */
+export const memberOnlyTools:ReadonlySet<string>=new Set(['my_time_zone']);
 export const boundReaderTools:Readonly<Record<BoundReader,ReadonlySet<string>>>={answer:privateAnswerTools,
-  member:new Set([...privateAnswerTools,'notion','github','action_status']),
+  member:new Set([...privateAnswerTools,'notion','github','action_status','my_time_zone']),
   memberRead:new Set(['archive_search','archive_read','archive_page'])};

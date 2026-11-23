@@ -37,7 +37,7 @@ export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prep
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered|grants)\/[a-f0-9]{64}|memory\/learned\/[a-f0-9]{64}\/[1-9][0-9]{0,8}|memory\/notes\/[a-f0-9]{12}|memory\/facts\/[a-f0-9]{64}(?:\/[1-9][0-9]{0,2})?|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions(?:\/[a-f0-9]{64})?|telegram\/destinations|notion\/connections|github\/repos)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|member-asks|schedules\/turn|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|member-asks|schedules\/turn|members\/time-zone|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */

@@ -447,6 +447,17 @@ async function github(args:Value,context:ToolContext) {
   }
 }
 
+/** A member's own time zone for their new schedules, set from their own words in their private chat (members' time zones). */
+async function myTimeZone(args:Value,context:ToolContext) {
+  try{return text(await request(context,'/v1/members/time-zone',{time_zone:args.time_zone??null}));}
+  catch(error) {
+    if(error instanceof Refused)return text({error:error.status===400?'invalid_time_zone':'time_zone_not_here',
+      note:error.status===400?'Not a known time zone: use a name such as Europe/Berlin or America/New_York.':
+        'Only the member\'s own message in their own private chat, with Personal assistant on, can set their time zone.'});
+    return text({error:'time_zone_unavailable'});
+  }
+}
+
 async function gmail(args:Value,context:ToolContext) {
   try {
     const body={connection:'gmail',tool:args.tool??null,input:args.input||{}};
@@ -689,6 +700,10 @@ export const mcpTools:readonly McpTool[]=[
     'repository, such as comparing tasks with the code, ask for a background job with box and repo instead.',
     inputSchema:shape({operation:{type:'string',enum:['repos','call']},tool:{type:'string',enum:['search_code','read_file','list_files','list_commits','get_commit']},
       input:{type:'object'},summary:SUMMARY},['operation']),run:github},
+  {name:'my_time_zone',description:'Set the time zone of the member you are talking with, for the schedules they set from now on; '+
+    'their schedules already set keep theirs. Only in their own private conversation, from their own words, never a forwarded message. '+
+    'time_zone is a name such as Europe/Berlin or America/New_York; null goes back to the owner\'s. Ask which city when unsure.',
+    inputSchema:shape({time_zone:{type:['string','null'],maxLength:64}},['time_zone']),run:myTimeZone},
   {name:'gmail',description:'Look up the owner\'s own Gmail live, read only. Only in the owner\'s private conversation, never in a group, '+
     'another person\'s private conversation or a background job. operation=call runs one tool with input: search_mail {query} finds up to 20 '+
     'messages with Gmail\'s own search words (from:, to:, subject:, after:YYYY/MM/DD, is:unread, has:attachment); read_message {id} reads one '+

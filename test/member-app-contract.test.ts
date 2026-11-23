@@ -75,7 +75,9 @@ test('the fixture launch key is honoured only in the installation fixture with t
 
 test('the members\' app answers only its own routes, and lists take only its own filters',()=>{
   const id='a'.repeat(64);
-  assert.equal(MEMBER_APP_ROUTES.length,10);
+  assert.equal(MEMBER_APP_ROUTES.length,11);
+  // The member's own time zone for new schedules (members' time zones).
+  assert.deepEqual(memberAppRoute('POST','/time-zone'),{name:'time_zone'});assert.equal(memberAppRoute('GET','/time-zone'),null);
   // A member's own schedules (members' schedules): the list, and one schedule by its id.
   assert.deepEqual(memberAppRoute('GET','/schedules'),{name:'schedules'});
   assert.deepEqual(memberAppRoute('POST','/schedules/a1b2c3d4e5f6'),{name:'schedule',schedule:'a1b2c3d4e5f6'});

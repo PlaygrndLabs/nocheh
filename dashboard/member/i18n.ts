@@ -190,6 +190,13 @@ export const memberWords = {
   schedule_deleted_toast: 'Schedule deleted.',
   schedule_gone: 'This schedule isn’t there any more.',
   unnamed_schedule: 'Schedule',
+  time_zone_label: 'Time zone for new schedules',
+  time_zone_owner: 'Same as the owner',
+  time_zone_phone: 'Use this phone’s time zone',
+  time_zone_hint:
+    'Schedules you already have keep theirs. You can also tell Nocheh your time zone in your private chat.',
+  time_zone_saved: 'Time zone saved. New schedules use it.',
+  time_zone_invalid: 'That time zone isn’t known.',
   sign_out: 'Sign out',
   sign_out_line: 'Signs you out on every phone. Opening the app from the menu signs you in again.',
   signed_in_as: 'Signed in as {name}',

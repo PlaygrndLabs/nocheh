@@ -12,6 +12,8 @@ import {
   type MemberReminder,
   type MemberScheduleRequest,
   type MemberScheduleResult,
+  type MemberTimeZone,
+  type MemberTimeZoneRequest,
   type MemberSchedules,
   type MemberTaskCommentRequest,
   type MemberTaskCreateRequest,
@@ -102,5 +104,6 @@ export const memberApi = {
   schedules: () => call<MemberSchedules>('GET', '/schedules'),
   schedule: (id: string, request: MemberScheduleRequest) =>
     call<MemberScheduleResult>('POST', '/schedules/' + encodeURIComponent(id), request),
+  timeZone: (request: MemberTimeZoneRequest) => call<MemberTimeZone>('POST', '/time-zone', request),
   signOut: () => call<Record<string, never>>('POST', '/sign-out'),
 };

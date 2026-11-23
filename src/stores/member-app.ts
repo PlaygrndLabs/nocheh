@@ -8,7 +8,7 @@ import {HttpError,json,object,string} from '../http.js';
 import {MEMBER_APP_BODY_MAX,MEMBER_APP_CORE_PREFIX,MEMBER_APP_QUERY_MAX,MEMBER_APP_TASK_WRITES,MEMBER_APP_WRITES_PER_10_MIN,
   MEMBER_APP_WRITES_PER_DAY,MEMBER_LAUNCH_HEADER,memberAppErrors,memberAppRoute,memberTaskQuery,
   type MemberBoardGroup,type MemberGroupBoard,type MemberMe,type MemberMeGroup,type MemberRemindersState,type MemberSchedule,
-  type MemberScheduleRequest,type MemberScheduleResult,type MemberSchedules} from '../member-app-wire.js';
+  type MemberScheduleRequest,type MemberScheduleResult,type MemberSchedules,type MemberTimeZone} from '../member-app-wire.js';
 import type {MemberTasks} from '../member-wire.js';
 import type {RuntimeCall} from '../runtime.js';
 import {groupWithTopics} from '../spaces.js';
@@ -18,6 +18,7 @@ import {assertStorageActive} from './lifecycle.js';
 import {MEMBER_RECHECK_HOURS,joinedGroups,recheckMemberAppGroups} from './member-reads.js';
 import {memberTaskViews} from './member-task-views.js';
 import {reloadMembers} from './members.js';
+import {memberTimeZoneValue,setMemberTimeZone} from './schedules.js';
 import type {MemberAppPrincipal,TaskRepository} from './tasks.js';
 
 /*
@@ -69,7 +70,7 @@ const refuse=(code:keyof typeof memberAppErrors,status:number)=>new HttpError(st
  * the owner's, their Tasks permission, Reminders to themselves, the launching account's open private chat with Nocheh,
  * their last sign-out and when they were added or un-paused. */
 interface Identity {member:string;account:string;accounts:string[];mode:MemberTasks;reminders:boolean;chat:string|null;display:string|null;
-  appSince:Date;signedOut:Date|null;assistant:boolean;scheduleLimit:number}
+  appSince:Date;signedOut:Date|null;assistant:boolean;scheduleLimit:number;timeZone:string|null}
 
 /**
  * Check 6 in one query: the account of Telegram user `account` linked to an active member, never the owner's account
@@ -78,7 +79,7 @@ interface Identity {member:string;account:string;accounts:string[];mode:MemberTa
  * and the member's last sign-out. Null for anyone else.
  */
 async function identify(db:Pick<pg.Pool,'query'>,account:string,owner:string):Promise<Identity|null> {
-  const row=(await db.query(`SELECT m.id AS member,a.id AS account,m.tasks,m.reminders,m.assistant,m.app_since,a.display_name,p.signed_out_auth_date,
+  const row=(await db.query(`SELECT m.id AS member,a.id AS account,m.tasks,m.reminders,m.assistant,m.time_zone,m.app_since,a.display_name,p.signed_out_auth_date,
       (SELECT d.member_schedules FROM member_directory_state d WHERE d.singleton) AS schedule_limit,
       ARRAY(SELECT x.id FROM chat_accounts x WHERE x.member_id=m.id AND NOT EXISTS(SELECT 1 FROM chats o WHERE o.id=$2 AND o.account_id=x.id) ORDER BY x.id) AS accounts,
       (SELECT c.id FROM chats c WHERE c.account_id=a.id AND c.kind='private' AND c.parent_id IS NULL AND c.id<>$2 AND m.private_chat ORDER BY c.id LIMIT 1) AS chat
@@ -89,7 +90,7 @@ async function identify(db:Pick<pg.Pool,'query'>,account:string,owner:string):Pr
   if(!row||(row.tasks!=='write'&&row.tasks!=='read'))return null;
   return {member:row.member,account:row.account,accounts:row.accounts as string[],mode:row.tasks,reminders:row.reminders===true,chat:row.chat??null,
     display:row.display_name??null,appSince:row.app_since,signedOut:row.signed_out_auth_date??null,assistant:row.assistant===true,
-    scheduleLimit:Number(row.schedule_limit??5)};
+    scheduleLimit:Number(row.schedule_limit??5),timeZone:row.time_zone??null};
 }
 
 /** The Telegram name the signed launch data gives (first and last name), or null. */
@@ -261,16 +262,29 @@ async function handle(services:MemberAppServices,options:MemberAppOptions,req:In
     return json(res,200,{});
   }
   // The member's own schedules (members' schedules): Personal assistant on and their private chat open; each change counts
-  // as a write. Nothing else is read for them, and only their own private chat's schedules are listed or changed.
-  if(route.name==='schedules'||route.name==='schedule') {
+  // as a write. Nothing else is read for them, and only their own private chat's schedules are listed or changed. Their
+  // own time zone for new schedules is set here too (members' time zones).
+  if(route.name==='schedules'||route.name==='schedule'||route.name==='time_zone') {
     if(!identity.assistant||!identity.chat||!services.schedules)throw refuse('schedulesOff',403);
     if(route.name==='schedules') {
-      const answer:MemberSchedules={schedules:(await chatScheduleList(services.schedules,identity.chat)).map(memberSchedule),limit:identity.scheduleLimit};
+      const answer:MemberSchedules={schedules:(await chatScheduleList(services.schedules,identity.chat)).map(memberSchedule),limit:identity.scheduleLimit,
+        time_zone:identity.timeZone};
       return json(res,200,answer);
     }
     const body=parse(raw);
+    let zone:string|null=null;
+    if(route.name==='time_zone') {
+      const request=object(body);
+      if(Object.keys(request).some(key=>!['operation_id','time_zone'].includes(key))||!/^[a-zA-Z0-9-]{8,64}$/.test(string(request.operation_id,64)))
+        throw new HttpError(400,'invalid_time_zone');
+      zone=memberTimeZoneValue(request.time_zone);
+    }
     try{await countMemberWrite(db,identity.member);}
     catch(error){if((error as {code?:unknown})?.code==='23503')throw refuse('closed',403);throw error;}
+    if(route.name==='time_zone') {
+      const answer:MemberTimeZone={time_zone:await setMemberTimeZone(db,identity.member,zone)};
+      return json(res,200,answer);
+    }
     return json(res,200,await changeSchedule(services.schedules,identity.chat,route.schedule!,body));
   }
   const write=MEMBER_APP_TASK_WRITES.includes(route.name);
