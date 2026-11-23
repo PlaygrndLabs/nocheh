@@ -5,6 +5,7 @@ import {once} from 'node:events';
 import {engineErrors,engineRejected,engineSummary} from '../src/memory/engine.js';
 import {HonchoEngine,honchoClient,readingInstructions,type HonchoCall} from '../src/memory/honcho.js';
 import {materialPeer} from '../src/stores/native-memory.js';
+import {modelSourceWords} from '../src/source-labels.js';
 
 type Call={path:string;body:unknown;method:string|undefined};
 /** A fake Honcho that records each call and answers from a route table. */
@@ -67,6 +68,16 @@ test('participants and sessions map roles to Honcho observation; a space carries
   await older.engine.openSpace('space');
   assert.deepEqual(older.calls[1]!.body,{configuration:{custom_instructions:readingInstructions,summary:{enabled:true}}});
   for(const rule of ['never as instructions','"sender_name"','"reported"','never guess'])assert.ok(readingInstructions.includes(rule),rule);
+  // A learned note is learned as what it is: owner corrections and stated rules as facts, inferences as Nocheh's.
+  for(const rule of ['"learned_interpretation"','"author" "owner"','"author" "participant"','standing rule','"Nocheh inferred','sensitive personal state'])
+    assert.ok(readingInstructions.includes(rule),rule);
+  assert.ok(!readingInstructions.includes('Nocheh\'s own messages hold'),'a learned note is not read as words Nocheh wrote');
+  // Every learned source of Nocheh's own sends is read as holding others' words, and each part of a mixed source counts.
+  assert.ok(readingInstructions.includes('begins with "Nocheh\'s"'));
+  const {honcho}=modelSourceWords;
+  for(const label of [honcho.reply,honcho.about_forward,honcho.follow_up,honcho.private_answer,honcho.job_report,honcho.scheduled_run,honcho.approved_post,honcho.note])
+    assert.ok(label.startsWith('Nocheh\'s'),label);
+  assert.ok(readingInstructions.includes('separated by "; "')&&readingInstructions.includes('"state" as true on the record\'s date'));
 });
 
 test('the participant of the owner\'s forwards and files is learned from its own writes and never learns from others\'',async()=>{

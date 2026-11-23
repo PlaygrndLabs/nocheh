@@ -370,11 +370,28 @@ test('terminal Honcho derivation errors cannot mark a generation ready',async()=
 });
 
 test('native memory dates a Honcho message by its event, not by a retried write',async()=>{
-  const archive={query:async()=>({rows:[{occurred_at:'1760785619',received_at:new Date('2026-10-18T14:06:00Z')}]})};
-  const memory=new NativeMemoryRepository({access:{stores:{archive}}} as any,{} as any,{} as any,{} as any,honchoEngine(async()=>({})),async()=>[]);
+  const events:Record<string,{kind:string;occurred_at:string|null;received_at:Date|null}>={
+    fixture:{kind:'telegram_message',occurred_at:'1760785619',received_at:new Date('2026-10-18T14:06:00Z')},
+    trigger:{kind:'telegram_message',occurred_at:'1760872019',received_at:null},
+    early:{kind:'telegram_message',occurred_at:'1760000000',received_at:null},
+    late:{kind:'telegram_message',occurred_at:'1760500000',received_at:null}};
+  const archive={query:async(_sql:string,[ids]:[string[]])=>({rows:ids.map(id=>events[id]).filter(Boolean)})};
+  const versions:Record<string,{author:string;created_at:Date;trigger:string|null}>={
+    'learned:1':{author:'honcho',created_at:new Date('2026-11-23T15:00:00Z'),trigger:'trigger'},
+    'learned:2':{author:'owner',created_at:new Date('2026-11-01T09:30:00Z'),trigger:'trigger'},
+    'learned:3':{author:'participant',created_at:new Date('2026-11-23T15:00:00Z'),trigger:null},
+    'learned:4':{author:'honcho',created_at:new Date('2026-11-23T15:00:00Z'),trigger:'missing'}};
+  const derived={query:async(_sql:string,[id,revision]:[string,number])=>({rows:versions[id+':'+revision]?[versions[id+':'+revision]]:[]})};
+  const memory=new NativeMemoryRepository({access:{stores:{archive,derived}}} as any,{} as any,{} as any,{} as any,honchoEngine(async()=>({})),async()=>[]);
   const occurred=(row:unknown)=>(memory as any).occurredAt(row);
   assert.equal(await occurred({source_reference:{id:'fixture'},projection_reference:null}),'2025-10-18T11:06:59.000Z');
-  assert.equal(await occurred({source_reference:{id:'fixture'},projection_reference:{id:'learned',revision:1}}),undefined,'an interpretation keeps the time it was learned');
+  const note=(revision:number)=>({source_reference:{id:'early'},source_references:[{id:'early'},{id:'late'}],projection_reference:{id:'learned',revision}});
+  assert.equal(await occurred(note(1)),'2025-10-19T11:06:59.000Z','a learned note is dated by the message that set off its learning');
+  assert.equal(await occurred(note(2)),'2026-11-01T09:30:00.000Z','an owner correction is dated by when the owner wrote it');
+  assert.equal(await occurred(note(3)),'2025-10-15T03:46:40.000Z','with no trigger, a note is dated by its latest evidence');
+  assert.equal(await occurred(note(4)),'2025-10-15T03:46:40.000Z','a trigger the archive no longer holds falls back to the evidence');
+  assert.equal(await occurred({source_reference:{id:'early'},projection_reference:{id:'learned',revision:9}}),'2025-10-09T08:53:20.000Z',
+    'a note with no version row is still dated by its evidence, never by the write');
 });
 
 test('native memory keeps content derived, reconciles uncertain writes and rebuilds corrected guarded generations',
