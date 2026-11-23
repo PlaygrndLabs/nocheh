@@ -2,7 +2,7 @@ import {useSubTab} from '../../lib/navigation';
 import {useResource} from '../../lib/resource';
 import {useSettings} from '../../lib/settings';
 import {href} from '../../lib/routes';
-import {Badge, Card, CardHeader, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
+import {Badge, Card, CardHeader, Facts, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
 import {LinkButton} from '../../ui/link-button';
 import {SubPanel, SubTabs} from '../../ui/page';
 import {FindIdButton, FoundPeople, useFindTelegramId} from './telegram-id';
@@ -140,9 +140,16 @@ export function TelegramSettings() {
                 </>
               }
               description={
-                token?.configured
-                  ? `A token${bot && !s.changed('TELEGRAM_BOT_TOKEN') ? ' for @' + bot : ''} is saved. Paste a new one only to replace it.`
-                  : 'From @BotFather in Telegram.'
+                token?.configured ? (
+                  <>
+                    <Facts rows={[['Bot', bot && !s.changed('TELEGRAM_BOT_TOKEN') ? '@' + bot : '']]} />
+                    <span className={bot ? 'mt-1.5 block' : undefined}>
+                      A token is saved. Paste a new one only to replace it.
+                    </span>
+                  </>
+                ) : (
+                  'From @BotFather in Telegram.'
+                )
               }
               htmlFor="telegram-token"
             >

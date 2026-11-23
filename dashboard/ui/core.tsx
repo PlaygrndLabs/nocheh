@@ -402,6 +402,22 @@ export function SettingRow({
   );
 }
 
+/** Labelled facts inside a row's description, such as which account a connection is signed in to. Empty values are left out. */
+export function Facts({rows}: {rows: [string, React.ReactNode][]}) {
+  const shown = rows.filter(([, value]) => value !== null && value !== undefined && value !== '');
+  if (!shown.length) return null;
+  return (
+    <span className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[13px]">
+      {shown.map(([label, value]) => (
+        <React.Fragment key={label}>
+          <span className="text-muted">{label}</span>
+          <span className="font-medium break-words text-fg">{value}</span>
+        </React.Fragment>
+      ))}
+    </span>
+  );
+}
+
 /** A key number with a label. `tone` colours the value when it means something. */
 export function Stat({
   label,

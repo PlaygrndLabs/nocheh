@@ -13,6 +13,7 @@ import {
   Button,
   Card,
   CardHeader,
+  Facts,
   Details,
   Input,
   LoadError,
@@ -242,14 +243,21 @@ export function GmailConnection() {
         <SettingRow
           title="Gmail sign-in"
           description={
-            data.connected
-              ? 'Signed in' +
-                (data.email ? ' as ' + data.email : '') +
-                (data.connected_at ? ', ' + when(new Date(data.connected_at * 1000).toISOString()) : '') +
-                '. Nocheh only reads.'
-              : data.reconnect
-                ? 'Google ended the sign-in. Connect again to keep using it.'
-                : 'Google opens in this tab. Choose your account and allow reading your email.'
+            data.connected ? (
+              <>
+                <Facts
+                  rows={[
+                    ['Account', data.email],
+                    ['Signed in', data.connected_at ? when(new Date(data.connected_at * 1000).toISOString()) : ''],
+                  ]}
+                />
+                <span className="mt-1.5 block">Nocheh only reads.</span>
+              </>
+            ) : data.reconnect ? (
+              'Google ended the sign-in. Connect again to keep using it.'
+            ) : (
+              'Google opens in this tab. Choose your account and allow reading your email.'
+            )
           }
         >
           <div className="flex flex-wrap gap-2 sm:justify-end">

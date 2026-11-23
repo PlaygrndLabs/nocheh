@@ -58,7 +58,7 @@ function ProjectNotion({project}: {project: string}) {
       ) : (
         <Badge dot>Connected, off</Badge>
       )}
-      {account && <span className="text-muted">{account}</span>}
+      {account && <span className="text-[13px] text-fg">{account}</span>}
     </span>
   );
 }
