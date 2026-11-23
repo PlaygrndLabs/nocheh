@@ -4,8 +4,8 @@ Hermes's turns and the secret check are counted by Hermes's own usage report
 (services/hermes/usage.py); Honcho memory and memory search are counted at
 Honcho's egress (services/honcho/meter.py). Both keep daily totals per part,
 provider and model, never content. Rows recorded without a price, such as
-memory tokens, are priced by Hermes when read; a cost Hermes cannot price
-stays unknown rather than zero.
+memory thinking on a model the meter cannot price, are priced by Hermes when
+read; a cost Hermes cannot price stays unknown rather than zero.
 """
 import json
 import sqlite3
@@ -101,13 +101,18 @@ def honcho_rows(state, since):
     for row in rows:
         embedding = row['route'] == '/v1/embeddings'
         priced = row['priced_calls']
+        # The meter prices memory search, and memory thinking on a model it knows the price of (ADR-0277). A thinking
+        # row it priced only in part, or not at all, is priced by Hermes when read.
+        complete = priced == row['calls'] - row['failed']
+        if not embedding and not (priced and complete):
+            priced = 0
         result.append({
             'day': row['day'], 'part': 'embedding' if embedding else 'memory', 'provider': row['provider'],
             'model': row['model'], 'runs': row['calls'], 'failed': row['failed'], 'calls': row['calls'],
             'input_tokens': row['input_tokens'], 'output_tokens': row['output_tokens'],
             'cache_read_tokens': 0, 'cache_write_tokens': 0, 'reasoning_tokens': 0,
             'cost_usd': row['cost_microdollars'] / 1e6 if priced else None,
-            'cost_complete': priced == row['calls'] - row['failed'] if embedding else False,
+            'cost_complete': complete if embedding else bool(priced),
         })
     return result
 

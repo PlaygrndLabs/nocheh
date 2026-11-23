@@ -64,11 +64,15 @@ type Budget = {
   released_error_holds_usd?: number;
   legacy_error_exposure_unverified_usd?: number;
   reasoning_requests: number;
-  /** Null while no thinking limit is turned on. */
-  reasoning_request_limit: number | null;
-  reasoning_remaining_requests: number | null;
-  suggested_reasoning_limit: number;
-  max_reasoning_limit: number;
+  /** What memory thinking cost this month, at list price. */
+  thinking_spent_usd: number;
+  /** Null while no thinking spending limit is turned on. */
+  thinking_limit_usd: number | null;
+  thinking_limit_cents: number | null;
+  thinking_remaining_usd: number | null;
+  max_thinking_limit_cents: number;
+  /** Thinking calls this month with no price, such as on a model Nocheh has no price for. */
+  thinking_unpriced_requests: number;
   window_started_at?: string;
 };
 
@@ -386,7 +390,7 @@ function BudgetCard({editable}: {editable: boolean}) {
     <Card>
       <CardHeader
         title="Limits this month"
-        description="Memory search is billed per use and stops at its limit. Memory thinking is a count of requests, not money."
+        description="Memory search and memory thinking each have their own spending limit. Thinking has none until you set one."
       />
       {budget.error && (
         <div className="px-5 pb-3">
@@ -441,27 +445,34 @@ function BudgetCard({editable}: {editable: boolean}) {
               </tr>
               <tr>
                 <Th scope="row" className="bg-transparent align-top text-[13px] font-normal whitespace-normal text-fg">
-                  Memory thinking requests
+                  Memory thinking spending
                 </Th>
                 <Td className="space-y-1.5">
                   <p className="tabular text-sm">
-                    <span className="font-semibold">{data.reasoning_requests.toLocaleString()}</span>
+                    <span className="font-semibold">{usd(data.thinking_spent_usd)}</span>
                     <span className="text-muted">
-                      {data.reasoning_request_limit === null
-                        ? ' requests, no limit'
-                        : ` of ${data.reasoning_request_limit.toLocaleString()}`}
+                      {data.thinking_limit_usd === null ? ', no limit' : ` of ${usd(data.thinking_limit_usd)}`}
                     </span>
                   </p>
-                  {data.reasoning_request_limit !== null && data.reasoning_remaining_requests !== null && (
+                  {data.thinking_limit_usd !== null && data.thinking_remaining_usd !== null && (
                     <>
-                      <Meter
-                        value={(100 * data.reasoning_requests) / data.reasoning_request_limit}
-                        tone={data.reasoning_remaining_requests <= 0 ? 'bad' : 'accent'}
-                        label="Thinking requests used"
-                      />
-                      <p className="text-xs text-muted">{data.reasoning_remaining_requests.toLocaleString()} left</p>
+                      {data.thinking_limit_usd > 0 && (
+                        <Meter
+                          value={(100 * data.thinking_spent_usd) / data.thinking_limit_usd}
+                          tone={
+                            data.thinking_remaining_usd <= 0
+                              ? 'bad'
+                              : data.thinking_spent_usd / data.thinking_limit_usd > 0.8
+                                ? 'warn'
+                                : 'accent'
+                          }
+                          label="Thinking spending limit used"
+                        />
+                      )}
+                      <p className="text-xs text-muted">{usd(data.thinking_remaining_usd)} left</p>
                     </>
                   )}
+                  <p className="text-xs text-muted">{data.reasoning_requests.toLocaleString()} requests</p>
                 </Td>
                 <Td className="text-right">
                   {editable && (
@@ -477,8 +488,16 @@ function BudgetCard({editable}: {editable: boolean}) {
             <p>
               Estimated search cost so far: {usd(data.estimated_embedding_cost_usd)} for{' '}
               {data.embedding_requests.toLocaleString()} searches ({data.embedding_tokens.toLocaleString()} tokens
-              reported). This is an estimate, not your provider’s bill.
+              reported). Thinking is counted at the model’s list price. Both are estimates, not your provider’s bill.
             </p>
+            {!!data.thinking_unpriced_requests && (
+              <p className="text-warn">
+                {data.thinking_unpriced_requests.toLocaleString()} thinking{' '}
+                {data.thinking_unpriced_requests === 1 ? 'request has' : 'requests have'} no known price and{' '}
+                {data.thinking_unpriced_requests === 1 ? 'isn’t' : 'aren’t'} counted. While a thinking limit is on, a
+                model without a known price can’t think.
+              </p>
+            )}
             {!!data.embedding_unreported_requests && (
               <p className="text-warn">
                 {data.embedding_unreported_requests.toLocaleString()}{' '}
@@ -513,8 +532,8 @@ function BudgetCard({editable}: {editable: boolean}) {
           <Dialog
             open={editing === 'thinking'}
             onOpenChange={open => !open && setEditing(null)}
-            title="Memory thinking limit"
-            description="How often long-term memory may ask the memory model each month."
+            title="Spending limit for memory thinking"
+            description="Nocheh stops memory thinking for the month at this limit. Learning that is already running can go a little past it."
           >
             <ThinkingLimitForm budget={data} />
           </Dialog>
@@ -527,29 +546,34 @@ function BudgetCard({editable}: {editable: boolean}) {
 function ThinkingLimitForm({budget}: {budget: Budget}) {
   const feedback = useFeedback();
   const command = useCommand();
-  const saved = budget.reasoning_request_limit;
+  const saved = budget.thinking_limit_cents;
   const [on, setOn] = useState<boolean | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [problem, setProblem] = useState('');
   const enabled = on ?? saved !== null;
-  const value = draft ?? String(saved ?? budget.suggested_reasoning_limit);
-  const changed = enabled !== (saved !== null) || (enabled && value.trim() !== String(saved));
+  const max = budget.max_thinking_limit_cents / 100;
+  const savedText = saved === null ? null : (saved / 100).toFixed(2);
+  const value = draft ?? savedText ?? '';
+  const changed = enabled !== (saved !== null) || (enabled && value.trim() !== savedText);
   const save = async () => {
     setProblem('');
-    const limit = enabled ? Number(value.trim()) : null;
-    if (limit !== null && (!/^\d{1,7}$/.test(value.trim()) || limit < 1 || limit > budget.max_reasoning_limit))
-      return setProblem(`Enter a whole number from 1 to ${budget.max_reasoning_limit.toLocaleString()}.`);
+    let cents: number | null = null;
+    if (enabled) {
+      if (!/^\d{1,5}(\.\d{1,2})?$/.test(value.trim())) return setProblem('Enter an amount like 40 or 25.50.');
+      cents = Math.round(Number(value) * 100);
+      if (cents > budget.max_thinking_limit_cents) return setProblem(`The highest limit is ${usd(max)}.`);
+    }
     const result = await command.run<Budget>('/honcho/budget', {
-      reasoning_limit: limit,
+      thinking_limit_cents: cents,
       expected_revision: budget.revision,
     });
     if (result) {
       setOn(null);
       setDraft(null);
       feedback.toast(
-        result.reasoning_request_limit === null
-          ? 'Memory thinking has no limit now.'
-          : `Memory thinking is limited to ${result.reasoning_request_limit.toLocaleString()} requests a month.`,
+        result.thinking_limit_usd === null
+          ? 'Memory thinking has no spending limit now.'
+          : `Memory thinking is limited to ${usd(result.thinking_limit_usd)} a month.`,
       );
     }
   };
@@ -565,7 +589,7 @@ function ThinkingLimitForm({budget}: {budget: Budget}) {
         <Switch
           id="thinking-limit-on"
           checked={enabled}
-          label="Limit thinking requests each month"
+          label="Limit thinking spending each month"
           onChange={checked => {
             setOn(checked);
             setProblem('');
@@ -573,22 +597,30 @@ function ThinkingLimitForm({budget}: {budget: Budget}) {
           }}
         />
         <label htmlFor="thinking-limit-on" className="text-sm">
-          Limit thinking requests each month
+          Limit thinking spending each month
         </label>
       </div>
       {enabled && (
-        <Field label="Requests a month" htmlFor="thinking-limit" error={problem}>
-          <Input
-            id="thinking-limit"
-            inputMode="numeric"
-            className="w-40"
-            value={value}
-            onChange={event => {
-              setDraft(event.target.value);
-              setProblem('');
-              command.clear();
-            }}
-          />
+        <Field
+          label="Monthly limit (US dollars)"
+          htmlFor="thinking-limit"
+          error={problem}
+          hint={`From $0 (pause) to ${usd(max)}. Spent so far this month: ${usd(budget.thinking_spent_usd)}.`}
+        >
+          <div className="relative w-40">
+            <span className="pointer-events-none absolute top-2 left-3 text-sm text-muted">$</span>
+            <Input
+              id="thinking-limit"
+              inputMode="decimal"
+              className="pl-6"
+              value={value}
+              onChange={event => {
+                setDraft(event.target.value);
+                setProblem('');
+                command.clear();
+              }}
+            />
+          </div>
         </Field>
       )}
       <Button type="submit" variant="primary" busy={command.busy} disabled={!changed}>

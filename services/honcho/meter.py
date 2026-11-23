@@ -26,8 +26,52 @@ MODEL = 'text-embedding-3-small'
 REASONING_MODEL = os.environ.get('NOCHEH_REASONING_MODEL') or os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5')
 PILOT_LIMIT_MICRODOLLARS = 5_000_000
 MAX_MONTHLY_LIMIT_CENTS = 1_500
-SUGGESTED_REASONING_LIMIT = 1_500  # Offered when the owner turns the monthly thinking limit on.
-MAX_REASONING_LIMIT = 1_000_000
+# The memory thinking spending limit: off until the owner turns it on (ADR-0277).
+MAX_THINKING_LIMIT_CENTS = 100_000
+# Anthropic's list prices in USD per million tokens: input, output, cache read, 5-minute cache write.
+# The same table as CLAUDE_PRICES in services/hermes/usage.py, which this container cannot import; a test keeps
+# them equal. A model not listed has no price, so its thinking cannot be held to a dollar limit.
+CLAUDE_PRICES = {
+    'claude-fable-5-1': (10, 50, 0.25, 12.5),
+    'claude-fable-5': (10, 50, 1, 12.5),
+    'claude-opus-5-5': (4, 20, 0.2, 5),
+    'claude-opus-5': (5, 25, 0.5, 6.25),
+    'claude-opus-4-8': (5, 25, 0.5, 6.25),
+    'claude-opus-4-7': (5, 25, 0.5, 6.25),
+    'claude-opus-4-6': (5, 25, 0.5, 6.25),
+    'claude-sonnet-5-5': (2, 10, 0.2, 2.5),
+    'claude-sonnet-5': (2, 10, 0.2, 2.5),
+    'claude-sonnet-4-6': (3, 15, 0.3, 3.75),
+    'claude-haiku-5-5': (0.1, 0.5, 0.01, 0.125),
+    'claude-haiku-4-5': (1, 5, 0.1, 1.25),
+}
+CLAUDE_LONG_PROMPT_PRICES = {'claude-haiku-5-5': (0.5, 2.5, 0.05, 0.625)}
+CLAUDE_LONG_PROMPT = 100_000
+
+
+def claude_name(model):
+    """A Claude model's name as CLAUDE_PRICES keys it: no provider prefix, dashes for dots."""
+    return re.sub(r'(\d)\.(\d)', r'\1-\2', str(model or '').strip().lower().removeprefix('anthropic/'))
+
+
+def claude_rates(model):
+    """A Claude model's list price card, or None when the model has no known price."""
+    return CLAUDE_PRICES.get(claude_name(model))
+
+
+def thinking_cost(model, usage):
+    """Microdollars one thinking call cost at list price, from the tokens the provider reported, rounded up; None
+    for a model with no known price or a call without a usage report. Anthropic's OpenAI-compatible API has no
+    prompt caching, so every prompt token is priced as input, as the Usage page does."""
+    rates=claude_rates(model)
+    if rates is None or not isinstance(usage,dict): return None
+    count=lambda name: usage.get(name) if type(usage.get(name)) is int and 0<=usage.get(name)<10**12 else 0
+    prompt=count('prompt_tokens') or count('input_tokens')
+    output=count('completion_tokens') or count('output_tokens')
+    if not prompt and not output: return None
+    if prompt>CLAUDE_LONG_PROMPT: rates=CLAUDE_LONG_PROMPT_PRICES.get(claude_name(model),rates)
+    total=Decimal(prompt)*Decimal(str(rates[0]))+Decimal(output)*Decimal(str(rates[1]))
+    return int(total.to_integral_value(rounding=ROUND_CEILING))
 
 
 class Rejected(Exception):
@@ -62,8 +106,8 @@ class Ledger:
             if 'monthly_limit' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN monthly_limit INTEGER NOT NULL DEFAULT 5000000')
             if 'revision' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN revision INTEGER NOT NULL DEFAULT 0')
             if 'last_operation_id' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN last_operation_id TEXT')
-            # No limit until the owner turns one on.
-            if 'reasoning_limit' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN reasoning_limit INTEGER')
+            # Memory thinking's monthly dollar limit in microdollars; none until the owner turns one on.
+            if 'thinking_limit' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN thinking_limit INTEGER')
             db.execute('CREATE TABLE IF NOT EXISTS embedding_route(id INTEGER PRIMARY KEY CHECK(id=1),provider TEXT,model TEXT,dimensions INTEGER)')
             db.execute('CREATE TABLE IF NOT EXISTS egress_cooldown(route TEXT PRIMARY KEY, until REAL NOT NULL, streak INTEGER NOT NULL, failed_at REAL NOT NULL)')
             if 'audit' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]: db.execute('ALTER TABLE calls ADD COLUMN audit TEXT')
@@ -185,10 +229,10 @@ class Ledger:
                        (proposed,operation_id))
             return revision+1
 
-    def set_reasoning_limit(self, limit, expected_revision, operation_id):
-        """Turn the monthly thinking limit on with a request count, or off with None."""
-        if limit is not None and (type(limit) is not int or not 1 <= limit <= MAX_REASONING_LIMIT):
-            raise Rejected('invalid_reasoning_limit')
+    def set_thinking_limit(self, limit_cents, expected_revision, operation_id):
+        """Turn memory thinking's monthly dollar limit on with an amount in cents ($0 pauses thinking), or off with None."""
+        if limit_cents is not None and (type(limit_cents) is not int or not 0 <= limit_cents <= MAX_THINKING_LIMIT_CENTS):
+            raise Rejected('invalid_thinking_limit')
         if type(expected_revision) is not int or expected_revision < 0:
             raise Rejected('invalid_budget_revision')
         try:
@@ -196,17 +240,25 @@ class Ledger:
                 raise ValueError()
         except (ValueError, AttributeError):
             raise Rejected('invalid_budget_operation') from None
+        proposed=None if limit_cents is None else limit_cents*10_000
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             current, revision, previous=db.execute(
-                'SELECT reasoning_limit,revision,last_operation_id FROM policy WHERE id=1').fetchone()
+                'SELECT thinking_limit,revision,last_operation_id FROM policy WHERE id=1').fetchone()
             if previous==operation_id:
-                if current!=limit: raise Rejected('budget_operation_conflict')
+                if current!=proposed: raise Rejected('budget_operation_conflict')
                 return revision
             if revision!=expected_revision: raise Rejected('budget_version_conflict')
-            db.execute('UPDATE policy SET reasoning_limit=?,revision=revision+1,last_operation_id=? WHERE id=1',
-                       (limit,operation_id))
+            db.execute('UPDATE policy SET thinking_limit=?,revision=revision+1,last_operation_id=? WHERE id=1',
+                       (proposed,operation_id))
             return revision+1
+
+    @staticmethod
+    def thinking_spent(db, now=None):
+        """Microdollars memory thinking cost this UTC month, at list price."""
+        first=datetime.fromtimestamp(now or time.time(),timezone.utc).strftime('%Y-%m-01')
+        return db.execute("SELECT coalesce(sum(cost_microdollars),0) FROM usage_daily WHERE route='/v1/chat/completions' AND day>=?",
+                          (first,)).fetchone()[0]
 
     @staticmethod
     def month_start(now=None):
@@ -221,7 +273,7 @@ class Ledger:
             with db: yield db
         finally: db.close()
 
-    def reserve(self, route, body, embedding=None):
+    def reserve(self, route, body, embedding=None, model=None):
         embedding=embedding or embeddings({})
         amount = embedding.reservation if route == '/v1/embeddings' else 0
         with self.connect() as db:
@@ -242,12 +294,12 @@ class Ledger:
             total = db.execute("SELECT coalesce(sum(CASE WHEN outcome IN ('http_error','legacy_error_unverified') THEN 0 ELSE reserved END),0) FROM calls WHERE route='/v1/embeddings' AND started>=?",(start,)).fetchone()[0]
             if amount and total + amount > limit:
                 raise Rejected('pilot_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
-            reasoning_limit=db.execute('SELECT reasoning_limit FROM policy WHERE id=1').fetchone()[0]
-            if route=='/v1/chat/completions' and reasoning_limit is not None:
-                # A request the provider refused outright, such as a dead key, used none of the limit.
-                reasoning=db.execute("SELECT count(*) FROM calls WHERE route='/v1/chat/completions' AND started>=? "
-                                     "AND outcome IS NOT 'http_error'",(self.month_start(),)).fetchone()[0]
-                if reasoning >= reasoning_limit: raise Rejected('reasoning_request_limit_reached')
+            thinking_limit=db.execute('SELECT thinking_limit FROM policy WHERE id=1').fetchone()[0]
+            if route=='/v1/chat/completions' and thinking_limit is not None:
+                # A model without a known price could spend past the limit unseen, so it is refused while one is on.
+                if claude_rates(model or REASONING_MODEL) is None: raise Rejected('thinking_price_unknown')
+                # Counted from finished calls: calls already under way can pass the limit by their own cost.
+                if self.thinking_spent(db) >= thinking_limit: raise Rejected('monthly_thinking_limit_reached')
             audit={'owner_wording':b'Database credentials are in my password manager.' in body,
                    'synthetic_raw_canary':b'mango123' in body}
             return db.execute('INSERT INTO calls(route,digest,reserved,started,audit) VALUES(?,?,?,?,?)',
@@ -266,6 +318,9 @@ class Ledger:
         if route=='/v1/embeddings' and ok and self._reported_tokens(usage) is not None:
             price=embeddings({'NOCHEH_EMBEDDING_MODEL':model}).price_per_million if model else 0
             cost=int((Decimal(self._reported_tokens(usage))*Decimal(str(price))).to_integral_value(rounding=ROUND_CEILING))
+        elif route=='/v1/chat/completions' and ok:
+            # Memory thinking is priced as it finishes, so its monthly dollar limit counts real spend.
+            cost=thinking_cost(model,value)
         key=(moment.strftime('%Y-%m-%d'),route,(provider or 'unknown')[:40],(model or 'unknown')[:120])
         db.execute('INSERT INTO usage_daily(day,route,provider,model) VALUES(?,?,?,?) ON CONFLICT DO NOTHING',key)
         db.execute('UPDATE usage_daily SET calls=calls+1,failed=failed+?,input_tokens=input_tokens+?,output_tokens=output_tokens+?,'
@@ -307,7 +362,10 @@ class Ledger:
             calls = [dict(row) for row in db.execute('SELECT * FROM calls ORDER BY id')]
             rollups = [dict(row) for row in db.execute('SELECT * FROM call_rollups ORDER BY month,route,outcome')]
             start,mode=self.window(db)
-            monthly_limit,revision,reasoning_limit=db.execute('SELECT monthly_limit,revision,reasoning_limit FROM policy WHERE id=1').fetchone()
+            monthly_limit,revision,thinking_limit=db.execute('SELECT monthly_limit,revision,thinking_limit FROM policy WHERE id=1').fetchone()
+            first=datetime.now(timezone.utc).strftime('%Y-%m-01')
+            thinking=db.execute("SELECT coalesce(sum(cost_microdollars),0),coalesce(sum(calls-failed-priced_calls),0) FROM usage_daily "
+                                "WHERE route='/v1/chat/completions' AND day>=?",(first,)).fetchone()
             selected=db.execute('SELECT provider,model,dimensions FROM embedding_route WHERE id=1').fetchone()
         limit=PILOT_LIMIT_MICRODOLLARS if mode=='pilot' else monthly_limit
         active=[c for c in calls if c['started']>=start and c['route']=='/v1/embeddings']
@@ -317,7 +375,13 @@ class Ledger:
         embedding=embeddings({'NOCHEH_EMBEDDING_MODEL':selected['model']}) if selected else embeddings({})
         return {'limit_usd':limit/1e6,'limit_cents':limit//10_000,'max_limit_cents':MAX_MONTHLY_LIMIT_CENTS,
                 'revision':revision,'window_started_at':datetime.fromtimestamp(start,timezone.utc).isoformat(),
-                'mode':mode,'reasoning_request_limit':reasoning_limit,'reserved_usd':reserved/1e6,'remaining_usd':max(0,limit-reserved)/1e6,
+                'mode':mode,'reserved_usd':reserved/1e6,
+                'thinking_limit_usd':None if thinking_limit is None else thinking_limit/1e6,
+                'thinking_limit_cents':None if thinking_limit is None else thinking_limit//10_000,
+                'max_thinking_limit_cents':MAX_THINKING_LIMIT_CENTS,
+                'thinking_spent_usd':thinking[0]/1e6,
+                'thinking_remaining_usd':None if thinking_limit is None else max(0,thinking_limit-thinking[0])/1e6,
+                'thinking_unpriced_requests':thinking[1],'remaining_usd':max(0,limit-reserved)/1e6,
                 'counted_toward_cap_usd':reserved/1e6,
                 'lifetime_reserved_usd':(sum(c['reserved'] for c in calls)+sum(r['reserved'] for r in rollups))/1e6,
                 'released_error_holds_usd':released/1e6,
@@ -334,7 +398,6 @@ class Ledger:
         month=self.month_start()
         reasoning=sum(call['route']=='/v1/chat/completions' and call['outcome']!='http_error' and call['started']>=month
                       for call in report['calls'])
-        limit=report['reasoning_request_limit']
         tokens=reported=0
         for call in embeddings:
             if not isinstance(call['status'],int) or not 200 <= call['status'] < 300: continue
@@ -342,9 +405,7 @@ class Ledger:
             if count is not None:tokens+=count;reported+=1
         return {key:value for key,value in report.items() if key!='calls'} | {
             'embedding_requests':len(embeddings),'reasoning_requests':reasoning,
-            'total_requests':len(current),'suggested_reasoning_limit':SUGGESTED_REASONING_LIMIT,
-            'max_reasoning_limit':MAX_REASONING_LIMIT,
-            'reasoning_remaining_requests':None if limit is None else max(0,limit-reasoning),
+            'total_requests':len(current),
             'embedding_reported_requests':reported,'embedding_unreported_requests':len(embeddings)-reported,
             'embedding_tokens':tokens,
             'estimated_embedding_cost_usd':round(tokens*report['pricing_usd_per_million_embedding_tokens']/1_000_000,8)}
@@ -493,7 +554,7 @@ class Egress:
         if paid and not self.paid_key: raise Rejected('temporary_embedding_key_missing')
         data=json.dumps(payload,ensure_ascii=False).encode()
         if len(data)>1024*1024: raise Rejected('request_too_large')
-        call=self.ledger.reserve(route,data,self.embedding)  # fsync transaction BEFORE any egress
+        call=self.ledger.reserve(route,data,self.embedding,None if paid else REASONING_MODEL)  # fsync transaction BEFORE any egress
         start=time.monotonic();status=502;usage=None;outcome='transport_error'
         url=self.embedding.url if paid else (self.reasoning_url+route.removeprefix('/v1'))
         try:

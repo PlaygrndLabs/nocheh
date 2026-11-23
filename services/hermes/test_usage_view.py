@@ -74,6 +74,17 @@ class UsageViewTests(unittest.TestCase):
         self.assertIsNone(unavailable['rows'][0]['cost_usd'])
         self.assertEqual(unavailable['sources'], {'hermes': 'empty', 'honcho': 'ok', 'pricing': 'unavailable'})
 
+    def test_memory_thinking_the_meter_priced_shows_the_meters_cost(self):
+        # The same cost the thinking spending limit counts (ADR-0277); Hermes is not asked.
+        self.honcho('/v1/chat/completions', 200, {'prompt_tokens': 300_000, 'completion_tokens': 30_000}, 'anthropic', 'claude-sonnet-5-5')
+        result = view_usage.view(self.state, 1, call=lambda *a, **k: self.fail('already priced'), now=DAY)
+        self.assertEqual((result['rows'][0]['cost_usd'], result['rows'][0]['cost_complete']), (0.9, True))
+        self.assertEqual(result['sources']['pricing'], 'not_needed')
+        # A model the meter has no price for is priced by Hermes, as before.
+        self.honcho('/v1/chat/completions', 200, {'prompt_tokens': 10, 'completion_tokens': 1}, 'anthropic', 'other-model')
+        rows = view_usage.view(self.state, 1, call=lambda *a, **k: {'costs': [0.5]}, now=DAY)['rows']
+        self.assertEqual({row['model']: row['cost_usd'] for row in rows}, {'claude-sonnet-5-5': 0.9, 'other-model': 0.5})
+
     def test_runs_recorded_without_a_price_are_priced_when_read(self):
         hermes = self.state / 'hermes/usage/usage.sqlite'
         hermes_usage.record('reply', {'input_tokens': 100, 'output_tokens': 10, 'cache_read_tokens': 50, 'calls': 2},

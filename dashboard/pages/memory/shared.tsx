@@ -17,7 +17,7 @@ export function errorWords(error: unknown): string {
   const known: Record<string, string> = {
     honcho_live_acceptance_pending: 'Long-term memory hasn’t passed its checks yet, so it can’t be connected.',
     honcho_budget_requires_accepted_memory: 'Connect long-term memory first, then change the limit.',
-    invalid_reasoning_limit: 'Enter a whole number of requests, 1 or more.',
+    invalid_thinking_limit: 'Enter an amount in dollars, $0 or more.',
     memory_detached: 'Connect long-term memory first.',
     memory_engine_unavailable: 'Long-term memory can’t be reached right now. Try again in a minute.',
     memory_engine_rejected: 'Long-term memory turned this down, so nothing changed. Try again in a minute.',
