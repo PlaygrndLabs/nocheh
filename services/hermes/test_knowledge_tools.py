@@ -11,7 +11,7 @@ class KnowledgeToolsTests(unittest.TestCase):
                      '/v1/organization/delegations/'+identity+'/resume','/v1/knowledge/proposals',
                      '/v1/knowledge/proposals/'+identity+'/decide','/v1/knowledge/proposals/'+identity+'/undo',
                      '/v1/prompts','/v1/entities/claims/'+identity+'/history?before=3',
-                     '/v1/tasks?state=done','/v1/tasks/'+identity,'/v1/tasks/settings','/v1/tasks/archive-finished',
+                     '/v1/tasks?state=done','/v1/tasks/'+identity,'/v1/tasks/settings','/v1/tasks/time-zone','/v1/tasks/archive-finished',
                      '/v1/tasks/'+identity+'/comments','/v1/tasks/'+identity+'/delete'):
             self.assertTrue(allowed_path(path),path)
         for path in ('/v1/decisions/unknown/'+identity,'/v1/knowledge/proposals/'+identity+'/execute',

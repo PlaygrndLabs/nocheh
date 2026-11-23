@@ -60,6 +60,9 @@ MACHINE_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['term
 # Hermes's own schedule tool, in a live reply in the owner's private chat only, with that chat's schedule store mounted
 # (ADR-0266). Its hooks keep it to what Nocheh runs; a job, a box, a machine, a review or a scheduled run never has it.
 SCHEDULE_TOOLS={'cronjob_manage'}
+# Setting one's own time zone (ADR-0281, ADR-0282) goes with the schedule tool: a member's turn always has it (Nocheh
+# refuses it without Personal assistant), and any other turn keeps it only where it may set schedules.
+TIME_ZONE_TOOL='mcp__nocheh__my_time_zone'
 SCHEDULE_TOOLSETS=TURN_TOOLSETS+['cronjob']
 
 
@@ -105,12 +108,13 @@ def bind_profile_home(profile):
     from hermes_constants import set_hermes_home_override
     set_hermes_home_override(profile)
 
-def turn_tools(background,box,machine=False,answer=False,member=False,member_read=False):
+def turn_tools(background,box,machine=False,answer=False,member=False,member_read=False,schedules=False):
     """The tools a turn drops from its profile's toolsets, and the exact set it then runs with."""
     if member_read:return OWNER_SET_TOOLS|(ALLOWED_TOOLS-MEMBER_READ_TOOLS),MEMBER_READ_TOOLS
     if member:return OWNER_SET_TOOLS|(ALLOWED_TOOLS-MEMBER_TOOLS),MEMBER_TOOLS
     if answer:return OWNER_SET_TOOLS|(ALLOWED_TOOLS-ANSWER_TOOLS),ANSWER_TOOLS
-    removed=OWNER_SET_TOOLS|(JOB_STRIPPED if background else set())|(BOX_STRIPPED if box or machine else set())
+    if schedules and not (background or box or machine):return OWNER_SET_TOOLS,ALLOWED_TOOLS|{TIME_ZONE_TOOL}
+    removed=OWNER_SET_TOOLS|{TIME_ZONE_TOOL}|(JOB_STRIPPED if background else set())|(BOX_STRIPPED if box or machine else set())
     return removed,BOX_TOOLS if box else MACHINE_TOOLS if machine else BACKGROUND_TOOLS if background else ALLOWED_TOOLS
 
 
@@ -412,7 +416,7 @@ def run(body, emit=None, relay=None):
         if review:
             from .native_memory import native_review
             return native_review(agent, body['text'], RUNS, prompt('memory.notes_review'))
-        removed,allowed=turn_tools(background,box,machine,answer,member,member_read)
+        removed,allowed=turn_tools(background,box,machine,answer,member,member_read,schedules)
         if schedules:allowed=allowed|SCHEDULE_TOOLS
         agent.tools=[tool for tool in agent.tools if tool['function']['name'] not in removed]
         agent.valid_tool_names=set(agent.valid_tool_names)-removed

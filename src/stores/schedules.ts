@@ -10,7 +10,7 @@ import type {GuardBinding} from './guards.js';
 import {OperationRepository} from './operations.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {forwardedMessage} from './owner-member-asks.js';
-import {ownerTimeZone,timeZone} from './task-settings.js';
+import {ownerTimeZone,setOwnerTimeZone,timeZone} from './task-settings.js';
 
 export const scheduleStorageSchema=`
 CREATE TABLE IF NOT EXISTS schedule_versions (
@@ -208,15 +208,21 @@ export async function setMemberTimeZone(db:Pick<pg.Pool,'query'>,member:string,v
 }
 
 /**
- * A member sets their own time zone by asking in their own private chat (members' time zones): the same live, not
- * forwarded, own message of a member with Personal assistant on that may set schedules (scheduleTurn). Refused with 403
- * `member_time_zone_not_here` otherwise.
+ * Someone sets their own time zone by asking in their own private chat (ADR-0281, ADR-0282): the same live, not
+ * forwarded, own message that may set schedules (scheduleTurn). A member's goes to them (null for the owner's); the
+ * owner's is the one their new schedules and task dates use (Settings › Tasks), never null. Refused with 403
+ * `time_zone_not_here` in any other turn.
  */
-export async function memberTimeZoneTurn(s:ScheduleTurnServices,principal:Reader,value:unknown):Promise<{time_zone:string|null}> {
-  if(boundReader(principal)!=='member'||!(await scheduleTurn(s,principal)).allowed)throw new HttpError(403,'member_time_zone_not_here');
+export async function timeZoneTurn(s:ScheduleTurnServices,principal:Reader,value:unknown):Promise<{time_zone:string|null}> {
+  const member=boundReader(principal)==='member';
+  if(!member&&boundReader(principal)!==null)throw new HttpError(403,'time_zone_not_here');
+  const rules=await scheduleTurn(s,principal).catch(error=>{if(error instanceof HttpError&&error.status<500)return null;throw error;});
+  if(!rules?.allowed)throw new HttpError(403,'time_zone_not_here');
   const body=object(value);
   if(Object.keys(body).some(key=>key!=='time_zone'))throw new HttpError(400,'invalid_time_zone');
-  return {time_zone:await setMemberTimeZone(s.stores.control,principal.member!,body.time_zone)};
+  if(member)return {time_zone:await setMemberTimeZone(s.stores.control,principal.member!,body.time_zone)};
+  try{return {time_zone:await setOwnerTimeZone(s.stores.control,body.time_zone)};}
+  catch(error){if(error instanceof HttpError&&error.status===400)throw new HttpError(400,'invalid_time_zone');throw error;}
 }
 /** How many schedules a chat keeps now: each one captured and not removed. */
 export async function chatSchedules(control:Pick<pg.Pool,'query'>,chat:string):Promise<number> {

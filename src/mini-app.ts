@@ -18,6 +18,8 @@ const routes:[string,RegExp][]=[
   ['GET',/^\/(?:status|settings|decisions|tools\/actions|tasks|schedules|schedules\/runs|memory-access\/requests|conversations|entities|monitoring)$/],
   // Pause, Resume, Run now or Delete on a schedule (ADR-0266).
   ['POST',/^\/schedules$/],
+  // The owner's own time zone, from the Schedules tab: nothing else of the task settings.
+  ['POST',/^\/tasks\/time-zone$/],
   ['POST',/^\/workflows\/retry-failed$/],
   ['GET',/^\/decisions\/(?:controlled_action|telegram_action|memory_access|entity|knowledge)\/[a-f0-9]{64}$/],
   ['GET',/^\/(?:tools\/actions|knowledge\/proposals)\/[a-f0-9]{64}$/],
