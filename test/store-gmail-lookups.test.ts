@@ -59,9 +59,9 @@ test('the owner\'s Gmail is looked up only in the owner\'s private chat, without
 
     // Right before it runs: never a job, and still from the owner's private chat.
     const asked=await row(own.result.id);
-    assert.equal(gmailRunRefusal(asked,'123'),null);
-    assert.equal(gmailRunRefusal({...asked,job_id:'made-up-job'},'123'),'gmail_not_here');
-    assert.equal(gmailRunRefusal({...asked,scope:inP,space_id:inP},'123'),'gmail_not_here');
-    assert.equal(gmailRunRefusal(asked,null),'gmail_not_here');
+    assert.equal(await gmailRunRefusal(stores.control,asked,'123'),null);
+    assert.equal(await gmailRunRefusal(stores.control,{...asked,job_id:'made-up-job'},'123'),'gmail_not_here');
+    assert.equal(await gmailRunRefusal(stores.control,{...asked,scope:inP,space_id:inP},'123'),'gmail_not_here');
+    assert.equal(await gmailRunRefusal(stores.control,asked,null),'gmail_not_here');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
