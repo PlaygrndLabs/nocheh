@@ -121,9 +121,12 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     // Set by asking (ADR-0290): the allowed turn leaves a turn grant, and Hermes's post from inside it records the schedule
     // as hers, within her cap, with its message in her chat once. Without the grant, or past her cap, nothing is recorded.
     const profile='nocheh-'+digest(MEMBER_GP_CHAT).slice(0,24),announced:unknown[]=[];
-    const turnServices={...live,turns:{binding:async()=>({logical_profile:profile})},access:{policy:()=>policy},schedules:s.schedules,
-      scheduleNotices:{announce:async(input:unknown)=>{announced.push(input);return {state:'sent'};}}};
     const turn={...member,turnEvent:'member-turn-'+base} as Reader;
+    // The message the turn answers, as the archive keeps it: by default her own typed words in her chat.
+    const asking=(message:Record<string,unknown>)=>({query:async(sql:string)=>sql.includes('id=ANY')?{rows:[{id:turn.turnEvent,payload:Buffer.from(JSON.stringify(
+      {message:{message_id:1,chat:{id:Number(MEMBER_GP_CHAT),type:'private'},from:{id:Number(MEMBER_GP_CHAT)},...message}}))}]}:live.stores.archive.query(sql)}) as any;
+    const turnServices={...live,stores:{...live.stores,archive:asking({text:'Remind me every weekday at 8'})},turns:{binding:async()=>({logical_profile:profile})},
+      access:{policy:()=>policy},schedules:s.schedules,scheduleNotices:{announce:async(input:unknown)=>{announced.push(input);return {state:'sent'};}}};
     const definition=(job:string,changes:Record<string,unknown>={})=>({scope:MEMBER_GP_CHAT,profile,job_id:job,workflow_cursor:digest(job),workflow_sequence:1,
       definition:{profile,name:'Asked',prompt:'Remind me',schedule:{kind:'cron',expr:'0 8 * * 1-5',display:'0 8 * * 1-5'},deliver:'telegram',repeat:null,
         enabled:true,removed:false,preferences:{},execution_version:'v1',timezone:'Europe/Berlin'},
@@ -165,8 +168,7 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     await s.schedules.turnDefinition(turn,removed,turnServices);
     // A turn that read outside content, here a file, cannot leave a schedule running (ADR-0294): Hermes saves it paused,
     // and its message shows what it does, says why and offers Start.
-    const filed={...turnServices,stores:{...turnServices.stores,archive:{query:async()=>({rows:[{payload:Buffer.from(JSON.stringify(
-      {message:{message_id:2,document:{file_id:'x'},caption:'every morning'}}))}]})} as any}};
+    const filed={...turnServices,stores:{...turnServices.stores,archive:asking({document:{file_id:'x'},caption:'every morning'})}};
     await assert.rejects(s.schedules.turnDefinition(turn,definition('steered-'+base),filed),{status:409,code:'schedule_start_needed'});
     assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM workflow_schedules WHERE job_id=$1',['steered-'+base])).rows[0].n,0);
     const held=definition('steered-'+base);Object.assign(held.definition,{enabled:false});

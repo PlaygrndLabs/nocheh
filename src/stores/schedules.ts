@@ -14,7 +14,7 @@ import {OperationRepository} from './operations.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {forwardedMessage} from './owner-member-asks.js';
 import {ownerTimeZone,setOwnerTimeZone,timeZone} from './task-settings.js';
-import {outsideReads} from './turn-reads.js';
+import {outsideReads,type OutsideRead} from './turn-reads.js';
 
 export const scheduleStorageSchema=`
 CREATE TABLE IF NOT EXISTS schedule_versions (
@@ -66,6 +66,8 @@ const grantId=(kind:'edit'|'run_now',schedule:string,request:string)=>digest(can
 const bodyHash=(document:Record<string,unknown>)=>{const {enabled:_on,removed:_gone,execution_version:_version,...body}=document;return digest(canonical(body));};
 const LOGICAL=/^nocheh-[a-f0-9]{24}$/;
 /** Who a turn sets schedules as: the member in their own chat, else the owner. */
+/** Reads that never hold a schedule (ADR-0294): the asker's own archive or task lookups, and an unreported conversation. */
+const SCHEDULE_IGNORES=new Set<OutsideRead>(['archive','unchecked']);
 const turnPerson=(principal:Reader)=>boundReader(principal)==='member'?principal.member??null:'owner';
 
 /** Who set a definition version: a person's live turn, a person's press (edit grant), or Hermes's own checkpoint. */
@@ -258,8 +260,11 @@ export class ScheduleRepository {
     if(document.deliver!=='telegram'||schedule.kind==='interval'&&(!Number.isSafeInteger(schedule.minutes)||Number(schedule.minutes)<1)||
       typeof document.timezone==='string'&&!knownZone(document.timezone))throw new HttpError(400,'invalid_schedule_definition');
     if(schedule.kind==='cron'&&!parseCron(schedule.expr))throw new HttpError(400,'schedule_cron_unsupported');
-    // What outside content reached this turn so far, and the instruction the schedule ran with before it (ADR-0294).
-    const reads=await outsideReads(this.control,s.stores.archive,turn);
+    // What outside content reached this turn so far, and the instruction the schedule ran with before it (ADR-0294). The
+    // asker's own typed words are theirs, the owner's or a member's in their own chat, whose chat id is their account's.
+    // Their own archive and task lookups and a runtime that never reported its conversation do not hold a schedule.
+    const asker=grant.person==='owner'?s.access.policy().owner_id:grant.scope;
+    const reads=(await outsideReads(this.control,s.stores.archive,turn,asker)).filter(read=>!SCHEDULE_IGNORES.has(read));
     const before=(await this.control.query(currentSql,[scheduleId(grant.profile,identity(body.job_id))])).rows[0];
     const earlier=before&&!before.configuration?.removed?await this.currentBody(before):null;
     const result=await this.record(body,this.turnChange(grant,turn,rules.limit,reads.length>0));

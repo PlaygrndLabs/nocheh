@@ -69,7 +69,7 @@ function instruction(value:unknown):string|null {
 }
 /** The outside content a turn read, in the owner's words: "a web page and a file". */
 function readsText(lines:Record<ScheduleNoticeText,string>,reads:unknown[]):string {
-  const known:Record<string,ScheduleNoticeText>={forward:'read_forward',file:'read_file',reply:'read_reply',web:'read_web',tools:'read_tools'};
+  const known:Record<string,ScheduleNoticeText>={forward:'read_forward',file:'read_file',reply:'read_reply',web:'read_web',tools:'read_tools',notion:'read_tools'};
   const names=[...new Set(reads.map(read=>lines[known[String(read)]??'read_other']))];
   return names.length<2?names[0]??'':names.slice(0,-1).join(', ')+' '+lines.read_and+' '+names.at(-1);
 }
