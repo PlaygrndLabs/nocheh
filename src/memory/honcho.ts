@@ -360,6 +360,8 @@ export class HonchoEngine implements MemoryEngine {
     do {
       const page=await this.page(space,options.size,cursor,{...(sessions?{session_id:{in:sessions}}:{}),...(citing?{source_message_ids:{in:citing}}:{})});
       for(const item of page.items) {
+        // A memory wall's copies (observer scope.<wall>, ADR-0286) repeat facts listed under their own participant.
+        if(typeof item?.observer_id==='string'&&item.observer_id.startsWith('scope.')&&wallName.test(item.observer_id.slice(6)))continue;
         if(!engineId(item?.observer_id)||!engineId(item?.observed_id))throw engineInvalid();
         if(item.observer_id!==item.observed_id)continue;
         const found=listed(item,item.observer_id,allowed);

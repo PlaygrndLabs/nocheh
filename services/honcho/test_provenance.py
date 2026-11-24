@@ -261,6 +261,7 @@ class CoverageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('AND NOT EXISTS (SELECT 1 FROM sessions x WHERE x.tenant_id=d.tenant_id AND x.workspace_name=d.workspace_name '
                       'AND x.name=d.session_name AND x.deleted_at IS NOT NULL)', sql, 'conclusions of a deleted session are not counted')
         self.assertIn('count(*) FILTER (WHERE NOT cited AND batch) AS batch_only', sql)
+        self.assertIn("AND d.observer NOT LIKE 'scope.%'", sql, 'a memory wall\'s copies are not counted again')
         self.assertNotIn('content', COVERAGE_SQL, 'counts only, never a conclusion\'s text')
 
 

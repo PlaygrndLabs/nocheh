@@ -52,7 +52,9 @@ Nocheh is in development mode and not yet released. Everything below is built an
   asking chat ([ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md), [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md), [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)); only addresses no model built open without a
   card ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)); "Do what I ask" runs a
   command with no card only from the owner's own typed words, with nothing outside in the message, the day's
-  conversation or the turn's reads before it ([ADR-0293](docs/adr/0293-do-what-i-ask-runs-commands-only-from-the-owners-typed-words.md)).
+  conversation or the turn's reads before it ([ADR-0293](docs/adr/0293-do-what-i-ask-runs-commands-only-from-the-owners-typed-words.md)); Inbox › History says why each action ran, and a card for a request made
+  in another chat quotes who asked ([ADR-0294](docs/adr/0294-show-why-each-action-is-allowed.md)). A new schedule's notice shows its
+  instruction, and one set by a reply that read outside content is saved paused until Start.
 - Security: the 2026-11 security review's fixes parts 1 to 5 are merged; machine jobs read only their
   card's chat, period and named Notion pages ([ADR-0283](docs/adr/0283-machine-jobs-read-only-their-card.md)), and
   watch start-up files and admin rights ([ADR-0284](docs/adr/0284-machine-jobs-watch-start-up-files-and-admin.md)); files are

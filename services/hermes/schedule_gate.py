@@ -26,6 +26,10 @@ OPTION_REFUSED="Nocheh runs a schedule only as a prompt on its schedule, sent to
 UNBOUND="Schedules can be set only from the owner's own message in their private chat, or a member's own in theirs."
 ZONE_REFUSED="{zone} is not a time zone name. Use one such as Europe/Berlin, or leave it out for the owner's own."
 LIMIT="This chat already has {count} schedules, the most allowed. Remove one first."
+# What a schedule Nocheh saved paused says instead of its note (ADR-0294).
+HELD=("Nocheh saved this schedule paused, because this reply read something from outside the chat, such as a web page, an "
+    "email, a file or a forwarded message. It does not run until they check what it does in Nocheh's message about it and press "
+    "Start there. Tell them so in one short sentence.")
 # What a schedule Nocheh did not record says instead of its note: it stays in the store but never runs.
 LIMIT_NOW="This chat already has the most schedules allowed. Remove one first."
 NOT_SAVED="Nocheh did not save this schedule, so it will not run. Try again in a new message."
@@ -132,8 +136,8 @@ def _record(action,value,args):
     job_id=value.get('job_id') if isinstance(value.get('job_id'),str) else job.get('job_id') if isinstance(job.get('job_id'),str) else args.get('job_id')
     try:
         if rules['home'] is None or not isinstance(job_id,str):raise ValueError('schedule_turn_unbound')
-        native_cron.turn_capture(job_id,rules['home'],rules['profile'],rules['scope'],request)
-        return None
+        answer=native_cron.turn_capture(job_id,rules['home'],rules['profile'],rules['scope'],request)
+        return HELD if isinstance(answer,dict) and answer.get('held') is True else None
     except Exception as error:
         if native_cron.refusal(error)[1]=='schedule_limit_reached':return LIMIT_NOW
         if native_cron.transient(error):return UNCONFIRMED
@@ -152,6 +156,11 @@ def tool_result(tool_name='',result=None,args=None,**_):
             args=args if isinstance(args,dict) else {}
             action=str(args.get('action') or '').strip().lower()
             refused=_record(action,value,args) if action in ('create','update','pause','resume','remove') else None
+            if refused is HELD:
+                # Saved, but paused until its person presses Start (ADR-0294).
+                kept['note']=HELD;kept.pop('next_run_at',None)
+                if isinstance(kept.get('job'),dict):kept['job']={**kept['job'],'enabled':False,'state':'paused','next_run_at':None}
+                return json.dumps(kept,ensure_ascii=False)
             if refused:
                 kept['success']=False;kept['error']=refused
                 return json.dumps(kept,ensure_ascii=False)

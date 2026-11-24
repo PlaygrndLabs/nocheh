@@ -215,12 +215,14 @@ async def provenance(body, load_documents, load_messages):
 
 
 # How many of a workspace's live explicit conclusions cite their messages, know only their learning batch, or neither.
+# A memory wall's copies (observer scope.<wall>) are not counted again.
 COVERAGE_SQL = '''SELECT count(*) AS explicit,
     count(*) FILTER (WHERE cited) AS cited,
     count(*) FILTER (WHERE NOT cited AND batch) AS batch_only
     FROM (SELECT EXISTS (SELECT 1 FROM conclusion_source_messages s WHERE s.tenant_id=d.tenant_id AND s.conclusion_id=d.id) AS cited,
         (jsonb_typeof(d.internal_metadata->'message_ids')='array' AND jsonb_array_length(d.internal_metadata->'message_ids')>0) AS batch
         FROM documents d WHERE d.workspace_name=:workspace AND d.level='explicit' AND d.deleted_at IS NULL
+        AND d.observer NOT LIKE 'scope.%'
         AND NOT EXISTS (SELECT 1 FROM sessions x WHERE x.tenant_id=d.tenant_id AND x.workspace_name=d.workspace_name
             AND x.name=d.session_name AND x.deleted_at IS NOT NULL)) c'''
 
