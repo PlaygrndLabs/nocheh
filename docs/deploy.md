@@ -360,7 +360,8 @@ follows recreates the services with the new keys and restarts the dashboard and
 executor, which read keys once; turns in flight at that moment fail, as after
 `rotate-keys` below.
 Most other commands initialize first, so any of them can make the keys; until the
-next `up`, the running services still hold the old ones, so run `up` right after.
+next `up` or Apply, which also restarts the dashboard and executor then, the running
+services still hold the old ones, so run `up` right after.
 Only variables explicitly listed in Compose enter each service. The wrapper reads
 literal values without shell expansion and gives this file precedence over stale
 shell exports. Keep values on one line; single quotes preserve `$` and `#`.
@@ -389,17 +390,7 @@ whose image each workspace builds as `<prefix>-box:local`; see [the security ser
 The generated `NOCHEH_MACHINE_TOKEN` lets `nocheh-app` ask `nocheh-machines` to run
 jobs on the owner's machines; only those two services get it. It has at least 32
 characters and differs from every other Nocheh key.
-`SERVICE_TOKEN` is Nocheh's master key: the admin bearer of its own services and the
-key that signs every pass. Only `nocheh-app`, `nocheh-security` and, for now,
-`nocheh-telegram` get it. The generated `AGENT_KEY` is the agent login: Nocheh and
-Hermes call each other with it, and on Nocheh's side it reaches only the routes the
-agent needs. `nocheh-app`, `nocheh-security`, `hermes` and `hermes-agent-sb` get it, and
-Hermes refuses to start with `SERVICE_TOKEN` in its environment. The generated
-`NOCHEH_HERMES_SESSION_TOKEN` opens Hermes's own dashboard pages; only `hermes` gets it,
-and the dashboard reads it from `.env`. Both have at least 32 characters, and no two of
-`SERVICE_TOKEN`, `AGENT_KEY`, `NOCHEH_HERMES_SESSION_TOKEN`, `NOCHEH_BOX_TOKEN` and
-`NOCHEH_MACHINE_TOKEN` may be equal. Settings neither shows nor counts them, so a new
-one never asks for Apply. See [ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md). `init`, `up` and
+`init`, `up` and
 `make dev` generate it when it is missing. Without it, Settings › Machines says
 machine control is unavailable and nothing else changes. `nocheh-machines` runs
 from the management image, which carries the SSH client and a user for
@@ -426,6 +417,18 @@ needs a new Test, and its key stays. See
 Settings › Telegram › Mini app saves the mini app address and tunnel token; with both set and Telegram on,
 `up` also starts `nocheh-miniapp` and `nocheh-tunnel`. See [Telegram](telegram.md#mini-app).
 The API binds only to loopback; PostgreSQL has no host port.
+
+`SERVICE_TOKEN` is Nocheh's master key: the admin bearer of its own services and the
+key that signs every pass. Only `nocheh-app`, `nocheh-security` and, for now,
+`nocheh-telegram` get it. The generated `AGENT_KEY` is the agent login: Nocheh and
+Hermes call each other with it, and on Nocheh's side it reaches only the routes the
+agent needs. `nocheh-app`, `nocheh-security`, `hermes` and `hermes-agent-sb` get it, and
+Hermes refuses to start with `SERVICE_TOKEN` in its environment. The generated
+`NOCHEH_HERMES_SESSION_TOKEN` opens Hermes's own dashboard pages; only `hermes` gets it,
+and the dashboard reads it from `.env`. Both have at least 32 characters, and no two of
+`SERVICE_TOKEN`, `AGENT_KEY`, `NOCHEH_HERMES_SESSION_TOKEN`, `NOCHEH_BOX_TOKEN` and
+`NOCHEH_MACHINE_TOKEN` may be equal. Settings neither shows nor counts them, so a new
+one never asks for Apply. See [ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md).
 
 The `.env` is ignored by Git, excluded from image builds and written with mode 0600.
 Environment values are visible to someone who can inspect Docker containers. The

@@ -59,7 +59,7 @@ Nocheh is in development mode and not yet released. Everything below is built an
   master key ([ADR-0289](docs/adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)); Nocheh
   grants every schedule change and fire, and Hermes's Cron page is read-only
   ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)); an agent login replaces the master key in
-  Hermes, which reaches only its own routes, and `rotate-keys` renews every key
+  Hermes, which reaches only its own routes, and `rotate-keys` renews the master key, the agent login and Hermes's session token
   ([ADR-0291](docs/adr/0291-agent-login-replaces-the-master-key-in-hermes.md)). Next: one-time keys per reply.
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
   Connections, Members and Sent to apps pages.

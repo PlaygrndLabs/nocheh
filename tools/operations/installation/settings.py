@@ -48,6 +48,15 @@ def service_revision(values):
     return revision({key: value for key, value in values.items() if key not in LIVE and key not in GENERATED and defaults.get(key) != value})
 
 
+def carry_keys(state, values):
+    """A cutover's new keys also go into the last applied baseline that unapplied settings left, so a failed Apply or
+    rotate-keys rolls back to keys the services can still start with (ADR-0291)."""
+    from tools.operations.installation.configuration import ROTATED, read_env
+    previous = Path(state) / 'admin/previous.env'
+    if not previous.exists(): return
+    write_env(previous, {**read_env(previous), **{name: values[name] for name in ROTATED if values.get(name)}})
+
+
 def carry_applied(state, before):
     """Builds before ADR-0291 counted generated keys in the applied revision. When a cutover changes only those, the record
     follows the settings, so the cutover asks for no Apply: init, up or make dev restarts the services with the new keys."""
@@ -257,6 +266,10 @@ def apply(state, progress=lambda step: None):
             temporary.write_text(json.dumps({'revision': service_revision(values)})); temporary.chmod(0o600)
             temporary.replace(directory / 'applied.json')
         previous.unlink(missing_ok=True)
+    from tools.operations.installation.configuration import RESTART_MARKER
+    # A key change since the last up (a cutover or rotate-keys) also restarts the dashboard and executor, which keep
+    # the keys they read once. Apply pressed in the dashboard restarts the dashboard itself last.
+    if (Path(state) / RESTART_MARKER).exists(): restart_cached(state)
     return {'status': 'applied', 'honcho': honcho, 'memory_rebuild': memory, 'mini_app': menu, **view(state)}
 
 
@@ -268,9 +281,11 @@ def restart_cached(state):
     # Compose's restart would start a stopped one too, such as an executor stopped on purpose.
     listed = subprocess.run(compose(state) + ['ps', '--status', 'running', '--services'], env=environment(state),
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
-    running = [name for name in ('nocheh-dashboard', 'nocheh-executor') if name in (listed.stdout or '').split()]
-    if running:
-        subprocess.run(compose(state) + ['restart', *running], env=environment(state),
+    running = [name for name in ('nocheh-executor', 'nocheh-dashboard') if name in (listed.stdout or '').split()]
+    # One at a time, the dashboard last: Apply run inside it ends there. Should it end before the marker goes, the
+    # next up restarts both once more, which is harmless.
+    for name in running:
+        subprocess.run(compose(state) + ['restart', name], env=environment(state),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
     (Path(state) / RESTART_MARKER).unlink(missing_ok=True)
 
@@ -297,9 +312,9 @@ def rotate_keys(state, print=print):
         validate(updated)
         write_env(env_path(state), updated)
         mark_restart(state)
+    # Apply restarts the dashboard and executor too, since the marker is set.
     result = apply(state)
     if result.get('status') == 'applied':
-        restart_cached(state)
         print(ROTATED_NOTICE)
         return 0
     print('Rotation failed; the old keys are back' if result.get('rolled_back') else

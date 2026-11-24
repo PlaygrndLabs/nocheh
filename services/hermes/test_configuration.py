@@ -497,7 +497,7 @@ class AgentKeyTests(unittest.TestCase):
             for name in ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN'):self.assertNotEqual(new[name],old[name])
             for name in ('NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','POSTGRES_PASSWORD'):self.assertEqual(new[name],old[name])
             commands=[call.args[0] for call in run.call_args_list]
-            self.assertIn('up',commands[0]);self.assertEqual(commands[-1][-3:],['restart','nocheh-dashboard','nocheh-executor'])
+            self.assertIn('up',commands[0]);self.assertEqual([command[-2:] for command in commands[-2:]],[['restart','nocheh-executor'],['restart','nocheh-dashboard']],'the dashboard last')
             self.assertFalse((state/'admin/restart-cached').exists());self.assertFalse((state/'admin/previous.env').exists())
             self.assertIn('Answer privately buttons',said[0]);self.assertFalse(any(new[name] in said[0] for name in self.KEYS))
             self.assertEqual(settings.view(state)['apply_state'],'current')
@@ -514,6 +514,38 @@ class AgentKeyTests(unittest.TestCase):
                 settings.restart_cached(state)
             self.assertEqual(run.call_args_list[-1].args[0][-2:],['restart','nocheh-dashboard'])
             self.assertFalse((state/'admin/restart-cached').exists())
+
+    def test_apply_after_a_cutover_restarts_what_caches_the_keys(self):
+        from tools.operations.installation import settings
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize(state);(state/'admin').mkdir(exist_ok=True);(state/'admin/restart-cached').touch()
+            def ran(command,**options):return SimpleNamespace(returncode=0,stdout='nocheh-dashboard\nnocheh-executor\n' if 'ps' in command else '')
+            with patch('tools.operations.installation.settings.subprocess.run',side_effect=ran) as run,\
+                 patch('tools.operations.installation.settings.refresh_honcho',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.rebuild_memory',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.mini_app.menu_button',return_value='skipped'):
+                self.assertEqual(settings.apply(state)['status'],'applied')
+            self.assertEqual(run.call_args_list[-1].args[0][-2:],['restart','nocheh-dashboard'])
+            self.assertFalse((state/'admin/restart-cached').exists())
+            # Without the marker, Apply restarts neither.
+            with patch('tools.operations.installation.settings.subprocess.run',side_effect=ran) as run,\
+                 patch('tools.operations.installation.settings.refresh_honcho',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.rebuild_memory',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.mini_app.menu_button',return_value='skipped'):
+                settings.apply(state)
+            self.assertFalse(any('restart' in call.args[0] for call in run.call_args_list))
+
+    def test_a_cutover_puts_the_new_keys_in_the_rollback_baseline(self):
+        from tools.operations.installation.configuration import read_env,write_env,env_path
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize(state);values=load(state)
+            old={key:value for key,value in read_env(env_path(state)).items() if key not in ('AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN')}
+            write_env(env_path(state),old);(state/'admin').mkdir(exist_ok=True);write_env(state/'admin/previous.env',old)
+            initialize(state);new=load(state);baseline=read_env(state/'admin/previous.env')
+            self.assertNotEqual(new['SERVICE_TOKEN'],old['SERVICE_TOKEN'])
+            for name in ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN'):self.assertEqual(baseline[name],new[name])
+            self.assertEqual(baseline['POSTGRES_PASSWORD'],values['POSTGRES_PASSWORD'])
 
     def test_restore_of_an_older_backup_gets_the_new_keys(self):
         from tools.operations.installation.configuration import cut_over,generate,ROTATED

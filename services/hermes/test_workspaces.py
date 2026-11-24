@@ -418,6 +418,15 @@ class CommandsTests(Machine):
         self.assertNotIn('NOCHEH_STATE_DIR', ups[0][1]['env']); self.assertNotIn('COMPOSE_PROJECT_NAME', ups[0][1]['env'])
         self.assertIn('make dev reloads it', said[0]); self.assertIn('restarted', said[1]); self.assertIn('Not running', said[2])
 
+    def test_update_asks_make_dev_to_restart_when_the_keys_are_new(self):
+        personal = self.folder('nocheh'); self.claim(personal)
+        configuration.write_env(personal / '.env', {key: value for key, value in self.saved(personal).items() if key != 'AGENT_KEY'})
+        self.docker = [running('nocheh', {'com.nocheh.runtime-mode': 'source-watched'}, service='nocheh-app')]
+        calls, run = self.calls(); said = []
+        with self.git(), patch.dict(os.environ, {'NOCHEH_STATE_DIR': '/elsewhere', 'COMPOSE_PROJECT_NAME': 'nocheh'}):
+            self.assertEqual(workspaces.update(['personal'], personal, run, said.append), 0)
+        self.assertIn('Stop make dev and run it again', said[0])
+
     def test_update_skips_a_folder_off_main_or_with_changes(self):
         personal = self.folder('nocheh'); self.claim(personal)
         for branch, dirty, message in (('topic', '', 'on topic, not main'), ('main', ' M src/x.ts', 'not committed')):

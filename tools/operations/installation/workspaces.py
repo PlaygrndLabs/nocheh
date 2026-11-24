@@ -498,7 +498,10 @@ def update(targets, own_folder, run=subprocess.run, say=print):
         after = revision(folder)
         mode = state_of(folder, everything)
         moved = f'code {before} → {after}' if after != before else f'code {after}, already current'
-        if mode == 'development':
+        if mode == 'development' and not (settings_of(folder) or {}).get('AGENT_KEY'):
+            # The first agent login makes new keys, which the running containers never see (ADR-0291).
+            say(f'{name}: {moved}. Stop make dev and run it again: this update makes new keys.')
+        elif mode == 'development':
             say(f'{name}: {moved}. make dev reloads it; run make dev-build if packages or images changed.')
         elif mode != 'running':
             say(f'{name}: {moved}. Not running; start it with ./bin/nocheh up in {folder}.')

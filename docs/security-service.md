@@ -86,8 +86,10 @@ its admin bearer and signs every pass; both refuse to start when it is in their
 environment. They hold the agent login `AGENT_KEY` instead
 ([ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md)). The launcher
 starts a turn only for a `POST /v1/turn` from Hermes's bridge with that key and
-answers 403 otherwise; the bridge, a short-lived parent-side process, is the only
-child of Hermes that gets it, and turn containers get no key. Nocheh calls Hermes
+answers 403 otherwise. Of Hermes's children, its dashboard process keeps it for its
+own calls to Nocheh and drops it from its environment before the upstream dashboard
+runs, the bridge, a short-lived parent-side process, gets it for the launcher, and
+turn containers get no key. Nocheh calls Hermes
 with the same key, and Hermes calls Nocheh with it: on `nocheh-app` it reaches only
 the agent's own routes (the served chat list, note and retired-source lookups,
 runtime profile reads, and the scheduler and background run steps), and on the broker

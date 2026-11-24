@@ -360,9 +360,9 @@ def initialize(state, workspace=None):
     path.chmod(0o600)
     if changed:
         mark_restart(state)
-        if before is not None:
-            from tools.operations.installation.settings import carry_applied
-            carry_applied(state, before)
+        from tools.operations.installation.settings import carry_applied, carry_keys
+        carry_keys(state, values)
+        if before is not None: carry_applied(state, before)
     if values['NOCHEH_HONCHO_ENABLED']=='true':
         from tools.operations.memory.honcho_setup import initialize as initialize_honcho, runtime_init
         initialize_honcho(state)

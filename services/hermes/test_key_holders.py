@@ -2,7 +2,7 @@
 agent login, and only Hermes holds its dashboard's session token.
 
 This checks Compose environments only. hermes-agent-sb runs as root with the Docker socket and can read other containers'
-configuration (and with it SERVICE_TOKEN), and the management containers (dashboard, executor, machines) read .env; a
+configuration (and with it SERVICE_TOKEN), and the dashboard and executor read .env; a
 Docker API proxy for the launcher comes later."""
 import json
 import os

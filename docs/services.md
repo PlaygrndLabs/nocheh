@@ -42,8 +42,8 @@ pass) reaches only `nocheh-app`, `nocheh-security` and, for now, `nocheh-telegra
 agent login `AGENT_KEY` reaches `nocheh-app`, `nocheh-security`, `hermes` and
 `hermes-agent-sb`; with it Nocheh and Hermes call each other, and on Nocheh's side it
 reaches only the agent's own routes. `NOCHEH_HERMES_SESSION_TOKEN`, which opens
-Hermes's own dashboard pages, reaches only `hermes`. The dashboard, executor and
-`nocheh-machines` get none of them from Compose, but read `.env`. Hermes and the
+Hermes's own dashboard pages, reaches only `hermes`. The dashboard and executor
+get none of them from Compose, but read `.env`; `nocheh-machines` holds only `NOCHEH_MACHINE_TOKEN`. Hermes and the
 launcher refuse to start with `SERVICE_TOKEN` in their environment; see
 [ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md).
 

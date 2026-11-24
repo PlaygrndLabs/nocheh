@@ -43,8 +43,8 @@ def development_box_token():
                     if not saved.get(name))
     if missing: write_env(path, generate(saved, missing))
     if changed:
-        from tools.operations.installation.settings import carry_applied
-        mark_restart(root / 'data/local'); carry_applied(root / 'data/local', values)
+        from tools.operations.installation.settings import carry_applied, carry_keys
+        mark_restart(root / 'data/local'); carry_keys(root / 'data/local', saved); carry_applied(root / 'data/local', values)
     # The launcher's read-only bind of the GitHub copies, nocheh-machines' keys folder and the folders the services
     # mount, such as nocheh-telegram's state and Hermes's two (ADR-0251): made here at 0700, so Docker never makes
     # them as root.
