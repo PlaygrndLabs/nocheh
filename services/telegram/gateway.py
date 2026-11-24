@@ -59,8 +59,8 @@ def topic_of(value):
 
 def member_notice_shape(body):
     """Whether a notice has one of the only shapes a member's own private chat takes: a task reminder, with no topic,
-    buttons or edit (step 5); or the message about a schedule the member set there, with no topic, and only its Pause and
-    Delete presses or no buttons, sent or edited (members' schedules)."""
+    buttons or edit (step 5); or the message about a schedule the member set there, with no topic, and only its Pause or
+    Start and Delete presses or no buttons, sent or edited (members' schedules)."""
     if body.get('topic') not in (None,''):return False
     if body.get('send_class')=='reminder':return body.get('buttons') is None and body.get('edit') is None
     buttons=body.get('buttons')

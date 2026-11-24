@@ -316,7 +316,16 @@ const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1'
 const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
 {id:'33333333-3333-4333-8333-333333333333',kind:'import',state:'cancelled',created_at:new Date().toISOString(),completed:40,total:180,duplicates:3,preview,review_approved:true,mapping:{'chat-1':'-10042'}},
 {id:'22222222-2222-4222-8222-222222222222',kind:'operations.diagnose',state:'complete',created_at:new Date().toISOString(),result:{containers:[{service:'nocheh-app',tool:'Nocheh',location:'docker',purpose:'Synthetic API',state:'running',expected_state:'running'}]}}];
-const actions:any[]=[{id:'c'.repeat(64),fingerprint:'d'.repeat(64),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-preview',workspace:'synthetic-demo'},state:'proposed',created_at:new Date().toISOString()}],permissions:any[]=[];
+const actions:any[]=[{id:'c'.repeat(64),fingerprint:'d'.repeat(64),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-preview',workspace:'synthetic-demo'},state:'proposed',created_at:new Date().toISOString()},
+ // Decided ones say why they ran (ADR-0294): a link the owner typed, a chat rule, the owner's Gmail setting and a card.
+ {id:'e1'.repeat(32),fingerprint:'1e'.repeat(32),kind:'browser',scope:'42',profile,arguments:{url:'https://example.test/prices'},state:'done',created_at:new Date(Date.now()-36e5).toISOString(),
+  because:{kind:'said',who:'owner',name:null,words:'What do the prices on example.test/prices say?'},asked:{kind:'said',who:'owner',name:null,words:'What do the prices on example.test/prices say?'}},
+ {id:'e2'.repeat(32),fingerprint:'2e'.repeat(32),kind:'browser',scope:'-10042',profile,arguments:{url:'https://weather.example.test/iceland'},state:'done',created_at:new Date(Date.now()-72e5).toISOString(),
+  because:{kind:'rule',what:'site',target:'weather.example.test',chat:'-10042',until:new Date(Date.now()+20*864e5).toISOString()},asked:{kind:'said',who:'member',name:'Nia',words:'Is it clear tonight?'}},
+ {id:'e3'.repeat(32),fingerprint:'3e'.repeat(32),kind:'mcp',scope:'42',profile,arguments:{connection:'gmail',tool:'search',input:{query:'is:unread'}},state:'done',created_at:new Date(Date.now()-108e5).toISOString(),
+  because:{kind:'setting',connection:'gmail'},asked:{kind:'schedule',name:'Morning aurora check',words:'Every morning at 8, check my email and the aurora forecast'}},
+ {id:'e4'.repeat(32),fingerprint:'4e'.repeat(32),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-approved'},state:'done',created_at:new Date(Date.now()-144e5).toISOString(),
+  because:{kind:'approved'},asked:{kind:'said',who:'owner',name:null,words:'Run the check script'}}],permissions:any[]=[];
 let spaceRevision=1,spaceOverrides:Record<string,any>={mode:'approved'},shares:any[]=[];
 /** System and Usage fixtures: maintenance history, reply timing, storage and the read-only database browser. Synthetic only. */
 const hoursAgo=(h:number)=>new Date(Date.now()-h*36e5).toISOString();
@@ -535,7 +544,8 @@ actions.push({id:'7'.repeat(64),event_id:id,fingerprint:'7a'.repeat(32),kind:'br
  {id:'6'.repeat(64),event_id:id,fingerprint:'6a'.repeat(32),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-unclear'},state:'ambiguous',revision:4,error_code:'executor_outcome_unconfirmed',resolution:null,created_at:inboxAgo(75),result:{state:'ambiguous',result:{error:'execution_outcome_unconfirmed'}}},
  {id:'5'.repeat(64),event_id:id,fingerprint:'5a'.repeat(32),kind:'browser',scope:conversation,profile,arguments:{url:'https://example.org/aurora-weather'},state:'ambiguous',revision:4,error_code:'executor_outcome_unconfirmed',resolution:'read_closed',resolved_at:inboxAgo(80),created_at:inboxAgo(80),result:{state:'ambiguous',result:{error:'execution_outcome_unconfirmed',cause:'remote_unreachable'}}});
 const telegramActions:any[]=[{id:'ab'.repeat(32),event_id:id,fingerprint:'ba'.repeat(32),kind:'telegram_message',scope:'42',profile,arguments:{destination:conversation,text:'Hi all, the cabin is booked for 14 to 18 March. Bring warm layers for the aurora nights!'},state:'proposed',revision:1,created_at:inboxAgo(12),result:null},
- {id:'cd'.repeat(32),event_id:id,fingerprint:'dc'.repeat(32),kind:'telegram_message',scope:'42',profile,arguments:{destination:topic,text:'Reminder: flights land at 09:40.'},state:'done',revision:3,created_at:inboxAgo(2900),result:{delivered:true}}];
+ {id:'cd'.repeat(32),event_id:id,fingerprint:'dc'.repeat(32),kind:'telegram_message',scope:'42',profile,arguments:{destination:topic,text:'Reminder: flights land at 09:40.'},state:'done',revision:3,created_at:inboxAgo(2900),result:{delivered:true},
+  because:{kind:'approved'},asked:{kind:'said',who:'owner',name:null,words:'Remind the Iceland topic when the flights land'}}];
 const memoryAccessCreated=inboxAgo(40);
 const entitySuggestion:any={id:'0'.repeat(64),kind:'person',name:'Nia Okafor',candidate_entity_id:null,source_reference:{id},reason:'Mentioned twice in Aurora planning as the person booking the cabin.',status:'pending',revision:1,created_at:inboxAgo(300)};
 // A project card with two other names folded into it: a longer name and the same name with another spelling.

@@ -107,7 +107,8 @@ test('allowed members post freely in their own group; everything else waits for 
     const elsewhere=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(plain.id,group),{destination:'123',text:'Exact private message'}));
     const card=last('card');
     assert.deepEqual([card.chat_id,card.topic,card.id],['123',undefined,elsewhere.id]);
-    assert.equal(card.text,'📨 Send to your private chat\n💬 Asked in a Telegram group\n\nExact private message');
+    // The card quotes who asked and their words, since it is not the reply to them (ADR-0294).
+    assert.equal(card.text,'📨 Send to your private chat\n💬 Asked in a Telegram group\n🗣 ⁨“Member”⁩ said: ⁨“Please prepare a message”⁩\n\nExact private message');
     assert.deepEqual(card.buttons,[['✅ Approve','na'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)],['❌ Reject','nd'+elsewhere.id.slice(0,40)+elsewhere.fingerprint.slice(0,16)]]);
     assert.ok(card.buttons.every((pair:string[])=>Buffer.byteLength(pair[1]!)<=64));
     assert.match(elsewhere.message,/say only, briefly, that you asked the owner; do not show the draft/);
@@ -197,7 +198,7 @@ test('allowed members post freely in their own group; everything else waits for 
     const note='\n\n👥 “Where asked” covers you and every member who can talk in that chat or topic, not only the person who asked.';
     // A web read's rule also says what it lets Nocheh open without asking (ADR-0263).
     const site='\n\n🔓 “Always allow this site” lets Nocheh open any page there without asking, including addresses that carry short pieces of your data.';
-    assert.equal(last('card').chat_id,'123');assert.equal(last('card').text,'⚙️ Run a command\n💬 Asked in a Telegram group › General\n\nprintf ok'+note);
+    assert.equal(last('card').chat_id,'123');assert.equal(last('card').text,'⚙️ Run a command\n💬 Asked in a Telegram group › General\n🗣 ⁨“Member”⁩ said: ⁨“Please prepare a message”⁩\n\nprintf ok'+note);
     assert.deepEqual(last('card').links,[{type:'bold',offset:3,length:13},{type:'pre',offset:last('card').text.indexOf('printf ok'),length:9}],'the name is bold, the command is code');assert.match(tool.message,/asked the owner/);
     assert.match(tool.message,/the answer will follow here/,'an operation answers later in the chat that asked');
     // A member's web page read runs under the group's tools permission, with no card (step 3).
@@ -210,10 +211,10 @@ test('allowed members post freely in their own group; everything else waits for 
     finally{ownerTools();}
     // A web address is all a page read sends, so it shows open under the summary, which says it is the AI's (ADR-0250).
     const opened=last('card');
-    assert.equal(opened.text,'⚙️ Open a web page · example.test\n📝 AI says: Read the made-up page.\n💬 Asked in a Telegram group › General\n\nhttps://example.test/made-up'+site+note);
+    assert.equal(opened.text,'⚙️ Open a web page · example.test\n📝 AI says: Read the made-up page.\n💬 Asked in a Telegram group › General\n🗣 You said: ⁨“Please prepare a message”⁩\n\nhttps://example.test/made-up'+site+note);
     assert.deepEqual(opened.links,[{type:'bold',offset:3,length:30}]);
     await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(plain.id,group),{kind:'shell',arguments:{command:'printf said'},summary:'Print a word.'}));
-    assert.equal(last('card').text,'⚙️ Run a command\n📝 AI says: Print a word.\n💬 Asked in a Telegram group › General\n\nprintf said'+note);
+    assert.equal(last('card').text,'⚙️ Run a command\n📝 AI says: Print a word.\n💬 Asked in a Telegram group › General\n🗣 ⁨“Member”⁩ said: ⁨“Please prepare a message”⁩\n\nprintf said'+note);
     // When the owner asks in the group, the reply tells them their card is in their private chat.
     const own=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(ownerTurn.id,group),{kind:'shell',arguments:{command:'printf mine'}}));
     assert.equal(last('card').chat_id,'123');assert.match(own.message,/The person who asked is the owner, so the decision is theirs:.*answer them as "you", briefly: their card is waiting in their private chat, and the answer will follow here\. Do not say it waits for the owner or anyone else/);
@@ -521,10 +522,10 @@ test('a send to a person\'s private chat names it in fixed words and quotes only
     // A group switched off says so wherever it is named: as where a card was asked, and as where it would have gone.
     const ownerInGp3=await capture('owner-in-gp3',said('Post this in GP1',Number(OWNER),{id:Number(GP3),type:'supergroup'}),GP3);
     const fromGp3=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(ownerInGp3.id,GP3,GP3),{destination:GP1,text:'From GP3'}));
-    assert.deepEqual([fromGp3.state,last('card').text],['proposed',`📨 Send to group ${gp1} › General\n💬 Asked in “GP3”\n\nFrom GP3`]);
+    assert.deepEqual([fromGp3.state,last('card').text],['proposed',`📨 Send to group ${gp1} › General\n💬 Asked in “GP3”\n🗣 You said: ⁨“Post this in GP1”⁩\n\nFrom GP3`]);
     installChatsForTest(fixtureDirectory([GP1]));
     assert.equal(await s.actionCommands.callback(await ownerPress('gp3-reject',button('d',fromGp3))),true);
-    assert.equal(last('settle').text,`📨 Send to group ${gp1} › General\n💬 Asked in “GP3” (not served now)\n\nFrom GP3\n\n❌ Rejected. Nothing was sent.`,'the owner\'s own Reject reads as before');
+    assert.equal(last('settle').text,`📨 Send to group ${gp1} › General\n💬 Asked in “GP3” (not served now)\n🗣 You said: ⁨“Post this in GP1”⁩\n\nFrom GP3\n\n❌ Rejected. Nothing was sent.`,'the owner\'s own Reject reads as before');
     assert.equal(await s.actionCommands.callback(await ownerPress('twin-reject',button('d',twinGroup))),true);
     assert.equal(last('settle').text,'📨 Send to group ⁨“GP3”⁩ (not served now)\n\nFor the twin group\n\n❌ Rejected. Nothing was sent.');
     // A card Bob reviews in GP1 settles there, where it was posted, also once its destination is no longer served or he
