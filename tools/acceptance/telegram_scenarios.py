@@ -1244,9 +1244,22 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         self.gate('one_reply_after_recovery', len(self.replies(before, OWNER)) >= 1 and
                   len({json.loads(r['parameters'].get('reply_parameters', '{}')).get('message_id') for r in self.replies(before, OWNER)}) == 1)
 
+    def sends_quiet(self, seconds=15, limit=240):
+        """Wait until Nocheh has sent nothing for `seconds`, so a late notice of an earlier scenario (an import's
+        "ready" message) is not counted as the next turn's reply."""
+        state = {'count': len(self.f.sent()), 'since': time.monotonic()}
+
+        def quiet():
+            count = len(self.f.sent())
+            if count != state['count']:
+                state.update(count=count, since=time.monotonic())
+            return time.monotonic()-state['since'] >= seconds
+        self.wait('sends_quiet', quiet, limit, interval=3)
+
     def restart_preserves_receipts(self):
         # A mark said in the private chat and in a group topic before the restart, which each chat's next turn must
         # still have in its own history, not only in memory.
+        self.sends_quiet()
         self.turn(self.f.message(OWNER, 'یادت باشد: HISTMARK-PRIVATE-31'), OWNER)
         self.turn(self.f.message(GROUP, 'یادت باشد: HISTMARK-GROUP-31', topic=11), GROUP, 11)
         sent = len(self.f.sent())
