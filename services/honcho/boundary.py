@@ -41,6 +41,25 @@ def bind_dreams(consumer):
         return await original(payload,*args,**kwargs)
     consumer.process_dream=run
 
+# A conclusion a dream retires is hidden, never removed (ADR-0298): Honcho soft-deletes it, and it is then given a
+# far-future deletion time, which Honcho's reads skip and its clean-up never reaches. The same literal is
+# provenance.HIDDEN_AT; a test keeps them equal. Only a dream's deduction step calls delete_documents.
+HIDE_SQL=("UPDATE documents SET deleted_at=TIMESTAMPTZ '9999-12-31 00:00:00+00', internal_metadata=internal_metadata"
+          "||jsonb_build_object('nocheh_hidden',jsonb_build_object('reason',CAST(:reason AS text),'at',"
+          "to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'))) "
+          "WHERE workspace_name=:workspace AND id=ANY(:ids) AND deleted_at IS NOT NULL AND deleted_at<TIMESTAMPTZ '9999-01-01 00:00:00+00'")
+
+def bind_hiding(crud,text):
+    original=crud.delete_documents
+    @functools.wraps(original)
+    async def run(db,workspace_name,document_ids,*args,**kwargs):
+        deleted=await original(db,workspace_name,document_ids,*args,**kwargs)
+        if deleted:
+            await db.execute(text(HIDE_SQL),{'workspace':workspace_name,'ids':[identifier for identifier,_ in deleted],'reason':'replaced'})
+            await db.commit()
+        return deleted
+    crud.delete_documents=run
+
 # The gateway's bounds on one embeddings request (meter.validate): inputs, and their UTF-8 bytes. The gateway checks
 # again after the archive prepares the texts, which can mask a few characters longer, so a part leaves some room.
 EMBEDDING_INPUTS,EMBEDDING_BYTES=100,131072

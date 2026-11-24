@@ -253,13 +253,20 @@ MESSAGES_SQL = '''SELECT id,public_id,metadata->>'nocheh_receipt' AS receipt_id
 
 
 SESSION_ID = re.compile(r'^[a-f0-9]{64}$')
+# A hidden conclusion (ADR-0298) is soft-deleted with a far-future time, so Honcho reads skip it and its clean-up, which
+# removes only rows deleted before a few minutes ago, never reaches it. Bringing it back clears the time.
+HIDDEN_AT = "TIMESTAMPTZ '9999-12-31 00:00:00+00'"
+HIDDEN_FLOOR = "TIMESTAMPTZ '9999-01-01 00:00:00+00'"
+
+# Live and hidden conclusions outside the session derived from it; hidden ones are walked through too, so a fact hidden
+# in between still leads to what was derived from it.
 DESCENDANTS_SQL = '''WITH RECURSIVE seed AS (
     SELECT id FROM documents WHERE workspace_name=:workspace AND session_name=:session
 ), messages_seed AS (
     SELECT id FROM messages WHERE workspace_name=:workspace AND session_name=:session
 ), tree(id, depth) AS (
     SELECT d.id, 1 FROM documents d
-    WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL AND d.session_name IS DISTINCT FROM :session
+    WHERE d.workspace_name=:workspace AND (d.deleted_at IS NULL OR d.deleted_at>=''' + HIDDEN_FLOOR + ''') AND d.session_name IS DISTINCT FROM :session
     AND (EXISTS (SELECT 1 FROM document_sources s JOIN seed ON seed.id=s.source_id WHERE s.derived_id=d.id)
         OR (jsonb_typeof(d.internal_metadata->'message_ids')='array' AND EXISTS (
             SELECT 1 FROM jsonb_array_elements(d.internal_metadata->'message_ids') link(value)
@@ -268,22 +275,77 @@ DESCENDANTS_SQL = '''WITH RECURSIVE seed AS (
     SELECT d.id, tree.depth+1 FROM tree
     JOIN document_sources s ON s.source_id=tree.id AND s.workspace_name=:workspace
     JOIN documents d ON d.id=s.derived_id
-    WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL AND d.session_name IS DISTINCT FROM :session AND tree.depth<8
+    WHERE d.workspace_name=:workspace AND (d.deleted_at IS NULL OR d.deleted_at>=''' + HIDDEN_FLOOR + ''') AND d.session_name IS DISTINCT FROM :session AND tree.depth<8
 )
-SELECT DISTINCT id FROM tree ORDER BY id LIMIT :limit'''
+SELECT d.id, d.deleted_at IS NOT NULL AS hidden FROM (SELECT DISTINCT id FROM tree) t JOIN documents d ON d.id=t.id
+    WHERE d.workspace_name=:workspace ORDER BY d.deleted_at IS NOT NULL DESC, d.id LIMIT :limit'''
+
+# A forgotten source takes its hidden descendants with it: they become ordinary deleted rows Honcho removes.
+RELEASE_HIDDEN_SQL = '''UPDATE documents SET deleted_at=now() WHERE workspace_name=:workspace AND id=ANY(:ids)
+    AND deleted_at>=''' + HIDDEN_FLOOR
+
+# Hidden conclusions, newest hidden first: a person's own, or a memory wall's copy (`copied_from` names the person's).
+HIDDEN_LIST_SQL = '''SELECT id, content, level, observer, observed, created_at,
+    COALESCE(internal_metadata->'nocheh_hidden'->>'reason','replaced') AS reason,
+    COALESCE(internal_metadata->'nocheh_hidden'->>'at','') AS hidden_at, internal_metadata->>'copied_from' AS copied_from
+    FROM documents WHERE workspace_name=:workspace AND deleted_at>=''' + HIDDEN_FLOOR + '''
+    AND (CAST(:after_at AS text) IS NULL OR (COALESCE(internal_metadata->'nocheh_hidden'->>'at',''), id) < (:after_at, :after_id))
+    ORDER BY COALESCE(internal_metadata->'nocheh_hidden'->>'at','') DESC, id DESC LIMIT :limit'''
+
+# Bringing a fact back brings back its hidden wall copies too.
+RESTORE_HIDDEN_SQL = '''UPDATE documents SET deleted_at=NULL, internal_metadata=internal_metadata - 'nocheh_hidden'
+    WHERE workspace_name=:workspace AND deleted_at>=''' + HIDDEN_FLOOR + '''
+    AND (id=ANY(:ids) OR internal_metadata->>'copied_from'=ANY(:ids)) RETURNING id'''
 
 
-async def session_descendants(body, load):
-    """Conclusions outside a session that were derived from it, so deleting the session leaves none behind."""
+async def session_descendants(body, load, release=None):
+    """Conclusions outside a session that were derived from it, so deleting the session leaves none behind. ``load``
+    gives (id, hidden) pairs, hidden first; the hidden ones are handed to ``release`` and only live ones are returned
+    for the caller to delete, so a call that finds only hidden ones returns none and the next finds them gone."""
     if not isinstance(body, dict) or set(body) - {'session_id', 'limit'}:
         raise ValueError('invalid_descendants_request')
     session, limit = body.get('session_id'), body.get('limit', 100)
     if not isinstance(session, str) or not SESSION_ID.fullmatch(session) or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
         raise ValueError('invalid_descendants_request')
-    ids = await load(session, limit + 1)
-    if any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in ids):
+    rows = await load(session, limit + 1)
+    if any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v, _ in rows):
         raise ValueError('descendant_identity_invalid')
-    return {'ids': ids[:limit], 'truncated': len(ids) > limit}
+    hidden = [v for v, h in rows if h]
+    if hidden:
+        if release is None:
+            raise ValueError('hidden_descendants_unreleased')
+        await release(hidden)
+    ids = [v for v, h in rows if not h]
+    return {'ids': ids[:limit], 'truncated': len(rows) > limit}
+
+
+def hidden_cursor(after):
+    """`after` is a page's `next`: the last row's hidden time and id, joined by a space."""
+    if after in (None, ''):
+        return None, None
+    if not isinstance(after, str) or len(after) > 80 or after.count(' ') != 1:
+        raise ValueError('invalid_hidden_cursor')
+    at, identifier = after.split(' ')
+    if not NATIVE_ID.fullmatch(identifier) or not re.fullmatch(r'[0-9TZ:.+-]{0,40}', at):
+        raise ValueError('invalid_hidden_cursor')
+    return at, identifier
+
+
+def hidden_page(rows, limit):
+    """One page of hidden facts as the owner's dashboard lists them."""
+    items = [{'id': r['id'], 'content': r['content'], 'level': r['level'], 'observer': r['observer'], 'observed': r['observed'],
+              'created_at': r['created_at'].isoformat() if hasattr(r['created_at'], 'isoformat') else str(r['created_at']),
+              'reason': r['reason'] if r['reason'] in ('replaced', 'unused') else 'replaced', 'hidden_at': r['hidden_at'] or None,
+              'copied_from': r['copied_from']} for r in rows[:limit]]
+    last = rows[limit - 1] if len(rows) > limit else None
+    return {'items': items, 'next': (last['hidden_at'] or '') + ' ' + last['id'] if last else None}
+
+
+def restore_ids(body):
+    if not isinstance(body, dict) or set(body) != {'ids'} or not isinstance(body['ids'], list) or not 1 <= len(body['ids']) <= 50 \
+            or any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in body['ids']):
+        raise ValueError('invalid_restore_request')
+    return list(dict.fromkeys(body['ids']))
 
 
 def install(app):
@@ -331,14 +393,35 @@ def install(app):
         return await citation_coverage(workspace_id, db)
 
     @router.post('/session-descendants')
-    async def descendants(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):
+    async def descendants(workspace_id: str, body: dict = Body(...), db: AsyncSession = write_db):
         async def load(session, limit):
             result = await db.execute(text(DESCENDANTS_SQL), {'workspace': workspace_id, 'session': session, 'limit': limit})
-            return [row[0] for row in result.all()]
+            return [(row[0], bool(row[1])) for row in result.all()]
+
+        async def release(ids):
+            await db.execute(text(RELEASE_HIDDEN_SQL), {'workspace': workspace_id, 'ids': ids})
+            await db.commit()
 
         try:
-            return await session_descendants(body, load)
+            return await session_descendants(body, load, release)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from None
+
+    @router.get('/hidden')
+    async def hidden(workspace_id: str, after: str | None = None, size: int = 25, db: AsyncSession = read_db):
+        try: at, identifier = hidden_cursor(after)
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from None
+        if not 1 <= size <= 100: raise HTTPException(status_code=400, detail='invalid_hidden_size')
+        result = await db.execute(text(HIDDEN_LIST_SQL), {'workspace': workspace_id, 'after_at': at, 'after_id': identifier, 'limit': size + 1})
+        return hidden_page([dict(row) for row in result.mappings()], size)
+
+    @router.post('/hidden/restore')
+    async def restore(workspace_id: str, body: dict = Body(...), db: AsyncSession = write_db):
+        try: ids = restore_ids(body)
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from None
+        result = await db.execute(text(RESTORE_HIDDEN_SQL), {'workspace': workspace_id, 'ids': ids})
+        restored = [row[0] for row in result.all()]
+        await db.commit()
+        return {'restored': restored}
 
     app.include_router(router)

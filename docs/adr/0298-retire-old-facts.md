@@ -1,7 +1,8 @@
 # ADR-0298: Retire old facts (Honcho dreams), off by default
 
 <status>
-Accepted on 2026-11-24. The owner asked for "Old facts retire", disabled by default. Amends
+Accepted on 2026-11-24. The owner asked for "Old facts retire", disabled by default, and then: "dont remove
+it just keep it hide". Amends
 [ADR-0225](0225-member-safety-rules.md) (dreams were pinned off beside peer cards),
 [ADR-0241](0241-honcho-runs-only-the-tools-it-offered.md) (its protection assumed dreams off) and
 [ADR-0101](0101-honcho-terminal-queue-errors-block-readiness.md) (a failed dream no longer holds readiness).
@@ -47,15 +48,32 @@ Works with [ADR-0286](0286-memory-walls.md) (memory walls).
 5. **A failed dream does not make memory limited.** `queue-health` counts failed
    `representation` and `summary` tasks only. Failed dreams stay in the failed-learning count
    and are retried with the rest.
+6. **A retired fact is hidden, never deleted.** Honcho soft-deletes a replaced fact and its
+   reconciler erases soft-deleted rows five minutes later. Nocheh's hook `bind_hiding` (bound in
+   `services/honcho/run.py` around `crud.delete_documents`) moves each just-retired row's
+   `deleted_at` to a far-future mark (`9999-12-31`) and records
+   `internal_metadata.nocheh_hidden = {reason, at}`. Honcho's reads skip any row with
+   `deleted_at` set, and its reconciler only erases rows older than five minutes, so a hidden row
+   stays out of every list, search and context and is never erased. `DREAM_HISTORY_ENABLED` is
+   written `false`, so a dream keeps no extra copy of what it removed.
+7. **Hidden facts can be brought back.** The Nocheh Honcho routes `GET /nocheh/hidden` (newest
+   hidden first) and `POST /nocheh/hidden/restore` (1 to 50 ids) list hidden facts and clear the
+   mark; a restore also brings back each wall copy of a restored fact. Memory › Long-term › Facts it
+   learned shows them under "Hidden facts", each with "Bring back".
+8. **Forgetting still erases.** Forgetting a message walks its descendants, hidden ones included,
+   and turns the hidden ones back into ordinary soft deletes so the reconciler erases them with
+   the rest. Deleting a session erases its hidden rows with it.
 
 ## Consequences
 
 - Turned on, each dream costs up to about 22 memory-model calls, for the whole memory of each
   person and for each wall a person writes in. Thinking goes through the meter, so it is priced
   and counts toward the optional monthly memory-thinking limit (ADR-0279).
-- A retired fact disappears from fact lists and recall; a re-learn can learn it again.
+- A retired fact disappears from fact lists and recall, but stays in the database, hidden, until it
+  is brought back or the message it came from is forgotten.
 - A whole-memory dream may retire a group fact because of a newer fact from another chat; the
   group then no longer sees the old fact. Nothing new is shown to the group.
 - While a dream runs the workspace queue is busy, so memory can show as catching up.
 - Checks: `services/honcho/test_setup.py`, `test_boundary.py`, `test_provenance.py`,
-  `test/fact-sources.test.ts`, `test/store-native-memory.test.ts`, `test/store-fact-sources.test.ts`.
+  `test/fact-sources.test.ts`, `test/store-native-memory.test.ts`, `test/store-fact-sources.test.ts`,
+  `test/memory-engine.test.ts`.

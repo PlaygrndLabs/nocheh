@@ -27,8 +27,8 @@ export function RetireOldFactsCard() {
           </label>
           <p className="mt-0.5 text-[13px] text-muted">
             Runs on its own after about 50 new facts, at most every 8 hours, once a chat has been quiet for an hour.
-            Your whole memory and each group’s memory are cleaned up separately. A retired fact no longer shows; a
-            re-learn can bring it back.
+            Your whole memory and each group’s memory are cleaned up separately. A retired fact is hidden, not deleted:
+            replies stop using it, and you can bring it back under Facts it learned.
           </p>
           <p className="mt-1 text-[13px] text-muted">
             Extra cost: each clean-up is up to about 22 calls to the memory model, and it counts toward the memory

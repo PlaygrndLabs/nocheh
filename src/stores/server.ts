@@ -3,620 +3,1269 @@ import {githubReposHere} from './github-lookups.js';
 import {createServer} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
-import {admin,boundReader,currentReader} from '../access.js';
-import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
+import {admin, boundReader, currentReader} from '../access.js';
+import {ownerChat, telegramDeliveryAllowed} from '../assistant-policy.js';
 import {servedChats} from '../chats.js';
 import {telegramAddress} from '../frontdoor/telegram.js';
-import {canonical,digest,envelope} from '../archive.js';
+import {canonical, digest, envelope} from '../archive.js';
 import type {Settings} from '../config.js';
-import {HttpError,authorize,json,object,readJson,string} from '../http.js';
-import {archiveFilters,matchesArchiveFilters,privateChatsParams,type ArchiveFilters} from '../archive-filters.js';
+import {HttpError, authorize, json, object, readJson, string} from '../http.js';
+import {archiveFilters, matchesArchiveFilters, privateChatsParams, type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
 import {reactionPreview} from '../reaction-preview.js';
 import {limit} from '../retrieval.js';
 import type {RuntimeCall} from '../runtime.js';
-import {agentErrors,agentOperation,agentSummary,type AgentOperation} from '../agent/agent.js';
+import {agentErrors, agentOperation, agentSummary, type AgentOperation} from '../agent/agent.js';
 import {immutableFile} from '../storage.js';
 import {ownerSecurityRoute} from '../security/owner-api.js';
 import {captureEvidence} from './generated-capture.js';
 import {OwnerStorageApi} from './owner-api.js';
 import type {StorageServices} from './services.js';
-import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHealth} from './lifecycle.js';
-import {listWorkflows,workflowDetail,workflowHealth} from '../workflows/owner.js';
+import {assertStorageActive, assertGuardConfiguration, restoredInactive, storageHealth} from './lifecycle.js';
+import {listWorkflows, workflowDetail, workflowHealth} from '../workflows/owner.js';
 import {workflowMetrics} from '../workflows/metrics.js';
-import {eventBreakdown,stageSummary,timed} from './stage-timings.js';
+import {eventBreakdown, stageSummary, timed} from './stage-timings.js';
 import {proxyInngestInspection} from '../workflows/inspection.js';
-import {controlStorageWorkflow,retryFailedWorkflows} from './workflow-owner.js';
-import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
-import {confirmImport,cancelImport,enterImportWrite,importProgress,pendingImports,reconcileImportReceipt} from '../workflows/imports.js';
+import {controlStorageWorkflow, retryFailedWorkflows} from './workflow-owner.js';
+import {
+  claimHostWorkflow,
+  renewHostWorkflow,
+  finishHostWorkflow,
+  continueHostWorkflow,
+} from '../workflows/host-coordinator.js';
+import {
+  confirmImport,
+  cancelImport,
+  enterImportWrite,
+  importProgress,
+  pendingImports,
+  reconcileImportReceipt,
+} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
-import {fillTemplate,labeledLines,ownerPrompts,problemButtons,problemNotice} from '../prompts.js';
+import {fillTemplate, labeledLines, ownerPrompts, problemButtons, problemNotice} from '../prompts.js';
 import {retryButton} from './action-commands.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
 import {archiveTranscriptPreviews} from './archive-transcript-previews.js';
 import {memoryProblems} from './note-sources.js';
 import {searchTagged} from './native-memory.js';
-import {agentCopies,messageSender} from './archive-row-details.js';
+import {agentCopies, messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
-import {currentChats,otherPrivateScopes} from './chats.js';
-import {issueScheduleGrant,recordScheduleTurn,scheduleChats,scheduleIdentity,scheduleTurn,timeZoneTurn} from './schedules.js';
+import {currentChats, otherPrivateScopes} from './chats.js';
+import {
+  issueScheduleGrant,
+  recordScheduleTurn,
+  scheduleChats,
+  scheduleIdentity,
+  scheduleTurn,
+  timeZoneTurn,
+} from './schedules.js';
 import {authorizeScheduleNotice} from './schedule-notices.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
 import {JobBoxRepository} from './job-box.js';
 import {MACHINE_BODY} from './machines.js';
-import {afterPending,jobRun} from './guards.js';
-import {loopback,selfBase,serveMcp} from '../mcp/server.js';
+import {afterPending, jobRun} from './guards.js';
+import {loopback, selfBase, serveMcp} from '../mcp/server.js';
 import {assertPrivateAnswerRoute} from './private-answers.js';
 import {assertMachineRunRoute} from './machine-reads.js';
 import {lookupTurn} from './scheduled-lookups.js';
-import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
-import {memberAssistant,memberPrivate,readSetGroups} from '../spaces.js';
-import {noticeAuthorizeRequest,type NoticeAuthorizeResponse} from '../notice-authorize.js';
+import {ownerRecallAllowed, withRecallPlaces} from './recall-places.js';
+import {memberAssistant, memberPrivate, readSetGroups} from '../spaces.js';
+import {noticeAuthorizeRequest, type NoticeAuthorizeResponse} from '../notice-authorize.js';
 import {authorizeNotice} from './task-reminder-delivery.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 import {MEMBER_APP_CORE_PREFIX} from '../member-app-wire.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
-export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>,capabilities:Readonly<Record<string,boolean>>={}) {
-  const owner=new OwnerStorageApi(s),box=new JobBoxRepository(s.access);
-  const server=createServer((req,res)=>{void(async()=>{
-    const url=new URL(req.url??'/','http://local'),path=url.pathname;
-    if(req.method==='GET'&&path==='/health')return json(res,200,{ok:true,service:config.service,storage_layout:'original-only-v1',
-      databases:await storageHealth(s.stores),inactive:restoredInactive(config.dataDir),workers:status()});
-    // The members' app has its own listener (MEMBER_APP_PORT, ADR-0265 D3): never here, whatever the caller holds.
-    if(path===MEMBER_APP_CORE_PREFIX||path.startsWith(MEMBER_APP_CORE_PREFIX+'/'))throw new HttpError(404,'not_found');
-    // The dashboard chat page is off until Nocheh has its own chat page; Telegram only. No browser input, run or
-    // delivery is taken, whatever the caller holds, so no browser run is ever admitted.
-    if(path.startsWith('/v1/browser/'))throw new HttpError(404,'browser_chat_off');
-    assertStorageActive(config.dataDir);
-    if(transport?.handle(req,res))return;
-    if(req.method==='POST'&&path==='/internal/actions/authorize') {
-      authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
-    }
-    if(req.method==='POST'&&path==='/internal/notices/authorize') {
-      // nocheh-telegram asks before it sends a task reminder into a member's own private chat (ADR-0265 D10): core's
-      // one-time yes. A malformed body is a no, never an error the gateway could read as something else.
-      authorize(req,config.token);let request;
-      try{request=noticeAuthorizeRequest(await readJson(req,1024));}catch{return json(res,200,{allowed:false} satisfies NoticeAuthorizeResponse);}
-      // A member's schedule message into their own chat (members' schedules) takes its one ask the same way.
-      const allowed=await authorizeNotice(s.stores.control,request,await currentChats())||await authorizeScheduleNotice(s.stores.control,request);
-      return json(res,200,{allowed} satisfies NoticeAuthorizeResponse);
-    }
-    if(req.method==='GET'&&path==='/internal/chats') {
-      // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
-      // chat apart from the owner's account; and each member's own private chat that is open now, marked member_private
-      // so the bot takes a member pass only there (step 4). A member change moves no epoch: the bot reads this list
-      // again when it is old or misses a chat, and storage checks every member pass again anyway.
-      authorize(req,config.token);const owner=s.access.policy().owner_id,directory=await currentChats();
-      // A member's chat whose member has Personal assistant on is marked member_assistant too: their schedules run there.
-      return json(res,200,servedChats(directory,owner?{app:'telegram',external:owner}:null,id=>memberPrivate(id,directory),id=>memberAssistant(id,directory)));
-    }
-    if(req.method==='POST'&&path==='/internal/chats/leave') {
-      // The bot asks right before Nocheh leaves a group (ADR-0253): is it still pending from this add?
-      authorize(req,config.token);const body=object(await readJson(req,1024));
-      return json(res,200,{valid:await s.chatAdds.leaveStands(string(body.id,64),string(body.chat_id,32))});
-    }
-    if(req.method==='POST'&&path==='/internal/sources/retired') {
-      // Hermes withholds retired turns from its own native history before each turn.
-      authorize(req,config.token);const ids=object(await readJson(req,64*1024)).event_ids;
-      if(!Array.isArray(ids)||ids.length>500||ids.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(400,'invalid_event_ids');
-      return json(res,200,await s.retirements.historyRetirements(ids as string[]));
-    }
-    if(req.method==='POST'&&path==='/internal/notes/sources') {
-      // Hermes asks where its notes came from before each turn and review (ADR-0257). The labels name groups only as
-      // Nocheh saved them and are never let through beforehand, so the request guard still reads them.
-      authorize(req,config.token);
-      return json(res,200,await s.noteSources.lookup(await readJson(req,256*1024)));
-    }
-    if(req.method==='POST'&&path==='/internal/memory/prepare') {
-      if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
-      await assertGuardConfiguration(s.guards,config.guardMode);
-      await s.configuration.assert(config.assistant);
-      const body=await readJson(req,1024*1024);
-      if(await s.memory.acceptanceRequest(body)) {
-        const input=object(body),route=string(input.route,100);
-        const guarded=await storageGuardService(s)({admin:true,scope:null},{destination:'http://honcho-provider-gateway:8790'+route,payload:input.payload});
-        return json(res,200,{payload:guarded.payload});
+export function storageServer(
+  s: StorageServices,
+  config: Settings,
+  call: RuntimeCall,
+  status: () => unknown = () => ({}),
+  transport?: ReturnType<typeof hostTransport>,
+  capabilities: Readonly<Record<string, boolean>> = {},
+) {
+  const owner = new OwnerStorageApi(s),
+    box = new JobBoxRepository(s.access);
+  const server = createServer((req, res) => {
+    void (async () => {
+      const url = new URL(req.url ?? '/', 'http://local'),
+        path = url.pathname;
+      if (req.method === 'GET' && path === '/health')
+        return json(res, 200, {
+          ok: true,
+          service: config.service,
+          storage_layout: 'original-only-v1',
+          databases: await storageHealth(s.stores),
+          inactive: restoredInactive(config.dataDir),
+          workers: status(),
+        });
+      // The members' app has its own listener (MEMBER_APP_PORT, ADR-0265 D3): never here, whatever the caller holds.
+      if (path === MEMBER_APP_CORE_PREFIX || path.startsWith(MEMBER_APP_CORE_PREFIX + '/'))
+        throw new HttpError(404, 'not_found');
+      // The dashboard chat page is off until Nocheh has its own chat page; Telegram only. No browser input, run or
+      // delivery is taken, whatever the caller holds, so no browser run is ever admitted.
+      if (path.startsWith('/v1/browser/')) throw new HttpError(404, 'browser_chat_off');
+      assertStorageActive(config.dataDir);
+      if (transport?.handle(req, res)) return;
+      if (req.method === 'POST' && path === '/internal/actions/authorize') {
+        authorize(req, config.token);
+        await assertGuardConfiguration(s.guards, config.guardMode);
+        await s.configuration.assert(config.assistant);
+        return json(res, 200, await s.telegramActions.authorizeDelivery(await readJson(req)));
       }
-      return json(res,200,await s.memory.prepareRequest(body));
-    }
-    // A bound reader's reads (an answer's, a member's private chat's, the owner's ask about a member's) come from the store
-    // on every request, and it reaches its read routes only (ADR-0249, ADR-0262). A pass naming a chat another process
-    // recorded a moment ago (a new topic's first turn) is read again once this process's directory has looked again, as
-    // the broker does (ADR-0252).
-    // Every scoped reader's reads are bound for the request: a bound reader's own, and a group reader's project groups
-    // while its project shares its group chats (ADR-0267).
-    // A run of a job on the owner's machine reads only what its card showed, and reaches only its own routes (machine jobs' reads).
-    const parsed=await currentReader(req,config.token),principal=parsed.admin?parsed:await s.access.bindMachine(parsed.scope===null?parsed:await s.access.bindReads(parsed));
-    assertPrivateAnswerRoute(principal,req.method,path);
-    assertMachineRunRoute(principal,req.method,path);
-    // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
-    // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
-    if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:false});
-    if(req.method==='GET'&&path==='/v1/runtime') {
-      admin(principal);
-      // The plugged-in agent and its health, Nocheh's own Telegram bot (ADR-0235), and which helper services answer (ADR-0234).
-      const [agentStatus,bot]=await Promise.all([s.agent.status().catch(()=>({ok:false,error:agentErrors.unavailable})),
-        capabilities['telegram.status']?call('telegram.status',{},5000).catch(()=>null):Promise.resolve(null)]);
-      const telegram=bot?{telegram:bot.telegram,telegram_details:bot.telegram_details}:capabilities['telegram.status']?{telegram:'unavailable'}:{};
-      return json(res,200,{agent:agentSummary(s.agent),status:{...agentStatus,...telegram},capabilities});
-    }
-    if(req.method==='POST'&&path==='/v1/runtime/usage-price'){
-      // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.
-      admin(principal);
-      return json(res,200,await call('usage.price',object(await readJson(req,512*1024)),15000));
-    }
-    if(req.method==='POST'&&path==='/v1/runtime/owner-notice'){
-      // The dashboard's problem check: one message to the owner's private chat, in the owner's wording, sent at most once.
-      // With edit, the same notice is edited in place: under each cleared line, its short status such as "Fixed at 12:06 UTC" marked ✅.
-      admin(principal);
-      const input=object(await readJson(req,64*1024)),id=string(input.id,64),lines=input.problems,resolved=input.resolved,edit=input.edit===true;
-      if(!/^[a-f0-9]{64}$/.test(id)||!Array.isArray(lines)||!lines.length||lines.length>20||lines.some(line=>typeof line!=='string'||!line.trim()||line.length>500)||
-        resolved!==undefined&&(!Array.isArray(resolved)||resolved.length!==lines.length||
-          resolved.some(note=>note!==null&&(typeof note!=='string'||!note.trim()||note.length>120||/[\r\n]/.test(note))))||
-        input.edit!==undefined&&typeof input.edit!=='boolean')
-        throw new HttpError(400,'invalid_owner_notice');
-      // The owner's private chat (ADR-0252), not the owner's account.
-      const policy=s.access.policy(),owner=policy.owner_id?ownerChat(policy):null;
-      if(!owner)return json(res,200,{state:'not_started',error_code:'owner_not_set'});
-      // Open goes to the mini app's Problems page, or the dashboard; Retry failed is a button press storage handles.
-      const open=input.open===undefined||input.open===null?null:object(input.open),retry=input.retry===true;
-      if(open&&(!['web_app','url'].includes(String(open.kind))||typeof open.url!=='string'||open.url.length>512||
-        !(open.kind==='web_app'?/^https:\/\/[^\s]+$/:/^https?:\/\/[^\s]+$/).test(open.url)))throw new HttpError(400,'invalid_owner_notice');
-      const prompts=await ownerPrompts(s.stores.control),labels=labeledLines(problemButtons,prompts['system.problem_buttons']);
-      const text=fillTemplate(prompts['system.problems']??problemNotice,{problems:lines.map((line,index)=>'• '+line+(resolved?.[index]?'\n✅ '+resolved[index]:'')).join('\n')}).slice(0,4000);
-      const buttons=[...(open?[{text:labels.open!.slice(0,40),[String(open.kind)]:open.url}]:[]),...(retry?[{text:labels.retry!.slice(0,40),callback:retryButton}]:[])];
-      // Sent where the owner's private chat is in Telegram now; a chat the directory does not know yet is not sent to.
-      const target=telegramAddress(owner);
-      if(!target)return json(res,200,{state:'not_started',error_code:'chat_not_found'});
-      return json(res,200,await call('telegram.notice',{id,...target,text,...(buttons.length?{buttons}:{}),...(edit?{edit:true}:{})},30000));
-    }
-    if(['x-nocheh-import-job','x-nocheh-import-lease','x-nocheh-import-owner'].some(key=>req.headers[key]!==undefined)){
-      admin(principal);
-      if(req.method!=='POST'||!(path==='/v1/import'||path==='/v1/memory/reviews'||/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)))throw new HttpError(403,'import_route_denied');
-      const held=await enterImportWrite(s.stores.control,req.headers['x-nocheh-import-job'],req.headers['x-nocheh-import-lease'],req.headers['x-nocheh-import-owner']);
-      try{
-        if(path==='/v1/import')return json(res,200,await s.imports.record(principal,await readJson(req,32*1024*1024),held.job));
-        if(path==='/v1/memory/reviews')return json(res,200,await s.imports.approveLearning(principal,await readJson(req),held.job));
-        return json(res,200,await s.imports.upload(principal,path.split('/')[3]!,await readJson(req,70*1024*1024),held.job));
-      }finally{await held.release();}
-    }
-    if(req.method==='POST'&&path==='/v1/import'){
-      admin(principal);const body=object(await readJson(req,32*1024*1024));
-      // Desktop batch imports are original-only; historical mixed-format exports
-      // take the explicit converter and retain their generated/guarded domains.
-      return json(res,200,body.guarded!=null||Array.isArray(body.derived)&&body.derived.length||object(body.event).origin==='generated'?
-        await s.legacyImports.record(principal,body,url.searchParams.get('restore_guarded')==='true'):await s.imports.record(principal,body));
-    }
-    if(req.method==='POST'&&path==='/v1/memory/reviews'){admin(principal);return json(res,200,await s.imports.approveLearning(principal,await readJson(req)));}
-    if(/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)&&req.method==='POST'){admin(principal);return json(res,200,await s.imports.upload(principal,path.split('/')[3]!,await readJson(req,70*1024*1024)));}
-
-    // Durable admission depends only on the owned filesystem. Database and
-    // workflow outages leave an acknowledged observation available for replay.
-    if(req.method==='POST'&&path==='/v1/ingest') {
-      admin(principal);const value=envelope(await readJson(req,16*1024*1024));captureEvidence(value);
-      await immutableFile(join(config.dataDir,'spool','pending'),digest(value.key)+'.json',Buffer.from(canonical(value)));
-      return json(res,202,{id:digest(value.key),state:'spooled'});
-    }
-    // Owners can inspect and repair incomplete guard changes; scoped callers
-    // must observe the complete current authorization generation on every call.
-    // A job's run waits out a publication still pending first (ADR-0208).
-    if(!principal.admin)await afterPending(jobRun(principal),async()=>{await s.turns.assertAudience(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);});
-    if(req.method==='GET'&&path==='/v1/entities')return json(res,200,await s.entities.list(principal,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
-      after:url.searchParams.get('after')??'',state:url.searchParams.get('state')??'active'}));
-    const entityHistory=path.match(/^\/v1\/entities\/claims\/([a-f0-9]{64})\/history$/);
-    if(req.method==='GET'&&entityHistory)return json(res,200,await s.entities.history(principal,entityHistory[1]!,url.searchParams.has('before')?Number(url.searchParams.get('before')):undefined));
-    const entityRead=path.match(/^\/v1\/entities\/([a-f0-9]{64})$/);
-    if(req.method==='GET'&&entityRead)return json(res,200,await s.entities.inspect(principal,entityRead[1]!));
-    // Runtime knowledge tools have their own bound owner-turn checks. They never proxy arbitrary owner routes.
-    if(req.method==='GET'&&path==='/v1/knowledge/context')return json(res,200,await s.knowledge.inspect(principal,Object.fromEntries(url.searchParams)));
-    // The owner asks about a member's private chat with Nocheh (step 4b): only from the owner's own live turn, which the
-    // repository checks first; the answer comes later as a separate message.
-    // Whether this reply may set schedules with Hermes's schedule tool (ADR-0266): only the owner's own live Telegram
-    // message in their private chat, not a forward. The schedules run in the owner's time zone.
-    // Nocheh keeps a turn grant for an allowed turn, with the chat and profile its schedules must name (ADR-0290).
-    if(req.method==='POST'&&path==='/v1/schedules/turn')return json(res,200,await recordScheduleTurn(s,principal,await scheduleTurn(s,principal)));
-    // A schedule Hermes's tool set in this turn, posted from inside it: only with this turn's grant (ADR-0290).
-    if(req.method==='POST'&&path==='/v1/schedules/turn/definition')return json(res,200,await s.schedules.turnDefinition(principal,await readJson(req,1024*1024),s));
-    // The owner or a member sets their own time zone by asking in their own private chat (ADR-0281, ADR-0282).
-    if(req.method==='POST'&&path==='/v1/schedules/time-zone')return json(res,200,await timeZoneTurn(s,principal,await readJson(req)));
-    if(req.method==='POST'&&path==='/v1/member-asks')return json(res,200,await s.memberAsks.ask(principal,await readJson(req,16*1024)));
-    if(req.method==='POST'&&path==='/v1/knowledge/proposals')return json(res,200,await s.knowledge.propose(principal,await readJson(req)));
-    const knowledgeProposal=path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
-    if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));
-    // Task lists: the owner's private chat reaches every list, a project's chat only its own. A change asked in the
-    // owner's private chat that a project's chats would see gets its card there instead (ADR-0243).
-    if(req.method==='GET'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatList(principal,taskQuery(url.searchParams)));
-    if(req.method==='POST'&&path==='/v1/owner/tasks')return json(res,200,await s.actionCommands.offer('task',await s.tasks.chatCreate(principal,await readJson(req,64*1024))));
-    const chatTask=path.match(/^\/v1\/owner\/tasks\/([a-f0-9]{64})(\/comments)?$/);
-    if(req.method==='GET'&&chatTask&&!chatTask[2])return json(res,200,await s.tasks.chatGet(principal,chatTask[1]!));
-    if(req.method==='POST'&&chatTask)return json(res,200,await s.actionCommands.offer('task',
-      await (chatTask[2]?s.tasks.chatComment:s.tasks.chatUpdate).call(s.tasks,principal,chatTask[1]!,await readJson(req,64*1024))));
-    // The owner may read all of their own data from a live owner-private turn, and a schedule's run there, such as a morning
-    // brief, may too (ADR-0266). Fixed read views map onto existing owner handlers; no mutation is reachable.
-    const ownerView=path.match(/^\/v1\/owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)$/);
-    if(req.method==='GET'&&ownerView) {
-      await s.knowledge.ownerReader(principal);
-      const reader={admin:true,scope:null},view=ownerView[1]!,policy=s.access.policy();
-      // Chats with people Nocheh doesn't serve are named by those people; the turn never sees them.
-      if(view==='telegram-identities') {
-        // As before, a group Nocheh does not serve is left out; the directory decides, so an unknown chat is left out too.
-        const found=await telegramDirectory(s.stores.control,reader,s.stores.archive),directory=await currentChats(),all=!policy.enabled||!policy.owner_id;
-        return json(res,200,{...found,groups:found.groups.filter(group=>all||directory.served(group.id))});
-      }
-      if(view==='conversations')return json(res,200,await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
-        limit:limit(url.searchParams.get('limit'),50,100),kind:url.searchParams.get('kind')??'',state:url.searchParams.get('state')??''},await s.supervision.outsiders(policy)));
-      if(view==='conversation-context') {
-        const space=url.searchParams.get('space')??'';
-        if(await s.supervision.outsider(policy,space))throw new HttpError(404,'conversation_not_found');
-      }
-      if(view==='people') {
-        // The owner's private note about each person shows here, in the owner's own private chat only (ADR-0274).
-        const found=await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
-          after:url.searchParams.get('after')??'',state:'active'}),notes=await s.entities.ownerNotes(reader,found.entities.map(entity=>entity.id));
-        return json(res,200,{...found,entities:found.entities.map(entity=>notes.get(entity.id)?.note?{...entity,private_note:notes.get(entity.id)!.note}:entity)});
-      }
-      const target=({conversations:'/v1/conversations','conversation-context':'/v1/conversations/context',projects:'/v1/projects',
-        'project-assignments':'/v1/projects/assignments','memory-map':'/v1/memory-map'} as Record<string,string>)[view]!;
-      return json(res,200,await owner.request(reader,'GET',new URL(target+url.search,url)));
-    }
-    if(await owner.handle(principal,req,res,url))return;
-    if(path==='/v1/runtime/profiles'||path==='/v1/runtime/profiles/resolve') {
-      admin(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(req.method==='GET'&&path==='/v1/runtime/profiles')return json(res,200,await s.runtimeProfiles.list(principal));
-      if(req.method==='POST')return json(res,200,await (path.endsWith('/resolve')?s.runtimeProfiles.resolve(principal,await readJson(req)):s.runtimeProfiles.save(principal,await readJson(req))));
-    }
-    if(req.method==='POST'&&path==='/v1/agent/manage') {
-      // Owner management of the agent's own state (ADR-0234): each action maps to an agent operation, never a native path.
-      admin(principal);
-      const {action,...input}=object(await readJson(req,1024*1024)),writes=['changes','role','skills'].some(key=>key in input);
-      const operation=({profiles:'listProfiles',memory:'readNotes',preferences:writes?'writeSettings':'readSettings',
-        persona:writes?'writePersona':'readPersona',schedules:'manageSchedules'} as Record<string,AgentOperation>)[string(action,20)];
-      if(!operation)throw new HttpError(400,'unknown_management_action');
-      if(operation==='manageSchedules') {
-        // The Schedules pages (ADR-0266): each schedule with the name of its chat as the owner sees it.
-        if(input.operation==='list')return json(res,200,await scheduleChats(s.stores.control,ownerChat(s.access.policy()),await agentOperation(s.agent,operation)(input)));
-        // The owner's Pause, Resume, Delete or Run now: Nocheh grants that one change first, so Hermes's post of it is
-        // accepted (ADR-0290). Nothing else changes a schedule from here.
-        if(!['pause','resume','delete','run'].includes(String(input.operation)))throw new HttpError(400,'invalid_schedule_action');
-        const change=input.operation as 'pause'|'resume'|'delete'|'run',profile=scheduleIdentity(input.profile),job=scheduleIdentity(input.job_id);
-        const request=input.request_id===undefined||input.request_id===null?randomUUID().replaceAll('-',''):input.request_id;
-        if(typeof request!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(request))throw new HttpError(400,'invalid_schedule_action');
-        await issueScheduleGrant(s.stores.control,{profile,job_id:job,operation:change,person:'owner',request_id:request});
-        return json(res,200,await agentOperation(s.agent,operation)({operation:change,profile,job_id:job,request_id:request}));
-      }
-      // Each note says where it came from in the owner's words; what Hermes recorded about it stays behind.
-      const value=await agentOperation(s.agent,operation)(input);
-      return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value,ids=>s.originals.originals(ids)):value);
-    }
-    if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
-      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
-      if(operation==='finish')return json(res,200,await s.scheduled.finish(body));
-      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='definition')return json(res,200,await s.schedules.definition(principal,body));
-      if(operation==='input')return json(res,200,await s.schedules.capture(principal,body));
-      if(operation==='workflow-context')return json(res,200,await s.scheduled.context(body));
-      if(operation==='claim')return json(res,200,await s.scheduled.claim(body));
-      if(operation==='prepare')return json(res,200,await s.scheduled.prepare(body));
-      if(operation==='heartbeat')return json(res,200,await s.scheduled.heartbeat(body));
-      if(operation==='observe')return json(res,200,await s.scheduled.observe(body));
-      if(operation==='cancel')return json(res,200,await s.scheduled.cancel(body));
-      if(operation==='recover')return json(res,200,await s.scheduled.recoverExpired());
-      if(operation==='runs')return json(res,200,await s.scheduled.history(body));
-      // Ownership, delivery and a new schedule's message are Nocheh's own now: it delivers after run() and announces from
-      // the turn route (ADR-0290).
-      throw new HttpError(404,'not_found');
-    }
-    if(req.method==='POST'&&path.startsWith('/v1/background/')) {
-      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/background/'.length),runs=s.jobs.runs;
-      if(operation==='finish')return json(res,200,await runs.finish(body));
-      if(operation==='cancel')return json(res,200,await runs.cancel(body));
-      if(operation==='observe')return json(res,200,await runs.observe(body));
-      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='workflow-context')return json(res,200,await runs.context(body));
-      if(operation==='claim')return json(res,200,await runs.claim(body));
-      if(operation==='prepare')return json(res,200,await runs.prepare(body));
-      if(operation==='heartbeat')return json(res,200,await runs.heartbeat(body));
-      throw new HttpError(404,'not_found');
-    }
-    if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true,preview:input=>s.controlledActions.preview(principal,input)}))return;
-    if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {
-      admin(principal);
-
-      if(req.method==='POST'&&path.startsWith('/v1/workflows/imports/')){
-        const body=await readJson(req);
-        if(path==='/v1/workflows/imports/confirm')return json(res,200,await confirmImport(s.stores.control,body));
-        if(path==='/v1/workflows/imports/reconcile-receipt')return json(res,200,await reconcileImportReceipt(s.stores.control,body));
-        if(path==='/v1/workflows/imports/cancel')return json(res,200,await cancelImport(s.stores.control,object(body).id));
-      }
-      if(req.method==='GET'&&/^\/v1\/workflows\/imports\/[a-f0-9-]{36}$/.test(path)){
-        const id=path.split('/').at(-1)!;
-        const job=(await s.stores.control.query('SELECT id,state,completed,duplicates,learning_after,review_approved,total,generation,updated_at,ready_at FROM workflow_imports WHERE id=$1',[id])).rows[0];
-        const owner=(await s.stores.control.query("SELECT owner FROM workflow_owners WHERE family='imports'")).rows[0].owner;
-        // How far its messages are prepared, until the import is ready to ask about.
-        const progress=job&&!job.ready_at&&['running','completed'].includes(job.state)?await importProgress(s.stores.control,id):null;
-        return json(res,200,{owned:!!job,owner,job:job&&{...job,progress}});
-      }
-      if(req.method==='POST'&&path.startsWith('/v1/workflows/host/')) {
-        const body=await readJson(req);
-        if(path==='/v1/workflows/host/claim') {
-          await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-          return json(res,200,await claimHostWorkflow(s.stores.control,body));
+      if (req.method === 'POST' && path === '/internal/notices/authorize') {
+        // nocheh-telegram asks before it sends a task reminder into a member's own private chat (ADR-0265 D10): core's
+        // one-time yes. A malformed body is a no, never an error the gateway could read as something else.
+        authorize(req, config.token);
+        let request;
+        try {
+          request = noticeAuthorizeRequest(await readJson(req, 1024));
+        } catch {
+          return json(res, 200, {allowed: false} satisfies NoticeAuthorizeResponse);
         }
-        if(path==='/v1/workflows/host/renew')return json(res,200,await renewHostWorkflow(s.stores.control,body));
-        if(path==='/v1/workflows/host/finish')return json(res,200,await finishHostWorkflow(s.stores.control,body));
-        if(path==='/v1/workflows/host/continue')return json(res,200,await continueHostWorkflow(s.stores.control,body));
-        if(path==='/v1/workflows/host/heartbeat') {
-          await registerWorker(s.stores.control,'host',['imports','tools']);
-          await s.stores.control.query("INSERT INTO service_heartbeats(service) VALUES('workflow-host') ON CONFLICT(service) DO UPDATE SET seen_at=now()");
-          return json(res,200,{ok:true});
+        // A member's schedule message into their own chat (members' schedules) takes its one ask the same way.
+        const allowed =
+          (await authorizeNotice(s.stores.control, request, await currentChats())) ||
+          (await authorizeScheduleNotice(s.stores.control, request));
+        return json(res, 200, {allowed} satisfies NoticeAuthorizeResponse);
+      }
+      if (req.method === 'GET' && path === '/internal/chats') {
+        // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
+        // chat apart from the owner's account; and each member's own private chat that is open now, marked member_private
+        // so the bot takes a member pass only there (step 4). A member change moves no epoch: the bot reads this list
+        // again when it is old or misses a chat, and storage checks every member pass again anyway.
+        authorize(req, config.token);
+        const owner = s.access.policy().owner_id,
+          directory = await currentChats();
+        // A member's chat whose member has Personal assistant on is marked member_assistant too: their schedules run there.
+        return json(
+          res,
+          200,
+          servedChats(
+            directory,
+            owner ? {app: 'telegram', external: owner} : null,
+            id => memberPrivate(id, directory),
+            id => memberAssistant(id, directory),
+          ),
+        );
+      }
+      if (req.method === 'POST' && path === '/internal/chats/leave') {
+        // The bot asks right before Nocheh leaves a group (ADR-0253): is it still pending from this add?
+        authorize(req, config.token);
+        const body = object(await readJson(req, 1024));
+        return json(res, 200, {valid: await s.chatAdds.leaveStands(string(body.id, 64), string(body.chat_id, 32))});
+      }
+      if (req.method === 'POST' && path === '/internal/sources/retired') {
+        // Hermes withholds retired turns from its own native history before each turn.
+        authorize(req, config.token);
+        const ids = object(await readJson(req, 64 * 1024)).event_ids;
+        if (
+          !Array.isArray(ids) ||
+          ids.length > 500 ||
+          ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id))
+        )
+          throw new HttpError(400, 'invalid_event_ids');
+        return json(res, 200, await s.retirements.historyRetirements(ids as string[]));
+      }
+      if (req.method === 'POST' && path === '/internal/notes/sources') {
+        // Hermes asks where its notes came from before each turn and review (ADR-0257). The labels name groups only as
+        // Nocheh saved them and are never let through beforehand, so the request guard still reads them.
+        authorize(req, config.token);
+        return json(res, 200, await s.noteSources.lookup(await readJson(req, 256 * 1024)));
+      }
+      if (req.method === 'POST' && path === '/internal/memory/prepare') {
+        if (!config.memoryToken) throw new HttpError(503, 'memory_gateway_unconfigured');
+        authorize(req, config.memoryToken);
+        await assertGuardConfiguration(s.guards, config.guardMode);
+        await s.configuration.assert(config.assistant);
+        const body = await readJson(req, 1024 * 1024);
+        if (await s.memory.acceptanceRequest(body)) {
+          const input = object(body),
+            route = string(input.route, 100);
+          const guarded = await storageGuardService(s)(
+            {admin: true, scope: null},
+            {destination: 'http://honcho-provider-gateway:8790' + route, payload: input.payload},
+          );
+          return json(res, 200, {payload: guarded.payload});
+        }
+        return json(res, 200, await s.memory.prepareRequest(body));
+      }
+      // A bound reader's reads (an answer's, a member's private chat's, the owner's ask about a member's) come from the store
+      // on every request, and it reaches its read routes only (ADR-0249, ADR-0262). A pass naming a chat another process
+      // recorded a moment ago (a new topic's first turn) is read again once this process's directory has looked again, as
+      // the broker does (ADR-0252).
+      // Every scoped reader's reads are bound for the request: a bound reader's own, and a group reader's project groups
+      // while its project shares its group chats (ADR-0267).
+      // A run of a job on the owner's machine reads only what its card showed, and reaches only its own routes (machine jobs' reads).
+      const parsed = await currentReader(req, config.token),
+        principal = parsed.admin
+          ? parsed
+          : await s.access.bindMachine(parsed.scope === null ? parsed : await s.access.bindReads(parsed));
+      assertPrivateAnswerRoute(principal, req.method, path);
+      assertMachineRunRoute(principal, req.method, path);
+      // Nocheh's data tools for a turn without the isolated runtime: each call comes back to these routes with the turn's pass (ADR-0233).
+      // Sealed boxes exist only in the isolated runtime, whose turns reach the broker's /mcp instead.
+      if (path === '/mcp')
+        return serveMcp(req, res, {
+          principal,
+          call: loopback(selfBase(req), req.headers.authorization!),
+          isolated: false,
+        });
+      if (req.method === 'GET' && path === '/v1/runtime') {
+        admin(principal);
+        // The plugged-in agent and its health, Nocheh's own Telegram bot (ADR-0235), and which helper services answer (ADR-0234).
+        const [agentStatus, bot] = await Promise.all([
+          s.agent.status().catch(() => ({ok: false, error: agentErrors.unavailable})),
+          capabilities['telegram.status'] ? call('telegram.status', {}, 5000).catch(() => null) : Promise.resolve(null),
+        ]);
+        const telegram = bot
+          ? {telegram: bot.telegram, telegram_details: bot.telegram_details}
+          : capabilities['telegram.status']
+            ? {telegram: 'unavailable'}
+            : {};
+        return json(res, 200, {agent: agentSummary(s.agent), status: {...agentStatus, ...telegram}, capabilities});
+      }
+      if (req.method === 'POST' && path === '/v1/runtime/usage-price') {
+        // Usage tracker: Hermes prices token counts of parts it does not run, such as Honcho memory.
+        admin(principal);
+        return json(res, 200, await call('usage.price', object(await readJson(req, 512 * 1024)), 15000));
+      }
+      if (req.method === 'POST' && path === '/v1/runtime/owner-notice') {
+        // The dashboard's problem check: one message to the owner's private chat, in the owner's wording, sent at most once.
+        // With edit, the same notice is edited in place: under each cleared line, its short status such as "Fixed at 12:06 UTC" marked ✅.
+        admin(principal);
+        const input = object(await readJson(req, 64 * 1024)),
+          id = string(input.id, 64),
+          lines = input.problems,
+          resolved = input.resolved,
+          edit = input.edit === true;
+        if (
+          !/^[a-f0-9]{64}$/.test(id) ||
+          !Array.isArray(lines) ||
+          !lines.length ||
+          lines.length > 20 ||
+          lines.some(line => typeof line !== 'string' || !line.trim() || line.length > 500) ||
+          (resolved !== undefined &&
+            (!Array.isArray(resolved) ||
+              resolved.length !== lines.length ||
+              resolved.some(
+                note =>
+                  note !== null &&
+                  (typeof note !== 'string' || !note.trim() || note.length > 120 || /[\r\n]/.test(note)),
+              ))) ||
+          (input.edit !== undefined && typeof input.edit !== 'boolean')
+        )
+          throw new HttpError(400, 'invalid_owner_notice');
+        // The owner's private chat (ADR-0252), not the owner's account.
+        const policy = s.access.policy(),
+          owner = policy.owner_id ? ownerChat(policy) : null;
+        if (!owner) return json(res, 200, {state: 'not_started', error_code: 'owner_not_set'});
+        // Open goes to the mini app's Problems page, or the dashboard; Retry failed is a button press storage handles.
+        const open = input.open === undefined || input.open === null ? null : object(input.open),
+          retry = input.retry === true;
+        if (
+          open &&
+          (!['web_app', 'url'].includes(String(open.kind)) ||
+            typeof open.url !== 'string' ||
+            open.url.length > 512 ||
+            !(open.kind === 'web_app' ? /^https:\/\/[^\s]+$/ : /^https?:\/\/[^\s]+$/).test(open.url))
+        )
+          throw new HttpError(400, 'invalid_owner_notice');
+        const prompts = await ownerPrompts(s.stores.control),
+          labels = labeledLines(problemButtons, prompts['system.problem_buttons']);
+        const text = fillTemplate(prompts['system.problems'] ?? problemNotice, {
+          problems: lines
+            .map((line, index) => '• ' + line + (resolved?.[index] ? '\n✅ ' + resolved[index] : ''))
+            .join('\n'),
+        }).slice(0, 4000);
+        const buttons = [
+          ...(open ? [{text: labels.open!.slice(0, 40), [String(open.kind)]: open.url}] : []),
+          ...(retry ? [{text: labels.retry!.slice(0, 40), callback: retryButton}] : []),
+        ];
+        // Sent where the owner's private chat is in Telegram now; a chat the directory does not know yet is not sent to.
+        const target = telegramAddress(owner);
+        if (!target) return json(res, 200, {state: 'not_started', error_code: 'chat_not_found'});
+        return json(
+          res,
+          200,
+          await call(
+            'telegram.notice',
+            {id, ...target, text, ...(buttons.length ? {buttons} : {}), ...(edit ? {edit: true} : {})},
+            30000,
+          ),
+        );
+      }
+      if (
+        ['x-nocheh-import-job', 'x-nocheh-import-lease', 'x-nocheh-import-owner'].some(
+          key => req.headers[key] !== undefined,
+        )
+      ) {
+        admin(principal);
+        if (
+          req.method !== 'POST' ||
+          !(
+            path === '/v1/import' ||
+            path === '/v1/memory/reviews' ||
+            /^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)
+          )
+        )
+          throw new HttpError(403, 'import_route_denied');
+        const held = await enterImportWrite(
+          s.stores.control,
+          req.headers['x-nocheh-import-job'],
+          req.headers['x-nocheh-import-lease'],
+          req.headers['x-nocheh-import-owner'],
+        );
+        try {
+          if (path === '/v1/import')
+            return json(res, 200, await s.imports.record(principal, await readJson(req, 32 * 1024 * 1024), held.job));
+          if (path === '/v1/memory/reviews')
+            return json(res, 200, await s.imports.approveLearning(principal, await readJson(req), held.job));
+          return json(
+            res,
+            200,
+            await s.imports.upload(principal, path.split('/')[3]!, await readJson(req, 70 * 1024 * 1024), held.job),
+          );
+        } finally {
+          await held.release();
         }
       }
-      if(path.startsWith('/v1/workflows/inspection/'))return proxyInngestInspection(req,res,process.env.INNGEST_SIGNING_KEY??'');
-      if(req.method==='GET') {
-        if(path==='/v1/workflows')return json(res,200,await listWorkflows(s.stores.control,Object.fromEntries(url.searchParams)));
-        if(path==='/v1/workflows/health')return json(res,200,await workflowHealth(s.stores.control));
-        if(path==='/v1/workflows/metrics')return json(res,200,await workflowMetrics(s.stores.control,Object.fromEntries(url.searchParams)));
-        if(path==='/v1/workflows/timings')return json(res,200,await stageSummary(s.stores,Number(url.searchParams.get('limit')??50)));
-        const timing=path.match(/^\/v1\/workflows\/timings\/([a-f0-9]{64})$/);
-        if(timing)return json(res,200,await eventBreakdown(s.stores,timing[1]!));
-        if(/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))return json(res,200,await workflowDetail(s.stores.control,path.split('/').at(-1)!));
+      if (req.method === 'POST' && path === '/v1/import') {
+        admin(principal);
+        const body = object(await readJson(req, 32 * 1024 * 1024));
+        // Desktop batch imports are original-only; historical mixed-format exports
+        // take the explicit converter and retain their generated/guarded domains.
+        return json(
+          res,
+          200,
+          body.guarded != null ||
+            (Array.isArray(body.derived) && body.derived.length) ||
+            object(body.event).origin === 'generated'
+            ? await s.legacyImports.record(principal, body, url.searchParams.get('restore_guarded') === 'true')
+            : await s.imports.record(principal, body),
+        );
       }
-      if(path==='/v1/workflows/retry-failed'&&req.method==='POST')return json(res,200,await retryFailedWorkflows(s.stores.control,principal));
-      const control=path.match(/^\/v1\/workflows\/([a-f0-9]{64})\/(retry|cancel)$/);
-      if(control&&req.method==='POST')return json(res,200,await controlStorageWorkflow(s.stores.control,principal,control[1]!,control[2]!,await readJson(req)));
-      if(path==='/v1/workflows/migrations'||path.startsWith('/v1/workflows/migrations/'))throw new HttpError(409,'legacy_migration_not_applicable');
-    }
-    // The private-chat split of the Messages list and search (step 4), resolved from the chat rows in the store.
-    const privateScopes=async(filters:ArchiveFilters):Promise<ArchiveFilters>=>filters.private_chats?
-      {...filters,private_scopes:await otherPrivateScopes(s.stores.control,s.access.policy())}:filters;
-    const result=async(value:unknown,prepared=false)=>{
-      if(!principal.admin){if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
-      return json(res,200,value);
-    };
-    if(path==='/v1/telegram/destinations'&&req.method==='GET')return result(await s.telegramActions.destinations(principal));
-    if(path==='/v1/action-requests'&&req.method==='POST')return result(await s.actionCommands.offer('telegram',await s.telegramActions.request(principal,await readJson(req))));
-    // The Notion connections this turn may use, named for the agent (ADR-0268).
-    if(path==='/v1/notion/connections'&&req.method==='GET') {
-      if(principal.admin)throw new HttpError(403,'scoped_turn_required');
-      return result({connections:await notionConnectionsHere(s.stores.control,principal,await lookupTurn(s.stores.control,principal,await s.turns.binding(principal)))});
-    }
-    // The GitHub repositories this turn may look up (ADR-0270).
-    if(path==='/v1/github/repos'&&req.method==='GET') {
-      if(principal.admin)throw new HttpError(403,'scoped_turn_required');
-      return result(await githubReposHere(s.stores.control,principal,await lookupTurn(s.stores.control,principal,await s.turns.binding(principal))));
-    }
-    if(path==='/v1/tools/propose'&&req.method==='POST')return result(await s.actionCommands.offer('controlled',await s.controlledActions.propose(principal,await readJson(req))));
-    if(req.method==='POST'&&/^\/v1\/jobs\/(?:start|status|stop)$/.test(path)) {
-      const body=await readJson(req),action=path.slice('/v1/jobs/'.length);
-      if(action==='start')return result(await s.actionCommands.offer('background',await s.jobs.start(principal,body)));
-      if(action==='status')return result(await s.jobs.list(principal));
-      const stopped=await s.jobs.stop(principal,body);
-      // A stopped job's card shows that it stopped.
-      void s.actionCommands.settle('background',stopped.id).catch(()=>{});
-      return result(stopped);
-    }
-    // One command of a machine job's run on its machine (ADR-0231), through the broker only. Not an answer through result():
-    // the output is raw terminal bytes, and the run's next model request is secret-checked by the broker, as for the box.
-    if(req.method==='POST'&&path==='/v1/machines/exec') {
-      if(principal.admin)throw new HttpError(403,'machine_not_allowed');
-      return s.machines.exec(principal,await s.turns.binding(principal),await readJson(req,MACHINE_BODY),res);
-    }
-    if(req.method==='POST'&&['/v1/tools/claim','/v1/tools/start','/v1/tools/finish'].includes(path)) {
-      admin(principal);const body=await readJson(req,2*1024*1024);
-      if(path==='/v1/tools/finish')return json(res,200,await s.controlledExecution.finish(body));
-      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      return json(res,200,await (path.endsWith('/claim')?s.controlledExecution.claim(body):s.controlledExecution.start(body)));
-    }
-    if(req.method==='POST'&&['/v1/tools/decide','/v1/tools/grant','/v1/tools/revoke'].includes(path)) {
-      admin(principal);const body=await readJson(req);
-      const outcome=await (path.endsWith('/decide')?s.controlledActions.decide(principal,body):path.endsWith('/grant')?s.controlledActions.grant(principal,body):s.controlledActions.revoke(principal,body));
-      // A decision made here also closes the buttons on its Telegram card.
-      if(path.endsWith('/decide'))void s.actionCommands.settle('controlled',String((outcome as any).id)).catch(()=>{});
-      return json(res,200,outcome);
-    }
-    if(path==='/v1/tools/actions'&&req.method==='GET') {
-      if(!principal.admin)return result({telegram:await s.telegramActions.recent(principal),actions:await s.controlledActions.recent(principal)},true);
-      admin(principal);return json(res,200,{...await s.controlledActions.list(principal),telegram:await s.telegramActions.list(principal)});
-    }
-    if(path==='/v1/tools/telegram-decision'&&req.method==='POST') {
-      admin(principal);const outcome=await s.telegramActions.decide(principal,await readJson(req));
-      void s.actionCommands.settle('telegram',outcome.id).catch(()=>{});return json(res,200,outcome);
-    }
-    // The owner closes an unclear operation or send; its card says how (ADR-0218).
-    if(req.method==='POST'&&['/v1/tools/resolve','/v1/tools/telegram-resolve'].includes(path)) {
-      admin(principal);const body=await readJson(req),telegram=path.endsWith('/telegram-resolve');
-      const outcome=await (telegram?s.telegramActions.resolve(principal,body):s.controlledActions.resolve(principal,body));
-      void s.actionCommands.settle(telegram?'telegram':'controlled',outcome.id).catch(()=>{});return json(res,200,outcome);
-    }
-    const action=path.match(/^\/v1\/tools\/actions\/([a-f0-9]{64})$/);
-    if(action&&req.method==='GET') {
-      const exists=(await s.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1',[action[1]])).rowCount;
-      // in_turn: the asking turn's tool holds the ended result and names the state it read (ADR-0215).
-      return result(exists?await s.controlledActions.inspect(principal,action[1],url.searchParams.get('in_turn')):await s.telegramActions.inspect(principal,action[1]!),true);
-    }
-    if(path==='/v1/context/prepare'&&req.method==='POST') {
-      if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
-      return result(await readJson(req,1024*1024));
-    }
-    if(path==='/v1/memory/check'&&req.method==='GET'){
-      const source=principal.turnEvent?(await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;
-      // Schedule fires and job runs are control operations, never archived; the admitted run is their authority.
-      if(!principal.admin&&principal.turnEvent&&!source)return json(res,200,{valid:await s.scheduled.deliveryAllowed(principal)||await s.jobs.runs.deliveryAllowed(principal)});
-      const retired=principal.turnEvent?await s.retirements.isRetired((await s.archive.captured(principal.turnEvent)).reference):false;
-      return json(res,200,{valid:principal.admin||!retired&&telegramDeliveryAllowed(s.access.policy(),principal,source)});
-    }
-    // The owner's dashboard's facts and originals (ADR-0261 step 4): owner only, each answered in the owner's words.
-    if(req.method==='GET'&&path==='/v1/memory/longterm/coverage')return json(res,200,await s.memoryDashboard.coverage(principal));
-    if(req.method==='GET'&&path==='/v1/memory/facts')return json(res,200,await s.memoryDashboard.facts(principal,{chat:url.searchParams.get('chat')??'',
-      person:url.searchParams.get('person')??'',after:url.searchParams.get('after')??''}));
-    if(req.method==='GET'&&path==='/v1/memory/originals')return json(res,200,await s.originals.lookup(principal,url.searchParams.getAll('id')));
-    // A message's facts are asked of long-term memory itself, so they sit outside Messages' live paths (/events/).
-    if(req.method==='GET'&&path==='/v1/memory/message-facts')return json(res,200,await s.memoryDashboard.learned(principal,url.searchParams.get('id')??''));
-    const eventThread=path.match(/^\/v1\/events\/([a-f0-9]{64})\/thread$/);
-    if(req.method==='GET'&&eventThread)return json(res,200,await s.sources.ownerThread(principal,eventThread[1]!,s.originals));
-    if(path==='/v1/memory/longterm') {
-      admin(principal);
-      if(req.method==='GET')return json(res,200,await s.memory.status());
-      if(req.method==='POST')return json(res,200,await s.memory.connection(principal,await readJson(req)));
-    }
-    if(path==='/v1/memory/longterm/fresh-start'&&req.method==='POST')return json(res,200,await s.memory.freshStart(principal,await readJson(req)));
-    if(path==='/v1/memory/longterm/rebuild') {
-      admin(principal);
-      if(req.method==='GET')return json(res,200,await s.memory.rebuildEstimate(principal,url.searchParams.getAll('space')));
-      if(req.method==='POST')return json(res,200,await s.memory.relearn(principal,await readJson(req)));
-    }
-    if(path==='/v1/memory/longterm/retry-failed'&&req.method==='POST')return json(res,200,await s.memory.retryFailedLearning(principal));
-    if(path==='/v1/memory/longterm/verify'&&req.method==='POST'){admin(principal);return json(res,200,await s.memory.acceptVerification(principal,await readJson(req)));}
-    if(path==='/v1/memory/longterm/acceptance-session'&&req.method==='POST')return json(res,200,await s.memory.issueAcceptance(principal));
-    const acceptanceSession=path.match(/^\/v1\/memory\/longterm\/acceptance-session\/([a-f0-9]{64})$/);
-    if(acceptanceSession&&req.method==='DELETE')return json(res,200,await s.memory.closeAcceptance(principal,acceptanceSession[1]!));
-    if(req.method==='POST'&&['/v1/memory/longterm/context','/v1/memory/longterm/recall'].includes(path)) {
-      if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
-      const body=object(await readJson(req));
-      return result(path.endsWith('/context')?await s.memory.context(principal):
-        await timed(s.stores.control,principal.turnEvent,'longterm_recall','nocheh',()=>s.memory.recall(principal,string(body.query??'',2000))),true);
-    }
-    if(path==='/v1/memory/longterm/search'&&req.method==='POST') {
-      if(principal.admin)throw new HttpError(403,'scoped_memory_context_required');await s.turns.binding(principal);
-      const body=object(await readJson(req)),count=limit(body.limit,5,10);
-      const found=await timed(s.stores.control,principal.turnEvent,'longterm_search','nocheh',()=>s.memory.search(principal,string(body.query??'',2000),count));
-      // The first 3 messages of each learned batch name their source (ADR-0261); the hits are today's, in today's order.
-      return result({sources:await s.sources.found(principal,found.ids,count,searchTagged(found)),learned:found.learned,...(found.syncing?{syncing:true}:{})},true);
-    }
-    if(path==='/v1/memory/context'&&req.method==='GET') {
-      // A member's private chat and the owner's ask about a member are given nothing shared or granted (step 4), nor is a
-      // machine job's run, which reads only what its card showed (machine jobs' reads).
-      if(['member','memberRead'].includes(boundReader(principal)??'')||principal.machineReads)return result({sources:[],filter_status:'disabled'},true);
-      const query=url.searchParams.get('q')??'',existing=await s.shared.context(principal,query),granted=await s.memoryAccess.context(principal,query);
-      return result({...existing,sources:[...existing.sources,...granted.sources]},true);
-    }
-    const shared=path.match(/^\/v1\/memory\/(?:shared|filtered)\/([a-f0-9]{64})$/);
-    if(shared&&req.method==='GET')return result(await s.shared.read(principal,shared[1]!),true);
-    // A grant and an owner-corrected entry opened by archive_read (ADR-0261); neither is a private answer's route.
-    const grant=path.match(/^\/v1\/memory\/grants\/([a-f0-9]{64})$/);
-    if(grant&&req.method==='GET')return result(await s.memoryAccess.open(principal,grant[1]!),true);
-    // A recalled fact opened by archive_read nocheh:memory:<record> fact=<n> (ADR-0261); not a private answer's route.
-    const fact=path.match(/^\/v1\/memory\/facts\/([a-f0-9]{64})(?:\/([1-9][0-9]{0,2}))?$/);
-    if(fact&&req.method==='GET') {
-      if(!principal.admin)await s.turns.binding(principal);
-      return result(await s.memory.openFact(principal,fact[1]!,fact[2]===undefined?null:Number(fact[2])),true);
-    }
-    // What a note in this turn's evidence was written from, opened by archive_read {note} (ADR-0261); no bound reader's route (ADR-0262).
-    const noteEntry=path.match(/^\/v1\/memory\/notes\/([a-f0-9]{12})$/);
-    if(noteEntry&&req.method==='GET')return result(await s.sources.noteEntry(principal,noteEntry[1]!),true);
-    const learnedEntry=path.match(/^\/v1\/memory\/learned\/([a-f0-9]{64})\/([1-9][0-9]{0,8})$/);
-    if(learnedEntry&&req.method==='GET')return result(await s.sources.learnedEntry(principal,learnedEntry[1]!,Number(learnedEntry[2])),true);
-    if(path==='/v1/memory/recall'&&req.method==='POST') {
-      if(principal.scope!==null)throw new HttpError(403,'owner_memory_required');
-      const input=object(await readJson(req)),binding=await s.guards.state();
-      if(!principal.admin)await s.turns.binding(principal);
-      // Each hit says in words which chat it came from, never by its raw ID (ADR-0251), and each note where it came from (ADR-0257).
-      // An owner turn recalls the owner's own notes and those of the owner's chat and the groups Nocheh serves, never a
-      // member's private chat's or an ask about a member's (D7); the dashboard (admin) names none and reads every one.
-      const found=await agentOperation(s.agent,'recallNotes')({...input,guard_epoch:binding.epoch,generation:binding.generation,
-        ...(principal.admin?{}:{allowed:ownerRecallAllowed(s.access.policy())})});
-      // Each note hit names up to 3 of the messages it was written from, tagged for the owner (B3.6).
-      const tagged=async(ids:string[])=>s.tags.checked(principal,binding,[...(await s.archive.capturedMany(ids)).values()].map(item=>item.reference));
-      return result(await withRecallPlaces(s.stores,await s.noteSources.withRecallSources(found,tagged)));
-    }
-    if(path==='/v1/memory/reviews'&&req.method==='GET'){admin(principal);return json(res,200,await s.reviews.list(principal,url.searchParams.get('after')??''));}
-    if(path==='/v1/memory/reviews/control'&&req.method==='POST') {
-      admin(principal);const body=object(await readJson(req));
-      return json(res,200,await s.reviews.controlJob(principal,string(body.id,64),{action:body.action,expected_revision:body.expected_revision}));
-    }
-    if(req.method==='GET') {
-      if(path==='/v1/telegram/identities')return json(res,200,await telegramDirectory(s.stores.control,principal,s.stores.archive));
-      if(path==='/v1/search') {
-        const mode=url.searchParams.get('mode')??'text';
-        if(mode==='current_reactions')return result(await s.sources.currentReactions(principal,limit(url.searchParams.get('limit'),5,10)),true);
-        if(mode!=='text')throw new HttpError(400,'invalid_search_mode');
-        return result(await s.sources.search(principal,url.searchParams.get('q')??'',limit(url.searchParams.get('limit')),await privateScopes(archiveFilters(url.searchParams))),true);
+      if (req.method === 'POST' && path === '/v1/memory/reviews') {
+        admin(principal);
+        return json(res, 200, await s.imports.approveLearning(principal, await readJson(req)));
       }
-      if(path==='/v1/archive/page')return result(await s.sources.page(principal,{chat:url.searchParams.get('chat')??'',from:url.searchParams.get('from')??'',
-        to:url.searchParams.get('to')??'',after:url.searchParams.get('after')??'',count:limit(url.searchParams.get('limit'),30,50)}),true);
-      // A sealed job box's chat copy, through the broker only, which also checks the box token. Chat and period come from the job.
-      if(path==='/v1/box/chat') {
-        if([...url.searchParams.keys()].some(key=>key!=='cursor'))throw new HttpError(400,'invalid_box_request');
-        if(principal.admin)throw new HttpError(403,'job_box_not_allowed');
-        const copy=await box.chat(principal,await s.turns.binding(principal),s.sources,url.searchParams.get('cursor')??'');
-        await s.turns.assertAudience(principal);return json(res,200,copy);
+      if (/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path) && req.method === 'POST') {
+        admin(principal);
+        return json(
+          res,
+          200,
+          await s.imports.upload(principal, path.split('/')[3]!, await readJson(req, 70 * 1024 * 1024)),
+        );
       }
-      if(path==='/v1/imports/pending') {
-        // A bound reader hears only about imports into its groups, never the owner's nor a private chat's (ADR-0249, step 4).
-        if(boundReader(principal)!==null)return json(res,200,{imports:await pendingImports(s.stores.control,readSetGroups(s.access.reads(principal)!))});
-        // A machine job's run hears only about its own chat (machine jobs' reads).
-        if(principal.machineReads)return json(res,200,{imports:await pendingImports(s.stores.control,[principal.machineReads.chat])});
-        const owner=principal.scope===null||principal.scope===ownerChat(s.access.policy());
-        return json(res,200,{imports:await pendingImports(s.stores.control,owner?null:principal.scope)});
+
+      // Durable admission depends only on the owned filesystem. Database and
+      // workflow outages leave an acknowledged observation available for replay.
+      if (req.method === 'POST' && path === '/v1/ingest') {
+        admin(principal);
+        const value = envelope(await readJson(req, 16 * 1024 * 1024));
+        captureEvidence(value);
+        await immutableFile(
+          join(config.dataDir, 'spool', 'pending'),
+          digest(value.key) + '.json',
+          Buffer.from(canonical(value)),
+        );
+        return json(res, 202, {id: digest(value.key), state: 'spooled'});
       }
-      if(path==='/v1/graph')return json(res,200,await s.sources.graph(principal,url.searchParams.get('scope')??'*',url.searchParams.get('after')??'',limit(url.searchParams.get('limit')),url.searchParams.get('focus')??''));
-      const event=path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
-      // archive_read asks for the thread around a message (ADR-0261); without it, the read is today's.
-      if(event&&(url.searchParams.has('replies')||url.searchParams.has('chain'))) {
-        const bounded=(name:string,fallback:number,most:number)=>{const value=url.searchParams.get(name);
-          if(value===null)return fallback;if(!/^[0-9]{1,2}$/.test(value)||Number(value)>most)throw new HttpError(400,'invalid_thread_request');return Number(value);};
-        return result(await s.sources.opened(principal,event[1]!,{replies:bounded('replies',3,10),chain:bounded('chain',1,5)}),true);
+      // Owners can inspect and repair incomplete guard changes; scoped callers
+      // must observe the complete current authorization generation on every call.
+      // A job's run waits out a publication still pending first (ADR-0208).
+      if (!principal.admin)
+        await afterPending(jobRun(principal), async () => {
+          await s.turns.assertAudience(principal);
+          await assertGuardConfiguration(s.guards, config.guardMode);
+          await s.configuration.assert(config.assistant);
+        });
+      if (req.method === 'GET' && path === '/v1/entities')
+        return json(
+          res,
+          200,
+          await s.entities.list(principal, {
+            query: url.searchParams.get('q') ?? '',
+            kind: url.searchParams.get('kind') ?? '',
+            after: url.searchParams.get('after') ?? '',
+            state: url.searchParams.get('state') ?? 'active',
+          }),
+        );
+      const entityHistory = path.match(/^\/v1\/entities\/claims\/([a-f0-9]{64})\/history$/);
+      if (req.method === 'GET' && entityHistory)
+        return json(
+          res,
+          200,
+          await s.entities.history(
+            principal,
+            entityHistory[1]!,
+            url.searchParams.has('before') ? Number(url.searchParams.get('before')) : undefined,
+          ),
+        );
+      const entityRead = path.match(/^\/v1\/entities\/([a-f0-9]{64})$/);
+      if (req.method === 'GET' && entityRead)
+        return json(res, 200, await s.entities.inspect(principal, entityRead[1]!));
+      // Runtime knowledge tools have their own bound owner-turn checks. They never proxy arbitrary owner routes.
+      if (req.method === 'GET' && path === '/v1/knowledge/context')
+        return json(res, 200, await s.knowledge.inspect(principal, Object.fromEntries(url.searchParams)));
+      // The owner asks about a member's private chat with Nocheh (step 4b): only from the owner's own live turn, which the
+      // repository checks first; the answer comes later as a separate message.
+      // Whether this reply may set schedules with Hermes's schedule tool (ADR-0266): only the owner's own live Telegram
+      // message in their private chat, not a forward. The schedules run in the owner's time zone.
+      // Nocheh keeps a turn grant for an allowed turn, with the chat and profile its schedules must name (ADR-0290).
+      if (req.method === 'POST' && path === '/v1/schedules/turn')
+        return json(res, 200, await recordScheduleTurn(s, principal, await scheduleTurn(s, principal)));
+      // A schedule Hermes's tool set in this turn, posted from inside it: only with this turn's grant (ADR-0290).
+      if (req.method === 'POST' && path === '/v1/schedules/turn/definition')
+        return json(res, 200, await s.schedules.turnDefinition(principal, await readJson(req, 1024 * 1024), s));
+      // The owner or a member sets their own time zone by asking in their own private chat (ADR-0281, ADR-0282).
+      if (req.method === 'POST' && path === '/v1/schedules/time-zone')
+        return json(res, 200, await timeZoneTurn(s, principal, await readJson(req)));
+      if (req.method === 'POST' && path === '/v1/member-asks')
+        return json(res, 200, await s.memberAsks.ask(principal, await readJson(req, 16 * 1024)));
+      if (req.method === 'POST' && path === '/v1/knowledge/proposals')
+        return json(res, 200, await s.knowledge.propose(principal, await readJson(req)));
+      const knowledgeProposal = path.match(/^\/v1\/knowledge\/proposals\/([a-f0-9]{64})$/);
+      if (req.method === 'GET' && knowledgeProposal)
+        return json(res, 200, await s.knowledge.proposal(principal, knowledgeProposal[1]!));
+      // Task lists: the owner's private chat reaches every list, a project's chat only its own. A change asked in the
+      // owner's private chat that a project's chats would see gets its card there instead (ADR-0243).
+      if (req.method === 'GET' && path === '/v1/owner/tasks')
+        return json(res, 200, await s.tasks.chatList(principal, taskQuery(url.searchParams)));
+      if (req.method === 'POST' && path === '/v1/owner/tasks')
+        return json(
+          res,
+          200,
+          await s.actionCommands.offer('task', await s.tasks.chatCreate(principal, await readJson(req, 64 * 1024))),
+        );
+      const chatTask = path.match(/^\/v1\/owner\/tasks\/([a-f0-9]{64})(\/comments)?$/);
+      if (req.method === 'GET' && chatTask && !chatTask[2])
+        return json(res, 200, await s.tasks.chatGet(principal, chatTask[1]!));
+      if (req.method === 'POST' && chatTask)
+        return json(
+          res,
+          200,
+          await s.actionCommands.offer(
+            'task',
+            await (chatTask[2] ? s.tasks.chatComment : s.tasks.chatUpdate).call(
+              s.tasks,
+              principal,
+              chatTask[1]!,
+              await readJson(req, 64 * 1024),
+            ),
+          ),
+        );
+      // The owner may read all of their own data from a live owner-private turn, and a schedule's run there, such as a morning
+      // brief, may too (ADR-0266). Fixed read views map onto existing owner handlers; no mutation is reachable.
+      const ownerView = path.match(
+        /^\/v1\/owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map)$/,
+      );
+      if (req.method === 'GET' && ownerView) {
+        await s.knowledge.ownerReader(principal);
+        const reader = {admin: true, scope: null},
+          view = ownerView[1]!,
+          policy = s.access.policy();
+        // Chats with people Nocheh doesn't serve are named by those people; the turn never sees them.
+        if (view === 'telegram-identities') {
+          // As before, a group Nocheh does not serve is left out; the directory decides, so an unknown chat is left out too.
+          const found = await telegramDirectory(s.stores.control, reader, s.stores.archive),
+            directory = await currentChats(),
+            all = !policy.enabled || !policy.owner_id;
+          return json(res, 200, {...found, groups: found.groups.filter(group => all || directory.served(group.id))});
+        }
+        if (view === 'conversations')
+          return json(
+            res,
+            200,
+            await s.supervision.conversations(
+              reader,
+              {
+                q: url.searchParams.get('q') ?? '',
+                after: url.searchParams.get('after') ?? '',
+                limit: limit(url.searchParams.get('limit'), 50, 100),
+                kind: url.searchParams.get('kind') ?? '',
+                state: url.searchParams.get('state') ?? '',
+              },
+              await s.supervision.outsiders(policy),
+            ),
+          );
+        if (view === 'conversation-context') {
+          const space = url.searchParams.get('space') ?? '';
+          if (await s.supervision.outsider(policy, space)) throw new HttpError(404, 'conversation_not_found');
+        }
+        if (view === 'people') {
+          // The owner's private note about each person shows here, in the owner's own private chat only (ADR-0274).
+          const found = await s.entities.list(reader, {
+              query: url.searchParams.get('q') ?? '',
+              kind: url.searchParams.get('kind') ?? '',
+              after: url.searchParams.get('after') ?? '',
+              state: 'active',
+            }),
+            notes = await s.entities.ownerNotes(
+              reader,
+              found.entities.map(entity => entity.id),
+            );
+          return json(res, 200, {
+            ...found,
+            entities: found.entities.map(entity =>
+              notes.get(entity.id)?.note ? {...entity, private_note: notes.get(entity.id)!.note} : entity,
+            ),
+          });
+        }
+        const target = (
+          {
+            conversations: '/v1/conversations',
+            'conversation-context': '/v1/conversations/context',
+            projects: '/v1/projects',
+            'project-assignments': '/v1/projects/assignments',
+            'memory-map': '/v1/memory-map',
+          } as Record<string, string>
+        )[view]!;
+        return json(res, 200, await owner.request(reader, 'GET', new URL(target + url.search, url)));
       }
-      if(event)return result(await s.sources.read(principal,event[1]!),true);
-      const file=path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
-      if(file){const bytes=await s.sources.bytes(principal,file[1]!);res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store','content-length':bytes.length});return res.end(bytes);}
-      admin(principal);
-      // One schedule's runs for the owner's Schedules page (ADR-0266).
-      if(path==='/v1/schedules/runs')return json(res,200,await s.scheduled.runLog(url.searchParams.get('scope')??'',url.searchParams.get('job_id')??''));
-      if(path==='/v1/scopes') {
-        const rows=(await s.stores.archive.query("SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 AND origin<>'generated' AND kind<>'telegram_wire' GROUP BY scope ORDER BY scope LIMIT 101",[url.searchParams.get('after')??''])).rows;
-        return json(res,200,{scopes:rows.slice(0,100),next:rows.length>100?rows[99].scope:null});
+      if (await owner.handle(principal, req, res, url)) return;
+      if (path === '/v1/runtime/profiles' || path === '/v1/runtime/profiles/resolve') {
+        admin(principal);
+        await assertGuardConfiguration(s.guards, config.guardMode);
+        await s.configuration.assert(config.assistant);
+        if (req.method === 'GET' && path === '/v1/runtime/profiles')
+          return json(res, 200, await s.runtimeProfiles.list(principal));
+        if (req.method === 'POST')
+          return json(
+            res,
+            200,
+            await (path.endsWith('/resolve')
+              ? s.runtimeProfiles.resolve(principal, await readJson(req))
+              : s.runtimeProfiles.save(principal, await readJson(req))),
+          );
       }
-      if(path==='/v1/data') {
-        const after=url.searchParams.get('after')??'',filters=await privateScopes(archiveFilters(url.searchParams));if(after&&!/^[a-f0-9]{64}$/.test(after))throw new HttpError(400,'invalid_cursor');
-        const candidates=(await s.stores.archive.query("SELECT e.id,e.channel,e.scope,e.source_id,e.revision,e.kind,e.origin,e.occurred_at,e.received_at,e.original_text,e.payload,(SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=e.id) AS artifact_kinds FROM events e WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1)) AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2) AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message') AND ($5::text[] IS NULL OR (e.scope=ANY($5::text[]))=$6) ORDER BY e.received_at DESC,e.id DESC LIMIT $4",[after,filters.scope,filters.kind,filters.reply?201:51,...privateChatsParams(filters)])).rows;
-        const states=candidates.length?(await s.stores.control.query(`SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
-          error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,[candidates.map(row=>row.id)])).rows:[];
-        const stateById=new Map(states.map(state=>[state.event_id,state]));
-        const reviews=await actionReviews(s.stores.control,candidates.filter(row=>row.kind==='telegram_update').map(row=>row.id),'separated');
-        const matched=candidates.filter(row=>matchesArchiveFilters(row,stateById.get(row.id)?.assistant_state,filters,reviews.get(row.id)?.state));
-        // The dashboard asks for a page that fits one screen; the cursor is the last message returned, whatever the size.
-        const size=limit(url.searchParams.get('limit'),50,50),page=matched.slice(0,size);
-        const retiredEvents=await s.retirements.retiredEvents(page.map(row=>row.id)),liveCopies=await s.retirements.liveCopies(page.map(row=>row.id));
-        const [replyPreviews,transcriptPreviews,copies]=await Promise.all([
-          archiveReplyPreviews(s.stores.archive,s.stores.control,page),archiveTranscriptPreviews(s.stores.derived,page),agentCopies(s.stores.derived,page.map(row=>row.id))]);
-        const records=page.map(({payload,artifact_kinds,original_text,...row})=>{const original=JSON.parse(payload.toString());return {...row,...stateById.get(row.id),retired:retiredEvents.has(row.id),
-          ...(liveCopies.has(row.id)?{live_copy:true}:{}),
-          sender:messageSender(row.kind,original),agent_copy:copies.get(row.id),
-          ...(reviews.has(row.id)?{action_review:reviews.get(row.id)}:{}),
-          text:original_text?.toString()??null,content_types:sourceContentTypes(row.kind,original,artifact_kinds??[]),
-          reaction_preview:reactionPreview(row.kind,original),
-          reply_messages:replyPreviews.get(row.id)??[],transcript_preview:transcriptPreviews.get(row.id)??null};});
-        const next=matched.length>size?matched[size-1].id:filters.reply&&candidates.length===201?candidates.at(-1).id:null;
-        return json(res,200,{records,next});
+      if (req.method === 'POST' && path === '/v1/agent/manage') {
+        // Owner management of the agent's own state (ADR-0234): each action maps to an agent operation, never a native path.
+        admin(principal);
+        const {action, ...input} = object(await readJson(req, 1024 * 1024)),
+          writes = ['changes', 'role', 'skills'].some(key => key in input);
+        const operation = (
+          {
+            profiles: 'listProfiles',
+            memory: 'readNotes',
+            preferences: writes ? 'writeSettings' : 'readSettings',
+            persona: writes ? 'writePersona' : 'readPersona',
+            schedules: 'manageSchedules',
+          } as Record<string, AgentOperation>
+        )[string(action, 20)];
+        if (!operation) throw new HttpError(400, 'unknown_management_action');
+        if (operation === 'manageSchedules') {
+          // The Schedules pages (ADR-0266): each schedule with the name of its chat as the owner sees it.
+          if (input.operation === 'list')
+            return json(
+              res,
+              200,
+              await scheduleChats(
+                s.stores.control,
+                ownerChat(s.access.policy()),
+                await agentOperation(s.agent, operation)(input),
+              ),
+            );
+          // The owner's Pause, Resume, Delete or Run now: Nocheh grants that one change first, so Hermes's post of it is
+          // accepted (ADR-0290). Nothing else changes a schedule from here.
+          if (!['pause', 'resume', 'delete', 'run'].includes(String(input.operation)))
+            throw new HttpError(400, 'invalid_schedule_action');
+          const change = input.operation as 'pause' | 'resume' | 'delete' | 'run',
+            profile = scheduleIdentity(input.profile),
+            job = scheduleIdentity(input.job_id);
+          const request =
+            input.request_id === undefined || input.request_id === null
+              ? randomUUID().replaceAll('-', '')
+              : input.request_id;
+          if (typeof request !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(request))
+            throw new HttpError(400, 'invalid_schedule_action');
+          await issueScheduleGrant(s.stores.control, {
+            profile,
+            job_id: job,
+            operation: change,
+            person: 'owner',
+            request_id: request,
+          });
+          return json(
+            res,
+            200,
+            await agentOperation(s.agent, operation)({operation: change, profile, job_id: job, request_id: request}),
+          );
+        }
+        // Each note says where it came from in the owner's words; what Hermes recorded about it stays behind.
+        const value = await agentOperation(s.agent, operation)(input);
+        return json(
+          res,
+          200,
+          operation === 'readNotes'
+            ? await s.noteSources.withOwnerLabels(value, ids => s.originals.originals(ids))
+            : value,
+        );
       }
-      if(path==='/v1/status') {
-        const [guard,archive,services,spool,dispatches,sends,memoryDay]=await Promise.all([s.guards.state(),s.sources.status(principal),
-          s.stores.control.query('SELECT service,seen_at FROM service_heartbeats ORDER BY service'),
-          // Health shows incoming updates that could not be saved and the latest replies' states.
-          s.stores.control.query('SELECT attempts,error_code,seen_at FROM spool_failures ORDER BY seen_at DESC LIMIT 100'),
-          s.stores.control.query('SELECT event_id,state,attempts,error_code,updated_at FROM dispatches ORDER BY created_at DESC LIMIT 50'),
-          // And what the chat apps refused or never answered in the last day.
-          s.chatSends.summary(),
-          // And the memory steps that failed today where Hermes can't see them: labelling notes, and recall's ask of the owner's forwards and files.
-          memoryProblems(s.stores.control)]);
-        const received=new Map((await s.stores.archive.query('SELECT id,received_at FROM events WHERE id=ANY($1::text[])',
-          [dispatches.rows.map(row=>row.event_id)])).rows.map(row=>[row.id,row.received_at]));
-        return json(res,200,{service:config.service,storage_layout:'original-only-v1',guard,guard_mode:guard.mode,
-          archive:{...archive,spool_failures:spool.rows,workflows:dispatches.rows.map(row=>({...row,received_at:received.get(row.event_id)??null}))},
-          chat_sends:sends,memory_problems:memoryDay,services:services.rows,workers:status()});
+      if (req.method === 'POST' && path.startsWith('/v1/scheduler/')) {
+        admin(principal);
+        const body = object(await readJson(req, 2 * 1024 * 1024)),
+          operation = path.slice('/v1/scheduler/'.length);
+        if (operation === 'finish') return json(res, 200, await s.scheduled.finish(body));
+        await assertGuardConfiguration(s.guards, config.guardMode);
+        await s.configuration.assert(config.assistant);
+        if (operation === 'definition') return json(res, 200, await s.schedules.definition(principal, body));
+        if (operation === 'input') return json(res, 200, await s.schedules.capture(principal, body));
+        if (operation === 'workflow-context') return json(res, 200, await s.scheduled.context(body));
+        if (operation === 'claim') return json(res, 200, await s.scheduled.claim(body));
+        if (operation === 'prepare') return json(res, 200, await s.scheduled.prepare(body));
+        if (operation === 'heartbeat') return json(res, 200, await s.scheduled.heartbeat(body));
+        if (operation === 'observe') return json(res, 200, await s.scheduled.observe(body));
+        if (operation === 'cancel') return json(res, 200, await s.scheduled.cancel(body));
+        if (operation === 'recover') return json(res, 200, await s.scheduled.recoverExpired());
+        if (operation === 'runs') return json(res, 200, await s.scheduled.history(body));
+        // Ownership, delivery and a new schedule's message are Nocheh's own now: it delivers after run() and announces from
+        // the turn route (ADR-0290).
+        throw new HttpError(404, 'not_found');
       }
-    }
-    throw new HttpError(404,'not_found');
-  })().catch(error=>{
-    if(res.headersSent){res.destroy();return;}
-    // A refusal may name what to ask instead (task_project_required names the lists to choose from, D14).
-    const details=error instanceof HttpError?(error as {details?:Record<string,unknown>}).details:undefined;
-    json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'service_unavailable',...(details??{})});
-  });});
-  server.requestTimeout=30000;return server;
+      if (req.method === 'POST' && path.startsWith('/v1/background/')) {
+        admin(principal);
+        const body = object(await readJson(req, 2 * 1024 * 1024)),
+          operation = path.slice('/v1/background/'.length),
+          runs = s.jobs.runs;
+        if (operation === 'finish') return json(res, 200, await runs.finish(body));
+        if (operation === 'cancel') return json(res, 200, await runs.cancel(body));
+        if (operation === 'observe') return json(res, 200, await runs.observe(body));
+        await assertGuardConfiguration(s.guards, config.guardMode);
+        await s.configuration.assert(config.assistant);
+        if (operation === 'workflow-context') return json(res, 200, await runs.context(body));
+        if (operation === 'claim') return json(res, 200, await runs.claim(body));
+        if (operation === 'prepare') return json(res, 200, await runs.prepare(body));
+        if (operation === 'heartbeat') return json(res, 200, await runs.heartbeat(body));
+        throw new HttpError(404, 'not_found');
+      }
+      if (
+        await ownerSecurityRoute(s.stores.control, principal, req, res, url, {
+          separated: true,
+          preview: input => s.controlledActions.preview(principal, input),
+        })
+      )
+        return;
+      if (path === '/v1/workflows' || path.startsWith('/v1/workflows/')) {
+        admin(principal);
+
+        if (req.method === 'POST' && path.startsWith('/v1/workflows/imports/')) {
+          const body = await readJson(req);
+          if (path === '/v1/workflows/imports/confirm')
+            return json(res, 200, await confirmImport(s.stores.control, body));
+          if (path === '/v1/workflows/imports/reconcile-receipt')
+            return json(res, 200, await reconcileImportReceipt(s.stores.control, body));
+          if (path === '/v1/workflows/imports/cancel')
+            return json(res, 200, await cancelImport(s.stores.control, object(body).id));
+        }
+        if (req.method === 'GET' && /^\/v1\/workflows\/imports\/[a-f0-9-]{36}$/.test(path)) {
+          const id = path.split('/').at(-1)!;
+          const job = (
+            await s.stores.control.query(
+              'SELECT id,state,completed,duplicates,learning_after,review_approved,total,generation,updated_at,ready_at FROM workflow_imports WHERE id=$1',
+              [id],
+            )
+          ).rows[0];
+          const owner = (await s.stores.control.query("SELECT owner FROM workflow_owners WHERE family='imports'"))
+            .rows[0].owner;
+          // How far its messages are prepared, until the import is ready to ask about.
+          const progress =
+            job && !job.ready_at && ['running', 'completed'].includes(job.state)
+              ? await importProgress(s.stores.control, id)
+              : null;
+          return json(res, 200, {owned: !!job, owner, job: job && {...job, progress}});
+        }
+        if (req.method === 'POST' && path.startsWith('/v1/workflows/host/')) {
+          const body = await readJson(req);
+          if (path === '/v1/workflows/host/claim') {
+            await assertGuardConfiguration(s.guards, config.guardMode);
+            await s.configuration.assert(config.assistant);
+            return json(res, 200, await claimHostWorkflow(s.stores.control, body));
+          }
+          if (path === '/v1/workflows/host/renew')
+            return json(res, 200, await renewHostWorkflow(s.stores.control, body));
+          if (path === '/v1/workflows/host/finish')
+            return json(res, 200, await finishHostWorkflow(s.stores.control, body));
+          if (path === '/v1/workflows/host/continue')
+            return json(res, 200, await continueHostWorkflow(s.stores.control, body));
+          if (path === '/v1/workflows/host/heartbeat') {
+            await registerWorker(s.stores.control, 'host', ['imports', 'tools']);
+            await s.stores.control.query(
+              "INSERT INTO service_heartbeats(service) VALUES('workflow-host') ON CONFLICT(service) DO UPDATE SET seen_at=now()",
+            );
+            return json(res, 200, {ok: true});
+          }
+        }
+        if (path.startsWith('/v1/workflows/inspection/'))
+          return proxyInngestInspection(req, res, process.env.INNGEST_SIGNING_KEY ?? '');
+        if (req.method === 'GET') {
+          if (path === '/v1/workflows')
+            return json(res, 200, await listWorkflows(s.stores.control, Object.fromEntries(url.searchParams)));
+          if (path === '/v1/workflows/health') return json(res, 200, await workflowHealth(s.stores.control));
+          if (path === '/v1/workflows/metrics')
+            return json(res, 200, await workflowMetrics(s.stores.control, Object.fromEntries(url.searchParams)));
+          if (path === '/v1/workflows/timings')
+            return json(res, 200, await stageSummary(s.stores, Number(url.searchParams.get('limit') ?? 50)));
+          const timing = path.match(/^\/v1\/workflows\/timings\/([a-f0-9]{64})$/);
+          if (timing) return json(res, 200, await eventBreakdown(s.stores, timing[1]!));
+          if (/^\/v1\/workflows\/[a-f0-9]{64}$/.test(path))
+            return json(res, 200, await workflowDetail(s.stores.control, path.split('/').at(-1)!));
+        }
+        if (path === '/v1/workflows/retry-failed' && req.method === 'POST')
+          return json(res, 200, await retryFailedWorkflows(s.stores.control, principal));
+        const control = path.match(/^\/v1\/workflows\/([a-f0-9]{64})\/(retry|cancel)$/);
+        if (control && req.method === 'POST')
+          return json(
+            res,
+            200,
+            await controlStorageWorkflow(s.stores.control, principal, control[1]!, control[2]!, await readJson(req)),
+          );
+        if (path === '/v1/workflows/migrations' || path.startsWith('/v1/workflows/migrations/'))
+          throw new HttpError(409, 'legacy_migration_not_applicable');
+      }
+      // The private-chat split of the Messages list and search (step 4), resolved from the chat rows in the store.
+      const privateScopes = async (filters: ArchiveFilters): Promise<ArchiveFilters> =>
+        filters.private_chats
+          ? {...filters, private_scopes: await otherPrivateScopes(s.stores.control, s.access.policy())}
+          : filters;
+      const result = async (value: unknown, prepared = false) => {
+        if (!principal.admin) {
+          if (prepared) await s.prepared.allow(principal, value);
+          else value = await s.prepared.prepare(principal, value, s.detect);
+          await s.turns.assertAudience(principal);
+        }
+        return json(res, 200, value);
+      };
+      if (path === '/v1/telegram/destinations' && req.method === 'GET')
+        return result(await s.telegramActions.destinations(principal));
+      if (path === '/v1/action-requests' && req.method === 'POST')
+        return result(
+          await s.actionCommands.offer('telegram', await s.telegramActions.request(principal, await readJson(req))),
+        );
+      // The Notion connections this turn may use, named for the agent (ADR-0268).
+      if (path === '/v1/notion/connections' && req.method === 'GET') {
+        if (principal.admin) throw new HttpError(403, 'scoped_turn_required');
+        return result({
+          connections: await notionConnectionsHere(
+            s.stores.control,
+            principal,
+            await lookupTurn(s.stores.control, principal, await s.turns.binding(principal)),
+          ),
+        });
+      }
+      // The GitHub repositories this turn may look up (ADR-0270).
+      if (path === '/v1/github/repos' && req.method === 'GET') {
+        if (principal.admin) throw new HttpError(403, 'scoped_turn_required');
+        return result(
+          await githubReposHere(
+            s.stores.control,
+            principal,
+            await lookupTurn(s.stores.control, principal, await s.turns.binding(principal)),
+          ),
+        );
+      }
+      if (path === '/v1/tools/propose' && req.method === 'POST')
+        return result(
+          await s.actionCommands.offer('controlled', await s.controlledActions.propose(principal, await readJson(req))),
+        );
+      if (req.method === 'POST' && /^\/v1\/jobs\/(?:start|status|stop)$/.test(path)) {
+        const body = await readJson(req),
+          action = path.slice('/v1/jobs/'.length);
+        if (action === 'start')
+          return result(await s.actionCommands.offer('background', await s.jobs.start(principal, body)));
+        if (action === 'status') return result(await s.jobs.list(principal));
+        const stopped = await s.jobs.stop(principal, body);
+        // A stopped job's card shows that it stopped.
+        void s.actionCommands.settle('background', stopped.id).catch(() => {});
+        return result(stopped);
+      }
+      // One command of a machine job's run on its machine (ADR-0231), through the broker only. Not an answer through result():
+      // the output is raw terminal bytes, and the run's next model request is secret-checked by the broker, as for the box.
+      if (req.method === 'POST' && path === '/v1/machines/exec') {
+        if (principal.admin) throw new HttpError(403, 'machine_not_allowed');
+        return s.machines.exec(principal, await s.turns.binding(principal), await readJson(req, MACHINE_BODY), res);
+      }
+      if (req.method === 'POST' && ['/v1/tools/claim', '/v1/tools/start', '/v1/tools/finish'].includes(path)) {
+        admin(principal);
+        const body = await readJson(req, 2 * 1024 * 1024);
+        if (path === '/v1/tools/finish') return json(res, 200, await s.controlledExecution.finish(body));
+        await assertGuardConfiguration(s.guards, config.guardMode);
+        await s.configuration.assert(config.assistant);
+        return json(
+          res,
+          200,
+          await (path.endsWith('/claim') ? s.controlledExecution.claim(body) : s.controlledExecution.start(body)),
+        );
+      }
+      if (req.method === 'POST' && ['/v1/tools/decide', '/v1/tools/grant', '/v1/tools/revoke'].includes(path)) {
+        admin(principal);
+        const body = await readJson(req);
+        const outcome = await (path.endsWith('/decide')
+          ? s.controlledActions.decide(principal, body)
+          : path.endsWith('/grant')
+            ? s.controlledActions.grant(principal, body)
+            : s.controlledActions.revoke(principal, body));
+        // A decision made here also closes the buttons on its Telegram card.
+        if (path.endsWith('/decide'))
+          void s.actionCommands.settle('controlled', String((outcome as any).id)).catch(() => {});
+        return json(res, 200, outcome);
+      }
+      if (path === '/v1/tools/actions' && req.method === 'GET') {
+        if (!principal.admin)
+          return result(
+            {telegram: await s.telegramActions.recent(principal), actions: await s.controlledActions.recent(principal)},
+            true,
+          );
+        admin(principal);
+        return json(res, 200, {
+          ...(await s.controlledActions.list(principal)),
+          telegram: await s.telegramActions.list(principal),
+        });
+      }
+      if (path === '/v1/tools/telegram-decision' && req.method === 'POST') {
+        admin(principal);
+        const outcome = await s.telegramActions.decide(principal, await readJson(req));
+        void s.actionCommands.settle('telegram', outcome.id).catch(() => {});
+        return json(res, 200, outcome);
+      }
+      // The owner closes an unclear operation or send; its card says how (ADR-0218).
+      if (req.method === 'POST' && ['/v1/tools/resolve', '/v1/tools/telegram-resolve'].includes(path)) {
+        admin(principal);
+        const body = await readJson(req),
+          telegram = path.endsWith('/telegram-resolve');
+        const outcome = await (telegram
+          ? s.telegramActions.resolve(principal, body)
+          : s.controlledActions.resolve(principal, body));
+        void s.actionCommands.settle(telegram ? 'telegram' : 'controlled', outcome.id).catch(() => {});
+        return json(res, 200, outcome);
+      }
+      const action = path.match(/^\/v1\/tools\/actions\/([a-f0-9]{64})$/);
+      if (action && req.method === 'GET') {
+        const exists = (await s.stores.control.query('SELECT 1 FROM controlled_actions WHERE id=$1', [action[1]]))
+          .rowCount;
+        // in_turn: the asking turn's tool holds the ended result and names the state it read (ADR-0215).
+        return result(
+          exists
+            ? await s.controlledActions.inspect(principal, action[1], url.searchParams.get('in_turn'))
+            : await s.telegramActions.inspect(principal, action[1]!),
+          true,
+        );
+      }
+      if (path === '/v1/context/prepare' && req.method === 'POST') {
+        if (principal.admin) throw new HttpError(403, 'scoped_turn_required');
+        await s.turns.binding(principal);
+        return result(await readJson(req, 1024 * 1024));
+      }
+      if (path === '/v1/memory/check' && req.method === 'GET') {
+        const source = principal.turnEvent
+          ? ((
+              await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1', [
+                principal.turnEvent,
+              ])
+            ).rows[0] ?? null)
+          : null;
+        // Schedule fires and job runs are control operations, never archived; the admitted run is their authority.
+        if (!principal.admin && principal.turnEvent && !source)
+          return json(res, 200, {
+            valid: (await s.scheduled.deliveryAllowed(principal)) || (await s.jobs.runs.deliveryAllowed(principal)),
+          });
+        const retired = principal.turnEvent
+          ? await s.retirements.isRetired((await s.archive.captured(principal.turnEvent)).reference)
+          : false;
+        return json(res, 200, {
+          valid: principal.admin || (!retired && telegramDeliveryAllowed(s.access.policy(), principal, source)),
+        });
+      }
+      // The owner's dashboard's facts and originals (ADR-0261 step 4): owner only, each answered in the owner's words.
+      if (req.method === 'GET' && path === '/v1/memory/longterm/coverage')
+        return json(res, 200, await s.memoryDashboard.coverage(principal));
+      if (req.method === 'GET' && path === '/v1/memory/facts')
+        return json(
+          res,
+          200,
+          await s.memoryDashboard.facts(principal, {
+            chat: url.searchParams.get('chat') ?? '',
+            person: url.searchParams.get('person') ?? '',
+            after: url.searchParams.get('after') ?? '',
+          }),
+        );
+      if (req.method === 'GET' && path === '/v1/memory/hidden')
+        return json(res, 200, await s.memoryDashboard.hidden(principal, url.searchParams.get('after') ?? ''));
+      if (req.method === 'POST' && path === '/v1/memory/hidden/restore')
+        return json(res, 200, await s.memoryDashboard.restore(principal, await readJson(req)));
+      if (req.method === 'GET' && path === '/v1/memory/originals')
+        return json(res, 200, await s.originals.lookup(principal, url.searchParams.getAll('id')));
+      // A message's facts are asked of long-term memory itself, so they sit outside Messages' live paths (/events/).
+      if (req.method === 'GET' && path === '/v1/memory/message-facts')
+        return json(res, 200, await s.memoryDashboard.learned(principal, url.searchParams.get('id') ?? ''));
+      const eventThread = path.match(/^\/v1\/events\/([a-f0-9]{64})\/thread$/);
+      if (req.method === 'GET' && eventThread)
+        return json(res, 200, await s.sources.ownerThread(principal, eventThread[1]!, s.originals));
+      if (path === '/v1/memory/longterm') {
+        admin(principal);
+        if (req.method === 'GET') return json(res, 200, await s.memory.status());
+        if (req.method === 'POST') return json(res, 200, await s.memory.connection(principal, await readJson(req)));
+      }
+      if (path === '/v1/memory/longterm/fresh-start' && req.method === 'POST')
+        return json(res, 200, await s.memory.freshStart(principal, await readJson(req)));
+      if (path === '/v1/memory/longterm/rebuild') {
+        admin(principal);
+        if (req.method === 'GET')
+          return json(res, 200, await s.memory.rebuildEstimate(principal, url.searchParams.getAll('space')));
+        if (req.method === 'POST') return json(res, 200, await s.memory.relearn(principal, await readJson(req)));
+      }
+      if (path === '/v1/memory/longterm/retry-failed' && req.method === 'POST')
+        return json(res, 200, await s.memory.retryFailedLearning(principal));
+      if (path === '/v1/memory/longterm/verify' && req.method === 'POST') {
+        admin(principal);
+        return json(res, 200, await s.memory.acceptVerification(principal, await readJson(req)));
+      }
+      if (path === '/v1/memory/longterm/acceptance-session' && req.method === 'POST')
+        return json(res, 200, await s.memory.issueAcceptance(principal));
+      const acceptanceSession = path.match(/^\/v1\/memory\/longterm\/acceptance-session\/([a-f0-9]{64})$/);
+      if (acceptanceSession && req.method === 'DELETE')
+        return json(res, 200, await s.memory.closeAcceptance(principal, acceptanceSession[1]!));
+      if (req.method === 'POST' && ['/v1/memory/longterm/context', '/v1/memory/longterm/recall'].includes(path)) {
+        if (principal.admin) throw new HttpError(403, 'scoped_memory_context_required');
+        await s.turns.binding(principal);
+        const body = object(await readJson(req));
+        return result(
+          path.endsWith('/context')
+            ? await s.memory.context(principal)
+            : await timed(s.stores.control, principal.turnEvent, 'longterm_recall', 'nocheh', () =>
+                s.memory.recall(principal, string(body.query ?? '', 2000)),
+              ),
+          true,
+        );
+      }
+      if (path === '/v1/memory/longterm/search' && req.method === 'POST') {
+        if (principal.admin) throw new HttpError(403, 'scoped_memory_context_required');
+        await s.turns.binding(principal);
+        const body = object(await readJson(req)),
+          count = limit(body.limit, 5, 10);
+        const found = await timed(s.stores.control, principal.turnEvent, 'longterm_search', 'nocheh', () =>
+          s.memory.search(principal, string(body.query ?? '', 2000), count),
+        );
+        // The first 3 messages of each learned batch name their source (ADR-0261); the hits are today's, in today's order.
+        return result(
+          {
+            sources: await s.sources.found(principal, found.ids, count, searchTagged(found)),
+            learned: found.learned,
+            ...(found.syncing ? {syncing: true} : {}),
+          },
+          true,
+        );
+      }
+      if (path === '/v1/memory/context' && req.method === 'GET') {
+        // A member's private chat and the owner's ask about a member are given nothing shared or granted (step 4), nor is a
+        // machine job's run, which reads only what its card showed (machine jobs' reads).
+        if (['member', 'memberRead'].includes(boundReader(principal) ?? '') || principal.machineReads)
+          return result({sources: [], filter_status: 'disabled'}, true);
+        const query = url.searchParams.get('q') ?? '',
+          existing = await s.shared.context(principal, query),
+          granted = await s.memoryAccess.context(principal, query);
+        return result({...existing, sources: [...existing.sources, ...granted.sources]}, true);
+      }
+      const shared = path.match(/^\/v1\/memory\/(?:shared|filtered)\/([a-f0-9]{64})$/);
+      if (shared && req.method === 'GET') return result(await s.shared.read(principal, shared[1]!), true);
+      // A grant and an owner-corrected entry opened by archive_read (ADR-0261); neither is a private answer's route.
+      const grant = path.match(/^\/v1\/memory\/grants\/([a-f0-9]{64})$/);
+      if (grant && req.method === 'GET') return result(await s.memoryAccess.open(principal, grant[1]!), true);
+      // A recalled fact opened by archive_read nocheh:memory:<record> fact=<n> (ADR-0261); not a private answer's route.
+      const fact = path.match(/^\/v1\/memory\/facts\/([a-f0-9]{64})(?:\/([1-9][0-9]{0,2}))?$/);
+      if (fact && req.method === 'GET') {
+        if (!principal.admin) await s.turns.binding(principal);
+        return result(
+          await s.memory.openFact(principal, fact[1]!, fact[2] === undefined ? null : Number(fact[2])),
+          true,
+        );
+      }
+      // What a note in this turn's evidence was written from, opened by archive_read {note} (ADR-0261); no bound reader's route (ADR-0262).
+      const noteEntry = path.match(/^\/v1\/memory\/notes\/([a-f0-9]{12})$/);
+      if (noteEntry && req.method === 'GET') return result(await s.sources.noteEntry(principal, noteEntry[1]!), true);
+      const learnedEntry = path.match(/^\/v1\/memory\/learned\/([a-f0-9]{64})\/([1-9][0-9]{0,8})$/);
+      if (learnedEntry && req.method === 'GET')
+        return result(await s.sources.learnedEntry(principal, learnedEntry[1]!, Number(learnedEntry[2])), true);
+      if (path === '/v1/memory/recall' && req.method === 'POST') {
+        if (principal.scope !== null) throw new HttpError(403, 'owner_memory_required');
+        const input = object(await readJson(req)),
+          binding = await s.guards.state();
+        if (!principal.admin) await s.turns.binding(principal);
+        // Each hit says in words which chat it came from, never by its raw ID (ADR-0251), and each note where it came from (ADR-0257).
+        // An owner turn recalls the owner's own notes and those of the owner's chat and the groups Nocheh serves, never a
+        // member's private chat's or an ask about a member's (D7); the dashboard (admin) names none and reads every one.
+        const found = await agentOperation(
+          s.agent,
+          'recallNotes',
+        )({
+          ...input,
+          guard_epoch: binding.epoch,
+          generation: binding.generation,
+          ...(principal.admin ? {} : {allowed: ownerRecallAllowed(s.access.policy())}),
+        });
+        // Each note hit names up to 3 of the messages it was written from, tagged for the owner (B3.6).
+        const tagged = async (ids: string[]) =>
+          s.tags.checked(
+            principal,
+            binding,
+            [...(await s.archive.capturedMany(ids)).values()].map(item => item.reference),
+          );
+        return result(await withRecallPlaces(s.stores, await s.noteSources.withRecallSources(found, tagged)));
+      }
+      if (path === '/v1/memory/reviews' && req.method === 'GET') {
+        admin(principal);
+        return json(res, 200, await s.reviews.list(principal, url.searchParams.get('after') ?? ''));
+      }
+      if (path === '/v1/memory/reviews/control' && req.method === 'POST') {
+        admin(principal);
+        const body = object(await readJson(req));
+        return json(
+          res,
+          200,
+          await s.reviews.controlJob(principal, string(body.id, 64), {
+            action: body.action,
+            expected_revision: body.expected_revision,
+          }),
+        );
+      }
+      if (req.method === 'GET') {
+        if (path === '/v1/telegram/identities')
+          return json(res, 200, await telegramDirectory(s.stores.control, principal, s.stores.archive));
+        if (path === '/v1/search') {
+          const mode = url.searchParams.get('mode') ?? 'text';
+          if (mode === 'current_reactions')
+            return result(
+              await s.sources.currentReactions(principal, limit(url.searchParams.get('limit'), 5, 10)),
+              true,
+            );
+          if (mode !== 'text') throw new HttpError(400, 'invalid_search_mode');
+          return result(
+            await s.sources.search(
+              principal,
+              url.searchParams.get('q') ?? '',
+              limit(url.searchParams.get('limit')),
+              await privateScopes(archiveFilters(url.searchParams)),
+            ),
+            true,
+          );
+        }
+        if (path === '/v1/archive/page')
+          return result(
+            await s.sources.page(principal, {
+              chat: url.searchParams.get('chat') ?? '',
+              from: url.searchParams.get('from') ?? '',
+              to: url.searchParams.get('to') ?? '',
+              after: url.searchParams.get('after') ?? '',
+              count: limit(url.searchParams.get('limit'), 30, 50),
+            }),
+            true,
+          );
+        // A sealed job box's chat copy, through the broker only, which also checks the box token. Chat and period come from the job.
+        if (path === '/v1/box/chat') {
+          if ([...url.searchParams.keys()].some(key => key !== 'cursor'))
+            throw new HttpError(400, 'invalid_box_request');
+          if (principal.admin) throw new HttpError(403, 'job_box_not_allowed');
+          const copy = await box.chat(
+            principal,
+            await s.turns.binding(principal),
+            s.sources,
+            url.searchParams.get('cursor') ?? '',
+          );
+          await s.turns.assertAudience(principal);
+          return json(res, 200, copy);
+        }
+        if (path === '/v1/imports/pending') {
+          // A bound reader hears only about imports into its groups, never the owner's nor a private chat's (ADR-0249, step 4).
+          if (boundReader(principal) !== null)
+            return json(res, 200, {
+              imports: await pendingImports(s.stores.control, readSetGroups(s.access.reads(principal)!)),
+            });
+          // A machine job's run hears only about its own chat (machine jobs' reads).
+          if (principal.machineReads)
+            return json(res, 200, {imports: await pendingImports(s.stores.control, [principal.machineReads.chat])});
+          const owner = principal.scope === null || principal.scope === ownerChat(s.access.policy());
+          return json(res, 200, {imports: await pendingImports(s.stores.control, owner ? null : principal.scope)});
+        }
+        if (path === '/v1/graph')
+          return json(
+            res,
+            200,
+            await s.sources.graph(
+              principal,
+              url.searchParams.get('scope') ?? '*',
+              url.searchParams.get('after') ?? '',
+              limit(url.searchParams.get('limit')),
+              url.searchParams.get('focus') ?? '',
+            ),
+          );
+        const event = path.match(/^\/v1\/events\/([a-f0-9]{64})$/);
+        // archive_read asks for the thread around a message (ADR-0261); without it, the read is today's.
+        if (event && (url.searchParams.has('replies') || url.searchParams.has('chain'))) {
+          const bounded = (name: string, fallback: number, most: number) => {
+            const value = url.searchParams.get(name);
+            if (value === null) return fallback;
+            if (!/^[0-9]{1,2}$/.test(value) || Number(value) > most) throw new HttpError(400, 'invalid_thread_request');
+            return Number(value);
+          };
+          return result(
+            await s.sources.opened(principal, event[1]!, {
+              replies: bounded('replies', 3, 10),
+              chain: bounded('chain', 1, 5),
+            }),
+            true,
+          );
+        }
+        if (event) return result(await s.sources.read(principal, event[1]!), true);
+        const file = path.match(/^\/v1\/artifacts\/([a-f0-9]{64})\/bytes$/);
+        if (file) {
+          const bytes = await s.sources.bytes(principal, file[1]!);
+          res.writeHead(200, {
+            'content-type': 'application/octet-stream',
+            'cache-control': 'no-store',
+            'content-length': bytes.length,
+          });
+          return res.end(bytes);
+        }
+        admin(principal);
+        // One schedule's runs for the owner's Schedules page (ADR-0266).
+        if (path === '/v1/schedules/runs')
+          return json(
+            res,
+            200,
+            await s.scheduled.runLog(url.searchParams.get('scope') ?? '', url.searchParams.get('job_id') ?? ''),
+          );
+        if (path === '/v1/scopes') {
+          const rows = (
+            await s.stores.archive.query(
+              "SELECT scope,count(*)::integer AS events FROM events WHERE scope>$1 AND origin<>'generated' AND kind<>'telegram_wire' GROUP BY scope ORDER BY scope LIMIT 101",
+              [url.searchParams.get('after') ?? ''],
+            )
+          ).rows;
+          return json(res, 200, {scopes: rows.slice(0, 100), next: rows.length > 100 ? rows[99].scope : null});
+        }
+        if (path === '/v1/data') {
+          const after = url.searchParams.get('after') ?? '',
+            filters = await privateScopes(archiveFilters(url.searchParams));
+          if (after && !/^[a-f0-9]{64}$/.test(after)) throw new HttpError(400, 'invalid_cursor');
+          const candidates = (
+            await s.stores.archive.query(
+              "SELECT e.id,e.channel,e.scope,e.source_id,e.revision,e.kind,e.origin,e.occurred_at,e.received_at,e.original_text,e.payload,(SELECT array_agg(a.kind ORDER BY a.id) FROM artifacts a WHERE a.event_id=e.id) AS artifact_kinds FROM events e WHERE ($1='' OR (e.received_at,e.id)<(SELECT received_at,id FROM events WHERE id=$1)) AND e.origin<>'generated' AND e.kind<>'telegram_wire' AND ($2='' OR e.scope=$2) AND ($3='' OR $3='incoming' AND e.kind IN ('telegram_update','browser_input') OR $3='assistant' AND e.kind LIKE '%_delivered_message') AND ($5::text[] IS NULL OR (e.scope=ANY($5::text[]))=$6) ORDER BY e.received_at DESC,e.id DESC LIMIT $4",
+              [after, filters.scope, filters.kind, filters.reply ? 201 : 51, ...privateChatsParams(filters)],
+            )
+          ).rows;
+          const states = candidates.length
+            ? (
+                await s.stores.control.query(
+                  `SELECT event_id,state AS assistant_state,runtime_stage AS assistant_stage,
+          error_code AS assistant_error,attempts AS assistant_attempts FROM dispatches WHERE event_id=ANY($1::text[])`,
+                  [candidates.map(row => row.id)],
+                )
+              ).rows
+            : [];
+          const stateById = new Map(states.map(state => [state.event_id, state]));
+          const reviews = await actionReviews(
+            s.stores.control,
+            candidates.filter(row => row.kind === 'telegram_update').map(row => row.id),
+            'separated',
+          );
+          const matched = candidates.filter(row =>
+            matchesArchiveFilters(row, stateById.get(row.id)?.assistant_state, filters, reviews.get(row.id)?.state),
+          );
+          // The dashboard asks for a page that fits one screen; the cursor is the last message returned, whatever the size.
+          const size = limit(url.searchParams.get('limit'), 50, 50),
+            page = matched.slice(0, size);
+          const retiredEvents = await s.retirements.retiredEvents(page.map(row => row.id)),
+            liveCopies = await s.retirements.liveCopies(page.map(row => row.id));
+          const [replyPreviews, transcriptPreviews, copies] = await Promise.all([
+            archiveReplyPreviews(s.stores.archive, s.stores.control, page),
+            archiveTranscriptPreviews(s.stores.derived, page),
+            agentCopies(
+              s.stores.derived,
+              page.map(row => row.id),
+            ),
+          ]);
+          const records = page.map(({payload, artifact_kinds, original_text, ...row}) => {
+            const original = JSON.parse(payload.toString());
+            return {
+              ...row,
+              ...stateById.get(row.id),
+              retired: retiredEvents.has(row.id),
+              ...(liveCopies.has(row.id) ? {live_copy: true} : {}),
+              sender: messageSender(row.kind, original),
+              agent_copy: copies.get(row.id),
+              ...(reviews.has(row.id) ? {action_review: reviews.get(row.id)} : {}),
+              text: original_text?.toString() ?? null,
+              content_types: sourceContentTypes(row.kind, original, artifact_kinds ?? []),
+              reaction_preview: reactionPreview(row.kind, original),
+              reply_messages: replyPreviews.get(row.id) ?? [],
+              transcript_preview: transcriptPreviews.get(row.id) ?? null,
+            };
+          });
+          const next =
+            matched.length > size
+              ? matched[size - 1].id
+              : filters.reply && candidates.length === 201
+                ? candidates.at(-1).id
+                : null;
+          return json(res, 200, {records, next});
+        }
+        if (path === '/v1/status') {
+          const [guard, archive, services, spool, dispatches, sends, memoryDay] = await Promise.all([
+            s.guards.state(),
+            s.sources.status(principal),
+            s.stores.control.query('SELECT service,seen_at FROM service_heartbeats ORDER BY service'),
+            // Health shows incoming updates that could not be saved and the latest replies' states.
+            s.stores.control.query(
+              'SELECT attempts,error_code,seen_at FROM spool_failures ORDER BY seen_at DESC LIMIT 100',
+            ),
+            s.stores.control.query(
+              'SELECT event_id,state,attempts,error_code,updated_at FROM dispatches ORDER BY created_at DESC LIMIT 50',
+            ),
+            // And what the chat apps refused or never answered in the last day.
+            s.chatSends.summary(),
+            // And the memory steps that failed today where Hermes can't see them: labelling notes, and recall's ask of the owner's forwards and files.
+            memoryProblems(s.stores.control),
+          ]);
+          const received = new Map(
+            (
+              await s.stores.archive.query('SELECT id,received_at FROM events WHERE id=ANY($1::text[])', [
+                dispatches.rows.map(row => row.event_id),
+              ])
+            ).rows.map(row => [row.id, row.received_at]),
+          );
+          return json(res, 200, {
+            service: config.service,
+            storage_layout: 'original-only-v1',
+            guard,
+            guard_mode: guard.mode,
+            archive: {
+              ...archive,
+              spool_failures: spool.rows,
+              workflows: dispatches.rows.map(row => ({...row, received_at: received.get(row.event_id) ?? null})),
+            },
+            chat_sends: sends,
+            memory_problems: memoryDay,
+            services: services.rows,
+            workers: status(),
+          });
+        }
+      }
+      throw new HttpError(404, 'not_found');
+    })().catch(error => {
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      // A refusal may name what to ask instead (task_project_required names the lists to choose from, D14).
+      const details = error instanceof HttpError ? (error as {details?: Record<string, unknown>}).details : undefined;
+      json(res, error instanceof HttpError ? error.status : 503, {
+        error: error instanceof HttpError ? error.code : 'service_unavailable',
+        ...(details ?? {}),
+      });
+    });
+  });
+  server.requestTimeout = 30000;
+  return server;
 }

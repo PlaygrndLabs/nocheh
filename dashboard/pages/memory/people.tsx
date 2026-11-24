@@ -192,9 +192,13 @@ export function People() {
 }
 
 function PersonDrawer({id, onClose}: {id: string | null; onClose: () => void}) {
-  const detail = useResource<{entity: Entity; claims: Claim[]; bindings: unknown[]; partial: boolean; note?: PrivateNote}>(
-    id ? '/entities/' + id : null,
-  );
+  const detail = useResource<{
+    entity: Entity;
+    claims: Claim[];
+    bindings: unknown[];
+    partial: boolean;
+    note?: PrivateNote;
+  }>(id ? '/entities/' + id : null);
   const entity = detail.data?.entity;
   return (
     <Drawer open={!!id} onOpenChange={open => !open && onClose()} title={entity?.name ?? 'Person'} wide>
@@ -231,7 +235,9 @@ function PersonDetail({
   return (
     <div className="space-y-6">
       <NameEditor entity={entity} mergedInto={names(entity.merged_into)} />
-      {entity.state === 'active' && data.note && <NoteEditor key={data.note.revision} entity={entity} saved={data.note} />}
+      {entity.state === 'active' && data.note && (
+        <NoteEditor key={data.note.revision} entity={entity} saved={data.note} />
+      )}
 
       <section>
         <h3 className="mb-2 text-sm font-semibold">What Nocheh knows</h3>
@@ -292,7 +298,8 @@ function PersonDetail({
   );
 }
 
-const SHOWN_NAME = 'Everyone sees this name: in groups, to members, and in memory. Use the private note for anything only for you.';
+const SHOWN_NAME =
+  'Everyone sees this name: in groups, to members, and in memory. Use the private note for anything only for you.';
 const RENAMED_SEEN = 'nocheh.people.renamed-notice';
 
 /** Once: the names the owner set, which everyone now reads (ADR-0274). Dismissed for this browser. */

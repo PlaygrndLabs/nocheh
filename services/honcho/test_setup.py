@@ -100,6 +100,7 @@ class HonchoSetupTests(unittest.TestCase):
                 honcho_setup.initialize(state)
                 values = read_env(state / 'honcho/honcho.env')
                 self.assertEqual(values['DREAM_ENABLED'], 'true')
+                self.assertEqual(values['DREAM_HISTORY_ENABLED'], 'false')
                 self.assertEqual(values['PEER_CARD_ENABLED'], 'false')
                 write_env(env_path(state), {**read_env(env_path(state)), 'NOCHEH_MEMORY_RETIRE_OLD_FACTS': 'false'})
                 honcho_setup.initialize(state)

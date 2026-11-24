@@ -3,7 +3,7 @@ import os
 import runpy
 import sys
 sys.path.insert(0,'/app')
-from boundary import WorkspaceMiddleware,bind_dreams,bind_reconciler,bind_worker,install_transport
+from boundary import WorkspaceMiddleware,bind_dreams,bind_hiding,bind_reconciler,bind_worker,install_transport
 import httpx
 install_transport(httpx,background=sys.argv[1:2]==['deriver'])
 if sys.argv[1]=='api':
@@ -18,6 +18,9 @@ elif sys.argv[1]=='deriver':
     bind_worker(QueueManager,parse_work_unit_key)
     import src.deriver.consumer as consumer
     bind_dreams(consumer)
+    import src.crud as crud
+    from sqlalchemy import text
+    bind_hiding(crud,text)
     import src.reconciler.sync_vectors as sync_vectors
     bind_reconciler(sync_vectors)
     runpy.run_module('src.deriver',run_name='__main__')

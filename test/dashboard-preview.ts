@@ -2,34 +2,61 @@ import {workflowMetrics} from '../src/workflows/metrics.js';
 /** Isolated UI acceptance fixture. No poller, scheduler, provider, or effect executor. */
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
-import {createHash,randomUUID} from 'node:crypto';
+import {createHash, randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {DashboardSessions} from '../src/dashboard-auth.js';
-import {HttpError,json,readJson} from '../src/http.js';
+import {HttpError, json, readJson} from '../src/http.js';
 import {githubReturn} from '../src/github-return.js';
 import {OwnerLock} from '../src/owner-lock.js';
 import {tmpdir} from 'node:os';
-import {TaskRepository,taskQuery,taskSchema} from '../src/stores/tasks.js';
-import {NotionRepository,notionSchema,notionTarget} from '../src/stores/notion.js';
-import {ChatToolSettingsRepository,chatToolSchema} from '../src/stores/chat-tools.js';
+import {TaskRepository, taskQuery, taskSchema} from '../src/stores/tasks.js';
+import {NotionRepository, notionSchema, notionTarget} from '../src/stores/notion.js';
+import {ChatToolSettingsRepository, chatToolSchema} from '../src/stores/chat-tools.js';
 import {controlPolicySchema} from '../src/stores/policy-schema.js';
 import {controlEntitySchema} from '../src/stores/entity-schema.js';
 import {requestWorkflow} from '../src/workflows/store.js';
-import {listWorkflows,workflowHealth,workflowDetail,controlWorkflow} from '../src/workflows/owner.js';
-import {accountIdFor,chatDirectory,chatIdFor,chatShortId,chats,conversationFields,installChats,type ChatIdRow,type ChatRow} from '../src/chats.js';
+import {listWorkflows, workflowHealth, workflowDetail, controlWorkflow} from '../src/workflows/owner.js';
+import {
+  accountIdFor,
+  chatDirectory,
+  chatIdFor,
+  chatShortId,
+  chats,
+  conversationFields,
+  installChats,
+  type ChatIdRow,
+  type ChatRow,
+} from '../src/chats.js';
 import {memberIdFor} from '../src/members.js';
-import type {MemberGroup,MemberGroupRef,MemberItem,MemberList,MemberPerson} from '../src/member-wire.js';
-import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from '../src/stores/member-api.js';
+import type {MemberGroup, MemberGroupRef, MemberItem, MemberList, MemberPerson} from '../src/member-wire.js';
+import {
+  memberAddRequest,
+  memberChangeRequest,
+  memberRemoveRequest,
+  memberSettingsRequest,
+} from '../src/stores/member-api.js';
 import type {ChatState} from '../src/chat-wire.js';
-import {labeledPlaceholders,memberPrivateDailyLimitReply,memberReadFrame,memberReadTexts,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,scheduleNoticeTexts,sourceTexts} from '../src/prompts.js';
+import {
+  labeledPlaceholders,
+  memberPrivateDailyLimitReply,
+  memberReadFrame,
+  memberReadTexts,
+  membersLocalLaws,
+  notAllowedPrivateReply,
+  promptProblem,
+  promptSchema,
+  reminderTexts,
+  scheduleNoticeTexts,
+  sourceTexts,
+} from '../src/prompts.js';
 import {matchesArchiveFilters} from '../src/archive-filters.js';
-import {archiveScopes,otherPrivate,parentSpace} from '../src/spaces.js';
+import {archiveScopes, otherPrivate, parentSpace} from '../src/spaces.js';
 import {chatSchema} from '../src/stores/chat-schema.js';
 import {chatRecordSchema} from '../src/stores/chats.js';
 import {memberAppPreview} from './dashboard-preview-member.js';
-if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_in_required');
+if (process.env.NOCHEH_WORKFLOW_FIXTURE !== '1') throw Error('synthetic_fixture_opt_in_required');
 /*
  * The chat directory the preview serves (ADR-0252). Chats Nocheh knew before step 2b keep their stored value as their
  * id ('42', '-10042', '-10042/topic/7'); a group first seen later has a digest id ('Night sky club', with a topic), and a
@@ -39,34 +66,95 @@ if(process.env.NOCHEH_WORKFLOW_FIXTURE!=='1')throw Error('synthetic_fixture_opt_
  * who ('Choir practice', left) or someone removed it ('Hiking crew'). The group switch (POST /chats/state) changes a
  * state here, in memory.
  */
-const NEW_GROUP_TG='-10088',NEW_GROUP=chatIdFor('telegram',NEW_GROUP_TG),NEW_TOPIC=chatIdFor('telegram',NEW_GROUP_TG,'3');
-const UPGRADED_OLD_TG='-4005',UPGRADED_TG='-10099',UPGRADED=chatIdFor('telegram',UPGRADED_OLD_TG);
-const LEAVING_GROUP=chatIdFor('telegram','-10091'),LEFT_GROUP=chatIdFor('telegram','-10092'),REMOVED_GROUP=chatIdFor('telegram','-10093');
-const REMOVED_TOPIC=chatIdFor('telegram','-10093','5');
-const previewChats:{id:string;kind:'private'|'group';title:string|null;ids:string[];old?:string[];is_forum?:boolean;topics?:[string,string][];state?:ChatState}[]=[
- {id:'42',kind:'private',title:'Owner',ids:['42'],state:'active'},
- {id:'73',kind:'private',title:'Mira Chen',ids:['73']},
- {id:'-10042',kind:'group',title:'Aurora planning',ids:['-10042'],is_forum:true,topics:[['-10042/topic/7','7']],state:'active'},
- {id:'-10073',kind:'group',title:'Weekend notes',ids:['-10073']},
- {id:'-10077',kind:'group',title:null,ids:['-10077']},
- {id:NEW_GROUP,kind:'group',title:'Night sky club',ids:[NEW_GROUP_TG],is_forum:true,topics:[[NEW_TOPIC,'3']]},
- {id:UPGRADED,kind:'group',title:'Garden swap',ids:[UPGRADED_TG],old:[UPGRADED_OLD_TG],state:'active'},
- {id:LEAVING_GROUP,kind:'group',title:'Book swap',ids:['-10091'],state:'pending'},
- {id:LEFT_GROUP,kind:'group',title:'Choir practice',ids:['-10092'],state:'left'},
- {id:REMOVED_GROUP,kind:'group',title:'Hiking crew',ids:['-10093'],is_forum:true,topics:[[REMOVED_TOPIC,'5']],state:'removed'},
+const NEW_GROUP_TG = '-10088',
+  NEW_GROUP = chatIdFor('telegram', NEW_GROUP_TG),
+  NEW_TOPIC = chatIdFor('telegram', NEW_GROUP_TG, '3');
+const UPGRADED_OLD_TG = '-4005',
+  UPGRADED_TG = '-10099',
+  UPGRADED = chatIdFor('telegram', UPGRADED_OLD_TG);
+const LEAVING_GROUP = chatIdFor('telegram', '-10091'),
+  LEFT_GROUP = chatIdFor('telegram', '-10092'),
+  REMOVED_GROUP = chatIdFor('telegram', '-10093');
+const REMOVED_TOPIC = chatIdFor('telegram', '-10093', '5');
+const previewChats: {
+  id: string;
+  kind: 'private' | 'group';
+  title: string | null;
+  ids: string[];
+  old?: string[];
+  is_forum?: boolean;
+  topics?: [string, string][];
+  state?: ChatState;
+}[] = [
+  {id: '42', kind: 'private', title: 'Owner', ids: ['42'], state: 'active'},
+  {id: '73', kind: 'private', title: 'Mira Chen', ids: ['73']},
+  {
+    id: '-10042',
+    kind: 'group',
+    title: 'Aurora planning',
+    ids: ['-10042'],
+    is_forum: true,
+    topics: [['-10042/topic/7', '7']],
+    state: 'active',
+  },
+  {id: '-10073', kind: 'group', title: 'Weekend notes', ids: ['-10073']},
+  {id: '-10077', kind: 'group', title: null, ids: ['-10077']},
+  {
+    id: NEW_GROUP,
+    kind: 'group',
+    title: 'Night sky club',
+    ids: [NEW_GROUP_TG],
+    is_forum: true,
+    topics: [[NEW_TOPIC, '3']],
+  },
+  {id: UPGRADED, kind: 'group', title: 'Garden swap', ids: [UPGRADED_TG], old: [UPGRADED_OLD_TG], state: 'active'},
+  {id: LEAVING_GROUP, kind: 'group', title: 'Book swap', ids: ['-10091'], state: 'pending'},
+  {id: LEFT_GROUP, kind: 'group', title: 'Choir practice', ids: ['-10092'], state: 'left'},
+  {
+    id: REMOVED_GROUP,
+    kind: 'group',
+    title: 'Hiking crew',
+    ids: ['-10093'],
+    is_forum: true,
+    topics: [[REMOVED_TOPIC, '5']],
+    state: 'removed',
+  },
 ];
 /** Each chat's state, which the group switch changes; a chat with none listed starts off. */
-const chatStates=new Map<string,ChatState>(previewChats.map(chat=>[chat.id,chat.state??'off']));
+const chatStates = new Map<string, ChatState>(previewChats.map(chat => [chat.id, chat.state ?? 'off']));
 function previewDirectory() {
-  const chats:ChatRow[]=[],ids:ChatIdRow[]=[];
-  for(const chat of previewChats) {
-    const state=chatStates.get(chat.id)!;
-    chats.push({id:chat.id,app:'telegram',kind:chat.kind,parent_id:null,topic_key:null,state,title:chat.title,is_forum:chat.is_forum===true});
-    for(const [id,key] of chat.topics??[])chats.push({id,app:'telegram',kind:'topic',parent_id:chat.id,topic_key:key,state});
-    ids.push(...chat.ids.map(external=>({app:'telegram' as const,external_id:external,chat_id:chat.id,state:'current' as const})),
-      ...(chat.old??[]).map(external=>({app:'telegram' as const,external_id:external,chat_id:chat.id,state:'old' as const})));
+  const chats: ChatRow[] = [],
+    ids: ChatIdRow[] = [];
+  for (const chat of previewChats) {
+    const state = chatStates.get(chat.id)!;
+    chats.push({
+      id: chat.id,
+      app: 'telegram',
+      kind: chat.kind,
+      parent_id: null,
+      topic_key: null,
+      state,
+      title: chat.title,
+      is_forum: chat.is_forum === true,
+    });
+    for (const [id, key] of chat.topics ?? [])
+      chats.push({id, app: 'telegram', kind: 'topic', parent_id: chat.id, topic_key: key, state});
+    ids.push(
+      ...chat.ids.map(external => ({
+        app: 'telegram' as const,
+        external_id: external,
+        chat_id: chat.id,
+        state: 'current' as const,
+      })),
+      ...(chat.old ?? []).map(external => ({
+        app: 'telegram' as const,
+        external_id: external,
+        chat_id: chat.id,
+        state: 'old' as const,
+      })),
+    );
   }
-  return chatDirectory({chats,ids,owner_chat:'42'});
+  return chatDirectory({chats, ids, owner_chat: '42'});
 }
 // The process's directory, for the real repositories the preview runs.
 installChats(previewDirectory());
@@ -77,624 +165,3124 @@ installChats(previewDirectory());
  * carried from the lists before step 3 and never wrote: only Telegram's name for him shows. Devon is paused, with read-only
  * tasks. Nia (in two groups) and Rosa are seen in groups and aren't members; Sam left Garden swap, so he is no one to add.
  */
-type PreviewMember={id:string;account:string;telegram:string;name:string|null;username:string|null;state:'active'|'paused';added_at:string;
- permissions:MemberItem['permissions'];switches:Map<string,boolean>;presence:Map<string,'in'|'left'>};
-const joinedGroups=()=>previewChats.filter(chat=>chat.kind==='group'&&!['left','removed','archived'].includes(chatStates.get(chat.id)!));
-const groupRef=(chat:string):MemberGroupRef=>({chat_id:chat,title:previewChats.find(item=>item.id===chat)?.title??null,state:chatStates.get(chat)!});
-const byGroupTitle=(a:MemberGroupRef,b:MemberGroupRef)=>(a.title??'￿').localeCompare(b.title??'￿')||(a.chat_id<b.chat_id?-1:1);
-const seenPeople:{telegram:string;name:string|null;username:string|null;presence:[string,'in'|'left'][]}[]=[
- {telegram:'91',name:'Nia',username:null,presence:[['-10042','in'],[NEW_GROUP,'in']]},{telegram:'61',name:'Rosa',username:null,presence:[[UPGRADED,'in']]},
- {telegram:'63',name:'Sam',username:null,presence:[[UPGRADED,'left']]}];
-const previewMember=(telegram:string,name:string|null,username:string|null,switches:[string,boolean][],presence:[string,'in'|'left'][],
- changes:Partial<Pick<PreviewMember,'state'|'permissions'|'added_at'>>={}):PreviewMember=>{const account=accountIdFor('telegram',telegram);
- return {id:memberIdFor(account),account,telegram,name,username,state:'active',added_at:'2026-11-10T09:00:00.000Z',
-  permissions:{talk:true,jobs:true,post:true,tools:true,tasks:'write',private_chat:true,reminders:true,assistant:false},switches:new Map(switches),presence:new Map(presence),...changes};};
-const previewMembers:PreviewMember[]=[
- previewMember('73','Mira Chen','mira',[['-10042',true],['-10073',false]],[['-10042','in'],['-10073','in'],[UPGRADED,'in']]),
- previewMember('95',null,null,[['-10042',true]],[]),
- previewMember('84','Devon',null,[['-10073',true]],[['-10073','in']],{state:'paused',permissions:{talk:true,jobs:false,post:true,tools:true,tasks:'read',private_chat:true,reminders:true,assistant:false}}),
+type PreviewMember = {
+  id: string;
+  account: string;
+  telegram: string;
+  name: string | null;
+  username: string | null;
+  state: 'active' | 'paused';
+  added_at: string;
+  permissions: MemberItem['permissions'];
+  switches: Map<string, boolean>;
+  presence: Map<string, 'in' | 'left'>;
+};
+const joinedGroups = () =>
+  previewChats.filter(
+    chat => chat.kind === 'group' && !['left', 'removed', 'archived'].includes(chatStates.get(chat.id)!),
+  );
+const groupRef = (chat: string): MemberGroupRef => ({
+  chat_id: chat,
+  title: previewChats.find(item => item.id === chat)?.title ?? null,
+  state: chatStates.get(chat)!,
+});
+const byGroupTitle = (a: MemberGroupRef, b: MemberGroupRef) =>
+  (a.title ?? '￿').localeCompare(b.title ?? '￿') || (a.chat_id < b.chat_id ? -1 : 1);
+const seenPeople: {
+  telegram: string;
+  name: string | null;
+  username: string | null;
+  presence: [string, 'in' | 'left'][];
+}[] = [
+  {
+    telegram: '91',
+    name: 'Nia',
+    username: null,
+    presence: [
+      ['-10042', 'in'],
+      [NEW_GROUP, 'in'],
+    ],
+  },
+  {telegram: '61', name: 'Rosa', username: null, presence: [[UPGRADED, 'in']]},
+  {telegram: '63', name: 'Sam', username: null, presence: [[UPGRADED, 'left']]},
 ];
-let memberRevision=3,dailyMessages=200,memberSchedules=5;
-const memberReceipts=new Map<string,{request:string;result:unknown}>();
-function memberItem(member:PreviewMember):MemberItem {
- const joined=new Set(joinedGroups().map(chat=>chat.id));
- const listed=new Set([...member.switches.keys(),...[...member.presence.keys()].filter(chat=>joined.has(chat))]);
- const groups:MemberGroup[]=[...listed].map(chat=>({...groupRef(chat),on:member.switches.get(chat)??true,telegram:member.presence.get(chat)??null,
-  new:member.presence.get(chat)==='in'&&!member.switches.has(chat)})).sort(byGroupTitle);
- return {id:member.id,account_id:member.account,state:member.state,name:member.name,username:member.username,telegram_id:member.telegram,owner_linked:false,
-  added_at:member.added_at,permissions:{...member.permissions},groups};
+const previewMember = (
+  telegram: string,
+  name: string | null,
+  username: string | null,
+  switches: [string, boolean][],
+  presence: [string, 'in' | 'left'][],
+  changes: Partial<Pick<PreviewMember, 'state' | 'permissions' | 'added_at'>> = {},
+): PreviewMember => {
+  const account = accountIdFor('telegram', telegram);
+  return {
+    id: memberIdFor(account),
+    account,
+    telegram,
+    name,
+    username,
+    state: 'active',
+    added_at: '2026-11-10T09:00:00.000Z',
+    permissions: {
+      talk: true,
+      jobs: true,
+      post: true,
+      tools: true,
+      tasks: 'write',
+      private_chat: true,
+      reminders: true,
+      assistant: false,
+    },
+    switches: new Map(switches),
+    presence: new Map(presence),
+    ...changes,
+  };
+};
+const previewMembers: PreviewMember[] = [
+  previewMember(
+    '73',
+    'Mira Chen',
+    'mira',
+    [
+      ['-10042', true],
+      ['-10073', false],
+    ],
+    [
+      ['-10042', 'in'],
+      ['-10073', 'in'],
+      [UPGRADED, 'in'],
+    ],
+  ),
+  previewMember('95', null, null, [['-10042', true]], []),
+  previewMember('84', 'Devon', null, [['-10073', true]], [['-10073', 'in']], {
+    state: 'paused',
+    permissions: {
+      talk: true,
+      jobs: false,
+      post: true,
+      tools: true,
+      tasks: 'read',
+      private_chat: true,
+      reminders: true,
+      assistant: false,
+    },
+  }),
+];
+let memberRevision = 3,
+  dailyMessages = 200,
+  memberSchedules = 5;
+const memberReceipts = new Map<string, {request: string; result: unknown}>();
+function memberItem(member: PreviewMember): MemberItem {
+  const joined = new Set(joinedGroups().map(chat => chat.id));
+  const listed = new Set([...member.switches.keys(), ...[...member.presence.keys()].filter(chat => joined.has(chat))]);
+  const groups: MemberGroup[] = [...listed]
+    .map(chat => ({
+      ...groupRef(chat),
+      on: member.switches.get(chat) ?? true,
+      telegram: member.presence.get(chat) ?? null,
+      new: member.presence.get(chat) === 'in' && !member.switches.has(chat),
+    }))
+    .sort(byGroupTitle);
+  return {
+    id: member.id,
+    account_id: member.account,
+    state: member.state,
+    name: member.name,
+    username: member.username,
+    telegram_id: member.telegram,
+    owner_linked: false,
+    added_at: member.added_at,
+    permissions: {...member.permissions},
+    groups,
+  };
 }
-function memberList():MemberList {
- const joined=new Set(joinedGroups().map(chat=>chat.id)),linked=new Set(previewMembers.map(member=>member.account));
- const people:MemberPerson[]=seenPeople.map(person=>({account_id:accountIdFor('telegram',person.telegram),name:person.name,username:person.username,telegram_id:person.telegram,
-  groups:person.presence.filter(([chat,state])=>state==='in'&&joined.has(chat)).map(([chat])=>groupRef(chat)).sort(byGroupTitle)}))
-  .filter(person=>person.groups.length&&!linked.has(person.account_id));
- return {revision:memberRevision,daily_messages:dailyMessages,member_schedules:memberSchedules,groups:joinedGroups().map(chat=>groupRef(chat.id)).sort(byGroupTitle),members:previewMembers.map(memberItem),people};
+function memberList(): MemberList {
+  const joined = new Set(joinedGroups().map(chat => chat.id)),
+    linked = new Set(previewMembers.map(member => member.account));
+  const people: MemberPerson[] = seenPeople
+    .map(person => ({
+      account_id: accountIdFor('telegram', person.telegram),
+      name: person.name,
+      username: person.username,
+      telegram_id: person.telegram,
+      groups: person.presence
+        .filter(([chat, state]) => state === 'in' && joined.has(chat))
+        .map(([chat]) => groupRef(chat))
+        .sort(byGroupTitle),
+    }))
+    .filter(person => person.groups.length && !linked.has(person.account_id));
+  return {
+    revision: memberRevision,
+    daily_messages: dailyMessages,
+    member_schedules: memberSchedules,
+    groups: joinedGroups()
+      .map(chat => groupRef(chat.id))
+      .sort(byGroupTitle),
+    members: previewMembers.map(memberItem),
+    people,
+  };
 }
 /** One member command: a replayed operation id answers its receipt, the same id with another request is refused. */
-function memberCommand<T>(operation:string,request:unknown,change:()=>T):T {
- const text=JSON.stringify(request),seen=memberReceipts.get(operation);
- if(seen){if(seen.request!==text)throw new HttpError(409,'owner_command_conflict');return seen.result as T;}
- const result=change();memberReceipts.set(operation,{request:text,result});return result;
-}
-function memberRoute(route:string,body:unknown):unknown {
- const joined=(chat:string)=>joinedGroups().some(item=>item.id===chat);
- if(route==='/members'){const request=memberAddRequest(body);
-  return memberCommand(request.operation_id,request,()=>{
-   if(Object.keys(request.groups).some(chat=>!joined(chat)))throw new HttpError(400,'member_group_invalid');
-   const person=request.account_id?seenPeople.find(item=>accountIdFor('telegram',item.telegram)===request.account_id):seenPeople.find(item=>item.telegram===request.telegram_id);
-   if(request.account_id&&!person)throw new HttpError(404,'member_account_not_found');
-   const telegram=request.telegram_id??person!.telegram;
-   if(telegram==='42')throw new HttpError(400,'member_account_invalid');
-   const account=accountIdFor('telegram',telegram);
-   if(previewMembers.some(member=>member.account===account))throw new HttpError(409,'member_exists');
-   // Rule 1: a seen person is switched on only where Telegram shows them; one added by ID may be put in any group.
-   const presence=new Map(person?.presence??[]);
-   if(request.account_id&&Object.entries(request.groups).some(([chat,on])=>on&&presence.get(chat)!=='in'))throw new HttpError(409,'member_group_not_seen');
-   const member=previewMember(telegram,person?.name??null,person?.username??null,Object.entries(request.groups),[...presence],{added_at:new Date().toISOString()});
-   previewMembers.push(member);memberRevision++;
-   return {revision:memberRevision,member:memberItem(member)};
-  });}
- if(route==='/members/settings'){const request=memberSettingsRequest(body);
-  return memberCommand(request.operation_id,request,()=>{dailyMessages=request.daily_messages??dailyMessages;memberSchedules=request.member_schedules??memberSchedules;memberRevision++;
-   return {revision:memberRevision,daily_messages:dailyMessages,member_schedules:memberSchedules};});}
- const one=/^\/members\/([a-f0-9]{64})(\/remove)?$/.exec(route);
- if(!one)return null;
- const at=previewMembers.findIndex(member=>member.id===one[1]);
- if(one[2]){const request=memberRemoveRequest(body);
-  return memberCommand(request.operation_id,{id:one[1],...request},()=>{if(at<0)throw new HttpError(404,'member_not_found');
-   previewMembers.splice(at,1);memberRevision++;return {revision:memberRevision,removed:one[1]};});}
- const request=memberChangeRequest(body);
- return memberCommand(request.operation_id,{id:one[1],...request},()=>{
-  const member=previewMembers[at];if(!member)throw new HttpError(404,'member_not_found');
-  const {state,talk,jobs,post,tools,tasks,private_chat,reminders,assistant,groups}=request.changes;
-  for(const [chat,on] of Object.entries(groups??{})){
-   if(!joined(chat))throw new HttpError(400,'member_group_invalid');
-   if(on&&!member.switches.has(chat)&&member.presence.get(chat)!=='in')throw new HttpError(409,'member_group_not_seen');
+function memberCommand<T>(operation: string, request: unknown, change: () => T): T {
+  const text = JSON.stringify(request),
+    seen = memberReceipts.get(operation);
+  if (seen) {
+    if (seen.request !== text) throw new HttpError(409, 'owner_command_conflict');
+    return seen.result as T;
   }
-  if(state)member.state=state;
-  Object.assign(member.permissions,Object.fromEntries(Object.entries({talk,jobs,post,tools,tasks,private_chat,reminders,assistant}).filter(([,value])=>value!==undefined)));
-  for(const [chat,on] of Object.entries(groups??{}))member.switches.set(chat,on);
-  memberRevision++;return {revision:memberRevision,member:memberItem(member)};
- });
+  const result = change();
+  memberReceipts.set(operation, {request: text, result});
+  return result;
+}
+function memberRoute(route: string, body: unknown): unknown {
+  const joined = (chat: string) => joinedGroups().some(item => item.id === chat);
+  if (route === '/members') {
+    const request = memberAddRequest(body);
+    return memberCommand(request.operation_id, request, () => {
+      if (Object.keys(request.groups).some(chat => !joined(chat))) throw new HttpError(400, 'member_group_invalid');
+      const person = request.account_id
+        ? seenPeople.find(item => accountIdFor('telegram', item.telegram) === request.account_id)
+        : seenPeople.find(item => item.telegram === request.telegram_id);
+      if (request.account_id && !person) throw new HttpError(404, 'member_account_not_found');
+      const telegram = request.telegram_id ?? person!.telegram;
+      if (telegram === '42') throw new HttpError(400, 'member_account_invalid');
+      const account = accountIdFor('telegram', telegram);
+      if (previewMembers.some(member => member.account === account)) throw new HttpError(409, 'member_exists');
+      // Rule 1: a seen person is switched on only where Telegram shows them; one added by ID may be put in any group.
+      const presence = new Map(person?.presence ?? []);
+      if (request.account_id && Object.entries(request.groups).some(([chat, on]) => on && presence.get(chat) !== 'in'))
+        throw new HttpError(409, 'member_group_not_seen');
+      const member = previewMember(
+        telegram,
+        person?.name ?? null,
+        person?.username ?? null,
+        Object.entries(request.groups),
+        [...presence],
+        {added_at: new Date().toISOString()},
+      );
+      previewMembers.push(member);
+      memberRevision++;
+      return {revision: memberRevision, member: memberItem(member)};
+    });
+  }
+  if (route === '/members/settings') {
+    const request = memberSettingsRequest(body);
+    return memberCommand(request.operation_id, request, () => {
+      dailyMessages = request.daily_messages ?? dailyMessages;
+      memberSchedules = request.member_schedules ?? memberSchedules;
+      memberRevision++;
+      return {revision: memberRevision, daily_messages: dailyMessages, member_schedules: memberSchedules};
+    });
+  }
+  const one = /^\/members\/([a-f0-9]{64})(\/remove)?$/.exec(route);
+  if (!one) return null;
+  const at = previewMembers.findIndex(member => member.id === one[1]);
+  if (one[2]) {
+    const request = memberRemoveRequest(body);
+    return memberCommand(request.operation_id, {id: one[1], ...request}, () => {
+      if (at < 0) throw new HttpError(404, 'member_not_found');
+      previewMembers.splice(at, 1);
+      memberRevision++;
+      return {revision: memberRevision, removed: one[1]};
+    });
+  }
+  const request = memberChangeRequest(body);
+  return memberCommand(request.operation_id, {id: one[1], ...request}, () => {
+    const member = previewMembers[at];
+    if (!member) throw new HttpError(404, 'member_not_found');
+    const {state, talk, jobs, post, tools, tasks, private_chat, reminders, assistant, groups} = request.changes;
+    for (const [chat, on] of Object.entries(groups ?? {})) {
+      if (!joined(chat)) throw new HttpError(400, 'member_group_invalid');
+      if (on && !member.switches.has(chat) && member.presence.get(chat) !== 'in')
+        throw new HttpError(409, 'member_group_not_seen');
+    }
+    if (state) member.state = state;
+    Object.assign(
+      member.permissions,
+      Object.fromEntries(
+        Object.entries({talk, jobs, post, tools, tasks, private_chat, reminders, assistant}).filter(
+          ([, value]) => value !== undefined,
+        ),
+      ),
+    );
+    for (const [chat, on] of Object.entries(groups ?? {})) member.switches.set(chat, on);
+    memberRevision++;
+    return {revision: memberRevision, member: memberItem(member)};
+  });
 }
 /** Past conversations of a notes profile, latest first, a page at a time as Hermes lists them: one titled after its chat
  * with its first message, one named only by its first message, and older ones to page through. */
-const PREVIEW_SESSIONS=[{id:'fixture-session',title:'Private chat',preview:'Where can we see the northern lights?',source:'telegram',started_at:'2026-11-18T08:00:00Z',last_active:'2026-11-19T20:00:00Z',messages:14},
-  {id:'fixture-browser',title:'',preview:'Planning a stargazing trip',source:'browser',started_at:'2026-11-17T09:00:00Z',last_active:'2026-11-17T09:30:00Z',messages:4},
-  ...Array.from({length:10},(_,i)=>({id:'fixture-older-'+i,title:'',preview:'Older question '+(i+1),source:'scheduler',started_at:`2026-11-0${Math.floor(i/2)+1}T10:00:00Z`,last_active:`2026-11-0${Math.floor(i/2)+1}T10:05:00Z`,messages:2}))];
-function previewSessions(url:URL){
-  const offset=Number(url.searchParams.get('offset')??0),limit=Number(url.searchParams.get('limit')??50);
-  return {sessions:PREVIEW_SESSIONS.slice(offset,offset+limit),next_offset:offset+limit<PREVIEW_SESSIONS.length?offset+limit:null};
+const PREVIEW_SESSIONS = [
+  {
+    id: 'fixture-session',
+    title: 'Private chat',
+    preview: 'Where can we see the northern lights?',
+    source: 'telegram',
+    started_at: '2026-11-18T08:00:00Z',
+    last_active: '2026-11-19T20:00:00Z',
+    messages: 14,
+  },
+  {
+    id: 'fixture-browser',
+    title: '',
+    preview: 'Planning a stargazing trip',
+    source: 'browser',
+    started_at: '2026-11-17T09:00:00Z',
+    last_active: '2026-11-17T09:30:00Z',
+    messages: 4,
+  },
+  ...Array.from({length: 10}, (_, i) => ({
+    id: 'fixture-older-' + i,
+    title: '',
+    preview: 'Older question ' + (i + 1),
+    source: 'scheduler',
+    started_at: `2026-11-0${Math.floor(i / 2) + 1}T10:00:00Z`,
+    last_active: `2026-11-0${Math.floor(i / 2) + 1}T10:05:00Z`,
+    messages: 2,
+  })),
+];
+function previewSessions(url: URL) {
+  const offset = Number(url.searchParams.get('offset') ?? 0),
+    limit = Number(url.searchParams.get('limit') ?? 50);
+  return {
+    sessions: PREVIEW_SESSIONS.slice(offset, offset + limit),
+    next_offset: offset + limit < PREVIEW_SESSIONS.length ? offset + limit : null,
+  };
 }
-const pool=new pg.Pool(),sessions=new DashboardSessions(),ownerLock=new OwnerLock(join(tmpdir(),'nocheh-preview-'+randomUUID(),'lock.json')),port=Number(process.env.NOCHEH_DASHBOARD_PORT||18848);
+const pool = new pg.Pool(),
+  sessions = new DashboardSessions(),
+  ownerLock = new OwnerLock(join(tmpdir(), 'nocheh-preview-' + randomUUID(), 'lock.json')),
+  port = Number(process.env.NOCHEH_DASHBOARD_PORT || 18848);
 await initialize(pool);
 await ownerLock.create('preview-password');
 // The real task store on the preview's disposable database; no chat turn ever reaches it here.
-await pool.query('DROP TABLE IF EXISTS owner_task_requests,owner_task_operations,owner_task_people,owner_task_links,owner_task_reminder_batches,owner_task_writers,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,connections,chat_tool_settings');await pool.query(controlPolicySchema);await pool.query(controlEntitySchema);await pool.query(taskSchema);await pool.query(notionSchema);await pool.query(chatToolSchema);
+await pool.query(
+  'DROP TABLE IF EXISTS owner_task_requests,owner_task_operations,owner_task_people,owner_task_links,owner_task_reminder_batches,owner_task_writers,owner_task_reminders,owner_task_comments,owner_task_activity,owner_task_attachments,owner_tasks,owner_task_settings,owner_notion,connections,chat_tool_settings',
+);
+await pool.query(controlPolicySchema);
+await pool.query(controlEntitySchema);
+await pool.query(taskSchema);
+await pool.query(notionSchema);
+await pool.query(chatToolSchema);
 // A reminder's "Set by" line reads the owner's reminder lines and the people Telegram showed: empty here, so the built-in
 // lines and the name kept with the reminder are used.
-await pool.query(promptSchema);await pool.query(chatSchema);await pool.query(chatRecordSchema);
+await pool.query(promptSchema);
+await pool.query(chatSchema);
+await pool.query(chatRecordSchema);
 // Two synthetic projects, each with its own list beside the personal one.
-const garden='9'.repeat(64),studio='8'.repeat(64);
+const garden = '9'.repeat(64),
+  studio = '8'.repeat(64);
 // The Memory page's own project is a row too, so its Notion card reads and saves its own connection (ADR-0268).
-for(const [id,name] of [[garden,'Garden redesign'],[studio,'Studio launch'],['ab'.repeat(32),'Aurora field guide']])
-  await pool.query("INSERT INTO projects(id,name,state,revision) VALUES($1,$2,'active',1) ON CONFLICT(id) DO NOTHING",[id,name]);
+for (const [id, name] of [
+  [garden, 'Garden redesign'],
+  [studio, 'Studio launch'],
+  ['ab'.repeat(32), 'Aurora field guide'],
+])
+  await pool.query("INSERT INTO projects(id,name,state,revision) VALUES($1,$2,'active',1) ON CONFLICT(id) DO NOTHING", [
+    id,
+    name,
+  ]);
 // The studio's list is seen in the Aurora planning group, so moving a task there names that group first.
-await pool.query("INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES('-10042',$1,'assigned',1) ON CONFLICT(space_id) DO UPDATE SET project_id=$1,mode='assigned'",[studio]);
+await pool.query(
+  "INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES('-10042',$1,'assigned',1) ON CONFLICT(space_id) DO UPDATE SET project_id=$1,mode='assigned'",
+  [studio],
+);
 // The same synthetic people as the Memory page's, so tasks can point to them.
-for(const [id,name] of [['1'.repeat(64),'Mira Chen'],['d1'.repeat(32),'Devon']])
-  await pool.query("INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person',$2,'active') ON CONFLICT(id) DO NOTHING",[id,name]);
-const notion=new NotionRepository(pool);
+for (const [id, name] of [
+  ['1'.repeat(64), 'Mira Chen'],
+  ['d1'.repeat(32), 'Devon'],
+])
+  await pool.query(
+    "INSERT INTO memory_entities(id,kind,name,state) VALUES($1,'person',$2,'active') ON CONFLICT(id) DO NOTHING",
+    [id, name],
+  );
+const notion = new NotionRepository(pool);
 // The real tool switches on the preview's database: the group keeps pages off, and one of its topics turns them back on.
-const chatTools=new ChatToolSettingsRepository(pool,()=>'42');
+const chatTools = new ChatToolSettingsRepository(pool, () => '42');
 await pool.query("INSERT INTO chat_tool_settings(space_id,browser) VALUES('-10042',false),('-10042/topic/7',true)");
 // Notion's sign-in is kept by the management service; the preview stands in for Notion and returns at once.
-type NotionSignIn={connected:boolean;method:string|null;workspace:string|null;account_name:string|null;account_email:string|null;connected_at:number|null;reconnect:boolean};
+type NotionSignIn = {
+  connected: boolean;
+  method: string | null;
+  workspace: string | null;
+  account_name: string | null;
+  account_email: string | null;
+  connected_at: number | null;
+  reconnect: boolean;
+};
 // One sign-in per Notion connection, as the management service keeps them: '' is the owner's own, else a project's id (ADR-0268).
-const notionSignIns=new Map<string,NotionSignIn>(),signedOut=():NotionSignIn=>({connected:false,method:null,workspace:null,account_name:null,account_email:null,connected_at:null,reconnect:false});
-const notionSignIn=(project:unknown)=>notionSignIns.get(typeof project==='string'?project:'')??signedOut();
-const setNotionSignIn=(project:unknown,value:NotionSignIn)=>{notionSignIns.set(typeof project==='string'?project:'',value);return value;};
+const notionSignIns = new Map<string, NotionSignIn>(),
+  signedOut = (): NotionSignIn => ({
+    connected: false,
+    method: null,
+    workspace: null,
+    account_name: null,
+    account_email: null,
+    connected_at: null,
+    reconnect: false,
+  });
+const notionSignIn = (project: unknown) => notionSignIns.get(typeof project === 'string' ? project : '') ?? signedOut();
+const setNotionSignIn = (project: unknown, value: NotionSignIn) => {
+  notionSignIns.set(typeof project === 'string' ? project : '', value);
+  return value;
+};
 // The owner's own Gmail (ADR-0272): the saved client and the sign-in, never a secret.
-let gmail:{client:string|null;connected:boolean;email:string|null;connected_at:number|null;reconnect:boolean}={client:null,connected:false,email:null,connected_at:null,reconnect:false};
+let gmail: {
+  client: string | null;
+  connected: boolean;
+  email: string | null;
+  connected_at: number | null;
+  reconnect: boolean;
+} = {client: null, connected: false, email: null, connected_at: null, reconnect: false};
 // GitHub: the preview stands in for GitHub's create and install pages and returns at once; made-up repositories, and the
 // copies live only in this preview.
-const githubListed=[{name:'example-org/gadgets',branch:'main',private:false,size_kb:900},{name:'example-org/widgets',branch:'main',private:true,size_kb:21000}];
-const githubApp={name:'Nocheh-a1b2c3',account:'octo-example',install_url:'/__preview/github/install',settings_url:'https://github.com/settings/apps/nocheh-a1b2c3'};
+const githubListed = [
+  {name: 'example-org/gadgets', branch: 'main', private: false, size_kb: 900},
+  {name: 'example-org/widgets', branch: 'main', private: true, size_kb: 21000},
+];
+const githubApp = {
+  name: 'Nocheh-a1b2c3',
+  account: 'octo-example',
+  install_url: '/__preview/github/install',
+  settings_url: 'https://github.com/settings/apps/nocheh-a1b2c3',
+};
 // As github.py keeps them: connected_at and listed_at in epoch seconds.
-let githubSignIn:{connected:boolean;app:typeof githubApp|null;connected_at:number|null;reconnect:boolean;listed:typeof githubListed;listed_at:number|null}=
-  {connected:false,app:null,connected_at:null,reconnect:false,listed:[],listed_at:null};
-let githubCopies:Record<string,unknown>[]=[];
+let githubSignIn: {
+  connected: boolean;
+  app: typeof githubApp | null;
+  connected_at: number | null;
+  reconnect: boolean;
+  listed: typeof githubListed;
+  listed_at: number | null;
+} = {connected: false, app: null, connected_at: null, reconnect: false, listed: [], listed_at: null};
+let githubCopies: Record<string, unknown>[] = [];
 // The repositories linked to a project, by lower-case name (ADR-0269).
-const githubLinks=new Map<string,string>();
-const githubStatus=()=>({...githubSignIn,copies:githubCopies.map(copy=>({...copy,missing:false}))});
-const tasks=new TaskRepository(pool,async()=>{throw new HttpError(403,'owner_private_turn_required');}),taskOwner={admin:true,scope:null};
-await tasks.create(taskOwner,{operation_id:'preview-1',title:'Book the Iceland flights',notes:'Window seats if possible.',group:'-10042/topic/7',tags:['Travel'],due_on:new Date(Date.now()+3*864e5).toISOString().slice(0,10)});
-await tasks.create(taskOwner,{operation_id:'preview-2',title:'Send the garden supplier the measurements',scope:garden,tags:['Suppliers'],people:['1'.repeat(64)]});
-await tasks.create(taskOwner,{operation_id:'preview-3',title:'Book a dentist checkup',tags:['Health','Family']});
-const announcement=await tasks.create(taskOwner,{operation_id:'preview-4',title:'Draft the launch announcement',scope:studio,tags:['Marketing'],group:'-10042',people:['1'.repeat(64),'d1'.repeat(32)],
-  status:'doing',priority:3,assignees:['d1'.repeat(32)],notes:'**Tone:** warm and short.\n\n- Mention the new studio\n- Link the booking page',due_on:new Date(Date.now()+864e5).toISOString().slice(0,10),due_time:'10:00'});
-await tasks.create(taskOwner,{operation_id:'preview-5',title:'Pick the photos',parent:announcement.id});
-await tasks.create(taskOwner,{operation_id:'preview-6',title:'Check the booking page works',scope:studio,status:'waiting',blocked_by:[announcement.id]});
-await tasks.create(taskOwner,{operation_id:'preview-7',title:'Pay the rent',tags:['Money'],priority:2,repeat:{every:1,unit:'month'},due_on:new Date().toISOString().slice(0,10)});
-await tasks.comment(taskOwner,announcement.id,{operation_id:'preview-comment',text:'Devon sends the photos on Friday.'});
+const githubLinks = new Map<string, string>();
+const githubStatus = () => ({...githubSignIn, copies: githubCopies.map(copy => ({...copy, missing: false}))});
+const tasks = new TaskRepository(pool, async () => {
+    throw new HttpError(403, 'owner_private_turn_required');
+  }),
+  taskOwner = {admin: true, scope: null};
+await tasks.create(taskOwner, {
+  operation_id: 'preview-1',
+  title: 'Book the Iceland flights',
+  notes: 'Window seats if possible.',
+  group: '-10042/topic/7',
+  tags: ['Travel'],
+  due_on: new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10),
+});
+await tasks.create(taskOwner, {
+  operation_id: 'preview-2',
+  title: 'Send the garden supplier the measurements',
+  scope: garden,
+  tags: ['Suppliers'],
+  people: ['1'.repeat(64)],
+});
+await tasks.create(taskOwner, {operation_id: 'preview-3', title: 'Book a dentist checkup', tags: ['Health', 'Family']});
+const announcement = await tasks.create(taskOwner, {
+  operation_id: 'preview-4',
+  title: 'Draft the launch announcement',
+  scope: studio,
+  tags: ['Marketing'],
+  group: '-10042',
+  people: ['1'.repeat(64), 'd1'.repeat(32)],
+  status: 'doing',
+  priority: 3,
+  assignees: ['d1'.repeat(32)],
+  notes: '**Tone:** warm and short.\n\n- Mention the new studio\n- Link the booking page',
+  due_on: new Date(Date.now() + 864e5).toISOString().slice(0, 10),
+  due_time: '10:00',
+});
+await tasks.create(taskOwner, {operation_id: 'preview-5', title: 'Pick the photos', parent: announcement.id});
+await tasks.create(taskOwner, {
+  operation_id: 'preview-6',
+  title: 'Check the booking page works',
+  scope: studio,
+  status: 'waiting',
+  blocked_by: [announcement.id],
+});
+await tasks.create(taskOwner, {
+  operation_id: 'preview-7',
+  title: 'Pay the rent',
+  tags: ['Money'],
+  priority: 2,
+  repeat: {every: 1, unit: 'month'},
+  due_on: new Date().toISOString().slice(0, 10),
+});
+await tasks.comment(taskOwner, announcement.id, {
+  operation_id: 'preview-comment',
+  text: 'Devon sends the photos on Friday.',
+});
 // Reminders as the owner sees who set them (ADR-0255): nine of the owner's, one a member set in Aurora planning, to
 // the second, and one of theirs Telegram refused. No chat turn reaches the preview, so they are written here.
-const greenhouse=await tasks.create(taskOwner,{operation_id:'preview-8',title:'Water the greenhouse plants',tags:['Garden']});
-await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by)
-  SELECT encode(sha256(convert_to('preview-reminder-'||n,'UTF8')),'hex'),$1,date_trunc('minute',now())+n*interval '1 day','pending','owner' FROM generate_series(3,11) n`,[greenhouse.id]);
-await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by,set_by_account_id,set_by_name,set_in_chat_id,set_in_group_id) VALUES
+const greenhouse = await tasks.create(taskOwner, {
+  operation_id: 'preview-8',
+  title: 'Water the greenhouse plants',
+  tags: ['Garden'],
+});
+await pool.query(
+  `INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by)
+  SELECT encode(sha256(convert_to('preview-reminder-'||n,'UTF8')),'hex'),$1,date_trunc('minute',now())+n*interval '1 day','pending','owner' FROM generate_series(3,11) n`,
+  [greenhouse.id],
+);
+await pool.query(
+  `INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by,set_by_account_id,set_by_name,set_in_chat_id,set_in_group_id) VALUES
   ($2,$1,date_trunc('minute',now())+interval '2 days 30 seconds','pending','person',$4,'Sam Rivera','-10042','-10042'),
-  ($3,$1,date_trunc('minute',now())-interval '1 day','failed','person',$4,'Sam Rivera','-10042','-10042')`,[greenhouse.id,'e1'.repeat(32),'e2'.repeat(32),'a7'.repeat(32)]);
+  ($3,$1,date_trunc('minute',now())-interval '1 day','failed','person',$4,'Sam Rivera','-10042','-10042')`,
+  [greenhouse.id, 'e1'.repeat(32), 'e2'.repeat(32), 'a7'.repeat(32)],
+);
 // A task a member added in the members' app (ADR-0265), with a comment and a change from there, and a reminder Mira set
 // there for herself: the owner sees where each came from.
-const seedTrays=await tasks.create(taskOwner,{operation_id:'preview-9',title:'Label the seed trays',scope:studio,group:'-10042',tags:['Garden']});
-await pool.query(`UPDATE owner_tasks SET origin='app',created_by='{"kind":"member","name":"Mira Chen"}'::jsonb WHERE id=$1`,[seedTrays.id]);
-await pool.query(`INSERT INTO owner_task_comments(id,task_id,body,author,origin) VALUES($2,$1,'Trays are in the shed.','{"kind":"member","name":"Mira Chen"}'::jsonb,'app')`,[seedTrays.id,'e3'.repeat(32)]);
-await pool.query(`INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{"kind":"member","name":"Mira Chen"}'::jsonb,'app','{"tags":{"from":[],"to":["Garden"]}}'::jsonb)`,[seedTrays.id]);
-await pool.query(`INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by,set_by_account_id,set_by_name,set_via) VALUES
-  ($2,$1,date_trunc('minute',now())+interval '3 days','pending','person',$3,'Mira Chen','app')`,[seedTrays.id,'e4'.repeat(32),accountIdFor('telegram','73')]);
-const client=await pool.connect();try{
- for(let i=0;i<90;i++){
-  const family=(['browser','imports','tools','telegram','honcho','memory_review','preparation'] as const)[i%7]!;
-  const id=await requestWorkflow(client,family,'ui-fixture-'+i);
-  const state=i%11===0?'retryable_failed':i%13===0?'ambiguous':i%17===0?'failed':i%7===0?'waiting':i%9===0?'running':'completed';
-  await client.query("UPDATE workflow_registry SET state=$2,created_at=now()-($3*interval '80 minutes'),updated_at=now()-($3*interval '80 minutes')+interval '47 seconds',stage=$4,attempts=1 WHERE id=$1 AND revision=1",[id,state,i+1,family==='honcho'?'sync':'execution']);
- }
- await client.query("INSERT INTO workflow_worker_registrations(family,version,app) SELECT family,1,CASE WHEN family IN ('tools','imports') THEN 'host' ELSE 'pipeline' END FROM workflow_owners ON CONFLICT(family) DO UPDATE SET seen_at=now()");
-}finally{client.release();}
-const id='a'.repeat(64),profile='fixture-owner';
-const source={id,event:{text:'A synthetic conversation about the northern lights.',payload:{message:{message_id:1,text:'A synthetic conversation about the northern lights.'}},scope:'42',source_id:'fixture',channel:'telegram',received_at:new Date().toISOString()},artifacts:[],derived:[],derivative_versions:true};
-const voiceId='b'.repeat(64),voiceFileId='c'.repeat(64);
-const voice={id:voiceId,event:{kind:'telegram_update',text:null,payload:{message:{message_id:2,voice:{file_id:'synthetic-voice',duration:3,mime_type:'audio/wav'}}},scope:'42',source_id:'fixture-voice',channel:'telegram',received_at:new Date().toISOString()},
- artifacts:[{id:voiceFileId,kind:'voice',metadata:{duration:3,mime_type:'audio/wav'},state:'ready'}],derived:[{id:'d'.repeat(64),artifact_id:voiceFileId,kind:'transcript',content_base64:Buffer.from('Synthetic voice transcript for preview verification.').toString('base64'),provenance:{producer:'synthetic-preview'}}]};
-const voiceBytes=Buffer.alloc(44+24000,128);
-voiceBytes.write('RIFF',0);voiceBytes.writeUInt32LE(voiceBytes.length-8,4);voiceBytes.write('WAVEfmt ',8);voiceBytes.writeUInt32LE(16,16);voiceBytes.writeUInt16LE(1,20);voiceBytes.writeUInt16LE(1,22);voiceBytes.writeUInt32LE(8000,24);voiceBytes.writeUInt32LE(8000,28);voiceBytes.writeUInt16LE(1,32);voiceBytes.writeUInt16LE(8,34);voiceBytes.write('data',36);voiceBytes.writeUInt32LE(24000,40);
-let modeRevision=false;
-let revision=1,guarded='A synthetic conversation about the northern lights.',settingsRevision='fixture-1';
-let retirementRevision=0,retired=false;const retirementHistory:any[]=[];
-let settingsChanges:Record<string,unknown>={};
+const seedTrays = await tasks.create(taskOwner, {
+  operation_id: 'preview-9',
+  title: 'Label the seed trays',
+  scope: studio,
+  group: '-10042',
+  tags: ['Garden'],
+});
+await pool.query(
+  `UPDATE owner_tasks SET origin='app',created_by='{"kind":"member","name":"Mira Chen"}'::jsonb WHERE id=$1`,
+  [seedTrays.id],
+);
+await pool.query(
+  `INSERT INTO owner_task_comments(id,task_id,body,author,origin) VALUES($2,$1,'Trays are in the shed.','{"kind":"member","name":"Mira Chen"}'::jsonb,'app')`,
+  [seedTrays.id, 'e3'.repeat(32)],
+);
+await pool.query(
+  `INSERT INTO owner_task_activity(task_id,actor,origin,changes) VALUES($1,'{"kind":"member","name":"Mira Chen"}'::jsonb,'app','{"tags":{"from":[],"to":["Garden"]}}'::jsonb)`,
+  [seedTrays.id],
+);
+await pool.query(
+  `INSERT INTO owner_task_reminders(id,task_id,remind_at,state,set_by,set_by_account_id,set_by_name,set_via) VALUES
+  ($2,$1,date_trunc('minute',now())+interval '3 days','pending','person',$3,'Mira Chen','app')`,
+  [seedTrays.id, 'e4'.repeat(32), accountIdFor('telegram', '73')],
+);
+const client = await pool.connect();
+try {
+  for (let i = 0; i < 90; i++) {
+    const family = (['browser', 'imports', 'tools', 'telegram', 'honcho', 'memory_review', 'preparation'] as const)[
+      i % 7
+    ]!;
+    const id = await requestWorkflow(client, family, 'ui-fixture-' + i);
+    const state =
+      i % 11 === 0
+        ? 'retryable_failed'
+        : i % 13 === 0
+          ? 'ambiguous'
+          : i % 17 === 0
+            ? 'failed'
+            : i % 7 === 0
+              ? 'waiting'
+              : i % 9 === 0
+                ? 'running'
+                : 'completed';
+    await client.query(
+      "UPDATE workflow_registry SET state=$2,created_at=now()-($3*interval '80 minutes'),updated_at=now()-($3*interval '80 minutes')+interval '47 seconds',stage=$4,attempts=1 WHERE id=$1 AND revision=1",
+      [id, state, i + 1, family === 'honcho' ? 'sync' : 'execution'],
+    );
+  }
+  await client.query(
+    "INSERT INTO workflow_worker_registrations(family,version,app) SELECT family,1,CASE WHEN family IN ('tools','imports') THEN 'host' ELSE 'pipeline' END FROM workflow_owners ON CONFLICT(family) DO UPDATE SET seen_at=now()",
+  );
+} finally {
+  client.release();
+}
+const id = 'a'.repeat(64),
+  profile = 'fixture-owner';
+const source = {
+  id,
+  event: {
+    text: 'A synthetic conversation about the northern lights.',
+    payload: {message: {message_id: 1, text: 'A synthetic conversation about the northern lights.'}},
+    scope: '42',
+    source_id: 'fixture',
+    channel: 'telegram',
+    received_at: new Date().toISOString(),
+  },
+  artifacts: [],
+  derived: [],
+  derivative_versions: true,
+};
+const voiceId = 'b'.repeat(64),
+  voiceFileId = 'c'.repeat(64);
+const voice = {
+  id: voiceId,
+  event: {
+    kind: 'telegram_update',
+    text: null,
+    payload: {message: {message_id: 2, voice: {file_id: 'synthetic-voice', duration: 3, mime_type: 'audio/wav'}}},
+    scope: '42',
+    source_id: 'fixture-voice',
+    channel: 'telegram',
+    received_at: new Date().toISOString(),
+  },
+  artifacts: [{id: voiceFileId, kind: 'voice', metadata: {duration: 3, mime_type: 'audio/wav'}, state: 'ready'}],
+  derived: [
+    {
+      id: 'd'.repeat(64),
+      artifact_id: voiceFileId,
+      kind: 'transcript',
+      content_base64: Buffer.from('Synthetic voice transcript for preview verification.').toString('base64'),
+      provenance: {producer: 'synthetic-preview'},
+    },
+  ],
+};
+const voiceBytes = Buffer.alloc(44 + 24000, 128);
+voiceBytes.write('RIFF', 0);
+voiceBytes.writeUInt32LE(voiceBytes.length - 8, 4);
+voiceBytes.write('WAVEfmt ', 8);
+voiceBytes.writeUInt32LE(16, 16);
+voiceBytes.writeUInt16LE(1, 20);
+voiceBytes.writeUInt16LE(1, 22);
+voiceBytes.writeUInt32LE(8000, 24);
+voiceBytes.writeUInt32LE(8000, 28);
+voiceBytes.writeUInt16LE(1, 32);
+voiceBytes.writeUInt16LE(8, 34);
+voiceBytes.write('data', 36);
+voiceBytes.writeUInt32LE(24000, 40);
+let modeRevision = false;
+let revision = 1,
+  guarded = 'A synthetic conversation about the northern lights.',
+  settingsRevision = 'fixture-1';
+let retirementRevision = 0,
+  retired = false;
+const retirementHistory: any[] = [];
+let settingsChanges: Record<string, unknown> = {};
 // The settings apply that is running in the `slow-apply` and `lost-apply` scenarios.
-let applying:any=null;
+let applying: any = null;
 // Saved settings that work at once, as LIVE in tools/operations/installation/settings.py; any other saved setting waits
 // for Apply, as on the real server, so the dashboard offers it. An apply that never finished leaves it waiting.
-const liveSettings=new Set(['NOCHEH_BACKUP_SCHEDULE','NOCHEH_BACKUP_TIME','NOCHEH_BACKUP_TIME_ZONE','NOCHEH_BACKUP_KEEP','TELEGRAM_PROBLEM_NOTICES',
-  'NOCHEH_OFFSITE','NOCHEH_OFFSITE_PROVIDER','NOCHEH_OFFSITE_ENDPOINT','NOCHEH_OFFSITE_BUCKET','NOCHEH_OFFSITE_REGION','NOCHEH_OFFSITE_ACCESS_KEY_ID',
-  'NOCHEH_OFFSITE_SECRET_ACCESS_KEY','NOCHEH_OFFSITE_PASSPHRASE','NOCHEH_OFFSITE_KEEP']);
-let applyPending=false;
+const liveSettings = new Set([
+  'NOCHEH_BACKUP_SCHEDULE',
+  'NOCHEH_BACKUP_TIME',
+  'NOCHEH_BACKUP_TIME_ZONE',
+  'NOCHEH_BACKUP_KEEP',
+  'TELEGRAM_PROBLEM_NOTICES',
+  'NOCHEH_OFFSITE',
+  'NOCHEH_OFFSITE_PROVIDER',
+  'NOCHEH_OFFSITE_ENDPOINT',
+  'NOCHEH_OFFSITE_BUCKET',
+  'NOCHEH_OFFSITE_REGION',
+  'NOCHEH_OFFSITE_ACCESS_KEY_ID',
+  'NOCHEH_OFFSITE_SECRET_ACCESS_KEY',
+  'NOCHEH_OFFSITE_PASSPHRASE',
+  'NOCHEH_OFFSITE_KEEP',
+]);
+let applyPending = false;
 /** Which provider and model each part uses, as owner monitoring reports it; never a key. */
 function modelRoutes() {
-  const setting=(key:string)=>String(settingsChanges[key]??fields.find(f=>f.key===key)?.value??'');
-  const customs:{id:string;name:string}[]=JSON.parse(setting('NOCHEH_PROVIDERS')||'[]');
-  const name=(id:string)=>({openai:'OpenAI',anthropic:'Anthropic'} as Record<string,string>)[id]??customs.find(c=>c.id===id)?.name??id;
-  const parts=[['reply','Replies (Hermes)','REPLY'],['memory','Memory (Honcho)','MEMORY'],['guard','Secret check','GUARD']].map(([part,label,key])=>{
-    const provider=setting(`NOCHEH_${key}_PROVIDER`)||setting('NOCHEH_PROVIDER');
-    return {part,label,provider,provider_name:provider?name(provider):'',model:provider?setting(`NOCHEH_${key}_MODEL`)||(part==='guard'&&provider==='anthropic'?'claude-haiku-5-5':'')||setting('NOCHEH_MODEL'):'',configured:!!provider};
+  const setting = (key: string) => String(settingsChanges[key] ?? fields.find(f => f.key === key)?.value ?? '');
+  const customs: {id: string; name: string}[] = JSON.parse(setting('NOCHEH_PROVIDERS') || '[]');
+  const name = (id: string) =>
+    (({openai: 'OpenAI', anthropic: 'Anthropic'}) as Record<string, string>)[id] ??
+    customs.find(c => c.id === id)?.name ??
+    id;
+  const parts = [
+    ['reply', 'Replies (Hermes)', 'REPLY'],
+    ['memory', 'Memory (Honcho)', 'MEMORY'],
+    ['guard', 'Secret check', 'GUARD'],
+  ].map(([part, label, key]) => {
+    const provider = setting(`NOCHEH_${key}_PROVIDER`) || setting('NOCHEH_PROVIDER');
+    return {
+      part,
+      label,
+      provider,
+      provider_name: provider ? name(provider) : '',
+      model: provider
+        ? setting(`NOCHEH_${key}_MODEL`) ||
+          (part === 'guard' && provider === 'anthropic' ? 'claude-haiku-5-5' : '') ||
+          setting('NOCHEH_MODEL')
+        : '',
+      configured: !!provider,
+    };
   });
-  const embedding=setting('NOCHEH_EMBEDDING_PROVIDER')||'openai';
-  return [...parts,{part:'embedding',label:'Memory search',provider:embedding,provider_name:name(embedding),model:setting('NOCHEH_EMBEDDING_MODEL'),configured:true}];
+  const embedding = setting('NOCHEH_EMBEDDING_PROVIDER') || 'openai';
+  return [
+    ...parts,
+    {
+      part: 'embedding',
+      label: 'Memory search',
+      provider: embedding,
+      provider_name: name(embedding),
+      model: setting('NOCHEH_EMBEDDING_MODEL'),
+      configured: true,
+    },
+  ];
 }
 /** The `fresh` scenario: a new installation with a saved bot token and nothing else yet. */
-const freshInstall:Record<string,{value?:string|null;configured?:boolean}>={TELEGRAM_OWNER_ID:{value:''},TELEGRAM_BOT_TOKEN:{configured:true},OPENAI_API_KEY:{configured:false}};
-const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRAM_OWNER_ID',value:'42',editable:true},{key:'TELEGRAM_GROUP_REPLIES',value:'addressed',editable:true},{key:'TELEGRAM_BOT_NAMES',value:'Nocheh,نوچه',editable:true},{key:'TELEGRAM_TOPIC_MEMORY',value:'group',editable:true},{key:'TELEGRAM_TYPING',value:'true',editable:true},{key:'TELEGRAM_REACTIONS',value:'true',editable:true},{key:'TELEGRAM_PROBLEM_NOTICES',value:'true',editable:true},{key:'NOCHEH_DASHBOARD_URL',value:'',editable:true},{key:'NOCHEH_MODEL',value:'claude-sonnet-5-5',editable:true},{key:'NOCHEH_EMBEDDING_MODEL',value:'text-embedding-3-small',editable:true},{key:'NOCHEH_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_PROVIDER',value:'',editable:true},{key:'NOCHEH_REPLY_MODEL',value:'',editable:true},{key:'NOCHEH_MEMORY_PROVIDER',value:'',editable:true},{key:'NOCHEH_MEMORY_MODEL',value:'',editable:true},{key:'NOCHEH_GUARD_PROVIDER',value:'',editable:true},{key:'NOCHEH_GUARD_MODEL',value:'',editable:true},{key:'NOCHEH_EMBEDDING_PROVIDER',value:'openai',editable:true},{key:'NOCHEH_PROVIDERS',value:'[]',editable:true},{key:'NOCHEH_PROVIDER_KEYS',value:null,secret:true,configured:false,editable:true},{key:'OPENAI_API_KEY',value:null,secret:true,configured:true,editable:true},{key:'ANTHROPIC_API_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_GUARD_MODE',value:'on',editable:true},{key:'NOCHEH_PARALLEL_RUNS',value:'4',editable:true},{key:'NOCHEH_PARALLEL_REPLIES',value:'3',editable:true},{key:'NOCHEH_PARALLEL_GUARD_CHECKS',value:'3',editable:true},{key:'TELEGRAM_BOT_TOKEN',value:'',secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE',value:'off',editable:true},{key:'NOCHEH_OFFSITE_PROVIDER',value:'cloudflare',editable:true},{key:'NOCHEH_OFFSITE_ENDPOINT',value:'',editable:true},{key:'NOCHEH_OFFSITE_BUCKET',value:'',editable:true},{key:'NOCHEH_OFFSITE_REGION',value:'auto',editable:true},{key:'NOCHEH_OFFSITE_ACCESS_KEY_ID',value:'',editable:true},{key:'NOCHEH_OFFSITE_SECRET_ACCESS_KEY',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE_PASSPHRASE',value:null,secret:true,configured:false,editable:true},{key:'NOCHEH_OFFSITE_KEEP',value:'14',editable:true},{key:'NOCHEH_MEMORY_RETIRE_OLD_FACTS',value:'false',editable:true}];
+const freshInstall: Record<string, {value?: string | null; configured?: boolean}> = {
+  TELEGRAM_OWNER_ID: {value: ''},
+  TELEGRAM_BOT_TOKEN: {configured: true},
+  OPENAI_API_KEY: {configured: false},
+};
+const fields = [
+  {key: 'TELEGRAM_ENABLED', value: 'false', editable: true},
+  {key: 'TELEGRAM_OWNER_ID', value: '42', editable: true},
+  {key: 'TELEGRAM_GROUP_REPLIES', value: 'addressed', editable: true},
+  {key: 'TELEGRAM_BOT_NAMES', value: 'Nocheh,نوچه', editable: true},
+  {key: 'TELEGRAM_TOPIC_MEMORY', value: 'group', editable: true},
+  {key: 'TELEGRAM_TYPING', value: 'true', editable: true},
+  {key: 'TELEGRAM_REACTIONS', value: 'true', editable: true},
+  {key: 'TELEGRAM_PROBLEM_NOTICES', value: 'true', editable: true},
+  {key: 'NOCHEH_DASHBOARD_URL', value: '', editable: true},
+  {key: 'NOCHEH_MODEL', value: 'claude-sonnet-5-5', editable: true},
+  {key: 'NOCHEH_EMBEDDING_MODEL', value: 'text-embedding-3-small', editable: true},
+  {key: 'NOCHEH_PROVIDER', value: '', editable: true},
+  {key: 'NOCHEH_REPLY_PROVIDER', value: '', editable: true},
+  {key: 'NOCHEH_REPLY_MODEL', value: '', editable: true},
+  {key: 'NOCHEH_MEMORY_PROVIDER', value: '', editable: true},
+  {key: 'NOCHEH_MEMORY_MODEL', value: '', editable: true},
+  {key: 'NOCHEH_GUARD_PROVIDER', value: '', editable: true},
+  {key: 'NOCHEH_GUARD_MODEL', value: '', editable: true},
+  {key: 'NOCHEH_EMBEDDING_PROVIDER', value: 'openai', editable: true},
+  {key: 'NOCHEH_PROVIDERS', value: '[]', editable: true},
+  {key: 'NOCHEH_PROVIDER_KEYS', value: null, secret: true, configured: false, editable: true},
+  {key: 'OPENAI_API_KEY', value: null, secret: true, configured: true, editable: true},
+  {key: 'ANTHROPIC_API_KEY', value: null, secret: true, configured: false, editable: true},
+  {key: 'NOCHEH_GUARD_MODE', value: 'on', editable: true},
+  {key: 'NOCHEH_PARALLEL_RUNS', value: '4', editable: true},
+  {key: 'NOCHEH_PARALLEL_REPLIES', value: '3', editable: true},
+  {key: 'NOCHEH_PARALLEL_GUARD_CHECKS', value: '3', editable: true},
+  {key: 'TELEGRAM_BOT_TOKEN', value: '', secret: true, configured: false, editable: true},
+  {key: 'NOCHEH_OFFSITE', value: 'off', editable: true},
+  {key: 'NOCHEH_OFFSITE_PROVIDER', value: 'cloudflare', editable: true},
+  {key: 'NOCHEH_OFFSITE_ENDPOINT', value: '', editable: true},
+  {key: 'NOCHEH_OFFSITE_BUCKET', value: '', editable: true},
+  {key: 'NOCHEH_OFFSITE_REGION', value: 'auto', editable: true},
+  {key: 'NOCHEH_OFFSITE_ACCESS_KEY_ID', value: '', editable: true},
+  {key: 'NOCHEH_OFFSITE_SECRET_ACCESS_KEY', value: null, secret: true, configured: false, editable: true},
+  {key: 'NOCHEH_OFFSITE_PASSPHRASE', value: null, secret: true, configured: false, editable: true},
+  {key: 'NOCHEH_OFFSITE_KEEP', value: '14', editable: true},
+  {key: 'NOCHEH_MEMORY_RETIRE_OLD_FACTS', value: 'false', editable: true},
+];
 // `no-owner` is an installation with its bot token and owner ID still to add.
-const settingValue=(mode:string,f:{key:string;value?:string|null})=>settingsChanges[f.key]??(mode==='fresh'?freshInstall[f.key]?.value:mode==='no-owner'&&f.key==='TELEGRAM_OWNER_ID'?'':undefined)??f.value;
+const settingValue = (mode: string, f: {key: string; value?: string | null}) =>
+  settingsChanges[f.key] ??
+  (mode === 'fresh'
+    ? freshInstall[f.key]?.value
+    : mode === 'no-owner' && f.key === 'TELEGRAM_OWNER_ID'
+      ? ''
+      : undefined) ??
+  f.value;
 // What GET /settings answers; connecting off-site storage answers it too.
-const settingsView=(mode:string)=>({revision:settingsRevision,apply_state:applying||applyPending?'pending':'current',
-   applying:applying?{id:applying.id,step:applying.step,started_at:applying.created_at}:null,fields:fields.map(f=>({...f,value:settingValue(mode,f),
-     // A saved owner ID changes only from the command line, like the real settings.
-     ...(f.key==='TELEGRAM_OWNER_ID'&&settingValue(mode,f)?{editable:false,changes_from:'cli'}:{}),
-     // A saved secret reads back as configured, like the real settings.
-     ...(f.secret?{configured:!!settingsChanges[f.key]||(mode==='fresh'?freshInstall[f.key]?.configured:undefined)||!!f.configured}:{})})),
-   models:{embedding:['text-embedding-3-large','text-embedding-3-small'],embedding_locked:mode==='no-provider'?null:'text-embedding-3-small',
-    transcription:[{model:'gpt-transcribe',usd_per_minute:0.0045},{model:'gpt-4o-transcribe',usd_per_minute:0.006},{model:'gpt-4o-mini-transcribe',usd_per_minute:0.003},{model:'whisper-1',usd_per_minute:0.006}]},
-   providers:{list:[{id:'openai',name:'OpenAI',kind:'openai',url:'https://api.openai.com/v1',has_key:mode!=='fresh'||!!settingsChanges.OPENAI_API_KEY},{id:'anthropic',name:'Anthropic',kind:'anthropic',url:'https://api.anthropic.com/v1',has_key:false},
-     ...JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS??'[]')).map((p:any)=>({...p,kind:'custom',has_key:true}))],
-    parts:[{id:'reply',label:'Replies (Hermes)',provider_setting:'NOCHEH_REPLY_PROVIDER',model_setting:'NOCHEH_REPLY_MODEL'},{id:'memory',label:'Memory (Honcho)',provider_setting:'NOCHEH_MEMORY_PROVIDER',model_setting:'NOCHEH_MEMORY_MODEL'},{id:'guard',label:'Secret check',provider_setting:'NOCHEH_GUARD_PROVIDER',model_setting:'NOCHEH_GUARD_MODEL',defaults:{anthropic:'claude-haiku-5-5'}}]}});
-const personas:Record<string,{role:string;skills:{name:string;description:string;body:string}[];revision:string}>={
-  default:{role:'',skills:[{name:'weekly-menu',description:'When someone asks what to cook this week.',body:'Suggest five dinners from what is in the fridge.'}],revision:'persona-1'}};
-const persona=(scope:string)=>({scope,...(personas[scope]??={role:'',skills:[],revision:'persona-1'})});
-const prompts={revision:'prompts-1',limit:20000,placeholders:{'learning.interpret':['{trigger_id}','{citable_ids}']},texts:{} as Record<string,string>,
-  defaults:{'reply.common':'You are Nocheh. Use authorized sources as evidence.','reply.owner':'This is the owner private conversation.',
-    'reply.group':'This is a shared space. For routine chatter return exactly [NO_REPLY].','reply.private':'This is a private answer, in the private chat of the person who asked.','memory.limited':'Long-term memory is limited.',
-    'telegram.private_answer':'[Private answer] The question below was asked in {group}. Answer it from these groups: {groups}.',
-    'telegram.private_answer_texts':'button: 🔒 Answer privately\nonly_asker: Only the person who asked can use this button.',
-    'memory.evidence':'Memory evidence is supplied as source-labelled data.','memory.notes_review':'Maintain useful private memory.',
-    'guard.secret_check':'Find secret values. Return only JSON.','sharing.group_filter':'You prepare knowledge for a shared group.','images.read':'Write out the text in this image, then describe it.',
-    'learning.interpret':'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.','tasks.reminder_texts':reminderTexts,'memory.source_texts':sourceTexts,
-    'telegram.member_daily_limit':'Sorry, that is all for today. Ask again tomorrow.','telegram.group_tools_texts':'allowed_follow_up: Allowed by this group; it runs now and its answer follows.\nallowed: Allowed by this group; it runs now.',
+const settingsView = (mode: string) => ({
+  revision: settingsRevision,
+  apply_state: applying || applyPending ? 'pending' : 'current',
+  applying: applying ? {id: applying.id, step: applying.step, started_at: applying.created_at} : null,
+  fields: fields.map(f => ({
+    ...f,
+    value: settingValue(mode, f),
+    // A saved owner ID changes only from the command line, like the real settings.
+    ...(f.key === 'TELEGRAM_OWNER_ID' && settingValue(mode, f) ? {editable: false, changes_from: 'cli'} : {}),
+    // A saved secret reads back as configured, like the real settings.
+    ...(f.secret
+      ? {
+          configured:
+            !!settingsChanges[f.key] ||
+            (mode === 'fresh' ? freshInstall[f.key]?.configured : undefined) ||
+            !!f.configured,
+        }
+      : {}),
+  })),
+  models: {
+    embedding: ['text-embedding-3-large', 'text-embedding-3-small'],
+    embedding_locked: mode === 'no-provider' ? null : 'text-embedding-3-small',
+    transcription: [
+      {model: 'gpt-transcribe', usd_per_minute: 0.0045},
+      {model: 'gpt-4o-transcribe', usd_per_minute: 0.006},
+      {model: 'gpt-4o-mini-transcribe', usd_per_minute: 0.003},
+      {model: 'whisper-1', usd_per_minute: 0.006},
+    ],
+  },
+  providers: {
+    list: [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        kind: 'openai',
+        url: 'https://api.openai.com/v1',
+        has_key: mode !== 'fresh' || !!settingsChanges.OPENAI_API_KEY,
+      },
+      {id: 'anthropic', name: 'Anthropic', kind: 'anthropic', url: 'https://api.anthropic.com/v1', has_key: false},
+      ...JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS ?? '[]')).map((p: any) => ({
+        ...p,
+        kind: 'custom',
+        has_key: true,
+      })),
+    ],
+    parts: [
+      {
+        id: 'reply',
+        label: 'Replies (Hermes)',
+        provider_setting: 'NOCHEH_REPLY_PROVIDER',
+        model_setting: 'NOCHEH_REPLY_MODEL',
+      },
+      {
+        id: 'memory',
+        label: 'Memory (Honcho)',
+        provider_setting: 'NOCHEH_MEMORY_PROVIDER',
+        model_setting: 'NOCHEH_MEMORY_MODEL',
+      },
+      {
+        id: 'guard',
+        label: 'Secret check',
+        provider_setting: 'NOCHEH_GUARD_PROVIDER',
+        model_setting: 'NOCHEH_GUARD_MODEL',
+        defaults: {anthropic: 'claude-haiku-5-5'},
+      },
+    ],
+  },
+});
+const personas: Record<
+  string,
+  {role: string; skills: {name: string; description: string; body: string}[]; revision: string}
+> = {
+  default: {
+    role: '',
+    skills: [
+      {
+        name: 'weekly-menu',
+        description: 'When someone asks what to cook this week.',
+        body: 'Suggest five dinners from what is in the fridge.',
+      },
+    ],
+    revision: 'persona-1',
+  },
+};
+const persona = (scope: string) => ({scope, ...(personas[scope] ??= {role: '', skills: [], revision: 'persona-1'})});
+const prompts = {
+  revision: 'prompts-1',
+  limit: 20000,
+  placeholders: {'learning.interpret': ['{trigger_id}', '{citable_ids}']},
+  texts: {} as Record<string, string>,
+  defaults: {
+    'reply.common': 'You are Nocheh. Use authorized sources as evidence.',
+    'reply.owner': 'This is the owner private conversation.',
+    'reply.group': 'This is a shared space. For routine chatter return exactly [NO_REPLY].',
+    'reply.private': 'This is a private answer, in the private chat of the person who asked.',
+    'memory.limited': 'Long-term memory is limited.',
+    'telegram.private_answer':
+      '[Private answer] The question below was asked in {group}. Answer it from these groups: {groups}.',
+    'telegram.private_answer_texts':
+      'button: 🔒 Answer privately\nonly_asker: Only the person who asked can use this button.',
+    'memory.evidence': 'Memory evidence is supplied as source-labelled data.',
+    'memory.notes_review': 'Maintain useful private memory.',
+    'guard.secret_check': 'Find secret values. Return only JSON.',
+    'sharing.group_filter': 'You prepare knowledge for a shared group.',
+    'images.read': 'Write out the text in this image, then describe it.',
+    'learning.interpret': 'Interpret permitted conversation evidence. Cite {trigger_id} from {citable_ids}.',
+    'tasks.reminder_texts': reminderTexts,
+    'memory.source_texts': sourceTexts,
+    'telegram.member_daily_limit': 'Sorry, that is all for today. Ask again tomorrow.',
+    'telegram.group_tools_texts':
+      'allowed_follow_up: Allowed by this group; it runs now and its answer follows.\nallowed: Allowed by this group; it runs now.',
     // Step 4: a member's private chat, its daily-limit and not-allowed replies, and the owner-only local laws line.
-    'reply.member':'This is the private chat of a member the owner added. It only reads. If asked who can see this chat, say the owner can read it.',
-    'telegram.member_private_daily_limit':memberPrivateDailyLimitReply,'telegram.not_allowed_private':notAllowedPrivateReply,'members.local_laws':membersLocalLaws,
-    'reply.member_read':'This answers the owner\'s question about what a member said in their own private chat with Nocheh. It only reads that chat.',
-    'telegram.member_read':memberReadFrame,'telegram.member_read_texts':memberReadTexts,
+    'reply.member':
+      'This is the private chat of a member the owner added. It only reads. If asked who can see this chat, say the owner can read it.',
+    'telegram.member_private_daily_limit': memberPrivateDailyLimitReply,
+    'telegram.not_allowed_private': notAllowedPrivateReply,
+    'members.local_laws': membersLocalLaws,
+    'reply.member_read':
+      "This answers the owner's question about what a member said in their own private chat with Nocheh. It only reads that chat.",
+    'telegram.member_read': memberReadFrame,
+    'telegram.member_read_texts': memberReadTexts,
     // Schedules set by asking (ADR-0266).
-    'reply.scheduled':'This run\'s answer is sent to this chat. Answer exactly [SILENT] if nothing is new.',
-    'reply.schedules':'Set schedules with cronjob_manage when the owner asks.','schedules.notice_texts':scheduleNoticeTexts} as Record<string,string>};
-const preferences={scope:'42',revision:'fixture-1',schema:{'agent.max_iterations':{min:1,max:100},'memory.memory_char_limit':{min:100,max:10000}},values:{'agent.max_iterations':20,'memory.memory_char_limit':2200},origins:{'agent.max_iterations':'global','memory.memory_char_limit':'profile'}};
-const preview={messages:180,supplied_files:4,missing_files:1,chats:[{id:'chat-1',name:'Synthetic travel notes',messages:180}]};
-const jobs:any[]=[{id:'11111111-1111-4111-8111-111111111111',kind:'import',state:'ready',created_at:new Date().toISOString(),completed:0,total:180,duplicates:0,preview},
-{id:'33333333-3333-4333-8333-333333333333',kind:'import',state:'cancelled',created_at:new Date().toISOString(),completed:40,total:180,duplicates:3,preview,review_approved:true,mapping:{'chat-1':'-10042'}},
-{id:'22222222-2222-4222-8222-222222222222',kind:'operations.diagnose',state:'complete',created_at:new Date().toISOString(),result:{containers:[{service:'nocheh-app',tool:'Nocheh',location:'docker',purpose:'Synthetic API',state:'running',expected_state:'running'}]}}];
-const actions:any[]=[{id:'c'.repeat(64),fingerprint:'d'.repeat(64),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-preview',workspace:'synthetic-demo'},state:'proposed',created_at:new Date().toISOString()}],permissions:any[]=[];
-let spaceRevision=1,spaceOverrides:Record<string,any>={mode:'approved'},shares:any[]=[];
+    'reply.scheduled': "This run's answer is sent to this chat. Answer exactly [SILENT] if nothing is new.",
+    'reply.schedules': 'Set schedules with cronjob_manage when the owner asks.',
+    'schedules.notice_texts': scheduleNoticeTexts,
+  } as Record<string, string>,
+};
+const preferences = {
+  scope: '42',
+  revision: 'fixture-1',
+  schema: {'agent.max_iterations': {min: 1, max: 100}, 'memory.memory_char_limit': {min: 100, max: 10000}},
+  values: {'agent.max_iterations': 20, 'memory.memory_char_limit': 2200},
+  origins: {'agent.max_iterations': 'global', 'memory.memory_char_limit': 'profile'},
+};
+const preview = {
+  messages: 180,
+  supplied_files: 4,
+  missing_files: 1,
+  chats: [{id: 'chat-1', name: 'Synthetic travel notes', messages: 180}],
+};
+const jobs: any[] = [
+  {
+    id: '11111111-1111-4111-8111-111111111111',
+    kind: 'import',
+    state: 'ready',
+    created_at: new Date().toISOString(),
+    completed: 0,
+    total: 180,
+    duplicates: 0,
+    preview,
+  },
+  {
+    id: '33333333-3333-4333-8333-333333333333',
+    kind: 'import',
+    state: 'cancelled',
+    created_at: new Date().toISOString(),
+    completed: 40,
+    total: 180,
+    duplicates: 3,
+    preview,
+    review_approved: true,
+    mapping: {'chat-1': '-10042'},
+  },
+  {
+    id: '22222222-2222-4222-8222-222222222222',
+    kind: 'operations.diagnose',
+    state: 'complete',
+    created_at: new Date().toISOString(),
+    result: {
+      containers: [
+        {
+          service: 'nocheh-app',
+          tool: 'Nocheh',
+          location: 'docker',
+          purpose: 'Synthetic API',
+          state: 'running',
+          expected_state: 'running',
+        },
+      ],
+    },
+  },
+];
+const actions: any[] = [
+    {
+      id: 'c'.repeat(64),
+      fingerprint: 'd'.repeat(64),
+      kind: 'shell',
+      scope: '42',
+      profile,
+      arguments: {command: 'printf synthetic-preview', workspace: 'synthetic-demo'},
+      state: 'proposed',
+      created_at: new Date().toISOString(),
+    },
+  ],
+  permissions: any[] = [];
+let spaceRevision = 1,
+  spaceOverrides: Record<string, any> = {mode: 'approved'},
+  shares: any[] = [];
 /** System and Usage fixtures: maintenance history, reply timing, storage and the read-only database browser. Synthetic only. */
-const hoursAgo=(h:number)=>new Date(Date.now()-h*36e5).toISOString();
-jobs.push({id:'44444444-4444-4444-8444-444444444444',kind:'settings.apply',state:'complete',created_at:hoursAgo(3),result:{status:'applied'}},
- {id:'55555555-5555-4555-8555-555555555555',kind:'operations.export',state:'complete',created_at:hoursAgo(26),result:{status:'exported',events:1842,files:28}},
- {id:'66666666-6666-4666-8666-666666666666',kind:'settings.apply',state:'failed',created_at:hoursAgo(50),error:'operation_failed',result:{status:'apply_failed',rolled_back:true}},
- {id:'77777777-7777-4777-8777-777777777777',kind:'operations.backup',state:'complete',created_at:hoursAgo(72),result:{status:'backed_up'}});
-const timingStages:[string,string,string,number][]=[['capture','internal','capture → archive',180],['queue:telegram','workflow','dispatch queue wait',420],['step:telegram','internal','dispatch steps',260],['hermes_queue','workflow','Hermes run queue',150],['memory_recall','third_party','Honcho context',610],['history_prepare','internal','Hermes history',90],['conversation','internal','tools + agent',540],['llm','llm','provider wait',3900],['model_guard','internal','model guard',230],['telegram_send','third_party','Telegram send',340]];
-const timingIds=Array.from({length:12},(_,i)=>(0x70+i).toString(16).repeat(32));
-const timingFor=(id:string)=>{const n=timingIds.indexOf(id),scale=1+((n*37)%10)/8;const stages=timingStages.map(([stage,category,label,ms])=>({stage,category,label,ms:Math.round(ms*scale),calls:stage==='llm'?2:1}));const unmeasured=Math.round(120*scale),reply=stages.reduce((t,s)=>t+s.ms,0)+unmeasured;
- return {event_id:id,started_at:hoursAgo(n*1.7+0.2),ended_at:hoursAgo(n*1.7+0.2-reply/36e5),reply_ms:reply,complete:n!==5,attempts:n===3?2:1,stages:[...stages,{stage:'unmeasured',category:'unmeasured',label:'unmeasured',ms:unmeasured,calls:0}],unmeasured_ms:unmeasured};};
-const browserDatabases=[['archive','Archive','postgres','nocheh_archive'],['derived','Derived','postgres','nocheh_derived'],['control','Control','postgres','nocheh_control'],['workflow','Workflow · Inngest','postgres','nocheh_inngest'],['hermes:fixture-owner','Hermes · fixture-owner','sqlite','state.db'],['usage','Model usage','sqlite','usage.sqlite']] as const;
-const browserRows=Array.from({length:73},(_,i)=>({id:(i+1).toString(16).padStart(64,'0'),channel:i%3?'telegram':'browser',scope:i%4?'42':'-10042',text:i%9===0?null:'Synthetic message '+(i+1)+' about stargazing plans.',received_at:hoursAgo(i*2)}));
-let memoryAttached=true;
-const serviceRows=[['nocheh-app','Nocheh','Archive API and workflow handlers','running'],['nocheh-executor','Nocheh','Approved execution','running'],['hermes','Hermes','Assistant runtime','running'],['nocheh-machines','Nocheh','Runs approved jobs on the owner’s machines over SSH and keeps their keys','running'],['honcho-api','Honcho','Memory engine','unhealthy'],['pgweb-archive','pgweb','Optional archive inspection','optional-stopped']].map(([service,tool,purpose,state])=>({service,tool,purpose,state,location:'docker',expected_state:state==='optional-stopped'?state:'running'}));
-const personId='1'.repeat(64),projectEntityId='2'.repeat(64),projectId='ab'.repeat(32),factId='3'.repeat(64),requestId='4'.repeat(64),grantId='5'.repeat(64),conversation='-10042',topic='-10042/topic/7';
-const memoryMapNodes:any[]=[
- {id:`person:${personId}`,kind:'person',label:'Mira Chen',state:'active',detail:{revision:2,fact_count:2}},
- {id:`project:${projectEntityId}`,kind:'project',label:'Aurora field guide',state:'active',detail:{revision:1,project_id:projectId,project:{id:projectId,name:'Aurora field guide',description:'Synthetic project for the isolated preview.',state:'active',revision:1}}},
- {id:`conversation:${conversation}`,kind:'conversation',label:'Friends travel group',detail:{space_id:conversation,assignment:{space_id:conversation,project_id:projectId,mode:'assigned',revision:1}}},
- {id:`topic:${topic}`,kind:'topic',label:'Topic 7 · Iceland planning',detail:{space_id:topic,parent:conversation,assignment:{space_id:topic,project_id:null,mode:'inherit',revision:1}}},
- {id:`fact:${factId}`,kind:'fact',label:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',state:'active',detail:{revision:1,predicate:'preference',attribution:'direct',uncertainty:'explicit',evidence:[{id}],author:'fixture-owner',created_at:new Date().toISOString()}},
+const hoursAgo = (h: number) => new Date(Date.now() - h * 36e5).toISOString();
+jobs.push(
+  {
+    id: '44444444-4444-4444-8444-444444444444',
+    kind: 'settings.apply',
+    state: 'complete',
+    created_at: hoursAgo(3),
+    result: {status: 'applied'},
+  },
+  {
+    id: '55555555-5555-4555-8555-555555555555',
+    kind: 'operations.export',
+    state: 'complete',
+    created_at: hoursAgo(26),
+    result: {status: 'exported', events: 1842, files: 28},
+  },
+  {
+    id: '66666666-6666-4666-8666-666666666666',
+    kind: 'settings.apply',
+    state: 'failed',
+    created_at: hoursAgo(50),
+    error: 'operation_failed',
+    result: {status: 'apply_failed', rolled_back: true},
+  },
+  {
+    id: '77777777-7777-4777-8777-777777777777',
+    kind: 'operations.backup',
+    state: 'complete',
+    created_at: hoursAgo(72),
+    result: {status: 'backed_up'},
+  },
+);
+const timingStages: [string, string, string, number][] = [
+  ['capture', 'internal', 'capture → archive', 180],
+  ['queue:telegram', 'workflow', 'dispatch queue wait', 420],
+  ['step:telegram', 'internal', 'dispatch steps', 260],
+  ['hermes_queue', 'workflow', 'Hermes run queue', 150],
+  ['memory_recall', 'third_party', 'Honcho context', 610],
+  ['history_prepare', 'internal', 'Hermes history', 90],
+  ['conversation', 'internal', 'tools + agent', 540],
+  ['llm', 'llm', 'provider wait', 3900],
+  ['model_guard', 'internal', 'model guard', 230],
+  ['telegram_send', 'third_party', 'Telegram send', 340],
 ];
-const memoryMapEdges:any[]=[
- {id:`relationship:fact:${factId}`,kind:'relationship',source:`person:${personId}`,target:`fact:${factId}`,label:'preference',authoritative:false,detail:{claim_id:factId,content:memoryMapNodes[4].label,attribution:'direct',uncertainty:'explicit',evidence:[{id}],revision:1}},
- {id:`project_assignment:${conversation}`,kind:'project_assignment',source:`project:${projectEntityId}`,target:`conversation:${conversation}`,label:'contains',authoritative:false,detail:{destination:conversation,project_id:projectId,mode:'assigned',revision:1}},
- {id:`access:${grantId}`,kind:'access',source:`fact:${factId}`,target:`topic:${topic}`,state:'active',label:'persistent',authoritative:true,detail:{grant_id:grantId,destination:topic,wording:'Mira prefers quiet aurora viewpoints.',mode:'persistent',revision:1,fact_revision:1}},
- {id:`suggestion:${requestId}`,kind:'suggestion',source:`fact:${factId}`,target:`conversation:${conversation}`,state:'pending',label:'suggested',authoritative:false,detail:{request_id:requestId,destination:conversation,wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',revision:1,fact_revision:1,relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],expires_at:new Date(Date.now()+86400000).toISOString()}},
+const timingIds = Array.from({length: 12}, (_, i) => (0x70 + i).toString(16).repeat(32));
+const timingFor = (id: string) => {
+  const n = timingIds.indexOf(id),
+    scale = 1 + ((n * 37) % 10) / 8;
+  const stages = timingStages.map(([stage, category, label, ms]) => ({
+    stage,
+    category,
+    label,
+    ms: Math.round(ms * scale),
+    calls: stage === 'llm' ? 2 : 1,
+  }));
+  const unmeasured = Math.round(120 * scale),
+    reply = stages.reduce((t, s) => t + s.ms, 0) + unmeasured;
+  return {
+    event_id: id,
+    started_at: hoursAgo(n * 1.7 + 0.2),
+    ended_at: hoursAgo(n * 1.7 + 0.2 - reply / 36e5),
+    reply_ms: reply,
+    complete: n !== 5,
+    attempts: n === 3 ? 2 : 1,
+    stages: [...stages, {stage: 'unmeasured', category: 'unmeasured', label: 'unmeasured', ms: unmeasured, calls: 0}],
+    unmeasured_ms: unmeasured,
+  };
+};
+const browserDatabases = [
+  ['archive', 'Archive', 'postgres', 'nocheh_archive'],
+  ['derived', 'Derived', 'postgres', 'nocheh_derived'],
+  ['control', 'Control', 'postgres', 'nocheh_control'],
+  ['workflow', 'Workflow · Inngest', 'postgres', 'nocheh_inngest'],
+  ['hermes:fixture-owner', 'Hermes · fixture-owner', 'sqlite', 'state.db'],
+  ['usage', 'Model usage', 'sqlite', 'usage.sqlite'],
+] as const;
+const browserRows = Array.from({length: 73}, (_, i) => ({
+  id: (i + 1).toString(16).padStart(64, '0'),
+  channel: i % 3 ? 'telegram' : 'browser',
+  scope: i % 4 ? '42' : '-10042',
+  text: i % 9 === 0 ? null : 'Synthetic message ' + (i + 1) + ' about stargazing plans.',
+  received_at: hoursAgo(i * 2),
+}));
+let memoryAttached = true;
+const serviceRows = [
+  ['nocheh-app', 'Nocheh', 'Archive API and workflow handlers', 'running'],
+  ['nocheh-executor', 'Nocheh', 'Approved execution', 'running'],
+  ['hermes', 'Hermes', 'Assistant runtime', 'running'],
+  ['nocheh-machines', 'Nocheh', 'Runs approved jobs on the owner’s machines over SSH and keeps their keys', 'running'],
+  ['honcho-api', 'Honcho', 'Memory engine', 'unhealthy'],
+  ['pgweb-archive', 'pgweb', 'Optional archive inspection', 'optional-stopped'],
+].map(([service, tool, purpose, state]) => ({
+  service,
+  tool,
+  purpose,
+  state,
+  location: 'docker',
+  expected_state: state === 'optional-stopped' ? state : 'running',
+}));
+const personId = '1'.repeat(64),
+  projectEntityId = '2'.repeat(64),
+  projectId = 'ab'.repeat(32),
+  factId = '3'.repeat(64),
+  requestId = '4'.repeat(64),
+  grantId = '5'.repeat(64),
+  conversation = '-10042',
+  topic = '-10042/topic/7';
+const memoryMapNodes: any[] = [
+  {id: `person:${personId}`, kind: 'person', label: 'Mira Chen', state: 'active', detail: {revision: 2, fact_count: 2}},
+  {
+    id: `project:${projectEntityId}`,
+    kind: 'project',
+    label: 'Aurora field guide',
+    state: 'active',
+    detail: {
+      revision: 1,
+      project_id: projectId,
+      project: {
+        id: projectId,
+        name: 'Aurora field guide',
+        description: 'Synthetic project for the isolated preview.',
+        state: 'active',
+        revision: 1,
+      },
+    },
+  },
+  {
+    id: `conversation:${conversation}`,
+    kind: 'conversation',
+    label: 'Friends travel group',
+    detail: {
+      space_id: conversation,
+      assignment: {space_id: conversation, project_id: projectId, mode: 'assigned', revision: 1},
+    },
+  },
+  {
+    id: `topic:${topic}`,
+    kind: 'topic',
+    label: 'Topic 7 · Iceland planning',
+    detail: {
+      space_id: topic,
+      parent: conversation,
+      assignment: {space_id: topic, project_id: null, mode: 'inherit', revision: 1},
+    },
+  },
+  {
+    id: `fact:${factId}`,
+    kind: 'fact',
+    label: 'Mira prefers quiet aurora viewpoints away from tour-bus routes.',
+    state: 'active',
+    detail: {
+      revision: 1,
+      predicate: 'preference',
+      attribution: 'direct',
+      uncertainty: 'explicit',
+      evidence: [{id}],
+      author: 'fixture-owner',
+      created_at: new Date().toISOString(),
+    },
+  },
 ];
-const conversations:any[]=[
- {space_id:'42',name:'Owner',kind:'private',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:true},
- {space_id:'73',name:'Mira Chen',kind:'private',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false,username:'mira_chen'},
- {space_id:conversation,name:'Aurora planning',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:true},
- {space_id:topic,name:'Iceland planning',kind:'topic',parent_space:conversation,parent_name:'Aurora planning',observed_at:new Date().toISOString(),configured:false,closed:false},
- {space_id:'-10073',name:'Weekend notes',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
- {space_id:'-10077',name:null,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true},
- {space_id:NEW_GROUP,name:'Night sky club',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
- {space_id:NEW_TOPIC,name:'Meteor watch',kind:'topic',parent_space:NEW_GROUP,parent_name:'Night sky club',observed_at:new Date().toISOString(),configured:false,closed:false},
- {space_id:UPGRADED,name:'Garden swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false},
- // Someone else added Nocheh to the first, and someone who didn't show who they were to the second (ADR-0253): it is
- // leaving the first and has left the second.
- {space_id:LEAVING_GROUP,name:'Book swap',kind:'group',parent_space:null,parent_name:null,observed_at:new Date().toISOString(),configured:false,
-  added_by:'other',added_at:new Date(Date.now()-20000).toISOString()},
- {space_id:LEFT_GROUP,name:'Choir practice',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-864e5).toISOString(),configured:false,
-  added_by:'anonymous',added_at:new Date(Date.now()-864e5).toISOString()},
- // Someone removed Nocheh from this one, and Telegram said so; the owner's refresh since found the bot not in it. Its
- // topic follows it.
- {space_id:REMOVED_GROUP,name:'Hiking crew',kind:'group',parent_space:null,parent_name:null,observed_at:new Date(Date.now()-3*864e5).toISOString(),configured:true,
-  added_by:'owner',added_at:new Date(Date.now()-30*864e5).toISOString(),removed_event:true,
-  telegram:{state:'not_member',migrate_to_chat_id:null,observed_at:new Date(Date.now()-2*864e5).toISOString()}},
- {space_id:REMOVED_TOPIC,name:'Trail maps',kind:'topic',parent_space:REMOVED_GROUP,parent_name:'Hiking crew',observed_at:new Date(Date.now()-4*864e5).toISOString(),configured:false,closed:false},
+const memoryMapEdges: any[] = [
+  {
+    id: `relationship:fact:${factId}`,
+    kind: 'relationship',
+    source: `person:${personId}`,
+    target: `fact:${factId}`,
+    label: 'preference',
+    authoritative: false,
+    detail: {
+      claim_id: factId,
+      content: memoryMapNodes[4].label,
+      attribution: 'direct',
+      uncertainty: 'explicit',
+      evidence: [{id}],
+      revision: 1,
+    },
+  },
+  {
+    id: `project_assignment:${conversation}`,
+    kind: 'project_assignment',
+    source: `project:${projectEntityId}`,
+    target: `conversation:${conversation}`,
+    label: 'contains',
+    authoritative: false,
+    detail: {destination: conversation, project_id: projectId, mode: 'assigned', revision: 1},
+  },
+  {
+    id: `access:${grantId}`,
+    kind: 'access',
+    source: `fact:${factId}`,
+    target: `topic:${topic}`,
+    state: 'active',
+    label: 'persistent',
+    authoritative: true,
+    detail: {
+      grant_id: grantId,
+      destination: topic,
+      wording: 'Mira prefers quiet aurora viewpoints.',
+      mode: 'persistent',
+      revision: 1,
+      fact_revision: 1,
+    },
+  },
+  {
+    id: `suggestion:${requestId}`,
+    kind: 'suggestion',
+    source: `fact:${factId}`,
+    target: `conversation:${conversation}`,
+    state: 'pending',
+    label: 'suggested',
+    authoritative: false,
+    detail: {
+      request_id: requestId,
+      destination: conversation,
+      wording: 'Mira prefers quiet aurora viewpoints away from tour-bus routes.',
+      revision: 1,
+      fact_revision: 1,
+      relationship_path: ['Mira Chen', 'Aurora field guide'],
+      evidence: [{id}],
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    },
+  },
+];
+const conversations: any[] = [
+  {
+    space_id: '42',
+    name: 'Owner',
+    kind: 'private',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date().toISOString(),
+    configured: true,
+  },
+  {
+    space_id: '73',
+    name: 'Mira Chen',
+    kind: 'private',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date().toISOString(),
+    configured: false,
+    username: 'mira_chen',
+  },
+  {
+    space_id: conversation,
+    name: 'Aurora planning',
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date().toISOString(),
+    configured: true,
+  },
+  {
+    space_id: topic,
+    name: 'Iceland planning',
+    kind: 'topic',
+    parent_space: conversation,
+    parent_name: 'Aurora planning',
+    observed_at: new Date().toISOString(),
+    configured: false,
+    closed: false,
+  },
+  {
+    space_id: '-10073',
+    name: 'Weekend notes',
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date().toISOString(),
+    configured: false,
+  },
+  {
+    space_id: '-10077',
+    name: null,
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: null,
+    configured: true,
+  },
+  {
+    space_id: NEW_GROUP,
+    name: 'Night sky club',
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date().toISOString(),
+    configured: false,
+  },
+  {
+    space_id: NEW_TOPIC,
+    name: 'Meteor watch',
+    kind: 'topic',
+    parent_space: NEW_GROUP,
+    parent_name: 'Night sky club',
+    observed_at: new Date().toISOString(),
+    configured: false,
+    closed: false,
+  },
+  {
+    space_id: UPGRADED,
+    name: 'Garden swap',
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date().toISOString(),
+    configured: false,
+  },
+  // Someone else added Nocheh to the first, and someone who didn't show who they were to the second (ADR-0253): it is
+  // leaving the first and has left the second.
+  {
+    space_id: LEAVING_GROUP,
+    name: 'Book swap',
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date().toISOString(),
+    configured: false,
+    added_by: 'other',
+    added_at: new Date(Date.now() - 20000).toISOString(),
+  },
+  {
+    space_id: LEFT_GROUP,
+    name: 'Choir practice',
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date(Date.now() - 864e5).toISOString(),
+    configured: false,
+    added_by: 'anonymous',
+    added_at: new Date(Date.now() - 864e5).toISOString(),
+  },
+  // Someone removed Nocheh from this one, and Telegram said so; the owner's refresh since found the bot not in it. Its
+  // topic follows it.
+  {
+    space_id: REMOVED_GROUP,
+    name: 'Hiking crew',
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: new Date(Date.now() - 3 * 864e5).toISOString(),
+    configured: true,
+    added_by: 'owner',
+    added_at: new Date(Date.now() - 30 * 864e5).toISOString(),
+    removed_event: true,
+    telegram: {
+      state: 'not_member',
+      migrate_to_chat_id: null,
+      observed_at: new Date(Date.now() - 2 * 864e5).toISOString(),
+    },
+  },
+  {
+    space_id: REMOVED_TOPIC,
+    name: 'Trail maps',
+    kind: 'topic',
+    parent_space: REMOVED_GROUP,
+    parent_name: 'Hiking crew',
+    observed_at: new Date(Date.now() - 4 * 864e5).toISOString(),
+    configured: false,
+    closed: false,
+  },
 ];
 /** The `many-chats` scenario: 120 more groups Nocheh is on in, listed only. Their ids sort before every digest id, so
  * 'Garden swap' falls past the first 100 chats and past the first 100 groups Nocheh is on in. In `many-chats-moved` one
  * more, 'Club 000', sorts first, so 'Club 099' moves off the first page of those groups, and no page after the first can
  * be read. */
-const club=(i:number)=>{const n=String(i).padStart(3,'0'),id='-2000000000'+n;
- return {space_id:id,name:'Club '+n,kind:'group',parent_space:null,parent_name:null,observed_at:null,configured:true,topic_key:null,
-  app_ids:[{app:'telegram',external:id,state:'current'}],is_forum:false,state:'active',owner:false,short_id:chatShortId(id),added_by:'owner',added_at:null,removed_event:false};};
-const manyChats=Array.from({length:120},(_,i)=>club(i+1));
+const club = (i: number) => {
+  const n = String(i).padStart(3, '0'),
+    id = '-2000000000' + n;
+  return {
+    space_id: id,
+    name: 'Club ' + n,
+    kind: 'group',
+    parent_space: null,
+    parent_name: null,
+    observed_at: null,
+    configured: true,
+    topic_key: null,
+    app_ids: [{app: 'telegram', external: id, state: 'current'}],
+    is_forum: false,
+    state: 'active',
+    owner: false,
+    short_id: chatShortId(id),
+    added_by: 'owner',
+    added_at: null,
+    removed_event: false,
+  };
+};
+const manyChats = Array.from({length: 120}, (_, i) => club(i + 1));
 /** When Refresh group names last asked about each group, by chat id. */
-const refreshedAt=new Map<string,number>();
+const refreshedAt = new Map<string, number>();
 /** The groups a scenario lists beyond the preview's own chats. */
-const moreChats=(mode:string)=>mode==='many-chats'?manyChats:mode==='many-chats-moved'?[club(0),...manyChats]:[];
+const moreChats = (mode: string) =>
+  mode === 'many-chats' ? manyChats : mode === 'many-chats-moved' ? [club(0), ...manyChats] : [];
 /** The directory as the chats' states serve it, installed for the repositories the preview runs. */
-const directoryNow=()=>installChats(previewDirectory());
+const directoryNow = () => installChats(previewDirectory());
 /** A /v1/conversations item: what the chat is comes from the directory, as Part A's store fills it (ADR-0252), and who
  * added Nocheh from the chat's own record (ADR-0253). */
-const conversationItem=(row:any)=>({added_by:null,added_at:null,removed_event:false,...row,...conversationFields(directoryNow(),row.space_id)});
-permissions.push({id:'6'.repeat(64),kind:'shell',scope:conversation,arguments:{command:'printf synthetic-group'},remaining:2,expires_at:new Date(Date.now()+3600000).toISOString()});
-const memoryAccessRequest={id:requestId,destination:conversation,state:'pending',revision:1,expires_at:new Date(Date.now()+86400000).toISOString(),wording:'Mira prefers quiet aurora viewpoints away from tour-bus routes.',relationship_path:['Mira Chen','Aurora field guide'],evidence:[{id}],provenance:{fixture:true},
- source_spaces:['-10077'],audience:{space:conversation,group:conversation},post_default:false};
-const memoryGrant={id:grantId,destination:topic,fact_id:factId,fact_revision:1,mode:'persistent',state:'active',revision:1,wording:'Mira prefers quiet aurora viewpoints.',suspended_reason:null,provenance:{fixture:true}};
+const conversationItem = (row: any) => ({
+  added_by: null,
+  added_at: null,
+  removed_event: false,
+  ...row,
+  ...conversationFields(directoryNow(), row.space_id),
+});
+permissions.push({
+  id: '6'.repeat(64),
+  kind: 'shell',
+  scope: conversation,
+  arguments: {command: 'printf synthetic-group'},
+  remaining: 2,
+  expires_at: new Date(Date.now() + 3600000).toISOString(),
+});
+const memoryAccessRequest = {
+  id: requestId,
+  destination: conversation,
+  state: 'pending',
+  revision: 1,
+  expires_at: new Date(Date.now() + 86400000).toISOString(),
+  wording: 'Mira prefers quiet aurora viewpoints away from tour-bus routes.',
+  relationship_path: ['Mira Chen', 'Aurora field guide'],
+  evidence: [{id}],
+  provenance: {fixture: true},
+  source_spaces: ['-10077'],
+  audience: {space: conversation, group: conversation},
+  post_default: false,
+};
+const memoryGrant = {
+  id: grantId,
+  destination: topic,
+  fact_id: factId,
+  fact_revision: 1,
+  mode: 'persistent',
+  state: 'active',
+  revision: 1,
+  wording: 'Mira prefers quiet aurora viewpoints.',
+  suspended_reason: null,
+  provenance: {fixture: true},
+};
 // Chats page: sharing rules, shared texts, suggestion settings and project assignments (synthetic, in memory).
-const sharingRules:any[]=[{id:'7'.repeat(64),name:'Trip notes from the topic',enabled:true,sources:[topic],destination:conversation,mode:'approved',instructions:'',revision:1},
- // Saved before private chats were refused: Nocheh skips the private chat it still names.
- {id:'7c'.repeat(32),name:'Notes from my chat',enabled:true,sources:['42'],destination:conversation,mode:'approved',instructions:'',revision:1}];
+const sharingRules: any[] = [
+  {
+    id: '7'.repeat(64),
+    name: 'Trip notes from the topic',
+    enabled: true,
+    sources: [topic],
+    destination: conversation,
+    mode: 'approved',
+    instructions: '',
+    revision: 1,
+  },
+  // Saved before private chats were refused: Nocheh skips the private chat it still names.
+  {
+    id: '7c'.repeat(32),
+    name: 'Notes from my chat',
+    enabled: true,
+    sources: ['42'],
+    destination: conversation,
+    mode: 'approved',
+    instructions: '',
+    revision: 1,
+  },
+];
 /** Only a group or one of its topics shares, is shared with or joins a project (ADR-0242); the directory decides. */
-const groupSpace=(space:string)=>directoryNow().isGroup(space);
-const sharingPreviews:any[]=[{id:'8'.repeat(64),rule_id:'7'.repeat(64),rule_revision:1,state:'ready',created_at:new Date(Date.now()-7200000).toISOString(),text:'We land in Reykjavik on the 3rd and stay two nights.'}];
-const sharingReleases:any[]=[];
-const memorySettings:any[]=[{destination:'*',suggestions:'related',notify_owner:true,auto_followup:false,request_ttl_seconds:86400,default_grant_mode:'one_time',revision:1}];
+const groupSpace = (space: string) => directoryNow().isGroup(space);
+const sharingPreviews: any[] = [
+  {
+    id: '8'.repeat(64),
+    rule_id: '7'.repeat(64),
+    rule_revision: 1,
+    state: 'ready',
+    created_at: new Date(Date.now() - 7200000).toISOString(),
+    text: 'We land in Reykjavik on the 3rd and stay two nights.',
+  },
+];
+const sharingReleases: any[] = [];
+const memorySettings: any[] = [
+  {
+    destination: '*',
+    suggestions: 'related',
+    notify_owner: true,
+    auto_followup: false,
+    request_ttl_seconds: 86400,
+    default_grant_mode: 'one_time',
+    revision: 1,
+  },
+];
 // Answer privately buttons offered under the owner's answers in the project's group (ADR-0249).
-const privateAnswers:any[]=[
- {id:'a'.repeat(32),question_event:'1'.repeat(64),from_chat_id:topic,project_id:projectId,member_id:null,asker_account_id:'42',read_chats:[conversation,'-10077'],reply_chat_id:'42',
-  state:'answered',refusal_code:null,offered_at:new Date(Date.now()-7200000).toISOString(),pressed_at:new Date(Date.now()-7100000).toISOString(),answered_at:new Date(Date.now()-7000000).toISOString()},
- {id:'b'.repeat(32),question_event:'2'.repeat(64),from_chat_id:conversation,project_id:projectId,member_id:null,asker_account_id:'42',read_chats:null,reply_chat_id:null,
-  state:'refused',refusal_code:'changed',offered_at:new Date(Date.now()-3600000).toISOString(),pressed_at:null,answered_at:null}];
-const assignments:any[]=[{space_id:conversation,project_id:projectId,mode:'assigned',revision:1},
- // Saved before private chats were refused: it puts the owner's chat in no project, and the owner can clear it.
- {space_id:'42',project_id:projectId,mode:'assigned',revision:1}];
+const privateAnswers: any[] = [
+  {
+    id: 'a'.repeat(32),
+    question_event: '1'.repeat(64),
+    from_chat_id: topic,
+    project_id: projectId,
+    member_id: null,
+    asker_account_id: '42',
+    read_chats: [conversation, '-10077'],
+    reply_chat_id: '42',
+    state: 'answered',
+    refusal_code: null,
+    offered_at: new Date(Date.now() - 7200000).toISOString(),
+    pressed_at: new Date(Date.now() - 7100000).toISOString(),
+    answered_at: new Date(Date.now() - 7000000).toISOString(),
+  },
+  {
+    id: 'b'.repeat(32),
+    question_event: '2'.repeat(64),
+    from_chat_id: conversation,
+    project_id: projectId,
+    member_id: null,
+    asker_account_id: '42',
+    read_chats: null,
+    reply_chat_id: null,
+    state: 'refused',
+    refusal_code: 'changed',
+    offered_at: new Date(Date.now() - 3600000).toISOString(),
+    pressed_at: null,
+    answered_at: null,
+  },
+];
+const assignments: any[] = [
+  {space_id: conversation, project_id: projectId, mode: 'assigned', revision: 1},
+  // Saved before private chats were refused: it puts the owner's chat in no project, and the owner can clear it.
+  {space_id: '42', project_id: projectId, mode: 'assigned', revision: 1},
+];
 /** A project's served groups, as the server lists them on /projects (ADR-0247). */
-const projectGroups=(id:string)=>{const directory=directoryNow();
- return assignments.filter(a=>a.mode==='assigned'&&a.project_id===id&&directory.kind(a.space_id)==='group'&&directory.served(a.space_id)).map(a=>a.space_id).sort();};
+const projectGroups = (id: string) => {
+  const directory = directoryNow();
+  return assignments
+    .filter(
+      a =>
+        a.mode === 'assigned' &&
+        a.project_id === id &&
+        directory.kind(a.space_id) === 'group' &&
+        directory.served(a.space_id),
+    )
+    .map(a => a.space_id)
+    .sort();
+};
 // Memory page: learned facts, people and their facts, projects, automatic organizing, long-term memory (synthetic, in memory).
-const hx=(s:string)=>s.repeat(64/s.length),minutesAgo=(m:number)=>new Date(Date.now()-m*60000).toISOString();
+const hx = (s: string) => s.repeat(64 / s.length),
+  minutesAgo = (m: number) => new Date(Date.now() - m * 60000).toISOString();
 // Background jobs: one reading a chat now, one that finished with its report.
-const backgroundJobs:any[]=[
-  {id:hx('9a'),title:'Open tasks in the aurora group',state:'running',chat:'-10042',asked_in:'-10042',attempts:1,ended:null,cost_usd:0.84,cost_limit_usd:5,priced:true,minutes_limit:45,
-   estimate:{minutes:14,cost_usd:1.6,messages:2400},todo:[{content:'Read March',status:'completed'},{content:'Read April',status:'in_progress'},{content:'Check who owns each open task',status:'pending'}],
-   started_at:minutesAgo(9),finished_at:null,created_at:minutesAgo(10),error_code:null,machine:null,steps:null,machine_cleanup:null},
-  {id:hx('9b'),title:'Summary of last week',state:'done',chat:'42',asked_in:'42',attempts:1,ended:'time',cost_usd:0.12,cost_limit_usd:5,priced:true,minutes_limit:45,
-   estimate:{minutes:2,cost_usd:0.1,messages:180},todo:[],started_at:minutesAgo(120),finished_at:minutesAgo(118),created_at:minutesAgo(121),error_code:null,machine:null,steps:null,machine_cleanup:null},
+const backgroundJobs: any[] = [
+  {
+    id: hx('9a'),
+    title: 'Open tasks in the aurora group',
+    state: 'running',
+    chat: '-10042',
+    asked_in: '-10042',
+    attempts: 1,
+    ended: null,
+    cost_usd: 0.84,
+    cost_limit_usd: 5,
+    priced: true,
+    minutes_limit: 45,
+    estimate: {minutes: 14, cost_usd: 1.6, messages: 2400},
+    todo: [
+      {content: 'Read March', status: 'completed'},
+      {content: 'Read April', status: 'in_progress'},
+      {content: 'Check who owns each open task', status: 'pending'},
+    ],
+    started_at: minutesAgo(9),
+    finished_at: null,
+    created_at: minutesAgo(10),
+    error_code: null,
+    machine: null,
+    steps: null,
+    machine_cleanup: null,
+  },
+  {
+    id: hx('9b'),
+    title: 'Summary of last week',
+    state: 'done',
+    chat: '42',
+    asked_in: '42',
+    attempts: 1,
+    ended: 'time',
+    cost_usd: 0.12,
+    cost_limit_usd: 5,
+    priced: true,
+    minutes_limit: 45,
+    estimate: {minutes: 2, cost_usd: 0.1, messages: 180},
+    todo: [],
+    started_at: minutesAgo(120),
+    finished_at: minutesAgo(118),
+    created_at: minutesAgo(121),
+    error_code: null,
+    machine: null,
+    steps: null,
+    machine_cleanup: null,
+  },
   // A job on the owner's machine: the plan its card showed, and its to-do list as it works through it.
-  {id:hx('9c'),title:'Set up the garden site on build-vm',state:'running',chat:'42',asked_in:'-10042',attempts:1,ended:null,cost_usd:0.31,cost_limit_usd:5,priced:true,minutes_limit:45,
-   estimate:{minutes:20,cost_usd:0.9},todo:[{content:'Install git and the build tools',status:'completed'},{content:'Copy the project into ~/projects/garden-site',status:'in_progress'}],
-   started_at:minutesAgo(6),finished_at:null,created_at:minutesAgo(8),error_code:null,machine:{name:'build-vm'},
-   steps:['Install git and the build tools','Copy the project into ~/projects/garden-site','Install its packages and run its tests','Start it and check that it answers on port 8080'],machine_cleanup:null},
-  {id:hx('9d'),title:'Clean old logs on test-vm',state:'stopped',chat:'42',asked_in:'42',attempts:0,ended:null,cost_usd:0,cost_limit_usd:5,priced:true,minutes_limit:45,
-   estimate:{minutes:5,cost_usd:0.2},todo:[],started_at:null,finished_at:minutesAgo(200),created_at:minutesAgo(210),error_code:'job_machine_off',machine:{name:'test-vm'},
-   steps:['List log files older than 30 days in ~/logs','Delete them and report the space freed'],machine_cleanup:null},
+  {
+    id: hx('9c'),
+    title: 'Set up the garden site on build-vm',
+    state: 'running',
+    chat: '42',
+    asked_in: '-10042',
+    attempts: 1,
+    ended: null,
+    cost_usd: 0.31,
+    cost_limit_usd: 5,
+    priced: true,
+    minutes_limit: 45,
+    estimate: {minutes: 20, cost_usd: 0.9},
+    todo: [
+      {content: 'Install git and the build tools', status: 'completed'},
+      {content: 'Copy the project into ~/projects/garden-site', status: 'in_progress'},
+    ],
+    started_at: minutesAgo(6),
+    finished_at: null,
+    created_at: minutesAgo(8),
+    error_code: null,
+    machine: {name: 'build-vm'},
+    steps: [
+      'Install git and the build tools',
+      'Copy the project into ~/projects/garden-site',
+      'Install its packages and run its tests',
+      'Start it and check that it answers on port 8080',
+    ],
+    machine_cleanup: null,
+  },
+  {
+    id: hx('9d'),
+    title: 'Clean old logs on test-vm',
+    state: 'stopped',
+    chat: '42',
+    asked_in: '42',
+    attempts: 0,
+    ended: null,
+    cost_usd: 0,
+    cost_limit_usd: 5,
+    priced: true,
+    minutes_limit: 45,
+    estimate: {minutes: 5, cost_usd: 0.2},
+    todo: [],
+    started_at: null,
+    finished_at: minutesAgo(200),
+    created_at: minutesAgo(210),
+    error_code: 'job_machine_off',
+    machine: {name: 'test-vm'},
+    steps: ['List log files older than 30 days in ~/logs', 'Delete them and report the space freed'],
+    machine_cleanup: null,
+  },
   // A machine job stopped at its time limit whose programs Nocheh couldn't end: the owner ends them.
-  {id:hx('9e'),title:'Build the photo gallery on build-vm',state:'done',chat:'42',asked_in:'42',attempts:1,ended:'time',cost_usd:0.62,cost_limit_usd:5,priced:true,minutes_limit:45,
-   estimate:{minutes:30,cost_usd:0.8},todo:[],started_at:minutesAgo(400),finished_at:minutesAgo(355),created_at:minutesAgo(410),error_code:null,machine:{name:'build-vm'},
-   steps:['Install the image tools','Build the gallery and start it on port 8081'],machine_cleanup:'failed'},
+  {
+    id: hx('9e'),
+    title: 'Build the photo gallery on build-vm',
+    state: 'done',
+    chat: '42',
+    asked_in: '42',
+    attempts: 1,
+    ended: 'time',
+    cost_usd: 0.62,
+    cost_limit_usd: 5,
+    priced: true,
+    minutes_limit: 45,
+    estimate: {minutes: 30, cost_usd: 0.8},
+    todo: [],
+    started_at: minutesAgo(400),
+    finished_at: minutesAgo(355),
+    created_at: minutesAgo(410),
+    error_code: null,
+    machine: {name: 'build-vm'},
+    steps: ['Install the image tools', 'Build the gallery and start it on port 8081'],
+    machine_cleanup: 'failed',
+  },
   // A machine job still waiting for Approve: nothing has run on its machine yet.
-  {id:hx('9f'),title:'Rotate the logs on build-vm',state:'proposed',chat:'42',asked_in:'42',attempts:0,ended:null,cost_usd:0,cost_limit_usd:5,priced:true,minutes_limit:45,
-   estimate:{minutes:5,cost_usd:0.1},todo:[],started_at:null,finished_at:null,created_at:minutesAgo(2),error_code:null,machine:{name:'build-vm'},
-   steps:['Set up logrotate for ~/projects/garden-site/logs'],machine_cleanup:null}];
-let jobLimits={cost_limit_usd:5,minutes_limit:45,member_notice_usd:20,member_pause_usd:100,box_tools:true,revision:0};
+  {
+    id: hx('9f'),
+    title: 'Rotate the logs on build-vm',
+    state: 'proposed',
+    chat: '42',
+    asked_in: '42',
+    attempts: 0,
+    ended: null,
+    cost_usd: 0,
+    cost_limit_usd: 5,
+    priced: true,
+    minutes_limit: 45,
+    estimate: {minutes: 5, cost_usd: 0.1},
+    todo: [],
+    started_at: null,
+    finished_at: null,
+    created_at: minutesAgo(2),
+    error_code: null,
+    machine: {name: 'build-vm'},
+    steps: ['Set up logrotate for ~/projects/garden-site/logs'],
+    machine_cleanup: null,
+  },
+];
+let jobLimits = {
+  cost_limit_usd: 5,
+  minutes_limit: 45,
+  member_notice_usd: 20,
+  member_pause_usd: 100,
+  box_tools: true,
+  revision: 0,
+};
 // What jobs members approved themselves spent today, and the pause of member jobs (ADR-0251).
-let memberPause:{by:'owner'|'auto';since:string;until:string|null}|null=null;
-const memberSpend=()=>({day:new Date().toISOString().slice(0,10),spent_usd:23.4,notice_usd:jobLimits.member_notice_usd,pause_usd:jobLimits.member_pause_usd,paused:memberPause});
+let memberPause: {by: 'owner' | 'auto'; since: string; until: string | null} | null = null;
+const memberSpend = () => ({
+  day: new Date().toISOString().slice(0, 10),
+  spent_usd: 23.4,
+  notice_usd: jobLimits.member_notice_usd,
+  pause_usd: jobLimits.member_pause_usd,
+  paused: memberPause,
+});
 // Machines: the preview stands in for Nocheh's machine service with made-up machines, keys and commands. Test fails only for an
 // address ending in .invalid; the key it shows is a fingerprint of the name, so a new host key shows only after Trust a new host key.
-const fingerprint=(text:string)=>createHash('sha256').update(text).digest('base64').replace(/=+$/,'');
-const machineView=(name:string,id:string)=>({id,name,public_key:'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI'+fingerprint('key:'+id)+' nocheh '+name});
-let machineControl={enabled:true,revision:0};
-const machines:any[]=[
-  {...machineView('build-vm','ab12'.repeat(8)),address:'192.0.2.10',port:22,login:'nocheh',host_key:'SHA256:'+fingerprint('build-vm'),enabled:true,tested_at:minutesAgo(40),test_error:null,admin:true,changed:{job:hx('9c'),files:['.zshrc']},revision:2,created_at:minutesAgo(900),jobs:1},
-  {...machineView('test-vm','cd34'.repeat(8)),address:'host.docker.internal',port:2222,login:'nocheh',host_key:null,enabled:true,tested_at:null,test_error:'machine_auth_failed',admin:null,changed:null,revision:3,created_at:minutesAgo(300),jobs:0},
-  {...machineView('spare-vm','ef56'.repeat(8)),address:'spare-vm.example.invalid',port:22,login:'nocheh',host_key:null,enabled:false,tested_at:null,test_error:null,admin:null,changed:null,revision:1,created_at:minutesAgo(200),jobs:0}];
-let machineCommandId=40;
-const machineCommand=(machine:any,row:any)=>({id:++machineCommandId,machine_id:machine.id,machine_name:machine.name,job_id:null,job_title:null,kind:'command',state:'done',exit_code:0,
-  script_sha256:['test','cleanup'].includes(row.kind)?null:createHash('sha256').update('script:'+row.command).digest('hex'),output_sha256:createHash('sha256').update('output:'+row.command).digest('hex'),output_bytes:0,error_code:null,started_at:new Date().toISOString(),finished_at:new Date().toISOString(),...row});
-const machineCommands:any[]=[];
-{const job={job_id:hx('9c'),job_title:'Set up the garden site on build-vm'},vm=machines[0];
- const commands:[string,string,number|null,number,string?][]=[['ssh test','test',0,26],['cd ~ && pwd','internal',0,12],['sudo -n true','command',1,58],['mkdir -p ~/projects/garden-site','command',0,0],
-  ['git --version','command',0,19],['read_file ~/projects/garden-site/README.md','file',0,2210],['ls -la ~/projects','command',0,412],['df -h ~','command',0,190],['npm --version','command',127,38],
-  ['curl -fsS https://example.org/garden-site.tar.gz -o /tmp/site.tar.gz','command',null,0,'machine_unreachable'],['tar -xzf /tmp/site.tar.gz -C ~/projects/garden-site','command',0,0]];
- commands.forEach(([command,kind,exit,bytes,error],index)=>machineCommands.unshift(machineCommand(vm,{...(kind==='test'?{}:job),command,kind,exit_code:exit,output_bytes:bytes,
-  state:error?'failed':'done',error_code:error??null,started_at:minutesAgo(40-index*3),finished_at:minutesAgo(40-index*3-0.4)})));
- for(let i=0;i<8;i++)machineCommands.unshift(machineCommand(vm,{...job,command:`sed -n '${i*40+1},${i*40+40}p' ~/projects/garden-site/src/app.js`,kind:i%4?'file':'command',output_bytes:900+i*13,
-  started_at:minutesAgo(6-i*0.2),finished_at:minutesAgo(6-i*0.2-0.05)}));
- machineCommands.unshift(machineCommand(vm,{...job,command:'npm test 2>&1 | tail -n 40',state:'running',exit_code:null,output_sha256:null,output_bytes:0,started_at:minutesAgo(0.3),finished_at:null}));}
+const fingerprint = (text: string) => createHash('sha256').update(text).digest('base64').replace(/=+$/, '');
+const machineView = (name: string, id: string) => ({
+  id,
+  name,
+  public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI' + fingerprint('key:' + id) + ' nocheh ' + name,
+});
+let machineControl = {enabled: true, revision: 0};
+const machines: any[] = [
+  {
+    ...machineView('build-vm', 'ab12'.repeat(8)),
+    address: '192.0.2.10',
+    port: 22,
+    login: 'nocheh',
+    host_key: 'SHA256:' + fingerprint('build-vm'),
+    enabled: true,
+    tested_at: minutesAgo(40),
+    test_error: null,
+    admin: true,
+    changed: {job: hx('9c'), files: ['.zshrc']},
+    revision: 2,
+    created_at: minutesAgo(900),
+    jobs: 1,
+  },
+  {
+    ...machineView('test-vm', 'cd34'.repeat(8)),
+    address: 'host.docker.internal',
+    port: 2222,
+    login: 'nocheh',
+    host_key: null,
+    enabled: true,
+    tested_at: null,
+    test_error: 'machine_auth_failed',
+    admin: null,
+    changed: null,
+    revision: 3,
+    created_at: minutesAgo(300),
+    jobs: 0,
+  },
+  {
+    ...machineView('spare-vm', 'ef56'.repeat(8)),
+    address: 'spare-vm.example.invalid',
+    port: 22,
+    login: 'nocheh',
+    host_key: null,
+    enabled: false,
+    tested_at: null,
+    test_error: null,
+    admin: null,
+    changed: null,
+    revision: 1,
+    created_at: minutesAgo(200),
+    jobs: 0,
+  },
+];
+let machineCommandId = 40;
+const machineCommand = (machine: any, row: any) => ({
+  id: ++machineCommandId,
+  machine_id: machine.id,
+  machine_name: machine.name,
+  job_id: null,
+  job_title: null,
+  kind: 'command',
+  state: 'done',
+  exit_code: 0,
+  script_sha256: ['test', 'cleanup'].includes(row.kind)
+    ? null
+    : createHash('sha256')
+        .update('script:' + row.command)
+        .digest('hex'),
+  output_sha256: createHash('sha256')
+    .update('output:' + row.command)
+    .digest('hex'),
+  output_bytes: 0,
+  error_code: null,
+  started_at: new Date().toISOString(),
+  finished_at: new Date().toISOString(),
+  ...row,
+});
+const machineCommands: any[] = [];
+{
+  const job = {job_id: hx('9c'), job_title: 'Set up the garden site on build-vm'},
+    vm = machines[0];
+  const commands: [string, string, number | null, number, string?][] = [
+    ['ssh test', 'test', 0, 26],
+    ['cd ~ && pwd', 'internal', 0, 12],
+    ['sudo -n true', 'command', 1, 58],
+    ['mkdir -p ~/projects/garden-site', 'command', 0, 0],
+    ['git --version', 'command', 0, 19],
+    ['read_file ~/projects/garden-site/README.md', 'file', 0, 2210],
+    ['ls -la ~/projects', 'command', 0, 412],
+    ['df -h ~', 'command', 0, 190],
+    ['npm --version', 'command', 127, 38],
+    ['curl -fsS https://example.org/garden-site.tar.gz -o /tmp/site.tar.gz', 'command', null, 0, 'machine_unreachable'],
+    ['tar -xzf /tmp/site.tar.gz -C ~/projects/garden-site', 'command', 0, 0],
+  ];
+  commands.forEach(([command, kind, exit, bytes, error], index) =>
+    machineCommands.unshift(
+      machineCommand(vm, {
+        ...(kind === 'test' ? {} : job),
+        command,
+        kind,
+        exit_code: exit,
+        output_bytes: bytes,
+        state: error ? 'failed' : 'done',
+        error_code: error ?? null,
+        started_at: minutesAgo(40 - index * 3),
+        finished_at: minutesAgo(40 - index * 3 - 0.4),
+      }),
+    ),
+  );
+  for (let i = 0; i < 8; i++)
+    machineCommands.unshift(
+      machineCommand(vm, {
+        ...job,
+        command: `sed -n '${i * 40 + 1},${i * 40 + 40}p' ~/projects/garden-site/src/app.js`,
+        kind: i % 4 ? 'file' : 'command',
+        output_bytes: 900 + i * 13,
+        started_at: minutesAgo(6 - i * 0.2),
+        finished_at: minutesAgo(6 - i * 0.2 - 0.05),
+      }),
+    );
+  machineCommands.unshift(
+    machineCommand(vm, {
+      ...job,
+      command: 'npm test 2>&1 | tail -n 40',
+      state: 'running',
+      exit_code: null,
+      output_sha256: null,
+      output_bytes: 0,
+      started_at: minutesAgo(0.3),
+      finished_at: null,
+    }),
+  );
+}
 // Sent to apps: content-free send records, newest first, a few of them problems (synthetic, in memory).
-const chatTitles:Record<string,string>={'42':'Owner','73':'Mira Chen',[conversation]:'Aurora planning',[NEW_GROUP_TG]:'Night sky club'},harmlessSends=['message_not_modified','button_answer_expired','reaction_not_allowed'];
-const chatSends:any[]=[];
-{const send=(minutes:number,kind:string,method:string,chat:string|null,row:any={})=>chatSends.unshift({id:String(901+chatSends.length),at:minutesAgo(minutes),channel:'telegram',kind,method,chat,
-  chat_title:chat?chatTitles[chat]??null:null,topic:null,message_id:chat?300+chatSends.length:null,detail:null,state:'sent',status:200,error_code:null,reference:null,ms:180,...row});
- send(2000,'setup','deleteWebhook',null,{message_id:null});
- for(let i=0;i<24;i++)send(1400-i*50,'reply','sendMessage',i%3?'42':conversation);
- send(240,'notice','sendMessage','42');
- send(200,'approval_card','sendMessage','73',{state:'failed',status:403,error_code:'bot_blocked',message_id:null});
- send(150,'card_update','editMessageText','42',{state:'failed',status:400,error_code:'message_not_modified'});
- send(120,'button_answer','answerCallbackQuery',null,{state:'failed',status:400,error_code:'button_answer_expired'});
- send(95,'reply','sendMessage','73',{state:'uncertain',status:0,error_code:'timed_out',message_id:null,ms:30000});
- send(80,'approved_send','sendMessage',conversation,{state:'not_sent',status:0,error_code:'audience_changed',message_id:null,ms:null});
- send(61,'reply','sendMessage',conversation,{topic:7,state:'failed',status:400,error_code:'formatting_rejected',message_id:null,reference:'telegram:1:update:60',recovered:true});
- send(60,'reply','sendMessage',conversation,{topic:7,reference:'telegram:1:update:60'});
- send(40,'reply','sendMessage','42',{state:'not_sent',status:0,error_code:'rate_limited',message_id:null,ms:null});
- send(25,'reaction','setMessageReaction',conversation,{detail:'👀',state:'failed',status:400,error_code:'reaction_not_allowed'});
- // A send to a group first seen after step 2b names its chat by Telegram id; the record carries its Nocheh chat.
- send(20,'reply','sendMessage',NEW_GROUP_TG);
- send(12,'reaction','setMessageReaction','42',{detail:'👀'});
- send(11,'reply','sendMessage','42');
- send(10,'reaction','setMessageReaction','42',{detail:'clear'});}
-const sendProblem=(row:any)=>['failed','uncertain'].includes(row.state)&&!harmlessSends.includes(row.error_code)&&!row.recovered;
-for(const row of chatSends)Object.assign(row,{problem:sendProblem(row),recovered:row.recovered===true});
+const chatTitles: Record<string, string> = {
+    '42': 'Owner',
+    '73': 'Mira Chen',
+    [conversation]: 'Aurora planning',
+    [NEW_GROUP_TG]: 'Night sky club',
+  },
+  harmlessSends = ['message_not_modified', 'button_answer_expired', 'reaction_not_allowed'];
+const chatSends: any[] = [];
+{
+  const send = (minutes: number, kind: string, method: string, chat: string | null, row: any = {}) =>
+    chatSends.unshift({
+      id: String(901 + chatSends.length),
+      at: minutesAgo(minutes),
+      channel: 'telegram',
+      kind,
+      method,
+      chat,
+      chat_title: chat ? (chatTitles[chat] ?? null) : null,
+      topic: null,
+      message_id: chat ? 300 + chatSends.length : null,
+      detail: null,
+      state: 'sent',
+      status: 200,
+      error_code: null,
+      reference: null,
+      ms: 180,
+      ...row,
+    });
+  send(2000, 'setup', 'deleteWebhook', null, {message_id: null});
+  for (let i = 0; i < 24; i++) send(1400 - i * 50, 'reply', 'sendMessage', i % 3 ? '42' : conversation);
+  send(240, 'notice', 'sendMessage', '42');
+  send(200, 'approval_card', 'sendMessage', '73', {
+    state: 'failed',
+    status: 403,
+    error_code: 'bot_blocked',
+    message_id: null,
+  });
+  send(150, 'card_update', 'editMessageText', '42', {state: 'failed', status: 400, error_code: 'message_not_modified'});
+  send(120, 'button_answer', 'answerCallbackQuery', null, {
+    state: 'failed',
+    status: 400,
+    error_code: 'button_answer_expired',
+  });
+  send(95, 'reply', 'sendMessage', '73', {
+    state: 'uncertain',
+    status: 0,
+    error_code: 'timed_out',
+    message_id: null,
+    ms: 30000,
+  });
+  send(80, 'approved_send', 'sendMessage', conversation, {
+    state: 'not_sent',
+    status: 0,
+    error_code: 'audience_changed',
+    message_id: null,
+    ms: null,
+  });
+  send(61, 'reply', 'sendMessage', conversation, {
+    topic: 7,
+    state: 'failed',
+    status: 400,
+    error_code: 'formatting_rejected',
+    message_id: null,
+    reference: 'telegram:1:update:60',
+    recovered: true,
+  });
+  send(60, 'reply', 'sendMessage', conversation, {topic: 7, reference: 'telegram:1:update:60'});
+  send(40, 'reply', 'sendMessage', '42', {
+    state: 'not_sent',
+    status: 0,
+    error_code: 'rate_limited',
+    message_id: null,
+    ms: null,
+  });
+  send(25, 'reaction', 'setMessageReaction', conversation, {
+    detail: '👀',
+    state: 'failed',
+    status: 400,
+    error_code: 'reaction_not_allowed',
+  });
+  // A send to a group first seen after step 2b names its chat by Telegram id; the record carries its Nocheh chat.
+  send(20, 'reply', 'sendMessage', NEW_GROUP_TG);
+  send(12, 'reaction', 'setMessageReaction', '42', {detail: '👀'});
+  send(11, 'reply', 'sendMessage', '42');
+  send(10, 'reaction', 'setMessageReaction', '42', {detail: 'clear'});
+}
+const sendProblem = (row: any) =>
+  ['failed', 'uncertain'].includes(row.state) && !harmlessSends.includes(row.error_code) && !row.recovered;
+for (const row of chatSends) Object.assign(row, {problem: sendProblem(row), recovered: row.recovered === true});
 /** Storage's /v1/status chat_sends: the last day's outcomes; the newest problem is any age. */
-function chatSendSummary(){const since=Date.now()-864e5,day=chatSends.filter(row=>Date.parse(row.at)>since),problems=day.filter(sendProblem),n=(state:string)=>day.filter(row=>row.state===state).length;
- return {window_hours:24,sent:n('sent'),failed:n('failed'),uncertain:n('uncertain'),not_sent:n('not_sent'),problems:problems.length,
-  problem_kinds:Object.fromEntries([...new Set(problems.map(row=>row.kind))].sort().map(kind=>[kind,problems.filter(row=>row.kind===kind).length])),
-  last_problem_at:chatSends.find(sendProblem)?.at??null,latest_problems:problems.slice(0,10)};}
-const machineList=(mode:string)=>({available:mode!=='unavailable',...machineControl,machines});
-const machineAt=(id:string)=>{const machine=machines.find(row=>row.id===id);if(!machine)throw new HttpError(404,'machine_not_found');return machine;};
-const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',revision:2}];
-const devonId=hx('d1');
-const personNotes=new Map<string,{note:string;revision:number}>();
-const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2,people_name:true},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
- {id:projectEntityId,kind:'project',name:'Aurora field guide',state:'active',project_id:projectId,merged_into:null,revision:1}];
-const claim=(id:string,subject:string,object:string|null,predicate:string,content:string,extra:any={})=>({id,subject_entity_id:subject,object_entity_id:object,predicate,revision:1,content,relationship_kind:object?'associated':null,attribution:'direct',speaker_entity_id:subject,uncertainty:'explicit',author:'learning',retired:false,evidence:[{id}],created_at:minutesAgo(900),...extra});
+function chatSendSummary() {
+  const since = Date.now() - 864e5,
+    day = chatSends.filter(row => Date.parse(row.at) > since),
+    problems = day.filter(sendProblem),
+    n = (state: string) => day.filter(row => row.state === state).length;
+  return {
+    window_hours: 24,
+    sent: n('sent'),
+    failed: n('failed'),
+    uncertain: n('uncertain'),
+    not_sent: n('not_sent'),
+    problems: problems.length,
+    problem_kinds: Object.fromEntries(
+      [...new Set(problems.map(row => row.kind))]
+        .sort()
+        .map(kind => [kind, problems.filter(row => row.kind === kind).length]),
+    ),
+    last_problem_at: chatSends.find(sendProblem)?.at ?? null,
+    latest_problems: problems.slice(0, 10),
+  };
+}
+const machineList = (mode: string) => ({available: mode !== 'unavailable', ...machineControl, machines});
+const machineAt = (id: string) => {
+  const machine = machines.find(row => row.id === id);
+  if (!machine) throw new HttpError(404, 'machine_not_found');
+  return machine;
+};
+const memoryProjects: any[] = [
+  memoryMapNodes[1].detail.project,
+  {
+    id: hx('cd'),
+    name: 'Garden redesign',
+    description: 'Ideas and suppliers for the back garden.',
+    state: 'active',
+    revision: 1,
+  },
+  {id: hx('ce'), name: 'Old apartment move', description: '', state: 'archived', revision: 2},
+];
+const devonId = hx('d1');
+const personNotes = new Map<string, {note: string; revision: number}>();
+const people: any[] = [
+  {
+    id: personId,
+    kind: 'person',
+    name: 'Mira Chen',
+    state: 'active',
+    project_id: null,
+    merged_into: null,
+    revision: 2,
+    people_name: true,
+  },
+  {id: devonId, kind: 'person', name: 'Devon', state: 'active', project_id: null, merged_into: null, revision: 1},
+  {
+    id: projectEntityId,
+    kind: 'project',
+    name: 'Aurora field guide',
+    state: 'active',
+    project_id: projectId,
+    merged_into: null,
+    revision: 1,
+  },
+];
+const claim = (
+  id: string,
+  subject: string,
+  object: string | null,
+  predicate: string,
+  content: string,
+  extra: any = {},
+) => ({
+  id,
+  subject_entity_id: subject,
+  object_entity_id: object,
+  predicate,
+  revision: 1,
+  content,
+  relationship_kind: object ? 'associated' : null,
+  attribution: 'direct',
+  speaker_entity_id: subject,
+  uncertainty: 'explicit',
+  author: 'learning',
+  retired: false,
+  evidence: [{id}],
+  created_at: minutesAgo(900),
+  ...extra,
+});
 // Mira's preference came from the owner's message (named on People in the owner's words, ADR-0261 step 4); the other
 // claims name only themselves, which no message is, so they read "Source not recorded" with no link.
-const claims:any[]=[claim(factId,personId,null,'preference','Mira prefers quiet aurora viewpoints away from tour-bus routes.',{evidence:[{id}]}),
- claim(hx('d2'),personId,devonId,'travel_partner','Mira and Devon are planning the Iceland trip together.',{relationship_kind:'participates',uncertainty:'supported'}),
- claim(hx('d3'),devonId,null,'diet','Devon is vegetarian.',{attribution:'reported',uncertainty:'supported'}),
- claim(hx('d4'),projectEntityId,null,'scope','The field guide covers viewpoints within two hours of Reykjavik.')];
-const learnedEntry=(key:string,subject:string,kind:string,scope_kind:string,scope_id:string,texts:string[],extra:any={})=>{const learning={subject,kind,scope:{kind:scope_kind,id:scope_id},uncertainty:extra.uncertainty??'supported',evidence:[{id}],conflicts:extra.conflicts??[]};
- const versions=texts.map((text,index)=>({revision:index+1,text,author:index&&extra.author?extra.author:'learning',retired:false,created_at:minutesAgo(2000-index*600),evidence:[{id}],provenance:{learning,producer:'synthetic-preview'}}));
- const last=versions.at(-1)!;if(extra.retired)last.retired=true;
- return {entry:{id:hx(key),subject,kind,scope_kind,scope_id,active_revision:last.revision,text:last.text,author:last.author,retired:!!extra.retired,revised_at:last.created_at,provenance:last.provenance},versions};};
-const learnedRows=[learnedEntry('e1','“The cabin”','meaning','conversation',conversation,['“The cabin” means the rented cottage near Vík for the March trip.']),
- learnedEntry('e2','Flight booking','state','conversation',topic,['Flights for the Iceland trip are not booked yet.','Flights for the Iceland trip are booked; hotels are still open.'],{author:'owner',uncertainty:'explicit'}),
- learnedEntry('e3','Photo naming','convention','project',projectId,['Aurora photos are named by date and place, for example 2027-03-04-vik.'],{uncertainty:'explicit'}),
- learnedEntry('e4','“The cabin”','meaning','conversation',conversation,['“The cabin” may mean Devon’s family house in the north.'],{uncertainty:'uncertain',conflicts:[hx('e1')]}),
- learnedEntry('e5','Weekly call','state','conversation','42',['The weekly family call is on Sundays.'],{retired:true})];
-const learned:any[]=learnedRows.map(row=>row.entry),learnedVersions:Record<string,any[]>=Object.fromEntries(learnedRows.map(row=>[row.entry.id,row.versions]));
-const factGrants:any[]=[];
-const delegations:any[]=[{id:hx('d5'),name:'Organize the travel group',enabled:true,scopes:[conversation,topic],project_ids:[projectId],expires_at:null,revision:1,baseline_suspended:[topic]}];
-const delegationView=(d:any)=>({...d,baseline_suspended:undefined,suspended_scopes:d.baseline_suspended.filter((s:string)=>d.scopes.includes(s)),expired:!!d.expires_at&&new Date(d.expires_at)<=new Date()});
-const pastProposals:any[]=[{id:hx('d6'),kind:'organization',state:'applied',revision:2,created_at:minutesAgo(4000),source_scope:conversation,proposal:{kind:'organization',reason:'Put the travel group in the Aurora field guide project.'}}];
-const honchoBudget:any={limit_cents:500,max_limit_cents:1500,revision:3,mode:'monthly',limit_usd:5,counted_toward_cap_usd:1.27,remaining_usd:3.73,estimated_embedding_cost_usd:0.94,embedding_tokens:47000,embedding_requests:312,embedding_reported_requests:310,embedding_unreported_requests:2,embedding_hold_usd:0.01,released_error_holds_usd:0,legacy_error_exposure_unverified_usd:0,reasoning_requests:184,thinking_spent_usd:12.4,thinking_limit_usd:40,thinking_limit_cents:4000,thinking_remaining_usd:27.6,max_thinking_limit_cents:100000,thinking_unpriced_requests:0,window_started_at:new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString()};
-let memoryRevision=4,memoryIncludeHistory=true;
-let failedLearning=3;
-const fixtureProject=(pid?:string)=>memoryProjects.find(p=>p.id===pid)??memoryMapNodes[1].detail.project;
-function effectiveProject(space:string){const parent=directoryNow().parentOf(space),own=assignments.find(a=>a.space_id===space)??null,inherited=!!parent||!own||own.mode==='inherit',chosen=inherited?assignments.find(a=>a.space_id===parent):own;
- if(!groupSpace(space))return {space,own_assignment:own,assignment:null,project:null,inherited:false};
- return {space,own_assignment:own,assignment:chosen??null,project:chosen?.project_id?fixtureProject(chosen.project_id):null,inherited:!!chosen&&inherited};}
-const previewView=(row:any)=>({...row,input:{rule:sharingRules.find(r=>r.id===row.rule_id),sources:[{id}]},guard_revision:1,text_hash:'9'.repeat(64),current:sharingRules.find(r=>r.id===row.rule_id)?.revision===row.rule_revision,output_provenance:{fixture:true}});
-// Inbox fixtures: synthetic decided actions, Telegram messages, an identity suggestion and an organization proposal.
-const inboxAgo=(minutes:number)=>new Date(Date.now()-minutes*60000).toISOString();
-actions.push({id:'7'.repeat(64),event_id:id,fingerprint:'7a'.repeat(32),kind:'browser',scope:conversation,profile,arguments:{url:'https://example.org/aurora-forecast'},state:'done',revision:3,created_at:inboxAgo(190),result:{text:'Aurora forecast: Kp 5 expected tonight, clear skies after 22:00.'}},
- {id:'8'.repeat(64),event_id:id,fingerprint:'8a'.repeat(32),kind:'shell',scope:'42',profile,arguments:{command:'rm -rf ./synthetic-cache'},state:'rejected',revision:2,created_at:inboxAgo(1500)},
- // Unclear outcomes (ADR-0218): a command waits for the owner's word; a page read closed itself.
- {id:'6'.repeat(64),event_id:id,fingerprint:'6a'.repeat(32),kind:'shell',scope:'42',profile,arguments:{command:'printf synthetic-unclear'},state:'ambiguous',revision:4,error_code:'executor_outcome_unconfirmed',resolution:null,created_at:inboxAgo(75),result:{state:'ambiguous',result:{error:'execution_outcome_unconfirmed'}}},
- {id:'5'.repeat(64),event_id:id,fingerprint:'5a'.repeat(32),kind:'browser',scope:conversation,profile,arguments:{url:'https://example.org/aurora-weather'},state:'ambiguous',revision:4,error_code:'executor_outcome_unconfirmed',resolution:'read_closed',resolved_at:inboxAgo(80),created_at:inboxAgo(80),result:{state:'ambiguous',result:{error:'execution_outcome_unconfirmed',cause:'remote_unreachable'}}});
-const telegramActions:any[]=[{id:'ab'.repeat(32),event_id:id,fingerprint:'ba'.repeat(32),kind:'telegram_message',scope:'42',profile,arguments:{destination:conversation,text:'Hi all, the cabin is booked for 14 to 18 March. Bring warm layers for the aurora nights!'},state:'proposed',revision:1,created_at:inboxAgo(12),result:null},
- {id:'cd'.repeat(32),event_id:id,fingerprint:'dc'.repeat(32),kind:'telegram_message',scope:'42',profile,arguments:{destination:topic,text:'Reminder: flights land at 09:40.'},state:'done',revision:3,created_at:inboxAgo(2900),result:{delivered:true}}];
-const memoryAccessCreated=inboxAgo(40);
-const entitySuggestion:any={id:'0'.repeat(64),kind:'person',name:'Nia Okafor',candidate_entity_id:null,source_reference:{id},reason:'Mentioned twice in Aurora planning as the person booking the cabin.',status:'pending',revision:1,created_at:inboxAgo(300)};
-// A project card with two other names folded into it: a longer name and the same name with another spelling.
-const folded=(hex:string,name:string,minutes:number)=>({id:hex.repeat(32),name,reason:'The same cabin booking, named another way.',revision:1,source_reference:{id},created_at:inboxAgo(minutes)});
-const projectSuggestion:any={id:'02'.repeat(32),kind:'project',name:'Aurora cabin',candidate_entity_id:null,source_reference:{id},reason:'A cabin booking the group keeps planning around.',status:'pending',revision:1,created_at:inboxAgo(280),
- also_called:[folded('03','Aurora cabin trip',260),folded('04','Aurora cabin (کلبه)',240)]};
-const knowledgeProposal:any={id:'f'.repeat(64),kind:'organization',origin:'learning',state:'review',revision:1,approved:false,created_at:inboxAgo(95),source_scope:conversation,source_reference:{id},error_code:null,result:null,decision_history:[],affected_topics:{},
- // As the server works it out: the project the group would join, with the groups already there (ADR-0247).
- get project_groups(){return [{id:projectId,name:'Aurora field guide',groups:projectGroups(projectId).filter(g=>g!=='-10073')}];},undo_project_groups:[],
- proposal:{kind:'organization',reason:'Weekend notes plans the same aurora trip; one project keeps its role and tasks together.',creates:[{key:'trip',name:'Iceland trip 2027',description:'Planning the March aurora trip with friends.',evidence_ids:[id]}],assignments:[{space_id:'-10073',project_id:projectId,reason:'Every recent message in this group is about the trip.',evidence_ids:[voiceId],expected_revision:0}]}};
-function inboxDecisions(){
- const summary=(kind:string,row:any,extra:any)=>({kind,id:row.id,state:row.state??row.status,revision:row.revision??1,created_at:row.created_at,source_scope:null,destination:null,fingerprint:null,...extra});
- // An unclear outcome waits until it is closed (ADR-0218).
- const waits=(a:any)=>a.state==='proposed'||a.state==='ambiguous'&&!a.resolution;
- return [...actions.filter(waits).map(a=>summary('controlled_action',a,{title:a.kind,source_scope:a.scope,fingerprint:a.fingerprint})),
-  ...telegramActions.filter(waits).map(a=>summary('telegram_action',a,{title:'Send Telegram message',source_scope:a.scope,destination:a.arguments.destination,fingerprint:a.fingerprint})),
-  ...(memoryAccessRequest.state==='pending'?[summary('memory_access',{...memoryAccessRequest,created_at:memoryAccessCreated},{title:'Share a specific fact',source_scope:conversation,destination:memoryAccessRequest.destination})]:[]),
-  ...[entitySuggestion,projectSuggestion].filter(card=>card.status==='pending').map(card=>summary('entity',card,{title:card.name,subject_kind:card.kind,also_called:(card.also_called??[]).map((name:any)=>name.name)})),
-  ...(['review','stale','failed'].includes(knowledgeProposal.state)?[summary('knowledge',knowledgeProposal,{title:knowledgeProposal.kind,source_scope:knowledgeProposal.source_scope})]:[])];
+const claims: any[] = [
+  claim(factId, personId, null, 'preference', 'Mira prefers quiet aurora viewpoints away from tour-bus routes.', {
+    evidence: [{id}],
+  }),
+  claim(hx('d2'), personId, devonId, 'travel_partner', 'Mira and Devon are planning the Iceland trip together.', {
+    relationship_kind: 'participates',
+    uncertainty: 'supported',
+  }),
+  claim(hx('d3'), devonId, null, 'diet', 'Devon is vegetarian.', {attribution: 'reported', uncertainty: 'supported'}),
+  claim(hx('d4'), projectEntityId, null, 'scope', 'The field guide covers viewpoints within two hours of Reykjavik.'),
+];
+const learnedEntry = (
+  key: string,
+  subject: string,
+  kind: string,
+  scope_kind: string,
+  scope_id: string,
+  texts: string[],
+  extra: any = {},
+) => {
+  const learning = {
+    subject,
+    kind,
+    scope: {kind: scope_kind, id: scope_id},
+    uncertainty: extra.uncertainty ?? 'supported',
+    evidence: [{id}],
+    conflicts: extra.conflicts ?? [],
+  };
+  const versions = texts.map((text, index) => ({
+    revision: index + 1,
+    text,
+    author: index && extra.author ? extra.author : 'learning',
+    retired: false,
+    created_at: minutesAgo(2000 - index * 600),
+    evidence: [{id}],
+    provenance: {learning, producer: 'synthetic-preview'},
+  }));
+  const last = versions.at(-1)!;
+  if (extra.retired) last.retired = true;
+  return {
+    entry: {
+      id: hx(key),
+      subject,
+      kind,
+      scope_kind,
+      scope_id,
+      active_revision: last.revision,
+      text: last.text,
+      author: last.author,
+      retired: !!extra.retired,
+      revised_at: last.created_at,
+      provenance: last.provenance,
+    },
+    versions,
+  };
+};
+const learnedRows = [
+  learnedEntry('e1', '“The cabin”', 'meaning', 'conversation', conversation, [
+    '“The cabin” means the rented cottage near Vík for the March trip.',
+  ]),
+  learnedEntry(
+    'e2',
+    'Flight booking',
+    'state',
+    'conversation',
+    topic,
+    [
+      'Flights for the Iceland trip are not booked yet.',
+      'Flights for the Iceland trip are booked; hotels are still open.',
+    ],
+    {author: 'owner', uncertainty: 'explicit'},
+  ),
+  learnedEntry(
+    'e3',
+    'Photo naming',
+    'convention',
+    'project',
+    projectId,
+    ['Aurora photos are named by date and place, for example 2027-03-04-vik.'],
+    {uncertainty: 'explicit'},
+  ),
+  learnedEntry(
+    'e4',
+    '“The cabin”',
+    'meaning',
+    'conversation',
+    conversation,
+    ['“The cabin” may mean Devon’s family house in the north.'],
+    {uncertainty: 'uncertain', conflicts: [hx('e1')]},
+  ),
+  learnedEntry('e5', 'Weekly call', 'state', 'conversation', '42', ['The weekly family call is on Sundays.'], {
+    retired: true,
+  }),
+];
+const learned: any[] = learnedRows.map(row => row.entry),
+  learnedVersions: Record<string, any[]> = Object.fromEntries(learnedRows.map(row => [row.entry.id, row.versions]));
+const factGrants: any[] = [];
+const delegations: any[] = [
+  {
+    id: hx('d5'),
+    name: 'Organize the travel group',
+    enabled: true,
+    scopes: [conversation, topic],
+    project_ids: [projectId],
+    expires_at: null,
+    revision: 1,
+    baseline_suspended: [topic],
+  },
+];
+const delegationView = (d: any) => ({
+  ...d,
+  baseline_suspended: undefined,
+  suspended_scopes: d.baseline_suspended.filter((s: string) => d.scopes.includes(s)),
+  expired: !!d.expires_at && new Date(d.expires_at) <= new Date(),
+});
+const pastProposals: any[] = [
+  {
+    id: hx('d6'),
+    kind: 'organization',
+    state: 'applied',
+    revision: 2,
+    created_at: minutesAgo(4000),
+    source_scope: conversation,
+    proposal: {kind: 'organization', reason: 'Put the travel group in the Aurora field guide project.'},
+  },
+];
+const honchoBudget: any = {
+  limit_cents: 500,
+  max_limit_cents: 1500,
+  revision: 3,
+  mode: 'monthly',
+  limit_usd: 5,
+  counted_toward_cap_usd: 1.27,
+  remaining_usd: 3.73,
+  estimated_embedding_cost_usd: 0.94,
+  embedding_tokens: 47000,
+  embedding_requests: 312,
+  embedding_reported_requests: 310,
+  embedding_unreported_requests: 2,
+  embedding_hold_usd: 0.01,
+  released_error_holds_usd: 0,
+  legacy_error_exposure_unverified_usd: 0,
+  reasoning_requests: 184,
+  thinking_spent_usd: 12.4,
+  thinking_limit_usd: 40,
+  thinking_limit_cents: 4000,
+  thinking_remaining_usd: 27.6,
+  max_thinking_limit_cents: 100000,
+  thinking_unpriced_requests: 0,
+  window_started_at: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString(),
+};
+let memoryRevision = 4,
+  memoryIncludeHistory = true;
+let failedLearning = 3;
+const fixtureProject = (pid?: string) => memoryProjects.find(p => p.id === pid) ?? memoryMapNodes[1].detail.project;
+function effectiveProject(space: string) {
+  const parent = directoryNow().parentOf(space),
+    own = assignments.find(a => a.space_id === space) ?? null,
+    inherited = !!parent || !own || own.mode === 'inherit',
+    chosen = inherited ? assignments.find(a => a.space_id === parent) : own;
+  if (!groupSpace(space)) return {space, own_assignment: own, assignment: null, project: null, inherited: false};
+  return {
+    space,
+    own_assignment: own,
+    assignment: chosen ?? null,
+    project: chosen?.project_id ? fixtureProject(chosen.project_id) : null,
+    inherited: !!chosen && inherited,
+  };
 }
-function inboxRecord(kind:string,recordId:string):any{
- if(kind==='controlled_action')return actions.find(a=>a.id===recordId);
- if(kind==='telegram_action')return telegramActions.find(a=>a.id===recordId);
- if(kind==='memory_access'&&recordId===requestId)return {...memoryAccessRequest,source_scope:conversation,fact_id:factId,fact_revision:1,current_fact_revision:1,created_at:memoryAccessCreated};
- if(kind==='entity')return [entitySuggestion,projectSuggestion].find(card=>card.id===recordId);
- if(kind==='knowledge'&&recordId===knowledgeProposal.id)return knowledgeProposal;
+const previewView = (row: any) => ({
+  ...row,
+  input: {rule: sharingRules.find(r => r.id === row.rule_id), sources: [{id}]},
+  guard_revision: 1,
+  text_hash: '9'.repeat(64),
+  current: sharingRules.find(r => r.id === row.rule_id)?.revision === row.rule_revision,
+  output_provenance: {fixture: true},
+});
+// Inbox fixtures: synthetic decided actions, Telegram messages, an identity suggestion and an organization proposal.
+const inboxAgo = (minutes: number) => new Date(Date.now() - minutes * 60000).toISOString();
+actions.push(
+  {
+    id: '7'.repeat(64),
+    event_id: id,
+    fingerprint: '7a'.repeat(32),
+    kind: 'browser',
+    scope: conversation,
+    profile,
+    arguments: {url: 'https://example.org/aurora-forecast'},
+    state: 'done',
+    revision: 3,
+    created_at: inboxAgo(190),
+    result: {text: 'Aurora forecast: Kp 5 expected tonight, clear skies after 22:00.'},
+  },
+  {
+    id: '8'.repeat(64),
+    event_id: id,
+    fingerprint: '8a'.repeat(32),
+    kind: 'shell',
+    scope: '42',
+    profile,
+    arguments: {command: 'rm -rf ./synthetic-cache'},
+    state: 'rejected',
+    revision: 2,
+    created_at: inboxAgo(1500),
+  },
+  // Unclear outcomes (ADR-0218): a command waits for the owner's word; a page read closed itself.
+  {
+    id: '6'.repeat(64),
+    event_id: id,
+    fingerprint: '6a'.repeat(32),
+    kind: 'shell',
+    scope: '42',
+    profile,
+    arguments: {command: 'printf synthetic-unclear'},
+    state: 'ambiguous',
+    revision: 4,
+    error_code: 'executor_outcome_unconfirmed',
+    resolution: null,
+    created_at: inboxAgo(75),
+    result: {state: 'ambiguous', result: {error: 'execution_outcome_unconfirmed'}},
+  },
+  {
+    id: '5'.repeat(64),
+    event_id: id,
+    fingerprint: '5a'.repeat(32),
+    kind: 'browser',
+    scope: conversation,
+    profile,
+    arguments: {url: 'https://example.org/aurora-weather'},
+    state: 'ambiguous',
+    revision: 4,
+    error_code: 'executor_outcome_unconfirmed',
+    resolution: 'read_closed',
+    resolved_at: inboxAgo(80),
+    created_at: inboxAgo(80),
+    result: {state: 'ambiguous', result: {error: 'execution_outcome_unconfirmed', cause: 'remote_unreachable'}},
+  },
+);
+const telegramActions: any[] = [
+  {
+    id: 'ab'.repeat(32),
+    event_id: id,
+    fingerprint: 'ba'.repeat(32),
+    kind: 'telegram_message',
+    scope: '42',
+    profile,
+    arguments: {
+      destination: conversation,
+      text: 'Hi all, the cabin is booked for 14 to 18 March. Bring warm layers for the aurora nights!',
+    },
+    state: 'proposed',
+    revision: 1,
+    created_at: inboxAgo(12),
+    result: null,
+  },
+  {
+    id: 'cd'.repeat(32),
+    event_id: id,
+    fingerprint: 'dc'.repeat(32),
+    kind: 'telegram_message',
+    scope: '42',
+    profile,
+    arguments: {destination: topic, text: 'Reminder: flights land at 09:40.'},
+    state: 'done',
+    revision: 3,
+    created_at: inboxAgo(2900),
+    result: {delivered: true},
+  },
+];
+const memoryAccessCreated = inboxAgo(40);
+const entitySuggestion: any = {
+  id: '0'.repeat(64),
+  kind: 'person',
+  name: 'Nia Okafor',
+  candidate_entity_id: null,
+  source_reference: {id},
+  reason: 'Mentioned twice in Aurora planning as the person booking the cabin.',
+  status: 'pending',
+  revision: 1,
+  created_at: inboxAgo(300),
+};
+// A project card with two other names folded into it: a longer name and the same name with another spelling.
+const folded = (hex: string, name: string, minutes: number) => ({
+  id: hex.repeat(32),
+  name,
+  reason: 'The same cabin booking, named another way.',
+  revision: 1,
+  source_reference: {id},
+  created_at: inboxAgo(minutes),
+});
+const projectSuggestion: any = {
+  id: '02'.repeat(32),
+  kind: 'project',
+  name: 'Aurora cabin',
+  candidate_entity_id: null,
+  source_reference: {id},
+  reason: 'A cabin booking the group keeps planning around.',
+  status: 'pending',
+  revision: 1,
+  created_at: inboxAgo(280),
+  also_called: [folded('03', 'Aurora cabin trip', 260), folded('04', 'Aurora cabin (کلبه)', 240)],
+};
+const knowledgeProposal: any = {
+  id: 'f'.repeat(64),
+  kind: 'organization',
+  origin: 'learning',
+  state: 'review',
+  revision: 1,
+  approved: false,
+  created_at: inboxAgo(95),
+  source_scope: conversation,
+  source_reference: {id},
+  error_code: null,
+  result: null,
+  decision_history: [],
+  affected_topics: {},
+  // As the server works it out: the project the group would join, with the groups already there (ADR-0247).
+  get project_groups() {
+    return [{id: projectId, name: 'Aurora field guide', groups: projectGroups(projectId).filter(g => g !== '-10073')}];
+  },
+  undo_project_groups: [],
+  proposal: {
+    kind: 'organization',
+    reason: 'Weekend notes plans the same aurora trip; one project keeps its role and tasks together.',
+    creates: [
+      {
+        key: 'trip',
+        name: 'Iceland trip 2027',
+        description: 'Planning the March aurora trip with friends.',
+        evidence_ids: [id],
+      },
+    ],
+    assignments: [
+      {
+        space_id: '-10073',
+        project_id: projectId,
+        reason: 'Every recent message in this group is about the trip.',
+        evidence_ids: [voiceId],
+        expected_revision: 0,
+      },
+    ],
+  },
+};
+function inboxDecisions() {
+  const summary = (kind: string, row: any, extra: any) => ({
+    kind,
+    id: row.id,
+    state: row.state ?? row.status,
+    revision: row.revision ?? 1,
+    created_at: row.created_at,
+    source_scope: null,
+    destination: null,
+    fingerprint: null,
+    ...extra,
+  });
+  // An unclear outcome waits until it is closed (ADR-0218).
+  const waits = (a: any) => a.state === 'proposed' || (a.state === 'ambiguous' && !a.resolution);
+  return [
+    ...actions
+      .filter(waits)
+      .map(a => summary('controlled_action', a, {title: a.kind, source_scope: a.scope, fingerprint: a.fingerprint})),
+    ...telegramActions
+      .filter(waits)
+      .map(a =>
+        summary('telegram_action', a, {
+          title: 'Send Telegram message',
+          source_scope: a.scope,
+          destination: a.arguments.destination,
+          fingerprint: a.fingerprint,
+        }),
+      ),
+    ...(memoryAccessRequest.state === 'pending'
+      ? [
+          summary(
+            'memory_access',
+            {...memoryAccessRequest, created_at: memoryAccessCreated},
+            {title: 'Share a specific fact', source_scope: conversation, destination: memoryAccessRequest.destination},
+          ),
+        ]
+      : []),
+    ...[entitySuggestion, projectSuggestion]
+      .filter(card => card.status === 'pending')
+      .map(card =>
+        summary('entity', card, {
+          title: card.name,
+          subject_kind: card.kind,
+          also_called: (card.also_called ?? []).map((name: any) => name.name),
+        }),
+      ),
+    ...(['review', 'stale', 'failed'].includes(knowledgeProposal.state)
+      ? [
+          summary('knowledge', knowledgeProposal, {
+            title: knowledgeProposal.kind,
+            source_scope: knowledgeProposal.source_scope,
+          }),
+        ]
+      : []),
+  ];
+}
+function inboxRecord(kind: string, recordId: string): any {
+  if (kind === 'controlled_action') return actions.find(a => a.id === recordId);
+  if (kind === 'telegram_action') return telegramActions.find(a => a.id === recordId);
+  if (kind === 'memory_access' && recordId === requestId)
+    return {
+      ...memoryAccessRequest,
+      source_scope: conversation,
+      fact_id: factId,
+      fact_revision: 1,
+      current_fact_revision: 1,
+      created_at: memoryAccessCreated,
+    };
+  if (kind === 'entity') return [entitySuggestion, projectSuggestion].find(card => card.id === recordId);
+  if (kind === 'knowledge' && recordId === knowledgeProposal.id) return knowledgeProposal;
 }
 /** Messages page fixture: synthetic kept messages, the assistant's copies, hiding, versions and imports. */
-const messagesFixture=(()=>{
- const hex=(n:string)=>n.repeat(32),ago=(minutes:number)=>new Date(Date.now()-minutes*60000).toISOString();
- const ids={tour:hex('e1'),tourReply:hex('e2'),forecast:hex('e3'),packing:hex('e4'),booking:hex('e5'),rejected:hex('e6'),archivedVoice:hex('e7'),photo:hex('e8'),reaction:hex('e9'),browser:hex('ea'),browserReply:hex('eb'),memberAsk:hex('ec'),memberReply:hex('ed')};
- const photoFile=hex('f1'),archivedVoiceFile=hex('f2'),transcriptVersion=hex('d1'),olderTranscript=hex('d2'),archivedStatus=hex('d3');
- const owner={id:42,first_name:'Owner'},mira={id:73,first_name:'Mira',last_name:'Chen'};
- type Message={id:string;scope:string;kind:string;text:string|null;minutes:number;payload:any;state?:string;error?:string;attempts?:number;retired?:boolean;action?:any;replies?:string[];artifacts?:any[];derived?:any[];transcript?:string};
- const telegram=(message_id:number,from:any,extra:any={})=>({message:{message_id,from,chat:{id:42},...extra}});
- const list:Message[]=[
-  {id:ids.tour,scope:'42',kind:'telegram_update',text:'Can you remind me what time the aurora tour starts on Friday?',minutes:12,payload:telegram(201,owner,{text:'Can you remind me what time the aurora tour starts on Friday?'}),state:'done',replies:[ids.tourReply]},
-  {id:ids.tourReply,scope:'42',kind:'telegram_delivered_message',text:'The tour leaves at 21:30 from the harbour car park. Bring warm layers and a flask.',minutes:11,payload:telegram(202,{id:1,first_name:'Nocheh',is_bot:true},{text:'The tour leaves at 21:30 from the harbour car park. Bring warm layers and a flask.'})},
-  {id:ids.forecast,scope:'-10042',kind:'telegram_update',text:'@Nocheh what is the Kp forecast for tonight?',minutes:40,payload:telegram(88,mira,{text:'@Nocheh what is the Kp forecast for tonight?'}),state:'failed',error:'model_unavailable',attempts:2},
-  {id:ids.packing,scope:'42',kind:'telegram_update',text:'Send the packing list to Mira when you can.',minutes:95,payload:telegram(199,owner,{text:'Send the packing list to Mira when you can.'}),state:'ambiguous',error:'delivery_unconfirmed'},
-  {id:ids.booking,scope:'42',kind:'telegram_update',text:'Please book the 22:00 slot for two people.',minutes:130,payload:telegram(197,owner,{text:'Please book the 22:00 slot for two people.'}),state:'running',action:{id:'c'.repeat(64),state:'proposed',count:1}},
-  {id:ids.rejected,scope:'-10042',kind:'telegram_update',text:'Can someone share the meeting point pin?',minutes:300,payload:telegram(80,mira,{text:'Can someone share the meeting point pin?'}),state:'suppressed',error:'telegram_rejected'},
-  {id:voiceId,scope:'42',kind:'telegram_update',text:null,minutes:420,payload:voice.event.payload,state:'done',artifacts:voice.artifacts.map(a=>({...a,file_hash:hex('9c')})),derived:voice.derived.map(d=>({...d,id:transcriptVersion})),transcript:'Synthetic voice transcript for preview verification.'},
-  {id:ids.archivedVoice,scope:'42',kind:'telegram_update',text:null,minutes:600,payload:telegram(190,owner,{voice:{file_id:'synthetic-voice-2',duration:14,mime_type:'audio/ogg'}}),state:'suppressed',error:'unsupported_message',
-   artifacts:[{id:archivedVoiceFile,kind:'voice',metadata:{duration:14,mime_type:'audio/ogg'},state:'ready',file_hash:hex('9a')}],derived:[{id:archivedStatus,event_id:ids.archivedVoice,artifact_id:archivedVoiceFile,kind:'extraction_status',content_base64:Buffer.from('Voice note archived; transcription is not available.').toString('base64'),provenance:{extractor:'voice-archive-v1'}}]},
-  {id:ids.photo,scope:'-10042',kind:'telegram_update',text:'Our view from the ridge last night',minutes:1500,payload:telegram(70,mira,{caption:'Our view from the ridge last night',photo:[{file_id:'synthetic-photo'}]}),state:'done',retired:true,
-   artifacts:[{id:photoFile,kind:'photo',metadata:{file_name:'ridge.jpg',mime_type:'image/jpeg'},state:'ready',file_hash:hex('9b')}]},
-  {id,scope:'42',kind:'telegram_update',text:source.event.text,minutes:2000,payload:source.event.payload},
-  {id:ids.reaction,scope:'-10042',kind:'telegram_update',text:null,minutes:2100,payload:{message_reaction:{chat:{id:-10042},message_id:70,user:mira,new_reaction:[{type:'emoji',emoji:'👍'}]}}},
-  {id:ids.browser,scope:'42',kind:'browser_input',text:'Summarize what we planned for the trip.',minutes:3000,payload:{text:'Summarize what we planned for the trip.'},replies:[ids.browserReply]},
-  {id:ids.browserReply,scope:'42',kind:'browser_delivered_message',text:'Friday: aurora tour at 21:30. Saturday: ridge hike if the sky is clear.',minutes:2999,payload:{text:'Friday: aurora tour at 21:30. Saturday: ridge hike if the sky is clear.'}},
-  // Step 4: Mira, a member, asks Nocheh in her own private chat; Messages keeps it under "Members' chats".
-  {id:ids.memberAsk,scope:'73',kind:'telegram_update',text:'Which night did the Aurora planning group pick for the tour?',minutes:20,payload:{message:{message_id:31,from:mira,chat:{id:73,type:'private'},text:'Which night did the Aurora planning group pick for the tour?'}},state:'done',replies:[ids.memberReply]},
-  {id:ids.memberReply,scope:'73',kind:'telegram_delivered_message',text:'Aurora planning picked Friday, with the 21:30 tour.',minutes:19,payload:{message:{message_id:32,from:{id:1,first_name:'Nocheh',is_bot:true},chat:{id:73,type:'private'},text:'Aurora planning picked Friday, with the 21:30 tour.'}}},
- ];
- const byId=new Map(list.map(m=>[m.id,m]));
- const contentTypes=(m:Message)=>m.kind==='telegram_update'&&m.payload.message_reaction?['reaction']:[...new Set([...(m.payload.message?.photo?['photo']:[]),...(m.artifacts??[]).map(a=>a.kind)])];
- const preview=(rid:string)=>{const r=byId.get(rid)!;return {id:r.id,text:r.text,received_at:ago(r.minutes),content_types:contentTypes(r)};};
- const retirement=new Map<string,{retired:boolean;revision:number;history:any[]}>();
- const retire=(rid:string)=>{if(!retirement.has(rid)){const retired=!!byId.get(rid)?.retired;retirement.set(rid,{retired,revision:retired?1:0,history:retired?[{revision:1,retired:true,event_id:rid,decision_authority:'owner',created_at:ago(1400)}]:[]});}return retirement.get(rid)!;};
- // A hit names its Nocheh chat (ADR-0252): a Telegram original's through its Telegram id, a browser one by its scope.
- const hitChat=(m:Message)=>m.kind.startsWith('browser')?m.scope:directoryNow().resolve('telegram',m.scope);
- const row=(m:Message)=>({id:m.id,channel:m.kind.startsWith('browser')?'browser':'telegram',scope:m.scope,chat_id:hitChat(m),source_id:'synthetic-'+m.id.slice(0,6),revision:'1',kind:m.kind,origin:'live',occurred_at:ago(m.minutes),received_at:ago(m.minutes),
-  ...(m.kind==='telegram_update'&&m.state?{assistant_state:m.state,assistant_stage:m.state==='running'?'execution':null,assistant_error:m.error??null,assistant_attempts:m.attempts??1}:{}),
-  retired:retire(m.id).retired,...(m.action?{action_review:m.action}:{}),text:m.text,content_types:contentTypes(m),
-  reaction_preview:m.payload.message_reaction?{change:'👍 added',actor:'Mira Chen',target:'70'}:null,reply_messages:(m.replies??[]).map(preview),transcript_preview:m.transcript??null});
- const record=(m:Message)=>({id:m.id,source:'nocheh:event:'+m.id,reference:{id:m.id},received_at:ago(m.minutes),representation:'original',guarded_revision:null,
-  event:{version:1,key:'synthetic:'+m.id.slice(0,8),channel:m.kind.startsWith('browser')?'browser':'telegram',bot_id:'synthetic',origin:'live',scope:m.scope,source_id:'synthetic-'+m.id.slice(0,6),revision:'1',kind:m.kind,occurred_at:ago(m.minutes),text:m.text,payload:m.payload},
-  artifacts:m.artifacts??[],derived:m.derived??[],relationships:[],current_reactions:[],derivative_versions:'/v1/sources/'+m.id+'/derivatives',reply_messages:(m.replies??[]).map(preview)});
- // The assistant's copies, keyed like the real store: `<kind>:<id>`.
- const guards=new Map<string,{input:any;revisions:{revision:number;content:any;author:string;created_at:string}[]}>();
- for(const m of list)if(m.id!==ids.archivedVoice)guards.set('events:'+m.id,{input:{text:m.text,payload:m.payload},revisions:[{revision:1,content:{text:m.text,payload:m.payload},author:'automatic',created_at:ago(m.minutes-1)}]});
- const tour=guards.get('events:'+ids.tour)!;tour.revisions.push({revision:2,content:{text:'Can you remind me what time the aurora tour starts on Friday (the 21:30 one)?',payload:tour.input.payload},author:'owner',created_at:ago(8)});
- for(const m of list)for(const a of m.artifacts??[])guards.set('artifacts:'+a.id,{input:{kind:a.kind,metadata:a.metadata},revisions:[{revision:1,content:{kind:a.kind,metadata:a.metadata},author:'automatic',created_at:ago(m.minutes-1)}]});
- const transcriptText='Synthetic voice transcript for preview verification.';
- const versions:any[]=[{id:transcriptVersion,event:voiceId,artifact_id:voiceFileId,kind:'transcript',text:transcriptText,producer:'synthetic-transcriber',producer_version:'2',active:true,created_at:ago(419)},
-  {id:olderTranscript,event:voiceId,artifact_id:voiceFileId,kind:'transcript',text:'Synthetic voice transcript, first try.',producer:'synthetic-transcriber',producer_version:'1',active:false,created_at:ago(419.5)},
-  {id:archivedStatus,event:ids.archivedVoice,artifact_id:archivedVoiceFile,kind:'extraction_status',text:'Voice note archived; transcription is not available.',producer:'voice-archive',producer_version:'1',active:true,created_at:ago(599)}];
- for(const v of versions)guards.set('derived_artifacts:'+v.id,{input:{text:v.text,kind:v.kind,provenance:{producer:v.producer}},revisions:[{revision:1,content:{text:v.text,kind:v.kind,provenance:{producer:v.producer}},author:'automatic',created_at:v.created_at}]});
- let selectionRevision=1;const reprocessing=new Map<string,number>();
- const importChats=[{id:'chat-2',name:'Synthetic hiking group',messages:64,type:'private_group'},{id:'chat-3',name:'Synthetic notes to self',messages:22,type:'saved_messages'}];
- jobs.push({id:'44444444-4444-4444-8444-444444444444',kind:'import',state:'complete',created_at:ago(9000),completed:120,files:3,bytes:2048,duplicates:4,review_approved:false,mapping:{},
-  preview:{file:'result.json',sha256:hex('7c'),chats:[{id:'chat-9',name:'Synthetic book club',messages:120,type:'private_group'}],messages:120,supplied_files:6,missing_files:0}});
- const body=async(req:any)=>{const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(Buffer.from(chunk));return chunks.length?JSON.parse(Buffer.concat(chunks).toString()||'{}'):{};};
- const guardView=(key:string)=>{const g=guards.get(key);if(!g)return {id:key,state:'pending',active_revision:null};const last=g.revisions.at(-1)!;return {id:key,state:'ready',input:g.input,active_revision:last.revision,content:last.content,author:last.author,error_code:null};};
- return async(req:any,res:any,route:string,url:URL):Promise<boolean>=>{
-  const method=req.method;
-  if(method==='GET'&&(route==='/data'||route==='/search')){
-   const q=(url.searchParams.get('q')??'').toLowerCase(),kind=url.searchParams.get('kind')??'',scope=url.searchParams.get('scope')??'',reply=url.searchParams.get('reply')??'';
-   // The members' chats split, by the real filter over the preview's directory (step 4).
-   const split=url.searchParams.get('private_chats') as 'hide'|'only'|null;
-   // Storage reads these from its chat rows (otherPrivateScopes); the preview's rows are its directory.
-   const others=split?archiveScopes(chats().all().filter(chat=>otherPrivate(chat.id)).map(chat=>chat.id)):[];
-   const rows=list.filter(m=>(!q||(m.text??'').toLowerCase().includes(q))&&(!scope||m.scope===scope)
-    &&(!split||matchesArchiveFilters({scope:m.scope},undefined,{kind:'',scope:'',reply:'',private_chats:split,private_scopes:others}))
-    &&(!kind||kind==='incoming'&&['telegram_update','browser_input'].includes(m.kind)||kind==='assistant'&&m.kind.endsWith('_delivered_message'))
-    &&(!reply||m.kind==='telegram_update'&&!m.payload.message_reaction&&(reply==='approval_pending'?m.action?.state==='proposed':reply==='not_started'?!m.state:m.state===reply))).map(row);
-   // Like the store: a page of `limit` messages after the cursor, and the last one's id as the next cursor.
-   const size=Number(url.searchParams.get('limit')??50),after=url.searchParams.get('after')??'',from=after?rows.findIndex(r=>r.id===after)+1:0,page=rows.slice(from,from+size);
-   json(res,200,route==='/search'?rows:{records:page,next:rows.length>from+size?page.at(-1)!.id:null});return true;
-  }
-  if(method==='GET'&&route==='/scopes'){const counts=new Map<string,number>();for(const m of list)counts.set(m.scope,(counts.get(m.scope)??0)+1);json(res,200,{scopes:[...counts].map(([scope,events])=>({scope,events})),next:null});return true;}
-  const event=/^\/events\/([a-f0-9]{64})$/.exec(route);
-  if(method==='GET'&&event&&byId.has(event[1]!)){json(res,200,record(byId.get(event[1]!)!));return true;}
-  const artifactDownload=/^\/artifacts\/([a-f0-9]{64})\/download$/.exec(route);
-  if(method==='GET'&&artifactDownload&&[photoFile,archivedVoiceFile].includes(artifactDownload[1]!)){
-   // A 1×1 synthetic image or the synthetic tone; never real media.
-   const bytes=artifactDownload[1]===photoFile?Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mN8+P9/PQAJYQPcbT2U2wAAAABJRU5ErkJggg==','base64'):voiceBytes;
-   res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store'});res.end(bytes);return true;
-  }
-  const retirementRoute=/^\/sources\/([a-f0-9]{64})\/retirement$/.exec(route);
-  if(retirementRoute&&byId.has(retirementRoute[1]!)){
-   const rid=retirementRoute[1]!,m=byId.get(rid)!;
-   if(m.kind.startsWith('browser'))throw new HttpError(404,'telegram_message_not_found');
-   const state=retire(rid);
-   if(method==='POST'){const input=await body(req);if(input.expected_revision!==state.revision)throw new HttpError(409,'source_retirement_conflict');
-    state.retired=!!input.retired;state.revision++;state.history.unshift({revision:state.revision,retired:state.retired,event_id:rid,decision_authority:'owner',created_at:new Date().toISOString()});
-    json(res,200,{event_id:rid,retired:state.retired,revision:state.revision,authority:'owner',observation:'not_observed'});return true;}
-   const related=(m.replies??[]).map(r=>({event_id:r,relation:'reply',text:byId.get(r)!.text,received_at:ago(byId.get(r)!.minutes),retired:retire(r).retired,revision:retire(r).revision}));
-   json(res,200,{event_id:rid,retired:state.retired,revision:state.revision,authority:'owner',observation:'not_observed',history:state.history,related_replies:related});return true;
-  }
-  const prepare=/^\/sources\/([a-f0-9]{64})\/prepare$/.exec(route);
-  if(method==='POST'&&prepare&&byId.has(prepare[1]!)){const m=byId.get(prepare[1]!)!;await body(req);
-   if(!guards.has('events:'+m.id))guards.set('events:'+m.id,{input:{text:m.text,payload:m.payload},revisions:[{revision:1,content:{text:m.text,payload:m.payload},author:'automatic',created_at:new Date().toISOString()}]});
-   json(res,200,{workflow_id:hex('5d')});return true;}
-  const guard=/^\/guards\/(events|artifacts|derived_artifacts)\/([a-f0-9]{64})(?:\/(history)|\/revisions\/(\d+))?$/.exec(route);
-  if(guard){
-   const key=guard[1]+':'+guard[2],g=guards.get(key);
-   if(method==='GET'&&guard[3]){json(res,200,{revisions:(g?.revisions??[]).slice().reverse().map(r=>({revision:r.revision,author:r.author,preparation_version:r.author==='owner'?'owner-edit-v1':'synthetic-v1',created_at:r.created_at})),next:null});return true;}
-   if(method==='GET'&&guard[4]){const r=g?.revisions.find(item=>item.revision===Number(guard[4]));if(!r)throw new HttpError(404,'guard_revision_missing');json(res,200,{source_id:key,revision:r.revision,content:r.content,author:r.author,created_at:r.created_at});return true;}
-   if(method==='GET'){json(res,200,guardView(key));return true;}
-   if(method==='POST'&&g){const input=await body(req);const active=g.revisions.at(-1)!.revision;
-    if(input.expected_revision!==active)throw new HttpError(409,'guard_revision_conflict');
-    const content='restore_revision' in input?g.revisions.find(r=>r.revision===input.restore_revision)?.content:input.content;
-    if(!content)throw new HttpError(404,'guard_revision_missing');
-    g.revisions.push({revision:active+1,content,author:'owner',created_at:new Date().toISOString()});json(res,200,{source_id:key,revision:active+1});return true;}
-  }
-  const derivatives=/^\/sources\/([a-f0-9]{64})\/derivatives$/.exec(route);
-  if(method==='GET'&&derivatives){json(res,200,{versions:versions.filter(v=>v.event===derivatives[1]).map(v=>({id:v.id,artifact_id:v.artifact_id,kind:v.kind,created_at:v.created_at,source_revision:'1',input_hash:hex('3f'),content_hash:hex('4f'),producer:v.producer,producer_version:v.producer_version,configuration_hash:hex('6f'),provenance:{producer:v.producer},guard_revision:guards.get('derived_artifacts:'+v.id)?.revisions.at(-1)?.revision??null,active:v.active,selection_revision:selectionRevision})),next:null});return true;}
-  const derivative=/^\/derivatives\/([a-f0-9]{64})(?:\/(activate))?$/.exec(route);
-  if(derivative){const v=versions.find(item=>item.id===derivative[1]);if(!v)throw new HttpError(404,'derivative_not_found');
-   if(method==='GET'&&!derivative[2]){json(res,200,{id:v.id,event_id:v.event,artifact_id:v.artifact_id,kind:v.kind,content_base64:Buffer.from(v.text).toString('base64'),producer:v.producer,producer_version:v.producer_version,source_revision:'1',input_hash:hex('3f'),configuration_hash:hex('6f'),provenance:{producer:v.producer,synthetic:true},guarded:'/v1/guards/derived_artifacts/'+v.id});return true;}
-   if(method==='POST'){const input=await body(req);if(input.expected_revision!==selectionRevision)throw new HttpError(409,'selection_revision_conflict');
-    for(const other of versions)if(other.event===v.event&&other.kind===v.kind)other.active=other.id===v.id;selectionRevision++;json(res,200,{revision:selectionRevision});return true;}
-  }
-  if(method==='GET'&&route==='/derivation-engines'){json(res,200,{engines:[{producer:'synthetic-transcriber',producer_version:'2',kind:'transcript'},{producer:'synthetic-reader',producer_version:'1',kind:'extracted_text'}]});return true;}
-  const reprocess=/^\/sources\/([a-f0-9]{64})\/reprocess$/.exec(route);
-  if(method==='POST'&&reprocess){await body(req);const job=hex(String(reprocessing.size%10)+'c');reprocessing.set(job,Date.now());json(res,200,{id:job,state:'queued',status_url:'/v1/reprocessing/'+job});return true;}
-  const reprocessJob=/^\/reprocessing\/([a-f0-9]{64})$/.exec(route);
-  if(method==='GET'&&reprocessJob&&reprocessing.has(reprocessJob[1]!)){json(res,200,{id:reprocessJob[1],state:Date.now()-reprocessing.get(reprocessJob[1]!)!>4000?'done':'running',error_code:null});return true;}
-  if(method==='POST'&&route==='/jobs'){await body(req);const job={id:randomUUID(),kind:'import',state:'uploading',created_at:new Date().toISOString(),completed:0,files:0,bytes:0,duplicates:0};jobs.unshift(job);json(res,201,job);return true;}
-  const upload=/^\/jobs\/([a-f0-9-]{36})\/(upload|preview)$/.exec(route);
-  if(upload){const job=jobs.find(j=>j.id===upload[1]);if(!job)throw new HttpError(404,'job_not_found');
-   if(method==='PUT'&&upload[2]==='upload'){if(job.state!=='uploading')throw new HttpError(409,'upload_closed');let size=0;for await(const chunk of req)size+=chunk.length;job.files++;job.bytes+=size;json(res,200,job);return true;}
-   if(method==='POST'&&upload[2]==='preview'){await body(req);if(job.state!=='uploading')throw new HttpError(409,'preview_closed');
-    job.preview={file:'result.json',sha256:hex('8d'),chats:importChats.map(c=>({...c,scope:'desktop:'+c.type+':'+c.id})),messages:86,supplied_files:5,missing_files:2};job.state='ready';json(res,200,job);return true;}
-  }
-  return false;
- };
+const messagesFixture = (() => {
+  const hex = (n: string) => n.repeat(32),
+    ago = (minutes: number) => new Date(Date.now() - minutes * 60000).toISOString();
+  const ids = {
+    tour: hex('e1'),
+    tourReply: hex('e2'),
+    forecast: hex('e3'),
+    packing: hex('e4'),
+    booking: hex('e5'),
+    rejected: hex('e6'),
+    archivedVoice: hex('e7'),
+    photo: hex('e8'),
+    reaction: hex('e9'),
+    browser: hex('ea'),
+    browserReply: hex('eb'),
+    memberAsk: hex('ec'),
+    memberReply: hex('ed'),
+  };
+  const photoFile = hex('f1'),
+    archivedVoiceFile = hex('f2'),
+    transcriptVersion = hex('d1'),
+    olderTranscript = hex('d2'),
+    archivedStatus = hex('d3');
+  const owner = {id: 42, first_name: 'Owner'},
+    mira = {id: 73, first_name: 'Mira', last_name: 'Chen'};
+  type Message = {
+    id: string;
+    scope: string;
+    kind: string;
+    text: string | null;
+    minutes: number;
+    payload: any;
+    state?: string;
+    error?: string;
+    attempts?: number;
+    retired?: boolean;
+    action?: any;
+    replies?: string[];
+    artifacts?: any[];
+    derived?: any[];
+    transcript?: string;
+  };
+  const telegram = (message_id: number, from: any, extra: any = {}) => ({
+    message: {message_id, from, chat: {id: 42}, ...extra},
+  });
+  const list: Message[] = [
+    {
+      id: ids.tour,
+      scope: '42',
+      kind: 'telegram_update',
+      text: 'Can you remind me what time the aurora tour starts on Friday?',
+      minutes: 12,
+      payload: telegram(201, owner, {text: 'Can you remind me what time the aurora tour starts on Friday?'}),
+      state: 'done',
+      replies: [ids.tourReply],
+    },
+    {
+      id: ids.tourReply,
+      scope: '42',
+      kind: 'telegram_delivered_message',
+      text: 'The tour leaves at 21:30 from the harbour car park. Bring warm layers and a flask.',
+      minutes: 11,
+      payload: telegram(
+        202,
+        {id: 1, first_name: 'Nocheh', is_bot: true},
+        {text: 'The tour leaves at 21:30 from the harbour car park. Bring warm layers and a flask.'},
+      ),
+    },
+    {
+      id: ids.forecast,
+      scope: '-10042',
+      kind: 'telegram_update',
+      text: '@Nocheh what is the Kp forecast for tonight?',
+      minutes: 40,
+      payload: telegram(88, mira, {text: '@Nocheh what is the Kp forecast for tonight?'}),
+      state: 'failed',
+      error: 'model_unavailable',
+      attempts: 2,
+    },
+    {
+      id: ids.packing,
+      scope: '42',
+      kind: 'telegram_update',
+      text: 'Send the packing list to Mira when you can.',
+      minutes: 95,
+      payload: telegram(199, owner, {text: 'Send the packing list to Mira when you can.'}),
+      state: 'ambiguous',
+      error: 'delivery_unconfirmed',
+    },
+    {
+      id: ids.booking,
+      scope: '42',
+      kind: 'telegram_update',
+      text: 'Please book the 22:00 slot for two people.',
+      minutes: 130,
+      payload: telegram(197, owner, {text: 'Please book the 22:00 slot for two people.'}),
+      state: 'running',
+      action: {id: 'c'.repeat(64), state: 'proposed', count: 1},
+    },
+    {
+      id: ids.rejected,
+      scope: '-10042',
+      kind: 'telegram_update',
+      text: 'Can someone share the meeting point pin?',
+      minutes: 300,
+      payload: telegram(80, mira, {text: 'Can someone share the meeting point pin?'}),
+      state: 'suppressed',
+      error: 'telegram_rejected',
+    },
+    {
+      id: voiceId,
+      scope: '42',
+      kind: 'telegram_update',
+      text: null,
+      minutes: 420,
+      payload: voice.event.payload,
+      state: 'done',
+      artifacts: voice.artifacts.map(a => ({...a, file_hash: hex('9c')})),
+      derived: voice.derived.map(d => ({...d, id: transcriptVersion})),
+      transcript: 'Synthetic voice transcript for preview verification.',
+    },
+    {
+      id: ids.archivedVoice,
+      scope: '42',
+      kind: 'telegram_update',
+      text: null,
+      minutes: 600,
+      payload: telegram(190, owner, {voice: {file_id: 'synthetic-voice-2', duration: 14, mime_type: 'audio/ogg'}}),
+      state: 'suppressed',
+      error: 'unsupported_message',
+      artifacts: [
+        {
+          id: archivedVoiceFile,
+          kind: 'voice',
+          metadata: {duration: 14, mime_type: 'audio/ogg'},
+          state: 'ready',
+          file_hash: hex('9a'),
+        },
+      ],
+      derived: [
+        {
+          id: archivedStatus,
+          event_id: ids.archivedVoice,
+          artifact_id: archivedVoiceFile,
+          kind: 'extraction_status',
+          content_base64: Buffer.from('Voice note archived; transcription is not available.').toString('base64'),
+          provenance: {extractor: 'voice-archive-v1'},
+        },
+      ],
+    },
+    {
+      id: ids.photo,
+      scope: '-10042',
+      kind: 'telegram_update',
+      text: 'Our view from the ridge last night',
+      minutes: 1500,
+      payload: telegram(70, mira, {
+        caption: 'Our view from the ridge last night',
+        photo: [{file_id: 'synthetic-photo'}],
+      }),
+      state: 'done',
+      retired: true,
+      artifacts: [
+        {
+          id: photoFile,
+          kind: 'photo',
+          metadata: {file_name: 'ridge.jpg', mime_type: 'image/jpeg'},
+          state: 'ready',
+          file_hash: hex('9b'),
+        },
+      ],
+    },
+    {id, scope: '42', kind: 'telegram_update', text: source.event.text, minutes: 2000, payload: source.event.payload},
+    {
+      id: ids.reaction,
+      scope: '-10042',
+      kind: 'telegram_update',
+      text: null,
+      minutes: 2100,
+      payload: {
+        message_reaction: {
+          chat: {id: -10042},
+          message_id: 70,
+          user: mira,
+          new_reaction: [{type: 'emoji', emoji: '👍'}],
+        },
+      },
+    },
+    {
+      id: ids.browser,
+      scope: '42',
+      kind: 'browser_input',
+      text: 'Summarize what we planned for the trip.',
+      minutes: 3000,
+      payload: {text: 'Summarize what we planned for the trip.'},
+      replies: [ids.browserReply],
+    },
+    {
+      id: ids.browserReply,
+      scope: '42',
+      kind: 'browser_delivered_message',
+      text: 'Friday: aurora tour at 21:30. Saturday: ridge hike if the sky is clear.',
+      minutes: 2999,
+      payload: {text: 'Friday: aurora tour at 21:30. Saturday: ridge hike if the sky is clear.'},
+    },
+    // Step 4: Mira, a member, asks Nocheh in her own private chat; Messages keeps it under "Members' chats".
+    {
+      id: ids.memberAsk,
+      scope: '73',
+      kind: 'telegram_update',
+      text: 'Which night did the Aurora planning group pick for the tour?',
+      minutes: 20,
+      payload: {
+        message: {
+          message_id: 31,
+          from: mira,
+          chat: {id: 73, type: 'private'},
+          text: 'Which night did the Aurora planning group pick for the tour?',
+        },
+      },
+      state: 'done',
+      replies: [ids.memberReply],
+    },
+    {
+      id: ids.memberReply,
+      scope: '73',
+      kind: 'telegram_delivered_message',
+      text: 'Aurora planning picked Friday, with the 21:30 tour.',
+      minutes: 19,
+      payload: {
+        message: {
+          message_id: 32,
+          from: {id: 1, first_name: 'Nocheh', is_bot: true},
+          chat: {id: 73, type: 'private'},
+          text: 'Aurora planning picked Friday, with the 21:30 tour.',
+        },
+      },
+    },
+  ];
+  const byId = new Map(list.map(m => [m.id, m]));
+  const contentTypes = (m: Message) =>
+    m.kind === 'telegram_update' && m.payload.message_reaction
+      ? ['reaction']
+      : [...new Set([...(m.payload.message?.photo ? ['photo'] : []), ...(m.artifacts ?? []).map(a => a.kind)])];
+  const preview = (rid: string) => {
+    const r = byId.get(rid)!;
+    return {id: r.id, text: r.text, received_at: ago(r.minutes), content_types: contentTypes(r)};
+  };
+  const retirement = new Map<string, {retired: boolean; revision: number; history: any[]}>();
+  const retire = (rid: string) => {
+    if (!retirement.has(rid)) {
+      const retired = !!byId.get(rid)?.retired;
+      retirement.set(rid, {
+        retired,
+        revision: retired ? 1 : 0,
+        history: retired
+          ? [{revision: 1, retired: true, event_id: rid, decision_authority: 'owner', created_at: ago(1400)}]
+          : [],
+      });
+    }
+    return retirement.get(rid)!;
+  };
+  // A hit names its Nocheh chat (ADR-0252): a Telegram original's through its Telegram id, a browser one by its scope.
+  const hitChat = (m: Message) =>
+    m.kind.startsWith('browser') ? m.scope : directoryNow().resolve('telegram', m.scope);
+  const row = (m: Message) => ({
+    id: m.id,
+    channel: m.kind.startsWith('browser') ? 'browser' : 'telegram',
+    scope: m.scope,
+    chat_id: hitChat(m),
+    source_id: 'synthetic-' + m.id.slice(0, 6),
+    revision: '1',
+    kind: m.kind,
+    origin: 'live',
+    occurred_at: ago(m.minutes),
+    received_at: ago(m.minutes),
+    ...(m.kind === 'telegram_update' && m.state
+      ? {
+          assistant_state: m.state,
+          assistant_stage: m.state === 'running' ? 'execution' : null,
+          assistant_error: m.error ?? null,
+          assistant_attempts: m.attempts ?? 1,
+        }
+      : {}),
+    retired: retire(m.id).retired,
+    ...(m.action ? {action_review: m.action} : {}),
+    text: m.text,
+    content_types: contentTypes(m),
+    reaction_preview: m.payload.message_reaction ? {change: '👍 added', actor: 'Mira Chen', target: '70'} : null,
+    reply_messages: (m.replies ?? []).map(preview),
+    transcript_preview: m.transcript ?? null,
+  });
+  const record = (m: Message) => ({
+    id: m.id,
+    source: 'nocheh:event:' + m.id,
+    reference: {id: m.id},
+    received_at: ago(m.minutes),
+    representation: 'original',
+    guarded_revision: null,
+    event: {
+      version: 1,
+      key: 'synthetic:' + m.id.slice(0, 8),
+      channel: m.kind.startsWith('browser') ? 'browser' : 'telegram',
+      bot_id: 'synthetic',
+      origin: 'live',
+      scope: m.scope,
+      source_id: 'synthetic-' + m.id.slice(0, 6),
+      revision: '1',
+      kind: m.kind,
+      occurred_at: ago(m.minutes),
+      text: m.text,
+      payload: m.payload,
+    },
+    artifacts: m.artifacts ?? [],
+    derived: m.derived ?? [],
+    relationships: [],
+    current_reactions: [],
+    derivative_versions: '/v1/sources/' + m.id + '/derivatives',
+    reply_messages: (m.replies ?? []).map(preview),
+  });
+  // The assistant's copies, keyed like the real store: `<kind>:<id>`.
+  const guards = new Map<
+    string,
+    {input: any; revisions: {revision: number; content: any; author: string; created_at: string}[]}
+  >();
+  for (const m of list)
+    if (m.id !== ids.archivedVoice)
+      guards.set('events:' + m.id, {
+        input: {text: m.text, payload: m.payload},
+        revisions: [
+          {
+            revision: 1,
+            content: {text: m.text, payload: m.payload},
+            author: 'automatic',
+            created_at: ago(m.minutes - 1),
+          },
+        ],
+      });
+  const tour = guards.get('events:' + ids.tour)!;
+  tour.revisions.push({
+    revision: 2,
+    content: {
+      text: 'Can you remind me what time the aurora tour starts on Friday (the 21:30 one)?',
+      payload: tour.input.payload,
+    },
+    author: 'owner',
+    created_at: ago(8),
+  });
+  for (const m of list)
+    for (const a of m.artifacts ?? [])
+      guards.set('artifacts:' + a.id, {
+        input: {kind: a.kind, metadata: a.metadata},
+        revisions: [
+          {
+            revision: 1,
+            content: {kind: a.kind, metadata: a.metadata},
+            author: 'automatic',
+            created_at: ago(m.minutes - 1),
+          },
+        ],
+      });
+  const transcriptText = 'Synthetic voice transcript for preview verification.';
+  const versions: any[] = [
+    {
+      id: transcriptVersion,
+      event: voiceId,
+      artifact_id: voiceFileId,
+      kind: 'transcript',
+      text: transcriptText,
+      producer: 'synthetic-transcriber',
+      producer_version: '2',
+      active: true,
+      created_at: ago(419),
+    },
+    {
+      id: olderTranscript,
+      event: voiceId,
+      artifact_id: voiceFileId,
+      kind: 'transcript',
+      text: 'Synthetic voice transcript, first try.',
+      producer: 'synthetic-transcriber',
+      producer_version: '1',
+      active: false,
+      created_at: ago(419.5),
+    },
+    {
+      id: archivedStatus,
+      event: ids.archivedVoice,
+      artifact_id: archivedVoiceFile,
+      kind: 'extraction_status',
+      text: 'Voice note archived; transcription is not available.',
+      producer: 'voice-archive',
+      producer_version: '1',
+      active: true,
+      created_at: ago(599),
+    },
+  ];
+  for (const v of versions)
+    guards.set('derived_artifacts:' + v.id, {
+      input: {text: v.text, kind: v.kind, provenance: {producer: v.producer}},
+      revisions: [
+        {
+          revision: 1,
+          content: {text: v.text, kind: v.kind, provenance: {producer: v.producer}},
+          author: 'automatic',
+          created_at: v.created_at,
+        },
+      ],
+    });
+  let selectionRevision = 1;
+  const reprocessing = new Map<string, number>();
+  const importChats = [
+    {id: 'chat-2', name: 'Synthetic hiking group', messages: 64, type: 'private_group'},
+    {id: 'chat-3', name: 'Synthetic notes to self', messages: 22, type: 'saved_messages'},
+  ];
+  jobs.push({
+    id: '44444444-4444-4444-8444-444444444444',
+    kind: 'import',
+    state: 'complete',
+    created_at: ago(9000),
+    completed: 120,
+    files: 3,
+    bytes: 2048,
+    duplicates: 4,
+    review_approved: false,
+    mapping: {},
+    preview: {
+      file: 'result.json',
+      sha256: hex('7c'),
+      chats: [{id: 'chat-9', name: 'Synthetic book club', messages: 120, type: 'private_group'}],
+      messages: 120,
+      supplied_files: 6,
+      missing_files: 0,
+    },
+  });
+  const body = async (req: any) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    return chunks.length ? JSON.parse(Buffer.concat(chunks).toString() || '{}') : {};
+  };
+  const guardView = (key: string) => {
+    const g = guards.get(key);
+    if (!g) return {id: key, state: 'pending', active_revision: null};
+    const last = g.revisions.at(-1)!;
+    return {
+      id: key,
+      state: 'ready',
+      input: g.input,
+      active_revision: last.revision,
+      content: last.content,
+      author: last.author,
+      error_code: null,
+    };
+  };
+  return async (req: any, res: any, route: string, url: URL): Promise<boolean> => {
+    const method = req.method;
+    if (method === 'GET' && (route === '/data' || route === '/search')) {
+      const q = (url.searchParams.get('q') ?? '').toLowerCase(),
+        kind = url.searchParams.get('kind') ?? '',
+        scope = url.searchParams.get('scope') ?? '',
+        reply = url.searchParams.get('reply') ?? '';
+      // The members' chats split, by the real filter over the preview's directory (step 4).
+      const split = url.searchParams.get('private_chats') as 'hide' | 'only' | null;
+      // Storage reads these from its chat rows (otherPrivateScopes); the preview's rows are its directory.
+      const others = split
+        ? archiveScopes(
+            chats()
+              .all()
+              .filter(chat => otherPrivate(chat.id))
+              .map(chat => chat.id),
+          )
+        : [];
+      const rows = list
+        .filter(
+          m =>
+            (!q || (m.text ?? '').toLowerCase().includes(q)) &&
+            (!scope || m.scope === scope) &&
+            (!split ||
+              matchesArchiveFilters({scope: m.scope}, undefined, {
+                kind: '',
+                scope: '',
+                reply: '',
+                private_chats: split,
+                private_scopes: others,
+              })) &&
+            (!kind ||
+              (kind === 'incoming' && ['telegram_update', 'browser_input'].includes(m.kind)) ||
+              (kind === 'assistant' && m.kind.endsWith('_delivered_message'))) &&
+            (!reply ||
+              (m.kind === 'telegram_update' &&
+                !m.payload.message_reaction &&
+                (reply === 'approval_pending'
+                  ? m.action?.state === 'proposed'
+                  : reply === 'not_started'
+                    ? !m.state
+                    : m.state === reply))),
+        )
+        .map(row);
+      // Like the store: a page of `limit` messages after the cursor, and the last one's id as the next cursor.
+      const size = Number(url.searchParams.get('limit') ?? 50),
+        after = url.searchParams.get('after') ?? '',
+        from = after ? rows.findIndex(r => r.id === after) + 1 : 0,
+        page = rows.slice(from, from + size);
+      json(
+        res,
+        200,
+        route === '/search' ? rows : {records: page, next: rows.length > from + size ? page.at(-1)!.id : null},
+      );
+      return true;
+    }
+    if (method === 'GET' && route === '/scopes') {
+      const counts = new Map<string, number>();
+      for (const m of list) counts.set(m.scope, (counts.get(m.scope) ?? 0) + 1);
+      json(res, 200, {scopes: [...counts].map(([scope, events]) => ({scope, events})), next: null});
+      return true;
+    }
+    const event = /^\/events\/([a-f0-9]{64})$/.exec(route);
+    if (method === 'GET' && event && byId.has(event[1]!)) {
+      json(res, 200, record(byId.get(event[1]!)!));
+      return true;
+    }
+    const artifactDownload = /^\/artifacts\/([a-f0-9]{64})\/download$/.exec(route);
+    if (method === 'GET' && artifactDownload && [photoFile, archivedVoiceFile].includes(artifactDownload[1]!)) {
+      // A 1×1 synthetic image or the synthetic tone; never real media.
+      const bytes =
+        artifactDownload[1] === photoFile
+          ? Buffer.from(
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mN8+P9/PQAJYQPcbT2U2wAAAABJRU5ErkJggg==',
+              'base64',
+            )
+          : voiceBytes;
+      res.writeHead(200, {'content-type': 'application/octet-stream', 'cache-control': 'no-store'});
+      res.end(bytes);
+      return true;
+    }
+    const retirementRoute = /^\/sources\/([a-f0-9]{64})\/retirement$/.exec(route);
+    if (retirementRoute && byId.has(retirementRoute[1]!)) {
+      const rid = retirementRoute[1]!,
+        m = byId.get(rid)!;
+      if (m.kind.startsWith('browser')) throw new HttpError(404, 'telegram_message_not_found');
+      const state = retire(rid);
+      if (method === 'POST') {
+        const input = await body(req);
+        if (input.expected_revision !== state.revision) throw new HttpError(409, 'source_retirement_conflict');
+        state.retired = !!input.retired;
+        state.revision++;
+        state.history.unshift({
+          revision: state.revision,
+          retired: state.retired,
+          event_id: rid,
+          decision_authority: 'owner',
+          created_at: new Date().toISOString(),
+        });
+        json(res, 200, {
+          event_id: rid,
+          retired: state.retired,
+          revision: state.revision,
+          authority: 'owner',
+          observation: 'not_observed',
+        });
+        return true;
+      }
+      const related = (m.replies ?? []).map(r => ({
+        event_id: r,
+        relation: 'reply',
+        text: byId.get(r)!.text,
+        received_at: ago(byId.get(r)!.minutes),
+        retired: retire(r).retired,
+        revision: retire(r).revision,
+      }));
+      json(res, 200, {
+        event_id: rid,
+        retired: state.retired,
+        revision: state.revision,
+        authority: 'owner',
+        observation: 'not_observed',
+        history: state.history,
+        related_replies: related,
+      });
+      return true;
+    }
+    const prepare = /^\/sources\/([a-f0-9]{64})\/prepare$/.exec(route);
+    if (method === 'POST' && prepare && byId.has(prepare[1]!)) {
+      const m = byId.get(prepare[1]!)!;
+      await body(req);
+      if (!guards.has('events:' + m.id))
+        guards.set('events:' + m.id, {
+          input: {text: m.text, payload: m.payload},
+          revisions: [
+            {
+              revision: 1,
+              content: {text: m.text, payload: m.payload},
+              author: 'automatic',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        });
+      json(res, 200, {workflow_id: hex('5d')});
+      return true;
+    }
+    const guard =
+      /^\/guards\/(events|artifacts|derived_artifacts)\/([a-f0-9]{64})(?:\/(history)|\/revisions\/(\d+))?$/.exec(route);
+    if (guard) {
+      const key = guard[1] + ':' + guard[2],
+        g = guards.get(key);
+      if (method === 'GET' && guard[3]) {
+        json(res, 200, {
+          revisions: (g?.revisions ?? [])
+            .slice()
+            .reverse()
+            .map(r => ({
+              revision: r.revision,
+              author: r.author,
+              preparation_version: r.author === 'owner' ? 'owner-edit-v1' : 'synthetic-v1',
+              created_at: r.created_at,
+            })),
+          next: null,
+        });
+        return true;
+      }
+      if (method === 'GET' && guard[4]) {
+        const r = g?.revisions.find(item => item.revision === Number(guard[4]));
+        if (!r) throw new HttpError(404, 'guard_revision_missing');
+        json(res, 200, {
+          source_id: key,
+          revision: r.revision,
+          content: r.content,
+          author: r.author,
+          created_at: r.created_at,
+        });
+        return true;
+      }
+      if (method === 'GET') {
+        json(res, 200, guardView(key));
+        return true;
+      }
+      if (method === 'POST' && g) {
+        const input = await body(req);
+        const active = g.revisions.at(-1)!.revision;
+        if (input.expected_revision !== active) throw new HttpError(409, 'guard_revision_conflict');
+        const content =
+          'restore_revision' in input
+            ? g.revisions.find(r => r.revision === input.restore_revision)?.content
+            : input.content;
+        if (!content) throw new HttpError(404, 'guard_revision_missing');
+        g.revisions.push({revision: active + 1, content, author: 'owner', created_at: new Date().toISOString()});
+        json(res, 200, {source_id: key, revision: active + 1});
+        return true;
+      }
+    }
+    const derivatives = /^\/sources\/([a-f0-9]{64})\/derivatives$/.exec(route);
+    if (method === 'GET' && derivatives) {
+      json(res, 200, {
+        versions: versions
+          .filter(v => v.event === derivatives[1])
+          .map(v => ({
+            id: v.id,
+            artifact_id: v.artifact_id,
+            kind: v.kind,
+            created_at: v.created_at,
+            source_revision: '1',
+            input_hash: hex('3f'),
+            content_hash: hex('4f'),
+            producer: v.producer,
+            producer_version: v.producer_version,
+            configuration_hash: hex('6f'),
+            provenance: {producer: v.producer},
+            guard_revision: guards.get('derived_artifacts:' + v.id)?.revisions.at(-1)?.revision ?? null,
+            active: v.active,
+            selection_revision: selectionRevision,
+          })),
+        next: null,
+      });
+      return true;
+    }
+    const derivative = /^\/derivatives\/([a-f0-9]{64})(?:\/(activate))?$/.exec(route);
+    if (derivative) {
+      const v = versions.find(item => item.id === derivative[1]);
+      if (!v) throw new HttpError(404, 'derivative_not_found');
+      if (method === 'GET' && !derivative[2]) {
+        json(res, 200, {
+          id: v.id,
+          event_id: v.event,
+          artifact_id: v.artifact_id,
+          kind: v.kind,
+          content_base64: Buffer.from(v.text).toString('base64'),
+          producer: v.producer,
+          producer_version: v.producer_version,
+          source_revision: '1',
+          input_hash: hex('3f'),
+          configuration_hash: hex('6f'),
+          provenance: {producer: v.producer, synthetic: true},
+          guarded: '/v1/guards/derived_artifacts/' + v.id,
+        });
+        return true;
+      }
+      if (method === 'POST') {
+        const input = await body(req);
+        if (input.expected_revision !== selectionRevision) throw new HttpError(409, 'selection_revision_conflict');
+        for (const other of versions)
+          if (other.event === v.event && other.kind === v.kind) other.active = other.id === v.id;
+        selectionRevision++;
+        json(res, 200, {revision: selectionRevision});
+        return true;
+      }
+    }
+    if (method === 'GET' && route === '/derivation-engines') {
+      json(res, 200, {
+        engines: [
+          {producer: 'synthetic-transcriber', producer_version: '2', kind: 'transcript'},
+          {producer: 'synthetic-reader', producer_version: '1', kind: 'extracted_text'},
+        ],
+      });
+      return true;
+    }
+    const reprocess = /^\/sources\/([a-f0-9]{64})\/reprocess$/.exec(route);
+    if (method === 'POST' && reprocess) {
+      await body(req);
+      const job = hex(String(reprocessing.size % 10) + 'c');
+      reprocessing.set(job, Date.now());
+      json(res, 200, {id: job, state: 'queued', status_url: '/v1/reprocessing/' + job});
+      return true;
+    }
+    const reprocessJob = /^\/reprocessing\/([a-f0-9]{64})$/.exec(route);
+    if (method === 'GET' && reprocessJob && reprocessing.has(reprocessJob[1]!)) {
+      json(res, 200, {
+        id: reprocessJob[1],
+        state: Date.now() - reprocessing.get(reprocessJob[1]!)! > 4000 ? 'done' : 'running',
+        error_code: null,
+      });
+      return true;
+    }
+    if (method === 'POST' && route === '/jobs') {
+      await body(req);
+      const job = {
+        id: randomUUID(),
+        kind: 'import',
+        state: 'uploading',
+        created_at: new Date().toISOString(),
+        completed: 0,
+        files: 0,
+        bytes: 0,
+        duplicates: 0,
+      };
+      jobs.unshift(job);
+      json(res, 201, job);
+      return true;
+    }
+    const upload = /^\/jobs\/([a-f0-9-]{36})\/(upload|preview)$/.exec(route);
+    if (upload) {
+      const job = jobs.find(j => j.id === upload[1]);
+      if (!job) throw new HttpError(404, 'job_not_found');
+      if (method === 'PUT' && upload[2] === 'upload') {
+        if (job.state !== 'uploading') throw new HttpError(409, 'upload_closed');
+        let size = 0;
+        for await (const chunk of req) size += chunk.length;
+        job.files++;
+        job.bytes += size;
+        json(res, 200, job);
+        return true;
+      }
+      if (method === 'POST' && upload[2] === 'preview') {
+        await body(req);
+        if (job.state !== 'uploading') throw new HttpError(409, 'preview_closed');
+        job.preview = {
+          file: 'result.json',
+          sha256: hex('8d'),
+          chats: importChats.map(c => ({...c, scope: 'desktop:' + c.type + ':' + c.id})),
+          messages: 86,
+          supplied_files: 5,
+          missing_files: 2,
+        };
+        job.state = 'ready';
+        json(res, 200, job);
+        return true;
+      }
+    }
+    return false;
+  };
 })();
 /*
  * Where messages and facts came from (ADR-0261 step 4), in the owner's words as storage names them: each message's
@@ -703,549 +3291,2648 @@ const messagesFixture=(()=>{
  * (the cloud photo request), so it shows its Topic and no Replies to; the packing request replies to the ridge photo, which
  * is retired and never linked; the booking was forwarded from a channel and replies to the tour question.
  */
-const sourcesFixture=(()=>{
- const hex=(n:string)=>n.repeat(32),ago=(minutes:number)=>new Date(Date.now()-minutes*60000).toISOString();
- const ids={tour:hex('e1'),tourReply:hex('e2'),forecast:hex('e3'),packing:hex('e4'),booking:hex('e5'),opening:hex('e6'),photo:hex('e8'),browser:hex('ea'),memberAsk:hex('ec')};
- const named=new Map<string,{label:string;minutes:number;forward?:string}>([
-  [id,{label:'you in your private chat',minutes:2000}],[voiceId,{label:'an audio file you sent in your private chat',minutes:420}],
-  [ids.tour,{label:'you in your private chat',minutes:12}],[ids.tourReply,{label:'Nocheh’s reply in your private chat',minutes:11}],
-  [ids.forecast,{label:'“Mira Chen” in “Aurora planning” › Iceland planning',minutes:40}],[ids.packing,{label:'you in your private chat',minutes:95}],
-  [ids.booking,{label:'a message you forwarded in your private chat, from the channel “Night sky news”',minutes:130,forward:'the channel “Night sky news”'}],
-  [ids.opening,{label:'“Mira Chen” in “Aurora planning” › Iceland planning',minutes:300}],[ids.browser,{label:'you in the browser chat',minutes:3000}],
-  [ids.memberAsk,{label:'“Mira Chen” in Mira Chen’s private chat',minutes:20}]]);
- const retired=new Set([ids.photo]);
- const original=(source:string)=>{if(retired.has(source))return {retired:true};const known=named.get(source);
-  return known?{id:source,label:known.label,at:ago(known.minutes),...known.forward?{forward:known.forward}:{}}:{unavailable:true,label:'Source not recorded'};};
- const fact=(key:string,text:string,minutes:number,chat:string,person:string|null,sources:string[],exact:boolean,batch:boolean)=>{const originals=sources.map(original),head=originals[0] as any;
-  return {chat,person,fact:{id:hex(key),text,learned_at:ago(minutes),exact,batch,by:exact?'owner':'mixed',label:head?.id?head.label:null,at:head?.id?head.at:null,originals,more:0}};};
- const facts=[fact('f1','You booked the 21:30 aurora tour for Friday.',10,'42',null,[ids.tour],true,false),
-  fact('f2','The aurora tour leaves from the harbour car park.',9,'42',null,[ids.tour,ids.tourReply],false,true),
-  fact('f3','Mira wants to check the Kp forecast before the trip.',30,'-10042/topic/7',personId,[ids.forecast],true,false),
-  fact('f4','Mira took photos from the ridge.',1400,'-10042',personId,[ids.photo],false,false)].sort((a,b)=>a.fact.learned_at<b.fact.learned_at?1:-1);
- const empty={reply_to:null,replies:{count:0,items:[]},topic:null,forwarded_from:null};
- const topic={label:'“Aurora planning” › Iceland planning'};
- const threads=new Map<string,any>([
-  [ids.tour,{...empty,replies:{count:1,items:[original(ids.tourReply)]}}],
-  [ids.forecast,{...empty,topic:{...topic,opening:original(ids.opening)}}],
-  [ids.opening,{...empty,replies:{count:0,items:[],topic:true},topic:{...topic,opens:true,opening:null}}],
-  [ids.packing,{...empty,reply_to:original(ids.photo)}],
-  [ids.booking,{...empty,reply_to:original(ids.tour),forwarded_from:'the channel “Night sky news”'}]]);
- const learned=new Map<string,any>([[ids.tour,{facts:facts.filter(f=>f.fact.originals.some((o:any)=>o.id===ids.tour)).map(f=>f.fact)}],
-  [ids.forecast,{facts:facts.filter(f=>f.fact.originals.some((o:any)=>o.id===ids.forecast)).map(f=>f.fact)}],[ids.packing,{facts:[]}],
-  [voiceId,{facts:[],reason:'unavailable'}]]);
- const notes:Record<string,{day:string|null;originals:any[]}>={own:{day:'2026-11-12',originals:[original(ids.tour),original(ids.packing)]},
-  forward:{day:'2026-11-14',originals:[original(ids.booking),original(ids.photo)]},turn:{day:null,originals:[original(id)]}};
- return {notes,handle(req:any,res:any,route:string,url:URL):boolean{
-  if(req.method!=='GET')return false;
-  const thread=/^\/events\/([a-f0-9]{64})\/thread$/.exec(route);
-  if(thread){json(res,200,threads.get(thread[1]!)??empty);return true;}
-  if(route==='/memory/message-facts'){const source=url.searchParams.get('id')??'';if(!/^[a-f0-9]{64}$/.test(source))throw new HttpError(400,'invalid_fact_request');
-   json(res,200,learned.get(source)??{facts:[],reason:'not_learned'});return true;}
-  if(route==='/memory/longterm/coverage'){json(res,200,{coverage:{total:515,exact:412,with_others:96,none:7}});return true;}
-  if(route==='/memory/facts'){const chat=url.searchParams.get('chat')??'',person=url.searchParams.get('person')??'';
-   json(res,200,{facts:facts.filter(f=>(!chat||f.chat===chat||parentSpace(f.chat)===chat)&&(!person||f.person===person)).map(f=>f.fact),next:null});return true;}
-  if(route==='/memory/originals'){const asked=url.searchParams.getAll('id');if(!asked.length||asked.length>50||asked.some(item=>!/^[a-f0-9]{64}$/.test(item)))throw new HttpError(400,'invalid_originals_request');
-   json(res,200,{originals:asked.map(original)});return true;}
-  return false;
- }};
+// Facts a clean-up hid (ADR-0298): kept, and brought back from Memory › Long-term › Facts.
+const hiddenFacts: {
+  id: string;
+  text: string;
+  about: string | null;
+  where: 'everywhere' | 'group';
+  reason: 'replaced' | 'unused';
+  hidden_at: string | null;
+  learned_at: string;
+}[] = [
+  {
+    id: 'h'.repeat(20) + '1',
+    text: 'Works at the old studio downtown.',
+    about: 'Sam Rivera',
+    where: 'everywhere',
+    reason: 'replaced',
+    hidden_at: '2026-11-20T09:12:00Z',
+    learned_at: '2026-03-02T10:00:00Z',
+  },
+  {
+    id: 'h'.repeat(20) + '2',
+    text: 'Prefers the 7:00 standup.',
+    about: 'Sam Rivera',
+    where: 'group',
+    reason: 'replaced',
+    hidden_at: '2026-11-19T18:40:00Z',
+    learned_at: '2026-04-11T08:30:00Z',
+  },
+  {
+    id: 'h'.repeat(20) + '3',
+    text: 'Was reading a book about tide pools.',
+    about: null,
+    where: 'everywhere',
+    reason: 'unused',
+    hidden_at: '2026-11-18T04:00:00Z',
+    learned_at: '2026-05-01T12:00:00Z',
+  },
+];
+const sourcesFixture = (() => {
+  const hex = (n: string) => n.repeat(32),
+    ago = (minutes: number) => new Date(Date.now() - minutes * 60000).toISOString();
+  const ids = {
+    tour: hex('e1'),
+    tourReply: hex('e2'),
+    forecast: hex('e3'),
+    packing: hex('e4'),
+    booking: hex('e5'),
+    opening: hex('e6'),
+    photo: hex('e8'),
+    browser: hex('ea'),
+    memberAsk: hex('ec'),
+  };
+  const named = new Map<string, {label: string; minutes: number; forward?: string}>([
+    [id, {label: 'you in your private chat', minutes: 2000}],
+    [voiceId, {label: 'an audio file you sent in your private chat', minutes: 420}],
+    [ids.tour, {label: 'you in your private chat', minutes: 12}],
+    [ids.tourReply, {label: 'Nocheh’s reply in your private chat', minutes: 11}],
+    [ids.forecast, {label: '“Mira Chen” in “Aurora planning” › Iceland planning', minutes: 40}],
+    [ids.packing, {label: 'you in your private chat', minutes: 95}],
+    [
+      ids.booking,
+      {
+        label: 'a message you forwarded in your private chat, from the channel “Night sky news”',
+        minutes: 130,
+        forward: 'the channel “Night sky news”',
+      },
+    ],
+    [ids.opening, {label: '“Mira Chen” in “Aurora planning” › Iceland planning', minutes: 300}],
+    [ids.browser, {label: 'you in the browser chat', minutes: 3000}],
+    [ids.memberAsk, {label: '“Mira Chen” in Mira Chen’s private chat', minutes: 20}],
+  ]);
+  const retired = new Set([ids.photo]);
+  const original = (source: string) => {
+    if (retired.has(source)) return {retired: true};
+    const known = named.get(source);
+    return known
+      ? {id: source, label: known.label, at: ago(known.minutes), ...(known.forward ? {forward: known.forward} : {})}
+      : {unavailable: true, label: 'Source not recorded'};
+  };
+  const fact = (
+    key: string,
+    text: string,
+    minutes: number,
+    chat: string,
+    person: string | null,
+    sources: string[],
+    exact: boolean,
+    batch: boolean,
+  ) => {
+    const originals = sources.map(original),
+      head = originals[0] as any;
+    return {
+      chat,
+      person,
+      fact: {
+        id: hex(key),
+        text,
+        learned_at: ago(minutes),
+        exact,
+        batch,
+        by: exact ? 'owner' : 'mixed',
+        label: head?.id ? head.label : null,
+        at: head?.id ? head.at : null,
+        originals,
+        more: 0,
+      },
+    };
+  };
+  const facts = [
+    fact('f1', 'You booked the 21:30 aurora tour for Friday.', 10, '42', null, [ids.tour], true, false),
+    fact(
+      'f2',
+      'The aurora tour leaves from the harbour car park.',
+      9,
+      '42',
+      null,
+      [ids.tour, ids.tourReply],
+      false,
+      true,
+    ),
+    fact(
+      'f3',
+      'Mira wants to check the Kp forecast before the trip.',
+      30,
+      '-10042/topic/7',
+      personId,
+      [ids.forecast],
+      true,
+      false,
+    ),
+    fact('f4', 'Mira took photos from the ridge.', 1400, '-10042', personId, [ids.photo], false, false),
+  ].sort((a, b) => (a.fact.learned_at < b.fact.learned_at ? 1 : -1));
+  const empty = {reply_to: null, replies: {count: 0, items: []}, topic: null, forwarded_from: null};
+  const topic = {label: '“Aurora planning” › Iceland planning'};
+  const threads = new Map<string, any>([
+    [ids.tour, {...empty, replies: {count: 1, items: [original(ids.tourReply)]}}],
+    [ids.forecast, {...empty, topic: {...topic, opening: original(ids.opening)}}],
+    [
+      ids.opening,
+      {...empty, replies: {count: 0, items: [], topic: true}, topic: {...topic, opens: true, opening: null}},
+    ],
+    [ids.packing, {...empty, reply_to: original(ids.photo)}],
+    [ids.booking, {...empty, reply_to: original(ids.tour), forwarded_from: 'the channel “Night sky news”'}],
+  ]);
+  const learned = new Map<string, any>([
+    [ids.tour, {facts: facts.filter(f => f.fact.originals.some((o: any) => o.id === ids.tour)).map(f => f.fact)}],
+    [
+      ids.forecast,
+      {facts: facts.filter(f => f.fact.originals.some((o: any) => o.id === ids.forecast)).map(f => f.fact)},
+    ],
+    [ids.packing, {facts: []}],
+    [voiceId, {facts: [], reason: 'unavailable'}],
+  ]);
+  const notes: Record<string, {day: string | null; originals: any[]}> = {
+    own: {day: '2026-11-12', originals: [original(ids.tour), original(ids.packing)]},
+    forward: {day: '2026-11-14', originals: [original(ids.booking), original(ids.photo)]},
+    turn: {day: null, originals: [original(id)]},
+  };
+  return {
+    notes,
+    handle(req: any, res: any, route: string, url: URL): boolean {
+      if (req.method !== 'GET') return false;
+      const thread = /^\/events\/([a-f0-9]{64})\/thread$/.exec(route);
+      if (thread) {
+        json(res, 200, threads.get(thread[1]!) ?? empty);
+        return true;
+      }
+      if (route === '/memory/message-facts') {
+        const source = url.searchParams.get('id') ?? '';
+        if (!/^[a-f0-9]{64}$/.test(source)) throw new HttpError(400, 'invalid_fact_request');
+        json(res, 200, learned.get(source) ?? {facts: [], reason: 'not_learned'});
+        return true;
+      }
+      if (route === '/memory/longterm/coverage') {
+        json(res, 200, {coverage: {total: 515, exact: 412, with_others: 96, none: 7}});
+        return true;
+      }
+      if (route === '/memory/hidden') {
+        json(res, 200, {facts: hiddenFacts, next: null});
+        return true;
+      }
+      if (route === '/memory/facts') {
+        const chat = url.searchParams.get('chat') ?? '',
+          person = url.searchParams.get('person') ?? '';
+        json(res, 200, {
+          facts: facts
+            .filter(f => (!chat || f.chat === chat || parentSpace(f.chat) === chat) && (!person || f.person === person))
+            .map(f => f.fact),
+          next: null,
+        });
+        return true;
+      }
+      if (route === '/memory/originals') {
+        const asked = url.searchParams.getAll('id');
+        if (!asked.length || asked.length > 50 || asked.some(item => !/^[a-f0-9]{64}$/.test(item)))
+          throw new HttpError(400, 'invalid_originals_request');
+        json(res, 200, {originals: asked.map(original)});
+        return true;
+      }
+      return false;
+    },
+  };
 })();
-async function scenario(){try{return (await readFile('/tmp/nocheh-ui-scenario','utf8')).trim();}catch{return 'normal';}}
-const server=createServer((req,res)=>{void(async()=>{
- const url=new URL(req.url||'/','http://fixture'),path=url.pathname;
- // The members' app (ADR-0265): its page and its own API, in memory, before any owner session is looked at.
- if(await memberAppPreview(req,res,url))return;
- if(req.method==='GET'&&path==='/'){
-  const session=sessions.page(req);res.setHeader('set-cookie',`nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/`);
-  res.setHeader('content-type','text/html');res.end((await readFile('dashboard/dist/index.html','utf8')).replace('/*NOCHEH_BOOTSTRAP*/',`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`));return;
- }
- // GitHub's create page takes the manifest form and sends the browser back with a code; its install page sends it back
- // with the installation. The dashboard's return page then opens the dashboard on them, as management.ts does.
- if(req.method==='POST'&&path==='/__preview/github/new'){let raw='';for await(const part of req)raw+=part;
-  const manifest=JSON.parse(new URLSearchParams(raw).get('manifest')??'{}');
-  if(JSON.stringify(manifest.default_permissions)!==JSON.stringify({contents:'read',metadata:'read'})||manifest.public!==false)throw new HttpError(400,'manifest_not_read_only');
-  res.writeHead(302,{location:'/connect/github?code=preview-code&state='+encodeURIComponent(url.searchParams.get('state')??'')});res.end();return;}
- if(req.method==='GET'&&path==='/__preview/github/install'){res.writeHead(302,{location:'/connect/github?installation_id=1&setup_action=install'});res.end();return;}
- if(req.method==='GET'&&path==='/connect/github'){res.writeHead(302,{location:githubReturn(url.searchParams)});res.end();return;}
- if(req.method==='GET'&&/^\/assets\/(?:app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)){res.setHeader('content-type',path.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(join('dashboard/dist',path.slice(8))));return;}
- // The mini app's phones sign in with the preview's synthetic password and send their session instead of a cookie.
- const phoneRoute=path.match(/^\/api\/nocheh\/mini-app\/(sign-in|check|sign-out)$/)?.[1];
- if(phoneRoute){const body=await readJson(req) as any;
-  if(phoneRoute==='check')return json(res,200,{state:await ownerLock.check(body.token,'phone')});
-  if(phoneRoute==='sign-out'){await ownerLock.signOut(body.token);return json(res,200,{ok:true});}
-  // The preview has no Telegram launch data to check; its phone is the synthetic owner's.
-  try{return json(res,200,await ownerLock.signIn(body.password,'phone:42'));}catch(error:any){return json(res,error.status??503,{error:error.code,until:error.until,tries_left:error.tries_left});}}
- const phone=req.headers['x-nocheh-mini-session'];
- if(typeof phone==='string'){if(await ownerLock.check(phone,'phone')!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');}
- else sessions.authorize(req,req.method!=='GET');
- if(['/inngest/runs','/hermes/nocheh'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
- const route=path.replace(/^\/api\/(?:plugins\/)?nocheh/,'');
- const mode=await scenario();if(mode==='conflict'&&!modeRevision){settingsRevision+='external';revision++;modeRevision=true;}if(mode!=='conflict')modeRevision=false;if(mode==='offline'&&['/monitoring','/workflows/metrics','/status','/tools/actions'].includes(route))throw new HttpError(503,'fixture_observation_unavailable');
- if(await messagesFixture(req,res,route,url))return;
- if(sourcesFixture.handle(req,res,route,url))return;
- // The owner password card, on a synthetic password; the preview itself has no sign-in.
- if(route==='/owner-lock'&&req.method==='GET')return json(res,200,await ownerLock.status());
- if(route==='/owner-lock/password'&&req.method==='POST'){const body=await readJson(req) as any;const {token}=await ownerLock.changePassword(body.current,body.password);return json(res,200,{...await ownerLock.status(token),csrf:sessions.authorize(req).csrf});}
- if(route==='/owner-lock/sign-out-others'&&req.method==='POST'){await ownerLock.signOutOthers('');return json(res,200,await ownerLock.status());}
- if(route==='/schedules'&&req.method==='POST'){await readJson(req);return json(res,200,{ok:true});}
- if(req.method==='GET'){
-  if(route==='/health')return json(res,200,{ok:true});
-  if(route==='/usage'){const days=Number(url.searchParams.get('days')||30),day=(ago:number)=>new Date(Date.now()-ago*864e5).toISOString().slice(0,10);
-    const row=(ago:number,part:string,label:string,service:string,provider:string,provider_name:string,model:string,calls:number,input:number,output:number,cost:number|null)=>({day:day(ago),part,label,service,provider,provider_name,model,runs:calls,calls,failed:part==='memory'&&ago===0?1:part==='guard'&&ago===0?3:0,refused:part==='guard'&&ago===0?2:0,hidden:part==='guard'&&ago===0?1:0,input_tokens:input,output_tokens:output,cache_read_tokens:provider==='anthropic'?input*3:0,cache_write_tokens:provider==='anthropic'?input/2:0,reasoning_tokens:0,cost_usd:cost,cost_complete:cost!==null});
-    const rows=[row(0,'reply','Telegram replies','Hermes','openai','OpenAI','gpt-5.6-sol',12,48000,3200,0.21),row(3,'reply','Telegram replies','Hermes','custom-1','Example gateway','claude-sonnet-5-5',5,20000,1500,null),row(1,'memory_review','Memory notes','Hermes','anthropic','Anthropic','claude-sonnet-5-5',4,2000,900,0.02),
-      row(0,'guard','Secret check','Nocheh','openai','OpenAI','gpt-5.6-sol',12,6000,240,0.01),row(0,'memory','Memory','Honcho','custom-1','Example gateway','claude-sonnet-5-5',9,30000,4000,null),
-      row(0,'embedding','Memory search','Honcho','openai','OpenAI','text-embedding-3-small',20,8000,0,0.0002)].filter(r=>r.day>=day(days-1));
-    return json(res,200,{since:day(days-1),today:day(0),days,rows,parts:[['reply','Telegram replies','Hermes'],['browser','Browser chat','Hermes'],['schedule','Scheduled runs','Hermes'],['memory_review','Memory notes','Hermes'],['guard','Secret check','Nocheh'],['memory','Memory','Honcho'],['embedding','Memory search','Honcho']].map(([id,label,service])=>({id,label,service})),sources:{hermes:'ok',honcho:'ok',pricing:'ok'}});}
-  if(route==='/monitoring'){const workflows=await workflowHealth(pool);return json(res,200,{checked_at:new Date().toISOString(),telegram_enabled:false,keys:[{name:'SERVICE_TOKEN',service:'Nocheh services',usage:'Lets Nocheh’s own services and the dashboard call each other',present:true},{name:'NOCHEH_MEMORY_TOKEN',service:'Long-term memory (Honcho)',usage:'Lets Honcho’s model calls pass Nocheh’s secret check',present:false},{name:'NOCHEH_MACHINE_TOKEN',service:'Machine control',usage:'Lets Nocheh ask its machine service to run approved jobs on your machines',present:true}],runtime:{status:{telegram:'disabled',telegram_details:{state:'disabled',bot_username:'example_nocheh_bot'}}},archive:{archive:{telegram:[],workflows:[],preparation:[{state:'ready',count:180}],artifacts:[],transcriptions:[],actions:[]},guard_mode:'on',chat_sends:chatSendSummary()},routes:modelRoutes(),model_problems:[{day:new Date().toISOString().slice(0,10),part:'guard',label:'Secret check',provider:'openai',model:'gpt-5.6-sol',calls:12,failed:3,refused:2,hidden:1,reasons:{refused:2,timed_out:1},why:'2 refused by the model, 1 took too long'}],application:{ok:true,workers:{capture:'ready',workflows:'connected'}},workflows:mode==='unavailable'?{unavailable:true}:workflows,services:serviceRows});}
-  if(route==='/workflows')return json(res,200,await listWorkflows(pool,Object.fromEntries(url.searchParams)));
-  if(route==='/workflows/metrics')return json(res,200,await workflowMetrics(pool,Object.fromEntries(url.searchParams)));
-  if(route==='/workflows/health')return json(res,200,await workflowHealth(pool));
-  if(route==='/workflows/timings'){const items=timingIds.map(timingFor),done=items.filter(i=>i.complete),pct=(v:number[],p:number)=>[...v].sort((a,b)=>a-b)[Math.max(0,Math.ceil(p*v.length)-1)]!;
-   return json(res,200,{observed_at:new Date().toISOString(),messages:done.length,reply_ms_p50:pct(done.map(i=>i.reply_ms),.5),reply_ms_p95:pct(done.map(i=>i.reply_ms),.95),
-    stages:[...timingStages,['unmeasured','unmeasured','unmeasured',0] as const].map(([stage,category,label])=>{const v=done.map(i=>i.stages.find(s=>s.stage===stage)!.ms);return {stage,category,label,messages:v.length,ms_p50:pct(v,.5),ms_p95:pct(v,.95)};}),
-    recent:items.map(i=>({event_id:i.event_id,started_at:i.started_at,reply_ms:i.reply_ms,unmeasured_ms:i.unmeasured_ms,complete:i.complete}))});}
-  if(/^\/workflows\/timings\/[a-f0-9]{64}$/.test(route)){const event=route.split('/')[3]!;if(!timingIds.includes(event))throw new HttpError(404,'event_not_found');return json(res,200,timingFor(event));}
-  if(route==='/storage')return json(res,200,{databases:[{database:'nocheh_archive',role:'owned originals',state:'measured',bytes:48_300_000,largest_tables:[{table:'events',bytes:31_000_000,estimated_rows:1842},{table:'artifacts',bytes:9_400_000,estimated_rows:28}]},
-    {database:'nocheh_derived',role:'derived',state:'measured',bytes:12_100_000,largest_tables:[{table:'derived_artifacts',bytes:7_000_000,estimated_rows:412}]},{database:'nocheh_control',role:'operational',state:'measured',bytes:9_800_000,largest_tables:[{table:'dispatches',bytes:2_100_000,estimated_rows:86}]},
-    {database:'nocheh_inngest',role:'workflow history',state:'measured',bytes:22_600_000,largest_tables:[{table:'function_runs',bytes:14_000_000,estimated_rows:930}]}],
-   state_folders:[{path:'hermes',bytes:84_000_000,complete:true},{path:'archive',bytes:37_500_000,complete:true},{path:'admin',bytes:5_200_000,complete:false}],docker_logs:{max_size_per_file:'10m',max_files_per_container:3},retention_days:14});
-  if(route==='/database-browser'){const q=Object.fromEntries(url.searchParams),db=browserDatabases.find(d=>d[0]===q.database);
-   if(q.action==='databases'||!q.action)return json(res,200,{databases:browserDatabases.map(([id,name,engine])=>({id,name,engine}))});
-   if(q.action==='status')return json(res,200,{databases:browserDatabases.map(([id,name,engine,identifier])=>id==='usage'?{id,name,engine,identifier,service:null,state:'missing',detail:'Database file has not been created'}:{id,name,engine,identifier,service:engine==='postgres'?'nocheh-db':null,state:'available',size_bytes:engine==='postgres'?12_000_000:420_000,table_count:id==='archive'?3:2,version:engine==='postgres'?'17.6':'3.46.1'})});
-   if(!db)throw new HttpError(400,'invalid_database');
-   const tables=db[0]==='archive'?[{schema:'public',name:'artifacts',estimated_rows:28},{schema:'public',name:'events',estimated_rows:73},{schema:'public',name:'spool_failures',estimated_rows:0}]:[{schema:db[2]==='sqlite'?'main':'public',name:'notes',estimated_rows:db[2]==='sqlite'?null:0},{schema:db[2]==='sqlite'?'main':'public',name:'settings',estimated_rows:db[2]==='sqlite'?null:0}];
-   if(q.action==='tables')return json(res,200,{tables});
-   if(!tables.some(t=>t.schema===q.schema&&t.name===q.table))throw new HttpError(400,'table_not_found');
-   const columns=[{name:'id',type:'text'},{name:'channel',type:'text'},{name:'scope',type:'text'},{name:'text',type:'text'},{name:'received_at',type:'timestamp with time zone'}];
-   let rows:Record<string,string|null>[]=q.table==='events'?browserRows:[];const offset=Number(q.offset||0),limit=Number(q.limit||50);
-   if(q.filter_column&&q.filter)rows=rows.filter(r=>String((r as any)[q.filter_column!]??'').toLowerCase().includes(q.filter!.toLowerCase()));
-   if(q.sort)rows=[...rows].sort((a,b)=>String((a as any)[q.sort!]??'').localeCompare(String((b as any)[q.sort!]??''))*(q.direction==='desc'?-1:1));
-   return json(res,200,{database:db[0],schema:q.schema,table:q.table,columns,rows:rows.slice(offset,offset+limit),next_offset:rows.length>offset+limit?offset+limit:null,offset,cell_limit:240});}
-  if(/^\/exports\/[a-f0-9-]{36}\/download$/.test(route)){res.writeHead(200,{'content-type':'application/zip','content-disposition':'attachment; filename="nocheh-archive.zip"','cache-control':'no-store'});res.end(Buffer.from([0x50,0x4b,5,6,...Array(18).fill(0)]));return;}
-  if(/^\/workflows\/[a-f0-9]{64}$/.test(route))return json(res,200,await workflowDetail(pool,route.split('/')[2]!));
-  if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[],managed_runs:[{event_id:id,state:'done',created_at:new Date().toISOString(),channel:'browser',profile,scope:'42'},{event_id:voiceId,state:'failed',error_code:'provider_timeout',created_at:new Date(Date.now()-86400000).toISOString(),channel:'scheduler',job_id:'morning-check',job_name:'Morning aurora check',profile,scope:'42'}]},guard_mode:'on',services:[]});
-  if(route==='/settings')return json(res,200,settingsView(mode));
-  if(route==='/members')return json(res,200,memberList());
-  if(route==='/telegram/identities')return json(res,200,{groups:[
-    // Omar is a member carried from the lists before step 3 who never wrote: Telegram named him (member true), and he is
-    // not seen in the group's own messages.
-    {id:'-10042',external:'-10042',name:'Aurora planning',users:[{id:'42',name:'Owner',username:'@owner'},{id:'73',name:'Mira Chen',username:'@mira',member:true},{id:'91',name:'Nia',username:null},
-      {id:'95',name:'Omar Haddad',username:null,state:null,seen:false,member:true}]},
-    {id:'-10073',external:'-10073',name:'Weekend notes',users:[{id:'42',name:'Owner',username:'@owner'},{id:'84',name:'Devon',username:null,member:true}]},
-    // A group Telegram upgraded, by its Nocheh id as storage names it, with its Telegram id now; people saved under its
-    // earlier one stay there (ADR-0252). Sam wrote there and left; Lee's only record is that he left, so the People list
-    // leaves him out.
-    {id:UPGRADED,external:UPGRADED_TG,name:'Garden swap',users:[{id:'61',name:'Rosa',username:null,state:'in',seen:true},{id:'62',name:'Lee',username:null,state:'left',seen:false},
-      {id:'63',name:'Sam',username:null,state:'left',seen:true}]},
-  ],truncated:false});
-  if(route==='/jobs')return json(res,200,jobs);
-  const jobRead=/^\/jobs\/([a-f0-9-]{36})$/.exec(route);
-  if(jobRead){const job=jobs.find(j=>j.id===jobRead[1]);if(!job)throw new HttpError(404,'job_not_found');return json(res,200,job);}
-  if(route==='/operations')return json(res,200,{backups:[{id:'synthetic-backup',created_at:'2026-09-16T12:00:00Z',files:28,offsite:true}],offsite:{enabled:true,keep:14,bucket:'example-backups',last:{state:'sent',at:'2026-09-16T12:05:00Z',bytes:52428800},check:{state:'passed',at:'2026-09-16T12:10:00Z'},last_sent:{at:'2026-09-16T12:05:00Z',bytes:52428800}}});
-  if(route==='/scopes')return json(res,200,{scopes:[{scope:'42',events:180},{scope:'-10042',events:32}],next:null});
-  if(route==='/data')return json(res,200,{records:[{...voice.event,id:voiceId,content_types:['voice'],ready:2,total:2},{...source.event,id,ready:1,total:1}],next:null});
-  if(route==='/search')return json(res,200,[{...source.event,id}]);
-  if(route==='/events')return json(res,200,{events:[source.event?{...source.event,id,text:source.event.text}:source],results:[{...source.event,id}],next:null});
-  if(route==='/events/'+id)return json(res,200,source);
-  if(route==='/sources/'+id+'/retirement')return json(res,200,{event_id:id,retired,revision:retirementRevision,history:retirementHistory});
-  if(route==='/events/'+voiceId)return json(res,200,voice);
-  if(route==='/artifacts/'+voiceFileId+'/download'){res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store'});res.end(voiceBytes);return;}
-  if(route==='/data/'+voiceId+'/guarded')return json(res,200,{projections:[]});
-  if(route==='/data/'+id+'/guarded')return json(res,200,{projections:[{id:'b'.repeat(64),source_id:id,kind:'events',state:'ready',active_revision:revision,author:revision>1?'owner':'automatic',content:{text:guarded,payload:{text:guarded}}}]});
-  if(route==='/data/'+id+'/guarded/history')return json(res,200,url.searchParams.has('revision')?{revision:1,content:{text:source.event.text}}:{revisions:[{revision:1,author:'automatic',created_at:new Date().toISOString()}],next:null});
-  // Schedules (ADR-0266): one set by asking in the private chat, one paused group schedule from the command line.
-  if(route==='/schedules')return json(res,200,{schedules:[
-    {id:'a1b2c3d4e5f6',profile:'nocheh-'+'1'.repeat(24),scope:'42',name:'Morning brief',schedule:'0 8 * * 1-5',timezone:'Europe/Berlin',enabled:true,state:'scheduled',
-      next_run_at:new Date(Date.now()+36e5).toISOString(),last_run_at:new Date(Date.now()-864e5).toISOString(),last_status:'success',last_error:null,last_delivery_error:null,
-      running:false,pending:false,set_in_chat:true,owner_chat:true,chat_title:null},
-    {id:'0f9e8d7c6b5a',profile:'nocheh-'+'2'.repeat(24),scope:'-10042',name:'Weekly review',schedule:'0 17 * * 5',timezone:null,enabled:false,state:'paused',
-      next_run_at:null,last_run_at:null,last_status:null,last_error:null,last_delivery_error:null,running:false,pending:false,set_in_chat:false,owner_chat:false,chat_title:'Fixture group'}]});
-  if(route==='/schedules/runs'){const at=(hours:number,seconds:number)=>({started_at:new Date(Date.now()-hours*36e5).toISOString(),finished_at:new Date(Date.now()-hours*36e5+seconds*1000).toISOString()});
-   return json(res,200,{runs:url.searchParams.get('job_id')!=='a1b2c3d4e5f6'?[]:[
-    {id:'aaaaaaaaaaa1',...at(1,32),trigger:'run_now',result:'nothing_new',error_code:null},
-    {id:'aaaaaaaaaaa2',...at(24,41),trigger:'timed',result:'sent',error_code:null},
-    {id:'aaaaaaaaaaa3',...at(48,12),trigger:'timed',result:'failed',error_code:'runtime_execution_interrupted'}]});}
-  if(route==='/memory/profiles'){const current=[{owner:true,scope:'42',profile},{owner:false,scope:'-10042',profile:'fixture-group'}];
-   // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
-   // After a reinstall: an earlier setup's notes for the private chat, listed first by Hermes; the page still opens on
-   // the current one (latest) and names this one as earlier.
-   const earlier={owner:true,scope:'42',profile:'nocheh-'+'99'.repeat(12),exists:true,guard_epoch:1,latest:false};
-   return json(res,200,{profiles:current,history_profiles:[earlier,...current.map(p=>({...p,exists:true,latest:true})),{owner:false,scope:'42',profile:'nocheh-'+'a1'.repeat(12),private_answer:true,
-    answer_group:'“Aurora planning” › Iceland planning',answer_at:'2026-11-12T10:00:00+00:00'},{owner:false,scope:'42',profile:'nocheh-'+'b2'.repeat(12),private_answer:true},
-    // Step 4: Mira's own private chat, and the owner's question about a member (4b), each its own profile.
-    {owner:false,scope:'73',profile:'nocheh-'+'c3'.repeat(12),member:true},{owner:false,scope:'42',profile:'nocheh-'+'d4'.repeat(12),member_read:true,answer_at:'2026-11-14T09:00:00+00:00'}]});}
-  if(route==='/memory')return json(res,200,{scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),memories:[{name:'MEMORY.md',exists:true,text:'Synthetic memory: interested in astronomy.\n§\nAlice is planning a trip to Iceland.\n§\nThe lunch poll now offers tacos on Friday.',citations:[],
-    // Each note with where it came from, in the owner's words (ADR-0257).
-    // Step 4: the day each names and the messages its writer read (a retired one is never linked).
-    entries:[{target:'memory',text:'Synthetic memory: interested in astronomy.',from:'owner',label:'Your own messages in your private chat',...sourcesFixture.notes.own},
-      {target:'memory',text:'Alice is planning a trip to Iceland.',from:'forward',label:'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”',...sourcesFixture.notes.forward},
-      {target:'memory',text:'The lunch poll now offers tacos on Friday (conv 4200042, nocheh:event:'+'c'.repeat(64)+').',from:'forward',label:'Nocheh’s notes review of a message holding someone else’s words, such as a shared checklist or poll, that you pinned in your private chat'}]},
-    {name:'USER.md',exists:true,text:'Prefers short answers.',citations:[],entries:[{target:'user',text:'Prefers short answers.',from:'turn',label:'Nocheh’s note from your private chat on 2026-11-12',...sourcesFixture.notes.turn}]}],...previewSessions(url),messages:url.searchParams.get('session')?[{id:'m1',role:'user',content:'Where can we see the northern lights?'}]:[]});
-  if(route==='/memory/preferences'||route==='/policy')return json(res,200,preferences);
-  if(route==='/memory/persona')return json(res,200,persona(url.searchParams.get('scope')??''));
-  if(route==='/prompts')return json(res,200,prompts);
-  if(route==='/memory/longterm')return json(res,200,{engine:{id:'honcho',name:'Honcho',capabilities:{inspect:true,evidence:true,retry_failed_learning:true}},connection:{attached:memoryAttached,verified:true,revision:memoryRevision,include_history:memoryIncludeHistory},workspace:{id:'synthetic-workspace',state:'building',last_ready_at:minutesAgo(30),error_code:null},limited_memory:!memoryAttached,syncing:true,generations:[{id:'fixture',state:'ready',mode:'on'}],receipts:[{state:'done',count:176},{state:'pending',count:4}]});
-  if(route==='/memory/longterm/rebuild'){const chosen=url.searchParams.getAll('space').length;
-    return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
-  if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
-  if(route==='/runtime')return json(res,200,{agent:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:false,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
-    status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'guard.detect':true,'image.read':true,'usage.price':false}});
-  if(route==='/graph'){
-    const scope=url.searchParams.get('scope')??'*',all=scope==='*';
-    return json(res,200,{scope,nodes:[...(all?[{id:'collection:*',kind:'collection',label:'All private knowledge'}]:[]),{id:'group:42',kind:'group',chat_type:'private',label:'Private chat · @fixture_owner'},{id:'message:'+id,event_id:id,kind:'message',label:'Northern lights trip'},{id:'user:owner',kind:'user',label:'@fixture_owner'},{id:'project:night-sky',kind:'project',label:'Night sky'}],edges:[...(all?[{from:'collection:*',to:'group:42',kind:'contains'}]:[]),{from:'group:42',to:'message:'+id,kind:'contains'},{from:'user:owner',to:'message:'+id,kind:'authored'},{from:'project:night-sky',to:'group:42',kind:'project_context'}],bounds:{truncated:false},unresolved_replies:0,next:null});
+async function scenario() {
+  try {
+    return (await readFile('/tmp/nocheh-ui-scenario', 'utf8')).trim();
+  } catch {
+    return 'normal';
   }
-  if(route==='/runs')return json(res,200,{runs:[]});
-  if(route==='/tools/actions')return json(res,200,{actions,telegram:telegramActions,permissions});
-  const actionRead=route.match(/^\/tools\/actions\/([a-f0-9]{64})$/);
-  if(actionRead){const found=[...actions,...telegramActions].find((item:any)=>item.id===actionRead[1]);return found?json(res,200,found):json(res,400,{error:'action_not_found'});}
-  if(route==='/decisions'){const kind=url.searchParams.get('kind')||null,after=url.searchParams.get('after')??'',limit=Number(url.searchParams.get('limit')||50),all=inboxDecisions(),matching=all.filter(d=>!kind||d.kind===kind).sort((a,b)=>(a.kind+':'+a.id).localeCompare(b.kind+':'+b.id)),rest=matching.filter(d=>d.kind+':'+d.id>after),items=rest.slice(0,limit);
-   const totals:Record<string,number>={controlled_action:0,telegram_action:0,memory_access:0,entity:0,knowledge:0};for(const d of all)totals[d.kind]!++;
-   return json(res,200,{items,total:matching.length,totals,next_cursor:rest.length>limit?items.at(-1)!.kind+':'+items.at(-1)!.id:null,observed_at:new Date().toISOString(),state:'current'});}
-  const inboxDecision=route.match(/^\/decisions\/(controlled_action|telegram_action|memory_access|entity|knowledge)\/([a-f0-9]{64})$/);
-  if(inboxDecision){const record=inboxRecord(inboxDecision[1]!,inboxDecision[2]!);if(!record)throw new HttpError(404,'decision_not_found');
-   return json(res,200,{kind:inboxDecision[1],id:record.id,title:record.name??record.kind,state:record.state??record.status,revision:record.revision??1,source_scope:record.source_scope??record.scope??null,destination:record.destination??record.arguments?.destination??null,fingerprint:record.fingerprint??null,created_at:record.created_at,detail:record,observed_at:new Date().toISOString(),observation:'current'});}
-  if(route==='/memory/spaces')return json(res,200,url.searchParams.has('id')?{id:url.searchParams.get('id'),private_owner:url.searchParams.get('id')==='42',overrides:spaceOverrides,inherited:{mode:'approved',sources:[],privacy_instructions:''},effective:{mode:'approved',...spaceOverrides},revision:spaceRevision}:{spaces:[{id:'42'},{id:'-10042'}],owner_space:'42',next:null});
-  if(route==='/memory/shares')return json(res,200,shares);
-  if(route==='/memory/preview')return json(res,200,{originals:[],shares,filtered_sources:[]});
-  if(route==='/memory/reviews')return json(res,200,{jobs:[{id:'e'.repeat(64),event_id:id,reason:'import',state:'paused',chunk_index:0}],next:null,kept_out:2});
-  if(route==='/memory-map'){const query=(url.searchParams.get('q')??'').trim().toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'';const stateEdges=state?memoryMapEdges.filter(edge=>edge.state===state||edge.label===state):memoryMapEdges,stateNodes=new Set(stateEdges.flatMap(edge=>[edge.source,edge.target])),nodes=memoryMapNodes.filter(node=>(!kind||node.kind===kind)&&(!state||node.state===state||stateNodes.has(node.id))&&(!query||`${node.label} ${node.kind}`.toLocaleLowerCase().includes(query))),ids=new Set(nodes.map(node=>node.id));return json(res,200,{format:'nocheh-memory-map-v1',nodes,edges:stateEdges.filter(edge=>ids.has(edge.source)||ids.has(edge.target)),next:null,collapsed_facts:true,focus:null,counts:{nodes:nodes.length,edges:memoryMapEdges.length},relationship_edges_grant_access:false});}
-  const claimAudience=route.match(/^\/entities\/claims\/([a-f0-9]{64})\/audience$/);
-  if(claimAudience){const item=claims.find(c=>c.id===claimAudience[1]);if(!item)throw new HttpError(404,'entity_claim_not_found');
-   // The field guide's scope came from the group; everything else from the owner's private chat.
-   const fromGroup=item.id===hx('d4');
-   return json(res,200,{claim_id:item.id,revision:item.revision,sources:[fromGroup?conversation:'42'],private_sources:fromGroup?[]:['42'],owner_private:!fromGroup,
-    confirm_required:!fromGroup,readers:fromGroup?{space:conversation,group:conversation}:null});}
-  if(route==='/memory-access/requests')return json(res,200,{requests:[memoryAccessRequest].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
-  if(route==='/memory-access/grants')return json(res,200,{grants:[memoryGrant,...factGrants].filter(row=>!url.searchParams.get('destination')||row.destination===url.searchParams.get('destination'))});
-  // A search matches a chat's name, its group's name and its Telegram ids, as the server's does; a search and the kind
-  // and state filters apply before the list, sorted by id, is paged, as the store pages it.
-  if(route==='/conversations'){const q=(url.searchParams.get('q')??'').toLocaleLowerCase(),kind=url.searchParams.get('kind')??'',state=url.searchParams.get('state')??'',after=url.searchParams.get('after')??'',limit=Math.min(100,Number(url.searchParams.get('limit')||50));
-   if(mode==='many-chats-moved'&&after)throw new HttpError(503,'fixture_observation_unavailable');
-   const all=[...conversations.map(conversationItem),...moreChats(mode)].sort((a,b)=>a.space_id<b.space_id?-1:a.space_id>b.space_id?1:0)
-    .filter(row=>(!q||[row.space_id,row.name,row.parent_name,...row.app_ids.map((label:any)=>label.external)].some(value=>value?.toLocaleLowerCase().includes(q)))&&(!kind||row.kind===kind)&&(!state||row.state===state));
-   const remaining=all.filter(row=>row.space_id>after),items=remaining.slice(0,limit);
-   return json(res,200,{items,total:all.length,next_cursor:remaining.length>limit?items.at(-1).space_id:null,state:'current',observed_at:new Date().toISOString()});}
-  if(route==='/conversations/context'){const space=url.searchParams.get('space')??'',directory=directoryNow(),group=directory.parentOf(space)??space;
-   return json(res,200,{conversation:conversations.find(row=>row.space_id===space)??{space_id:space,name:null,kind:'unknown'},observed_at:new Date().toISOString(),state:'current',
-    addressing:{state:'current',enabled:false,owner_id:'42',group_enabled:directory.isGroup(group)&&directory.served(group),granted:[],denied:[]},
-    knowledge_access:{owner_access:space==='42',sharing_rules:sharingRules.filter(rule=>rule.destination===space),fact_grants:[],sharing_releases:[],note:'Synthetic preview.'},
-    external_actions:{policy:null,permissions:permissions.filter(row=>row.scope===group),note:'Synthetic preview.'},
-    organization:{effective:{project:group===conversation?{id:projectId,name:'Aurora field guide'}:null,inherited:space===topic},delegations:[],note:'Synthetic preview.'},
-    memory:{connection:{attached:memoryAttached,verified:true},availability:memoryAttached?'available':'unavailable',syncing:false,sessions:[],note:'Synthetic preview.'}});}
-  if(route==='/sharing/rules')return json(res,200,{rules:sharingRules.map(rule=>({...rule,private_sources:[...rule.sources,rule.destination].filter(space=>!groupSpace(space))})),next:null});
-  if(route==='/sharing/previews')return json(res,200,{previews:sharingPreviews.map(({text,...row})=>row),next:null});
-  if(route.startsWith('/sharing/previews/')){const row=sharingPreviews.find(p=>p.id===route.split('/')[3]);if(!row)throw new HttpError(404,'sharing_preview_not_found');return json(res,200,previewView(row));}
-  if(route==='/sharing/releases')return json(res,200,{releases:sharingReleases,next:null});
-  if(route==='/projects/effective')return json(res,200,effectiveProject(url.searchParams.get('space')??''));
-  if(route==='/memory-access/settings'){const destination=url.searchParams.get('destination');if(!destination)return json(res,200,{settings:memorySettings,partial:false});
-   const keys=['suggestions','notify_owner','auto_followup','request_ttl_seconds','default_grant_mode'],global=memorySettings[0],row=memorySettings.find(r=>r.destination===destination),override=row?Object.fromEntries(keys.filter(k=>row[k]!==null&&row[k]!==undefined).map(k=>[k,row[k]])):null;
-   return json(res,200,{destination,global:Object.fromEntries(keys.map(k=>[k,global[k]])),override,effective:{...Object.fromEntries(keys.map(k=>[k,global[k]])),...override},revision:row?row.revision:global.revision});}
-  if(route==='/learned'){const kind=url.searchParams.get('scope_kind'),sid=url.searchParams.get('scope_id');if(!!kind!==!!sid)throw new HttpError(400,'invalid_memory_scope');const needle=(url.searchParams.get('q')??'').toLowerCase(),show=url.searchParams.get('show')??'';
-    return json(res,200,{entries:learned.filter((e:any)=>(!kind||e.scope_kind===kind&&e.scope_id===sid)&&(!needle||(e.subject+' '+e.text).toLowerCase().includes(needle))
-      &&(!show||(show==='retired')===!!e.retired)&&(show!=='revised'||e.active_revision>1)&&(show!=='unsure'||e.provenance?.learning?.uncertainty==='uncertain'||e.provenance?.learning?.conflicts?.length)),next:null});}
-  const learnedRead=route.match(/^\/learned\/([a-f0-9]{64})(\/history)?$/);
-  if(learnedRead){const entry=learned.find(e=>e.id===learnedRead[1]);if(!entry)throw new HttpError(404,'learned_memory_not_found');const before=Number(url.searchParams.get('before')||1e9),versions=learnedVersions[entry.id]!.filter(v=>v.revision<before).sort((a,b)=>b.revision-a.revision);
-   return json(res,200,learnedRead[2]?{versions,next:null}:{id:entry.id,active_revision:entry.active_revision,entry,versions,next:null});}
-  if(route==='/entities'){const kind=url.searchParams.get('kind')??'',q=(url.searchParams.get('q')??'').toLocaleLowerCase(),all=url.searchParams.get('state')==='all';
-   return json(res,200,{entities:people.filter(p=>(!kind||p.kind===kind)&&(all||p.state==='active')&&p.name.toLocaleLowerCase().includes(q)),next:null});}
-  if(route==='/entities/suggestions')return json(res,200,{suggestions:[entitySuggestion,projectSuggestion].filter(card=>card.status==='pending'),next:null});
-  const entityRead=route.match(/^\/entities\/([a-f0-9]{64})$/);
-  if(entityRead){const entity=people.find(p=>p.id===entityRead[1]);if(!entity)throw new HttpError(404,'entity_not_found');return json(res,200,{entity,bindings:[],claims:claims.filter(c=>!c.retired&&(c.subject_entity_id===entity.id||c.object_entity_id===entity.id)),partial:false,
-   ...(entity.kind==='person'?{note:personNotes.get(entity.id)??{note:'',revision:0}}:{})});}
-  if(route==='/notion')return json(res,200,await notion.get(taskOwner,notionTarget(url.searchParams.get('project')??undefined)));
-  if(route==='/chat-tools')return json(res,200,await chatTools.get(taskOwner,url.searchParams.get('space')??'*'));
-  if(route==='/connections/notion')return json(res,200,notionSignIn(url.searchParams.get('project')??''));
-  if(route==='/connections/gmail')return json(res,200,gmail);
-  if(route==='/connections/github')return json(res,200,githubStatus());
-  if(route==='/github-projects')return json(res,200,{repos:[...githubLinks].sort().map(([repo,project_id])=>({repo,project_id}))});
-  if(route==='/tasks')return json(res,200,await tasks.list(taskOwner,taskQuery(url.searchParams)));
-  if(route==='/tasks/settings')return json(res,200,await tasks.settings(taskOwner));
-  if(route==='/background-jobs')return json(res,200,{jobs:backgroundJobs,members:memberSpend()});
-  if(route==='/background-jobs/settings')return json(res,200,jobLimits);
-  if(route==='/machines')return json(res,200,machineList(mode));
-  if(route==='/chat-sends'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
-   const rows=chatSends.filter(row=>(q.get('filter')!=='problems'||sendProblem(row))&&(!q.get('kind')||row.kind===q.get('kind'))&&(!before||Number(row.id)<before));
-   // Each send names its Nocheh chat (ADR-0252), the one the dashboard links to; the app's chat id stays a label.
-   const directory=directoryNow(),named=(row:any)=>({...row,chat_id:row.chat?directory.resolve('telegram',row.chat,row.topic):null});
-   return json(res,200,{records:rows.slice(0,limit).map(named),next:rows.length>limit?rows[limit-1].id:null});}
-  if(route==='/machines/commands'){const q=url.searchParams,before=Number(q.get('before')||0),limit=Math.min(100,Number(q.get('limit')||50));
-   const rows=machineCommands.filter(row=>(!q.get('machine')||row.machine_id===q.get('machine'))&&(!q.get('job')||row.job_id===q.get('job'))&&(q.get('kind')==='all'||row.kind!=='internal')&&(!before||row.id<before));
-   return json(res,200,{commands:rows.slice(0,limit),next:rows.length>limit?rows[limit-1].id:null});}
-  const taskAudience=route.match(/^\/tasks\/([a-f0-9]{64})\/audience$/);
-  if(taskAudience)return json(res,200,await tasks.audience(taskOwner,taskAudience[1]!,{scope:url.searchParams.get('scope'),group:url.searchParams.get('group')}));
-  const taskRead=route.match(/^\/tasks\/([a-f0-9]{64})$/);
-  if(taskRead)return json(res,200,await tasks.get(taskOwner,taskRead[1]!));
-  if(route==='/projects')return json(res,200,{projects:memoryProjects.map(p=>({...p,groups:projectGroups(p.id)})),next:null});
-  if(route==='/projects/assignments')return json(res,200,{assignments,next:null});
-  const projectContext=route.match(/^\/projects\/([a-f0-9]{64})\/context$/);
-  if(projectContext){const project=memoryProjects.find(p=>p.id===projectContext[1]);if(!project)throw new HttpError(404,'project_not_found');
-   const chats=conversations.map(c=>({...c,effective:effectiveProject(c.space_id)})).filter(c=>c.effective.project?.id===project.id);
-   const entityIds=people.filter(p=>p.project_id===project.id).map(p=>p.id);
-   const items=[...learned.filter(e=>e.scope_kind==='project'&&e.scope_id===project.id&&!e.retired).map(e=>({type:'learned',id:e.id,subject:e.subject,kind:e.kind,revision:e.active_revision,author:e.author,retired:false,content:null,attribution:null,uncertainty:null,evidence:e.provenance.learning.evidence})),
-    ...claims.filter(c=>!c.retired&&(entityIds.includes(c.subject_entity_id)||entityIds.includes(c.object_entity_id))).map(c=>({type:'claim',id:c.id,subject:c.predicate,kind:'fact',revision:c.revision,author:c.author,retired:false,content:c.content,attribution:c.attribution,uncertainty:c.uncertainty,evidence:c.evidence}))];
-   const decisions=project.id===projectId&&knowledgeProposal.state==='review'?[{kind:'knowledge',id:knowledgeProposal.id,title:'Organizing suggestion for Weekend notes',state:'review',created_at:knowledgeProposal.created_at}]:[];
-   return json(res,200,{project,conversations:chats,observed_at:new Date().toISOString(),state:'current',knowledge:{items,total:items.length,next_cursor:null},decisions:{items:decisions,total:decisions.length,next_cursor:null}});}
-  if(route==='/private-answers'){const project=url.searchParams.get('project');
-   return json(res,200,{answers:privateAnswers.filter(row=>!project||row.project_id===project),next:null});}
-  if(route==='/organization/delegations')return json(res,200,{delegations:delegations.map(delegationView),next:null});
-  if(route==='/knowledge/proposals')return json(res,200,{proposals:[knowledgeProposal,...pastProposals],next:null});
-  if(route==='/honcho/budget')return json(res,200,honchoBudget);
- }
- if(req.method==='POST'){
-  const body=await readJson(req) as any;
-  if(/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await controlWorkflow(pool,route.split('/')[2]!,route.split('/')[3]!,body));
-  if(route==='/memory/longterm/retry-failed'){const retried=failedLearning;failedLearning=0;return json(res,200,{retried});}
-  if(route==='/memory/longterm/rebuild'){return json(res,200,body.spaces?{conversations:body.spaces.length,sessions:2,messages:12*body.spaces.length,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4});}
-  if(route==='/memory/longterm/fresh-start'){if(body.expected_revision!==memoryRevision)throw new HttpError(409,'memory_connection_conflict');memoryIncludeHistory=body.from_archive===true;memoryRevision++;return json(res,200,{ok:true});}
-  if(route==='/memory/longterm'){if(body.expected_revision!==memoryRevision)throw new HttpError(409,'memory_connection_conflict');memoryAttached=body.attached;memoryIncludeHistory=body.include_history;memoryRevision++;return json(res,200,{ok:true});}
-  const learnedCorrect=route.match(/^\/learned\/([a-f0-9]{64})\/correct$/);
-  if(learnedCorrect){const entry=learned.find(e=>e.id===learnedCorrect[1]);if(!entry)throw new HttpError(404,'learned_memory_not_found');if(entry.active_revision!==body.expected_revision)throw new HttpError(409,'learned_revision_conflict');
-   const text=body.retired?entry.text:String(body.text??'').trim();if(!text)throw new HttpError(400,'memory_correction_required');
-   entry.provenance={...entry.provenance,learning:{...entry.provenance.learning,uncertainty:'explicit',conflicts:[]}};Object.assign(entry,{text,author:'owner',retired:body.retired,revised_at:new Date().toISOString(),active_revision:entry.active_revision+1});
-   learnedVersions[entry.id]!.push({revision:entry.active_revision,text,author:'owner',retired:body.retired,created_at:entry.revised_at,evidence:entry.provenance.learning.evidence,provenance:entry.provenance});return json(res,200,{id:entry.id,revision:entry.active_revision,retired:body.retired});}
-  const claimCorrect=route.match(/^\/entities\/claims\/([a-f0-9]{64})\/correct$/);
-  if(claimCorrect){const item=claims.find(c=>c.id===claimCorrect[1]);if(!item)throw new HttpError(404,'entity_claim_not_found');if(item.revision!==body.expected_revision)throw new HttpError(409,'entity_claim_revision_conflict');
-   Object.assign(item,{content:String(body.content),attribution:body.attribution,uncertainty:body.uncertainty,retired:body.retired,author:'owner',revision:item.revision+1},body.relationship_kind?{relationship_kind:body.relationship_kind}:{});return json(res,200,{id:item.id,revision:item.revision,retired:item.retired});}
-  // The owner's private note about a person (ADR-0274).
-  const entityNote=route.match(/^\/entities\/([a-f0-9]{64})\/note$/);
-  if(entityNote){const entity=people.find(p=>p.id===entityNote[1]&&p.kind==='person');if(!entity)throw new HttpError(404,'entity_not_found');
-   const saved=personNotes.get(entity.id)??{note:'',revision:0};if(saved.revision!==body.expected_revision)throw new HttpError(409,'entity_note_conflict');
-   personNotes.set(entity.id,{note:String(body.note).trim(),revision:saved.revision+1});return json(res,200,{id:entity.id,revision:saved.revision+1});}
-  const entityChange=route.match(/^\/entities\/([a-f0-9]{64})\/(rename|merge|unmerge)$/);
-  if(entityChange){const entity=people.find(p=>p.id===entityChange[1]);if(!entity)throw new HttpError(404,'entity_not_found');if(entity.revision!==body.expected_revision)throw new HttpError(409,'entity_revision_conflict');
-   if(entityChange[2]==='rename'){entity.name=String(body.name).trim();entity.people_name=true;}else if(entityChange[2]==='merge'){entity.state='merged';entity.merged_into=body.target_id;}else{entity.state='active';entity.merged_into=null;}
-   entity.revision++;return json(res,200,{id:entity.id,name:entity.name,state:entity.state,revision:entity.revision});}
-  if(route==='/memory-access/grants'){const fact=claims.find(c=>c.id===body.fact_id&&!c.retired);if(!fact)throw new HttpError(404,'memory_fact_not_found');if(fact.revision!==body.fact_revision)throw new HttpError(409,'memory_fact_changed');
-   if(!groupSpace(String(body.destination)))throw new HttpError(400,'memory_grant_private_destination');
-   if(fact.id!==hx('d4')&&body.private_evidence_confirmed!==true)throw new HttpError(409,'memory_grant_private_sources');
-   const grant={id:randomUUID().replace(/-/g,'').repeat(2),destination:body.destination,fact_id:fact.id,fact_revision:fact.revision,mode:'persistent',state:'active',revision:1,wording:body.wording??fact.content,expires_at:body.expires_at??null,suspended_reason:null,provenance:{fixture:true}};
-   factGrants.push(grant);return json(res,200,{id:grant.id,state:'active',revision:1});}
-  const factRevoke=route.match(/^\/memory-access\/grants\/([a-f0-9]{64})\/revoke$/),ownGrant=factRevoke&&factGrants.find(g=>g.id===factRevoke[1]);
-  if(ownGrant){if(ownGrant.revision!==body.expected_revision||ownGrant.state!=='active')throw new HttpError(409,'memory_fact_grant_changed');ownGrant.state='revoked';ownGrant.revision++;return json(res,200,{id:ownGrant.id,state:'revoked',revision:ownGrant.revision});}
-  if(route==='/notion')return json(res,200,await notion.save(taskOwner,body));
-  if(route==='/chat-tools')return json(res,200,await chatTools.save(taskOwner,body));
-  if(route==='/connections/notion/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/?connect=notion')throw new HttpError(400,'invalid_notion_redirect');
-    return json(res,200,{url:body.redirect+'&code=fixture-code&state=fixture-state'});}
-  if(route==='/connections/notion/finish'){if(body.state!=='fixture-state')throw new HttpError(400,'notion_sign_in_expired');
-    return json(res,200,setNotionSignIn(body.project,{connected:true,method:'oauth',workspace:'Synthetic workspace',account_name:'Sample Owner',account_email:'owner@example.com',connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
-  if(route==='/connections/notion/token'){if(body.token!=='synthetic-notion-token')throw new HttpError(400,'notion_token_refused');
-    return json(res,200,setNotionSignIn(body.project,{connected:true,method:'token',workspace:null,account_name:'Sample Owner',account_email:null,connected_at:Math.floor(Date.now()/1000),reconnect:false}));}
-  if(route==='/connections/notion/disconnect')return json(res,200,setNotionSignIn(body.project,signedOut()));
-  if(route==='/connections/gmail/client'){if(typeof body.client_id!=='string'||!/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(body.client_id.trim())||typeof body.client_secret!=='string'||body.client_secret.trim().length<8)throw new HttpError(400,'invalid_gmail_client');
-    gmail={...gmail,client:body.client_id.trim(),...(gmail.client===body.client_id.trim()?{}:{connected:false,email:null,connected_at:null})};return json(res,200,gmail);}
-  if(route==='/connections/gmail/start'){if(!gmail.client)throw new HttpError(400,'gmail_client_missing');if(body.redirect!==new URL(String(body.redirect)).origin+'/?connect=gmail')throw new HttpError(400,'invalid_gmail_redirect');
-    return json(res,200,{url:body.redirect+'&code=fixture-code&state=fixture-state'});}
-  if(route==='/connections/gmail/finish'){if(body.state!=='fixture-state')throw new HttpError(400,'gmail_sign_in_expired');
-    gmail={...gmail,connected:true,email:'owner@example.com',connected_at:Math.floor(Date.now()/1000),reconnect:false};return json(res,200,gmail);}
-  if(route==='/connections/gmail/disconnect'){gmail={...gmail,connected:false,email:null,connected_at:null,reconnect:false};return json(res,200,gmail);}
-  if(route==='/github-projects'){
-    if(typeof body.repo!=='string'||!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(body.repo)||!(body.project===null||typeof body.project==='string'))throw new HttpError(400,'invalid_github_repo');
-    if(body.project===null)githubLinks.delete(body.repo.toLowerCase());else githubLinks.set(body.repo.toLowerCase(),body.project as string);
-    return json(res,200,{repos:[...githubLinks].sort().map(([repo,project_id])=>({repo,project_id}))});
-  }
-  if(route==='/connections/github/start'){if(body.redirect!==new URL(String(body.redirect)).origin+'/connect/github')throw new HttpError(400,'invalid_github_redirect');
-    return json(res,200,{action:'/__preview/github/new?state=fixture-state',manifest:JSON.stringify({name:'Nocheh-a1b2c3',url:new URL(String(body.redirect)).origin,
-      redirect_url:body.redirect,setup_url:body.redirect,setup_on_update:true,public:false,default_permissions:{contents:'read',metadata:'read'},default_events:[]})});}
-  // A code from a sign-in that came back while Nocheh was busy: the real route refuses it before github.py sees it.
-  if(route==='/connections/github/finish'&&body.code==='preview-busy')throw new HttpError(409,'wait_for_active_jobs');
-  if(route==='/connections/github/finish'){if(body.state!=='fixture-state'||body.code!=='preview-code')throw new HttpError(400,'github_sign_in_expired');
-    githubSignIn={connected:true,app:githubApp,connected_at:Math.floor(Date.now()/1000),reconnect:false,listed:[],listed_at:null};
-    return json(res,200,{...githubStatus(),install_url:githubApp.install_url});}
-  if(route==='/connections/github/list'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');
-    githubSignIn.listed=githubListed;githubSignIn.listed_at=Math.floor(Date.now()/1000);return json(res,200,githubStatus());}
-  if(route==='/connections/github/copy'){if(!githubSignIn.connected)throw new HttpError(400,'github_not_connected');
-    const repo=String(body.repo??''),known=githubListed.find(row=>row.name.toLowerCase()===repo.toLowerCase());if(!known)throw new HttpError(400,'github_repo_not_readable');
-    const commit=randomUUID().replace(/-/g,'').padEnd(40,'0'),copied_at=new Date().toISOString(),row={repo:known.name,branch:known.branch,commit,digest:commit.padEnd(64,'0'),
-      bytes:known.size_kb*1000,need:known.size_kb*3000,files:1204,previous_digest:null,copied_at};
-    githubCopies=[...githubCopies.filter(copy=>String(copy.repo).toLowerCase()!==repo.toLowerCase()),row].sort((a,b)=>String(a.repo).localeCompare(String(b.repo)));
-    return json(res,200,{state:'copied',repo:row.repo,branch:row.branch,commit,copied_at,bytes:row.bytes,files:row.files});}
-  if(route==='/connections/github/remove'){githubCopies=githubCopies.filter(copy=>String(copy.repo).toLowerCase()!==String(body.repo??'').toLowerCase());return json(res,200,githubStatus());}
-  if(route==='/connections/github/disconnect'){githubSignIn={connected:false,app:null,connected_at:null,reconnect:false,listed:[],listed_at:null};githubCopies=[];return json(res,200,githubStatus());}
-  if(route==='/tasks')return json(res,200,await tasks.create(taskOwner,body));
-  if(route==='/tasks/settings')return json(res,200,await tasks.saveSettings(taskOwner,body));
-  if(route==='/tasks/time-zone')return json(res,200,await tasks.saveTimeZone(taskOwner,body));
-  if(route==='/background-jobs/settings'){if(body.revision!==jobLimits.revision)throw new HttpError(409,'configuration_conflict');
-    const notice=body.member_notice_usd===undefined?jobLimits.member_notice_usd:Number(body.member_notice_usd),high=body.member_pause_usd===undefined?jobLimits.member_pause_usd:Number(body.member_pause_usd);
-    if(!(high>=notice))throw new HttpError(400,'invalid_settings');
-    if(Object.keys(body).some(key=>!['cost_limit_usd','minutes_limit','box_tools','member_notice_usd','member_pause_usd','revision'].includes(key)))throw new HttpError(400,'invalid_settings');
-    jobLimits={cost_limit_usd:Number(body.cost_limit_usd),minutes_limit:Number(body.minutes_limit),member_notice_usd:notice,member_pause_usd:high,
-      box_tools:typeof body.box_tools==='boolean'?body.box_tools:jobLimits.box_tools,revision:jobLimits.revision+1};return json(res,200,jobLimits);}
-  if(route==='/background-jobs/member-pause'){if(typeof body.paused!=='boolean')throw new HttpError(400,'invalid_member_pause');
-    memberPause=body.paused?{by:'owner',since:memberPause?.by==='owner'?memberPause.since:new Date().toISOString(),until:null}:null;return json(res,200,memberSpend());}
-  if(route==='/machines/settings'){if(body.revision!==machineControl.revision)throw new HttpError(409,'configuration_conflict');
-    machineControl={enabled:body.enabled===true,revision:machineControl.revision+1};return json(res,200,machineList(mode));}
-  if(route==='/machines'){if(mode==='unavailable')throw new HttpError(400,'machine_unavailable');
-    if(machines.some(row=>row.name.toLowerCase()===String(body.name).toLowerCase()))throw new HttpError(409,'machine_name_taken');
-    const machine={...machineView(String(body.name),randomUUID().replace(/-/g,'')),address:String(body.address),port:Number(body.port??22),login:String(body.login),host_key:null,enabled:true,
-      tested_at:null,test_error:null,revision:1,created_at:new Date().toISOString(),jobs:0};machines.push(machine);return json(res,200,machine);}
-  const machineChange=route.match(/^\/machines\/([a-f0-9]{32})(?:\/(test|forget-host-key|remove))?$/);
-  if(machineChange){const machine=machineAt(machineChange[1]!),action=machineChange[2];
-    if(action==='remove'){machines.splice(machines.indexOf(machine),1);return json(res,200,{ok:true});}
-    if(action==='forget-host-key'){Object.assign(machine,{host_key:null,tested_at:null,test_error:null,revision:machine.revision+1});return json(res,200,machine);}
-    if(action==='test'){if(mode==='unavailable')throw new HttpError(400,'machine_unavailable');const ok=!machine.address.endsWith('.invalid'),host_key=machine.host_key??'SHA256:'+fingerprint(machine.name);
-      Object.assign(machine,ok?{host_key,tested_at:new Date().toISOString(),test_error:null}:{test_error:'machine_unreachable'},{revision:machine.revision+1});
-      machineCommands.unshift(machineCommand(machine,{command:'ssh test',kind:'test',exit_code:ok?0:255,state:ok?'done':'failed',error_code:ok?null:'machine_unreachable'}));
-      return json(res,200,{machine,result:ok?{ok,host_key,system:'Linux 6.8.0 x86_64'}:{ok,error:'machine_unreachable'}});}
-    if(body.revision!==machine.revision)throw new HttpError(409,'configuration_conflict');
-    // Edit: a new address, port or login is another machine, as in the store: its host key goes and its jobs stop.
-    if(typeof body.name==='string'&&machines.some(row=>row!==machine&&row.name.toLowerCase()===body.name.toLowerCase()))throw new HttpError(409,'machine_name_taken');
-    const next={name:body.name??machine.name,address:body.address??machine.address,port:body.port??machine.port,login:body.login??machine.login};
-    const moved=next.address!==machine.address||next.port!==machine.port||next.login!==machine.login;
-    if(moved)for(const job of backgroundJobs.filter(row=>row.machine?.name===machine.name&&['proposed','approved','running'].includes(row.state)))
-      Object.assign(job,job.state==='running'?{state:'stopping',machine_cleanup:'pending'}:{state:'stopped',error_code:'job_machine_off',finished_at:new Date().toISOString()});
-    Object.assign(machine,next,moved?{host_key:null,tested_at:null,test_error:null,jobs:0}:{},typeof body.enabled==='boolean'?{enabled:body.enabled}:{},{revision:machine.revision+1});return json(res,200,machine);}
-  const jobStop=route.match(/^\/background-jobs\/([a-f0-9]{64})\/stop$/);
-  if(jobStop){const job=backgroundJobs.find(row=>row.id===jobStop[1]);if(!job)throw new HttpError(404,'job_not_found');
-   if(job.machine&&['running','reporting'].includes(job.state))job.machine_cleanup='pending';job.state='stopping';return json(res,200,{id:job.id,state:'stopping'});}
-  if(route==='/tasks/archive-finished')return json(res,200,await tasks.archiveFinished(taskOwner,body));
-  const taskChange=route.match(/^\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);
-  if(taskChange)return json(res,200,await (taskChange[2]==='comments'?tasks.comment(taskOwner,taskChange[1]!,body):taskChange[2]==='delete'?tasks.remove(taskOwner,taskChange[1]!)
-    :tasks.update(taskOwner,taskChange[1]!,body)));
-  if(route==='/projects'){if(Object.keys(body).some(key=>!['id','name','description','state','share_chats','own_groups','expected_revision','operation_id'].includes(key)))throw new HttpError(400,'unknown_policy_field');
-   const prior=body.id?memoryProjects.find(p=>p.id===body.id):null;if((prior?.revision??0)!==body.expected_revision)throw new HttpError(409,'project_revision_conflict');
-   if(!String(body.name??'').trim()||!['active','archived'].includes(body.state))throw new HttpError(400,'invalid_project');
-   const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2)};Object.assign(saved,{name:String(body.name).trim(),description:String(body.description??''),state:body.state,share_chats:typeof body.share_chats==='boolean'?body.share_chats:prior?.share_chats??true,own_groups:Array.isArray(body.own_groups)?[...body.own_groups].sort():prior?.own_groups??[],revision:(prior?.revision??0)+1});if(!prior)memoryProjects.push(saved);return json(res,200,saved);}
-  if(route==='/organization/delegations'){if(Object.keys(body).some(key=>!['id','name','enabled','scopes','project_ids','expires_at','expected_revision','operation_id','resume_scopes'].includes(key)))throw new HttpError(400,'unknown_knowledge_field');
-   const prior=body.id?delegations.find(d=>d.id===body.id):null;if((prior?.revision??0)!==body.expected_revision)throw new HttpError(409,'organization_delegation_changed');
-   if(!String(body.name??'').trim()||!Array.isArray(body.scopes)||!body.scopes.length)throw new HttpError(400,'invalid_organization_delegation');
-   const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2),baseline_suspended:[]};Object.assign(saved,{name:String(body.name).trim(),enabled:body.enabled,scopes:body.scopes,project_ids:body.project_ids,expires_at:body.expires_at??null,revision:(prior?.revision??0)+1,
-    baseline_suspended:(saved.baseline_suspended??[]).filter((s:string)=>!(body.resume_scopes??[]).includes(s))});if(!prior)delegations.push(saved);return json(res,200,delegationView(saved));}
-  if(route==='/honcho/budget'&&'thinking_limit_cents' in body){if(body.expected_revision!==honchoBudget.revision)throw new HttpError(409,'budget_revision_conflict');const cents=body.thinking_limit_cents;
-   if(cents!==null&&(!Number.isInteger(cents)||cents<0||cents>honchoBudget.max_thinking_limit_cents))throw new HttpError(400,'invalid_thinking_limit');
-   Object.assign(honchoBudget,{thinking_limit_cents:cents,thinking_limit_usd:cents===null?null:cents/100,thinking_remaining_usd:cents===null?null:Math.max(0,cents/100-honchoBudget.thinking_spent_usd),revision:honchoBudget.revision+1});return json(res,200,honchoBudget);}
-  if(route==='/honcho/budget'){if(body.expected_revision!==honchoBudget.revision)throw new HttpError(409,'budget_revision_conflict');if(!Number.isInteger(body.limit_cents)||body.limit_cents<0||body.limit_cents>honchoBudget.max_limit_cents)throw new HttpError(400,'invalid_budget_request');
-   Object.assign(honchoBudget,{limit_cents:body.limit_cents,limit_usd:body.limit_cents/100,remaining_usd:Math.max(0,body.limit_cents/100-honchoBudget.counted_toward_cap_usd),revision:honchoBudget.revision+1});return json(res,200,honchoBudget);}
-  if(route==='/honcho/read')return json(res,200,{complete:true,workspaces:[{id:'synthetic-workspace'}]});
-  if(route==='/prompts'){if(body.revision!==prompts.revision)throw new HttpError(409,'configuration_conflict');
-   for(const [key,text] of Object.entries(body.texts as Record<string,string|null>)){
-     if(text!==null&&(prompts.placeholders as Record<string,string[]>)[key]?.some(name=>!text.includes(name)))throw new HttpError(400,'prompt_placeholder_missing');
-     // As the server does: a "name: text" line that drops a value Nocheh fills in is refused.
-     const labeled=text!==null&&key in labeledPlaceholders?promptProblem(key,text):null;if(labeled)throw new HttpError(400,labeled);
-     if(text===null)delete prompts.texts[key];else prompts.texts[key]=text;}
-   prompts.revision+='x';return json(res,200,prompts);}
-  if(route==='/memory/persona'){const current=persona(String(body.scope));if(body.revision!==current.revision)throw new HttpError(409,'configuration_conflict');
-   personas[String(body.scope)]={role:body.role,skills:body.skills,revision:current.revision+'x'};return json(res,200,persona(String(body.scope)));}
-  if(route==='/memory/preferences'||route==='/policy'){if(body.revision!==preferences.revision)throw new HttpError(409,'configuration_conflict');preferences.revision+='x';preferences.values={...preferences.values,...body.changes};return json(res,200,{ok:true});}
-  if(route==='/tools/decide'){const item=actions.find(a=>a.id===body.id);if(!item||item.fingerprint!==body.fingerprint)throw new HttpError(409,'action_changed');item.state=body.decision==='approve'?'approved':'rejected';return json(res,200,{ok:true});}
-  if(route==='/tools/grant'){const granted=actions.find(a=>a.id===body.action_id)??actions[0];permissions.push({id:randomUUID(),kind:granted.kind,scope:granted.scope,arguments:granted.arguments,remaining:body.uses,expires_at:new Date(Date.now()+body.minutes*60000).toISOString()});return json(res,200,{ok:true});}
-  if(route==='/tools/telegram-decision'){const item=telegramActions.find(a=>a.id===body.id);if(!item||item.fingerprint!==body.fingerprint)throw new HttpError(409,'action_changed');if(body.expected_revision!==undefined&&body.expected_revision!==item.revision)throw new HttpError(409,'action_revision_changed');if(item.state!=='proposed')throw new HttpError(409,'action_already_started_or_closed');item.state=body.decision==='approve'?'approved':'rejected';item.revision++;return json(res,200,{id:item.id,state:item.state,revision:item.revision});}
-  if(route==='/tools/resolve'||route==='/tools/telegram-resolve'){const item=(route==='/tools/resolve'?actions:telegramActions).find(a=>a.id===body.id);if(!item||item.fingerprint!==body.fingerprint)throw new HttpError(409,'action_changed');if(body.expected_revision!==undefined&&body.expected_revision!==item.revision)throw new HttpError(409,'action_changed');if(item.state!=='ambiguous'||item.resolution)throw new HttpError(409,'action_already_started_or_closed');if(!['ran','not_run','dismissed'].includes(body.outcome))throw new HttpError(400,'invalid_decision');item.resolution=body.outcome;item.resolved_at=new Date().toISOString();item.revision++;return json(res,200,{id:item.id,state:item.state,resolution:item.resolution,revision:item.revision});}
-  if(route==='/memory-access/requests/'+requestId+'/decide'){if(body.expected_revision!==memoryAccessRequest.revision||memoryAccessRequest.state!=='pending')throw new HttpError(409,'memory_access_request_changed');memoryAccessRequest.state=body.decision==='reject'?'rejected':'approved';if(body.wording)memoryAccessRequest.wording=body.wording;memoryAccessRequest.revision++;return json(res,200,{id:requestId,state:memoryAccessRequest.state,grant_id:null,revision:memoryAccessRequest.revision});}
-  const cardDecide=route.match(/^\/entities\/([a-f0-9]{64})\/decide$/),card=cardDecide&&[entitySuggestion,projectSuggestion].find(item=>item.id===cardDecide[1]);
-  if(card){if(body.expected_revision!==card.revision)throw new HttpError(409,'entity_suggestion_conflict');card.status=body.decision==='confirm'?'confirmed':'rejected';card.revision++;return json(res,200,{id:card.id,status:card.status});}
-  const cardSplit=route.match(/^\/entities\/([a-f0-9]{64})\/split$/);
-  if(cardSplit){const index=(projectSuggestion.also_called as any[]).findIndex(name=>name.id===cardSplit[1]);if(index<0)throw new HttpError(409,'entity_suggestion_split_invalid');
-   projectSuggestion.also_called.splice(index,1);projectSuggestion.revision++;return json(res,200,{id:cardSplit[1],merged_into:null});}
-  if(/^\/entities\/[a-f0-9]{64}\/fold$/.test(route))return json(res,200,{id:route.split('/')[2],merged_into:body.target_id});
-  if(route==='/knowledge/proposals/'+knowledgeProposal.id+'/decide'||route==='/knowledge/proposals/'+knowledgeProposal.id+'/undo'){if(body.expected_revision!==knowledgeProposal.revision)throw new HttpError(409,'knowledge_proposal_changed');knowledgeProposal.state=route.endsWith('/undo')?'undone':body.decision==='approve'?'queued':'cancelled';knowledgeProposal.revision++;return json(res,200,{id:knowledgeProposal.id,state:knowledgeProposal.state,revision:knowledgeProposal.revision});}
-  if(route==='/tools/revoke'){const item=permissions.find(p=>p.id===body.id);if(item)item.revoked_at=new Date().toISOString();return json(res,200,{ok:true});}
-  if(route==='/projects/assignments'){if(body.mode==='assigned'&&!groupSpace(String(body.space_id)))throw new HttpError(400,'project_private_chat');
-   if(directoryNow().kind(String(body.space_id))==='topic'&&body.mode!=='inherit')throw new HttpError(400,'project_topic_follows_group');
-   if(Object.keys(body).some(key=>!['space_id','project_id','mode','expected_revision','operation_id'].includes(key)))throw new HttpError(400,'unknown_policy_field');
-   const own=assignments.find(a=>a.space_id===body.space_id);if((own?.revision??0)!==body.expected_revision)throw new HttpError(409,'assignment_revision_conflict');const next={space_id:body.space_id,project_id:body.mode==='assigned'?body.project_id:null,mode:body.mode,revision:body.expected_revision+1};if(own)Object.assign(own,next);else assignments.push(next);return json(res,200,next);}
-  if(route==='/memory-access/settings'){const row=memorySettings.find(r=>r.destination===body.destination);if(row?row.revision!==body.expected_revision:body.expected_revision!==1)throw new HttpError(409,'memory_access_settings_conflict');const values={suggestions:body.suggestions??null,notify_owner:body.notify_owner??null,auto_followup:body.auto_followup??null,request_ttl_seconds:body.request_ttl_seconds??null,default_grant_mode:body.default_grant_mode??null};const revision=row?row.revision+1:1;if(row)Object.assign(row,values,{revision});else memorySettings.push({destination:body.destination,...values,revision});return json(res,200,{destination:body.destination,revision});}
-  if(/^\/memory-access\/grants\/[a-f0-9]{64}\/revoke$/.test(route)){if(memoryGrant.revision!==body.expected_revision||!['active','suspended'].includes(memoryGrant.state))throw new HttpError(409,'memory_fact_grant_changed');memoryGrant.state='revoked';memoryGrant.revision++;return json(res,200,{id:memoryGrant.id,state:'revoked',revision:memoryGrant.revision});}
-  if(route==='/sharing/rules'){const rule=body.id?sharingRules.find(r=>r.id===body.id):null;
-   // A rule saved earlier that names a private chat can be turned off as it is; nothing else may name one.
-   const named=[...(body.sources??[]),body.destination].map(String).filter(space=>!groupSpace(space));
-   if(named.length&&(body.enabled!==false||!named.every(space=>rule&&[...rule.sources,rule.destination].includes(space))))throw new HttpError(400,'sharing_private_chat');if((rule?.revision??0)!==body.expected_revision)throw new HttpError(409,'sharing_revision_conflict');const next={id:rule?.id??randomUUID().replaceAll('-','').padEnd(64,'0'),name:body.name,sources:body.sources,destination:body.destination,enabled:body.enabled,mode:body.mode,instructions:body.instructions??'',revision:body.expected_revision+1};if(rule)Object.assign(rule,next);else sharingRules.push(next);return json(res,200,next);}
-  if(route==='/sharing/preview'){const rule=sharingRules.find(r=>r.id===body.rule_id);if(!rule||rule.revision!==body.expected_revision)throw new HttpError(409,'sharing_revision_conflict');const row={id:randomUUID().replaceAll('-','').padEnd(64,'0'),rule_id:rule.id,rule_revision:rule.revision,state:'ready',created_at:new Date().toISOString(),text:body.content??''};sharingPreviews.push(row);return json(res,200,previewView(row));}
-  if(/^\/sharing\/previews\/[a-f0-9]{64}\/approve$/.test(route)){const row=sharingPreviews.find(p=>p.id===route.split('/')[3]);if(!row)throw new HttpError(404,'sharing_preview_not_found');const release={id:randomUUID().replaceAll('-','').padEnd(64,'0'),preview_id:row.id,rule_id:row.rule_id,state:'active',mode:'approved',revision:1,expires_at:null,created_at:new Date().toISOString()};sharingReleases.push(release);return json(res,200,{id:release.id,revision:1});}
-  if(/^\/sharing\/releases\/[a-f0-9]{64}\/revoke$/.test(route)){const release=sharingReleases.find(r=>r.id===route.split('/')[3]);if(!release||release.revision!==body.expected_revision||release.state!=='active')throw new HttpError(409,'sharing_revision_conflict');release.state='revoked';release.revision++;return json(res,200,{id:release.id,revision:release.revision,state:'revoked'});}
-  if(route==='/memory/spaces'){if(body.revision!==spaceRevision)throw new HttpError(409,'space_revision_conflict');spaceOverrides=body.overrides;spaceRevision++;return json(res,200,{ok:true});}
-  if(route==='/memory/shares'){shares.push({id:randomUUID(),destination:body.destination,content:body.content});spaceRevision++;return json(res,200,{ok:true});}
-  if(route==='/memory/recall')return json(res,200,{hits:[]});
-  // Like a gateway that serves its API under /v1: the dialog's check finds an address typed without a version there.
-  if(route==='/settings/provider-models'){const typed=String(body.url??'').replace(/\/+$/,''),url=!typed||body.try_v1!==true||/(^|\/)v\d+[a-z0-9]*(\/|$)/i.test(new URL(typed).pathname)?typed:typed+'/v1';
-    return json(res,200,body.provider==='openai'||body.key||JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS??'[]')).some((p:any)=>p.id===body.provider&&p.url===url)
-    ?{provider:body.provider,models:body.provider==='openai'?['gpt-5.6-sol','text-embedding-3-small']:['claude-sonnet-5-5','gpt-5.6-sol'],...(url?{url}:{})}
-    :{provider:body.provider,models:[],error:'missing_key'});}
-  if(route==='/memory/reviews/control')return json(res,200,{ok:true});
-  // `slow-apply` restarts for a few seconds in steps like a real apply; `lost-apply` ends as a dashboard restart would leave it.
-  if(route==='/settings/apply'&&['slow-apply','lost-apply'].includes(mode)){if(applying)throw new HttpError(409,'wait_for_active_jobs');
-   const job:any={id:randomUUID(),kind:'settings.apply',state:'running',step:'restarting',created_at:new Date().toISOString()};jobs.unshift(job);applying=job;
-   if(mode==='lost-apply')setTimeout(()=>{job.state='interrupted';job.error='dashboard_restarted';applying=null;},2500);
-   else{setTimeout(()=>{job.step='memory';},5000);setTimeout(()=>{job.state='complete';job.result={status:'applied'};applying=null;applyPending=false;},8000);}
-   return json(res,202,job);}
-  if(route==='/settings/apply')applyPending=false;
-  if(route==='/operations'||route==='/settings/apply'){const job={id:randomUUID(),kind:route==='/operations'?'operations.'+body.action:'settings.apply',state:'complete',created_at:new Date().toISOString(),result:{status:'synthetic_only'}};jobs.unshift(job);return json(res,200,job);}
-  const importAction=/^\/jobs\/([a-f0-9-]{36})\/(start|cancel)$/.exec(route);
-  if(importAction){const job=jobs.find(j=>j.id===importAction[1]);if(!job)throw new HttpError(404,'job_not_found');if(importAction[2]==='start'){if(job.state!=='ready'&&(JSON.stringify(body.mapping)!==JSON.stringify(job.mapping)||body.review_approved!==job.review_approved))throw new HttpError(409,'import_configuration_conflict');job.mapping=body.mapping;job.review_approved=body.review_approved;job.state='running';}else job.state='cancelled';return json(res,200,job);}
-  // "Find my ID": the synthetic bot has one private message, from the synthetic owner.
-  if(route==='/telegram/discover'){const saved=(key:string)=>String(settingsChanges[key]??fields.find(f=>f.key===key)?.value??'');
-    if(!settingsChanges.TELEGRAM_BOT_TOKEN&&mode!=='fresh')throw new HttpError(400,'telegram_token_missing');
-    if(saved('TELEGRAM_ENABLED')==='true')throw new HttpError(400,'telegram_running');
-    return json(res,200,{bot:'@aurora_helper_bot',people:[{id:'42',name:'Owner',username:'@owner'}]});}
-  // Telegram is asked about the groups Nocheh is on in as the server asks: at most 50 a press, those never checked and
-  // then those checked longest ago first, ties by id; the answer counts the others not checked in the last hour.
-  if(route==='/telegram/chats/refresh'){const directory=directoryNow(),now=Date.now(),last=(id:string)=>refreshedAt.get(id)??0;
-   const served=[...previewChats.filter(chat=>chat.kind==='group'&&directory.served(chat.id)).map(chat=>({chat_id:chat.id,external:chat.ids[0],state:'available',title:chat.title,is_forum:chat.is_forum===true})),
-    ...moreChats(mode).map(chat=>({chat_id:chat.space_id,external:chat.space_id,state:'available',title:chat.name,is_forum:false}))];
-   const chats=served.sort((a,b)=>last(a.chat_id)-last(b.chat_id)||(a.chat_id<b.chat_id?-1:a.chat_id>b.chat_id?1:0)).slice(0,50);
-   for(const chat of chats)refreshedAt.set(chat.chat_id,now);
-   return json(res,200,{chats,remaining:served.filter(chat=>last(chat.chat_id)<now-3600000).length});}
-  // The group switch (ADR-0253): on or off at once, with the project a group joins as it turns on: a new one named
-  // after it, one of the owner's, or none. Only a group Nocheh is in has one.
-  if(route==='/chats/state'){if(Object.keys(body).some(key=>!['chat_id','state','operation_id','project'].includes(key)))throw new HttpError(400,'unknown_chat_state_field');
-   const chat=String(body.chat_id),row=previewChats.find(item=>item.id===chat),project=body.project as {mode:string;project_id?:string}|undefined;
-   if(!['active','off'].includes(body.state)||project&&body.state!=='active')throw new HttpError(400,'invalid_chat_state');
-   if(!row)throw new HttpError(404,'chat_not_found');
-   if(row.kind!=='group')throw new HttpError(400,'chat_not_group');
-   if(['left','removed','archived'].includes(chatStates.get(chat)!))throw new HttpError(409,'chat_not_joined');
-   chatStates.set(chat,body.state);
-   const own=assignments.find(a=>a.space_id===chat);let projectId:string|null=own?.mode==='assigned'?own.project_id:null;
-   if(project){
-    if(project.mode==='new'){projectId=createHash('sha256').update('project:'+body.operation_id).digest('hex');
-     memoryProjects.unshift({id:projectId,name:row.title||'Group',description:'',state:'active',revision:1});}
-    else projectId=project.mode==='assigned'?project.project_id??null:null;
-    const next={space_id:chat,project_id:projectId,mode:project.mode==='none'?'none':'assigned',revision:(own?.revision??0)+1};
-    if(own)Object.assign(own,next);else assignments.push(next);
-   }
-   return json(res,200,{chat_id:chat,state:body.state,project_id:projectId});}
-  // The Members routes: each change at once, with its operation id (step 3).
-  if(route==='/members'||route.startsWith('/members/')){const answer=memberRoute(route,body);if(answer)return json(res,200,answer);}
-  // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0252).
-  if(route==='/telegram/topics'){
-   if(Object.keys(body).some(key=>!['action','link','chat_id','topic_id','name'].includes(key)))throw new HttpError(400,'unknown_topic_field');
-   if(!body.link&&(directoryNow().kind(String(body.chat_id))!=='group'||!Number.isSafeInteger(body.topic_id)||body.topic_id<2))throw new HttpError(400,'invalid_topic_reference');
-   return json(res,200,{ok:true});}
-  // Off-site storage from one pasted credential. A token named two-accounts asks which account to use.
-  if(route==='/offsite/connect'){
-    if(body.provider==='cloudflare'){
-      if(!body.token)throw new HttpError(400,'offsite_cloudflare_token_invalid');
-      if(body.token==='refused')throw new HttpError(400,'offsite_cloudflare_token_refused');
-      if(body.token==='no-r2')throw new HttpError(400,'offsite_cloudflare_r2_off');
-      if(body.token==='two-accounts'&&!body.account)return json(res,200,{status:'choose_account',accounts:[{id:'0'.repeat(32),name:'Example home'},{id:'1'.repeat(32),name:'Example work'}]});
-      settingsChanges={...settingsChanges,NOCHEH_OFFSITE_PROVIDER:'cloudflare',NOCHEH_OFFSITE_ENDPOINT:'https://'+(body.account??'0'.repeat(32))+'.r2.cloudflarestorage.com',
-        NOCHEH_OFFSITE_BUCKET:'nocheh-backups',NOCHEH_OFFSITE_REGION:'auto',NOCHEH_OFFSITE_ACCESS_KEY_ID:'example-key-id',NOCHEH_OFFSITE_SECRET_ACCESS_KEY:'example-secret'};
-      const savedOn=settingsRevision;settingsRevision+='x';
-      return json(res,200,{saved_on:savedOn,status:'connected',provider:'cloudflare',bucket:'nocheh-backups',account:'Example home',lock_days:7,setup_token_deleted:true,settings:settingsView(mode)});
+}
+const server = createServer((req, res) => {
+  void (async () => {
+    const url = new URL(req.url || '/', 'http://fixture'),
+      path = url.pathname;
+    // The members' app (ADR-0265): its page and its own API, in memory, before any owner session is looked at.
+    if (await memberAppPreview(req, res, url)) return;
+    if (req.method === 'GET' && path === '/') {
+      const session = sessions.page(req);
+      res.setHeader('set-cookie', `nocheh_session=${session.id}; HttpOnly; SameSite=Strict; Path=/`);
+      res.setHeader('content-type', 'text/html');
+      res.end(
+        (await readFile('dashboard/dist/index.html', 'utf8')).replace(
+          '/*NOCHEH_BOOTSTRAP*/',
+          `window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`,
+        ),
+      );
+      return;
     }
-    if(body.provider==='backblaze'){
-      if(!body.key_id||!body.key)throw new HttpError(400,'offsite_backblaze_key_invalid');
-      settingsChanges={...settingsChanges,NOCHEH_OFFSITE_PROVIDER:'backblaze',NOCHEH_OFFSITE_ENDPOINT:'https://s3.us-west-004.backblazeb2.com',
-        NOCHEH_OFFSITE_BUCKET:'example-backups',NOCHEH_OFFSITE_REGION:'us-west-004',NOCHEH_OFFSITE_ACCESS_KEY_ID:String(body.key_id),NOCHEH_OFFSITE_SECRET_ACCESS_KEY:'example-secret'};
-      const savedOn=settingsRevision;settingsRevision+='x';
-      return json(res,200,{saved_on:savedOn,status:'connected',provider:'backblaze',bucket:'example-backups',settings:settingsView(mode)});
+    // GitHub's create page takes the manifest form and sends the browser back with a code; its install page sends it back
+    // with the installation. The dashboard's return page then opens the dashboard on them, as management.ts does.
+    if (req.method === 'POST' && path === '/__preview/github/new') {
+      let raw = '';
+      for await (const part of req) raw += part;
+      const manifest = JSON.parse(new URLSearchParams(raw).get('manifest') ?? '{}');
+      if (
+        JSON.stringify(manifest.default_permissions) !== JSON.stringify({contents: 'read', metadata: 'read'}) ||
+        manifest.public !== false
+      )
+        throw new HttpError(400, 'manifest_not_read_only');
+      res.writeHead(302, {
+        location: '/connect/github?code=preview-code&state=' + encodeURIComponent(url.searchParams.get('state') ?? ''),
+      });
+      res.end();
+      return;
     }
-    throw new HttpError(400,'offsite_provider_unknown');
-  }
-  if(route==='/settings'){if(body.revision!==settingsRevision)throw new HttpError(409,'configuration_conflict');
-    const owner=settingValue(mode,fields.find(f=>f.key==='TELEGRAM_OWNER_ID')!);
-    if(owner&&body.changes&&'TELEGRAM_OWNER_ID' in body.changes&&body.changes.TELEGRAM_OWNER_ID!==owner)
-      throw new HttpError(400,'Your Telegram user ID changes only from the command line: ./bin/nocheh config set TELEGRAM_OWNER_ID <id>');
-    // Memory already holds small-model vectors here; another model needs the confirmed rebuild.
-    if(mode!=='no-provider'&&body.changes?.NOCHEH_EMBEDDING_MODEL&&body.changes.NOCHEH_EMBEDDING_MODEL!=='text-embedding-3-small'&&body.rebuild_memory!==true)throw new HttpError(400,'embedding_model_change_requires_rebuild');
-    settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';
-    if(Object.keys(body.changes??{}).some(key=>!liveSettings.has(key)))applyPending=true;
-    return json(res,200,{ok:true});}
-  if(route==='/data/'+id+'/guarded'){if(body.expected_revision!==revision)throw new HttpError(409,'guard_revision_conflict');guarded=body.content?.text??source.event.text;revision++;return json(res,200,{ok:true});}
-  if(route==='/sources/'+id+'/retirement'){
-    if(body.expected_revision!==retirementRevision)throw new HttpError(409,'source_retirement_conflict');
-    retired=body.retired;retirementRevision++;retirementHistory.unshift({revision:retirementRevision,retired,created_at:new Date().toISOString()});
-    return json(res,200,{event_id:id,retired,revision:retirementRevision});
-  }
- }
- throw new HttpError(404,'fixture_capability_unavailable');
-})().catch(error=>json(res,error instanceof HttpError?error.status:500,{error:error instanceof HttpError?error.code:'fixture_request_failed'}));});
-server.listen(port,'0.0.0.0',()=>console.log(`Synthetic dashboard preview ready on ${port}; no external execution authorities.`));
-for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{server.closeAllConnections();server.close(()=>void pool.end());});
+    if (req.method === 'GET' && path === '/__preview/github/install') {
+      res.writeHead(302, {location: '/connect/github?installation_id=1&setup_action=install'});
+      res.end();
+      return;
+    }
+    if (req.method === 'GET' && path === '/connect/github') {
+      res.writeHead(302, {location: githubReturn(url.searchParams)});
+      res.end();
+      return;
+    }
+    if (req.method === 'GET' && /^\/assets\/(?:app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/.test(path)) {
+      res.setHeader('content-type', path.endsWith('.css') ? 'text/css' : 'text/javascript');
+      res.end(await readFile(join('dashboard/dist', path.slice(8))));
+      return;
+    }
+    // The mini app's phones sign in with the preview's synthetic password and send their session instead of a cookie.
+    const phoneRoute = path.match(/^\/api\/nocheh\/mini-app\/(sign-in|check|sign-out)$/)?.[1];
+    if (phoneRoute) {
+      const body = (await readJson(req)) as any;
+      if (phoneRoute === 'check') return json(res, 200, {state: await ownerLock.check(body.token, 'phone')});
+      if (phoneRoute === 'sign-out') {
+        await ownerLock.signOut(body.token);
+        return json(res, 200, {ok: true});
+      }
+      // The preview has no Telegram launch data to check; its phone is the synthetic owner's.
+      try {
+        return json(res, 200, await ownerLock.signIn(body.password, 'phone:42'));
+      } catch (error: any) {
+        return json(res, error.status ?? 503, {error: error.code, until: error.until, tries_left: error.tries_left});
+      }
+    }
+    const phone = req.headers['x-nocheh-mini-session'];
+    if (typeof phone === 'string') {
+      if ((await ownerLock.check(phone, 'phone')) !== 'signed_in')
+        throw new HttpError(401, 'mini_app_sign_in_required');
+    } else sessions.authorize(req, req.method !== 'GET');
+    if (['/inngest/runs', '/hermes/nocheh'].includes(path)) {
+      res.setHeader('content-type', 'text/html');
+      res.end(
+        '<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>',
+      );
+      return;
+    }
+    const route = path.replace(/^\/api\/(?:plugins\/)?nocheh/, '');
+    const mode = await scenario();
+    if (mode === 'conflict' && !modeRevision) {
+      settingsRevision += 'external';
+      revision++;
+      modeRevision = true;
+    }
+    if (mode !== 'conflict') modeRevision = false;
+    if (mode === 'offline' && ['/monitoring', '/workflows/metrics', '/status', '/tools/actions'].includes(route))
+      throw new HttpError(503, 'fixture_observation_unavailable');
+    if (await messagesFixture(req, res, route, url)) return;
+    if (sourcesFixture.handle(req, res, route, url)) return;
+    // The owner password card, on a synthetic password; the preview itself has no sign-in.
+    if (route === '/owner-lock' && req.method === 'GET') return json(res, 200, await ownerLock.status());
+    if (route === '/owner-lock/password' && req.method === 'POST') {
+      const body = (await readJson(req)) as any;
+      const {token} = await ownerLock.changePassword(body.current, body.password);
+      return json(res, 200, {...(await ownerLock.status(token)), csrf: sessions.authorize(req).csrf});
+    }
+    if (route === '/owner-lock/sign-out-others' && req.method === 'POST') {
+      await ownerLock.signOutOthers('');
+      return json(res, 200, await ownerLock.status());
+    }
+    if (route === '/schedules' && req.method === 'POST') {
+      await readJson(req);
+      return json(res, 200, {ok: true});
+    }
+    if (req.method === 'GET') {
+      if (route === '/health') return json(res, 200, {ok: true});
+      if (route === '/usage') {
+        const days = Number(url.searchParams.get('days') || 30),
+          day = (ago: number) => new Date(Date.now() - ago * 864e5).toISOString().slice(0, 10);
+        const row = (
+          ago: number,
+          part: string,
+          label: string,
+          service: string,
+          provider: string,
+          provider_name: string,
+          model: string,
+          calls: number,
+          input: number,
+          output: number,
+          cost: number | null,
+        ) => ({
+          day: day(ago),
+          part,
+          label,
+          service,
+          provider,
+          provider_name,
+          model,
+          runs: calls,
+          calls,
+          failed: part === 'memory' && ago === 0 ? 1 : part === 'guard' && ago === 0 ? 3 : 0,
+          refused: part === 'guard' && ago === 0 ? 2 : 0,
+          hidden: part === 'guard' && ago === 0 ? 1 : 0,
+          input_tokens: input,
+          output_tokens: output,
+          cache_read_tokens: provider === 'anthropic' ? input * 3 : 0,
+          cache_write_tokens: provider === 'anthropic' ? input / 2 : 0,
+          reasoning_tokens: 0,
+          cost_usd: cost,
+          cost_complete: cost !== null,
+        });
+        const rows = [
+          row(0, 'reply', 'Telegram replies', 'Hermes', 'openai', 'OpenAI', 'gpt-5.6-sol', 12, 48000, 3200, 0.21),
+          row(
+            3,
+            'reply',
+            'Telegram replies',
+            'Hermes',
+            'custom-1',
+            'Example gateway',
+            'claude-sonnet-5-5',
+            5,
+            20000,
+            1500,
+            null,
+          ),
+          row(
+            1,
+            'memory_review',
+            'Memory notes',
+            'Hermes',
+            'anthropic',
+            'Anthropic',
+            'claude-sonnet-5-5',
+            4,
+            2000,
+            900,
+            0.02,
+          ),
+          row(0, 'guard', 'Secret check', 'Nocheh', 'openai', 'OpenAI', 'gpt-5.6-sol', 12, 6000, 240, 0.01),
+          row(
+            0,
+            'memory',
+            'Memory',
+            'Honcho',
+            'custom-1',
+            'Example gateway',
+            'claude-sonnet-5-5',
+            9,
+            30000,
+            4000,
+            null,
+          ),
+          row(
+            0,
+            'embedding',
+            'Memory search',
+            'Honcho',
+            'openai',
+            'OpenAI',
+            'text-embedding-3-small',
+            20,
+            8000,
+            0,
+            0.0002,
+          ),
+        ].filter(r => r.day >= day(days - 1));
+        return json(res, 200, {
+          since: day(days - 1),
+          today: day(0),
+          days,
+          rows,
+          parts: [
+            ['reply', 'Telegram replies', 'Hermes'],
+            ['browser', 'Browser chat', 'Hermes'],
+            ['schedule', 'Scheduled runs', 'Hermes'],
+            ['memory_review', 'Memory notes', 'Hermes'],
+            ['guard', 'Secret check', 'Nocheh'],
+            ['memory', 'Memory', 'Honcho'],
+            ['embedding', 'Memory search', 'Honcho'],
+          ].map(([id, label, service]) => ({id, label, service})),
+          sources: {hermes: 'ok', honcho: 'ok', pricing: 'ok'},
+        });
+      }
+      if (route === '/monitoring') {
+        const workflows = await workflowHealth(pool);
+        return json(res, 200, {
+          checked_at: new Date().toISOString(),
+          telegram_enabled: false,
+          keys: [
+            {
+              name: 'SERVICE_TOKEN',
+              service: 'Nocheh services',
+              usage: 'Lets Nocheh’s own services and the dashboard call each other',
+              present: true,
+            },
+            {
+              name: 'NOCHEH_MEMORY_TOKEN',
+              service: 'Long-term memory (Honcho)',
+              usage: 'Lets Honcho’s model calls pass Nocheh’s secret check',
+              present: false,
+            },
+            {
+              name: 'NOCHEH_MACHINE_TOKEN',
+              service: 'Machine control',
+              usage: 'Lets Nocheh ask its machine service to run approved jobs on your machines',
+              present: true,
+            },
+          ],
+          runtime: {
+            status: {telegram: 'disabled', telegram_details: {state: 'disabled', bot_username: 'example_nocheh_bot'}},
+          },
+          archive: {
+            archive: {
+              telegram: [],
+              workflows: [],
+              preparation: [{state: 'ready', count: 180}],
+              artifacts: [],
+              transcriptions: [],
+              actions: [],
+            },
+            guard_mode: 'on',
+            chat_sends: chatSendSummary(),
+          },
+          routes: modelRoutes(),
+          model_problems: [
+            {
+              day: new Date().toISOString().slice(0, 10),
+              part: 'guard',
+              label: 'Secret check',
+              provider: 'openai',
+              model: 'gpt-5.6-sol',
+              calls: 12,
+              failed: 3,
+              refused: 2,
+              hidden: 1,
+              reasons: {refused: 2, timed_out: 1},
+              why: '2 refused by the model, 1 took too long',
+            },
+          ],
+          application: {ok: true, workers: {capture: 'ready', workflows: 'connected'}},
+          workflows: mode === 'unavailable' ? {unavailable: true} : workflows,
+          services: serviceRows,
+        });
+      }
+      if (route === '/workflows')
+        return json(res, 200, await listWorkflows(pool, Object.fromEntries(url.searchParams)));
+      if (route === '/workflows/metrics')
+        return json(res, 200, await workflowMetrics(pool, Object.fromEntries(url.searchParams)));
+      if (route === '/workflows/health') return json(res, 200, await workflowHealth(pool));
+      if (route === '/workflows/timings') {
+        const items = timingIds.map(timingFor),
+          done = items.filter(i => i.complete),
+          pct = (v: number[], p: number) => [...v].sort((a, b) => a - b)[Math.max(0, Math.ceil(p * v.length) - 1)]!;
+        return json(res, 200, {
+          observed_at: new Date().toISOString(),
+          messages: done.length,
+          reply_ms_p50: pct(
+            done.map(i => i.reply_ms),
+            0.5,
+          ),
+          reply_ms_p95: pct(
+            done.map(i => i.reply_ms),
+            0.95,
+          ),
+          stages: [...timingStages, ['unmeasured', 'unmeasured', 'unmeasured', 0] as const].map(
+            ([stage, category, label]) => {
+              const v = done.map(i => i.stages.find(s => s.stage === stage)!.ms);
+              return {stage, category, label, messages: v.length, ms_p50: pct(v, 0.5), ms_p95: pct(v, 0.95)};
+            },
+          ),
+          recent: items.map(i => ({
+            event_id: i.event_id,
+            started_at: i.started_at,
+            reply_ms: i.reply_ms,
+            unmeasured_ms: i.unmeasured_ms,
+            complete: i.complete,
+          })),
+        });
+      }
+      if (/^\/workflows\/timings\/[a-f0-9]{64}$/.test(route)) {
+        const event = route.split('/')[3]!;
+        if (!timingIds.includes(event)) throw new HttpError(404, 'event_not_found');
+        return json(res, 200, timingFor(event));
+      }
+      if (route === '/storage')
+        return json(res, 200, {
+          databases: [
+            {
+              database: 'nocheh_archive',
+              role: 'owned originals',
+              state: 'measured',
+              bytes: 48_300_000,
+              largest_tables: [
+                {table: 'events', bytes: 31_000_000, estimated_rows: 1842},
+                {table: 'artifacts', bytes: 9_400_000, estimated_rows: 28},
+              ],
+            },
+            {
+              database: 'nocheh_derived',
+              role: 'derived',
+              state: 'measured',
+              bytes: 12_100_000,
+              largest_tables: [{table: 'derived_artifacts', bytes: 7_000_000, estimated_rows: 412}],
+            },
+            {
+              database: 'nocheh_control',
+              role: 'operational',
+              state: 'measured',
+              bytes: 9_800_000,
+              largest_tables: [{table: 'dispatches', bytes: 2_100_000, estimated_rows: 86}],
+            },
+            {
+              database: 'nocheh_inngest',
+              role: 'workflow history',
+              state: 'measured',
+              bytes: 22_600_000,
+              largest_tables: [{table: 'function_runs', bytes: 14_000_000, estimated_rows: 930}],
+            },
+          ],
+          state_folders: [
+            {path: 'hermes', bytes: 84_000_000, complete: true},
+            {path: 'archive', bytes: 37_500_000, complete: true},
+            {path: 'admin', bytes: 5_200_000, complete: false},
+          ],
+          docker_logs: {max_size_per_file: '10m', max_files_per_container: 3},
+          retention_days: 14,
+        });
+      if (route === '/database-browser') {
+        const q = Object.fromEntries(url.searchParams),
+          db = browserDatabases.find(d => d[0] === q.database);
+        if (q.action === 'databases' || !q.action)
+          return json(res, 200, {databases: browserDatabases.map(([id, name, engine]) => ({id, name, engine}))});
+        if (q.action === 'status')
+          return json(res, 200, {
+            databases: browserDatabases.map(([id, name, engine, identifier]) =>
+              id === 'usage'
+                ? {
+                    id,
+                    name,
+                    engine,
+                    identifier,
+                    service: null,
+                    state: 'missing',
+                    detail: 'Database file has not been created',
+                  }
+                : {
+                    id,
+                    name,
+                    engine,
+                    identifier,
+                    service: engine === 'postgres' ? 'nocheh-db' : null,
+                    state: 'available',
+                    size_bytes: engine === 'postgres' ? 12_000_000 : 420_000,
+                    table_count: id === 'archive' ? 3 : 2,
+                    version: engine === 'postgres' ? '17.6' : '3.46.1',
+                  },
+            ),
+          });
+        if (!db) throw new HttpError(400, 'invalid_database');
+        const tables =
+          db[0] === 'archive'
+            ? [
+                {schema: 'public', name: 'artifacts', estimated_rows: 28},
+                {schema: 'public', name: 'events', estimated_rows: 73},
+                {schema: 'public', name: 'spool_failures', estimated_rows: 0},
+              ]
+            : [
+                {
+                  schema: db[2] === 'sqlite' ? 'main' : 'public',
+                  name: 'notes',
+                  estimated_rows: db[2] === 'sqlite' ? null : 0,
+                },
+                {
+                  schema: db[2] === 'sqlite' ? 'main' : 'public',
+                  name: 'settings',
+                  estimated_rows: db[2] === 'sqlite' ? null : 0,
+                },
+              ];
+        if (q.action === 'tables') return json(res, 200, {tables});
+        if (!tables.some(t => t.schema === q.schema && t.name === q.table)) throw new HttpError(400, 'table_not_found');
+        const columns = [
+          {name: 'id', type: 'text'},
+          {name: 'channel', type: 'text'},
+          {name: 'scope', type: 'text'},
+          {name: 'text', type: 'text'},
+          {name: 'received_at', type: 'timestamp with time zone'},
+        ];
+        let rows: Record<string, string | null>[] = q.table === 'events' ? browserRows : [];
+        const offset = Number(q.offset || 0),
+          limit = Number(q.limit || 50);
+        if (q.filter_column && q.filter)
+          rows = rows.filter(r =>
+            String((r as any)[q.filter_column!] ?? '')
+              .toLowerCase()
+              .includes(q.filter!.toLowerCase()),
+          );
+        if (q.sort)
+          rows = [...rows].sort(
+            (a, b) =>
+              String((a as any)[q.sort!] ?? '').localeCompare(String((b as any)[q.sort!] ?? '')) *
+              (q.direction === 'desc' ? -1 : 1),
+          );
+        return json(res, 200, {
+          database: db[0],
+          schema: q.schema,
+          table: q.table,
+          columns,
+          rows: rows.slice(offset, offset + limit),
+          next_offset: rows.length > offset + limit ? offset + limit : null,
+          offset,
+          cell_limit: 240,
+        });
+      }
+      if (/^\/exports\/[a-f0-9-]{36}\/download$/.test(route)) {
+        res.writeHead(200, {
+          'content-type': 'application/zip',
+          'content-disposition': 'attachment; filename="nocheh-archive.zip"',
+          'cache-control': 'no-store',
+        });
+        res.end(Buffer.from([0x50, 0x4b, 5, 6, ...Array(18).fill(0)]));
+        return;
+      }
+      if (/^\/workflows\/[a-f0-9]{64}$/.test(route))
+        return json(res, 200, await workflowDetail(pool, route.split('/')[2]!));
+      if (route === '/status')
+        return json(res, 200, {
+          archive: {
+            events: 1842,
+            artifacts: [{state: 'ready', count: 28}],
+            dispatches: [{state: 'done', count: 86}],
+            transcriptions: [{state: 'done', count: 12}],
+            actions: [],
+            managed_runs: [
+              {
+                event_id: id,
+                state: 'done',
+                created_at: new Date().toISOString(),
+                channel: 'browser',
+                profile,
+                scope: '42',
+              },
+              {
+                event_id: voiceId,
+                state: 'failed',
+                error_code: 'provider_timeout',
+                created_at: new Date(Date.now() - 86400000).toISOString(),
+                channel: 'scheduler',
+                job_id: 'morning-check',
+                job_name: 'Morning aurora check',
+                profile,
+                scope: '42',
+              },
+            ],
+          },
+          guard_mode: 'on',
+          services: [],
+        });
+      if (route === '/settings') return json(res, 200, settingsView(mode));
+      if (route === '/members') return json(res, 200, memberList());
+      if (route === '/telegram/identities')
+        return json(res, 200, {
+          groups: [
+            // Omar is a member carried from the lists before step 3 who never wrote: Telegram named him (member true), and he is
+            // not seen in the group's own messages.
+            {
+              id: '-10042',
+              external: '-10042',
+              name: 'Aurora planning',
+              users: [
+                {id: '42', name: 'Owner', username: '@owner'},
+                {id: '73', name: 'Mira Chen', username: '@mira', member: true},
+                {id: '91', name: 'Nia', username: null},
+                {id: '95', name: 'Omar Haddad', username: null, state: null, seen: false, member: true},
+              ],
+            },
+            {
+              id: '-10073',
+              external: '-10073',
+              name: 'Weekend notes',
+              users: [
+                {id: '42', name: 'Owner', username: '@owner'},
+                {id: '84', name: 'Devon', username: null, member: true},
+              ],
+            },
+            // A group Telegram upgraded, by its Nocheh id as storage names it, with its Telegram id now; people saved under its
+            // earlier one stay there (ADR-0252). Sam wrote there and left; Lee's only record is that he left, so the People list
+            // leaves him out.
+            {
+              id: UPGRADED,
+              external: UPGRADED_TG,
+              name: 'Garden swap',
+              users: [
+                {id: '61', name: 'Rosa', username: null, state: 'in', seen: true},
+                {id: '62', name: 'Lee', username: null, state: 'left', seen: false},
+                {id: '63', name: 'Sam', username: null, state: 'left', seen: true},
+              ],
+            },
+          ],
+          truncated: false,
+        });
+      if (route === '/jobs') return json(res, 200, jobs);
+      const jobRead = /^\/jobs\/([a-f0-9-]{36})$/.exec(route);
+      if (jobRead) {
+        const job = jobs.find(j => j.id === jobRead[1]);
+        if (!job) throw new HttpError(404, 'job_not_found');
+        return json(res, 200, job);
+      }
+      if (route === '/operations')
+        return json(res, 200, {
+          backups: [{id: 'synthetic-backup', created_at: '2026-09-16T12:00:00Z', files: 28, offsite: true}],
+          offsite: {
+            enabled: true,
+            keep: 14,
+            bucket: 'example-backups',
+            last: {state: 'sent', at: '2026-09-16T12:05:00Z', bytes: 52428800},
+            check: {state: 'passed', at: '2026-09-16T12:10:00Z'},
+            last_sent: {at: '2026-09-16T12:05:00Z', bytes: 52428800},
+          },
+        });
+      if (route === '/scopes')
+        return json(res, 200, {
+          scopes: [
+            {scope: '42', events: 180},
+            {scope: '-10042', events: 32},
+          ],
+          next: null,
+        });
+      if (route === '/data')
+        return json(res, 200, {
+          records: [
+            {...voice.event, id: voiceId, content_types: ['voice'], ready: 2, total: 2},
+            {...source.event, id, ready: 1, total: 1},
+          ],
+          next: null,
+        });
+      if (route === '/search') return json(res, 200, [{...source.event, id}]);
+      if (route === '/events')
+        return json(res, 200, {
+          events: [source.event ? {...source.event, id, text: source.event.text} : source],
+          results: [{...source.event, id}],
+          next: null,
+        });
+      if (route === '/events/' + id) return json(res, 200, source);
+      if (route === '/sources/' + id + '/retirement')
+        return json(res, 200, {event_id: id, retired, revision: retirementRevision, history: retirementHistory});
+      if (route === '/events/' + voiceId) return json(res, 200, voice);
+      if (route === '/artifacts/' + voiceFileId + '/download') {
+        res.writeHead(200, {'content-type': 'application/octet-stream', 'cache-control': 'no-store'});
+        res.end(voiceBytes);
+        return;
+      }
+      if (route === '/data/' + voiceId + '/guarded') return json(res, 200, {projections: []});
+      if (route === '/data/' + id + '/guarded')
+        return json(res, 200, {
+          projections: [
+            {
+              id: 'b'.repeat(64),
+              source_id: id,
+              kind: 'events',
+              state: 'ready',
+              active_revision: revision,
+              author: revision > 1 ? 'owner' : 'automatic',
+              content: {text: guarded, payload: {text: guarded}},
+            },
+          ],
+        });
+      if (route === '/data/' + id + '/guarded/history')
+        return json(
+          res,
+          200,
+          url.searchParams.has('revision')
+            ? {revision: 1, content: {text: source.event.text}}
+            : {revisions: [{revision: 1, author: 'automatic', created_at: new Date().toISOString()}], next: null},
+        );
+      // Schedules (ADR-0266): one set by asking in the private chat, one paused group schedule from the command line.
+      if (route === '/schedules')
+        return json(res, 200, {
+          schedules: [
+            {
+              id: 'a1b2c3d4e5f6',
+              profile: 'nocheh-' + '1'.repeat(24),
+              scope: '42',
+              name: 'Morning brief',
+              schedule: '0 8 * * 1-5',
+              timezone: 'Europe/Berlin',
+              enabled: true,
+              state: 'scheduled',
+              next_run_at: new Date(Date.now() + 36e5).toISOString(),
+              last_run_at: new Date(Date.now() - 864e5).toISOString(),
+              last_status: 'success',
+              last_error: null,
+              last_delivery_error: null,
+              running: false,
+              pending: false,
+              set_in_chat: true,
+              owner_chat: true,
+              chat_title: null,
+            },
+            {
+              id: '0f9e8d7c6b5a',
+              profile: 'nocheh-' + '2'.repeat(24),
+              scope: '-10042',
+              name: 'Weekly review',
+              schedule: '0 17 * * 5',
+              timezone: null,
+              enabled: false,
+              state: 'paused',
+              next_run_at: null,
+              last_run_at: null,
+              last_status: null,
+              last_error: null,
+              last_delivery_error: null,
+              running: false,
+              pending: false,
+              set_in_chat: false,
+              owner_chat: false,
+              chat_title: 'Fixture group',
+            },
+          ],
+        });
+      if (route === '/schedules/runs') {
+        const at = (hours: number, seconds: number) => ({
+          started_at: new Date(Date.now() - hours * 36e5).toISOString(),
+          finished_at: new Date(Date.now() - hours * 36e5 + seconds * 1000).toISOString(),
+        });
+        return json(res, 200, {
+          runs:
+            url.searchParams.get('job_id') !== 'a1b2c3d4e5f6'
+              ? []
+              : [
+                  {id: 'aaaaaaaaaaa1', ...at(1, 32), trigger: 'run_now', result: 'nothing_new', error_code: null},
+                  {id: 'aaaaaaaaaaa2', ...at(24, 41), trigger: 'timed', result: 'sent', error_code: null},
+                  {
+                    id: 'aaaaaaaaaaa3',
+                    ...at(48, 12),
+                    trigger: 'timed',
+                    result: 'failed',
+                    error_code: 'runtime_execution_interrupted',
+                  },
+                ],
+        });
+      }
+      if (route === '/memory/profiles') {
+        const current = [
+          {owner: true, scope: '42', profile},
+          {owner: false, scope: '-10042', profile: 'fixture-group'},
+        ];
+        // Two private answers' own profiles in the private chat: one with the receipt its turn left, one from before it.
+        // After a reinstall: an earlier setup's notes for the private chat, listed first by Hermes; the page still opens on
+        // the current one (latest) and names this one as earlier.
+        const earlier = {
+          owner: true,
+          scope: '42',
+          profile: 'nocheh-' + '99'.repeat(12),
+          exists: true,
+          guard_epoch: 1,
+          latest: false,
+        };
+        return json(res, 200, {
+          profiles: current,
+          history_profiles: [
+            earlier,
+            ...current.map(p => ({...p, exists: true, latest: true})),
+            {
+              owner: false,
+              scope: '42',
+              profile: 'nocheh-' + 'a1'.repeat(12),
+              private_answer: true,
+              answer_group: '“Aurora planning” › Iceland planning',
+              answer_at: '2026-11-12T10:00:00+00:00',
+            },
+            {owner: false, scope: '42', profile: 'nocheh-' + 'b2'.repeat(12), private_answer: true},
+            // Step 4: Mira's own private chat, and the owner's question about a member (4b), each its own profile.
+            {owner: false, scope: '73', profile: 'nocheh-' + 'c3'.repeat(12), member: true},
+            {
+              owner: false,
+              scope: '42',
+              profile: 'nocheh-' + 'd4'.repeat(12),
+              member_read: true,
+              answer_at: '2026-11-14T09:00:00+00:00',
+            },
+          ],
+        });
+      }
+      if (route === '/memory')
+        return json(res, 200, {
+          scope: url.searchParams.get('scope'),
+          profile: url.searchParams.get('profile'),
+          memories: [
+            {
+              name: 'MEMORY.md',
+              exists: true,
+              text: 'Synthetic memory: interested in astronomy.\n§\nAlice is planning a trip to Iceland.\n§\nThe lunch poll now offers tacos on Friday.',
+              citations: [],
+              // Each note with where it came from, in the owner's words (ADR-0257).
+              // Step 4: the day each names and the messages its writer read (a retired one is never linked).
+              entries: [
+                {
+                  target: 'memory',
+                  text: 'Synthetic memory: interested in astronomy.',
+                  from: 'owner',
+                  label: 'Your own messages in your private chat',
+                  ...sourcesFixture.notes.own,
+                },
+                {
+                  target: 'memory',
+                  text: 'Alice is planning a trip to Iceland.',
+                  from: 'forward',
+                  label:
+                    'Nocheh’s notes review of a message you forwarded in your private chat, from a person shown as “Alice”',
+                  ...sourcesFixture.notes.forward,
+                },
+                {
+                  target: 'memory',
+                  text:
+                    'The lunch poll now offers tacos on Friday (conv 4200042, nocheh:event:' + 'c'.repeat(64) + ').',
+                  from: 'forward',
+                  label:
+                    'Nocheh’s notes review of a message holding someone else’s words, such as a shared checklist or poll, that you pinned in your private chat',
+                },
+              ],
+            },
+            {
+              name: 'USER.md',
+              exists: true,
+              text: 'Prefers short answers.',
+              citations: [],
+              entries: [
+                {
+                  target: 'user',
+                  text: 'Prefers short answers.',
+                  from: 'turn',
+                  label: 'Nocheh’s note from your private chat on 2026-11-12',
+                  ...sourcesFixture.notes.turn,
+                },
+              ],
+            },
+          ],
+          ...previewSessions(url),
+          messages: url.searchParams.get('session')
+            ? [{id: 'm1', role: 'user', content: 'Where can we see the northern lights?'}]
+            : [],
+        });
+      if (route === '/memory/preferences' || route === '/policy') return json(res, 200, preferences);
+      if (route === '/memory/persona') return json(res, 200, persona(url.searchParams.get('scope') ?? ''));
+      if (route === '/prompts') return json(res, 200, prompts);
+      if (route === '/memory/longterm')
+        return json(res, 200, {
+          engine: {
+            id: 'honcho',
+            name: 'Honcho',
+            capabilities: {inspect: true, evidence: true, retry_failed_learning: true},
+          },
+          connection: {
+            attached: memoryAttached,
+            verified: true,
+            revision: memoryRevision,
+            include_history: memoryIncludeHistory,
+          },
+          workspace: {id: 'synthetic-workspace', state: 'building', last_ready_at: minutesAgo(30), error_code: null},
+          limited_memory: !memoryAttached,
+          syncing: true,
+          generations: [{id: 'fixture', state: 'ready', mode: 'on'}],
+          receipts: [
+            {state: 'done', count: 176},
+            {state: 'pending', count: 4},
+          ],
+        });
+      if (route === '/memory/longterm/rebuild') {
+        const chosen = url.searchParams.getAll('space').length;
+        return json(res, 200, {
+          workspace: 'synthetic-workspace',
+          failed_learning: failedLearning,
+          relearn: chosen
+            ? {conversations: chosen, sessions: chosen * 2, messages: 12 * chosen, interpretations: 1}
+            : {conversations: 5, sessions: 9, messages: 180, interpretations: 4},
+          replace: {saved_messages: 212},
+        });
+      }
+      if (route === '/honcho/status')
+        return json(res, 200, {
+          enabled: true,
+          running: true,
+          reasoning_provider_configured: false,
+          embedding_credential: true,
+          api_budget_usd: 5,
+        });
+      if (route === '/runtime')
+        return json(res, 200, {
+          agent: {
+            id: 'hermes',
+            name: 'Hermes',
+            capabilities: {
+              telegram: true,
+              browser: false,
+              scheduler: true,
+              background: true,
+              settings: true,
+              persona: true,
+              prompts: true,
+              notes: true,
+              recall: true,
+              review: true,
+              schedules: false,
+              schedule_list: true,
+            },
+          },
+          status: {ok: true, model: 'Subscription model', telegram: 'disabled'},
+          capabilities: {'guard.detect': true, 'image.read': true, 'usage.price': false},
+        });
+      if (route === '/graph') {
+        const scope = url.searchParams.get('scope') ?? '*',
+          all = scope === '*';
+        return json(res, 200, {
+          scope,
+          nodes: [
+            ...(all ? [{id: 'collection:*', kind: 'collection', label: 'All private knowledge'}] : []),
+            {id: 'group:42', kind: 'group', chat_type: 'private', label: 'Private chat · @fixture_owner'},
+            {id: 'message:' + id, event_id: id, kind: 'message', label: 'Northern lights trip'},
+            {id: 'user:owner', kind: 'user', label: '@fixture_owner'},
+            {id: 'project:night-sky', kind: 'project', label: 'Night sky'},
+          ],
+          edges: [
+            ...(all ? [{from: 'collection:*', to: 'group:42', kind: 'contains'}] : []),
+            {from: 'group:42', to: 'message:' + id, kind: 'contains'},
+            {from: 'user:owner', to: 'message:' + id, kind: 'authored'},
+            {from: 'project:night-sky', to: 'group:42', kind: 'project_context'},
+          ],
+          bounds: {truncated: false},
+          unresolved_replies: 0,
+          next: null,
+        });
+      }
+      if (route === '/runs') return json(res, 200, {runs: []});
+      if (route === '/tools/actions') return json(res, 200, {actions, telegram: telegramActions, permissions});
+      const actionRead = route.match(/^\/tools\/actions\/([a-f0-9]{64})$/);
+      if (actionRead) {
+        const found = [...actions, ...telegramActions].find((item: any) => item.id === actionRead[1]);
+        return found ? json(res, 200, found) : json(res, 400, {error: 'action_not_found'});
+      }
+      if (route === '/decisions') {
+        const kind = url.searchParams.get('kind') || null,
+          after = url.searchParams.get('after') ?? '',
+          limit = Number(url.searchParams.get('limit') || 50),
+          all = inboxDecisions(),
+          matching = all
+            .filter(d => !kind || d.kind === kind)
+            .sort((a, b) => (a.kind + ':' + a.id).localeCompare(b.kind + ':' + b.id)),
+          rest = matching.filter(d => d.kind + ':' + d.id > after),
+          items = rest.slice(0, limit);
+        const totals: Record<string, number> = {
+          controlled_action: 0,
+          telegram_action: 0,
+          memory_access: 0,
+          entity: 0,
+          knowledge: 0,
+        };
+        for (const d of all) totals[d.kind]!++;
+        return json(res, 200, {
+          items,
+          total: matching.length,
+          totals,
+          next_cursor: rest.length > limit ? items.at(-1)!.kind + ':' + items.at(-1)!.id : null,
+          observed_at: new Date().toISOString(),
+          state: 'current',
+        });
+      }
+      const inboxDecision = route.match(
+        /^\/decisions\/(controlled_action|telegram_action|memory_access|entity|knowledge)\/([a-f0-9]{64})$/,
+      );
+      if (inboxDecision) {
+        const record = inboxRecord(inboxDecision[1]!, inboxDecision[2]!);
+        if (!record) throw new HttpError(404, 'decision_not_found');
+        return json(res, 200, {
+          kind: inboxDecision[1],
+          id: record.id,
+          title: record.name ?? record.kind,
+          state: record.state ?? record.status,
+          revision: record.revision ?? 1,
+          source_scope: record.source_scope ?? record.scope ?? null,
+          destination: record.destination ?? record.arguments?.destination ?? null,
+          fingerprint: record.fingerprint ?? null,
+          created_at: record.created_at,
+          detail: record,
+          observed_at: new Date().toISOString(),
+          observation: 'current',
+        });
+      }
+      if (route === '/memory/spaces')
+        return json(
+          res,
+          200,
+          url.searchParams.has('id')
+            ? {
+                id: url.searchParams.get('id'),
+                private_owner: url.searchParams.get('id') === '42',
+                overrides: spaceOverrides,
+                inherited: {mode: 'approved', sources: [], privacy_instructions: ''},
+                effective: {mode: 'approved', ...spaceOverrides},
+                revision: spaceRevision,
+              }
+            : {spaces: [{id: '42'}, {id: '-10042'}], owner_space: '42', next: null},
+        );
+      if (route === '/memory/shares') return json(res, 200, shares);
+      if (route === '/memory/preview') return json(res, 200, {originals: [], shares, filtered_sources: []});
+      if (route === '/memory/reviews')
+        return json(res, 200, {
+          jobs: [{id: 'e'.repeat(64), event_id: id, reason: 'import', state: 'paused', chunk_index: 0}],
+          next: null,
+          kept_out: 2,
+        });
+      if (route === '/memory-map') {
+        const query = (url.searchParams.get('q') ?? '').trim().toLocaleLowerCase(),
+          kind = url.searchParams.get('kind') ?? '',
+          state = url.searchParams.get('state') ?? '';
+        const stateEdges = state
+            ? memoryMapEdges.filter(edge => edge.state === state || edge.label === state)
+            : memoryMapEdges,
+          stateNodes = new Set(stateEdges.flatMap(edge => [edge.source, edge.target])),
+          nodes = memoryMapNodes.filter(
+            node =>
+              (!kind || node.kind === kind) &&
+              (!state || node.state === state || stateNodes.has(node.id)) &&
+              (!query || `${node.label} ${node.kind}`.toLocaleLowerCase().includes(query)),
+          ),
+          ids = new Set(nodes.map(node => node.id));
+        return json(res, 200, {
+          format: 'nocheh-memory-map-v1',
+          nodes,
+          edges: stateEdges.filter(edge => ids.has(edge.source) || ids.has(edge.target)),
+          next: null,
+          collapsed_facts: true,
+          focus: null,
+          counts: {nodes: nodes.length, edges: memoryMapEdges.length},
+          relationship_edges_grant_access: false,
+        });
+      }
+      const claimAudience = route.match(/^\/entities\/claims\/([a-f0-9]{64})\/audience$/);
+      if (claimAudience) {
+        const item = claims.find(c => c.id === claimAudience[1]);
+        if (!item) throw new HttpError(404, 'entity_claim_not_found');
+        // The field guide's scope came from the group; everything else from the owner's private chat.
+        const fromGroup = item.id === hx('d4');
+        return json(res, 200, {
+          claim_id: item.id,
+          revision: item.revision,
+          sources: [fromGroup ? conversation : '42'],
+          private_sources: fromGroup ? [] : ['42'],
+          owner_private: !fromGroup,
+          confirm_required: !fromGroup,
+          readers: fromGroup ? {space: conversation, group: conversation} : null,
+        });
+      }
+      if (route === '/memory-access/requests')
+        return json(res, 200, {
+          requests: [memoryAccessRequest].filter(
+            row => !url.searchParams.get('destination') || row.destination === url.searchParams.get('destination'),
+          ),
+        });
+      if (route === '/memory-access/grants')
+        return json(res, 200, {
+          grants: [memoryGrant, ...factGrants].filter(
+            row => !url.searchParams.get('destination') || row.destination === url.searchParams.get('destination'),
+          ),
+        });
+      // A search matches a chat's name, its group's name and its Telegram ids, as the server's does; a search and the kind
+      // and state filters apply before the list, sorted by id, is paged, as the store pages it.
+      if (route === '/conversations') {
+        const q = (url.searchParams.get('q') ?? '').toLocaleLowerCase(),
+          kind = url.searchParams.get('kind') ?? '',
+          state = url.searchParams.get('state') ?? '',
+          after = url.searchParams.get('after') ?? '',
+          limit = Math.min(100, Number(url.searchParams.get('limit') || 50));
+        if (mode === 'many-chats-moved' && after) throw new HttpError(503, 'fixture_observation_unavailable');
+        const all = [...conversations.map(conversationItem), ...moreChats(mode)]
+          .sort((a, b) => (a.space_id < b.space_id ? -1 : a.space_id > b.space_id ? 1 : 0))
+          .filter(
+            row =>
+              (!q ||
+                [row.space_id, row.name, row.parent_name, ...row.app_ids.map((label: any) => label.external)].some(
+                  value => value?.toLocaleLowerCase().includes(q),
+                )) &&
+              (!kind || row.kind === kind) &&
+              (!state || row.state === state),
+          );
+        const remaining = all.filter(row => row.space_id > after),
+          items = remaining.slice(0, limit);
+        return json(res, 200, {
+          items,
+          total: all.length,
+          next_cursor: remaining.length > limit ? items.at(-1).space_id : null,
+          state: 'current',
+          observed_at: new Date().toISOString(),
+        });
+      }
+      if (route === '/conversations/context') {
+        const space = url.searchParams.get('space') ?? '',
+          directory = directoryNow(),
+          group = directory.parentOf(space) ?? space;
+        return json(res, 200, {
+          conversation: conversations.find(row => row.space_id === space) ?? {
+            space_id: space,
+            name: null,
+            kind: 'unknown',
+          },
+          observed_at: new Date().toISOString(),
+          state: 'current',
+          addressing: {
+            state: 'current',
+            enabled: false,
+            owner_id: '42',
+            group_enabled: directory.isGroup(group) && directory.served(group),
+            granted: [],
+            denied: [],
+          },
+          knowledge_access: {
+            owner_access: space === '42',
+            sharing_rules: sharingRules.filter(rule => rule.destination === space),
+            fact_grants: [],
+            sharing_releases: [],
+            note: 'Synthetic preview.',
+          },
+          external_actions: {
+            policy: null,
+            permissions: permissions.filter(row => row.scope === group),
+            note: 'Synthetic preview.',
+          },
+          organization: {
+            effective: {
+              project: group === conversation ? {id: projectId, name: 'Aurora field guide'} : null,
+              inherited: space === topic,
+            },
+            delegations: [],
+            note: 'Synthetic preview.',
+          },
+          memory: {
+            connection: {attached: memoryAttached, verified: true},
+            availability: memoryAttached ? 'available' : 'unavailable',
+            syncing: false,
+            sessions: [],
+            note: 'Synthetic preview.',
+          },
+        });
+      }
+      if (route === '/sharing/rules')
+        return json(res, 200, {
+          rules: sharingRules.map(rule => ({
+            ...rule,
+            private_sources: [...rule.sources, rule.destination].filter(space => !groupSpace(space)),
+          })),
+          next: null,
+        });
+      if (route === '/sharing/previews')
+        return json(res, 200, {previews: sharingPreviews.map(({text, ...row}) => row), next: null});
+      if (route.startsWith('/sharing/previews/')) {
+        const row = sharingPreviews.find(p => p.id === route.split('/')[3]);
+        if (!row) throw new HttpError(404, 'sharing_preview_not_found');
+        return json(res, 200, previewView(row));
+      }
+      if (route === '/sharing/releases') return json(res, 200, {releases: sharingReleases, next: null});
+      if (route === '/projects/effective') return json(res, 200, effectiveProject(url.searchParams.get('space') ?? ''));
+      if (route === '/memory-access/settings') {
+        const destination = url.searchParams.get('destination');
+        if (!destination) return json(res, 200, {settings: memorySettings, partial: false});
+        const keys = ['suggestions', 'notify_owner', 'auto_followup', 'request_ttl_seconds', 'default_grant_mode'],
+          global = memorySettings[0],
+          row = memorySettings.find(r => r.destination === destination),
+          override = row
+            ? Object.fromEntries(keys.filter(k => row[k] !== null && row[k] !== undefined).map(k => [k, row[k]]))
+            : null;
+        return json(res, 200, {
+          destination,
+          global: Object.fromEntries(keys.map(k => [k, global[k]])),
+          override,
+          effective: {...Object.fromEntries(keys.map(k => [k, global[k]])), ...override},
+          revision: row ? row.revision : global.revision,
+        });
+      }
+      if (route === '/learned') {
+        const kind = url.searchParams.get('scope_kind'),
+          sid = url.searchParams.get('scope_id');
+        if (!!kind !== !!sid) throw new HttpError(400, 'invalid_memory_scope');
+        const needle = (url.searchParams.get('q') ?? '').toLowerCase(),
+          show = url.searchParams.get('show') ?? '';
+        return json(res, 200, {
+          entries: learned.filter(
+            (e: any) =>
+              (!kind || (e.scope_kind === kind && e.scope_id === sid)) &&
+              (!needle || (e.subject + ' ' + e.text).toLowerCase().includes(needle)) &&
+              (!show || (show === 'retired') === !!e.retired) &&
+              (show !== 'revised' || e.active_revision > 1) &&
+              (show !== 'unsure' ||
+                e.provenance?.learning?.uncertainty === 'uncertain' ||
+                e.provenance?.learning?.conflicts?.length),
+          ),
+          next: null,
+        });
+      }
+      const learnedRead = route.match(/^\/learned\/([a-f0-9]{64})(\/history)?$/);
+      if (learnedRead) {
+        const entry = learned.find(e => e.id === learnedRead[1]);
+        if (!entry) throw new HttpError(404, 'learned_memory_not_found');
+        const before = Number(url.searchParams.get('before') || 1e9),
+          versions = learnedVersions[entry.id]!.filter(v => v.revision < before).sort(
+            (a, b) => b.revision - a.revision,
+          );
+        return json(
+          res,
+          200,
+          learnedRead[2]
+            ? {versions, next: null}
+            : {id: entry.id, active_revision: entry.active_revision, entry, versions, next: null},
+        );
+      }
+      if (route === '/entities') {
+        const kind = url.searchParams.get('kind') ?? '',
+          q = (url.searchParams.get('q') ?? '').toLocaleLowerCase(),
+          all = url.searchParams.get('state') === 'all';
+        return json(res, 200, {
+          entities: people.filter(
+            p => (!kind || p.kind === kind) && (all || p.state === 'active') && p.name.toLocaleLowerCase().includes(q),
+          ),
+          next: null,
+        });
+      }
+      if (route === '/entities/suggestions')
+        return json(res, 200, {
+          suggestions: [entitySuggestion, projectSuggestion].filter(card => card.status === 'pending'),
+          next: null,
+        });
+      const entityRead = route.match(/^\/entities\/([a-f0-9]{64})$/);
+      if (entityRead) {
+        const entity = people.find(p => p.id === entityRead[1]);
+        if (!entity) throw new HttpError(404, 'entity_not_found');
+        return json(res, 200, {
+          entity,
+          bindings: [],
+          claims: claims.filter(
+            c => !c.retired && (c.subject_entity_id === entity.id || c.object_entity_id === entity.id),
+          ),
+          partial: false,
+          ...(entity.kind === 'person' ? {note: personNotes.get(entity.id) ?? {note: '', revision: 0}} : {}),
+        });
+      }
+      if (route === '/notion')
+        return json(res, 200, await notion.get(taskOwner, notionTarget(url.searchParams.get('project') ?? undefined)));
+      if (route === '/chat-tools')
+        return json(res, 200, await chatTools.get(taskOwner, url.searchParams.get('space') ?? '*'));
+      if (route === '/connections/notion') return json(res, 200, notionSignIn(url.searchParams.get('project') ?? ''));
+      if (route === '/connections/gmail') return json(res, 200, gmail);
+      if (route === '/connections/github') return json(res, 200, githubStatus());
+      if (route === '/github-projects')
+        return json(res, 200, {repos: [...githubLinks].sort().map(([repo, project_id]) => ({repo, project_id}))});
+      if (route === '/tasks') return json(res, 200, await tasks.list(taskOwner, taskQuery(url.searchParams)));
+      if (route === '/tasks/settings') return json(res, 200, await tasks.settings(taskOwner));
+      if (route === '/background-jobs') return json(res, 200, {jobs: backgroundJobs, members: memberSpend()});
+      if (route === '/background-jobs/settings') return json(res, 200, jobLimits);
+      if (route === '/machines') return json(res, 200, machineList(mode));
+      if (route === '/chat-sends') {
+        const q = url.searchParams,
+          before = Number(q.get('before') || 0),
+          limit = Math.min(100, Number(q.get('limit') || 50));
+        const rows = chatSends.filter(
+          row =>
+            (q.get('filter') !== 'problems' || sendProblem(row)) &&
+            (!q.get('kind') || row.kind === q.get('kind')) &&
+            (!before || Number(row.id) < before),
+        );
+        // Each send names its Nocheh chat (ADR-0252), the one the dashboard links to; the app's chat id stays a label.
+        const directory = directoryNow(),
+          named = (row: any) => ({
+            ...row,
+            chat_id: row.chat ? directory.resolve('telegram', row.chat, row.topic) : null,
+          });
+        return json(res, 200, {
+          records: rows.slice(0, limit).map(named),
+          next: rows.length > limit ? rows[limit - 1].id : null,
+        });
+      }
+      if (route === '/machines/commands') {
+        const q = url.searchParams,
+          before = Number(q.get('before') || 0),
+          limit = Math.min(100, Number(q.get('limit') || 50));
+        const rows = machineCommands.filter(
+          row =>
+            (!q.get('machine') || row.machine_id === q.get('machine')) &&
+            (!q.get('job') || row.job_id === q.get('job')) &&
+            (q.get('kind') === 'all' || row.kind !== 'internal') &&
+            (!before || row.id < before),
+        );
+        return json(res, 200, {commands: rows.slice(0, limit), next: rows.length > limit ? rows[limit - 1].id : null});
+      }
+      const taskAudience = route.match(/^\/tasks\/([a-f0-9]{64})\/audience$/);
+      if (taskAudience)
+        return json(
+          res,
+          200,
+          await tasks.audience(taskOwner, taskAudience[1]!, {
+            scope: url.searchParams.get('scope'),
+            group: url.searchParams.get('group'),
+          }),
+        );
+      const taskRead = route.match(/^\/tasks\/([a-f0-9]{64})$/);
+      if (taskRead) return json(res, 200, await tasks.get(taskOwner, taskRead[1]!));
+      if (route === '/projects')
+        return json(res, 200, {projects: memoryProjects.map(p => ({...p, groups: projectGroups(p.id)})), next: null});
+      if (route === '/projects/assignments') return json(res, 200, {assignments, next: null});
+      const projectContext = route.match(/^\/projects\/([a-f0-9]{64})\/context$/);
+      if (projectContext) {
+        const project = memoryProjects.find(p => p.id === projectContext[1]);
+        if (!project) throw new HttpError(404, 'project_not_found');
+        const chats = conversations
+          .map(c => ({...c, effective: effectiveProject(c.space_id)}))
+          .filter(c => c.effective.project?.id === project.id);
+        const entityIds = people.filter(p => p.project_id === project.id).map(p => p.id);
+        const items = [
+          ...learned
+            .filter(e => e.scope_kind === 'project' && e.scope_id === project.id && !e.retired)
+            .map(e => ({
+              type: 'learned',
+              id: e.id,
+              subject: e.subject,
+              kind: e.kind,
+              revision: e.active_revision,
+              author: e.author,
+              retired: false,
+              content: null,
+              attribution: null,
+              uncertainty: null,
+              evidence: e.provenance.learning.evidence,
+            })),
+          ...claims
+            .filter(
+              c => !c.retired && (entityIds.includes(c.subject_entity_id) || entityIds.includes(c.object_entity_id)),
+            )
+            .map(c => ({
+              type: 'claim',
+              id: c.id,
+              subject: c.predicate,
+              kind: 'fact',
+              revision: c.revision,
+              author: c.author,
+              retired: false,
+              content: c.content,
+              attribution: c.attribution,
+              uncertainty: c.uncertainty,
+              evidence: c.evidence,
+            })),
+        ];
+        const decisions =
+          project.id === projectId && knowledgeProposal.state === 'review'
+            ? [
+                {
+                  kind: 'knowledge',
+                  id: knowledgeProposal.id,
+                  title: 'Organizing suggestion for Weekend notes',
+                  state: 'review',
+                  created_at: knowledgeProposal.created_at,
+                },
+              ]
+            : [];
+        return json(res, 200, {
+          project,
+          conversations: chats,
+          observed_at: new Date().toISOString(),
+          state: 'current',
+          knowledge: {items, total: items.length, next_cursor: null},
+          decisions: {items: decisions, total: decisions.length, next_cursor: null},
+        });
+      }
+      if (route === '/private-answers') {
+        const project = url.searchParams.get('project');
+        return json(res, 200, {
+          answers: privateAnswers.filter(row => !project || row.project_id === project),
+          next: null,
+        });
+      }
+      if (route === '/organization/delegations')
+        return json(res, 200, {delegations: delegations.map(delegationView), next: null});
+      if (route === '/knowledge/proposals')
+        return json(res, 200, {proposals: [knowledgeProposal, ...pastProposals], next: null});
+      if (route === '/honcho/budget') return json(res, 200, honchoBudget);
+    }
+    if (req.method === 'POST') {
+      const body = (await readJson(req)) as any;
+      if (/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))
+        return json(res, 200, await controlWorkflow(pool, route.split('/')[2]!, route.split('/')[3]!, body));
+      if (route === '/memory/longterm/retry-failed') {
+        const retried = failedLearning;
+        failedLearning = 0;
+        return json(res, 200, {retried});
+      }
+      if (route === '/memory/longterm/rebuild') {
+        return json(
+          res,
+          200,
+          body.spaces
+            ? {conversations: body.spaces.length, sessions: 2, messages: 12 * body.spaces.length, interpretations: 1}
+            : {conversations: 5, sessions: 9, messages: 180, interpretations: 4},
+        );
+      }
+      if (route === '/memory/longterm/fresh-start') {
+        if (body.expected_revision !== memoryRevision) throw new HttpError(409, 'memory_connection_conflict');
+        memoryIncludeHistory = body.from_archive === true;
+        memoryRevision++;
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/memory/longterm') {
+        if (body.expected_revision !== memoryRevision) throw new HttpError(409, 'memory_connection_conflict');
+        memoryAttached = body.attached;
+        memoryIncludeHistory = body.include_history;
+        memoryRevision++;
+        return json(res, 200, {ok: true});
+      }
+      const learnedCorrect = route.match(/^\/learned\/([a-f0-9]{64})\/correct$/);
+      if (learnedCorrect) {
+        const entry = learned.find(e => e.id === learnedCorrect[1]);
+        if (!entry) throw new HttpError(404, 'learned_memory_not_found');
+        if (entry.active_revision !== body.expected_revision) throw new HttpError(409, 'learned_revision_conflict');
+        const text = body.retired ? entry.text : String(body.text ?? '').trim();
+        if (!text) throw new HttpError(400, 'memory_correction_required');
+        entry.provenance = {
+          ...entry.provenance,
+          learning: {...entry.provenance.learning, uncertainty: 'explicit', conflicts: []},
+        };
+        Object.assign(entry, {
+          text,
+          author: 'owner',
+          retired: body.retired,
+          revised_at: new Date().toISOString(),
+          active_revision: entry.active_revision + 1,
+        });
+        learnedVersions[entry.id]!.push({
+          revision: entry.active_revision,
+          text,
+          author: 'owner',
+          retired: body.retired,
+          created_at: entry.revised_at,
+          evidence: entry.provenance.learning.evidence,
+          provenance: entry.provenance,
+        });
+        return json(res, 200, {id: entry.id, revision: entry.active_revision, retired: body.retired});
+      }
+      const claimCorrect = route.match(/^\/entities\/claims\/([a-f0-9]{64})\/correct$/);
+      if (claimCorrect) {
+        const item = claims.find(c => c.id === claimCorrect[1]);
+        if (!item) throw new HttpError(404, 'entity_claim_not_found');
+        if (item.revision !== body.expected_revision) throw new HttpError(409, 'entity_claim_revision_conflict');
+        Object.assign(
+          item,
+          {
+            content: String(body.content),
+            attribution: body.attribution,
+            uncertainty: body.uncertainty,
+            retired: body.retired,
+            author: 'owner',
+            revision: item.revision + 1,
+          },
+          body.relationship_kind ? {relationship_kind: body.relationship_kind} : {},
+        );
+        return json(res, 200, {id: item.id, revision: item.revision, retired: item.retired});
+      }
+      // The owner's private note about a person (ADR-0274).
+      const entityNote = route.match(/^\/entities\/([a-f0-9]{64})\/note$/);
+      if (entityNote) {
+        const entity = people.find(p => p.id === entityNote[1] && p.kind === 'person');
+        if (!entity) throw new HttpError(404, 'entity_not_found');
+        const saved = personNotes.get(entity.id) ?? {note: '', revision: 0};
+        if (saved.revision !== body.expected_revision) throw new HttpError(409, 'entity_note_conflict');
+        personNotes.set(entity.id, {note: String(body.note).trim(), revision: saved.revision + 1});
+        return json(res, 200, {id: entity.id, revision: saved.revision + 1});
+      }
+      const entityChange = route.match(/^\/entities\/([a-f0-9]{64})\/(rename|merge|unmerge)$/);
+      if (entityChange) {
+        const entity = people.find(p => p.id === entityChange[1]);
+        if (!entity) throw new HttpError(404, 'entity_not_found');
+        if (entity.revision !== body.expected_revision) throw new HttpError(409, 'entity_revision_conflict');
+        if (entityChange[2] === 'rename') {
+          entity.name = String(body.name).trim();
+          entity.people_name = true;
+        } else if (entityChange[2] === 'merge') {
+          entity.state = 'merged';
+          entity.merged_into = body.target_id;
+        } else {
+          entity.state = 'active';
+          entity.merged_into = null;
+        }
+        entity.revision++;
+        return json(res, 200, {id: entity.id, name: entity.name, state: entity.state, revision: entity.revision});
+      }
+      if (route === '/memory-access/grants') {
+        const fact = claims.find(c => c.id === body.fact_id && !c.retired);
+        if (!fact) throw new HttpError(404, 'memory_fact_not_found');
+        if (fact.revision !== body.fact_revision) throw new HttpError(409, 'memory_fact_changed');
+        if (!groupSpace(String(body.destination))) throw new HttpError(400, 'memory_grant_private_destination');
+        if (fact.id !== hx('d4') && body.private_evidence_confirmed !== true)
+          throw new HttpError(409, 'memory_grant_private_sources');
+        const grant = {
+          id: randomUUID().replace(/-/g, '').repeat(2),
+          destination: body.destination,
+          fact_id: fact.id,
+          fact_revision: fact.revision,
+          mode: 'persistent',
+          state: 'active',
+          revision: 1,
+          wording: body.wording ?? fact.content,
+          expires_at: body.expires_at ?? null,
+          suspended_reason: null,
+          provenance: {fixture: true},
+        };
+        factGrants.push(grant);
+        return json(res, 200, {id: grant.id, state: 'active', revision: 1});
+      }
+      const factRevoke = route.match(/^\/memory-access\/grants\/([a-f0-9]{64})\/revoke$/),
+        ownGrant = factRevoke && factGrants.find(g => g.id === factRevoke[1]);
+      if (ownGrant) {
+        if (ownGrant.revision !== body.expected_revision || ownGrant.state !== 'active')
+          throw new HttpError(409, 'memory_fact_grant_changed');
+        ownGrant.state = 'revoked';
+        ownGrant.revision++;
+        return json(res, 200, {id: ownGrant.id, state: 'revoked', revision: ownGrant.revision});
+      }
+      if (route === '/notion') return json(res, 200, await notion.save(taskOwner, body));
+      if (route === '/chat-tools') return json(res, 200, await chatTools.save(taskOwner, body));
+      if (route === '/connections/notion/start') {
+        if (body.redirect !== new URL(String(body.redirect)).origin + '/?connect=notion')
+          throw new HttpError(400, 'invalid_notion_redirect');
+        return json(res, 200, {url: body.redirect + '&code=fixture-code&state=fixture-state'});
+      }
+      if (route === '/connections/notion/finish') {
+        if (body.state !== 'fixture-state') throw new HttpError(400, 'notion_sign_in_expired');
+        return json(
+          res,
+          200,
+          setNotionSignIn(body.project, {
+            connected: true,
+            method: 'oauth',
+            workspace: 'Synthetic workspace',
+            account_name: 'Sample Owner',
+            account_email: 'owner@example.com',
+            connected_at: Math.floor(Date.now() / 1000),
+            reconnect: false,
+          }),
+        );
+      }
+      if (route === '/connections/notion/token') {
+        if (body.token !== 'synthetic-notion-token') throw new HttpError(400, 'notion_token_refused');
+        return json(
+          res,
+          200,
+          setNotionSignIn(body.project, {
+            connected: true,
+            method: 'token',
+            workspace: null,
+            account_name: 'Sample Owner',
+            account_email: null,
+            connected_at: Math.floor(Date.now() / 1000),
+            reconnect: false,
+          }),
+        );
+      }
+      if (route === '/connections/notion/disconnect') return json(res, 200, setNotionSignIn(body.project, signedOut()));
+      if (route === '/connections/gmail/client') {
+        if (
+          typeof body.client_id !== 'string' ||
+          !/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(body.client_id.trim()) ||
+          typeof body.client_secret !== 'string' ||
+          body.client_secret.trim().length < 8
+        )
+          throw new HttpError(400, 'invalid_gmail_client');
+        gmail = {
+          ...gmail,
+          client: body.client_id.trim(),
+          ...(gmail.client === body.client_id.trim() ? {} : {connected: false, email: null, connected_at: null}),
+        };
+        return json(res, 200, gmail);
+      }
+      if (route === '/connections/gmail/start') {
+        if (!gmail.client) throw new HttpError(400, 'gmail_client_missing');
+        if (body.redirect !== new URL(String(body.redirect)).origin + '/?connect=gmail')
+          throw new HttpError(400, 'invalid_gmail_redirect');
+        return json(res, 200, {url: body.redirect + '&code=fixture-code&state=fixture-state'});
+      }
+      if (route === '/connections/gmail/finish') {
+        if (body.state !== 'fixture-state') throw new HttpError(400, 'gmail_sign_in_expired');
+        gmail = {
+          ...gmail,
+          connected: true,
+          email: 'owner@example.com',
+          connected_at: Math.floor(Date.now() / 1000),
+          reconnect: false,
+        };
+        return json(res, 200, gmail);
+      }
+      if (route === '/connections/gmail/disconnect') {
+        gmail = {...gmail, connected: false, email: null, connected_at: null, reconnect: false};
+        return json(res, 200, gmail);
+      }
+      if (route === '/github-projects') {
+        if (
+          typeof body.repo !== 'string' ||
+          !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(body.repo) ||
+          !(body.project === null || typeof body.project === 'string')
+        )
+          throw new HttpError(400, 'invalid_github_repo');
+        if (body.project === null) githubLinks.delete(body.repo.toLowerCase());
+        else githubLinks.set(body.repo.toLowerCase(), body.project as string);
+        return json(res, 200, {repos: [...githubLinks].sort().map(([repo, project_id]) => ({repo, project_id}))});
+      }
+      if (route === '/connections/github/start') {
+        if (body.redirect !== new URL(String(body.redirect)).origin + '/connect/github')
+          throw new HttpError(400, 'invalid_github_redirect');
+        return json(res, 200, {
+          action: '/__preview/github/new?state=fixture-state',
+          manifest: JSON.stringify({
+            name: 'Nocheh-a1b2c3',
+            url: new URL(String(body.redirect)).origin,
+            redirect_url: body.redirect,
+            setup_url: body.redirect,
+            setup_on_update: true,
+            public: false,
+            default_permissions: {contents: 'read', metadata: 'read'},
+            default_events: [],
+          }),
+        });
+      }
+      // A code from a sign-in that came back while Nocheh was busy: the real route refuses it before github.py sees it.
+      if (route === '/connections/github/finish' && body.code === 'preview-busy')
+        throw new HttpError(409, 'wait_for_active_jobs');
+      if (route === '/connections/github/finish') {
+        if (body.state !== 'fixture-state' || body.code !== 'preview-code')
+          throw new HttpError(400, 'github_sign_in_expired');
+        githubSignIn = {
+          connected: true,
+          app: githubApp,
+          connected_at: Math.floor(Date.now() / 1000),
+          reconnect: false,
+          listed: [],
+          listed_at: null,
+        };
+        return json(res, 200, {...githubStatus(), install_url: githubApp.install_url});
+      }
+      if (route === '/connections/github/list') {
+        if (!githubSignIn.connected) throw new HttpError(400, 'github_not_connected');
+        githubSignIn.listed = githubListed;
+        githubSignIn.listed_at = Math.floor(Date.now() / 1000);
+        return json(res, 200, githubStatus());
+      }
+      if (route === '/connections/github/copy') {
+        if (!githubSignIn.connected) throw new HttpError(400, 'github_not_connected');
+        const repo = String(body.repo ?? ''),
+          known = githubListed.find(row => row.name.toLowerCase() === repo.toLowerCase());
+        if (!known) throw new HttpError(400, 'github_repo_not_readable');
+        const commit = randomUUID().replace(/-/g, '').padEnd(40, '0'),
+          copied_at = new Date().toISOString(),
+          row = {
+            repo: known.name,
+            branch: known.branch,
+            commit,
+            digest: commit.padEnd(64, '0'),
+            bytes: known.size_kb * 1000,
+            need: known.size_kb * 3000,
+            files: 1204,
+            previous_digest: null,
+            copied_at,
+          };
+        githubCopies = [
+          ...githubCopies.filter(copy => String(copy.repo).toLowerCase() !== repo.toLowerCase()),
+          row,
+        ].sort((a, b) => String(a.repo).localeCompare(String(b.repo)));
+        return json(res, 200, {
+          state: 'copied',
+          repo: row.repo,
+          branch: row.branch,
+          commit,
+          copied_at,
+          bytes: row.bytes,
+          files: row.files,
+        });
+      }
+      if (route === '/connections/github/remove') {
+        githubCopies = githubCopies.filter(
+          copy => String(copy.repo).toLowerCase() !== String(body.repo ?? '').toLowerCase(),
+        );
+        return json(res, 200, githubStatus());
+      }
+      if (route === '/connections/github/disconnect') {
+        githubSignIn = {connected: false, app: null, connected_at: null, reconnect: false, listed: [], listed_at: null};
+        githubCopies = [];
+        return json(res, 200, githubStatus());
+      }
+      if (route === '/tasks') return json(res, 200, await tasks.create(taskOwner, body));
+      if (route === '/tasks/settings') return json(res, 200, await tasks.saveSettings(taskOwner, body));
+      if (route === '/tasks/time-zone') return json(res, 200, await tasks.saveTimeZone(taskOwner, body));
+      if (route === '/background-jobs/settings') {
+        if (body.revision !== jobLimits.revision) throw new HttpError(409, 'configuration_conflict');
+        const notice =
+            body.member_notice_usd === undefined ? jobLimits.member_notice_usd : Number(body.member_notice_usd),
+          high = body.member_pause_usd === undefined ? jobLimits.member_pause_usd : Number(body.member_pause_usd);
+        if (!(high >= notice)) throw new HttpError(400, 'invalid_settings');
+        if (
+          Object.keys(body).some(
+            key =>
+              ![
+                'cost_limit_usd',
+                'minutes_limit',
+                'box_tools',
+                'member_notice_usd',
+                'member_pause_usd',
+                'revision',
+              ].includes(key),
+          )
+        )
+          throw new HttpError(400, 'invalid_settings');
+        jobLimits = {
+          cost_limit_usd: Number(body.cost_limit_usd),
+          minutes_limit: Number(body.minutes_limit),
+          member_notice_usd: notice,
+          member_pause_usd: high,
+          box_tools: typeof body.box_tools === 'boolean' ? body.box_tools : jobLimits.box_tools,
+          revision: jobLimits.revision + 1,
+        };
+        return json(res, 200, jobLimits);
+      }
+      if (route === '/background-jobs/member-pause') {
+        if (typeof body.paused !== 'boolean') throw new HttpError(400, 'invalid_member_pause');
+        memberPause = body.paused
+          ? {
+              by: 'owner',
+              since: memberPause?.by === 'owner' ? memberPause.since : new Date().toISOString(),
+              until: null,
+            }
+          : null;
+        return json(res, 200, memberSpend());
+      }
+      if (route === '/machines/settings') {
+        if (body.revision !== machineControl.revision) throw new HttpError(409, 'configuration_conflict');
+        machineControl = {enabled: body.enabled === true, revision: machineControl.revision + 1};
+        return json(res, 200, machineList(mode));
+      }
+      if (route === '/machines') {
+        if (mode === 'unavailable') throw new HttpError(400, 'machine_unavailable');
+        if (machines.some(row => row.name.toLowerCase() === String(body.name).toLowerCase()))
+          throw new HttpError(409, 'machine_name_taken');
+        const machine = {
+          ...machineView(String(body.name), randomUUID().replace(/-/g, '')),
+          address: String(body.address),
+          port: Number(body.port ?? 22),
+          login: String(body.login),
+          host_key: null,
+          enabled: true,
+          tested_at: null,
+          test_error: null,
+          revision: 1,
+          created_at: new Date().toISOString(),
+          jobs: 0,
+        };
+        machines.push(machine);
+        return json(res, 200, machine);
+      }
+      const machineChange = route.match(/^\/machines\/([a-f0-9]{32})(?:\/(test|forget-host-key|remove))?$/);
+      if (machineChange) {
+        const machine = machineAt(machineChange[1]!),
+          action = machineChange[2];
+        if (action === 'remove') {
+          machines.splice(machines.indexOf(machine), 1);
+          return json(res, 200, {ok: true});
+        }
+        if (action === 'forget-host-key') {
+          Object.assign(machine, {host_key: null, tested_at: null, test_error: null, revision: machine.revision + 1});
+          return json(res, 200, machine);
+        }
+        if (action === 'test') {
+          if (mode === 'unavailable') throw new HttpError(400, 'machine_unavailable');
+          const ok = !machine.address.endsWith('.invalid'),
+            host_key = machine.host_key ?? 'SHA256:' + fingerprint(machine.name);
+          Object.assign(
+            machine,
+            ok
+              ? {host_key, tested_at: new Date().toISOString(), test_error: null}
+              : {test_error: 'machine_unreachable'},
+            {revision: machine.revision + 1},
+          );
+          machineCommands.unshift(
+            machineCommand(machine, {
+              command: 'ssh test',
+              kind: 'test',
+              exit_code: ok ? 0 : 255,
+              state: ok ? 'done' : 'failed',
+              error_code: ok ? null : 'machine_unreachable',
+            }),
+          );
+          return json(res, 200, {
+            machine,
+            result: ok ? {ok, host_key, system: 'Linux 6.8.0 x86_64'} : {ok, error: 'machine_unreachable'},
+          });
+        }
+        if (body.revision !== machine.revision) throw new HttpError(409, 'configuration_conflict');
+        // Edit: a new address, port or login is another machine, as in the store: its host key goes and its jobs stop.
+        if (
+          typeof body.name === 'string' &&
+          machines.some(row => row !== machine && row.name.toLowerCase() === body.name.toLowerCase())
+        )
+          throw new HttpError(409, 'machine_name_taken');
+        const next = {
+          name: body.name ?? machine.name,
+          address: body.address ?? machine.address,
+          port: body.port ?? machine.port,
+          login: body.login ?? machine.login,
+        };
+        const moved = next.address !== machine.address || next.port !== machine.port || next.login !== machine.login;
+        if (moved)
+          for (const job of backgroundJobs.filter(
+            row => row.machine?.name === machine.name && ['proposed', 'approved', 'running'].includes(row.state),
+          ))
+            Object.assign(
+              job,
+              job.state === 'running'
+                ? {state: 'stopping', machine_cleanup: 'pending'}
+                : {state: 'stopped', error_code: 'job_machine_off', finished_at: new Date().toISOString()},
+            );
+        Object.assign(
+          machine,
+          next,
+          moved ? {host_key: null, tested_at: null, test_error: null, jobs: 0} : {},
+          typeof body.enabled === 'boolean' ? {enabled: body.enabled} : {},
+          {revision: machine.revision + 1},
+        );
+        return json(res, 200, machine);
+      }
+      const jobStop = route.match(/^\/background-jobs\/([a-f0-9]{64})\/stop$/);
+      if (jobStop) {
+        const job = backgroundJobs.find(row => row.id === jobStop[1]);
+        if (!job) throw new HttpError(404, 'job_not_found');
+        if (job.machine && ['running', 'reporting'].includes(job.state)) job.machine_cleanup = 'pending';
+        job.state = 'stopping';
+        return json(res, 200, {id: job.id, state: 'stopping'});
+      }
+      if (route === '/tasks/archive-finished') return json(res, 200, await tasks.archiveFinished(taskOwner, body));
+      const taskChange = route.match(/^\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);
+      if (taskChange)
+        return json(
+          res,
+          200,
+          await (taskChange[2] === 'comments'
+            ? tasks.comment(taskOwner, taskChange[1]!, body)
+            : taskChange[2] === 'delete'
+              ? tasks.remove(taskOwner, taskChange[1]!)
+              : tasks.update(taskOwner, taskChange[1]!, body)),
+        );
+      if (route === '/projects') {
+        if (
+          Object.keys(body).some(
+            key =>
+              ![
+                'id',
+                'name',
+                'description',
+                'state',
+                'share_chats',
+                'own_groups',
+                'expected_revision',
+                'operation_id',
+              ].includes(key),
+          )
+        )
+          throw new HttpError(400, 'unknown_policy_field');
+        const prior = body.id ? memoryProjects.find(p => p.id === body.id) : null;
+        if ((prior?.revision ?? 0) !== body.expected_revision) throw new HttpError(409, 'project_revision_conflict');
+        if (!String(body.name ?? '').trim() || !['active', 'archived'].includes(body.state))
+          throw new HttpError(400, 'invalid_project');
+        const saved = prior ?? {id: randomUUID().replace(/-/g, '').repeat(2)};
+        Object.assign(saved, {
+          name: String(body.name).trim(),
+          description: String(body.description ?? ''),
+          state: body.state,
+          share_chats: typeof body.share_chats === 'boolean' ? body.share_chats : (prior?.share_chats ?? true),
+          own_groups: Array.isArray(body.own_groups) ? [...body.own_groups].sort() : (prior?.own_groups ?? []),
+          revision: (prior?.revision ?? 0) + 1,
+        });
+        if (!prior) memoryProjects.push(saved);
+        return json(res, 200, saved);
+      }
+      if (route === '/organization/delegations') {
+        if (
+          Object.keys(body).some(
+            key =>
+              ![
+                'id',
+                'name',
+                'enabled',
+                'scopes',
+                'project_ids',
+                'expires_at',
+                'expected_revision',
+                'operation_id',
+                'resume_scopes',
+              ].includes(key),
+          )
+        )
+          throw new HttpError(400, 'unknown_knowledge_field');
+        const prior = body.id ? delegations.find(d => d.id === body.id) : null;
+        if ((prior?.revision ?? 0) !== body.expected_revision)
+          throw new HttpError(409, 'organization_delegation_changed');
+        if (!String(body.name ?? '').trim() || !Array.isArray(body.scopes) || !body.scopes.length)
+          throw new HttpError(400, 'invalid_organization_delegation');
+        const saved = prior ?? {id: randomUUID().replace(/-/g, '').repeat(2), baseline_suspended: []};
+        Object.assign(saved, {
+          name: String(body.name).trim(),
+          enabled: body.enabled,
+          scopes: body.scopes,
+          project_ids: body.project_ids,
+          expires_at: body.expires_at ?? null,
+          revision: (prior?.revision ?? 0) + 1,
+          baseline_suspended: (saved.baseline_suspended ?? []).filter(
+            (s: string) => !(body.resume_scopes ?? []).includes(s),
+          ),
+        });
+        if (!prior) delegations.push(saved);
+        return json(res, 200, delegationView(saved));
+      }
+      if (route === '/memory/hidden/restore') {
+        const asked: string[] = Array.isArray(body.ids) ? body.ids : [];
+        if (!asked.length || asked.length > 50) throw new HttpError(400, 'invalid_restore_request');
+        const restored = hiddenFacts.filter(f => asked.includes(f.id)).map(f => f.id);
+        for (const id of restored)
+          hiddenFacts.splice(
+            hiddenFacts.findIndex(f => f.id === id),
+            1,
+          );
+        return json(res, 200, {restored});
+      }
+      if (route === '/honcho/budget' && 'thinking_limit_cents' in body) {
+        if (body.expected_revision !== honchoBudget.revision) throw new HttpError(409, 'budget_revision_conflict');
+        const cents = body.thinking_limit_cents;
+        if (cents !== null && (!Number.isInteger(cents) || cents < 0 || cents > honchoBudget.max_thinking_limit_cents))
+          throw new HttpError(400, 'invalid_thinking_limit');
+        Object.assign(honchoBudget, {
+          thinking_limit_cents: cents,
+          thinking_limit_usd: cents === null ? null : cents / 100,
+          thinking_remaining_usd: cents === null ? null : Math.max(0, cents / 100 - honchoBudget.thinking_spent_usd),
+          revision: honchoBudget.revision + 1,
+        });
+        return json(res, 200, honchoBudget);
+      }
+      if (route === '/honcho/budget') {
+        if (body.expected_revision !== honchoBudget.revision) throw new HttpError(409, 'budget_revision_conflict');
+        if (
+          !Number.isInteger(body.limit_cents) ||
+          body.limit_cents < 0 ||
+          body.limit_cents > honchoBudget.max_limit_cents
+        )
+          throw new HttpError(400, 'invalid_budget_request');
+        Object.assign(honchoBudget, {
+          limit_cents: body.limit_cents,
+          limit_usd: body.limit_cents / 100,
+          remaining_usd: Math.max(0, body.limit_cents / 100 - honchoBudget.counted_toward_cap_usd),
+          revision: honchoBudget.revision + 1,
+        });
+        return json(res, 200, honchoBudget);
+      }
+      if (route === '/honcho/read') return json(res, 200, {complete: true, workspaces: [{id: 'synthetic-workspace'}]});
+      if (route === '/prompts') {
+        if (body.revision !== prompts.revision) throw new HttpError(409, 'configuration_conflict');
+        for (const [key, text] of Object.entries(body.texts as Record<string, string | null>)) {
+          if (
+            text !== null &&
+            (prompts.placeholders as Record<string, string[]>)[key]?.some(name => !text.includes(name))
+          )
+            throw new HttpError(400, 'prompt_placeholder_missing');
+          // As the server does: a "name: text" line that drops a value Nocheh fills in is refused.
+          const labeled = text !== null && key in labeledPlaceholders ? promptProblem(key, text) : null;
+          if (labeled) throw new HttpError(400, labeled);
+          if (text === null) delete prompts.texts[key];
+          else prompts.texts[key] = text;
+        }
+        prompts.revision += 'x';
+        return json(res, 200, prompts);
+      }
+      if (route === '/memory/persona') {
+        const current = persona(String(body.scope));
+        if (body.revision !== current.revision) throw new HttpError(409, 'configuration_conflict');
+        personas[String(body.scope)] = {role: body.role, skills: body.skills, revision: current.revision + 'x'};
+        return json(res, 200, persona(String(body.scope)));
+      }
+      if (route === '/memory/preferences' || route === '/policy') {
+        if (body.revision !== preferences.revision) throw new HttpError(409, 'configuration_conflict');
+        preferences.revision += 'x';
+        preferences.values = {...preferences.values, ...body.changes};
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/tools/decide') {
+        const item = actions.find(a => a.id === body.id);
+        if (!item || item.fingerprint !== body.fingerprint) throw new HttpError(409, 'action_changed');
+        item.state = body.decision === 'approve' ? 'approved' : 'rejected';
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/tools/grant') {
+        const granted = actions.find(a => a.id === body.action_id) ?? actions[0];
+        permissions.push({
+          id: randomUUID(),
+          kind: granted.kind,
+          scope: granted.scope,
+          arguments: granted.arguments,
+          remaining: body.uses,
+          expires_at: new Date(Date.now() + body.minutes * 60000).toISOString(),
+        });
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/tools/telegram-decision') {
+        const item = telegramActions.find(a => a.id === body.id);
+        if (!item || item.fingerprint !== body.fingerprint) throw new HttpError(409, 'action_changed');
+        if (body.expected_revision !== undefined && body.expected_revision !== item.revision)
+          throw new HttpError(409, 'action_revision_changed');
+        if (item.state !== 'proposed') throw new HttpError(409, 'action_already_started_or_closed');
+        item.state = body.decision === 'approve' ? 'approved' : 'rejected';
+        item.revision++;
+        return json(res, 200, {id: item.id, state: item.state, revision: item.revision});
+      }
+      if (route === '/tools/resolve' || route === '/tools/telegram-resolve') {
+        const item = (route === '/tools/resolve' ? actions : telegramActions).find(a => a.id === body.id);
+        if (!item || item.fingerprint !== body.fingerprint) throw new HttpError(409, 'action_changed');
+        if (body.expected_revision !== undefined && body.expected_revision !== item.revision)
+          throw new HttpError(409, 'action_changed');
+        if (item.state !== 'ambiguous' || item.resolution) throw new HttpError(409, 'action_already_started_or_closed');
+        if (!['ran', 'not_run', 'dismissed'].includes(body.outcome)) throw new HttpError(400, 'invalid_decision');
+        item.resolution = body.outcome;
+        item.resolved_at = new Date().toISOString();
+        item.revision++;
+        return json(res, 200, {id: item.id, state: item.state, resolution: item.resolution, revision: item.revision});
+      }
+      if (route === '/memory-access/requests/' + requestId + '/decide') {
+        if (body.expected_revision !== memoryAccessRequest.revision || memoryAccessRequest.state !== 'pending')
+          throw new HttpError(409, 'memory_access_request_changed');
+        memoryAccessRequest.state = body.decision === 'reject' ? 'rejected' : 'approved';
+        if (body.wording) memoryAccessRequest.wording = body.wording;
+        memoryAccessRequest.revision++;
+        return json(res, 200, {
+          id: requestId,
+          state: memoryAccessRequest.state,
+          grant_id: null,
+          revision: memoryAccessRequest.revision,
+        });
+      }
+      const cardDecide = route.match(/^\/entities\/([a-f0-9]{64})\/decide$/),
+        card = cardDecide && [entitySuggestion, projectSuggestion].find(item => item.id === cardDecide[1]);
+      if (card) {
+        if (body.expected_revision !== card.revision) throw new HttpError(409, 'entity_suggestion_conflict');
+        card.status = body.decision === 'confirm' ? 'confirmed' : 'rejected';
+        card.revision++;
+        return json(res, 200, {id: card.id, status: card.status});
+      }
+      const cardSplit = route.match(/^\/entities\/([a-f0-9]{64})\/split$/);
+      if (cardSplit) {
+        const index = (projectSuggestion.also_called as any[]).findIndex(name => name.id === cardSplit[1]);
+        if (index < 0) throw new HttpError(409, 'entity_suggestion_split_invalid');
+        projectSuggestion.also_called.splice(index, 1);
+        projectSuggestion.revision++;
+        return json(res, 200, {id: cardSplit[1], merged_into: null});
+      }
+      if (/^\/entities\/[a-f0-9]{64}\/fold$/.test(route))
+        return json(res, 200, {id: route.split('/')[2], merged_into: body.target_id});
+      if (
+        route === '/knowledge/proposals/' + knowledgeProposal.id + '/decide' ||
+        route === '/knowledge/proposals/' + knowledgeProposal.id + '/undo'
+      ) {
+        if (body.expected_revision !== knowledgeProposal.revision)
+          throw new HttpError(409, 'knowledge_proposal_changed');
+        knowledgeProposal.state = route.endsWith('/undo')
+          ? 'undone'
+          : body.decision === 'approve'
+            ? 'queued'
+            : 'cancelled';
+        knowledgeProposal.revision++;
+        return json(res, 200, {
+          id: knowledgeProposal.id,
+          state: knowledgeProposal.state,
+          revision: knowledgeProposal.revision,
+        });
+      }
+      if (route === '/tools/revoke') {
+        const item = permissions.find(p => p.id === body.id);
+        if (item) item.revoked_at = new Date().toISOString();
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/projects/assignments') {
+        if (body.mode === 'assigned' && !groupSpace(String(body.space_id)))
+          throw new HttpError(400, 'project_private_chat');
+        if (directoryNow().kind(String(body.space_id)) === 'topic' && body.mode !== 'inherit')
+          throw new HttpError(400, 'project_topic_follows_group');
+        if (
+          Object.keys(body).some(
+            key => !['space_id', 'project_id', 'mode', 'expected_revision', 'operation_id'].includes(key),
+          )
+        )
+          throw new HttpError(400, 'unknown_policy_field');
+        const own = assignments.find(a => a.space_id === body.space_id);
+        if ((own?.revision ?? 0) !== body.expected_revision) throw new HttpError(409, 'assignment_revision_conflict');
+        const next = {
+          space_id: body.space_id,
+          project_id: body.mode === 'assigned' ? body.project_id : null,
+          mode: body.mode,
+          revision: body.expected_revision + 1,
+        };
+        if (own) Object.assign(own, next);
+        else assignments.push(next);
+        return json(res, 200, next);
+      }
+      if (route === '/memory-access/settings') {
+        const row = memorySettings.find(r => r.destination === body.destination);
+        if (row ? row.revision !== body.expected_revision : body.expected_revision !== 1)
+          throw new HttpError(409, 'memory_access_settings_conflict');
+        const values = {
+          suggestions: body.suggestions ?? null,
+          notify_owner: body.notify_owner ?? null,
+          auto_followup: body.auto_followup ?? null,
+          request_ttl_seconds: body.request_ttl_seconds ?? null,
+          default_grant_mode: body.default_grant_mode ?? null,
+        };
+        const revision = row ? row.revision + 1 : 1;
+        if (row) Object.assign(row, values, {revision});
+        else memorySettings.push({destination: body.destination, ...values, revision});
+        return json(res, 200, {destination: body.destination, revision});
+      }
+      if (/^\/memory-access\/grants\/[a-f0-9]{64}\/revoke$/.test(route)) {
+        if (memoryGrant.revision !== body.expected_revision || !['active', 'suspended'].includes(memoryGrant.state))
+          throw new HttpError(409, 'memory_fact_grant_changed');
+        memoryGrant.state = 'revoked';
+        memoryGrant.revision++;
+        return json(res, 200, {id: memoryGrant.id, state: 'revoked', revision: memoryGrant.revision});
+      }
+      if (route === '/sharing/rules') {
+        const rule = body.id ? sharingRules.find(r => r.id === body.id) : null;
+        // A rule saved earlier that names a private chat can be turned off as it is; nothing else may name one.
+        const named = [...(body.sources ?? []), body.destination].map(String).filter(space => !groupSpace(space));
+        if (
+          named.length &&
+          (body.enabled !== false || !named.every(space => rule && [...rule.sources, rule.destination].includes(space)))
+        )
+          throw new HttpError(400, 'sharing_private_chat');
+        if ((rule?.revision ?? 0) !== body.expected_revision) throw new HttpError(409, 'sharing_revision_conflict');
+        const next = {
+          id: rule?.id ?? randomUUID().replaceAll('-', '').padEnd(64, '0'),
+          name: body.name,
+          sources: body.sources,
+          destination: body.destination,
+          enabled: body.enabled,
+          mode: body.mode,
+          instructions: body.instructions ?? '',
+          revision: body.expected_revision + 1,
+        };
+        if (rule) Object.assign(rule, next);
+        else sharingRules.push(next);
+        return json(res, 200, next);
+      }
+      if (route === '/sharing/preview') {
+        const rule = sharingRules.find(r => r.id === body.rule_id);
+        if (!rule || rule.revision !== body.expected_revision) throw new HttpError(409, 'sharing_revision_conflict');
+        const row = {
+          id: randomUUID().replaceAll('-', '').padEnd(64, '0'),
+          rule_id: rule.id,
+          rule_revision: rule.revision,
+          state: 'ready',
+          created_at: new Date().toISOString(),
+          text: body.content ?? '',
+        };
+        sharingPreviews.push(row);
+        return json(res, 200, previewView(row));
+      }
+      if (/^\/sharing\/previews\/[a-f0-9]{64}\/approve$/.test(route)) {
+        const row = sharingPreviews.find(p => p.id === route.split('/')[3]);
+        if (!row) throw new HttpError(404, 'sharing_preview_not_found');
+        const release = {
+          id: randomUUID().replaceAll('-', '').padEnd(64, '0'),
+          preview_id: row.id,
+          rule_id: row.rule_id,
+          state: 'active',
+          mode: 'approved',
+          revision: 1,
+          expires_at: null,
+          created_at: new Date().toISOString(),
+        };
+        sharingReleases.push(release);
+        return json(res, 200, {id: release.id, revision: 1});
+      }
+      if (/^\/sharing\/releases\/[a-f0-9]{64}\/revoke$/.test(route)) {
+        const release = sharingReleases.find(r => r.id === route.split('/')[3]);
+        if (!release || release.revision !== body.expected_revision || release.state !== 'active')
+          throw new HttpError(409, 'sharing_revision_conflict');
+        release.state = 'revoked';
+        release.revision++;
+        return json(res, 200, {id: release.id, revision: release.revision, state: 'revoked'});
+      }
+      if (route === '/memory/spaces') {
+        if (body.revision !== spaceRevision) throw new HttpError(409, 'space_revision_conflict');
+        spaceOverrides = body.overrides;
+        spaceRevision++;
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/memory/shares') {
+        shares.push({id: randomUUID(), destination: body.destination, content: body.content});
+        spaceRevision++;
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/memory/recall') return json(res, 200, {hits: []});
+      // Like a gateway that serves its API under /v1: the dialog's check finds an address typed without a version there.
+      if (route === '/settings/provider-models') {
+        const typed = String(body.url ?? '').replace(/\/+$/, ''),
+          url =
+            !typed || body.try_v1 !== true || /(^|\/)v\d+[a-z0-9]*(\/|$)/i.test(new URL(typed).pathname)
+              ? typed
+              : typed + '/v1';
+        return json(
+          res,
+          200,
+          body.provider === 'openai' ||
+            body.key ||
+            JSON.parse(String(settingsChanges.NOCHEH_PROVIDERS ?? '[]')).some(
+              (p: any) => p.id === body.provider && p.url === url,
+            )
+            ? {
+                provider: body.provider,
+                models:
+                  body.provider === 'openai'
+                    ? ['gpt-5.6-sol', 'text-embedding-3-small']
+                    : ['claude-sonnet-5-5', 'gpt-5.6-sol'],
+                ...(url ? {url} : {}),
+              }
+            : {provider: body.provider, models: [], error: 'missing_key'},
+        );
+      }
+      if (route === '/memory/reviews/control') return json(res, 200, {ok: true});
+      // `slow-apply` restarts for a few seconds in steps like a real apply; `lost-apply` ends as a dashboard restart would leave it.
+      if (route === '/settings/apply' && ['slow-apply', 'lost-apply'].includes(mode)) {
+        if (applying) throw new HttpError(409, 'wait_for_active_jobs');
+        const job: any = {
+          id: randomUUID(),
+          kind: 'settings.apply',
+          state: 'running',
+          step: 'restarting',
+          created_at: new Date().toISOString(),
+        };
+        jobs.unshift(job);
+        applying = job;
+        if (mode === 'lost-apply')
+          setTimeout(() => {
+            job.state = 'interrupted';
+            job.error = 'dashboard_restarted';
+            applying = null;
+          }, 2500);
+        else {
+          setTimeout(() => {
+            job.step = 'memory';
+          }, 5000);
+          setTimeout(() => {
+            job.state = 'complete';
+            job.result = {status: 'applied'};
+            applying = null;
+            applyPending = false;
+          }, 8000);
+        }
+        return json(res, 202, job);
+      }
+      if (route === '/settings/apply') applyPending = false;
+      if (route === '/operations' || route === '/settings/apply') {
+        const job = {
+          id: randomUUID(),
+          kind: route === '/operations' ? 'operations.' + body.action : 'settings.apply',
+          state: 'complete',
+          created_at: new Date().toISOString(),
+          result: {status: 'synthetic_only'},
+        };
+        jobs.unshift(job);
+        return json(res, 200, job);
+      }
+      const importAction = /^\/jobs\/([a-f0-9-]{36})\/(start|cancel)$/.exec(route);
+      if (importAction) {
+        const job = jobs.find(j => j.id === importAction[1]);
+        if (!job) throw new HttpError(404, 'job_not_found');
+        if (importAction[2] === 'start') {
+          if (
+            job.state !== 'ready' &&
+            (JSON.stringify(body.mapping) !== JSON.stringify(job.mapping) ||
+              body.review_approved !== job.review_approved)
+          )
+            throw new HttpError(409, 'import_configuration_conflict');
+          job.mapping = body.mapping;
+          job.review_approved = body.review_approved;
+          job.state = 'running';
+        } else job.state = 'cancelled';
+        return json(res, 200, job);
+      }
+      // "Find my ID": the synthetic bot has one private message, from the synthetic owner.
+      if (route === '/telegram/discover') {
+        const saved = (key: string) => String(settingsChanges[key] ?? fields.find(f => f.key === key)?.value ?? '');
+        if (!settingsChanges.TELEGRAM_BOT_TOKEN && mode !== 'fresh') throw new HttpError(400, 'telegram_token_missing');
+        if (saved('TELEGRAM_ENABLED') === 'true') throw new HttpError(400, 'telegram_running');
+        return json(res, 200, {bot: '@aurora_helper_bot', people: [{id: '42', name: 'Owner', username: '@owner'}]});
+      }
+      // Telegram is asked about the groups Nocheh is on in as the server asks: at most 50 a press, those never checked and
+      // then those checked longest ago first, ties by id; the answer counts the others not checked in the last hour.
+      if (route === '/telegram/chats/refresh') {
+        const directory = directoryNow(),
+          now = Date.now(),
+          last = (id: string) => refreshedAt.get(id) ?? 0;
+        const served = [
+          ...previewChats
+            .filter(chat => chat.kind === 'group' && directory.served(chat.id))
+            .map(chat => ({
+              chat_id: chat.id,
+              external: chat.ids[0],
+              state: 'available',
+              title: chat.title,
+              is_forum: chat.is_forum === true,
+            })),
+          ...moreChats(mode).map(chat => ({
+            chat_id: chat.space_id,
+            external: chat.space_id,
+            state: 'available',
+            title: chat.name,
+            is_forum: false,
+          })),
+        ];
+        const chats = served
+          .sort(
+            (a, b) => last(a.chat_id) - last(b.chat_id) || (a.chat_id < b.chat_id ? -1 : a.chat_id > b.chat_id ? 1 : 0),
+          )
+          .slice(0, 50);
+        for (const chat of chats) refreshedAt.set(chat.chat_id, now);
+        return json(res, 200, {chats, remaining: served.filter(chat => last(chat.chat_id) < now - 3600000).length});
+      }
+      // The group switch (ADR-0253): on or off at once, with the project a group joins as it turns on: a new one named
+      // after it, one of the owner's, or none. Only a group Nocheh is in has one.
+      if (route === '/chats/state') {
+        if (Object.keys(body).some(key => !['chat_id', 'state', 'operation_id', 'project'].includes(key)))
+          throw new HttpError(400, 'unknown_chat_state_field');
+        const chat = String(body.chat_id),
+          row = previewChats.find(item => item.id === chat),
+          project = body.project as {mode: string; project_id?: string} | undefined;
+        if (!['active', 'off'].includes(body.state) || (project && body.state !== 'active'))
+          throw new HttpError(400, 'invalid_chat_state');
+        if (!row) throw new HttpError(404, 'chat_not_found');
+        if (row.kind !== 'group') throw new HttpError(400, 'chat_not_group');
+        if (['left', 'removed', 'archived'].includes(chatStates.get(chat)!))
+          throw new HttpError(409, 'chat_not_joined');
+        chatStates.set(chat, body.state);
+        const own = assignments.find(a => a.space_id === chat);
+        let projectId: string | null = own?.mode === 'assigned' ? own.project_id : null;
+        if (project) {
+          if (project.mode === 'new') {
+            projectId = createHash('sha256')
+              .update('project:' + body.operation_id)
+              .digest('hex');
+            memoryProjects.unshift({
+              id: projectId,
+              name: row.title || 'Group',
+              description: '',
+              state: 'active',
+              revision: 1,
+            });
+          } else projectId = project.mode === 'assigned' ? (project.project_id ?? null) : null;
+          const next = {
+            space_id: chat,
+            project_id: projectId,
+            mode: project.mode === 'none' ? 'none' : 'assigned',
+            revision: (own?.revision ?? 0) + 1,
+          };
+          if (own) Object.assign(own, next);
+          else assignments.push(next);
+        }
+        return json(res, 200, {chat_id: chat, state: body.state, project_id: projectId});
+      }
+      // The Members routes: each change at once, with its operation id (step 3).
+      if (route === '/members' || route.startsWith('/members/')) {
+        const answer = memberRoute(route, body);
+        if (answer) return json(res, 200, answer);
+      }
+      // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0252).
+      if (route === '/telegram/topics') {
+        if (Object.keys(body).some(key => !['action', 'link', 'chat_id', 'topic_id', 'name'].includes(key)))
+          throw new HttpError(400, 'unknown_topic_field');
+        if (
+          !body.link &&
+          (directoryNow().kind(String(body.chat_id)) !== 'group' ||
+            !Number.isSafeInteger(body.topic_id) ||
+            body.topic_id < 2)
+        )
+          throw new HttpError(400, 'invalid_topic_reference');
+        return json(res, 200, {ok: true});
+      }
+      // Off-site storage from one pasted credential. A token named two-accounts asks which account to use.
+      if (route === '/offsite/connect') {
+        if (body.provider === 'cloudflare') {
+          if (!body.token) throw new HttpError(400, 'offsite_cloudflare_token_invalid');
+          if (body.token === 'refused') throw new HttpError(400, 'offsite_cloudflare_token_refused');
+          if (body.token === 'no-r2') throw new HttpError(400, 'offsite_cloudflare_r2_off');
+          if (body.token === 'two-accounts' && !body.account)
+            return json(res, 200, {
+              status: 'choose_account',
+              accounts: [
+                {id: '0'.repeat(32), name: 'Example home'},
+                {id: '1'.repeat(32), name: 'Example work'},
+              ],
+            });
+          settingsChanges = {
+            ...settingsChanges,
+            NOCHEH_OFFSITE_PROVIDER: 'cloudflare',
+            NOCHEH_OFFSITE_ENDPOINT: 'https://' + (body.account ?? '0'.repeat(32)) + '.r2.cloudflarestorage.com',
+            NOCHEH_OFFSITE_BUCKET: 'nocheh-backups',
+            NOCHEH_OFFSITE_REGION: 'auto',
+            NOCHEH_OFFSITE_ACCESS_KEY_ID: 'example-key-id',
+            NOCHEH_OFFSITE_SECRET_ACCESS_KEY: 'example-secret',
+          };
+          const savedOn = settingsRevision;
+          settingsRevision += 'x';
+          return json(res, 200, {
+            saved_on: savedOn,
+            status: 'connected',
+            provider: 'cloudflare',
+            bucket: 'nocheh-backups',
+            account: 'Example home',
+            lock_days: 7,
+            setup_token_deleted: true,
+            settings: settingsView(mode),
+          });
+        }
+        if (body.provider === 'backblaze') {
+          if (!body.key_id || !body.key) throw new HttpError(400, 'offsite_backblaze_key_invalid');
+          settingsChanges = {
+            ...settingsChanges,
+            NOCHEH_OFFSITE_PROVIDER: 'backblaze',
+            NOCHEH_OFFSITE_ENDPOINT: 'https://s3.us-west-004.backblazeb2.com',
+            NOCHEH_OFFSITE_BUCKET: 'example-backups',
+            NOCHEH_OFFSITE_REGION: 'us-west-004',
+            NOCHEH_OFFSITE_ACCESS_KEY_ID: String(body.key_id),
+            NOCHEH_OFFSITE_SECRET_ACCESS_KEY: 'example-secret',
+          };
+          const savedOn = settingsRevision;
+          settingsRevision += 'x';
+          return json(res, 200, {
+            saved_on: savedOn,
+            status: 'connected',
+            provider: 'backblaze',
+            bucket: 'example-backups',
+            settings: settingsView(mode),
+          });
+        }
+        throw new HttpError(400, 'offsite_provider_unknown');
+      }
+      if (route === '/settings') {
+        if (body.revision !== settingsRevision) throw new HttpError(409, 'configuration_conflict');
+        const owner = settingValue(
+          mode,
+          fields.find(f => f.key === 'TELEGRAM_OWNER_ID')!,
+        );
+        if (owner && body.changes && 'TELEGRAM_OWNER_ID' in body.changes && body.changes.TELEGRAM_OWNER_ID !== owner)
+          throw new HttpError(
+            400,
+            'Your Telegram user ID changes only from the command line: ./bin/nocheh config set TELEGRAM_OWNER_ID <id>',
+          );
+        // Memory already holds small-model vectors here; another model needs the confirmed rebuild.
+        if (
+          mode !== 'no-provider' &&
+          body.changes?.NOCHEH_EMBEDDING_MODEL &&
+          body.changes.NOCHEH_EMBEDDING_MODEL !== 'text-embedding-3-small' &&
+          body.rebuild_memory !== true
+        )
+          throw new HttpError(400, 'embedding_model_change_requires_rebuild');
+        settingsChanges = {...settingsChanges, ...body.changes};
+        settingsRevision += 'x';
+        if (Object.keys(body.changes ?? {}).some(key => !liveSettings.has(key))) applyPending = true;
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/data/' + id + '/guarded') {
+        if (body.expected_revision !== revision) throw new HttpError(409, 'guard_revision_conflict');
+        guarded = body.content?.text ?? source.event.text;
+        revision++;
+        return json(res, 200, {ok: true});
+      }
+      if (route === '/sources/' + id + '/retirement') {
+        if (body.expected_revision !== retirementRevision) throw new HttpError(409, 'source_retirement_conflict');
+        retired = body.retired;
+        retirementRevision++;
+        retirementHistory.unshift({revision: retirementRevision, retired, created_at: new Date().toISOString()});
+        return json(res, 200, {event_id: id, retired, revision: retirementRevision});
+      }
+    }
+    throw new HttpError(404, 'fixture_capability_unavailable');
+  })().catch(error =>
+    json(res, error instanceof HttpError ? error.status : 500, {
+      error: error instanceof HttpError ? error.code : 'fixture_request_failed',
+    }),
+  );
+});
+server.listen(port, '0.0.0.0', () =>
+  console.log(`Synthetic dashboard preview ready on ${port}; no external execution authorities.`),
+);
+for (const signal of ['SIGTERM', 'SIGINT'])
+  process.on(signal, () => {
+    server.closeAllConnections();
+    server.close(() => void pool.end());
+  });

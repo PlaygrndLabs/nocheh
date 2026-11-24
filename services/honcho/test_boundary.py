@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from services.honcho.boundary import EMBEDDING_BYTES,EMBEDDING_INPUTS,PART_BYTES,WORKSPACE,WorkspaceMiddleware,bind_dreams,bind_reconciler,bind_worker,install_transport,reconciler_parts
+from services.honcho.boundary import EMBEDDING_BYTES,EMBEDDING_INPUTS,PART_BYTES,WORKSPACE,WorkspaceMiddleware,bind_dreams,bind_hiding,HIDE_SQL,bind_reconciler,bind_worker,install_transport,reconciler_parts
 
 class BoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_api_and_worker_bindings_are_scoped_and_always_reset(self):
@@ -23,6 +23,27 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
             await consumer.process_dream(SimpleNamespace(trigger_reason=reason,dream_type=kind),'current',queue_item_id=7)
         # A dream after every wall copy and a peer-card refresh (cards are off) never reach Honcho's dreamer.
         self.assertEqual(ran,[('document_threshold','current',7),('work_list_backlog','current',7)])
+
+    async def test_a_retired_conclusion_is_hidden_never_removed(self):
+        calls=[]
+        class Db:
+            async def execute(self,statement,values): calls.append(('execute',statement,values))
+            async def commit(self): calls.append(('commit',))
+        async def delete_documents(db,workspace_name,document_ids,*,observer,observed,history=None):
+            calls.append(('soft-delete',document_ids));return [(i,'explicit') for i in document_ids if i!='gone']
+        crud=SimpleNamespace(delete_documents=delete_documents)
+        bind_hiding(crud,lambda sql:sql)
+        db=Db()
+        self.assertEqual(await crud.delete_documents(db,'current',['one','gone'],observer='p',observed='p'),[('one','explicit')])
+        self.assertEqual(calls[0],('soft-delete',['one','gone']))
+        self.assertEqual(calls[1],('execute',HIDE_SQL,{'workspace':'current','ids':['one'],'reason':'replaced'}))
+        self.assertEqual(calls[2],('commit',))
+        calls.clear()
+        async def nothing(db,workspace_name,document_ids,**kwargs): return []
+        crud=SimpleNamespace(delete_documents=nothing);bind_hiding(crud,lambda sql:sql)
+        await crud.delete_documents(db,'current',['x'],observer='p',observed='p')
+        self.assertEqual(calls,[],'nothing deleted, nothing to hide')
+        self.assertIn("deleted_at<TIMESTAMPTZ '9999-01-01",HIDE_SQL,'only rows just soft-deleted, never a hidden or older row')
 
     async def test_malformed_work_unit_reaches_honcho_unbound_and_frees_the_slot(self):
         def parse(key):

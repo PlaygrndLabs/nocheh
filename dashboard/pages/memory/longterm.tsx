@@ -31,6 +31,7 @@ import {
 } from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
 import {SubPanel, SubTabs} from '../../ui/page';
+import {HiddenFacts} from './hidden-facts';
 import {LongTermFacts} from './longterm-facts';
 import {Rebuild} from './rebuild';
 import {RetireOldFactsCard} from './retire-old-facts';
@@ -129,7 +130,12 @@ export function LongTerm() {
         </div>
       </SubPanel>
       <SubPanel id="facts" current={tab}>
-        {memory.data && <LongTermFacts />}
+        {memory.data && (
+          <div className="grid gap-5">
+            <LongTermFacts />
+            <HiddenFacts />
+          </div>
+        )}
       </SubPanel>
     </>
   );

@@ -272,10 +272,39 @@ class SessionDescendantTests(unittest.IsolatedAsyncioTestCase):
         calls = []
         async def load(session, limit):
             calls.append((session, limit))
-            return [str(i).zfill(21) for i in range(limit)]
+            return [(str(i).zfill(21), False) for i in range(limit)]
         result = await session_descendants({'session_id': 'a'*64, 'limit': 2}, load)
         self.assertEqual(calls, [('a'*64, 3)])
         self.assertEqual(result, {'ids': ['0'*21, '0'*20+'1'], 'truncated': True})
+
+    async def test_hidden_descendants_are_released_and_only_live_ones_returned(self):
+        released = []
+        async def load(session, limit): return [('h'*21, True), ('l'*21, False)]
+        async def release(ids): released.append(ids)
+        self.assertEqual(await session_descendants({'session_id': 'a'*64}, load, release), {'ids': ['l'*21], 'truncated': False})
+        self.assertEqual(released, [['h'*21]], 'a forgotten source takes its hidden descendants with it')
+        with self.assertRaises(ValueError):
+            await session_descendants({'session_id': 'a'*64}, load)
+
+    async def test_hidden_pages_cursor_and_restore_requests(self):
+        from .provenance import HIDDEN_AT, HIDDEN_LIST_SQL, RESTORE_HIDDEN_SQL, hidden_cursor, hidden_page, restore_ids
+        from .boundary import HIDE_SQL
+        self.assertIn(HIDDEN_AT.split("'")[1], HIDE_SQL, 'the deriver hides with the same time the routes look for')
+        self.assertEqual(hidden_cursor(''), (None, None))
+        self.assertEqual(hidden_cursor('2026-11-24T17:28:28.750034Z '+'b'*21), ('2026-11-24T17:28:28.750034Z', 'b'*21))
+        for bad in ['x', "2026' OR 1=1 "+'b'*21, '2026 short', 'a b c']:
+            with self.assertRaises(ValueError): hidden_cursor(bad)
+        row = lambda i: {'id': i*21, 'content': 'c', 'level': 'explicit', 'observer': 'p', 'observed': 'p', 'created_at': '2026-01-01',
+                         'reason': 'odd', 'hidden_at': '2026-11-24T00:00:00Z', 'copied_from': None}
+        page = hidden_page([row('a'), row('b')], 1)
+        self.assertEqual([item['id'] for item in page['items']], ['a'*21])
+        self.assertEqual(page['items'][0]['reason'], 'replaced')
+        self.assertEqual(page['next'], '2026-11-24T00:00:00Z '+'a'*21)
+        self.assertEqual(restore_ids({'ids': ['a'*21, 'a'*21]}), ['a'*21])
+        for bad in [{}, {'ids': []}, {'ids': ['x']}, {'ids': ['a'*21]*51}, {'ids': ['a'*21], 'more': 1}]:
+            with self.assertRaises(ValueError): restore_ids(bad)
+        self.assertIn("copied_from'=ANY(:ids)", RESTORE_HIDDEN_SQL, 'bringing a fact back brings back its wall copies')
+        self.assertIn('workspace_name=:workspace', HIDDEN_LIST_SQL)
 
     async def test_invalid_requests_never_reach_the_store(self):
         async def load(session, limit): self.fail('invalid request reached the store')
@@ -286,5 +315,5 @@ class SessionDescendantTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_query_excludes_the_session_itself_and_deleted_conclusions(self):
         self.assertIn('session_name IS DISTINCT FROM :session', DESCENDANTS_SQL)
-        self.assertIn('deleted_at IS NULL', DESCENDANTS_SQL)
+        self.assertIn('deleted_at IS NULL OR d.deleted_at>=', DESCENDANTS_SQL, 'hidden conclusions are walked through too')
         self.assertIn('tree.depth<8', DESCENDANTS_SQL)
