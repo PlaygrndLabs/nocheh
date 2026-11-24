@@ -44,8 +44,16 @@ import time
 from tools.acceptance.owner_dashboard import FIXTURE_PASSWORD
 from tools.paths import ROOT
 
-IMAGES = {'services': 'nocheh-services:local', 'management': 'nocheh-management:local', 'postgres': 'nocheh-store-postgres:local',
-          'native': 'nocheh-hermes:local', 'honcho': 'nocheh-honcho:e212feef', 'box': 'nocheh-box:local', 'miniapp': 'nocheh-miniapp:local'}
+def workspace_images():
+    """The installation's own images, by role: those of this checkout's workspace (its NOCHEH_IMAGES prefix, `nocheh`
+    for the personal workspace), also from a session worktree of it. Honcho's is built per pinned revision."""
+    from tools.operations.installation import workspaces
+    prefix = workspaces.images(workspaces.checkout_settings(ROOT) or {})
+    return {'services': prefix+'-services:local', 'management': prefix+'-management:local', 'postgres': prefix+'-store-postgres:local',
+            'native': prefix+'-hermes:local', 'honcho': 'nocheh-honcho:e212feef', 'box': prefix+'-box:local', 'miniapp': prefix+'-miniapp:local'}
+
+
+IMAGES = workspace_images()
 # The Telegram mini app's edge joins the fixture only when the fake Telegram connects (telegram_rehearsal.py), without its
 # tunnel; the synthetic installation itself starts without it.
 LATER_IMAGES = ('miniapp',)

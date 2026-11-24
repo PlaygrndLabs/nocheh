@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tools.acceptance import upgrade_check
+from tools.acceptance import full_test, upgrade_check
+from tools.operations.installation import workspaces
 
 
 class UpgradeCheckTests(unittest.TestCase):
@@ -46,6 +47,15 @@ class UpgradeCheckTests(unittest.TestCase):
                              ('sha256:new-native', 'sha256:new-native', 'sha256:new-services', 'sha256:new-miniapp'))
             self.assertEqual(json.loads((directory/'fixture.json').read_text())['images'],
                              {'native': 'sha256:new-native', 'services': 'sha256:new-services'})
+
+    def test_the_tester_starts_on_its_workspaces_own_images(self):
+        with patch.object(workspaces, 'checkout_settings', lambda folder: {'NOCHEH_WORKSPACE': 'dev'}):
+            with patch.object(workspaces, 'name_of', lambda values: values['NOCHEH_WORKSPACE']):
+                images = full_test.workspace_images()
+        self.assertEqual((images['services'], images['postgres'], images['native']),
+                         ('nocheh-dev-services:local', 'nocheh-dev-store-postgres:local', 'nocheh-dev-hermes:local'))
+        with patch.object(workspaces, 'checkout_settings', lambda folder: None):
+            self.assertEqual(full_test.workspace_images()['native'], 'nocheh-hermes:local')
 
 
 if __name__ == '__main__':
