@@ -3,11 +3,5 @@
   "load": {},
   "node": {},
   "browser": {},
-  "python": {
-    "hermes :: services.hermes.test_machine_server.MachineServerTests.test_cleanup_finds_programs_with_lsof_and_ps_where_there_is_no_proc": {
-      "reason": "Fails when not run as root, as on GitHub: the test's stray line starts with pid 2, whose environment only root can read, so the cleanup without /proc never falls back to checking every process. A fix in the machine cleanup is pending.",
-      "since": "2026-11-24",
-      "flaky": true
-    }
-  }
+  "python": {}
 }
