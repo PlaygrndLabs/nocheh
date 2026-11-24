@@ -359,6 +359,8 @@ makes `SERVICE_TOKEN` anew, since Hermes knew the old one
 follows recreates the services with the new keys and restarts the dashboard and
 executor, which read keys once; turns in flight at that moment fail, as after
 `rotate-keys` below.
+Most other commands initialize first, so any of them can make the keys; until the
+next `up`, the running services still hold the old ones, so run `up` right after.
 Only variables explicitly listed in Compose enter each service. The wrapper reads
 literal values without shell expansion and gives this file precedence over stale
 shell exports. Keep values on one line; single quotes preserve `$` and `#`.

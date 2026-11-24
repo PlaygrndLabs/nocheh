@@ -3,8 +3,8 @@
 <status>
 Accepted on 2026-11-24 as step 1 of the owner-approved key design ("Approve, start step 1"). Amends
 [ADR-0289](0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md), "Hermes reads passes without the
-master key", to "Hermes has no master key". The Profiles-page decision (8) is the assumed answer to a question still
-open with the owner; it is made easy to reverse.
+master key", to "Hermes has no master key". The owner chose a read-only Profiles page for now (8); it is made easy to
+reverse.
 </status>
 
 ## Context
@@ -51,7 +51,7 @@ and ADR-0290 removed its power to set or fire schedules; what remained were plai
 7. **Hermes's dashboard has its own session token.** The dashboard proxy sends `X-Hermes-Session-Token` with
    `NOCHEH_HERMES_SESSION_TOKEN`, and the page's `window.__HERMES_SESSION_TOKEN__` is still replaced with the dashboard's
    CSRF value; if that ever missed, only the session token could leak, never the agent login.
-8. **Hermes's Profiles page only reads (assumed owner answer).** Create, rename and retire on Hermes's own Profiles page
+8. **Hermes's Profiles page only reads (owner, "read-only for now").** Create, rename and retire on Hermes's own Profiles page
    answer 403 `profiles_read_only`, as its Cron page does since ADR-0290; listing, the active profile and the preference
    and config edits that never call Nocheh stay. Nocheh's side matches: `POST /v1/runtime/profiles` is not on the agent
    list. Reversing it is one check in `native_admin` and one allow-list row, both marked.
