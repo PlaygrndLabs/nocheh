@@ -1,13 +1,13 @@
-import {createReadStream} from 'node:fs';
-import {createServer, type IncomingMessage, type ServerResponse} from 'node:http';
-import {randomUUID, timingSafeEqual} from 'node:crypto';
-import {mkdir, readFile, readdir, rename, open, stat, unlink, chmod} from 'node:fs/promises';
-import {resolve, join, dirname} from 'node:path';
-import {spawn, type ChildProcess} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-import {HttpError, json, object, readJson, string} from './http.js';
-import {DOWNLOAD_COOKIE, OwnerSessions, SESSION_COOKIE, SESSION_COOKIE_AGE, csrfFor} from './dashboard-auth.js';
-import {CSP_REPORT_PATH, proxyNative} from './dashboard-proxy.js';
+import { createReadStream } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { mkdir, readFile, readdir, rename, open, stat, unlink, chmod } from 'node:fs/promises';
+import { resolve, join, dirname } from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { HttpError, json, object, readJson, string } from './http.js';
+import {DOWNLOAD_COOKIE,OwnerSessions,SESSION_COOKIE,SESSION_COOKIE_AGE,csrfFor} from './dashboard-auth.js';
+import {CSP_REPORT_PATH,proxyNative} from './dashboard-proxy.js';
 import {importConfiguration} from './workflows/imports.js';
 import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
@@ -15,59 +15,36 @@ import {ManagementMaintenance} from './management-maintenance.js';
 import {DashboardLiveUpdates} from './dashboard-live.js';
 import {OwnerLock} from './owner-lock.js';
 import {miniAppRoute} from './mini-app.js';
-import {verifyLaunch, ed25519, TELEGRAM_KEYS} from './telegram-launch.js';
-import {MAX_REPORT_BYTES, ScriptReportLog} from './csp-reports.js';
+import {verifyLaunch,ed25519,TELEGRAM_KEYS} from './telegram-launch.js';
+import {MAX_REPORT_BYTES,ScriptReportLog} from './csp-reports.js';
 import {githubReturn} from './github-return.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const STATE = resolve(process.env.NOCHEH_STATE_DIR ?? join(ROOT, 'data/local'));
 const JOBS = join(STATE, 'admin/jobs');
 const PORT = Number(process.env.NOCHEH_DASHBOARD_PORT ?? 8783);
-const CONTAINER = process.env.NOCHEH_CONTAINER === '1';
+const CONTAINER=process.env.NOCHEH_CONTAINER==='1';
 const PREFIX = '/api/plugins/nocheh';
 /** The workspace's name for the browser tab, so the owner tells dashboards apart (ADR-0245); `personal` shows none. */
-const WORKSPACE = (process.env.COMPOSE_PROJECT_NAME ?? 'nocheh').replace(/^nocheh-?/, '');
+const WORKSPACE=(process.env.COMPOSE_PROJECT_NAME??'nocheh').replace(/^nocheh-?/,'');
 const PRIMARY = '/api/nocheh';
-type Job = {
-  id: string;
-  kind: string;
-  state: string;
-  created_at: string;
-  completed: number;
-  files: number;
-  bytes: number;
-  duplicates: number;
-  preview?: Record<string, unknown>;
-  mapping?: Record<string, unknown>;
-  review_approved?: boolean;
-  error?: string;
-  result?: unknown;
-  workflow?: 'pending' | 'inngest';
+type Job = {id: string; kind: string; state: string; created_at: string; completed: number;
+  files: number; bytes: number; duplicates: number; preview?: Record<string, unknown>;
+  mapping?: Record<string, unknown>; review_approved?:boolean; error?: string; result?: unknown;workflow?:'pending'|'inngest';
   /** After the messages are written: how far they are read and checked, and when all were. */
-  prepared?: Record<string, unknown> | null;
-  prepared_at?: string | null;
+  prepared?: Record<string, unknown> | null; prepared_at?: string | null;
   /** The step a settings apply is on, so a reloaded page can still follow it. */
   step?: string;
   /** A backup the daily schedule started rather than the owner. */
-  automatic?: boolean;
-};
+  automatic?: boolean};
 
 async function atomic(path: string, value: unknown) {
   const temporary = path + '.' + randomUUID() + '.tmp';
   const file = await open(temporary, 'wx', 0o600);
-  try {
-    await file.writeFile(JSON.stringify(value));
-    await file.sync();
-  } finally {
-    await file.close();
-  }
+  try { await file.writeFile(JSON.stringify(value)); await file.sync(); } finally { await file.close(); }
   await rename(temporary, path);
   const directory = await open(dirname(path), 'r');
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
-  }
+  try { await directory.sync(); } finally { await directory.close(); }
 }
 
 function jobPath(id: string) {
@@ -75,135 +52,70 @@ function jobPath(id: string) {
   return join(JOBS, id);
 }
 async function getJob(id: string): Promise<Job> {
-  let job: Job;
-  try {
-    job = JSON.parse(await readFile(join(jobPath(id), 'job.json'), 'utf8')) as Job;
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-    throw new HttpError(404, 'job_not_found');
-  }
-  if (job.workflow) {
-    const status = object(await python({operation: 'workflow.api', path: '/v1/workflows/imports/' + id}));
-    if (status.owned) {
-      const current = object(status.job);
-      job.state =
-        current.state === 'completed'
-          ? 'complete'
-          : ['queued', 'running'].includes(String(current.state))
-            ? 'running'
-            : String(current.state);
-      job.completed = Number(current.completed);
-      job.duplicates = Number(current.duplicates);
-      job.prepared = current.progress ? object(current.progress) : null;
-      job.prepared_at = current.ready_at ? String(current.ready_at) : null;
-      if (job.state === 'complete')
-        job.result = {
-          completed: job.completed,
-          duplicates: job.duplicates,
-          telegram_replies: 0,
-          review_approved: job.review_approved,
-        };
+  let job:Job;
+  try {job=JSON.parse(await readFile(join(jobPath(id),'job.json'),'utf8')) as Job;}
+  catch(error){if(error instanceof HttpError)throw error;throw new HttpError(404,'job_not_found');}
+    if(job.workflow){
+      const status=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/'+id}));
+      if(status.owned){
+        const current=object(status.job);job.state=current.state==='completed'?'complete':['queued','running'].includes(String(current.state))?'running':String(current.state);
+        job.completed=Number(current.completed);job.duplicates=Number(current.duplicates);
+        job.prepared=current.progress?object(current.progress):null;job.prepared_at=current.ready_at?String(current.ready_at):null;
+        if(job.state==='complete')job.result={completed:job.completed,duplicates:job.duplicates,telegram_replies:0,review_approved:job.review_approved};
+      }
     }
-  }
-  return job;
+    return job;
 }
-async function putJob(job: Job) {
-  await atomic(join(jobPath(job.id), 'job.json'), job);
-}
-async function listJobs(max = 200) {
+async function putJob(job: Job) { await atomic(join(jobPath(job.id), 'job.json'), job); }
+async function listJobs(max=200) {
   const result: Job[] = [];
-  for (const id of await readdir(JOBS)) {
-    try {
-      result.push(await getJob(id));
-    } catch {
-      /* partial creation */
-    }
-  }
+  for (const id of await readdir(JOBS)) { try { result.push(await getJob(id)); } catch { /* partial creation */ } }
   return result.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, max);
 }
 async function newJob(kind: string): Promise<Job> {
-  const job: Job = {
-    id: randomUUID(),
-    kind,
-    state: kind === 'import' ? 'uploading' : 'queued',
-    created_at: new Date().toISOString(),
-    completed: 0,
-    files: 0,
-    bytes: 0,
-    duplicates: 0,
-  };
-  await mkdir(join(jobPath(job.id), 'upload'), {recursive: true, mode: 0o700});
-  await putJob(job);
-  return job;
+  const job: Job = {id: randomUUID(), kind, state: kind === 'import' ? 'uploading' : 'queued',
+    created_at: new Date().toISOString(), completed: 0, files: 0, bytes: 0, duplicates: 0};
+  await mkdir(join(jobPath(job.id), 'upload'), {recursive: true, mode: 0o700}); await putJob(job); return job;
 }
 
 export function uploadName(name: string): string {
-  if (
-    !name ||
-    name.length > 1024 ||
-    name.startsWith('/') ||
-    /[\\\x00-\x1f]/.test(name) ||
-    name.split('/').some(part => !part || part === '..' || part === '.')
-  )
-    throw new HttpError(400, 'unsafe_upload_path');
+  if (!name || name.length > 1024 || name.startsWith('/') || /[\\\x00-\x1f]/.test(name)
+      || name.split('/').some(part => !part || part === '..' || part === '.')) throw new HttpError(400, 'unsafe_upload_path');
   return name;
 }
 
-function python(
-  body: unknown,
-  progress?: (value: Record<string, unknown>) => void,
-  started?: (child: ChildProcess) => void,
-  coordinator?: string,
-): Promise<unknown> {
+function python(body: unknown, progress?: (value: Record<string, unknown>) => void,
+                started?: (child: ChildProcess) => void, coordinator?:string): Promise<unknown> {
   return new Promise((accept, reject) => {
-    const child = spawn(process.env.NOCHEH_PYTHON ?? 'python3', ['-m', 'tools.runtime.management'], {
-      cwd: ROOT,
-      env: {...process.env, NOCHEH_STATE_DIR: STATE, NOCHEH_MAINTENANCE_COORDINATOR: coordinator ?? ''},
-      stdio: ['pipe', 'pipe', 'ignore'],
-    });
+    const child = spawn(process.env.NOCHEH_PYTHON ?? 'python3', ['-m', 'tools.runtime.management'],
+      {cwd: ROOT, env: {...process.env, NOCHEH_STATE_DIR: STATE,NOCHEH_MAINTENANCE_COORDINATOR:coordinator??''}, stdio: ['pipe', 'pipe', 'ignore']});
     started?.(child);
-    let buffer = '',
-      result: unknown,
-      failure: string | undefined;
+    let buffer = '', result: unknown, failure: string | undefined;
     // Lifecycle operations must finish their cleanup; do not kill a backup with writers paused.
     const lifecycle = object(body).operation === 'operations.run' || object(body).operation === 'settings.apply';
     const timer = lifecycle ? undefined : setTimeout(() => child.kill('SIGKILL'), 15 * 60 * 1000);
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       buffer += chunk;
-      if (buffer.length > 4 * 1024 * 1024) {
-        failure = 'operation_output_limit';
-        child.kill();
-        return;
-      }
+      if (buffer.length > 4 * 1024 * 1024) { failure = 'operation_output_limit'; child.kill(); return; }
       let position: number;
       while ((position = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, position);
-        buffer = buffer.slice(position + 1);
+        const line = buffer.slice(0, position); buffer = buffer.slice(position + 1);
         try {
           const value = object(JSON.parse(line));
           if ('result' in value) result = value.result;
           else if (typeof value.error === 'string') failure = value.error;
           else progress?.(value);
-        } catch {
-          failure = 'operation_output_invalid';
-        }
+        } catch { failure = 'operation_output_invalid'; }
       }
     });
-    child.on('error', () => {
-      clearTimeout(timer);
-      reject(new HttpError(503, 'operation_unavailable'));
-    });
+    child.on('error', () => { clearTimeout(timer); reject(new HttpError(503, 'operation_unavailable')); });
     child.on('close', code => {
       clearTimeout(timer);
-      if (code || failure || result === undefined)
-        reject(
-          new HttpError(/(?:_conflict|_changed)$/.test(failure ?? '') ? 409 : 400, failure ?? 'operation_interrupted'),
-        );
+      if (code || failure || result === undefined) reject(new HttpError(/(?:_conflict|_changed)$/.test(failure??'')?409:400, failure ?? 'operation_interrupted'));
       else accept(result);
     });
-    child.stdin.on('error', () => {});
-    child.stdin.end(JSON.stringify(body));
+    child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(body));
   });
 }
 
@@ -211,64 +123,30 @@ const active = new Map<string, ChildProcess>();
 const locked = new Set<string>();
 async function exclusive<T>(id: string, run: () => Promise<T>): Promise<T> {
   if (locked.has(id)) throw new HttpError(409, 'job_busy');
-  locked.add(id);
-  try {
-    return await run();
-  } finally {
-    locked.delete(id);
-  }
+  locked.add(id); try { return await run(); } finally { locked.delete(id); }
 }
 /** Whether a backup, restore or restart must wait: one already runs, a child process works for an import or an apply,
  *  or a GitHub copy or refresh runs, whose fetcher a stopped app would leave behind (ADR-0209). */
-export function operationBlocked(state: {busy: boolean; active: number; locked: ReadonlySet<string>}): boolean {
-  return state.busy || state.active > 0 || state.locked.has('github-connection');
+export function operationBlocked(state:{busy:boolean;active:number;locked:ReadonlySet<string>}):boolean {
+  return state.busy||state.active>0||state.locked.has('github-connection');
 }
 const runningTasks = new Set<Promise<void>>();
-const maintenance = new ManagementMaintenance();
-function launch(job: Job, body: Record<string, unknown>, coordinator?: string) {
+const maintenance=new ManagementMaintenance();
+function launch(job: Job, body: Record<string, unknown>, coordinator?:string) {
   let writes = Promise.resolve();
-  const task = python(
-    body,
-    value => {
-      if (typeof value.completed === 'number') job.completed = value.completed;
-      if (typeof value.duplicates === 'number') job.duplicates = value.duplicates;
-      if (typeof value.step === 'string') job.step = value.step.slice(0, 40);
-      const snapshot = {...job};
-      writes = writes.then(() => putJob(snapshot));
-    },
-    child => active.set(job.id, child),
-    coordinator,
-  )
-    .then(async result => {
-      await writes;
-      job.result = result;
-      if (job.state !== 'cancelled')
-        job.state =
-          object(result).status === 'import_paused'
-            ? 'interrupted'
-            : object(result).status === 'apply_failed'
-              ? 'failed'
-              : 'complete';
-    })
-    .catch(async error => {
-      await writes.catch(() => {});
-      if (job.state !== 'cancelled') {
-        job.state = 'failed';
-        job.error = error instanceof HttpError ? error.code : 'operation_failed';
-      }
-    })
-    .finally(async () => {
-      try {
-        await putJob(job);
-      } finally {
-        active.delete(job.id);
-        activeJobs.delete(job.id);
-        if (job.kind.startsWith('operations.') || job.kind === 'settings.apply') operationBusy = false;
-        if (coordinator) maintenance.end(coordinator);
-      }
-    });
-  runningTasks.add(task);
-  void task.finally(() => runningTasks.delete(task)).catch(() => {});
+  const task = python(body, value => {
+    if (typeof value.completed === 'number') job.completed = value.completed;
+    if (typeof value.duplicates === 'number') job.duplicates = value.duplicates;
+    if (typeof value.step === 'string') job.step = value.step.slice(0, 40);
+    const snapshot = {...job}; writes = writes.then(() => putJob(snapshot));
+  }, child => active.set(job.id, child),coordinator).then(async result => {
+    await writes; job.result = result;
+    if (job.state !== 'cancelled') job.state = object(result).status === 'import_paused'?'interrupted':object(result).status === 'apply_failed' ? 'failed' : 'complete';
+  }).catch(async error => {
+    await writes.catch(() => {});
+    if (job.state !== 'cancelled') { job.state = 'failed'; job.error = error instanceof HttpError ? error.code : 'operation_failed'; }
+  }).finally(async () => {try{await putJob(job);}finally{active.delete(job.id); activeJobs.delete(job.id); if(job.kind.startsWith('operations.')||job.kind==='settings.apply') operationBusy=false;if(coordinator)maintenance.end(coordinator);} });
+  runningTasks.add(task); void task.finally(()=>runningTasks.delete(task)).catch(()=>{});
   activeJobs.set(job.id, job);
 }
 const activeJobs = new Map<string, Job>();
@@ -278,39 +156,25 @@ let operationBusy = false;
 async function upload(req: IncomingMessage, job: Job, name: string, offset = 0, more = false) {
   if (job.state !== 'uploading' || job.files >= 10000) throw new HttpError(409, 'upload_closed');
   if (!Number.isSafeInteger(offset) || offset < 0) throw new HttpError(400, 'invalid_upload_offset');
-  const path = join(jobPath(job.id), 'upload', uploadName(name)),
-    partial = path + '.part';
+  const path = join(jobPath(job.id), 'upload', uploadName(name)), partial = path + '.part';
   const max = name.endsWith('.zip') ? 512 * 1024 * 1024 : name.endsWith('.json') ? 128 * 1024 * 1024 : 50 * 1024 * 1024;
   await mkdir(dirname(path), {recursive: true, mode: 0o700});
-  try {
-    await stat(path);
-    throw new HttpError(409, 'duplicate_upload');
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-  }
+  try { await stat(path); throw new HttpError(409, 'duplicate_upload'); }
+  catch (error) { if (error instanceof HttpError) throw error; }
   if (offset === 0) await unlink(partial).catch(() => {});
   else if ((await stat(partial).catch(() => null))?.size !== offset) throw new HttpError(409, 'upload_offset_mismatch');
-  const file = await open(partial, offset === 0 ? 'wx' : 'a', 0o600);
-  let size = offset;
+  const file = await open(partial, offset === 0 ? 'wx' : 'a', 0o600); let size = offset;
   try {
     for await (const raw of req.iterator({destroyOnReturn: false})) {
-      const chunk = raw as Buffer;
-      size += chunk.length;
+      const chunk = raw as Buffer; size += chunk.length;
       if (size > max || job.bytes + size > 512 * 1024 * 1024) throw new HttpError(413, 'upload_size_limit');
       await file.write(chunk);
     }
-    await file.sync();
-    await file.close();
-  } catch (error) {
-    await file.close().catch(() => {});
-    await unlink(partial).catch(() => {});
-    throw error;
-  }
+    await file.sync(); await file.close();
+  } catch (error) { await file.close().catch(() => {}); await unlink(partial).catch(() => {}); throw error; }
   if (more) return job;
   await rename(partial, path);
-  job.files++;
-  job.bytes += size;
-  await putJob(job);
+  job.files++; job.bytes += size; await putJob(job);
   return job;
 }
 
@@ -323,977 +187,435 @@ export async function startManagement() {
   await mkdir(JOBS, {recursive: true, mode: 0o700});
   const token = (await readFile(join(STATE, 'admin/dashboard/token'), 'utf8')).trim();
   if (token.length < 32) throw new Error('dashboard_token_missing');
-  const lock = new OwnerLock(join(STATE, 'admin/owner-lock.json'));
-  const sessions = new OwnerSessions(lock);
-  const scriptReports = new ScriptReportLog(join(STATE, 'admin/dashboard/csp-reports.json'));
+  const lock=new OwnerLock(join(STATE,'admin/owner-lock.json'));
+  const sessions=new OwnerSessions(lock);
+  const scriptReports=new ScriptReportLog(join(STATE,'admin/dashboard/csp-reports.json'));
   /**
    * The phone's Telegram account, from launch data the mini app passed on and the dashboard checks again with
    * the bot and owner in .env, read each time. Its wrong passwords count apart from the browser's (ADR-0251).
    */
-  async function phonePerson(req: IncomingMessage): Promise<`phone:${string}`> {
-    const launch = String(req.headers['x-telegram-init-data'] ?? '');
-    if (!launch || launch.length > 8192) throw new HttpError(401, 'telegram_launch_required');
-    const telegram = object(await python({operation: 'mini_app.launch_check'}));
-    const {user_id} = verifyLaunch(launch, {
-      botId: String(telegram.bot_id ?? ''),
-      ownerId: String(telegram.owner_id ?? ''),
-      key: ed25519(telegram.test_environment === true ? TELEGRAM_KEYS.test : TELEGRAM_KEYS.production),
-    });
+  async function phonePerson(req:IncomingMessage):Promise<`phone:${string}`> {
+    const launch=String(req.headers['x-telegram-init-data']??'');
+    if(!launch||launch.length>8192)throw new HttpError(401,'telegram_launch_required');
+    const telegram=object(await python({operation:'mini_app.launch_check'}));
+    const {user_id}=verifyLaunch(launch,{botId:String(telegram.bot_id??''),ownerId:String(telegram.owner_id??''),
+      key:ed25519(telegram.test_environment===true?TELEGRAM_KEYS.test:TELEGRAM_KEYS.production)});
     return `phone:${user_id}`;
   }
-  const archiveConnection = object(await python({operation: 'archive.connection'}));
-  const live = new DashboardLiveUpdates();
-  for (const job of await listJobs(Infinity))
-    if (!job.workflow && ['running', 'queued'].includes(job.state)) {
-      job.state = 'interrupted';
-      job.error = 'dashboard_restarted';
-      await putJob(job);
-    }
+  const archiveConnection=object(await python({operation:'archive.connection'}));
+  const live=new DashboardLiveUpdates();
+  for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
+    job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
+  }
   /** Who is calling: the installation token, a signed-in browser, or a signed-in phone through the mini app. */
-  async function authorized(
-    req: IncomingMessage,
-    route: string,
-    download = false,
-  ): Promise<'token' | 'browser' | 'phone'> {
-    const cookie = download
-      ? req.headers.cookie
-          ?.split(';')
-          .map(v => v.trim())
-          .find(v => v.startsWith(DOWNLOAD_COOKIE + '='))
-          ?.slice(DOWNLOAD_COOKIE.length + 1)
-      : undefined;
-    const actual = Buffer.from(
-      String(req.headers['x-nocheh-session-token'] ?? req.headers['x-hermes-session-token'] ?? cookie ?? ''),
-    );
+  async function authorized(req: IncomingMessage, route: string, download=false):Promise<'token'|'browser'|'phone'> {
+    const cookie = download ? req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith(DOWNLOAD_COOKIE+'='))?.slice(DOWNLOAD_COOKIE.length+1) : undefined;
+    const actual = Buffer.from(String(req.headers['x-nocheh-session-token'] ?? req.headers['x-hermes-session-token'] ?? cookie ?? ''));
     const expected = Buffer.from(token);
-    if (actual.length === expected.length && timingSafeEqual(actual, expected)) return 'token';
-    const phone = req.headers['x-nocheh-mini-session'];
-    if (typeof phone === 'string' && !sessions.token(req)) {
+    if (actual.length === expected.length && timingSafeEqual(actual, expected))return 'token';
+    const phone=req.headers['x-nocheh-mini-session'];
+    if(typeof phone==='string'&&!sessions.token(req)) {
       // A phone reaches only the mini app's own routes, with a header token and no cookie, so no CSRF applies.
-      if (!miniAppRoute(req.method ?? '', route)) throw new HttpError(404, 'not_found');
-      const state = await sessions.state(phone, 'phone');
-      if (state === 'no_password') throw new HttpError(401, 'mini_app_password_not_set');
-      if (state !== 'signed_in') throw new HttpError(401, 'mini_app_sign_in_required');
+      if(!miniAppRoute(req.method??'',route))throw new HttpError(404,'not_found');
+      const state=await sessions.state(phone,'phone');
+      if(state==='no_password')throw new HttpError(401,'mini_app_password_not_set');
+      if(state!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');
       return 'phone';
     }
-    await sessions.authorize(req, !['GET', 'HEAD'].includes(req.method ?? ''));
+    await sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
     return 'browser';
   }
-  const sessionCookie = (value: string, age = SESSION_COOKIE_AGE) =>
-    `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}`;
+  const sessionCookie=(value:string,age=SESSION_COOKIE_AGE)=>`${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}`;
   /** Answers a password check with its refusal details: tries left before a pause, or when the pause ends. */
-  async function passwordAnswer(res: ServerResponse, work: () => Promise<unknown>) {
-    try {
-      return json(res, 200, await work());
-    } catch (error) {
-      if (!(error instanceof HttpError)) throw error;
-      const {until, tries_left} = error as HttpError & {until?: number; tries_left?: number};
-      return json(res, error.status, {
-        error: error.code,
-        ...(until ? {until} : {}),
-        ...(tries_left !== undefined ? {tries_left} : {}),
-      });
+  async function passwordAnswer(res:ServerResponse,work:()=>Promise<unknown>) {
+    try {return json(res,200,await work());}
+    catch(error) {
+      if(!(error instanceof HttpError))throw error;
+      const {until,tries_left}=error as HttpError&{until?:number;tries_left?:number};
+      return json(res,error.status,{error:error.code,...(until?{until}:{}),...(tries_left!==undefined?{tries_left}:{})});
     }
   }
-  function checkOrigin(req: IncomingMessage, opened = false) {
+  function checkOrigin(req:IncomingMessage,opened=false) {
     const authority = `127.0.0.1:${PORT}`;
     if (![authority, `localhost:${PORT}`].includes(req.headers.host ?? '')) throw new HttpError(403, 'invalid_host');
     // A page served with no-referrer may send its script-rule reports with `Origin: null`; they are only counted.
-    const report =
-      req.method === 'POST' && req.headers.origin === 'null' && (req.url ?? '').split('?')[0] === CSP_REPORT_PATH;
-    if (
-      req.headers.origin &&
-      !report &&
-      !['http://' + authority, `http://localhost:${PORT}`].includes(req.headers.origin)
-    )
-      throw new HttpError(403, 'invalid_origin');
-    if (!opened && req.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'cross_site_denied');
+    const report=req.method==='POST'&&req.headers.origin==='null'&&(req.url??'').split('?')[0]===CSP_REPORT_PATH;
+    if(req.headers.origin&&!report&&!['http://'+authority,`http://localhost:${PORT}`].includes(req.headers.origin))throw new HttpError(403,'invalid_origin');
+    if(!opened&&req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'cross_site_denied');
   }
   /** The dashboard page opened in a tab from another site, as Notion's and GitHub's sign-ins do when they send the browser back. */
-  const openedFromAnotherSite = (req: IncomingMessage) =>
-    req.method === 'GET' &&
-    req.headers['sec-fetch-site'] === 'cross-site' &&
-    req.headers['sec-fetch-mode'] === 'navigate' &&
-    req.headers['sec-fetch-dest'] === 'document' &&
-    ['/', '/connect/github'].includes(new URL(req.url ?? '/', 'http://local').pathname);
+  const openedFromAnotherSite=(req:IncomingMessage)=>req.method==='GET'&&req.headers['sec-fetch-site']==='cross-site'&&
+    req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'&&['/','/connect/github'].includes(new URL(req.url??'/','http://local').pathname);
   /** Starts an enumerated operation; callers hold the writer-start lock. `request` is the
    * caller's own admitted request, which a backup's drain must not wait for. */
-  async function startOperation(action: string, options: unknown, request: symbol, automatic = false): Promise<Job> {
-    if (operationBlocked({busy: operationBusy, active: active.size, locked}))
-      throw new HttpError(409, 'wait_for_active_jobs');
-    operationBusy = true;
-    let coordinator: string | undefined, job: Job | undefined;
-    try {
-      job = await newJob('operations.' + action);
-      job.state = 'running';
-      if (automatic) job.automatic = true;
-      await putJob(job);
-      if (automatic && action === 'backup') await python({operation: 'backups.started', job: job.id});
-      if (action === 'backup') {
-        const draining = maintenance.begin(job.id, request);
+  async function startOperation(action:string,options:unknown,request:symbol,automatic=false):Promise<Job> {
+    if(operationBlocked({busy:operationBusy,active:active.size,locked}))throw new HttpError(409,'wait_for_active_jobs');
+    operationBusy=true;
+    let coordinator:string|undefined,job:Job|undefined;
+    try {job=await newJob('operations.'+action);job.state='running';if(automatic)job.automatic=true;await putJob(job);
+      if(automatic&&action==='backup')await python({operation:'backups.started',job:job.id});
+      if(action==='backup'){
+        const draining=maintenance.begin(job.id,request);
         live.closeAll();
-        coordinator = await draining;
+        coordinator=await draining;
         maintenance.ready(coordinator);
       }
-      launch(job, {operation: 'operations.run', action, job: job.id, options}, coordinator);
-      return job;
-    } catch (error) {
-      operationBusy = false;
-      if (coordinator) maintenance.end(coordinator);
-      if (job) {
-        job.state = 'failed';
-        job.error = error instanceof HttpError ? error.code : 'operation_failed';
-        await putJob(job).catch(() => {});
-      }
+      launch(job,{operation:'operations.run',action,job:job.id,options},coordinator);return job;
+    }catch(error){
+      operationBusy=false;if(coordinator)maintenance.end(coordinator);
+      if(job){job.state='failed';job.error=error instanceof HttpError?error.code:'operation_failed';await putJob(job).catch(()=>{});}
       throw error;
     }
   }
   const server = createServer((req, res) => {
-    if (stopping) {
-      json(res, 503, {error: 'dashboard_stopping'});
-      return;
-    }
-    const tracked = maintenance.enter();
-    const responseDone = new Promise<void>(resolve => {
-      res.once('finish', resolve);
-      res.once('close', resolve);
-    });
+    if(stopping){json(res,503,{error:'dashboard_stopping'});return;}
+    const tracked=maintenance.enter();
+    const responseDone=new Promise<void>(resolve=>{res.once('finish',resolve);res.once('close',resolve);});
     void (async () => {
-      const authority = `127.0.0.1:${PORT}`;
-      const opened = openedFromAnotherSite(req);
-      checkOrigin(req, opened);
-      if (opened) {
-        // Such a tab comes without the strict session cookie and gets nothing else from here.
-        // This page opens the same address again from the dashboard itself, which sends it.
-        res.writeHead(200, {
-          'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'no-store',
-          'x-frame-options': 'DENY',
-          'referrer-policy': 'no-referrer',
-          'x-content-type-options': 'nosniff',
+    const authority = `127.0.0.1:${PORT}`;
+    const opened=openedFromAnotherSite(req);checkOrigin(req,opened);
+    if(opened) {
+      // Such a tab comes without the strict session cookie and gets nothing else from here.
+      // This page opens the same address again from the dashboard itself, which sends it.
+      res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-frame-options':'DENY','referrer-policy':'no-referrer','x-content-type-options':'nosniff'});
+      res.end('<!doctype html><meta charset="utf-8"><title>Nocheh</title><script>location.replace(location.href)</script>');return;
+    }
+    const url = new URL(req.url ?? '/', `http://${authority}`), path = url.pathname;
+    if(!maintenance.allows(req.method??'',path))throw new HttpError(503,'installation_maintenance');
+    const prefix=path.startsWith(PRIMARY+'/')?PRIMARY:PREFIX;
+    if (path.startsWith(prefix + '/')) {
+      const route = path.slice(prefix.length);
+      // Signing in needs no session: the password is the check. Only the browser's own sign-in sets a cookie.
+      if(route==='/login'&&req.method==='GET'){
+        const status=await lock.status();
+        return json(res,200,{state:await sessions.session(req)?'signed_in':status.password_set?'sign_in':'create',paused_until:status.paused_until});
+      }
+      if(route==='/login'&&req.method==='POST')return passwordAnswer(res,async()=>{
+        const {password}=object(await readJson(req,4096));
+        const {token:session}=(await lock.status()).password_set?await lock.signIn(password,'browser'):await lock.create(password);
+        res.setHeader('set-cookie',sessionCookie(session));return {ok:true};
+      });
+      // The mini app service signs phones in and checks them here; it holds no credential of its own.
+      if(route==='/mini-app/sign-in'&&req.method==='POST')return passwordAnswer(res,async()=>{
+        const person=await phonePerson(req);
+        return lock.signIn(object(await readJson(req,4096)).password,person);
+      });
+      if(route==='/mini-app/check'&&req.method==='POST')return json(res,200,{state:await sessions.state(String(object(await readJson(req,4096)).token??''),'phone')});
+      if(route==='/mini-app/sign-out'&&req.method==='POST'){await lock.signOut(object(await readJson(req,4096)).token);sessions.forget();return json(res,200,{ok:true});}
+      // The browser's reports on the Hermes page's script rules come without a session; they are only counted.
+      if(route==='/csp-report'&&req.method==='POST'){
+        await scriptReports.record(await readJson(req,MAX_REPORT_BYTES));
+        res.writeHead(204,{'cache-control':'no-store'});res.end();return;
+      }
+      const caller=await authorized(req,route,req.method==='GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route));
+      const legacy=caller==='token';
+      // Session cookie is accepted only by streaming download routes, never by settings or mutations.
+      if(legacy)res.setHeader('set-cookie',`${DOWNLOAD_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
+      if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
+      if(req.method==='GET'&&route==='/maintenance')return json(res,200,maintenance.state??{ready:false});
+      if(maintenance.active&&req.method==='GET'&&(route==='/jobs'||route==='/jobs/'+maintenance.state?.job)){
+        const job=activeJobs.get(maintenance.state!.job);
+        return json(res,200,route==='/jobs'?(job?[job]:[]):job??{state:'running'});
+      }
+      if(ownerStoragePath('/v1'+route)&&['GET','POST'].includes(req.method??''))return json(res,200,await python({operation:'knowledge.api',path:'/v1'+route+url.search,
+        ...(req.method==='POST'?{body:await readJson(req,8*1024*1024)}:{})}));
+      if (req.method === 'GET' && route === '/changes')return live.open(res);
+      if (req.method === 'GET' && route === '/monitoring') return json(res,200,await python({operation:'monitoring.status'}));
+      if(req.method==='GET'&&route==='/storage')return json(res,200,await python({operation:'storage.report'}));
+      if(req.method==='GET'&&route==='/database-browser')return json(res,200,await python({operation:'database.browser',
+        request:Object.fromEntries(url.searchParams)}));
+      if(req.method==='GET'&&/^\/workflows(?:\/(?:health|metrics|timings(?:\/[a-f0-9]{64})?|[a-f0-9]{64}))?$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route+url.search}));
+      if(req.method==='POST'&&route==='/workflows/retry-failed')return json(res,200,await python({operation:'workflow.api',path:'/v1/workflows/retry-failed',body:{}}));
+      if(req.method==='POST'&&/^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))return json(res,200,await python({operation:'workflow.api',path:'/v1'+route,body:await readJson(req)}));
+      if(route==='/tools/actions' && req.method==='GET')return json(res,200,await python({operation:'tools.manage'}));
+      if(/^\/tools\/actions\/[a-f0-9]{64}$/.test(route) && req.method==='GET')return json(res,200,await python({operation:'tools.manage',action:route.slice(7)}));
+      if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/resolve','/tools/telegram-resolve','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
+      if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
+      if(['/memory/longterm','/memory/longterm/rebuild','/memory/longterm/retry-failed','/memory/longterm/fresh-start','/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview','/memory/facts','/memory/longterm/coverage','/memory/originals','/memory/message-facts','/memory/hidden','/memory/hidden/restore'].includes(route) && ['GET','POST'].includes(req.method??'')) {
+        return json(res,200,await python({operation:'memory.api',path:'/v1'+route+url.search,
+          ...(req.method==='POST'?{body:object(await readJson(req))}:{})}));
+      }
+      if (req.method === 'POST' && route === '/shutdown') {
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        json(res, 200, {ok: true}); setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100); return;
+      }
+      if (req.method === 'GET' && route === '/scopes') return json(res,200,await archive('/v1/scopes?after='+encodeURIComponent(url.searchParams.get('after')??'')));
+      if (req.method === 'GET' && route === '/telegram/identities') return json(res,200,await python({operation:'telegram.directory'}));
+      // One look at a time, never while services restart: two readers of the bot's messages conflict.
+      if (req.method === 'POST' && route === '/telegram/discover') return exclusive('telegram-discover',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        return json(res,200,await python({operation:'telegram.discover'}));
+      });
+      if (req.method === 'GET' && route === '/graph') return json(res,200,await python({operation:'graph.read',scope:url.searchParams.get('scope')??'',after:url.searchParams.get('after')??'',focus:url.searchParams.get('focus')??''}));
+      const artifact=route.match(/^\/artifacts\/([a-f0-9]{64})\/download$/);
+      if(req.method==='GET' && artifact?.[1]) {
+        await python({operation:'archive.cache',id:artifact[1]});
+        res.writeHead(200,{'content-type':'application/octet-stream','content-disposition':"attachment; filename*=UTF-8''"+encodeURIComponent((url.searchParams.get('name')??artifact[1]).split(/[\\/]/).at(-1)!.slice(0,200)),'cache-control':'no-store'});
+        createReadStream(join(STATE,'admin/downloads',artifact[1])).on('error',()=>res.destroy()).pipe(res);return;
+      }
+      const exported=route.match(/^\/exports\/([a-f0-9-]{36})\/download$/);
+      if(req.method==='GET' && exported?.[1]) {
+        const job=await getJob(exported[1]);if(!['operations.export','operations.portable-export'].includes(job.kind)||job.state!=='complete')throw new HttpError(409,'export_not_ready');
+        res.writeHead(200,{'content-type':'application/zip','content-disposition':'attachment; filename="'+(job.kind==='operations.portable-export'?'nocheh-archive-memory.zip':'nocheh-archive.zip')+'"','cache-control':'no-store'});
+        createReadStream(join(STATE,'admin/exports',job.id,'export.zip')).on('error',()=>res.destroy()).pipe(res);return;
+      }
+      if(req.method==='GET' && route==='/operations')return json(res,200,await python({operation:'operations.list'}));
+      if(req.method==='POST' && route==='/operations') return exclusive('writer-start', async () => {
+        const body=object(await readJson(req));const action=string(body.action,30);
+        if(!['diagnose','backup','restore','restart','export','portable-export','offsite','offsite-check'].includes(action))throw new HttpError(400,'operation_denied');
+        return json(res,202,await startOperation(action,body.options??{},tracked.id));
+      });
+      if (route === '/policy' && ['GET','POST'].includes(req.method??'')) {
+        const body=req.method==='POST'?object(await readJson(req)):{};
+        return json(res,200,await python({operation:'policy.manage',request:{...body,profile:url.searchParams.get('profile'),job:url.searchParams.get('job')},write:req.method==='POST'}));
+      }
+      // Off-site storage from one pasted credential (ADR-0236). It writes the storage settings, so it waits like a save;
+      // the token or key travels only in this POST body and never comes back.
+      if(req.method==='POST'&&route==='/offsite/connect')return exclusive('writer-start',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        return json(res,200,await python({operation:'offsite.connect',request:object(await readJson(req))}));
+      });
+      // A Notion sign-in: the owner's own, or a project's named by `project` (ADR-0268). Tokens travel only in POST bodies
+      // and never come back.
+      if(req.method==='GET'&&route==='/connections/notion')return json(res,200,await python({operation:'notion.status',request:{project:url.searchParams.get('project')}}));
+      const notion=route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
+      if(req.method==='POST'&&notion)return exclusive('notion-connection',async()=>json(res,200,await python({operation:'notion.'+notion[1],request:object(await readJson(req))})));
+      // The owner's own Gmail (ADR-0272): the OAuth client of the owner's Personal mode project, then a sign-in. The secret
+      // and tokens travel only in POST bodies and never come back.
+      if(req.method==='GET'&&route==='/connections/gmail')return json(res,200,await python({operation:'gmail.status'}));
+      const gmail=route.match(/^\/connections\/gmail\/(client|start|finish|disconnect)$/);
+      if(req.method==='POST'&&gmail)return exclusive('gmail-connection',async()=>json(res,200,await python({operation:'gmail.'+gmail[1],request:object(await readJson(req))})));
+      // Nocheh's GitHub App and the copies background jobs may read (ADR-0209, ADR-0210). The app's key never comes
+      // back. A copy, a list and the hourly check run one at a time. Connecting, Remove and Disconnect never wait for
+      // them: github.py's short file lock and the store order them with a copy that is still running.
+      if(req.method==='GET'&&route==='/connections/github')return json(res,200,await python({operation:'github.status'}));
+      const github=route.match(/^\/connections\/github\/(start|finish|copy|list|remove|disconnect)$/)?.[1];
+      if(req.method==='POST'&&github){
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        const run=async()=>json(res,200,await python({operation:'github.'+github,request:object(await readJson(req))}));
+        return ['start','finish','remove','disconnect'].includes(github)?run():exclusive('github-connection',run);
+      }
+      // The mini app's password. The owner sets it here; the mini app service signs in and
+      // checks its sessions through the same routes.
+      // The owner's password, from a signed-in browser only.
+      if(caller!=='phone'&&route==='/owner-lock'&&req.method==='GET')return json(res,200,await lock.status(sessions.token(req)));
+      if(caller==='browser'&&route==='/owner-lock/password'&&req.method==='POST')return passwordAnswer(res,async()=>{
+        const body=object(await readJson(req,4096));
+        const {token:session}=await lock.changePassword(body.current,body.password);
+        // The new session has a new CSRF value; the page keeps using it.
+        sessions.forget();res.setHeader('set-cookie',sessionCookie(session));return {...await lock.status(session),csrf:csrfFor(session)};
+      });
+      // `./bin/nocheh dashboard --clear-pause`, with the installation token, ends every sign-in pause.
+      if(caller==='token'&&route==='/owner-lock/clear-pause'&&req.method==='POST')return json(res,200,await lock.clearPauses());
+      if(caller==='browser'&&route==='/owner-lock/sign-out-others'&&req.method==='POST'){
+        await lock.signOutOthers(sessions.token(req));sessions.forget();return json(res,200,await lock.status(sessions.token(req)));
+      }
+      if(caller==='browser'&&route==='/logout'&&req.method==='POST'){
+        await lock.signOut(sessions.token(req));sessions.forget();res.setHeader('set-cookie',sessionCookie('',0));return json(res,200,{ok:true});
+      }
+      if (req.method === 'GET' && route === '/settings') {
+        // A running apply is named so a page opened or reloaded meanwhile follows it instead of offering Apply again.
+        const applying=[...activeJobs.values()].find(job=>job.kind==='settings.apply');
+        // A phone reads settings only to know which chat is the owner's own.
+        if(caller==='phone')return json(res,200,{fields:((object(await python({operation:'settings.view'})).fields??[]) as {key:string}[]).filter(field=>field.key==='TELEGRAM_OWNER_ID')});
+        return json(res, 200, {...object(await python({operation: 'settings.view'})),
+          applying:applying?{id:applying.id,step:applying.step??'starting',started_at:applying.created_at}:null});
+      }
+      // POST so a key being typed travels in the body, never in a URL or access log.
+      if (req.method === 'POST' && route === '/settings/provider-models') return json(res, 200, await python({operation: 'settings.provider_models', request: object(await readJson(req))}));
+      if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
+      if (req.method === 'GET' && route === '/usage') return json(res, 200, await python({operation: 'usage.view', days: Number(url.searchParams.get('days') ?? 30)}));
+      if (req.method === 'GET' && route === '/honcho/budget') return json(res, 200, await python({operation: 'honcho.budget'}));
+      if (req.method === 'POST' && route === '/honcho/budget') return exclusive('honcho-budget',async()=>
+        json(res,200,await python({operation:'honcho.budget.update',request:object(await readJson(req))})));
+      if (req.method === 'POST' && route === '/honcho/read') return json(res, 200, await python({operation: 'honcho.read', args: object(await readJson(req)).args}));
+      if (req.method === 'GET' && route === '/memory/profiles') return json(res, 200, await python({operation:'agent.manage',request:{action:'profiles'}}));
+      // Every chat's schedules, and Pause, Resume, Run now or Delete on one (ADR-0266).
+      if (req.method === 'GET' && route === '/schedules') return json(res, 200, await python({operation:'agent.manage',request:{action:'schedules',operation:'list'}}));
+      if (req.method === 'GET' && route === '/schedules/runs') {
+        const query=new URLSearchParams({scope:url.searchParams.get('scope')??'',job_id:url.searchParams.get('job_id')??''});
+        return json(res,200,await archive('/v1/schedules/runs?'+query.toString()));
+      }
+      if (req.method === 'POST' && route === '/schedules') {
+        const body=object(await readJson(req,4096));
+        return json(res,200,await python({operation:'agent.manage',request:{action:'schedules',operation:body.operation,profile:body.profile,job_id:body.job_id,request_id:body.request_id}}));
+      }
+      if (req.method === 'GET' && ['/memory','/memory/preferences'].includes(route)) {
+        return json(res,200,await python({operation:'agent.manage',request:{action:route.endsWith('preferences')?'preferences':'memory',
+          scope:url.searchParams.get('scope'),profile:url.searchParams.get('profile'),session:url.searchParams.get('session'),offset:Number(url.searchParams.get('offset')??0),
+          ...(url.searchParams.has('limit')?{limit:Number(url.searchParams.get('limit'))}:{})}}));
+      }
+      if (req.method === 'POST' && route === '/memory/preferences') return exclusive('writer-start',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        const body=object(await readJson(req));
+        return json(res,200,await python({operation:'agent.manage',request:{action:'preferences',scope:body.scope,changes:body.changes,revision:body.revision}}));
+      });
+      // Role (SOUL.md) and skills of one chat's native profile, `default` for the owner's private chat, or `default:groups` for every group.
+      if (req.method === 'GET' && route === '/memory/persona')
+        return json(res,200,await python({operation:'agent.manage',request:{action:'persona',scope:url.searchParams.get('scope')}}));
+      if (req.method === 'POST' && route === '/memory/persona') return exclusive('writer-start',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        const body=object(await readJson(req,1024*1024));
+        return json(res,200,await python({operation:'agent.manage',request:{action:'persona',scope:body.scope,role:body.role,skills:body.skills,revision:body.revision}}));
+      });
+      if (req.method === 'POST' && route === '/settings') return exclusive('writer-start',async()=>{
+        if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+        const body = object(await readJson(req));
+        return json(res, 200, await python({operation: 'settings.save', changes: body.changes, revision: body.revision, rebuild_memory: body.rebuild_memory===true}));
+      });
+      if (req.method === 'POST' && route === '/settings/apply') return exclusive('writer-start', async () => {
+        if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
+        operationBusy=true;
+        try {const job = await newJob('settings.apply'); job.state = 'running'; await putJob(job);
+          launch(job, {operation: 'settings.apply'}); return json(res, 202, job);
+        }catch(error){operationBusy=false;throw error;}
+      });
+      if (req.method === 'GET' && route === '/status') return json(res, 200, await archive('/v1/status'));
+      if ((req.method==='GET'||req.method==='POST') && (route==='/data'||/^\/data\/[a-f0-9]{64}\/guarded(?:\/history)?$/.test(route))) {
+        return json(res,200,await python({operation:'archive.projections',path:'/v1'+route+url.search,
+          ...(req.method==='POST'?{body:await readJson(req,8*1024*1024)}:{})}));
+      }
+      if (req.method === 'GET' && route === '/search') return json(res, 200, await archive('/v1/search?' + url.searchParams.toString()));
+      if (req.method === 'GET' && route.startsWith('/events/')) return json(res, 200, await archive('/v1' + route));
+      if (req.method === 'GET' && route === '/jobs') return json(res, 200, await listJobs());
+      if (req.method === 'POST' && route === '/jobs') return json(res, 201, await newJob('import'));
+      const match = route.match(/^\/jobs\/([^/]+)(?:\/(upload|preview|start|cancel))?$/);
+      if (match?.[1]) {
+        const id = match[1], action = match[2];
+        if (req.method === 'GET' && !action) return json(res, 200, await getJob(id));
+        return exclusive(id, async () => {
+          const job = await getJob(id);
+          if (req.method === 'PUT' && action === 'upload') return json(res, 200, await upload(req, job, url.searchParams.get('name') ?? '',
+            Number(url.searchParams.get('offset') ?? 0), url.searchParams.get('more') === '1'));
+          if (req.method === 'POST' && action === 'preview') {
+            if (job.state !== 'uploading' && job.state !== 'preview_failed') throw new HttpError(409, 'preview_closed');
+            // A preview that can't read the upload says so instead of looking unfinished.
+            try {job.preview = object(await python({operation: 'import.inspect', job: id}));}
+            catch(error){job.state='preview_failed';job.error=error instanceof HttpError?error.message:'operation_interrupted';await putJob(job);throw error;}
+            job.state = 'ready'; delete job.error; await putJob(job); return json(res, 200, job);
+          }
+          if (req.method === 'POST' && action === 'start') return exclusive('writer-start', async () => {
+            if(operationBusy)throw new HttpError(409,'wait_for_active_jobs');
+            if (!job.preview || !['ready', 'failed', 'cancelled', 'interrupted'].includes(job.state) || active.has(id)) throw new HttpError(409, 'job_not_ready');
+            const body = object(await readJson(req));
+            const mapping = object(body.mapping ?? job.mapping ?? {});
+            if(body.review_approved!==undefined && typeof body.review_approved!=='boolean')throw new HttpError(400,'invalid_review_approval');
+            if(job.review_approved!==undefined && body.review_approved!==undefined && body.review_approved!==job.review_approved)throw new HttpError(409,'resume_review_approval_cannot_change');
+            job.review_approved=job.review_approved??(body.review_approved===true);
+            if (job.mapping && JSON.stringify(mapping) !== JSON.stringify(job.mapping)) throw new HttpError(409, 'resume_scope_cannot_change');
+            job.mapping=mapping;job.workflow='pending';delete job.error;await putJob(job);
+            const chats=(Array.isArray(job.preview.chats)?job.preview.chats:[]).map(chat=>object(chat));
+            const confirmed=object(await python({operation:'workflow.api',path:'/v1/workflows/imports/confirm',body:{id,configuration_hash:importConfiguration(job.preview,mapping,job.review_approved),review_approved:job.review_approved,total:job.preview.messages,completed:job.completed,duplicates:job.duplicates,resume:['failed','cancelled','interrupted'].includes(job.state),
+              label:chats.map(chat=>String(chat.name??'')).filter(Boolean).join(', ').slice(0,300),
+              scopes:chats.map(chat=>String(mapping[String(chat.id)]??chat.scope??'')).filter(Boolean)}}));
+            if(confirmed.owned===true){job.workflow='inngest';job.state='running';await putJob(job);return json(res,202,await getJob(id));}
+            throw new HttpError(503,'import_admission_unavailable');
+          });
+          if (req.method === 'POST' && action === 'cancel') {
+            if (job.kind !== 'import' || job.state !== 'running') throw new HttpError(409, 'job_not_cancellable');
+            if(job.workflow){await python({operation:'workflow.api',path:'/v1/workflows/imports/cancel',body:{id}});return json(res,200,await getJob(id));}
+            const running = activeJobs.get(id); if (running) running.state = 'cancelled';
+            active.get(id)?.kill('SIGTERM'); job.state = 'cancelled'; await putJob(job);
+            return json(res, 200, job);
+          }
+          throw new HttpError(404, 'not_found');
         });
-        res.end(
-          '<!doctype html><meta charset="utf-8"><title>Nocheh</title><script>location.replace(location.href)</script>',
-        );
-        return;
-      }
-      const url = new URL(req.url ?? '/', `http://${authority}`),
-        path = url.pathname;
-      if (!maintenance.allows(req.method ?? '', path)) throw new HttpError(503, 'installation_maintenance');
-      const prefix = path.startsWith(PRIMARY + '/') ? PRIMARY : PREFIX;
-      if (path.startsWith(prefix + '/')) {
-        const route = path.slice(prefix.length);
-        // Signing in needs no session: the password is the check. Only the browser's own sign-in sets a cookie.
-        if (route === '/login' && req.method === 'GET') {
-          const status = await lock.status();
-          return json(res, 200, {
-            state: (await sessions.session(req)) ? 'signed_in' : status.password_set ? 'sign_in' : 'create',
-            paused_until: status.paused_until,
-          });
-        }
-        if (route === '/login' && req.method === 'POST')
-          return passwordAnswer(res, async () => {
-            const {password} = object(await readJson(req, 4096));
-            const {token: session} = (await lock.status()).password_set
-              ? await lock.signIn(password, 'browser')
-              : await lock.create(password);
-            res.setHeader('set-cookie', sessionCookie(session));
-            return {ok: true};
-          });
-        // The mini app service signs phones in and checks them here; it holds no credential of its own.
-        if (route === '/mini-app/sign-in' && req.method === 'POST')
-          return passwordAnswer(res, async () => {
-            const person = await phonePerson(req);
-            return lock.signIn(object(await readJson(req, 4096)).password, person);
-          });
-        if (route === '/mini-app/check' && req.method === 'POST')
-          return json(res, 200, {
-            state: await sessions.state(String(object(await readJson(req, 4096)).token ?? ''), 'phone'),
-          });
-        if (route === '/mini-app/sign-out' && req.method === 'POST') {
-          await lock.signOut(object(await readJson(req, 4096)).token);
-          sessions.forget();
-          return json(res, 200, {ok: true});
-        }
-        // The browser's reports on the Hermes page's script rules come without a session; they are only counted.
-        if (route === '/csp-report' && req.method === 'POST') {
-          await scriptReports.record(await readJson(req, MAX_REPORT_BYTES));
-          res.writeHead(204, {'cache-control': 'no-store'});
-          res.end();
-          return;
-        }
-        const caller = await authorized(
-          req,
-          route,
-          req.method === 'GET' && /^\/(?:artifacts\/[a-f0-9]{64}|exports\/[a-f0-9-]{36})\/download$/.test(route),
-        );
-        const legacy = caller === 'token';
-        // Session cookie is accepted only by streaming download routes, never by settings or mutations.
-        if (legacy)
-          res.setHeader('set-cookie', `${DOWNLOAD_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=${prefix}/`);
-        if (req.method === 'GET' && route === '/health') return json(res, 200, {ok: true});
-        if (req.method === 'GET' && route === '/maintenance')
-          return json(res, 200, maintenance.state ?? {ready: false});
-        if (
-          maintenance.active &&
-          req.method === 'GET' &&
-          (route === '/jobs' || route === '/jobs/' + maintenance.state?.job)
-        ) {
-          const job = activeJobs.get(maintenance.state!.job);
-          return json(res, 200, route === '/jobs' ? (job ? [job] : []) : (job ?? {state: 'running'}));
-        }
-        if (ownerStoragePath('/v1' + route) && ['GET', 'POST'].includes(req.method ?? ''))
-          return json(
-            res,
-            200,
-            await python({
-              operation: 'knowledge.api',
-              path: '/v1' + route + url.search,
-              ...(req.method === 'POST' ? {body: await readJson(req, 8 * 1024 * 1024)} : {}),
-            }),
-          );
-        if (req.method === 'GET' && route === '/changes') return live.open(res);
-        if (req.method === 'GET' && route === '/monitoring')
-          return json(res, 200, await python({operation: 'monitoring.status'}));
-        if (req.method === 'GET' && route === '/storage')
-          return json(res, 200, await python({operation: 'storage.report'}));
-        if (req.method === 'GET' && route === '/database-browser')
-          return json(
-            res,
-            200,
-            await python({operation: 'database.browser', request: Object.fromEntries(url.searchParams)}),
-          );
-        if (
-          req.method === 'GET' &&
-          /^\/workflows(?:\/(?:health|metrics|timings(?:\/[a-f0-9]{64})?|[a-f0-9]{64}))?$/.test(route)
-        )
-          return json(res, 200, await python({operation: 'workflow.api', path: '/v1' + route + url.search}));
-        if (req.method === 'POST' && route === '/workflows/retry-failed')
-          return json(
-            res,
-            200,
-            await python({operation: 'workflow.api', path: '/v1/workflows/retry-failed', body: {}}),
-          );
-        if (req.method === 'POST' && /^\/workflows\/[a-f0-9]{64}\/(retry|cancel)$/.test(route))
-          return json(
-            res,
-            200,
-            await python({operation: 'workflow.api', path: '/v1' + route, body: await readJson(req)}),
-          );
-        if (route === '/tools/actions' && req.method === 'GET')
-          return json(res, 200, await python({operation: 'tools.manage'}));
-        if (/^\/tools\/actions\/[a-f0-9]{64}$/.test(route) && req.method === 'GET')
-          return json(res, 200, await python({operation: 'tools.manage', action: route.slice(7)}));
-        if (
-          req.method === 'POST' &&
-          [
-            '/tools/decide',
-            '/tools/telegram-decision',
-            '/tools/resolve',
-            '/tools/telegram-resolve',
-            '/tools/grant',
-            '/tools/revoke',
-          ].includes(route)
-        )
-          return json(
-            res,
-            200,
-            await python({operation: 'tools.manage', action: route.slice(7), request: await readJson(req)}),
-          );
-        if (req.method === 'GET' && route === '/runtime') return json(res, 200, await archive('/v1/runtime'));
-        if (
-          [
-            '/memory/longterm',
-            '/memory/longterm/rebuild',
-            '/memory/longterm/retry-failed',
-            '/memory/longterm/fresh-start',
-            '/memory/spaces',
-            '/memory/shares',
-            '/memory/shares/revoke',
-            '/memory/reviews',
-            '/memory/reviews/control',
-            '/memory/recall',
-            '/memory/preview',
-            '/memory/facts',
-            '/memory/longterm/coverage',
-            '/memory/originals',
-            '/memory/message-facts',
-            '/memory/hidden',
-            '/memory/hidden/restore',
-          ].includes(route) &&
-          ['GET', 'POST'].includes(req.method ?? '')
-        ) {
-          return json(
-            res,
-            200,
-            await python({
-              operation: 'memory.api',
-              path: '/v1' + route + url.search,
-              ...(req.method === 'POST' ? {body: object(await readJson(req))} : {}),
-            }),
-          );
-        }
-        if (req.method === 'POST' && route === '/shutdown') {
-          if (operationBusy) throw new HttpError(409, 'wait_for_active_jobs');
-          json(res, 200, {ok: true});
-          setTimeout(() => process.kill(process.pid, 'SIGTERM'), 100);
-          return;
-        }
-        if (req.method === 'GET' && route === '/scopes')
-          return json(
-            res,
-            200,
-            await archive('/v1/scopes?after=' + encodeURIComponent(url.searchParams.get('after') ?? '')),
-          );
-        if (req.method === 'GET' && route === '/telegram/identities')
-          return json(res, 200, await python({operation: 'telegram.directory'}));
-        // One look at a time, never while services restart: two readers of the bot's messages conflict.
-        if (req.method === 'POST' && route === '/telegram/discover')
-          return exclusive('telegram-discover', async () => {
-            if (operationBusy) throw new HttpError(409, 'wait_for_active_jobs');
-            return json(res, 200, await python({operation: 'telegram.discover'}));
-          });
-        if (req.method === 'GET' && route === '/graph')
-          return json(
-            res,
-            200,
-            await python({
-              operation: 'graph.read',
-              scope: url.searchParams.get('scope') ?? '',
-              after: url.searchParams.get('after') ?? '',
-              focus: url.searchParams.get('focus') ?? '',
-            }),
-          );
-        const artifact = route.match(/^\/artifacts\/([a-f0-9]{64})\/download$/);
-        if (req.method === 'GET' && artifact?.[1]) {
-          await python({operation: 'archive.cache', id: artifact[1]});
-          res.writeHead(200, {
-            'content-type': 'application/octet-stream',
-            'content-disposition':
-              "attachment; filename*=UTF-8''" +
-              encodeURIComponent((url.searchParams.get('name') ?? artifact[1]).split(/[\\/]/).at(-1)!.slice(0, 200)),
-            'cache-control': 'no-store',
-          });
-          createReadStream(join(STATE, 'admin/downloads', artifact[1]))
-            .on('error', () => res.destroy())
-            .pipe(res);
-          return;
-        }
-        const exported = route.match(/^\/exports\/([a-f0-9-]{36})\/download$/);
-        if (req.method === 'GET' && exported?.[1]) {
-          const job = await getJob(exported[1]);
-          if (!['operations.export', 'operations.portable-export'].includes(job.kind) || job.state !== 'complete')
-            throw new HttpError(409, 'export_not_ready');
-          res.writeHead(200, {
-            'content-type': 'application/zip',
-            'content-disposition':
-              'attachment; filename="' +
-              (job.kind === 'operations.portable-export' ? 'nocheh-archive-memory.zip' : 'nocheh-archive.zip') +
-              '"',
-            'cache-control': 'no-store',
-          });
-          createReadStream(join(STATE, 'admin/exports', job.id, 'export.zip'))
-            .on('error', () => res.destroy())
-            .pipe(res);
-          return;
-        }
-        if (req.method === 'GET' && route === '/operations')
-          return json(res, 200, await python({operation: 'operations.list'}));
-        if (req.method === 'POST' && route === '/operations')
-          return exclusive('writer-start', async () => {
-            const body = object(await readJson(req));
-            const action = string(body.action, 30);
-            if (
-              ![
-                'diagnose',
-                'backup',
-                'restore',
-                'restart',
-                'export',
-                'portable-export',
-                'offsite',
-                'offsite-check',
-              ].includes(action)
-            )
-              throw new HttpError(400, 'operation_denied');
-            return json(res, 202, await startOperation(action, body.options ?? {}, tracked.id));
-          });
-        if (route === '/policy' && ['GET', 'POST'].includes(req.method ?? '')) {
-          const body = req.method === 'POST' ? object(await readJson(req)) : {};
-          return json(
-            res,
-            200,
-            await python({
-              operation: 'policy.manage',
-              request: {...body, profile: url.searchParams.get('profile'), job: url.searchParams.get('job')},
-              write: req.method === 'POST',
-            }),
-          );
-        }
-        // Off-site storage from one pasted credential (ADR-0236). It writes the storage settings, so it waits like a save;
-        // the token or key travels only in this POST body and never comes back.
-        if (req.method === 'POST' && route === '/offsite/connect')
-          return exclusive('writer-start', async () => {
-            if (operationBusy) throw new HttpError(409, 'wait_for_active_jobs');
-            return json(res, 200, await python({operation: 'offsite.connect', request: object(await readJson(req))}));
-          });
-        // A Notion sign-in: the owner's own, or a project's named by `project` (ADR-0268). Tokens travel only in POST bodies
-        // and never come back.
-        if (req.method === 'GET' && route === '/connections/notion')
-          return json(
-            res,
-            200,
-            await python({operation: 'notion.status', request: {project: url.searchParams.get('project')}}),
-          );
-        const notion = route.match(/^\/connections\/notion\/(start|finish|token|disconnect)$/);
-        if (req.method === 'POST' && notion)
-          return exclusive('notion-connection', async () =>
-            json(res, 200, await python({operation: 'notion.' + notion[1], request: object(await readJson(req))})),
-          );
-        // The owner's own Gmail (ADR-0272): the OAuth client of the owner's Personal mode project, then a sign-in. The secret
-        // and tokens travel only in POST bodies and never come back.
-        if (req.method === 'GET' && route === '/connections/gmail')
-          return json(res, 200, await python({operation: 'gmail.status'}));
-        const gmail = route.match(/^\/connections\/gmail\/(client|start|finish|disconnect)$/);
-        if (req.method === 'POST' && gmail)
-          return exclusive('gmail-connection', async () =>
-            json(res, 200, await python({operation: 'gmail.' + gmail[1], request: object(await readJson(req))})),
-          );
-        // Nocheh's GitHub App and the copies background jobs may read (ADR-0209, ADR-0210). The app's key never comes
-        // back. A copy, a list and the hourly check run one at a time. Connecting, Remove and Disconnect never wait for
-        // them: github.py's short file lock and the store order them with a copy that is still running.
-        if (req.method === 'GET' && route === '/connections/github')
-          return json(res, 200, await python({operation: 'github.status'}));
-        const github = route.match(/^\/connections\/github\/(start|finish|copy|list|remove|disconnect)$/)?.[1];
-        if (req.method === 'POST' && github) {
-          if (operationBusy) throw new HttpError(409, 'wait_for_active_jobs');
-          const run = async () =>
-            json(res, 200, await python({operation: 'github.' + github, request: object(await readJson(req))}));
-          return ['start', 'finish', 'remove', 'disconnect'].includes(github)
-            ? run()
-            : exclusive('github-connection', run);
-        }
-        // The mini app's password. The owner sets it here; the mini app service signs in and
-        // checks its sessions through the same routes.
-        // The owner's password, from a signed-in browser only.
-        if (caller !== 'phone' && route === '/owner-lock' && req.method === 'GET')
-          return json(res, 200, await lock.status(sessions.token(req)));
-        if (caller === 'browser' && route === '/owner-lock/password' && req.method === 'POST')
-          return passwordAnswer(res, async () => {
-            const body = object(await readJson(req, 4096));
-            const {token: session} = await lock.changePassword(body.current, body.password);
-            // The new session has a new CSRF value; the page keeps using it.
-            sessions.forget();
-            res.setHeader('set-cookie', sessionCookie(session));
-            return {...(await lock.status(session)), csrf: csrfFor(session)};
-          });
-        // `./bin/nocheh dashboard --clear-pause`, with the installation token, ends every sign-in pause.
-        if (caller === 'token' && route === '/owner-lock/clear-pause' && req.method === 'POST')
-          return json(res, 200, await lock.clearPauses());
-        if (caller === 'browser' && route === '/owner-lock/sign-out-others' && req.method === 'POST') {
-          await lock.signOutOthers(sessions.token(req));
-          sessions.forget();
-          return json(res, 200, await lock.status(sessions.token(req)));
-        }
-        if (caller === 'browser' && route === '/logout' && req.method === 'POST') {
-          await lock.signOut(sessions.token(req));
-          sessions.forget();
-          res.setHeader('set-cookie', sessionCookie('', 0));
-          return json(res, 200, {ok: true});
-        }
-        if (req.method === 'GET' && route === '/settings') {
-          // A running apply is named so a page opened or reloaded meanwhile follows it instead of offering Apply again.
-          const applying = [...activeJobs.values()].find(job => job.kind === 'settings.apply');
-          // A phone reads settings only to know which chat is the owner's own.
-          if (caller === 'phone')
-            return json(res, 200, {
-              fields: ((object(await python({operation: 'settings.view'})).fields ?? []) as {key: string}[]).filter(
-                field => field.key === 'TELEGRAM_OWNER_ID',
-              ),
-            });
-          return json(res, 200, {
-            ...object(await python({operation: 'settings.view'})),
-            applying: applying
-              ? {id: applying.id, step: applying.step ?? 'starting', started_at: applying.created_at}
-              : null,
-          });
-        }
-        // POST so a key being typed travels in the body, never in a URL or access log.
-        if (req.method === 'POST' && route === '/settings/provider-models')
-          return json(
-            res,
-            200,
-            await python({operation: 'settings.provider_models', request: object(await readJson(req))}),
-          );
-        if (req.method === 'GET' && route === '/honcho/status')
-          return json(res, 200, await python({operation: 'honcho.status'}));
-        if (req.method === 'GET' && route === '/usage')
-          return json(
-            res,
-            200,
-            await python({operation: 'usage.view', days: Number(url.searchParams.get('days') ?? 30)}),
-          );
-        if (req.method === 'GET' && route === '/honcho/budget')
-          return json(res, 200, await python({operation: 'honcho.budget'}));
-        if (req.method === 'POST' && route === '/honcho/budget')
-          return exclusive('honcho-budget', async () =>
-            json(res, 200, await python({operation: 'honcho.budget.update', request: object(await readJson(req))})),
-          );
-        if (req.method === 'POST' && route === '/honcho/read')
-          return json(res, 200, await python({operation: 'honcho.read', args: object(await readJson(req)).args}));
-        if (req.method === 'GET' && route === '/memory/profiles')
-          return json(res, 200, await python({operation: 'agent.manage', request: {action: 'profiles'}}));
-        // Every chat's schedules, and Pause, Resume, Run now or Delete on one (ADR-0266).
-        if (req.method === 'GET' && route === '/schedules')
-          return json(
-            res,
-            200,
-            await python({operation: 'agent.manage', request: {action: 'schedules', operation: 'list'}}),
-          );
-        if (req.method === 'GET' && route === '/schedules/runs') {
-          const query = new URLSearchParams({
-            scope: url.searchParams.get('scope') ?? '',
-            job_id: url.searchParams.get('job_id') ?? '',
-          });
-          return json(res, 200, await archive('/v1/schedules/runs?' + query.toString()));
-        }
-        if (req.method === 'POST' && route === '/schedules') {
-          const body = object(await readJson(req, 4096));
-          return json(
-            res,
-            200,
-            await python({
-              operation: 'agent.manage',
-              request: {
-                action: 'schedules',
-                operation: body.operation,
-                profile: body.profile,
-                job_id: body.job_id,
-                request_id: body.request_id,
-              },
-            }),
-          );
-        }
-        if (req.method === 'GET' && ['/memory', '/memory/preferences'].includes(route)) {
-          return json(
-            res,
-            200,
-            await python({
-              operation: 'agent.manage',
-              request: {
-                action: route.endsWith('preferences') ? 'preferences' : 'memory',
-                scope: url.searchParams.get('scope'),
-                profile: url.searchParams.get('profile'),
-                session: url.searchParams.get('session'),
-                offset: Number(url.searchParams.get('offset') ?? 0),
-                ...(url.searchParams.has('limit') ? {limit: Number(url.searchParams.get('limit'))} : {}),
-              },
-            }),
-          );
-        }
-        if (req.method === 'POST' && route === '/memory/preferences')
-          return exclusive('writer-start', async () => {
-            if (operationBusy) throw new HttpError(409, 'wait_for_active_jobs');
-            const body = object(await readJson(req));
-            return json(
-              res,
-              200,
-              await python({
-                operation: 'agent.manage',
-                request: {action: 'preferences', scope: body.scope, changes: body.changes, revision: body.revision},
-              }),
-            );
-          });
-        // Role (SOUL.md) and skills of one chat's native profile, `default` for the owner's private chat, or `default:groups` for every group.
-        if (req.method === 'GET' && route === '/memory/persona')
-          return json(
-            res,
-            200,
-            await python({
-              operation: 'agent.manage',
-              request: {action: 'persona', scope: url.searchParams.get('scope')},
-            }),
-          );
-        if (req.method === 'POST' && route === '/memory/persona')
-          return exclusive('writer-start', async () => {
-            if (operationBusy) throw new HttpError(409, 'wait_for_active_jobs');
-            const body = object(await readJson(req, 1024 * 1024));
-            return json(
-              res,
-              200,
-              await python({
-                operation: 'agent.manage',
-                request: {
-                  action: 'persona',
-                  scope: body.scope,
-                  role: body.role,
-                  skills: body.skills,
-                  revision: body.revision,
-                },
-              }),
-            );
-          });
-        if (req.method === 'POST' && route === '/settings')
-          return exclusive('writer-start', async () => {
-            if (operationBusy) throw new HttpError(409, 'wait_for_active_jobs');
-            const body = object(await readJson(req));
-            return json(
-              res,
-              200,
-              await python({
-                operation: 'settings.save',
-                changes: body.changes,
-                revision: body.revision,
-                rebuild_memory: body.rebuild_memory === true,
-              }),
-            );
-          });
-        if (req.method === 'POST' && route === '/settings/apply')
-          return exclusive('writer-start', async () => {
-            if (operationBusy || active.size) throw new HttpError(409, 'wait_for_active_jobs');
-            operationBusy = true;
-            try {
-              const job = await newJob('settings.apply');
-              job.state = 'running';
-              await putJob(job);
-              launch(job, {operation: 'settings.apply'});
-              return json(res, 202, job);
-            } catch (error) {
-              operationBusy = false;
-              throw error;
-            }
-          });
-        if (req.method === 'GET' && route === '/status') return json(res, 200, await archive('/v1/status'));
-        if (
-          (req.method === 'GET' || req.method === 'POST') &&
-          (route === '/data' || /^\/data\/[a-f0-9]{64}\/guarded(?:\/history)?$/.test(route))
-        ) {
-          return json(
-            res,
-            200,
-            await python({
-              operation: 'archive.projections',
-              path: '/v1' + route + url.search,
-              ...(req.method === 'POST' ? {body: await readJson(req, 8 * 1024 * 1024)} : {}),
-            }),
-          );
-        }
-        if (req.method === 'GET' && route === '/search')
-          return json(res, 200, await archive('/v1/search?' + url.searchParams.toString()));
-        if (req.method === 'GET' && route.startsWith('/events/')) return json(res, 200, await archive('/v1' + route));
-        if (req.method === 'GET' && route === '/jobs') return json(res, 200, await listJobs());
-        if (req.method === 'POST' && route === '/jobs') return json(res, 201, await newJob('import'));
-        const match = route.match(/^\/jobs\/([^/]+)(?:\/(upload|preview|start|cancel))?$/);
-        if (match?.[1]) {
-          const id = match[1],
-            action = match[2];
-          if (req.method === 'GET' && !action) return json(res, 200, await getJob(id));
-          return exclusive(id, async () => {
-            const job = await getJob(id);
-            if (req.method === 'PUT' && action === 'upload')
-              return json(
-                res,
-                200,
-                await upload(
-                  req,
-                  job,
-                  url.searchParams.get('name') ?? '',
-                  Number(url.searchParams.get('offset') ?? 0),
-                  url.searchParams.get('more') === '1',
-                ),
-              );
-            if (req.method === 'POST' && action === 'preview') {
-              if (job.state !== 'uploading' && job.state !== 'preview_failed')
-                throw new HttpError(409, 'preview_closed');
-              // A preview that can't read the upload says so instead of looking unfinished.
-              try {
-                job.preview = object(await python({operation: 'import.inspect', job: id}));
-              } catch (error) {
-                job.state = 'preview_failed';
-                job.error = error instanceof HttpError ? error.message : 'operation_interrupted';
-                await putJob(job);
-                throw error;
-              }
-              job.state = 'ready';
-              delete job.error;
-              await putJob(job);
-              return json(res, 200, job);
-            }
-            if (req.method === 'POST' && action === 'start')
-              return exclusive('writer-start', async () => {
-                if (operationBusy) throw new HttpError(409, 'wait_for_active_jobs');
-                if (
-                  !job.preview ||
-                  !['ready', 'failed', 'cancelled', 'interrupted'].includes(job.state) ||
-                  active.has(id)
-                )
-                  throw new HttpError(409, 'job_not_ready');
-                const body = object(await readJson(req));
-                const mapping = object(body.mapping ?? job.mapping ?? {});
-                if (body.review_approved !== undefined && typeof body.review_approved !== 'boolean')
-                  throw new HttpError(400, 'invalid_review_approval');
-                if (
-                  job.review_approved !== undefined &&
-                  body.review_approved !== undefined &&
-                  body.review_approved !== job.review_approved
-                )
-                  throw new HttpError(409, 'resume_review_approval_cannot_change');
-                job.review_approved = job.review_approved ?? body.review_approved === true;
-                if (job.mapping && JSON.stringify(mapping) !== JSON.stringify(job.mapping))
-                  throw new HttpError(409, 'resume_scope_cannot_change');
-                job.mapping = mapping;
-                job.workflow = 'pending';
-                delete job.error;
-                await putJob(job);
-                const chats = (Array.isArray(job.preview.chats) ? job.preview.chats : []).map(chat => object(chat));
-                const confirmed = object(
-                  await python({
-                    operation: 'workflow.api',
-                    path: '/v1/workflows/imports/confirm',
-                    body: {
-                      id,
-                      configuration_hash: importConfiguration(job.preview, mapping, job.review_approved),
-                      review_approved: job.review_approved,
-                      total: job.preview.messages,
-                      completed: job.completed,
-                      duplicates: job.duplicates,
-                      resume: ['failed', 'cancelled', 'interrupted'].includes(job.state),
-                      label: chats
-                        .map(chat => String(chat.name ?? ''))
-                        .filter(Boolean)
-                        .join(', ')
-                        .slice(0, 300),
-                      scopes: chats.map(chat => String(mapping[String(chat.id)] ?? chat.scope ?? '')).filter(Boolean),
-                    },
-                  }),
-                );
-                if (confirmed.owned === true) {
-                  job.workflow = 'inngest';
-                  job.state = 'running';
-                  await putJob(job);
-                  return json(res, 202, await getJob(id));
-                }
-                throw new HttpError(503, 'import_admission_unavailable');
-              });
-            if (req.method === 'POST' && action === 'cancel') {
-              if (job.kind !== 'import' || job.state !== 'running') throw new HttpError(409, 'job_not_cancellable');
-              if (job.workflow) {
-                await python({operation: 'workflow.api', path: '/v1/workflows/imports/cancel', body: {id}});
-                return json(res, 200, await getJob(id));
-              }
-              const running = activeJobs.get(id);
-              if (running) running.state = 'cancelled';
-              active.get(id)?.kill('SIGTERM');
-              job.state = 'cancelled';
-              await putJob(job);
-              return json(res, 200, job);
-            }
-            throw new HttpError(404, 'not_found');
-          });
-        }
-        throw new HttpError(404, 'not_found');
-      }
-      res.setHeader('x-frame-options', 'DENY');
-      res.setHeader('referrer-policy', 'no-referrer');
-      res.setHeader('x-content-type-options', 'nosniff');
-      if (req.method === 'GET' && (path === '/nocheh' || path === '/nocheh/')) {
-        res.writeHead(308, {location: '/' + url.search});
-        res.end();
-        return;
-      }
-      if (req.method === 'GET' && path === '/hermes') {
-        res.writeHead(308, {location: '/hermes/' + url.search});
-        res.end();
-        return;
-      }
-      // GitHub's way back after it created Nocheh's app or installed it; the page finishes it (ADR-0210).
-      if (req.method === 'GET' && path === '/connect/github') {
-        res.writeHead(302, {location: githubReturn(url.searchParams), 'cache-control': 'no-store'});
-        res.end();
-        return;
-      }
-      if (process.env.NOCHEH_DEV_WATCH === '1' && req.method === 'GET' && path === '/__dev/revision') {
-        const revision = await readFile(join(ROOT, 'dashboard/dist/.dev-revision'), 'utf8').catch(() => '');
-        res.writeHead(200, {'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store'});
-        res.end(revision);
-        return;
-      }
-      if (req.method === 'GET' && path === '/') {
-        // Without a signed-in session the same page opens on its sign-in screen, with no CSRF value.
-        const session = await sessions.session(req);
-        const bootstrap =
-          (WORKSPACE ? `window.__NOCHEH_WORKSPACE__=${JSON.stringify(WORKSPACE)};` : '') +
-          (session
-            ? `window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`
-            : `window.__NOCHEH_LOGIN__=${JSON.stringify((await lock.status()).password_set ? 'sign_in' : 'create')};`);
-        const reload =
-          process.env.NOCHEH_DEV_WATCH === '1'
-            ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision){if(window.__nochehUnsaved)return;location.reload()}nochehRevision=next}catch{}},1000)</script>`
-            : '';
-        const html = (await readFile(join(ROOT, 'dashboard/dist/index.html'), 'utf8'))
-          .replace('/*NOCHEH_BOOTSTRAP*/', bootstrap)
-          .replace('</head>', reload + '</head>');
-        res.writeHead(200, {'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store'});
-        res.end(html);
-        return;
-      }
-      const asset = path.match(/^\/assets\/(app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/);
-      if (req.method === 'GET' && asset?.[1]) {
-        res.writeHead(200, {
-          'content-type': asset[1].endsWith('.css') ? 'text/css' : 'text/javascript',
-          'cache-control': 'no-cache',
-        });
-        createReadStream(join(ROOT, 'dashboard/dist', asset[1]))
-          .on('error', () => res.destroy())
-          .pipe(res);
-        return;
-      }
-      if (path.startsWith('/inngest/')) {
-        const session = await sessions.authorize(req, req.method !== 'GET');
-        await proxyOwnerInspection(
-          req,
-          res,
-          Number(archiveConnection.port),
-          string(archiveConnection.token),
-          session.csrf,
-          String(archiveConnection.host ?? '127.0.0.1'),
-        );
-        return;
-      }
-      if (path.startsWith('/hermes/')) {
-        // The dashboard chat page is off until Nocheh has its own chat page; Telegram only. Whoever asks gets this page
-        // and nothing reaches Hermes.
-        if (path === '/hermes/chat' || path.startsWith('/hermes/chat/')) {
-          res.writeHead(404, {
-            'content-type': 'text/html; charset=utf-8',
-            'cache-control': 'no-store',
-            'content-security-policy':
-              "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-          });
-          res.end(
-            '<!doctype html><html lang="en"><title>Chat is off</title><body><h1>Chat is off</h1><p>The chat page is switched off for now. Talk to Nocheh in Telegram.</p><a href="/">Back to Nocheh</a></body></html>',
-          );
-          return;
-        }
-        const page =
-          req.method === 'GET' &&
-          !path.startsWith('/hermes/api/') &&
-          !path.startsWith('/hermes/assets/') &&
-          !path.startsWith('/hermes/dashboard-plugins/');
-        const session = page
-          ? await sessions.session(req)
-          : await sessions.authorize(req, !['GET', 'HEAD'].includes(req.method ?? ''));
-        // A signed-out browser signs in on the dashboard first.
-        if (!session) {
-          res.writeHead(303, {location: '/'});
-          res.end();
-          return;
-        }
-        const connection = object(await python({operation: 'native.connection'}));
-        proxyNative(
-          req,
-          res,
-          Number(connection.port),
-          string(connection.token),
-          session.csrf,
-          String(connection.host ?? '127.0.0.1'),
-          page,
-        );
-        return;
       }
       throw new HttpError(404, 'not_found');
-    })()
-      .catch(error => {
-        if (!res.headersSent)
-          json(res, error instanceof HttpError ? error.status : 503, {
-            error: error instanceof HttpError ? error.code : 'management_unavailable',
-          });
-        else res.end();
-      })
-      .finally(async () => {
-        await responseDone;
-        tracked.finish();
-      });
-  });
+    }
+    res.setHeader('x-frame-options','DENY');res.setHeader('referrer-policy','no-referrer');res.setHeader('x-content-type-options','nosniff');
+    if(req.method==='GET'&&(path==='/nocheh'||path==='/nocheh/')){res.writeHead(308,{location:'/'+url.search});res.end();return;}
+    if(req.method==='GET'&&path==='/hermes'){res.writeHead(308,{location:'/hermes/'+url.search});res.end();return;}
+    // GitHub's way back after it created Nocheh's app or installed it; the page finishes it (ADR-0210).
+    if(req.method==='GET'&&path==='/connect/github'){res.writeHead(302,{location:githubReturn(url.searchParams),'cache-control':'no-store'});res.end();return;}
+    if(process.env.NOCHEH_DEV_WATCH==='1'&&req.method==='GET'&&path==='/__dev/revision') {
+      const revision=await readFile(join(ROOT,'dashboard/dist/.dev-revision'),'utf8').catch(()=>'');
+      res.writeHead(200,{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'});res.end(revision);return;
+    }
+    if(req.method==='GET'&&path==='/') {
+      // Without a signed-in session the same page opens on its sign-in screen, with no CSRF value.
+      const session=await sessions.session(req);
+      const bootstrap=(WORKSPACE?`window.__NOCHEH_WORKSPACE__=${JSON.stringify(WORKSPACE)};`:'')+(session?`window.__NOCHEH_CSRF__=${JSON.stringify(session.csrf)};`
+        :`window.__NOCHEH_LOGIN__=${JSON.stringify((await lock.status()).password_set?'sign_in':'create')};`);
+      const reload=process.env.NOCHEH_DEV_WATCH==='1' ? `<script>let nochehRevision;setInterval(async()=>{try{const next=await(await fetch('/__dev/revision',{cache:'no-store'})).text();if(nochehRevision&&next&&next!==nochehRevision){if(window.__nochehUnsaved)return;location.reload()}nochehRevision=next}catch{}},1000)</script>` : '';
+      const html=(await readFile(join(ROOT,'dashboard/dist/index.html'),'utf8')).replace('/*NOCHEH_BOOTSTRAP*/',bootstrap).replace('</head>',reload+'</head>');
+      res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});res.end(html);return;
+    }
+    const asset=path.match(/^\/assets\/(app\.js|style\.css|chunks\/[a-zA-Z0-9_-]+\.js)$/);
+    if(req.method==='GET'&&asset?.[1]) {
+      res.writeHead(200,{'content-type':asset[1].endsWith('.css')?'text/css':'text/javascript','cache-control':'no-cache'});
+      createReadStream(join(ROOT,'dashboard/dist',asset[1])).on('error',()=>res.destroy()).pipe(res);return;
+    }
+    if(path.startsWith('/inngest/')){
+      const session=await sessions.authorize(req,req.method!=='GET');
+      await proxyOwnerInspection(req,res,Number(archiveConnection.port),string(archiveConnection.token),session.csrf,String(archiveConnection.host??'127.0.0.1'));return;
+    }
+    if(path.startsWith('/hermes/')) {
+      // The dashboard chat page is off until Nocheh has its own chat page; Telegram only. Whoever asks gets this page
+      // and nothing reaches Hermes.
+      if(path==='/hermes/chat'||path.startsWith('/hermes/chat/')) {
+        res.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',
+          'content-security-policy':"default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"});
+        res.end('<!doctype html><html lang="en"><title>Chat is off</title><body><h1>Chat is off</h1><p>The chat page is switched off for now. Talk to Nocheh in Telegram.</p><a href="/">Back to Nocheh</a></body></html>');return;
+      }
+      const page=req.method==='GET'&&!path.startsWith('/hermes/api/')&&!path.startsWith('/hermes/assets/')&&!path.startsWith('/hermes/dashboard-plugins/');
+      const session=page?await sessions.session(req):await sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
+      // A signed-out browser signs in on the dashboard first.
+      if(!session){res.writeHead(303,{location:'/'});res.end();return;}
+      const connection=object(await python({operation:'native.connection'}));
+      proxyNative(req,res,Number(connection.port),string(connection.token),session.csrf,String(connection.host??'127.0.0.1'),page);return;
+    }
+    throw new HttpError(404,'not_found');
+  })().catch(error => { if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503,
+    {error: error instanceof HttpError ? error.code : 'management_unavailable'}); else res.end(); }).finally(async()=>{await responseDone;tracked.finish();}); });
   server.requestTimeout = 120000;
   // The dashboard chat page is off, and with it every live connection to Hermes: each upgrade is refused. The listener
   // stays so an upgrade never reaches the request handler.
-  server.on('upgrade', (_req, socket) => {
-    socket.on('error', () => socket.destroy());
-    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
-  });
-  server.listen(PORT, CONTAINER ? '0.0.0.0' : '127.0.0.1', () =>
-    console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/`),
-  );
-  let stopping = false;
+  server.on('upgrade',(_req,socket)=>{socket.on('error',()=>socket.destroy());socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');});
+  server.listen(PORT, CONTAINER?'0.0.0.0':'127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/`));
+  let stopping=false;
   // The daily automatic backup goes through the same path as Back up now. A busy dashboard
   // waits for the next check; the schedule records each start, so a failure is not retried
   // until the next day.
-  const automaticBackup = async () => {
-    const blocked = () => operationBlocked({busy: operationBusy, active: active.size, locked});
-    if (stopping || maintenance.active || locked.has('writer-start') || blocked()) return;
-    if (object(await python({operation: 'backups.due'})).due === true) {
-      await exclusive('writer-start', async () => {
-        if (!stopping && !blocked()) await startOperation('backup', {}, Symbol('schedule'), true);
-      });
+  const automaticBackup=async()=>{
+    const blocked=()=>operationBlocked({busy:operationBusy,active:active.size,locked});
+    if(stopping||maintenance.active||locked.has('writer-start')||blocked())return;
+    if(object(await python({operation:'backups.due'})).due===true){
+      await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('backup',{},Symbol('schedule'),true);});
       return;
     }
     // A finished backup that has no off-site copy yet gets one at a later check (ADR-0229). Sending reads
     // the finished folder only, so writers keep running; each backup is tried once by the schedule.
-    if (object(await python({operation: 'offsite.due'})).due !== true) return;
-    await exclusive('writer-start', async () => {
-      if (!stopping && !blocked()) await startOperation('offsite', {}, Symbol('schedule'), true);
-    });
+    if(object(await python({operation:'offsite.due'})).due!==true)return;
+    await exclusive('writer-start',async()=>{if(!stopping&&!blocked())await startOperation('offsite',{},Symbol('schedule'),true);});
   };
-  const schedule = setInterval(() => void automaticBackup().catch(() => {}), 5 * 60 * 1000);
-  schedule.unref();
+  const schedule=setInterval(()=>void automaticBackup().catch(()=>{}),5*60*1000);schedule.unref();
   // Every two minutes, new or worse problems go to the owner's private chat. Backups, restores
   // and Apply restart services on purpose, so the check waits until they finish.
-  let checkingProblems = false;
-  const problemCheck = setInterval(
-    () => {
-      if (stopping || checkingProblems || operationBusy || maintenance.active) return;
-      checkingProblems = true;
-      void python({operation: 'problems.check'})
-        .catch(() => {})
-        .finally(() => {
-          checkingProblems = false;
-        });
-    },
-    2 * 60 * 1000,
-  );
-  problemCheck.unref();
+  let checkingProblems=false;
+  const problemCheck=setInterval(()=>{
+    if(stopping||checkingProblems||operationBusy||maintenance.active)return;
+    checkingProblems=true;
+    void python({operation:'problems.check'}).catch(()=>{}).finally(()=>{checkingProblems=false;});
+  },2*60*1000);problemCheck.unref();
   // Every hour, each GitHub copy is copied again when its branch moved (owner decision D1). A key, copy or check still
   // running, a backup, a restore or an apply skips the hour.
-  const githubCheck = setInterval(
-    () => {
-      if (stopping || operationBusy || maintenance.active || locked.has('github-connection')) return;
-      void exclusive('github-connection', () => python({operation: 'github.refresh'})).catch(() => {});
-    },
-    60 * 60 * 1000,
-  );
-  githubCheck.unref();
+  const githubCheck=setInterval(()=>{
+    if(stopping||operationBusy||maintenance.active||locked.has('github-connection'))return;
+    void exclusive('github-connection',()=>python({operation:'github.refresh'})).catch(()=>{});
+  },60*60*1000);githubCheck.unref();
   const stop = () => {
-    if (stopping) return;
-    stopping = true;
-    clearInterval(schedule);
-    clearInterval(problemCheck);
-    clearInterval(githubCheck);
+    if(stopping)return;stopping=true;clearInterval(schedule);clearInterval(problemCheck);clearInterval(githubCheck);
     live.closeAll();
-    for (const [id, child] of active) if (activeJobs.get(id)?.kind === 'import') child.kill('SIGTERM');
+    for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
     // A partial request or stalled stream must not hold a reload open forever.
     // Closing its transport does not cancel admitted owner writes or lifecycle jobs.
-    const admitted = maintenance.drain();
-    const drainConnections = setTimeout(() => server.closeAllConnections(), 1000);
-    drainConnections.unref();
-    server.close(() => {
-      clearTimeout(drainConnections);
-      void Promise.allSettled([admitted, ...runningTasks, scriptReports.save()]).then(() => process.exit(0));
-    });
+    const admitted=maintenance.drain();
+    const drainConnections=setTimeout(()=>server.closeAllConnections(),1000);drainConnections.unref();
+    server.close(()=>{clearTimeout(drainConnections);void Promise.allSettled([admitted,...runningTasks,scriptReports.save()]).then(()=>process.exit(0));});
     server.closeIdleConnections();
   };
-  process.on('SIGTERM', stop);
-  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop); process.on('SIGINT', stop);
   return server;
 }
 
