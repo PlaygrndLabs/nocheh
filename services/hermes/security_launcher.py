@@ -606,6 +606,8 @@ class Handler(BaseHTTPRequestHandler):
             from .security_transport import scoped_transport
             body.update(scoped_transport(credential,body['api_mode']))
             body['model_context_length']=binding['model_context_length']
+            # The backup reply model comes from the binding only, so a turn cannot name one the broker refuses.
+            body['backup_model']=binding.get('backup_model') or None
             box=None
             if boxed:
                 # Without its box the turn stops with job_box_unavailable before its agent runs.

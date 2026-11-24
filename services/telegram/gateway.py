@@ -23,6 +23,7 @@ from . import settings
 from .capture import Capture, DISPATCH_KEY, OUTBOUND_CHECK, SEND_ANSWERS, SEND_CLASS
 from .checks import (EYES, NOT_TRANSMITTED, THUMBS_DOWN, THUMBS_UP, answer_button, approval_links, check_action_policy, check_delivery_policy, check_leave_policy, check_notice_policy,
                      SCHEDULE_CALLBACK, delivery_failure, leave_check, no_preview, notice_buttons, outbound_check, reaction_check, render_reply_citations, verify_turn_credential)
+from .quiet import QuietHours
 from .sends import GONE, route_class
 
 # Telegram shows "typing…" for about five seconds per chat action, so presence renews it a little sooner.
@@ -80,6 +81,7 @@ class Presence:
 class TelegramService:
     def __init__(self, policy, token, spool: Path, state: Path, on_fatal=None, bot_factory=None):
         self.policy, self.token, self.spool, self.state, self.on_fatal = policy, token, Path(spool), Path(state), on_fatal
+        self.quiet = QuietHours()
         # Tests pass a factory that builds the bot against the fake Telegram.
         self.bot_factory = bot_factory
         self.bot_id = token.split(':', 1)[0] if token else None
@@ -366,7 +368,9 @@ class TelegramService:
             # Stop typing before the reply: a status sent after it would show again.
             await self._stop_typing(body['id'])
             # A follow-up arrives when nobody watches the typing, so it alerts; an ordinary reply is silent.
-            if await self.sender.send(chat, text, reply_to=int(message), topic=topic, notify=body.get('notify', False), markup=markup):
+            # Quiet hours: a message that would ring goes silently instead (ADR-0297).
+            notify = body.get('notify', False) and not await self.silent(chat, SEND_CLASS.get(None))
+            if await self.sender.send(chat, text, reply_to=int(message), topic=topic, notify=notify, markup=markup):
                 result = {'state': 'done'}
             elif (failure := delivery_failure(requests)) is not None:
                 result = {'state': 'cancelled'} if failure['state'] == 'failed' and cancelled.is_set() else failure
@@ -402,6 +406,11 @@ class TelegramService:
             return json.loads(path.read_bytes()) if path.exists() else {'state': 'ambiguous' if (self.receipts / ('action-' + body['id'] + '.intent')).exists() else 'not_found'}
         return self.call(self.send_action(body))
 
+    async def silent(self, chat, send_class):
+        """Quiet hours (ADR-0297): whether a message of this class to this Telegram chat goes without sound now."""
+        try: return await asyncio.to_thread(self.quiet.silent, chat, send_class)
+        except Exception: return False
+
     async def send_action(self, body):
         # Storage names the destination by its chat id and gives the Telegram chat and topic it is at now (ADR-0252); the
         # app checks both again before the send (check_action_policy).
@@ -428,7 +437,8 @@ class TelegramService:
             check = OUTBOUND_CHECK.set(outbound_check(chat_id, topic, lambda: check_action_policy(body)))
             try:
                 # Any failure is reported as possibly sent: the caller reconciles rather than sending twice.
-                result = {'state': 'done' if await self.sender.send(chat_id, body['text'], topic=topic, notify=True) else 'ambiguous'}
+                notify = not await self.silent(chat_id, SEND_CLASS.get(None))
+                result = {'state': 'done' if await self.sender.send(chat_id, body['text'], topic=topic, notify=notify) else 'ambiguous'}
             except Exception:
                 result = {'state': 'ambiguous'}
             finally:
@@ -493,7 +503,7 @@ class TelegramService:
                     # Links are entities over plain text, so no default formatting applies.
                     sent=await bot.send_message(int(chat),text,message_thread_id=int(topic) if topic else None,reply_markup=keyboard,
                                                 entities=entities,parse_mode=None,reply_to_message_id=int(reply) if reply else None,allow_sending_without_reply=True,
-                                                link_preview_options=no_preview())
+                                                link_preview_options=no_preview(),**({'disable_notification':True} if await self.silent(chat,'card') else {}))
                     result={'state':'done','chat_id':chat,'message_id':str(sent.message_id)}
                 except Exception:result={'state':'ambiguous'}
                 finally:OUTBOUND_CHECK.reset(check);SEND_CLASS.reset(kind);DISPATCH_KEY.reset(token)
@@ -678,12 +688,13 @@ class TelegramService:
             sent=None
             try:
                 from telegram.error import BadRequest
-                try:sent=await self.bot.send_message(int(chat),text,parse_mode=None,reply_markup=markup,link_preview_options=no_preview())
+                quiet={'disable_notification':True} if await self.silent(chat,SEND_CLASS.get(None)) else {}
+                try:sent=await self.bot.send_message(int(chat),text,parse_mode=None,reply_markup=markup,link_preview_options=no_preview(),**quiet)
                 except BadRequest:
                     # Telegram refused a button, such as a dashboard address it does not accept;
                     # nothing was sent, so the notice goes without buttons.
                     if markup is None:raise
-                    sent=await self.bot.send_message(int(chat),text,parse_mode=None,link_preview_options=no_preview())
+                    sent=await self.bot.send_message(int(chat),text,parse_mode=None,link_preview_options=no_preview(),**quiet)
                 result={'state':'done'}
             except Exception:result={'state':'ambiguous'}
             finally:OUTBOUND_CHECK.reset(check);SEND_CLASS.reset(kind);DISPATCH_KEY.reset(token)

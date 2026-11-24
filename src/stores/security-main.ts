@@ -20,7 +20,7 @@ const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:co
   policy:servedPolicy(()=>config.assistant),runtime:call,agent:agentWithPrompts(agent(config),stores.control),memoryEngine:memoryEngine(config)});
 // The security service reads chats as the app records them (ADR-0252); a newer guard epoch reloads them.
 await startChatDirectory(stores.control,()=>config.assistant);
-const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,agentKey:config.agentKey,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',
+const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,agentKey:config.agentKey,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',backupModel:process.env.NOCHEH_BACKUP_MODEL??'',
   archive:process.env.ARCHIVE_URL??'http://nocheh-app:8780',hermes:config.hermesUrl,prepare:storageGuardService(services),
   assertActive:()=>assertStorageActive(config.dataDir),assertReady:async()=>{await assertGuardConfiguration(services.guards,config.guardMode);await services.configuration.assert(config.assistant);},health:()=>storageHealth(stores)});
 const timer=setInterval(()=>{if(!restoredInactive(config.dataDir))void storageHeartbeat(stores,'nocheh-security').catch(()=>{});},5000);timer.unref();

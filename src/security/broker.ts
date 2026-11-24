@@ -34,7 +34,7 @@ export interface BrokerStorage {
 }
 /** `agentKey` is the agent login (ADR-0295): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
  * no agent login is accepted and no transport call is sent. */
-export interface BrokerOptions {pool:pg.Pool; token:string; agentKey?:string; archive:string; prepare:(principal:Reader|AgentLogin,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
+export interface BrokerOptions {pool:pg.Pool; token:string; agentKey?:string; archive:string; prepare:(principal:Reader|AgentLogin,input:unknown)=>Promise<any>; hermes:string; model:string; backupModel?:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
 /** Why Nocheh did not save a schedule a turn set (ADR-0290); any other refusal stays opaque. */
 export const scheduleErrors=new Set(['schedule_turn_required','schedule_turn_not_allowed','schedule_limit_reached','schedule_cron_unsupported',
   'invalid_schedule_definition','invalid_schedule_prompt','invalid_schedule_preference','profile_scope_denied','schedule_sequence_conflict',
@@ -130,6 +130,18 @@ async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
   if(response.body)for await(const part of response.body){size+=part.length;if(size>max)throw new HttpError(413,'security_response_limit');chunks.push(Buffer.from(part));}
   try{return JSON.parse(Buffer.concat(chunks).toString());}catch{throw new HttpError(503,'invalid_security_upstream');}
 }
+/** The month the monthly spending limit was reached (ADR-0298), read at most every 15 seconds; null when nothing is paused. */
+export function spendingPause(pool:pg.Pool,now=()=>Date.now()):()=>Promise<boolean> {
+  let read=0,month:string|null=null;
+  return async()=>{
+    if(now()-read>15_000){
+      try{month=(await pool.query<{month:string}>('SELECT month FROM spending_pause WHERE singleton')).rows[0]?.month??null;read=now();}
+      // A store that cannot answer keeps the last answer; the next call asks again.
+      catch{}
+    }
+    return month!==null&&month===new Date(now()).toISOString().slice(0,7);
+  };
+}
 export function brokerServer(options:BrokerOptions) {
   const call=options.fetch??fetch;
   // A long-term recall may wait on the archive for up to ten minutes, longer than Node's own fetch waits.
@@ -141,6 +153,7 @@ export function brokerServer(options:BrokerOptions) {
   // Hermes takes the agent login, never the master key (ADR-0295); without one nothing is sent.
   const hermesLogin=()=>{if(!options.agentKey)throw new HttpError(503,'agent_key_unconfigured');return 'Bearer '+options.agentKey;};
   // A job's run goes on across reaction and learning epochs; each of its checks waits out a publication still pending (ADR-0208).
+  const paused=spendingPause(options.pool);
   const assertCurrent=(principal:Reader)=>afterPending(jobRun(principal),async()=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal));
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
     if(res.headersSent){res.destroy();return;}
@@ -215,7 +228,7 @@ export function brokerServer(options:BrokerOptions) {
           !!(await options.pool.query(`SELECT 1 FROM chats c JOIN chat_accounts a ON a.id=c.account_id JOIN members m ON m.id=a.member_id
             WHERE c.id=$1 AND c.kind='private' AND m.id=$2 AND m.state='active' AND m.private_chat AND m.assistant`,[principal.scope,principal.member])).rowCount;
         return json(res,200,{...binding,box:box&&boxTokenSet()?await box.binding(binding):null,machine:machines?await machines.binding(binding):null,
-          model:options.model,model_context_length:transport.model_context_length,plugin:manifest,...(memberSchedules?{member_schedules:true}:{})});
+          model:options.model,...(options.backupModel?{backup_model:options.backupModel}:{}),model_context_length:transport.model_context_length,plugin:manifest,...(memberSchedules?{member_schedules:true}:{})});
       }
       if(path==='/v1/guard'&&req.method==='POST') {
         const body=object(await readJson(req,1024*1024));
@@ -286,7 +299,8 @@ export function brokerServer(options:BrokerOptions) {
       const input=await readJson(req,1024*1024);let payload:Record<string,unknown>;
       try {
         payload=anthropic?anthropicPayload(input):providerPayload(input);
-        if(payload.model!==options.model)throw new HttpError(403,'model_configuration_mismatch');
+        // The backup reply model is admitted too: Hermes switches to it only when the reply model cannot answer.
+        if(payload.model!==options.model&&!(options.backupModel&&payload.model===options.backupModel))throw new HttpError(403,'model_configuration_mismatch');
       }catch(error){
         if(error instanceof HttpError){
           const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{}),...(principal.agent?{agent:principal.agent}:{})};
@@ -297,6 +311,9 @@ export function brokerServer(options:BrokerOptions) {
         }
         throw error;
       }
+      // At the monthly spending limit only the owner's own private chat reaches a model; schedules, background work,
+      // members and groups wait for next month or a higher limit (ADR-0298). 402 reads as out of credit, so Hermes stops at once.
+      if((!binding.owner||binding.job)&&await paused())throw new HttpError(402,'monthly_spend_limit');
       const attempt=await authorizeEffect('model.request',payload);
       const prepareStarted=performance.now();
       const transport=object(await rpc(options.hermes,'/internal/security/transport',{},hermesLogin()));
