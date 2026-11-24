@@ -41,9 +41,21 @@ def binding(chat, topic=None):
     return {'app': 'telegram', 'chat': chat, 'topic': None if topic is None else str(topic)}
 
 
+# A claim a test leaves out of a pass.
+DROP = object()
+
+
+def keyed(claims):
+    """A pass's claims with the one-time key Nocheh signs for them (ADR-0301), unless the test set them: its own id, the
+    person (the member, the lane's member, else the owner), a reply's kind and the agent. A claim set to DROP is left out."""
+    person = claims.get('member') or claims.get('lane') or 'owner'
+    value = {'jti': 'e' * 32, 'person': person, 'key_kind': 'member_ask' if claims.get('member_read') is not None else 'turn', 'agent': 'hermes', **claims}
+    return {key: item for key, item in value.items() if item is not DROP}
+
+
 def credential(event_id, scope=None, space=None, expires=None, **extra):
-    claims = {'event_id': event_id, 'audience': 'nocheh-assistant', 'scope': scope,
-              'expires': expires or int(time.time() * 1000) + 600000, **({'space': space, 'revision': 1} if space else {}), **extra}
+    claims = keyed({'event_id': event_id, 'audience': 'nocheh-assistant', 'scope': scope,
+                    'expires': expires or int(time.time() * 1000) + 600000, **({'space': space, 'revision': 1} if space else {}), **extra})
     body = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
     signature = base64.urlsafe_b64encode(hmac.new(SECRET.encode(), body.encode(), hashlib.sha256).digest()).decode().rstrip('=')
     return 'turn.' + body + '.' + signature
@@ -250,6 +262,47 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.reply({**group, 'topic': 8})
         self.assertEqual(self.sent(), [])
+
+    def test_a_reply_is_sent_only_with_a_reply_key_for_its_person(self):
+        # ADR-0301: every pass is a one-time key with its own id, the person it is for and an agent's name; only a reply's key
+        # (a message's turn, a follow-up, an ask about a member) reaches Telegram, and the owner's own pass is the owner's.
+        self.member_policy()
+        body = self.turn(12, text='x')
+        mine = lambda **extra: credential(body['event_id'], None, OWNER, app=binding(OWNER), **extra)
+        refused = {'no id': mine(jti=DROP), 'a malformed id': mine(jti='E' * 32), 'no person': mine(person=DROP),
+                   'a member on the owner\'s pass': mine(person=MEMBER), 'a malformed person': mine(person='someone'),
+                   'no kind': mine(key_kind=DROP), 'a Reader-spelled kind': mine(keyKind='turn'), 'an ask without its ask': mine(key_kind='member_ask'),
+                   'no agent': mine(agent=DROP), 'a malformed agent': mine(agent='Another Agent'), 'a review\'s purpose': mine(purpose='memory-review')}
+        refused.update({'a ' + kind + ' key': mine(key_kind=kind) for kind in ('scheduled', 'background', 'review', 'filter', 'reply')})
+        for why, value in refused.items():
+            with self.subTest(why), self.assertRaises(ValueError):
+                self.service.reply({**body, 'archive_credential': value})
+            with self.subTest(why, route='presence'), self.assertRaises(ValueError):
+                self.service.presence({**body, 'archive_credential': value})
+        # A lane's pass is that member's.
+        group = self.turn(13, GROUP, text='x')
+        with self.assertRaises(ValueError):
+            self.service.reply({**group, 'archive_credential': credential(group['event_id'], GROUP, GROUP, lane=MEMBER, person='owner', app=binding(GROUP))})
+        self.assertEqual(self.sent(), [])
+        # A follow-up's key sends its reply too.
+        self.assertEqual(self.service.reply({**body, 'archive_credential': mine(key_kind='follow_up')})['state'], 'done')
+
+    def test_the_reply_receipt_is_written_after_the_final_reaction(self):
+        # Core closes the reply's one-time key once it reads the closed receipt (ADR-0301): the final reaction, which still
+        # needs the key, comes first, and a reaction that fails never holds the receipt back.
+        original = self.service._finish
+        for number, fails in ((14, False), (15, True)):
+            body = self.turn(number, text='x', presence=True);seen = []
+            receipt = self.service.receipts / ('reply-' + body['id'] + '.result')
+            async def finish(key, chat, message, credential, outcome):
+                seen.append((outcome, receipt.exists()))
+                if fails: raise RuntimeError('synthetic reaction failure')
+                return await original(key, chat, message, credential, outcome)
+            self.service._finish = finish
+            with self.subTest(fails=fails):
+                self.assertEqual(self.service.reply(body)['state'], 'done')
+                self.assertEqual(seen, [('answered', False)])
+                self.assertTrue(receipt.exists())
 
     def answer_button(self, event, label='🔒 Answer privately'):
         # The record id Nocheh derives from the question with the service token (ADR-0249).

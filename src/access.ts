@@ -34,7 +34,21 @@ export interface Reader {readonly scope:string|null; readonly admin:boolean;read
   /** What a run of a job on the owner's machine may read: only what its card showed, frozen when the owner approved it
    * (machine jobs' reads). Set only on the server, by bindMachine, for every request of a pass whose turn is such a run;
    * never taken from a pass: a pass that names one is refused, as reads is. */
-  readonly machineReads?:MachineReads}
+  readonly machineReads?:MachineReads;
+  /** Who this one-time key is for (ADR-0301): 'owner' or a members.id. Signed in every pass and checked against its claims;
+   * it never widens what the pass reads, which the server derives for every request as before. */
+  readonly person?:string;
+  /** The one-time key's own id (32 hex, a one_time_keys.jti), checked open on every request. */
+  readonly jti?:string;
+  /** What the one-time key is for (KeyKind): it decides which routes the pass reaches (key-routes.ts). */
+  readonly keyKind?:KeyKind}
+/** What a one-time key is for (ADR-0301): a reply turn, a follow-up after actions, the owner's ask about a member, a
+ * scheduled run, a background job's run, a memory review or a sharing filter. */
+export const keyKinds=['turn','follow_up','member_ask','scheduled','background','review','filter'] as const;
+export type KeyKind=typeof keyKinds[number];
+export const isKeyKind=(value:unknown):value is KeyKind=>(keyKinds as readonly unknown[]).includes(value);
+/** A one-time key's id: 32 lowercase hex. */
+export const keyIdPattern=/^[a-f0-9]{32}$/;
 /** A machine job's reads (machine jobs' reads): its one chat, its period (dates as the job was asked, or null for the
  * whole chat), the last archive capture sequence when the owner approved it (a decimal string), and the Notion pages its
  * card named. */
@@ -45,6 +59,8 @@ export const answerId=/^[a-f0-9]{32}$/;
 export const memberClaimId=/^[a-f0-9]{64}$/;
 /** The id of an owner's ask about a member (owner_member_asks.id, step 4b): 32 hex. */
 export const memberReadId=/^[a-f0-9]{32}$/;
+/** A one-time key's person: the owner, or a member by their members.id (ADR-0301). */
+export const personClaim=(value:unknown):value is string=>value==='owner'||typeof value==='string'&&memberClaimId.test(value);
 /** The bound readers: a turn that reads as someone other than the owner, its reads resolved on the server for every
  * request (bindReads) and limited to reading (ADR-0249, ADR-0262). */
 export type BoundReader='answer'|'member'|'memberRead';
@@ -73,10 +89,6 @@ export function sharedReads(principal:Pick<Reader,'admin'|'scope'|'reads'|'answe
   return !principal.admin&&principal.scope!==null&&boundReader(principal)===null?principal.reads:undefined;
 }
 const equal=(a:string,b:string)=>{const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length && timingSafeEqual(x,y);};
-export function scopeToken(secret:string,scope:string|null,expires:number,binding?:{generation:string;guard_epoch:number}):string {
-  const body=Buffer.from(JSON.stringify({scope,expires,audience:'nocheh-archive',...binding})).toString('base64url');
-  return `scope.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
-}
 /** The agent a turn's pass is for: the one plugged into the agent socket (ADR-0234). The pass names it so its effects can be told apart (ADR-0233). */
 export const defaultAgent=activeAgent;
 const agentName=/^[a-z][a-z0-9-]{0,31}$/;
@@ -84,13 +96,15 @@ const agentName=/^[a-z][a-z0-9-]{0,31}$/;
  * A turn pass. `member` (a member's own private chat), `lane` (a member's turn, in a group or their private chat: the
  * member id, for Hermes to run one turn at a time per member; storage parses it and drops it) and `memberRead` (signed
  * as the claim member_read: the owner's ask about a member) are step 4's claims; verifiedReader says where each is
- * allowed.
+ * allowed. Every pass is a one-time key (ADR-0301): `person`, `jti` and `kind` (signed as key_kind) are required by
+ * verifiedReader, which refuses a pass without them; they are optional here only for code that never reaches a server.
+ * Only AudienceRepository.turn mints passes, each with its key row.
  */
 export function turnToken(secret:string,scope:string|null,expires:number,eventId:string,policy?:{space:string;revision:number;guard_epoch?:number;generation?:string;logical_profile?:string;purpose?:'assistant'|'memory-review'|'filter';project?:string;agent?:string;answer?:string;app?:AppBinding;
-  member?:string;lane?:string;memberRead?:string}):string {
-  const {memberRead,...claims}=policy??{};
+  member?:string;lane?:string;memberRead?:string;person?:string;jti?:string;kind?:KeyKind}):string {
+  const {memberRead,kind,...claims}=policy??{};
   const body=Buffer.from(JSON.stringify({scope,expires,event_id:eventId,audience:'nocheh-assistant',agent:defaultAgent,...claims,
-    ...(memberRead===undefined?{}:{member_read:memberRead})})).toString('base64url');
+    ...(memberRead===undefined?{}:{member_read:memberRead}),...(kind===undefined?{}:{key_kind:kind})})).toString('base64url');
   return `turn.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
 }
 const appText=/^[A-Za-z0-9._:-]{1,128}$/,appTopic=/^[A-Za-z0-9._-]{1,64}$/;
@@ -125,12 +139,13 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
   if (equal(bearer,secret)) return {scope:null,admin:true};
   try {
     const [prefix,body,signature,extra]=bearer.split('.');
-    if (!['scope','turn'].includes(prefix ?? '') || !body || !signature || extra || body.length>2048 || !equal(signature,createHmac('sha256',secret).update(body).digest('base64url'))) throw Error();
+    // Every pass is a turn pass and a one-time key (ADR-0301): the archive-wide `scope.` pass is gone.
+    if (prefix!=='turn' || !body || !signature || extra || body.length>2048 || !equal(signature,createHmac('sha256',secret).update(body).digest('base64url'))) throw Error();
     const claims=object(JSON.parse(Buffer.from(body,'base64url').toString()));
-    if (claims.audience!==(prefix==='turn'?'nocheh-assistant':'nocheh-archive') || typeof claims.expires!=='number' || claims.expires<=now || claims.expires>now+3600000) throw Error();
+    if (claims.audience!=='nocheh-assistant' || typeof claims.expires!=='number' || claims.expires<=now || claims.expires>now+3600000) throw Error();
     const scope=claims.scope===null ? null : string(claims.scope,256);
     if (scope==='') throw Error();
-    if(prefix==='turn' && (typeof claims.event_id!=='string' || !/^[a-f0-9]{64}$/.test(claims.event_id)))throw Error();
+    if(typeof claims.event_id!=='string' || !/^[a-f0-9]{64}$/.test(claims.event_id))throw Error();
     let policy:{}|{space:string;revision:number}={};
     if(claims.space!==undefined || claims.revision!==undefined){
       const space=validateSpace(claims.space);
@@ -143,32 +158,47 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     if(claims.guard_epoch!==undefined&&(!Number.isSafeInteger(claims.guard_epoch)||Number(claims.guard_epoch)<1))throw Error();
     if(claims.generation!==undefined&&(typeof claims.generation!=='string'||!(/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/).test(claims.generation)))throw Error();
     if(claims.purpose!==undefined&&!['assistant','memory-review','filter'].includes(String(claims.purpose)))throw Error();
-    if(claims.logical_profile!==undefined&&(prefix!=='turn'||!claims.generation||typeof claims.logical_profile!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(claims.logical_profile)))throw Error();
-    if(claims.project!==undefined&&(prefix!=='turn'||typeof claims.project!=='string'||!/^[a-f0-9]{64}$/.test(claims.project)))throw Error();
-    if(claims.agent!==undefined&&(prefix!=='turn'||typeof claims.agent!=='string'||!agentName.test(claims.agent)))throw Error();
+    if(claims.logical_profile!==undefined&&(!claims.generation||typeof claims.logical_profile!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(claims.logical_profile)))throw Error();
+    if(claims.project!==undefined&&(typeof claims.project!=='string'||!/^[a-f0-9]{64}$/.test(claims.project)))throw Error();
+    // The pass is for the agent plugged in now, never another (ADR-0301); a pass for any other agent is no pass.
+    if(typeof claims.agent!=='string'||!agentName.test(claims.agent)||claims.agent!==activeAgent)throw Error();
+    // The one-time key it is (ADR-0301): its id, its person and its kind. Storage and the broker check its row is open.
+    if(typeof claims.jti!=='string'||!keyIdPattern.test(claims.jti)||!personClaim(claims.person)||!isKeyKind(claims.key_kind))throw Error();
+    const person=claims.person,kind=claims.key_kind;
     // An answer pass reads as the asker's private chat, never as the owner: its scope and space are that chat, a private
     // chat row of the owner's (ADR-0249, ADR-0252).
-    if(claims.answer!==undefined&&(prefix!=='turn'||typeof claims.answer!=='string'||!answerId.test(claims.answer)||scope===null||
+    if(claims.answer!==undefined&&(typeof claims.answer!=='string'||!answerId.test(claims.answer)||scope===null||
       !ownersPrivateChat(scope,missed)||!('space' in policy)||policy.space!==scope))throw Error();
     // A member pass reads as the member's own private chat: its scope and space are a private chat that is not the
     // owner's (step 4). Which member's chat it is, bindReads checks on the server for every request.
-    if(claims.member!==undefined&&(prefix!=='turn'||typeof claims.member!=='string'||!memberClaimId.test(claims.member)||scope===null||
+    if(claims.member!==undefined&&(typeof claims.member!=='string'||!memberClaimId.test(claims.member)||scope===null||
       !othersPrivateChat(scope,missed)||!('space' in policy)||policy.space!==scope))throw Error();
     // An ask about a member reads as the owner's private chat, never as the owner, as an answer does (step 4b).
-    if(claims.member_read!==undefined&&(prefix!=='turn'||typeof claims.member_read!=='string'||!memberReadId.test(claims.member_read)||scope===null||
+    if(claims.member_read!==undefined&&(typeof claims.member_read!=='string'||!memberReadId.test(claims.member_read)||scope===null||
       !ownersPrivateChat(scope,missed)||!('space' in policy)||policy.space!==scope))throw Error();
     // A pass is at most one bound reader.
     if([claims.answer,claims.member,claims.member_read].filter(claim=>claim!==undefined).length>1)throw Error();
     // A lane is the member id of a member's turn, for Hermes's per-member order. Checked for shape and then dropped: it
     // never reaches a Reader and grants nothing.
-    if(claims.lane!==undefined&&(prefix!=='turn'||typeof claims.lane!=='string'||!memberClaimId.test(claims.lane)))throw Error();
+    if(claims.lane!==undefined&&(typeof claims.lane!=='string'||!memberClaimId.test(claims.lane)))throw Error();
     // What an answer, a member or an ask may read comes from the server, never from the pass; a claim spelled the
     // Reader's way is no claim and is refused rather than ignored.
     if(claims.reads!==undefined||claims.member_chat!==undefined||claims.memberChat!==undefined||claims.memberRead!==undefined||
       claims.machine_reads!==undefined||claims.machineReads!==undefined)throw Error();
+    // The key's person fits the pass: a member's own chat is that member's, a lane is its member's, and the owner's
+    // chat, an answer and an ask are the owner's. Its kind fits the pass's purpose (ADR-0301).
+    // The claims are checked above, so each present one is a string.
+    const bound=boundReader({...('answer' in claims?{answer:String(claims.answer)}:{}),...('member' in claims?{member:String(claims.member)}:{}),
+      ...('member_read' in claims?{memberRead:String(claims.member_read)}:{})});
+    if(claims.member!==undefined&&person!==claims.member||claims.lane!==undefined&&person!==claims.lane||
+      (scope===null||bound==='answer'||bound==='memberRead')&&person!=='owner')throw Error();
+    if((claims.purpose==='memory-review')!==(kind==='review')||(claims.purpose==='filter')!==(kind==='filter')||
+      (claims.member_read!==undefined)!==(kind==='member_ask')||(kind==='scheduled'||kind==='background')&&claims.logical_profile===undefined)throw Error();
+    // The key's fields come from these claims only; one spelled the Reader's way is refused, as reads is.
+    if(claims.keyKind!==undefined||claims.turnEvent!==undefined)throw Error();
     const app=claims.app===undefined?undefined:appBinding(claims.app);
-    if(app!==undefined&&prefix!=='turn')throw Error();
-    return {scope,admin:false,...(prefix==='turn'?{turnEvent:claims.event_id as string}:{}),...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.agent===undefined?{}:{agent:claims.agent as string}),...(claims.answer===undefined?{}:{answer:claims.answer as string}),...(app===undefined?{}:{app}),...(claims.member===undefined?{}:{member:claims.member as string}),...(claims.member_read===undefined?{}:{memberRead:claims.member_read as string})};
+    return {scope,admin:false,turnEvent:claims.event_id as string,...policy,...(claims.guard_epoch===undefined?{}:{guard_epoch:claims.guard_epoch as number}),...(claims.generation===undefined?{}:{generation:claims.generation as string}),...(claims.logical_profile===undefined?{}:{logical_profile:claims.logical_profile as string}),...(claims.purpose===undefined?{}:{purpose:claims.purpose as NonNullable<Reader['purpose']>}),...(claims.answer===undefined?{}:{answer:claims.answer as string}),...(app===undefined?{}:{app}),...(claims.member===undefined?{}:{member:claims.member as string}),...(claims.member_read===undefined?{}:{memberRead:claims.member_read as string}),
+      agent:claims.agent,person,jti:claims.jti,keyKind:kind};
   } catch { throw new HttpError(401,'invalid_scope_token'); }
 }
 export function admin(principal:Reader):void { if (!principal.admin) throw new HttpError(403,'owner_required'); }

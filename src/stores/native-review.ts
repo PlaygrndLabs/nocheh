@@ -1,3 +1,4 @@
+import {randomBytes} from 'node:crypto';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object} from '../http.js';
@@ -464,7 +465,9 @@ export class NativeReviewRepository {
         if(this.token.length<24)throw new HttpError(503,'service_credential_required');
         await this.prepared.allow(actor,{text:document.text});
       }
-      const credential=uncertain?null:await this.prepared.audience.turn(this.token,{scope:null,space:actor.space!,purpose:'memory-review'},job.source_reference.id,Date.now()+600000);
+      // The review's own one-time key, the owner's (ADR-0301): one per claim, closed once the review leaves running.
+      const credential=uncertain?null:await this.prepared.audience.turn(this.token,{scope:null,space:actor.space!,purpose:'memory-review'},job.source_reference.id,Date.now()+600000,
+        {kind:'review',subject:id,attempt:(job.attempts+1)+'-'+randomBytes(4).toString('hex'),person:'owner'});
       if(!uncertain){
         await this.turns.binding(actor);
         const claimed=await db.query("UPDATE native_review_jobs SET state='running',attempts=attempts+1,updated_at=now() WHERE id=$1 AND state='pending' AND NOT paused AND revision=$2 RETURNING id",[id,job.revision]);
@@ -512,7 +515,13 @@ export class NativeReviewRepository {
       // Most reviews finish within seconds: a running review is observed after 5 seconds, then at doubling gaps up to a minute.
       await db.query(`UPDATE native_review_jobs SET state='running',error_code=NULL,updated_at=now(),next_attempt=now()+CASE WHEN $2
         THEN least(interval '60 seconds',greatest(interval '5 seconds',(next_attempt-updated_at)*2)) ELSE interval '5 seconds' END WHERE id=$1`,[id,uncertain]);return 'running';
-    } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803359)');if(fenced)await leaveFamily(db,'memory_review');});}
+    } finally {
+      // A review that is not running any more has no open key (ADR-0301): done, failed, waiting again or unconfirmed.
+      try {
+        if(locked)await db.query(`UPDATE one_time_keys SET closed_at=now(),closed_reason='review_finished' WHERE kind='review' AND subject=$1 AND closed_at IS NULL
+          AND NOT EXISTS(SELECT 1 FROM native_review_jobs WHERE id=$1 AND state='running')`,[id]);
+      } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803359)');if(fenced)await leaveFamily(db,'memory_review');});}
+    }
   }
   async list(principal:Reader,after='') {
     admin(principal);const rows=(await this.control.query('SELECT * FROM native_review_jobs WHERE id>$1 ORDER BY id LIMIT 101',[after])).rows;

@@ -6,7 +6,8 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {digest,type Envelope} from '../src/archive.js';
 import type {Reader} from '../src/access.js';
-import {turnToken,reader} from '../src/access.js';
+import {reader} from '../src/access.js';
+import {keyPass,openKey} from './one-time-key-pass.js';
 import type {IncomingMessage} from 'node:http';
 import {preparedAudience} from '../src/stores/prepared-context.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
@@ -39,7 +40,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
   const principal=async(id:string,space='123',scope:string|null=null):Promise<Reader>=>{
     const state=await services.guards.state();return {admin:false,scope,space,turnEvent:id,generation:state.generation,guard_epoch:state.epoch,revision:state.epoch};
   };
-  const credential=(actor:Reader)=>turnToken(token,actor.scope,Date.now()+600000,actor.turnEvent!,{space:actor.space!,revision:actor.revision!,guard_epoch:actor.guard_epoch!,generation:actor.generation!});
+  const credential=async(actor:Reader)=>openKey(stores.control,keyPass(token,actor.scope,Date.now()+600000,actor.turnEvent!,{space:actor.space!,revision:actor.revision!,guard_epoch:actor.guard_epoch!,generation:actor.generation!}));
   const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL='https://gateway.example.test/v1';
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
@@ -65,7 +66,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
     const {logical_profile:ignoredProfile,...missingProfile}=scheduled;
     await assert.rejects(services.turns.binding(missingProfile),{code:'runtime_profile_changed'});
     await assert.rejects(services.turns.binding({...scheduled,logical_profile:'different'}),{code:'runtime_profile_changed'});
-    const namedToken=await services.prepared.audience.turn(token,scheduled,operation.id,Date.now()+60000);
+    const namedToken=await services.prepared.audience.turn(token,scheduled,operation.id,Date.now()+60000,{kind:'scheduled',subject:operation.id,attempt:1,person:'owner'});
     const parsed=reader({headers:{authorization:'Bearer '+namedToken}} as IncomingMessage,token);
     assert.equal(parsed.logical_profile,'fixture-project');assert.equal((await services.turns.binding(parsed)).profile,managed.profile);
     const otherOperation=await services.operations.record({key:key+':other-profile',kind:'scheduled_trigger',scope:'-321/topic/9',input_hash:digest('schedule')});
@@ -80,7 +81,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
     assert.equal(services.turns.profile({...actor,logical_profile:binding.logical_profile},state),binding.profile,'default native profile still shares owner notes');
     await assert.rejects(services.turns.binding(named),{code:'runtime_turn_not_admitted'});
     for(const invalid of ['../owner','a/b','a.b','x'.repeat(65)]) {
-      const bad=turnToken(token,null,Date.now()+60000,actor.turnEvent!,{space:'123',revision:state.epoch,guard_epoch:state.epoch,generation:state.generation,logical_profile:invalid});
+      const bad=keyPass(token,null,Date.now()+60000,actor.turnEvent!,{space:'123',revision:state.epoch,guard_epoch:state.epoch,generation:state.generation,logical_profile:invalid,kind:'scheduled'});
       assert.throws(()=>reader({headers:{authorization:'Bearer '+bad}} as IncomingMessage,token),{code:'invalid_scope_token'});
     }
     await services.turns.close(operation.id);
@@ -88,11 +89,22 @@ test('three-store broker binds original and scheduled turns, isolates generation
 
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
     const address=server.address();if(!address||typeof address==='string')throw Error();const base='http://127.0.0.1:'+address.port;
-    const request=(path:string,body:unknown,key=credential(actor))=>fetch(base+path,{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify(body)});
+    const request=async(path:string,body:unknown,key?:string)=>fetch(base+path,{method:'POST',headers:{authorization:'Bearer '+(key??await credential(actor)),'content-type':'application/json'},body:JSON.stringify(body)});
     const payload={model:'fixture-model',input:[{role:'user',content:'Observed words. Password is saffronpass.'}]};
     await services.sources.read(actor,source.reference.id);
     assert.equal((await request('/v1/chat/completions',payload)).status,200);
     const provider=calls.at(-1)!;assert.ok(!JSON.stringify(provider.body).includes('saffronpass'));
+    // The broker checks the one-time key before anything else (ADR-0301): never minted, closed, or outside its kind's routes.
+    const keyed=(error:string)=>async(answer:Response)=>assert.equal((await answer.json() as any).error,error);
+    const unminted=keyPass(token,actor.scope,Date.now()+600000,actor.turnEvent!,{space:actor.space!,revision:actor.revision!,guard_epoch:actor.guard_epoch!,generation:actor.generation!});
+    const beforeKeys=calls.length;
+    await request('/v1/chat/completions',payload,unminted).then(keyed('one_time_key_unknown'));
+    const closing=await credential(actor);
+    await stores.control.query("UPDATE one_time_keys SET closed_at=now(),closed_reason='delivered' WHERE jti=$1",[JSON.parse(Buffer.from(closing.split('.')[1]!,'base64url').toString()).jti]);
+    await request('/v1/chat/completions',payload,closing).then(keyed('one_time_key_closed'));
+    const filterKey=await openKey(stores.control,keyPass(token,actor.scope,Date.now()+600000,actor.turnEvent!,{space:actor.space!,revision:actor.revision!,guard_epoch:actor.guard_epoch!,generation:actor.generation!,purpose:'filter'}));
+    await request('/v1/member-asks',{},filterKey).then(keyed('one_time_key_route_denied'));
+    assert.equal(calls.length,beforeKeys,'a refused key reaches no provider and no relay');
     // Hermes is asked for the provider with the agent login, never the master key (ADR-0295).
     assert.ok(transports.length&&transports.every(authorization=>authorization==='Bearer '+agentKey),JSON.stringify(transports));assert.ok(JSON.stringify(provider.body).includes('Observed words.'));
     assert.equal((await stores.archive.query("SELECT 1 FROM events WHERE kind IN ('runtime_context','guard_result')")).rowCount,0);
@@ -101,7 +113,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
     assert.deepEqual((await stores.control.query('SELECT source_reference FROM security_events WHERE source_event_id=$1 LIMIT 1',[source.reference.id])).rows[0].source_reference,source.reference);
     assert.equal((await request('/v1/chat/completions',payload,token)).status,403);
     const before=calls.length;
-    const oldGeneration=credential({...actor,generation:'00000000-0000-0000-0000-000000000000'});
+    const oldGeneration=await credential({...actor,generation:'00000000-0000-0000-0000-000000000000'});
     assert.equal((await request('/v1/chat/completions',payload,oldGeneration)).status,409);assert.equal(calls.length,before);
     // The system guard takes the agent login only (ADR-0295): the master key is refused there, and the agent login reaches
     // nothing else on the broker.
@@ -160,14 +172,14 @@ test('three-store broker binds original and scheduled turns, isolates generation
     refuse=()=>null;
     assert.deepEqual(await relayed('/v1/member-asks',ask),{status:200,body:{ok:true}});
     assert.deepEqual(calls.at(-1),{url:'http://archive/v1/member-asks',body:ask});
-    const relays=calls.length,scoped=await request('/v1/member-asks',ask,credential({...actor,scope:'123'}));
+    const relays=calls.length,scoped=await request('/v1/member-asks',ask,await credential({...actor,scope:'123'}));
     assert.deepEqual({status:scoped.status,body:await scoped.json()},{status:403,body:{error:'owner_private_turn_required'}});
     assert.equal(calls.length,relays,'a turn that is not the owner\'s own reaches nothing');
     refuse=()=>null;
     revocation=true;
     const streaming=await request('/v1/chat/completions',payload);await assert.rejects(streaming.text());
     revocation=false;const previousDetectors=detectors,offActor=await principal(source.reference.id);
-    assert.equal((await request('/v1/chat/completions',payload,credential(offActor))).status,200);assert.equal(detectors,previousDetectors);
+    assert.equal((await request('/v1/chat/completions',payload,await credential(offActor))).status,200);assert.equal(detectors,previousDetectors);
     assert.ok(JSON.stringify(calls.at(-1)!.body).includes('saffronpass'));
     assert.equal((await request('/v1/chat/completions',payload)).status,409,'guard off cannot revive an old capability');
   } finally {if(previousRoute===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previousRoute;server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await services.guards.setMode('on');await stores.close();await rm(root,{recursive:true,force:true});}

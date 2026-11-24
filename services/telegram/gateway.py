@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import hashlib
 import json
 import re
@@ -391,10 +392,13 @@ class TelegramService:
         finished = max(started, int(time.time() * 1000))
         result['timings'] = {'telegram_send': {'ms': min(86400000, max(0, round((perf_counter() - sending) * 1000))), 'calls': 1}}
         result['window'] = {'delivery': started, 'finished': finished}
-        await asyncio.to_thread(immutable_file, self.receipts, name + '.result', canonical(result))
+        # The final reaction before the receipt: core closes the reply's one-time key once it reads the closed receipt
+        # (ADR-0301), so the receipt is written last, after the delivery check, the presence and the final reaction that
+        # still need the key. A missed reaction is cosmetic and never holds the receipt back.
         if body.get('presence'):
             outcome = 'answered' if result['state'] == 'done' else 'failed' if result['state'] in ('failed', 'suppressed') else 'clear'
-            await self._finish(body['id'], chat, message, credential, outcome)
+            with contextlib.suppress(Exception): await self._finish(body['id'], chat, message, credential, outcome)
+        await asyncio.to_thread(immutable_file, self.receipts, name + '.result', canonical(result))
         return result
 
     # ── approved sends, cards, refusals and notices ─────────────────────────────────────────────

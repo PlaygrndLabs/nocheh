@@ -26,6 +26,8 @@ export function gmailAuthority(principal:Reader,turn:{owner?:boolean;job?:string
  *  ended, or not from the owner's private chat. */
 export async function gmailRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ownerIds:OwnerIds|string|null):Promise<string|null> {
   if(row.job_id&&!await scheduleRunning(db,row.job_id))return 'gmail_not_here';
+  // The owner's own mail is only ever for the owner's key (ADR-0301).
+  if(row.person&&row.person!=='owner')return 'gmail_not_here';
   const {chat:owner}=typeof ownerIds==='string'||!ownerIds?{chat:ownerIds}:ownerIds;
   return !!owner&&row.scope===owner&&(parentSpace(row.space_id)??row.space_id)===owner?null:'gmail_not_here';
 }

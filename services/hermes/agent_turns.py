@@ -76,7 +76,9 @@ class AgentTurns:
         self.root,self.scopes,self.model,self.credentials,self.turn,self.size=Path(root),policy,model,credentials,turn,capacity
         # Not spool/async-runs: the same Telegram attempt has the same run id on both runners.
         self.directory=Path(spool)/'agent-turns'
-        self.runs=AsyncRuns(self.directory,self._execute,self._saved,self._arrived)
+        # A turn's pass is never saved with its request: a turn resumed after a restart runs only with the fresh pass Nocheh
+        # sends (ADR-0301).
+        self.runs=AsyncRuns(self.directory,self._execute,self._saved,self._arrived,credential=True)
         self.loop=self.thread=self.capacity=self.order=None;self.lanes={}
 
     def open(self):
@@ -191,7 +193,9 @@ class AgentTurns:
         # Off the event loop: reading the served list may wait on the app (ADR-0252), and other turns keep running meanwhile.
         scope=await asyncio.to_thread(self.scopes.resolve,body,Scopes.claims(body['archive_credential'])) if self.scopes.enabled else None
         if scope is None:return {'state':'suppressed'}
-        claims=check_claims(body['archive_credential'],scope,body['event_id'])
+        # The pass is a one-time key for this very kind of turn (ADR-0301): a follow-up's for a follow-up, an ask's for an ask.
+        kind='follow_up' if body.get('continuation') is not None else 'member_ask' if body.get('member_read') is not None else 'turn'
+        claims=check_claims(body['archive_credential'],scope,body['event_id'],(kind,))
         # A private answer runs as the owner's private chat but never as the owner: its own scoped profile, the project's
         # role and read tools only (ADR-0249). Its pass and its framed question must come together.
         answer=claims.get('answer') is not None

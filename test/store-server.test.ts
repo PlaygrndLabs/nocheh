@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {spawn} from 'node:child_process';
 import pg from 'pg';
 import {canonical,digest,type Envelope} from '../src/archive.js';
-import {scopeToken} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases,type StorePools} from '../src/stores/connections.js';
 import {fixtureServices,type FakeCall} from './fixture-agent.js';
@@ -96,7 +96,8 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/chat-sends?limit=101',undefined,400);
     const runtimeStatus=await request('/v1/runtime');
     assert.equal(runtimeStatus.status.telegram,'connected');assert.equal(runtimeStatus.agent.id,'hermes');assert.equal(runtimeStatus.agent.capabilities.persona,true);
-    await request('/v1/runtime',undefined,403,scopeToken(token,'123',Date.now()+60000));
+    // A signed pass whose one-time key was never minted reaches nothing (ADR-0301).
+    await request('/v1/runtime',undefined,401,keyPass(token,'123',Date.now()+60000));
     const persona={action:'persona',scope:'default',role:'Fixture role',skills:[],revision:'r1'};
     assert.deepEqual(await request('/v1/agent/manage',persona),{operation:'persona.write',input:{scope:'default',role:'Fixture role',skills:[],revision:'r1'}});
     assert.equal((await request('/v1/agent/manage',{action:'persona',scope:'default'})).operation,'persona.read');
@@ -107,7 +108,7 @@ test('separated application captures through control outages, exposes owner repo
     // Hermes's lookup takes the agent login (or the admin bearer), never a pass, and a body not as Hermes writes it is refused.
     const lookup={notes:[{key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}],space:'123'};
     assert.deepEqual(await request('/internal/notes/sources',lookup),{labels:{['e'.repeat(64)]:{from:'unknown',label:'source not recorded'}}});
-    await request('/internal/notes/sources',lookup,401,scopeToken(token,'123',Date.now()+60000));
+    await request('/internal/notes/sources',lookup,401,keyPass(token,'123',Date.now()+60000));
     await request('/internal/notes/sources',{notes:[{key:'e'.repeat(64),origins:[{by:'owner'}]}]},400);
     const prompts=await request('/v1/prompts');
     assert.equal(prompts.defaults['reply.owner'],'Owner');assert.match(prompts.defaults['learning.interpret'],/\{trigger_id\}/);assert.deepEqual(prompts.texts,{});
@@ -125,13 +126,14 @@ test('separated application captures through control outages, exposes owner repo
     controlDown=true;archiveDown=true;
     await request('/health',undefined,503);
     await request('/v1/status',undefined,503);
-    await request('/v1/ingest',event,403,scopeToken(token,'123',Date.now()+60000));
+    // A pass never ingests; while the control store is down its key cannot even be looked up, so it fails closed (ADR-0301).
+    await request('/v1/ingest',event,503,keyPass(token,'123',Date.now()+60000));
     const accepted=await request('/v1/ingest',event,202);assert.equal(accepted.state,'spooled');
     // The dashboard chat page is off until Nocheh has its own chat page: browser input is refused even with the service
     // token, and nothing is spooled for it.
     const ownerProfile='nocheh-'+digest('123').slice(0,24);
     const browserInput={scope:'123',profile:ownerProfile,conversation:'http-'+Date.now(),id:'submission',text:'Original browser observation',files:[]};
-    for(const credential of [token,scopeToken(token,'123',Date.now()+60000)])
+    for(const credential of [token,keyPass(token,'123',Date.now()+60000)])
       assert.equal((await request('/v1/browser/input',browserInput,404,credential)).error,'browser_chat_off');
     const path=join(root,'spool/pending',digest(key)+'.json');assert.equal(JSON.parse(await readFile(path,'utf8')).text,event.text);
     assert.deepEqual((await readdir(join(root,'spool/pending'))).filter(name=>name.endsWith('.json')),[digest(key)+'.json'],'nothing is spooled for browser input');
@@ -157,11 +159,14 @@ test('separated application captures through control outages, exposes owner repo
     await until(async()=>!(await connected.control.query("SELECT 1 FROM guard_publications WHERE id=$1 AND state='pending'",[key+':selection'])).rowCount);
     assert.equal((await services.selections.current(captured.id,null,'extracted_text',await services.guards.state())).id,output.id,'worker repairs interrupted selection publication');
     await services.guards.prepare((await services.archive.captured(digest(key))).reference,'fixture',services.detect);
-    const binding=await services.guards.state(),credential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000);
+    const turnKey=(attempt:string,person='owner')=>({kind:'turn' as const,subject:digest(key),attempt,person});
+    const binding=await services.guards.state(),credential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000,turnKey('owner'));
     assert.equal((await request('/v1/memory/check',undefined,200,credential)).valid,true);
-    const mismatched=await services.prepared.audience.turn(token,{scope:'-42',space:'-42'},digest(key),Date.now()+60000);
+    const mismatched=await services.prepared.audience.turn(token,{scope:'-42',space:'-42'},digest(key),Date.now()+60000,turnKey('group'));
     assert.equal((await request('/v1/memory/check',undefined,200,mismatched)).valid,false);
     await request('/v1/status',undefined,403,credential);
+    // A reply's key reaches the turn's routes only, never the owner's dashboard (ADR-0301).
+    assert.equal((await request('/v1/runtime',undefined,403,credential)).error,'one_time_key_route_denied');
     await request('/v1/chat-sends',undefined,403,credential);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);
     // The owner's list and detail say who wrote it, whether its assistant copy is ready and its reply state.
@@ -240,7 +245,8 @@ test('separated application captures through control outages, exposes owner repo
     const scheduledClaim=await request('/v1/scheduler/claim',scheduledContext,200,agentKey);assert.equal(scheduledClaim.claimed,true);
     // Unarchived schedule fires pass the runtime's pre-run delivery check through their admitted run.
     assert.equal((await request('/v1/memory/check',undefined,200,scheduledClaim.archive_credential)).valid,true);
-    const otherScope=await services.prepared.audience.turn(token,{scope:'-42',space:'-42',logical_profile:ownerProfile},scheduled.event_id,Date.now()+60000);
+    const otherScope=await services.prepared.audience.turn(token,{scope:'-42',space:'-42',logical_profile:ownerProfile},scheduled.event_id,Date.now()+60000,
+      {kind:'scheduled',subject:scheduled.event_id,attempt:'other',person:'owner'});
     assert.equal((await request('/v1/memory/check',undefined,200,otherScope)).valid,false);
     assert.equal((await request('/v1/scheduler/prepare',scheduledContext,200,agentKey)).files.length,0);
     await request('/v1/scheduler/finish',{event_id:scheduled.event_id,actor:scheduledContext.actor,state:'done',session:scheduledContext.conversation,text:'Scheduled result'},200,agentKey);
@@ -318,7 +324,7 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/export',undefined,404);
     await services.guards.setMode('off');
     await request('/v1/memory/check',undefined,409,credential);assert.notEqual((await services.guards.state()).epoch,binding.epoch);
-    const offCredential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000);
+    const offCredential=await services.prepared.audience.turn(token,{scope:null,space:'123'},digest(key),Date.now()+60000,turnKey('off'));
     await request('/v1/memory/check',undefined,503,offCredential);
     settings.guardMode='off';
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,offCredential)).representation,'original');

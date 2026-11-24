@@ -46,7 +46,9 @@ test('a machine job\'s run reaches only the routes that read its card\'s chat, i
 test('what a machine job\'s run reads comes from storage, never from its pass', ()=>{
   const secret='s'.repeat(32),now=Date.now();
   const pass=(claims:Record<string,unknown>)=>{
-    const body=Buffer.from(JSON.stringify({scope:null,expires:now+60000,event_id:'e'.repeat(64),audience:'nocheh-assistant',...claims})).toString('base64url');
+    // A one-time key's claims (ADR-0301), so the refusal below is for the machine claim.
+    const body=Buffer.from(JSON.stringify({scope:null,expires:now+60000,event_id:'e'.repeat(64),audience:'nocheh-assistant',agent:'hermes',person:'owner',
+      jti:'f'.repeat(32),key_kind:'background',logical_profile:'job-synthetic',generation:'00000000-0000-4000-8000-000000000001',...claims})).toString('base64url');
     return {headers:{authorization:'Bearer turn.'+body+'.'+createHmac('sha256',secret).update(body).digest('base64url')}} as unknown as IncomingMessage;
   };
   assert.equal(reader(pass({}),secret,now).machineReads,undefined);

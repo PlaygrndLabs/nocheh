@@ -1,10 +1,11 @@
+import {keyPass} from './one-time-key-pass.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {once} from 'node:events';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {turnToken} from '../src/access.js';
+
 import {storageServer} from '../src/stores/server.js';
 import {agentRoute,agentRoutes,serveAgent} from '../src/stores/agent-routes.js';
 import type {StorageServices} from '../src/stores/services.js';
@@ -64,7 +65,7 @@ test('nocheh-app takes the agent login before any other route or reader, and the
     // The browser routes still answer first, whatever the caller holds.
     assert.deepEqual(await call('POST','/v1/browser/input',agentKey),{status:404,body:{error:'browser_chat_off'}});
     // A pass signed with the agent login is no pass, and the agent login is no admin bearer for the bot's routes.
-    const forged=turnToken(agentKey,null,Date.now()+60000,'e'.repeat(64),{space:'123',revision:1});
+    const forged=keyPass(agentKey,null,Date.now()+60000,'e'.repeat(64),{space:'123',revision:1});
     assert.equal((await call('GET','/v1/status',forged)).body.error,'invalid_scope_token');
     assert.equal((await call('POST','/internal/actions/authorize',forged)).body.error,'unauthorized');
   } finally {server.closeAllConnections();server.close();}

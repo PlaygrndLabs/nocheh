@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
-import {turnToken,type Reader} from '../src/access.js';
+import {type Reader} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,jobErrors,machineErrors,providerTarget,scopedRoute,spendingPause,type TurnBinding} from '../src/security/broker.js';
 import {createServer,type IncomingMessage} from 'node:http';
 import {once} from 'node:events';
@@ -112,7 +113,7 @@ test('a long-term recall reaches a slow archive without Node fetch, which gives 
   broker.listen(0,'127.0.0.1');await once(broker,'listening');
   try {
     const address=broker.address();assert.ok(address&&typeof address!=='string');
-    const credential=turnToken(secret,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
+    const credential=keyPass(secret,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
     const response=await realFetch('http://127.0.0.1:'+address.port+'/v1/memory/longterm/recall',{method:'POST',
       headers:{authorization:'Bearer '+credential,'content-type':'application/json'},body:JSON.stringify({query:'Synthetic question'})});
     assert.equal(response.status,200);
@@ -149,7 +150,7 @@ test('the agent login reaches only the system guard, the master key never does, 
     assert.equal((await call(bareBase+'/v1/guard',agentKey)).body.error,'invalid_scope_token');
     assert.equal(prepared.length,1);
     // Without an agent login configured, the broker asks Hermes nothing.
-    const pass=turnToken(token,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
+    const pass=keyPass(token,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
     assert.deepEqual(await call(bareBase+'/v1/security/binding',pass,'GET'),{status:503,body:{error:'agent_key_unconfigured'}});
     assert.deepEqual(sent,[]);
   }finally{for(const server of [broker,bare]){server.closeAllConnections();server.close();await once(server,'close');}}
@@ -167,7 +168,7 @@ test('at the monthly spending limit only the owner’s own chat reaches a model'
   try {
     const address=broker.address();assert.ok(address&&typeof address!=='string');
     const ask=async(scope:string|null,space:string)=>{
-      const credential=turnToken(secret,scope,Date.now()+600000,source,{space,revision:1,guard_epoch:1,purpose:'assistant'});
+      const credential=keyPass(secret,scope,Date.now()+600000,source,{space,revision:1,guard_epoch:1,purpose:'assistant'});
       const response=await realFetch('http://127.0.0.1:'+address.port+'/v1/chat/completions',{method:'POST',
         headers:{authorization:'Bearer '+credential,'content-type':'application/json'},body:JSON.stringify({model:'synthetic',messages:[{role:'user',content:'Synthetic'}]})});
       return {status:response.status,body:await response.text()};
@@ -226,7 +227,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     const event=await ingest(pool,{version:1,key:'security-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
     const address=server.address();if(!address||typeof address==='string')throw Error();const base='http://127.0.0.1:'+address.port;
-    const credential=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:1});
+    const credential=keyPass(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:1});
     const request=(path:string,body:unknown,key=credential)=>fetch(base+path,{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify(body)});
     const payload={model:'same-model',input:[{role:'user',content:'Exact owner edit 🧠\r\n two  spaces'}],reasoning:{effort:'high'}};
     const response=await request('/v1/chat/completions',payload);
@@ -289,7 +290,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     assert.equal((await request('/v1/chat/completions',payload)).status,409);
     assert.equal(calls.length,afterOutage,'stale capabilities fail before any provider lookup');
     guardDown=false;streamRevocation=true;
-    const fresh=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:2});
+    const fresh=keyPass(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:2});
     const streaming=await request('/v1/chat/completions',payload,fresh);
     await assert.rejects(streaming.text(),'revocation cuts off in-flight output');
     let states:string[]=[];
@@ -301,7 +302,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     streamRevocation=false;delete process.env.NOCHEH_REPLY_ROUTE_URL;const unconfigured=calls.length;
     // Revocation advanced the epoch, so the last check uses a capability for the current one.
     const epoch=Number((await pool.query('SELECT epoch FROM guard_state')).rows[0].epoch);
-    const current=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:epoch});
+    const current=keyPass(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:epoch});
     const missing=await request('/v1/chat/completions',payload,current);
     assert.equal(missing.status,503);assert.deepEqual(await missing.json(),{error:'provider_not_configured'});
     assert.equal(calls.length,unconfigured,'an unconfigured provider is reported before any upstream call');
@@ -325,7 +326,7 @@ test("PostgreSQL broker: Anthropic's Messages API gets the provider key in its o
     const event=await ingest(pool,{version:1,key:'security-anthropic-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
     const address=server.address();if(!address||typeof address==='string')throw Error();const base='http://127.0.0.1:'+address.port;
-    const credential=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:1});
+    const credential=keyPass(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:1});
     // Hermes's Anthropic client sends the scoped credential as x-api-key, with its version and beta headers.
     const request=(body:unknown,headers:Record<string,string>={'x-api-key':credential})=>fetch(base+ANTHROPIC_MESSAGES,{method:'POST',
       headers:{'content-type':'application/json','anthropic-version':'2023-06-01','anthropic-beta':'interleaved-thinking-2025-05-14,files-api-2025-04-14',...headers},body:JSON.stringify(body)});

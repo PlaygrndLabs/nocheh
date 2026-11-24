@@ -34,7 +34,7 @@ function sources():string[] {
 const answerOnly:readonly [string,string][]=[
   // The claim's own parse, and boundReader itself.
   ['src/access.ts',"if(principal.answer!==undefined)return 'answer';"],
-  ['src/access.ts','if(claims.answer!==undefined&&(prefix!==\'turn\''],
+  ['src/access.ts','if(claims.answer!==undefined&&(typeof claims.answer'],
   ['src/access.ts','...(claims.answer===undefined?{}:{answer:claims.answer as string})'],
   // The answer's pass (audience.ts signs the answer claim and its project).
   ['src/stores/audience.ts',"if(answer!==undefined&&(!principal.reads"],

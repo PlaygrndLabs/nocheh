@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import type {IncomingMessage} from 'node:http';
 import {createHmac} from 'node:crypto';
 import {canonical,digest} from '../src/archive.js';
-import {appBinding,reader,turnToken} from '../src/access.js';
+import {appBinding,reader} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import {assistantPolicy,ownerChat} from '../src/assistant-policy.js';
 import {accountIdFor,chatDirectory,chatIdFor,chatShortId,chatIdListSql,chatIdPattern,chatIdSql,chats,connectionIdFor,conversationFields,installChats,
   installChatsForTest,isChatId,refreshChatsOnEpoch,servedChats,setChatLoader,topicKey,type ChatSnapshot} from '../src/chats.js';
@@ -217,13 +218,13 @@ test('a turn pass may carry an app binding, checked in shape only',()=>{
   const secret='synthetic-service-token-only-for-tests',now=Date.now(),event=digest('fixture:event');
   const request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;
   // reader() still checks the space against the scope by the old shape until Part C moves that check onto the directory.
-  const bound=reader(request(turnToken(secret,GP1,now+60000,event,{space:GP1_TOPIC,revision:1,app:{app:'telegram',chat:GP1,topic:'7'}})),secret,now);
+  const bound=reader(request(keyPass(secret,GP1,now+60000,event,{space:GP1_TOPIC,revision:1,app:{app:'telegram',chat:GP1,topic:'7'}})),secret,now);
   assert.deepEqual(bound.app,{app:'telegram',chat:GP1,topic:'7'});
-  const plain=reader(request(turnToken(secret,GP1,now+60000,event,{space:GP1,revision:1})),secret,now);
+  const plain=reader(request(keyPass(secret,GP1,now+60000,event,{space:GP1,revision:1})),secret,now);
   assert.equal(plain.app,undefined,'storage does not require it');
   for(const bad of [{app:'telegram',chat:GP1},{app:'telegram',chat:GP1,topic:7},{app:'discord',chat:GP1,topic:null},{app:'telegram',chat:GP1+'/topic/7',topic:null},
     {app:'telegram',chat:GP1,topic:null,extra:1}])
-    assert.throws(()=>reader(request(turnToken(secret,GP1,now+60000,event,{space:GP1,revision:1,app:bad as never})),secret,now),{code:'invalid_scope_token'});
+    assert.throws(()=>reader(request(keyPass(secret,GP1,now+60000,event,{space:GP1,revision:1,app:bad as never})),secret,now),{code:'invalid_scope_token'});
   assert.deepEqual(appBinding({app:'slack',chat:'C0EXAMPLE1',topic:'1700000000.000200'}),{app:'slack',chat:'C0EXAMPLE1',topic:'1700000000.000200'});
   const body=Buffer.from(JSON.stringify({scope:GP1,expires:now+60000,audience:'nocheh-archive',app:{app:'telegram',chat:GP1,topic:null}})).toString('base64url');
   assert.throws(()=>reader(request(`scope.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`),secret,now),{code:'invalid_scope_token'},

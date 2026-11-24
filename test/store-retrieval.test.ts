@@ -6,7 +6,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {digest,type Envelope} from '../src/archive.js';
-import {reader,scopeToken,type Reader} from '../src/access.js';
+import {reader,turnToken,type Reader} from '../src/access.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {ArchiveRepository} from '../src/stores/archive.js';
 import {DerivedRepository} from '../src/stores/derived.js';
@@ -112,11 +112,12 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     await assert.rejects(sources.read(scoped,target.id),{code:'audience_context_changed'});
     const current=await principal('-321');
     await assert.rejects(sources.read({...current,generation:'00000000-0000-0000-0000-000000000000'},target.id),{code:'audience_context_changed'});
-    const token=await sources.audience.turn('synthetic-secret',current,target.id,Date.now()+60000);
+    const token=await sources.audience.turn('synthetic-secret',current,target.id,Date.now()+60000,{kind:'turn',subject:target.id,attempt:1,person:'owner'});
     const parsed=reader({headers:{authorization:'Bearer '+token}} as IncomingMessage,'synthetic-secret');
     assert.equal(parsed.generation,current.generation);assert.equal((await sources.read(parsed,target.id)).id,target.id);
-    const legacy=reader({headers:{authorization:'Bearer '+scopeToken('synthetic-secret','-321',Date.now()+60000)}} as IncomingMessage,'synthetic-secret');
-    await assert.rejects(sources.read(legacy,target.id),{code:'audience_context_changed'});
+    // A pass that is no one-time key (no person, id or kind) is no pass at all (ADR-0301).
+    assert.throws(()=>reader({headers:{authorization:'Bearer '+turnToken('synthetic-secret','-321',Date.now()+60000,target.id,{space:'-321',revision:1})}} as IncomingMessage,'synthetic-secret'),
+      {code:'invalid_scope_token'});
     await guards.setMode('off');
     await assert.rejects(sources.read(parsed,target.id),{code:'audience_context_changed'});
     const unprepared=(await archive.capture(event(':off','-321',{message_id:sequence+6,chat:{id:-321,type:'group'},text:'Guard off original'}))).source.reference;

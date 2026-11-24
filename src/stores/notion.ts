@@ -270,7 +270,8 @@ export async function notionRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ow
     const member=!!owner&&typeof row.scope==='string'&&row.space_id===row.scope?await memberChatProjects(db,row.scope,owner):null;
     return member?.projects.includes(target)&&notionMemberRead(args)?null:'notion_not_here';
   }
-  if(!owner||!account||!ownChat)return 'notion_owner_private_only';
+  // The owner's own Notion is only ever for the owner's key (ADR-0301).
+  if(!owner||!account||!ownChat||row.person&&row.person!=='owner')return 'notion_owner_private_only';
   // A schedule's run in the owner's private chat, still running (ADR-0278).
   if(!row.job_id||await scheduleRunning(db,row.job_id))return null;
   const bySetting=row.state==='approved'&&canonical(row.decision_reference)===canonical(row.source_reference);

@@ -2,6 +2,7 @@ import {blockingPublications} from './publications.js';
 import {followUpTurn,ownerAutonomyGrant} from './owner-autonomy.js';
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
+import {activeAgent} from '../agent/agents.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {assertActingReader,conversationScope,ownerChat,readOnlyReader,telegramAccount} from '../assistant-policy.js';
@@ -209,6 +210,8 @@ export class TelegramActionRepository {
    *  needed. A post to another group the owner's card decides keeps the owner's word. Read fresh, as the last word
    *  before a send. A send the owner asked for, or that no member's turn asked for, has no asker. */
   private async askerCurrent(row:any,directory:ChatDirectory):Promise<boolean> {
+    // A send asked through another agent than the one plugged in now never goes out (ADR-0301).
+    if(row.agent&&row.agent!==activeAgent)return false;
     if(!row.asker_account)return true;
     const current=await freshMembers();
     if(!current.talks(row.asker_account,row.scope,directory))return false;
@@ -284,9 +287,11 @@ export class TelegramActionRepository {
     const fingerprint=digest(canonical({destination,text:preparedText})),db=await this.stores.control.connect();
     try {
       await db.query('BEGIN');await this.fence(db,binding);
-      await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,asker_account,send_class)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING`,
-        [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision,asker,sendClass]);
+      // The asking key's person and agent are kept (ADR-0301); a send made for another agent never goes out.
+      await db.query(`INSERT INTO telegram_action_requests(id,source_reference,proposal_reference,binding,scope,space_id,profile,destination,fingerprint,text_hash,guard_revision,asker_account,send_class,person,agent)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT DO NOTHING`,
+        [id,source,proposal,binding,chat,principal.space,turn.logical_profile,destination,fingerprint,digest(preparedText),representation.revision,asker,sendClass,
+          principal.person??null,principal.agent??null]);
       const row=(await db.query('SELECT * FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint||canonical(row.proposal_reference)!==canonical(proposal))throw new HttpError(409,'action_proposal_changed');
       // The same request asked again once decided, such as a scheduled run's result delivered again, keeps its one decision:

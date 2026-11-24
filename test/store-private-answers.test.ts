@@ -469,14 +469,15 @@ test('an answer reader reads the groups frozen at its tap, by search and by page
     assert.notEqual(turn.profile,runtimeProfile({admin:false,scope:null,space:OWNER},binding),'not the owner\'s profile');
     assert.notEqual(turn.profile,runtimeProfile({admin:false,scope:OWNER,space:OWNER},binding),'its own profile, named after its record');
     await assert.rejects(s.turns.binding(pass),{code:'turn_source_denied'});
-    const audience=new AudienceRepository(s.guards),token=await audience.turn(secret,answer,started.id,Date.now()+60000);
+    const audience=new AudienceRepository(s.guards),answerKey=(attempt:string)=>({kind:'turn' as const,subject:started.id,attempt,person:'owner'});
+    const token=await audience.turn(secret,answer,started.id,Date.now()+60000,answerKey('answer'));
     const claims=JSON.parse(Buffer.from(token.split('.')[1]!,'base64url').toString());
     assert.deepEqual([claims.scope,claims.space,claims.answer,claims.project,claims.reads],[OWNER,OWNER,id,P1,undefined]);
     const parsed=parseReader({headers:{authorization:'Bearer '+token}} as IncomingMessage,secret);
     assert.deepEqual([parsed.scope,parsed.space,parsed.answer,parsed.turnEvent,parsed.reads],[OWNER,OWNER,id,started.id,undefined]);
-    await assert.rejects(audience.turn(secret,pass,started.id,Date.now()+60000),{code:'private_answer_closed'});
+    await assert.rejects(audience.turn(secret,pass,started.id,Date.now()+60000,answerKey('closed')),{code:'private_answer_closed'});
     await stores.control.query("UPDATE projects SET state='archived' WHERE id=$1",[P1]);
-    try {assert.equal(JSON.parse(Buffer.from((await audience.turn(secret,answer,started.id,Date.now()+60000)).split('.')[1]!,'base64url').toString()).project,undefined,
+    try {assert.equal(JSON.parse(Buffer.from((await audience.turn(secret,answer,started.id,Date.now()+60000,answerKey('archived'))).split('.')[1]!,'base64url').toString()).project,undefined,
       'an archived project gives no role');}
     finally{await stores.control.query("UPDATE projects SET state='active' WHERE id=$1",[P1]);}
 

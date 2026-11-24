@@ -15,6 +15,7 @@ from unittest.mock import patch, AsyncMock
 from .turn_process import _run_process,run_process
 from .job_progress import run_tokens
 from .scopes import Scope,Scopes
+from .key_fixture import keyed
 from services.chats import Served
 
 class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
@@ -42,10 +43,11 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         environment=patch.dict(os.environ,{'AGENT_KEY':self.secret})
         environment.start();self.addCleanup(environment.stop)
 
-    def review_body(self,purpose='memory-review',key=None):
+    def review_body(self,purpose='memory-review',key=None,**changes):
         claims={'scope':None,'space':'42','revision':1,'guard_epoch':1,'generation':'11111111-1111-1111-1111-111111111111',
                 'purpose':purpose,'event_id':'b'*64,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant'}
-        encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+        # A review's pass is the owner's one-time review key (ADR-0301).
+        encoded=base64.urlsafe_b64encode(json.dumps(keyed(claims,**changes)).encode()).decode().rstrip('=')
         signature=base64.urlsafe_b64encode(hmac.new((key or self.secret).encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
 
@@ -493,9 +495,12 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         # its signature part are refused before any profile is touched.
         ordinary=self.review_body('assistant');other=self.review_body();other['event_id']='c'*64
         unsigned=self.review_body();unsigned['archive_credential']=unsigned['archive_credential'].rsplit('.',1)[0]
+        # Its pass is a review key, the owner's, for this agent (ADR-0301).
+        keys=[self.review_body(key_kind=kind) for kind in ('turn','filter')]+[self.review_body(**change) for change in
+              ({'jti':None},{'person':'d'*64},{'agent':'another-agent'},{'key_kind':None})]
         with patch('services.hermes.review_worker.prepare_profile',side_effect=AssertionError('must not touch a profile')):
             for operation in (review,start):
-                for body in (ordinary,other,unsigned):
+                for body in (ordinary,other,unsigned,*keys):
                     with self.assertRaises(ValueError):operation(Path('/unused'),Scopes({'enabled':True},Served.of('42')),'model',None,body)
         # One signed with another key but carrying the review's own claims opens it: Nocheh's services check the signature.
         with patch('services.hermes.review_worker.prepare_profile',return_value=Path('/prepared')) as prepare:

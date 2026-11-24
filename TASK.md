@@ -64,7 +64,10 @@ Nocheh is in development mode and not yet released. Everything below is built an
   grants every schedule change and fire, and Hermes's Cron page is read-only
   ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)); an agent login replaces the master key in
   Hermes, which reaches only its own routes, and `rotate-keys` renews the master key, the agent login and Hermes's session token
-  ([ADR-0295](docs/adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Next: one-time keys per reply. A group's
+  ([ADR-0295](docs/adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Step 2: every pass is a one-time key for one
+  reply or run, naming its person and the agent plugged in now, written as a row and closed once the reply is delivered or
+  the run ends; each kind of key reaches only its own routes, review and filter keys no data tool, and Hermes keeps no pass on
+  disk ([ADR-0301](docs/adr/0301-one-time-keys-per-reply.md)). Next: close read holes, key-use log and the Keys list. A group's
   tools permission runs only what carries no data, within ten reads a message; the rest asks
   ([ADR-0291](docs/adr/0291-group-tools-run-only-what-carries-no-data.md)).
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);

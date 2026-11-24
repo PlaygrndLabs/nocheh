@@ -1,5 +1,7 @@
 import {blockingPublications} from './publications.js';
 import type pg from 'pg';
+import {randomBytes} from 'node:crypto';
+import {closeSubject} from './one-time-keys.js';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
@@ -157,9 +159,14 @@ export class SharingContentRepository {
             await this.prepared.allow(actor,input.candidates);
             // The model sees only the words searched for, never the asker's sentence; the saved input keeps the raw query (ADR-0251).
             const payload=await this.prepared.prepare(actor,{query:await this.searchWords(input.query),instructions:input.rule.instructions,candidates:input.candidates},this.detect) as Record<string,unknown>;
-            const credential=await this.prepared.audience.turn(this.serviceToken,actor,actor.turnEvent!,Date.now()+180000);
-            await this.validate(input,binding);
-            const response=await this.call('memory.filter',{...payload,archive_credential:credential},120000);
+            // The filter's own one-time key, the owner's (ADR-0301): one per call, closed as soon as the call returns.
+            const credential=await this.prepared.audience.turn(this.serviceToken,actor,actor.turnEvent!,Date.now()+180000,
+              {kind:'filter',subject:id,attempt:randomBytes(8).toString('hex'),person:'owner'});
+            let response:Record<string,unknown>;
+            try {
+              await this.validate(input,binding);
+              response=await this.call('memory.filter',{...payload,archive_credential:credential},120000);
+            } finally {await closeSubject(this.stores.control,'filter',id,'filter_finished');}
             const producer=object(response.producer);
             for(const key of ['name','version','model','provider','api_mode'])if(!string(producer[key],200).trim())throw new HttpError(503,'filter_provenance_required');
             if(Object.keys(producer).some(key=>!['name','version','model','provider','api_mode'].includes(key)))throw new HttpError(503,'filter_provenance_rejected');

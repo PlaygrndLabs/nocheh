@@ -1,3 +1,4 @@
+import json
 import tempfile
 import threading
 import time
@@ -113,6 +114,37 @@ class AsyncRunTests(unittest.TestCase):
             observed={'channel':'telegram','event_id':'a'*64,'attempt':attempt,'observe_only':True}
             self.assertEqual(runs.resume(observed),{'run_id':first['run_id'],'state':'done'})
             self.assertEqual(runs.resume({**observed,'attempt':1})['state'],'not_found','the message turn is another run')
+
+    def test_a_request_is_kept_without_its_pass_and_a_resume_launches_only_with_a_fresh_one(self):
+        # A pass is a one-time key for one reply (ADR-0301): it stays in memory with its run, never in the request on disk.
+        with tempfile.TemporaryDirectory() as folder:
+            calls=[];body=self.body();run=identity(body)
+            runs=AsyncRuns(folder,lambda body,*rest:calls.append(body.get('archive_credential')) or {'state':'done'},lambda body:None,credential=True)
+            runs.start(body);self.assertEqual(self.wait(runs,{**body,'observe_only':True})['state'],'done')
+            self.assertEqual(calls,['private credential canary'],'the first launch runs with the pass it came with')
+            saved=json.loads((Path(folder)/(run+'.request')).read_bytes())
+            self.assertNotIn('archive_credential',saved);self.assertEqual(saved['text'],'private transcript canary')
+            for path in Path(folder).iterdir():self.assertNotIn('credential canary',path.read_text(),path.name)
+        with tempfile.TemporaryDirectory() as folder:
+            calls=[];body=self.body();run=identity(body)
+            with patch('threading.Thread.start'):AsyncRuns(folder,lambda *args:None,lambda body:None,credential=True).start(body)
+            self.assertNotIn('credential canary',(Path(folder)/(run+'.request')).read_text())
+            execute=lambda body,*rest:calls.append(body.get('archive_credential')) or {'state':'done'}
+            restored=AsyncRuns(folder,execute,lambda body:None,credential=True)
+            identity_only={key:body[key] for key in ('channel','event_id','attempt')}
+            # Observing needs no pass; launching does, and never takes one from disk.
+            self.assertEqual(restored.resume({**identity_only,'observe_only':True})['state'],'queued')
+            for missing in (identity_only,{**identity_only,'archive_credential':None},{**identity_only,'archive_credential':5}):
+                with self.subTest(missing=missing),self.assertRaisesRegex(ValueError,'archive_credential_required'):restored.resume(missing)
+            time.sleep(.05);self.assertEqual(calls,[],'a resume without a fresh pass launches nothing')
+            self.assertEqual(self.wait(restored,{**identity_only,'archive_credential':'fresh credential'})['state'],'done')
+            self.assertEqual(calls,['fresh credential'])
+        # A run whose pass comes from its claim (a schedule or background job) resumes without one, as before.
+        with tempfile.TemporaryDirectory() as folder:
+            calls=[];body={'channel':'scheduler','event_id':'c'*64,'attempt':1}
+            with patch('threading.Thread.start'):AsyncRuns(folder,lambda *args:None,lambda body:None).start(body)
+            managed=AsyncRuns(folder,lambda body,*rest:calls.append(body) or {'state':'done'},lambda body:None)
+            self.assertEqual(self.wait(managed,body)['state'],'done');self.assertEqual(calls,[body])
 
     def test_exception_content_is_removed_from_durable_results(self):
         with tempfile.TemporaryDirectory() as folder:

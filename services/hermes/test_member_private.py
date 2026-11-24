@@ -24,7 +24,9 @@ from .agent_turns import AgentTurns
 from .native_memory import recall
 from .profile_history import _same_chat
 from .prompts import reply
-from .scopes import Scope, Scopes, check_claims
+from .scopes import KEY_KINDS, Scope, Scopes
+from .scopes import check_claims as checked
+from .key_fixture import keyed
 
 SECRET = 'synthetic-service-token-123456789'
 OWNER, MEMBER_CHAT, OTHER_CHAT = '123', '4567', '4568'
@@ -33,8 +35,13 @@ GENERATION = '11111111-1111-1111-1111-111111111111'
 
 
 def signed(claims, secret=SECRET):
-    data = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+    # Every pass is a one-time key (ADR-0301): a member's is that member's.
+    data = base64.urlsafe_b64encode(canonical(keyed(claims))).decode().rstrip('=')
     return 'turn.' + data + '.' + base64.urlsafe_b64encode(hmac.new(secret.encode(), data.encode(), hashlib.sha256).digest()).decode().rstrip('=')
+
+
+def check_claims(credential, scope, event, kinds=KEY_KINDS):
+    return checked(credential, scope, event, kinds)
 
 
 def update(chat, user, kind='private', number=1):

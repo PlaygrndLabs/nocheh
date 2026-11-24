@@ -192,10 +192,11 @@ export class ControlledActionRepository {
       const left=outward&&source.store==='archive'?await freeReadsLeft(db,source.id):null;
       // A repeat of the same request keeps the summary it was first asked with, so its card never changes.
       // A member's request keeps their account, so the claim checks them again before it runs (step 3).
-      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference,asker_account)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`,
+      // The asking key's person and agent are kept too (ADR-0301): its claim and its follow-up are for them.
+      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference,asker_account,person,agent)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT DO NOTHING`,
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null,
-          turn.job||followUp||left&&left.all<=0?null:ruleKey(body.kind as string,args),summary,asker&&!asker.owner?asker.account:null]);
+          turn.job||followUp||left&&left.all<=0?null:ruleKey(body.kind as string,args),summary,asker&&!asker.owner?asker.account:null,principal.person??null,principal.agent??null]);
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint)throw new HttpError(409,'action_proposal_changed');
       const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);

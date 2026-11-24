@@ -6,6 +6,7 @@ import {assertActingReader,conversationScope,ownerChat,ownerIds,telegramAccount,
 import {chats} from '../chats.js';
 import {allowedIn,servedDestination} from '../destinations.js';
 import {members} from '../members.js';
+import {activeAgent} from '../agent/agents.js';
 import {parentSpace,servedGroup} from '../spaces.js';
 import {HttpError,object,string} from '../http.js';
 import {approvalLines,backgroundBox,backgroundLines,backgroundCard,backgroundJob,backgroundLimit,backgroundMachine,backgroundRepo,backgroundRestart,backgroundResume,backgroundTexts,fillTemplate,labeledLines,lineKept,ownerPrompts} from '../prompts.js';
@@ -116,7 +117,14 @@ ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS held boolean NOT NULL DEFAU
 -- the archive's last capture sequence when it was approved, so nothing captured after Approve reaches it.
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS notion_pages jsonb;
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS reads_until bigint;
+-- Who asked for the job and through which agent, from the asking turn's one-time key (ADR-0301): each run is made for both.
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS person text CHECK(person IS NULL OR person='owner' OR person ~ '^[a-f0-9]{64}$');
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS agent text CHECK(agent IS NULL OR agent ~ '^[a-z][a-z0-9-]{0,31}$');
 ${memberJobSchema}`;
+
+/** Who a job is for when its row names nobody (ADR-0301): the owner for the owner's own job, else its requester's member
+ * while they are one; null once nobody can be named. */
+const requesterPerson=(requester:string|null):string|null=>requester===null?'owner':members().memberOf(telegramAccount(requester))?.id??null;
 
 const protocol='background-job-v1';
 // Hermes's backstop on the tool and thinking steps of one run; time and cost end a run long before it.
@@ -463,6 +471,10 @@ export class BackgroundJobRepository {
     // A direction override or a tag character can make a card read in another order than the job runs (ADR-0250).
     if(reordering(title)||reordering(instruction))throw new HttpError(400,'job_hidden_characters');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
+    // The asking key's person is the requester's (ADR-0301); a key for anyone else asks for nothing.
+    const person=requesterPerson(requester);
+    if(!person)throw new HttpError(409,'one_time_key_person_required');
+    if(principal.person!==undefined&&principal.person!==person)throw new HttpError(409,'one_time_key_person_mismatch');
     // A member's small jobs, with no daily count: their jobs permission where they asked (step 3). The owner, first, never needs one.
     if(requester&&!members().may(telegramAccount(requester),turn.scope,'jobs'))throw new HttpError(403,'job_not_permitted');
     // A job asked in the owner's private chat or one of its topics is the owner's chat's (ADR-0252: by its row).
@@ -514,10 +526,10 @@ export class BackgroundJobRepository {
     const fingerprint=digest(canonical({proposal:shown,chat:size.chat,from,to,estimate,cost_limit:costLimit,minutes_limit:minutesLimit,approver,box,byte_budget:bytes,
       ...(repo?{repo}:{}),...(machine?{machine,steps:plan,...(pages?{notion_pages:pages}:{})}:{})}));
     const insert=(db:Pick<pg.PoolClient,'query'>)=>db.query(`INSERT INTO background_jobs(id,source_reference,proposal_reference,guard_revision,binding,scope,space_id,target,logical_profile,requester,approver,
-      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo,notion_reads,machine,steps,notion_pages) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) ON CONFLICT DO NOTHING`,
+      fingerprint,estimate,cost_limit_usd,minutes_limit,box,rates,byte_budget,repo,notion_reads,machine,steps,notion_pages,person,agent) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) ON CONFLICT DO NOTHING`,
       [id,source,proposal,representation.revision,binding,scope,space,size.chat,'job-'+id.slice(0,24),requester,approver,fingerprint,
         {...estimate,from:from||null,to:to||null},costLimit,minutesLimit,box,estimate.rates,bytes,repo,notion,machine,plan===null?null:JSON.stringify(plan),
-        pages===null?null:JSON.stringify(pages)]);
+        pages===null?null:JSON.stringify(pages),person,principal.agent??null]);
     if(!repo&&!machine)await insert(this.control);
     else {
       // The copy or machine row is locked before the job row exists, the order Remove takes them in: Remove waits for this
@@ -835,13 +847,15 @@ export class BackgroundJobRepository {
     const binding=earlier&&await carriesForward(this.control,earlier,current)?earlier:current,db=await this.control.connect();
     try {
       await db.query('BEGIN');
-      const job=(await db.query('SELECT state,cancel_requested FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
+      const job=(await db.query('SELECT state,cancel_requested,person,agent,requester FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
       if(!job||job.cancel_requested||!['approved','running'].includes(job.state)){await db.query('ROLLBACK');return;}
+      // The run is for the job's person and agent (ADR-0301); its claim refuses a run nobody can be named for.
+      const person=job.person??requesterPerson(job.requester),agent=job.agent??activeAgent;
       const owner=(await db.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0];
       await db.query('INSERT INTO background_runs(event_id,job_id,attempt) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[operation.id,row.id,attempt]);
-      await db.query(`INSERT INTO managed_runs(event_id,channel,source_reference,scope,space_id,logical_profile,conversation_id,binding,owner_epoch,job_id)
-        VALUES($1,'background',$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`,
-        [operation.id,operation,row.scope,row.space_id,row.logical_profile,'job_'+row.id.slice(0,24),binding,owner.epoch,row.id]);
+      await db.query(`INSERT INTO managed_runs(event_id,channel,source_reference,scope,space_id,logical_profile,conversation_id,binding,owner_epoch,job_id,person,agent)
+        VALUES($1,'background',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,
+        [operation.id,operation,row.scope,row.space_id,row.logical_profile,'job_'+row.id.slice(0,24),binding,owner.epoch,row.id,person,agent]);
       // The job runs from its first run's commit, so the run's own claim and context see its clock.
       await db.query(`UPDATE background_jobs SET state='running',started_at=coalesce(started_at,now()),attempts=GREATEST(attempts,$2),
         revision=revision+1,updated_at=now() WHERE id=$1`,[row.id,attempt]);

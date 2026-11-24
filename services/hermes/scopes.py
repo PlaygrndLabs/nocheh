@@ -22,10 +22,36 @@ def topic_id(message):
     return raw if forum or message.get('is_topic_message') is True else None
 
 
-def check_claims(credential,scope,event_id):
+# The agent this Hermes is: every pass Nocheh mints names the agent plugged in now (ADR-0295, ADR-0301).
+AGENT_NAME='hermes'
+# What a one-time key is for (ADR-0301): a reply to a message, a follow-up after actions, the owner's ask about a member, a
+# scheduled or background run, a memory review, a sharing filter.
+KEY_KINDS=('turn','follow_up','member_ask','scheduled','background','review','filter')
+
+
+def check_key(claims,kinds):
+    """A pass's one-time key (ADR-0301): its own id, the person it is for, its kind, one of `kinds` (what the caller
+    runs), and this agent. The person fits the pass: a member's pass and a lane are that member's; the owner's own turn
+    (no scope), an answer, an ask about a member, a review and a filter are the owner's. Raises ValueError otherwise.
+    Nocheh checks the key's row on every call the pass makes; this only keeps a pass from running as another kind."""
+    jti,person,kind=claims.get('jti'),claims.get('person'),claims.get('key_kind')
+    if not isinstance(jti,str) or not re.fullmatch(r'[a-f0-9]{32}',jti):raise ValueError()
+    if person!='owner' and (not isinstance(person,str) or not re.fullmatch(r'[a-f0-9]{64}',person)):raise ValueError()
+    if kind not in KEY_KINDS or kind not in kinds or claims.get('agent')!=AGENT_NAME:raise ValueError()
+    member,lane,member_read=claims.get('member'),claims.get('lane'),claims.get('member_read')
+    if member is not None and person!=member or lane is not None and person!=lane:raise ValueError()
+    if (claims.get('scope') is None or claims.get('answer') is not None or member_read is not None) and person!='owner':raise ValueError()
+    purpose=claims.get('purpose','assistant')
+    if (purpose=='memory-review')!=(kind=='review') or (purpose=='filter')!=(kind=='filter') or (purpose!='assistant' and person!='owner'):raise ValueError()
+    if (member_read is not None)!=(kind=='member_ask'):raise ValueError()
+    if kind in ('scheduled','background') and claims.get('logical_profile') is None:raise ValueError()
+
+
+def check_claims(credential,scope,event_id,kinds):
     """A turn pass's claims, checked against the turn they must bind. Hermes does not check the signature, so the master key
     can leave it (ADR-0289): Nocheh's own services check it on every call the pass makes, and a forged pass reaches nothing there. Here
-    the claims choose only this turn's local profile, lane and tools, so every one must match its binding exactly."""
+    the claims choose only this turn's local profile, lane and tools, so every one must match its binding exactly. Every pass is
+    a one-time key of one of `kinds` (check_key, ADR-0301)."""
     try:
         prefix,body,signature=credential.split('.')
         if not body or not signature:raise ValueError()
@@ -44,7 +70,7 @@ def check_claims(credential,scope,event_id):
         member_read=claims.get('member_read')
         if member_read is not None and (not scope.owner or answer is not None or member is not None or not isinstance(member_read,str) or
                                         not re.fullmatch(r'[a-f0-9]{32}',member_read)):raise ValueError()
-        if any(key in claims for key in ('reads','member_chat','memberChat','memberRead')):raise ValueError()
+        if any(key in claims for key in ('reads','member_chat','memberChat','memberRead','keyKind')):raise ValueError()
         if answer is not None and member is not None:raise ValueError()
         # A lane (a member id) only orders turns: one at a time per member. It is never on the owner's own pass, an
         # answer's or an ask's, and on a member's pass it is that member.
@@ -66,6 +92,7 @@ def check_claims(credential,scope,event_id):
         if 'project' in claims and (not isinstance(claims['project'],str) or not re.fullmatch(r'[a-f0-9]{64}',claims['project'])):raise ValueError()
         # A Telegram turn is bound to where its chat is in the app (ADR-0252); a job's or the dashboard's pass names none.
         if scope.app and claims.get('app')!={'app':scope.app[0],'chat':scope.app[1],'topic':scope.app[2]}:raise ValueError()
+        check_key(claims,kinds)
         return claims
     except Exception:raise ValueError('archive_capability_scope_mismatch') from None
 

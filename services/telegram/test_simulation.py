@@ -121,6 +121,8 @@ class TelegramSimulationTests(unittest.IsolatedAsyncioTestCase):
         claims = {'scope': '-20', 'space': '-20' if topic is None else f'-20/topic/{topic}',
                   'revision': 1, 'event_id': event_id, 'expires': time.time() * 1000 + 600000,
                   'audience': 'nocheh-assistant', 'app': {'app': 'telegram', 'chat': '-20', 'topic': None if topic is None else str(topic)}}
+        # Every pass is a one-time key for one reply (ADR-0301).
+        claims.update(jti='e' * 32, person='owner', key_kind='turn', agent='hermes')
         body = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
         signature = base64.urlsafe_b64encode(hmac.new(self.secret.encode(), body.encode(), hashlib.sha256).digest()).decode().rstrip('=')
         return {'id': digest(event_id + ':' + str(attempt)), 'event_id': event_id, 'attempt': attempt, 'dispatch_key': source_key,

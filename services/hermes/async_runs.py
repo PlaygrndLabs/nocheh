@@ -25,9 +25,12 @@ def identity(body):
 
 
 class AsyncRuns:
-    def __init__(self,directory,execute,reconcile,launched=None):
+    """A run's request is kept on disk without its pass (`archive_credential`): a pass is a one-time key for one reply
+    (ADR-0301), held only in memory while its run goes on. With `credential` (runs whose requests carry a pass, the agent's
+    turns), a run resumed after a restart launches only with the fresh pass its resume brings, never one read from disk."""
+    def __init__(self,directory,execute,reconcile,launched=None,credential=False):
         self.directory=Path(directory);self.directory.mkdir(parents=True,exist_ok=True,mode=0o700)
-        self.execute,self.reconcile=execute,reconcile
+        self.execute,self.reconcile,self.credential=execute,reconcile,credential
         # A runner that keeps its runs in arrival order hears of each launch: under the lock, so in the order runs arrive, and
         # before the run's worker starts. What it returns is called once that run is over, whether or not it ever executed.
         self.launched=launched
@@ -124,7 +127,9 @@ class AsyncRuns:
                 omit=lambda value:{k:v for k,v in value.items() if k not in ('archive_credential','asynchronous','prompts')}
                 if canonical(omit(previous))!=canonical(omit(body)):raise ValueError('run_identity_conflict')
             else:
-                immutable_file(self.directory,run+'.request',canonical(body));self._observe(run,'queued','admission')
+                # The pass stays in memory with the run it launches here; the request on disk never holds it.
+                saved={key:value for key,value in body.items() if key!='archive_credential'}
+                immutable_file(self.directory,run+'.request',canonical(saved));self._observe(run,'queued','admission')
             state=self._snapshot(run,body)
             if state['state']=='queued':self._launch(run,body)
             return self._snapshot(run,body)
@@ -134,10 +139,13 @@ class AsyncRuns:
         with self.lock:
             path=self._path(run,'.request')
             if not path.exists():return {'run_id':run,'state':'not_found'}
-            request=json.loads(path.read_bytes())
+            # Never a pass from disk, even one an older request kept: only the one this resume brings.
+            request={key:value for key,value in json.loads(path.read_bytes()).items() if key!='archive_credential'}
             state=self._snapshot(run,request)
             if state['state']=='queued' and body.get('observe_only') is not True:
-                if 'archive_credential' in body:request['archive_credential']=body['archive_credential']
+                fresh=body.get('archive_credential')
+                if self.credential and not isinstance(fresh,str):raise ValueError('archive_credential_required')
+                if 'archive_credential' in body:request['archive_credential']=fresh
                 self._launch(run,request)
             return self._snapshot(run,request)
 

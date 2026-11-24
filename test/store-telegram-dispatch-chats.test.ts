@@ -97,6 +97,8 @@ test('a group Telegram upgraded, a forum topic and the owner\'s private chat fir
     // The security service binds this turn with its own directory, which may still be the one from before the upgrade:
     // it reads the turn once that directory has looked again, never refusing it as a chat it does not know.
     // Nothing here looks the new id up first: a lookup that misses would start a reload of its own.
+    // The reply went out, which closed its key (ADR-0301); it is opened again here as it was while the turn ran.
+    await stores.control.query('UPDATE one_time_keys SET closed_at=NULL,closed_reason=NULL WHERE jti=$1',[ng2.jti]);
     installChats(beforeUpgrade);
     assert.equal(chats(),beforeUpgrade,'a directory from before the upgrade');
     assert.equal((await services.turns.binding(ng2)).scope,NG2,'the upgraded group\'s turn is bound');

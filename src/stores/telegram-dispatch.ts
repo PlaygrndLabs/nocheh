@@ -32,6 +32,7 @@ import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnState
 import {forwardLine,forwardOrigin} from '../forwarded.js';
 import {ownerTimeZone} from './task-settings.js';
 import type {Tag,TagBy} from '../source-tags.js';
+import {closeSubject} from './one-time-keys.js';
 import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply,type ReplyButton} from './telegram-reply.js';
 
 export const telegramDispatchSchema=`
@@ -54,7 +55,9 @@ const observeMs=1000;
 const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
 /** A private answer whose record closed (expired, refused or its groups changed) is withdrawn like a retired source (ADR-0249);
  * so is a member's private turn whose chat closed or that may no longer read a group it was given (step 4). */
-const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired','private_answer_closed',memberChatClosed];
+const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired','private_answer_closed',memberChatClosed,
+  // A sender nobody can name now (they stopped being a member since the turn was built) gets no key: withdrawn (ADR-0301).
+  'one_time_key_person_required'];
 /**
  * Who sent a group message and when, as one line for the model. Names come
  * from the guarded representation, the time from the captured original, and
@@ -191,6 +194,9 @@ export class TelegramDispatchRepository {
     await this.control.query(`UPDATE dispatches SET state=$2,result_reference=$3,error_code=$4,runtime_stage=$5,
       next_attempt=CASE WHEN $2='failed' THEN now()+least(300,5*power(2,least(attempts,6)))*interval '1 second' ELSE next_attempt END,
       revision=revision+1,updated_at=now() WHERE event_id=$1`,[row.event_id,result.state,reference,result.error_code??null,result.state==='done'?'delivery':'assistant']);
+    // The reply went out, its delivery check, presence and final reaction done, or the attempt ended without it: its
+    // one-time key closes, every copy at once (ADR-0301). A retry gets a key of its own.
+    await closeSubject(this.control,'turn',row.event_id,result.state==='done'?'delivered':'not_delivered');
     if(row.input_reference&&['done','cancelled','suppressed'].includes(result.state))try {const input=await this.input(row.input_reference);
       if(result.state!=='done')await this.unanswered(input);
       // A private answer that went out is recorded once, with the send of its /start; nothing else is suggested from it.
@@ -239,11 +245,13 @@ export class TelegramDispatchRepository {
     await this.control.query(`UPDATE dispatches SET launched_attempt=CASE WHEN $3 THEN $2 END WHERE event_id=$1 AND attempts=$2
       AND launched_attempt IS DISTINCT FROM CASE WHEN $3 THEN $2 END`,[row.event_id,row.attempts,held]);
   }
-  /** A pass for the turn under the current binding, after the turn's own binding and source are checked. */
-  private async credential(input:Input):Promise<string> {
+  /** A pass for the turn under the current binding, after the turn's own binding and source are checked: the one-time key
+   * of this attempt (ADR-0301), the same at every check of it. */
+  private async credential(input:Input,attempt:number):Promise<string> {
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
-    const lane=this.lane(input);
-    const credential=await this.prepared.audience.turn(this.token,lane?{...input.principal,lane}:input.principal,input.principal.turnEvent!,Date.now()+600000);
+    const lane=this.lane(input),event=input.principal.turnEvent!;
+    const credential=await this.prepared.audience.turn(this.token,lane?{...input.principal,lane}:input.principal,event,Date.now()+600000,
+      {kind:'turn',subject:event,attempt,person:this.person(input)});
     await currentTurn(this,input);
     return credential;
   }
@@ -261,6 +269,20 @@ export class TelegramDispatchRepository {
     return members().memberOf(telegramAccount(String(from)))?.id;
   }
   /**
+   * Whose one-time key the turn's pass is (ADR-0301): the member of their own private chat; the owner for the owner's
+   * chat, an answer and an ask; in a group, whoever sent the message, the owner or a member while they are one. Null
+   * when nobody can be named, which gives no pass.
+   */
+  private person(input:Input):string|null {
+    const principal=input.principal;
+    if(principal.member!==undefined)return principal.member;
+    if(principal.scope===null||boundReader(principal)!==null)return 'owner';
+    const from=(input.body.payload as {message?:{from?:{id?:unknown}}}|undefined)?.message?.from?.id,policy=this.access.policy();
+    if(typeof from!=='number'&&typeof from!=='string')return null;
+    if(String(from)===policy.owner_id)return 'owner';
+    return members().memberOf(telegramAccount(String(from)))?.id??null;
+  }
+  /**
    * The agent closed the turn. A done turn's reply goes out through Nocheh's bot (ADR-0235), after any earlier reply in
    * the same chat, and only while the turn's context still holds; otherwise the reply is withdrawn or runs again.
    * Every other end clears the working reaction, or marks it 👎 when the turn failed and will be retried.
@@ -268,7 +290,7 @@ export class TelegramDispatchRepository {
   private async settle(row:any,input:Input,receipt:TurnReceipt):Promise<Observation> {
     const attempt=row.attempts as number,state=String(receipt.state);
     let credential:string|null=null,withdrawn:string|null=null;
-    try{credential=await this.credential(input);}catch(error){
+    try{credential=await this.credential(input,attempt);}catch(error){
       if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
       withdrawn=error.code;
     }
@@ -804,7 +826,7 @@ export class TelegramDispatchRepository {
         catch{return await this.receive(row,{state:'running'});}
         await this.launched(row,observed);
         if(closed.has(String(observed.state)))return await this.settle(row,input,observed);
-        try{credential=await this.credential(input);}catch(error){
+        try{credential=await this.credential(input,row.attempts);}catch(error){
           if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
           // Only a retirement or a deselected chat withdraws the reply. A newer epoch alone means
           // it is rebuilt under that epoch: a turn that never started runs again, and a running
@@ -813,6 +835,7 @@ export class TelegramDispatchRepository {
           if(renewed&&observed.state==='not_found') {
             await this.control.query(`UPDATE dispatches SET state='failed',error_code=$2,next_attempt=now()+interval '2 seconds',
               revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='running'`,[id,error.code]);
+            await closeSubject(this.control,'turn',id,'not_delivered');
             return this.observation(await this.row(id));
           }
           if(renewed)return await this.receive(row,observed);
@@ -872,7 +895,7 @@ export class TelegramDispatchRepository {
         }catch(error){await db.query('ROLLBACK');throw error;}
       }
       const fixed=controlReply(input);if(fixed)return await this.settle(row,input,fixed);
-      credential??=await this.credential(input);
+      credential??=await this.credential(input,row.attempts);
       // The same ref starts once the bot can send its reply; until then it waits, as it did while Hermes held the bot.
       if(!await botReady(this.call))return await this.receive(row,{state:'running'},10000);
       // Typing and 👀 show while the agent works; Nocheh renews them at each check.

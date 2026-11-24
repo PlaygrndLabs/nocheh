@@ -4,7 +4,8 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {settings} from '../src/config.js';
 import {connectDatabase,initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
-import {turnToken,reader,assertAudience,isAgentLogin} from '../src/access.js';
+import {reader,assertAudience,isAgentLogin} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import {readJson,json,HttpError,object} from '../src/http.js';
 import {prepareContext} from '../src/prepared-context.js';
 import {prepareGuarded} from '../src/guarded.js';
@@ -23,7 +24,7 @@ const source=await ingest(pool,{version:1,key:'security-acceptance-source',origi
 const turn=await ingest(pool,{version:1,key:'security-acceptance-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'turn',revision:'0',occurred_at:null,text:'Synthetic security acceptance',payload:{profile:'owner'}},false);
 const detect=async(text:string)=>text.includes('SYNTHETIC_TEST_SECRET')?['SYNTHETIC_TEST_SECRET']:[];
 await prepareGuarded(pool,detect,undefined,undefined,undefined,{owner:'inngest',epoch:1});
-const credential=turnToken(config.token,null,Date.now()+3600000,turn.id,{space:'1',revision:1,guard_epoch:1});
+const credential=keyPass(config.token,null,Date.now()+3600000,turn.id,{space:'1',revision:1,guard_epoch:1});
 const principal=reader({headers:{authorization:'Bearer '+credential}} as any,config.token);
 const binding=await turnBinding(pool,principal);
 const recalled={limited_memory:false,hits:[{source:'nocheh:event:'+source.id,text:'Retrieved planning note: Mina owns Cedar. The backup owner is Jules. Cite the archive record when stating the launch date or budget.'}]};

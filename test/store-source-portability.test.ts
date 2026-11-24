@@ -6,7 +6,8 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {digest,type Envelope} from '../src/archive.js';
-import {reader,scopeToken} from '../src/access.js';
+import {reader} from '../src/access.js';
+import {keyPass,openKey} from './one-time-key-pass.js';
 import {HttpError,json} from '../src/http.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {ArchiveRepository,sourceIdentity,type CapturedSource} from '../src/stores/archive.js';
@@ -50,7 +51,7 @@ test('source-only portable records preserve originals and recover imports withou
   const dead=new pg.Pool(config);await dead.end();
   try {
     const input=record(':roundtrip'),bytes=Buffer.from([79,103,103,0,255]);
-    const denied=await fetch(base+'/v1/imports/sources',{method:'POST',headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)},body:'not json'});
+    const denied=await fetch(base+'/v1/imports/sources',{method:'POST',headers:{authorization:'Bearer '+await openKey(stores.control,keyPass(token,'123',Date.now()+60000))},body:'not json'});
     assert.equal(denied.status,403,'owner authority precedes parsing');
     await request('/v1/imports/sources',{...input,derived:[{content_base64:'YQ=='}]},400);
     assert.equal((await stores.control.query('SELECT 1 FROM source_intakes WHERE event_id=$1',[input.id])).rowCount,0);
