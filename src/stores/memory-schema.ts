@@ -10,7 +10,7 @@ ALTER TABLE memory_engine_connection ADD COLUMN IF NOT EXISTS workspace_revision
 CREATE TABLE IF NOT EXISTS memory_generations (
  id text PRIMARY KEY,installation_generation uuid NOT NULL,guard_epoch bigint NOT NULL,
  audience text NOT NULL,state text NOT NULL DEFAULT 'building' CHECK(state IN ('building','ready','retired')),
- created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(installation_generation,guard_epoch,audience)
+ created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS root_reference jsonb;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS root_space text;
@@ -19,7 +19,9 @@ ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS error_code text;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS derivation_checked_at timestamptz;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS work_revision integer NOT NULL DEFAULT 1;
 ALTER TABLE memory_generations ADD COLUMN IF NOT EXISTS representation_version text NOT NULL DEFAULT 'legacy-source-v1';
-ALTER TABLE memory_generations DROP CONSTRAINT IF EXISTS memory_generations_installation_generation_guard_epoch_audience_key;
+-- Earlier installs kept one workspace per guard epoch. Postgres cut that constraint's name to 63 characters, so it is dropped
+-- by the name Postgres gave it.
+ALTER TABLE memory_generations DROP CONSTRAINT IF EXISTS memory_generations_installation_generation_guard_epoch_audi_key;
 DROP INDEX IF EXISTS memory_generations_versioned_audience;
 -- One current workspace per installation; a fresh start retires it and opens the next.
 CREATE UNIQUE INDEX IF NOT EXISTS memory_generations_current ON memory_generations(installation_generation) WHERE audience='installation' AND state<>'retired';
