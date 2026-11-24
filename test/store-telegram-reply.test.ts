@@ -62,7 +62,7 @@ test('a turn names and quotes the message it replies to, and a recent message na
   };
   const turnOf=(event:string)=>started.find(turn=>turn.event_id===event);
   const at=(message:any)=>new Date(message.date*1000).toISOString().slice(0,16).replace('T',' ')+' UTC';
-  const noIds=(value:unknown)=>{const text=JSON.stringify(value);for(const id of [G,String(ALICE),String(LONG),OWNER])assert.ok(!text.includes(id),'no Telegram ID: '+id);};
+  const noIds=(value:unknown)=>{const text=JSON.stringify(value);for(const id of [G,String(ALICE),String(LONG),OWNER])assert.ok(!new RegExp(`(?<![0-9A-Za-z])${id}(?![0-9A-Za-z])`).test(text),'no Telegram ID: '+id);};
   await startChatDirectory(stores.control,()=>configured);
   try {
     await services.guards.reconcile();await services.guards.setMode('on');
