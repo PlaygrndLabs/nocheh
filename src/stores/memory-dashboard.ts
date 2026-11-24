@@ -20,6 +20,9 @@ import type {Original,OwnerOriginals} from './owner-originals.js';
  */
 export type DashboardFact={id:string;text:string;learned_at:string;exact:boolean;batch:boolean;by:TagBy;label:string|null;at:string|null;
   originals:Original[];more:number};
+/** A hidden fact as the dashboard lists it: whom it is about (null when no People name is known), `group` when it is a
+ *  group memory wall's copy, why and when it was hidden, and when it was first learned. */
+export type HiddenDashboardFact={id:string;text:string;about:string|null;where:'everywhere'|'group';reason:'replaced'|'unused';hidden_at:string|null;learned_at:string};
 /** Why a list is empty without a failure: no memory space to read, an engine that can't list facts, or a message never
  *  learned. `unavailable` is a failure, counted as a `source_tags` problem. */
 export type FactsReason='no_memory'|'not_supported'|'not_learned'|'unavailable';
@@ -130,6 +133,39 @@ export class MemoryDashboard {
         facts:found.facts.map((fact:EngineFact)=>({...fact,participant:participant!}))})):await this.engine.everyFact!(space.id,options);
       return {facts:await this.shaped(principal,space,page.facts,page.limitations),next:page.next};
     }catch(error){return {facts:[],next:null,reason:await this.failed('memory_dashboard_facts_failed',error)};}
+  }
+
+  /**
+   * Hidden facts (ADR-0298), newest hidden first: what a clean-up retired, kept so the owner can bring it back. Each names
+   * whom it is about (the People name, or null) and whether it is a group memory wall's copy.
+   */
+  async hidden(principal:Reader,after:string):Promise<{facts:HiddenDashboardFact[];next:string|null;reason?:FactsReason}> {
+    admin(principal);
+    if(after.length>80)throw new HttpError(400,'invalid_hidden_request');
+    const space=await this.memory.dashboardSpace();
+    if(!space)return {facts:[],next:null,reason:'no_memory'};
+    if(!this.engine.hiddenFacts)return {facts:[],next:null,reason:'not_supported'};
+    try {
+      const page=await this.engine.hiddenFacts(space.id,{after:after||null,size:OWNER_FACT_PAGE});
+      const entities=[...new Set(page.facts.map(fact=>/^(?:person|project)_(.+)$/.exec(fact.participant)?.[1]).filter((id):id is string=>!!id))];
+      const names=new Map<string,string>(entities.length
+        ?(await this.stores.control.query('SELECT id,name FROM memory_entities WHERE id=ANY($1::text[])',[entities])).rows.map(row=>[String(row.id),String(row.name)])
+        :[]);
+      return {facts:page.facts.map(fact=>({id:fact.id,text:fact.content,about:names.get(fact.participant.replace(/^(?:person|project)_/,''))??null,
+        where:fact.wall?'group':'everywhere',reason:fact.reason,hidden_at:fact.hiddenAt,learned_at:fact.createdAt})),next:page.next};
+    } catch(error) {
+      return {facts:[],next:null,reason:await this.failed('memory_dashboard_hidden_failed',error)};
+    }
+  }
+  /** Bring hidden facts back, with their group copies. */
+  async restore(principal:Reader,body:unknown):Promise<{restored:string[]}> {
+    admin(principal);
+    const ids=(body as any)?.ids;
+    if(!Array.isArray(ids)||!ids.length||ids.length>50||ids.some(id=>!engineId(id)))throw new HttpError(400,'invalid_restore_request');
+    const space=await this.memory.dashboardSpace();
+    if(!space)throw new HttpError(409,'memory_not_connected');
+    if(!this.engine.restoreFacts)throw new HttpError(409,'memory_restore_not_supported');
+    return {restored:await this.engine.restoreFacts(space.id,ids)};
   }
 
   /** The coverage line: how many live facts cite their messages, know only their learning batch, or neither. */

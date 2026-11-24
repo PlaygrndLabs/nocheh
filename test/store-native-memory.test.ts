@@ -63,7 +63,8 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   assert.match(calls[0]!,new RegExp('/v3/workspaces/'+workspace+'/sessions/'+groupSession+'/context\\?'));
   assert.match(calls[0]!,/peer_target=person_speaker/);assert.match(calls[0]!,/limit_to_session=true/,'a group turn never reads the speaker\'s whole representation');
   assert.equal(calls.length,1,'a group turn reads no forwards and files');assert.equal((first.sources[0] as any).about,undefined);
-  assert.equal(contents[0],'[conversation summary]\nConversation summary\n\n[what is known about the speaker]\nWhat the speaker said');
+  // Only the owner's block falls back to Honcho's prose; a group's prose can hold a conclusion drawn across chats (ADR-0298).
+  assert.equal(contents[0],'[conversation summary]\nConversation summary');
   const before=records.length;await memory.context(group);
   assert.deepEqual(records.slice(before),records.slice(0,before),'identical Honcho output reuses its guarded result, so a prefetch serves the next turn');
   assert.equal(calls.length,2,'every turn checks Honcho freshness on arrival; nothing is saved behind a timer');
