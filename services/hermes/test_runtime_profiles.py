@@ -75,7 +75,7 @@ class RuntimeProfileTests(unittest.TestCase):
     def tearDown(self): self.env.stop(); self.temp.cleanup()
 
     def create(self):
-        # Made on Nocheh's side: Hermes's Profiles page only reads (ADR-0291), and the agent login cannot save profiles.
+        # Made on Nocheh's side: Hermes's Profiles page only reads (ADR-0295), and the agent login cannot save profiles.
         response = self.client.post('/api/profiles', headers=self.headers, json={'name': 'research', 'operation_id': 'create-research'})
         self.assertEqual((response.status_code, response.json()['error']), (403, 'profiles_read_only'))
         self.assertEqual([call for call in self.control.calls if call[0] == '/v1/runtime/profiles' and call[1] is not None], [])

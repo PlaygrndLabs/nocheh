@@ -1,0 +1,64 @@
+# Hermes's and Honcho's own tests at the revisions Nocheh pins: python3 -m tools.development.check_all --only upstream.
+# Runs on pull requests that move a pin, and by hand. Synthetic data and made-up credentials only. No repository
+# secrets, no model calls, no write access. The upstream sources are downloaded at run time and never committed.
+name: Upgrade checks
+
+on:
+  pull_request:
+    paths:
+      - deploy/upstreams.lock.json
+      - services/honcho/upstreams.lock.json
+      - tools/development/upstream_tests.py
+      - .github/workflows/upgrade-checks.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upgrade-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upstream:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      PGHOST: 127.0.0.1
+      PGUSER: nocheh
+      PGPASSWORD: checks-fixture-not-a-real-credential
+      NOCHEH_CHECK_VECTOR_PGPORT: "5440"
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start a synthetic Postgres with pgvector
+        # The image Nocheh's memory store runs.
+        run: |
+          docker run -d --name postgres-vector -p "127.0.0.1:$NOCHEH_CHECK_VECTOR_PGPORT:5432" -e POSTGRES_USER=nocheh \
+            -e POSTGRES_PASSWORD="$PGPASSWORD" \
+            pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0 \
+            -c cluster_name=nocheh-stores-fixture -c max_connections=200
+
+      - name: Install uv
+        run: pipx install --quiet uv==0.13.7
+
+      - name: Make the environments
+        run: python3 -c 'from tools.development import check_all; check_all.setup(("upstream",))'
+
+      - name: Wait for Postgres
+        run: |
+          for attempt in $(seq 60); do pg_isready -q -h 127.0.0.1 -p "$NOCHEH_CHECK_VECTOR_PGPORT" && break; sleep 1; done
+          pg_isready -h 127.0.0.1 -p "$NOCHEH_CHECK_VECTOR_PGPORT"
+
+      - name: Run Hermes's and Honcho's tests
+        run: python3 -m tools.development.check_all --only upstream
+
+      - name: Keep the results
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: upstream-test-results
+          path: data/test-results/
+          retention-days: 14

@@ -57,6 +57,7 @@ import {authorizeNotice} from './task-reminder-delivery.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 import {MEMBER_APP_CORE_PREFIX} from '../member-app-wire.js';
 import {backgroundOperation,internalChats,noteSources,retiredSources,runtimeProfiles,schedulerOperation,serveAgent} from './agent-routes.js';
+import {conversationReads,isTurnRead,recordTurnReads} from './turn-reads.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
 export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>,capabilities:Readonly<Record<string,boolean>>={}) {
@@ -72,7 +73,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(path.startsWith('/v1/browser/'))throw new HttpError(404,'browser_chat_off');
     assertStorageActive(config.dataDir);
     if(transport?.handle(req,res))return;
-    // The agent login reaches only the routes Hermes calls, before any other route or reader (ADR-0291).
+    // The agent login reaches only the routes Hermes calls, before any other route or reader (ADR-0295).
     const login=agentLogin(req,config.agentKey);if(login)return serveAgent(s,config,login,req,res,url);
     if(req.method==='POST'&&path==='/internal/actions/authorize') {
       authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
@@ -416,7 +417,21 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(path==='/v1/context/prepare'&&req.method==='POST') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
-      return result(await readJson(req,1024*1024));
+      // A tool result the agent's runtime is about to hand the model names what it read, which is kept before the model
+      // sees it: a command later in the turn then asks first (ADR-0293).
+      const read=url.searchParams.get('read'),input=await readJson(req,1024*1024);
+      if(read!==null) {
+        if(!isTurnRead(read))throw new HttpError(400,'invalid_turn_reads');
+        if(principal.turnEvent&&/^[a-f0-9]{64}$/.test(principal.turnEvent))await recordTurnReads(s.stores.control,principal,'turn',[read]);
+      }
+      return result(input);
+    }
+    // What the conversation a turn runs in holds besides the owner's typed words, from the agent's runtime before the
+    // model starts (ADR-0293). A turn it never reported counts as outside.
+    if(path==='/v1/turn/conversation-reads'&&req.method==='POST') {
+      if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
+      await recordTurnReads(s.stores.control,principal,'conversation',conversationReads(await readJson(req)));
+      return json(res,200,{recorded:true});
     }
     if(path==='/v1/memory/check'&&req.method==='GET'){
       const source=principal.turnEvent?(await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;

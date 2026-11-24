@@ -93,7 +93,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
     await services.sources.read(actor,source.reference.id);
     assert.equal((await request('/v1/chat/completions',payload)).status,200);
     const provider=calls.at(-1)!;assert.ok(!JSON.stringify(provider.body).includes('saffronpass'));
-    // Hermes is asked for the provider with the agent login, never the master key (ADR-0291).
+    // Hermes is asked for the provider with the agent login, never the master key (ADR-0295).
     assert.ok(transports.length&&transports.every(authorization=>authorization==='Bearer '+agentKey),JSON.stringify(transports));assert.ok(JSON.stringify(provider.body).includes('Observed words.'));
     assert.equal((await stores.archive.query("SELECT 1 FROM events WHERE kind IN ('runtime_context','guard_result')")).rowCount,0);
     assert.ok((await stores.derived.query("SELECT 1 FROM derived_artifacts WHERE event_id=$1 AND kind='runtime_context'",[source.reference.id])).rowCount!>0);
@@ -103,7 +103,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
     const before=calls.length;
     const oldGeneration=credential({...actor,generation:'00000000-0000-0000-0000-000000000000'});
     assert.equal((await request('/v1/chat/completions',payload,oldGeneration)).status,409);assert.equal(calls.length,before);
-    // The system guard takes the agent login only (ADR-0291): the master key is refused there, and the agent login reaches
+    // The system guard takes the agent login only (ADR-0295): the master key is refused there, and the agent login reaches
     // nothing else on the broker.
     const guarded=await request('/v1/guard',{destination:'https://fixture.example',payload:{text:'Administrative saffronpass'}},token);
     assert.equal(guarded.status,403);assert.equal((await guarded.json() as any).error,'agent_login_required');

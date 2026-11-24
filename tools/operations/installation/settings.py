@@ -43,14 +43,14 @@ RETIRED_DEFAULTS = {'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}'}
 def service_revision(values):
     """What the running services use; Apply records it. Settings that work live are left out, and so
     are settings at their default, so a newly added or retired setting does not ask for Apply. Generated keys are no
-    settings: a cutover or rotate-keys (ADR-0291) applies them itself, so a new one never asks for Apply."""
+    settings: a cutover or rotate-keys (ADR-0295) applies them itself, so a new one never asks for Apply."""
     defaults = {**RETIRED_DEFAULTS, **DEFAULTS}
     return revision({key: value for key, value in values.items() if key not in LIVE and key not in GENERATED and defaults.get(key) != value})
 
 
 def carry_keys(state, values):
     """A cutover's new keys also go into the last applied baseline that unapplied settings left, so a failed Apply or
-    rotate-keys rolls back to keys the services can still start with (ADR-0291)."""
+    rotate-keys rolls back to keys the services can still start with (ADR-0295)."""
     from tools.operations.installation.configuration import ROTATED, read_env
     previous = Path(state) / 'admin/previous.env'
     if not previous.exists(): return
@@ -58,7 +58,7 @@ def carry_keys(state, values):
 
 
 def carry_applied(state, before):
-    """Builds before ADR-0291 counted generated keys in the applied revision. When a cutover changes only those, the record
+    """Builds before ADR-0295 counted generated keys in the applied revision. When a cutover changes only those, the record
     follows the settings, so the cutover asks for no Apply: init, up or make dev restarts the services with the new keys."""
     applied = Path(state) / 'admin/applied.json'
     try: recorded = json.loads(applied.read_text()).get('revision')
@@ -274,7 +274,7 @@ def apply(state, progress=lambda step: None):
 
 
 def restart_cached(state):
-    """The dashboard and executor read the keys once (ADR-0291) and up does not recreate them, so after a key change they
+    """The dashboard and executor read the keys once (ADR-0295) and up does not recreate them, so after a key change they
     restart here. A stopped one stays stopped; the marker goes either way."""
     from tools.operations.installation.operations import compose, environment
     from tools.operations.installation.configuration import RESTART_MARKER

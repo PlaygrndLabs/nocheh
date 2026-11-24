@@ -347,7 +347,7 @@ def main(action, rest):
     print(f'Source checkout: {ROOT}\nOperating state: {root / "data/local"}', flush=True)
     marker = root / 'data/local' / configuration.RESTART_MARKER
     if marker.exists():
-        # After a key change (ADR-0291): the dashboard and executor keep keys they read once, and up does not recreate them.
+        # After a key change (ADR-0295): the dashboard and executor keep keys they read once, and up does not recreate them.
         subprocess.call(cmd + ['stop', 'nocheh-dashboard', 'nocheh-executor'], cwd=root, env=env)
         marker.unlink(missing_ok=True)
     try:

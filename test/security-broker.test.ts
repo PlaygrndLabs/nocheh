@@ -208,7 +208,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     await assert.rejects(effectLog(pool,{admin:false,scope:null},'0',undefined,event.id),{code:'owner_required'});
     await assert.rejects(effectLog(pool,{admin:true,scope:null},'0',undefined,'bad'),{code:'invalid_event_filter'});
     const provider=calls.at(-1)!;assert.deepEqual(provider.body,payload);assert.equal(provider.auth,'Bearer '+secret);
-    // Hermes gives the provider to the agent login only, never to the master key (ADR-0291).
+    // Hermes gives the provider to the agent login only, never to the master key (ADR-0295).
     assert.deepEqual([...new Set(calls.filter(call=>call.url.endsWith('/internal/security/transport')).map(call=>call.auth))],['Bearer '+agentKey]);
     assert.equal(provider.agent,'Nocheh','a reply names its client, so a gateway bot check does not refuse it');
     assert.equal(preparedPrincipals[0].turnEvent,event.id);assert.equal(preparedPrincipals[0].admin,false);

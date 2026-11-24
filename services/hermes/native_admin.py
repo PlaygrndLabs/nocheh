@@ -23,7 +23,7 @@ class Administration:
         from .isolated_profile import install_database_paths
         install_database_paths()
         self.app, self.root, self.model = app, Path(root).resolve(), model
-        # The agent login calls Nocheh; the session token is the only key the dashboard's requests here carry (ADR-0291).
+        # The agent login calls Nocheh; the session token is the only key the dashboard's requests here carry (ADR-0295).
         self.policy, self.agent_key, self.session_token = policy, agent_key, session_token
         self.lock = asyncio.Lock()
         self.revision_reader = revision_reader
@@ -147,7 +147,7 @@ class Administration:
                 # Schedules page, where Nocheh grants each change.
                 if path.startswith('/api/cron/') and method not in ('GET', 'HEAD'):
                     return await JSONResponse({'error': 'cron_read_only', 'detail': 'cron_read_only'}, 403)(scope, receive, send)
-                # Hermes's Profiles page only reads too (ADR-0291, the owner's choice for now): the agent login cannot save
+                # Hermes's Profiles page only reads too (ADR-0295, the owner's choice for now): the agent login cannot save
                 # profiles in Nocheh. To allow it again, drop this check and add POST /v1/runtime/profiles to Nocheh's agent routes.
                 if (path == '/api/profiles' and method == 'POST') or (re.fullmatch(r'/api/profiles/[^/]+', path) and method in ('PATCH', 'DELETE')):
                     return await JSONResponse({'error': 'profiles_read_only', 'detail': 'profiles_read_only'}, 403)(scope, receive, send)

@@ -16,7 +16,7 @@ _AGENT_KEY = None
 
 
 def agent_key():
-    """The agent login (ADR-0291): Nocheh and Hermes call each other with it. Kept here once read, so a process may drop
+    """The agent login (ADR-0295): Nocheh and Hermes call each other with it. Kept here once read, so a process may drop
     it from its environment before starting children that must not hold it."""
     global _AGENT_KEY
     if _AGENT_KEY is None or 'AGENT_KEY' in os.environ or 'AGENT_KEY_FILE' in os.environ:

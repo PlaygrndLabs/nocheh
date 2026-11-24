@@ -25,7 +25,7 @@ from .isolated_profile import DATA_DIRS,DATA_FILES
 from .environment import parallel,agent_key,refuse_master_key
 
 CONFIGURATION=('config.yaml','SOUL.md','skills')
-# The agent login Hermes's bridge sends; read once by main() (ADR-0291). Unset, every turn is refused.
+# The agent login Hermes's bridge sends; read once by main() (ADR-0295). Unset, every turn is refused.
 AGENT_KEY=''
 BOX_NAME=re.compile(r'nocheh-box-[a-f0-9]{24}')
 def security_url():return os.environ.get('NOCHEH_SECURITY_URL') or 'http://nocheh-security:8786'

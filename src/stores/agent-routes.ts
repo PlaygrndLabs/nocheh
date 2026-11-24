@@ -9,7 +9,7 @@ import {assertGuardConfiguration} from './lifecycle.js';
 import type {StorageServices} from './services.js';
 
 /**
- * Every route the agent login reaches on nocheh-app (ADR-0291): exactly what Hermes calls, by method and path, with no
+ * Every route the agent login reaches on nocheh-app (ADR-0295): exactly what Hermes calls, by method and path, with no
  * query. Anything else is refused, so a leaked agent login opens no owner, data or tool route. Saving a runtime profile
  * (POST /v1/runtime/profiles) is left out while Hermes's own Profiles page only reads; adding its row back here and
  * removing native_admin's profiles_read_only check is the whole change if that decision is reversed.

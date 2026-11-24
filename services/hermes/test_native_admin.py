@@ -61,7 +61,7 @@ class NativeAdminTests(unittest.TestCase):
         self.owner = self.root / 'profiles' / Scopes.profile('42')
         self.group = self.root / 'profiles' / Scopes.profile('-10')
         configure_profile(self.owner, 'gpt-5.6-sol'); configure_profile(self.group, 'gpt-5.6-sol')
-        # The session token opens these pages; the agent login only calls Nocheh (ADR-0291).
+        # The session token opens these pages; the agent login only calls Nocheh (ADR-0295).
         self.token, self.agent = 'admin-test-token-' * 3, 'agent-test-key-' * 3
         self.app = create_app(self.root, 'gpt-5.6-sol', self.policy, self.agent, self.token)
         self.client = TestClient(self.app, base_url='http://127.0.0.1')
@@ -202,7 +202,7 @@ class NativeAdminTests(unittest.TestCase):
         self.assertIn(self.client.get('/api/files/read', params={'path':'escape/config.yaml'}, headers=self.headers).status_code, (400,403))
 
     def test_profiles_page_lists_and_refuses_every_change(self):
-        # Like the Cron page (ADR-0291, the owner's pending answer): no profile is made, renamed or retired here.
+        # Like the Cron page (ADR-0295, the owner's pending answer): no profile is made, renamed or retired here.
         before = self.client.get('/api/profiles', headers=self.headers).json()['profiles']
         for method, path, body in (('POST', '/api/profiles', {'name': 'research'}), ('POST', '/api/profiles', {'name': 'nocheh-impostor'}),
                                    ('PATCH', '/api/profiles/' + self.owner.name, {'new_name': 'notes'}),

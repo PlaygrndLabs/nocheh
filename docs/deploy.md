@@ -355,7 +355,7 @@ Run `./bin/nocheh init`, edit the root `.env`, then run `./bin/nocheh up`.
 Initialization fills missing internal passwords; existing passwords stay unchanged,
 with one exception: the first `init`, `up` or `make dev` without an `AGENT_KEY` also
 makes `SERVICE_TOKEN` anew, since Hermes knew the old one
-([ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md)). The `up` that
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). The `up` that
 follows recreates the services with the new keys and restarts the dashboard and
 executor, which read keys once; turns in flight at that moment fail, as after
 `rotate-keys` below.
@@ -428,7 +428,7 @@ Hermes refuses to start with `SERVICE_TOKEN` in its environment. The generated
 and the dashboard reads it from `.env`. Both have at least 32 characters, and no two of
 `SERVICE_TOKEN`, `AGENT_KEY`, `NOCHEH_HERMES_SESSION_TOKEN`, `NOCHEH_BOX_TOKEN` and
 `NOCHEH_MACHINE_TOKEN` may be equal. Settings neither shows nor counts them, so a new
-one never asks for Apply. See [ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md).
+one never asks for Apply. See [ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md).
 
 The `.env` is ignored by Git, excluded from image builds and written with mode 0600.
 Environment values are visible to someone who can inspect Docker containers. The

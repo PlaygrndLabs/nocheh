@@ -84,7 +84,7 @@ implementation; arbitrary plugin installation does not confer privileges.
 Neither Hermes nor the launcher holds Nocheh's master key `SERVICE_TOKEN`, which is
 its admin bearer and signs every pass; both refuse to start when it is in their
 environment. They hold the agent login `AGENT_KEY` instead
-([ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md)). The launcher
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). The launcher
 starts a turn only for a `POST /v1/turn` from Hermes's bridge with that key and
 answers 403 otherwise. Of Hermes's children, its dashboard process keeps it for its
 own calls to Nocheh and drops it from its environment before the upstream dashboard

@@ -383,7 +383,7 @@ Off for every chat; a chat or topic sets its own on its Tools card in Chats
 Pass `--revision REVISION` to conditional CLI writes. Hermes's own Profiles page
 only reads, like its Cron page: making, renaming or retiring a profile there answers
 `profiles_read_only`, since the agent login cannot save profiles in Nocheh
-([ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md)). Its
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Its
 listing, the active profile and the preference pages stay. Session inspection and changes stay within the
 selected profile. Native file browsing/uploads are confined to that profile's
 workspace, including symlink checks. These workspace files are not chat imports;

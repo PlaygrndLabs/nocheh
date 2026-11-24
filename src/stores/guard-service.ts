@@ -13,7 +13,7 @@ export function storageGuardService(services:StorageServices) {
     const reference={store:'control' as const,kind:'operation' as const,id:row.id,generation:row.generation,input_hash:row.input_hash};
     await services.operations.verify(reference);return reference;
   },services.detectorVersion);
-  // The system guard serves the agent's own model calls without a pass (its login, ADR-0291) and storage's own in-process
+  // The system guard serves the agent's own model calls without a pass (its login, ADR-0295) and storage's own in-process
   // calls (the admin form); anyone else is a turn and keeps its pass's checks.
   return async(principal:Reader|AgentLogin,input:unknown)=>{
     const body=object(input);let destination:URL;

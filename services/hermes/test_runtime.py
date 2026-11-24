@@ -159,7 +159,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
 
 
 class StartupKeyTests(unittest.TestCase):
-    """Hermes's processes hold the agent login and refuse Nocheh's master key (ADR-0291)."""
+    """Hermes's processes hold the agent login and refuse Nocheh's master key (ADR-0295)."""
     KEY,SESSION='synthetic-agent-key-0123456789abcdef','synthetic-session-token-0123456789abcd'
 
     def refused(self,start,environment):

@@ -245,7 +245,7 @@ def validate(values):
     machine=values.get('NOCHEH_MACHINE_TOKEN')
     if machine and (len(machine)<32 or machine in (values['SERVICE_TOKEN'],box)):
         raise ValueError('NOCHEH_MACHINE_TOKEN must contain at least 32 characters and differ from SERVICE_TOKEN and NOCHEH_BOX_TOKEN')
-    # The agent login (Nocheh and Hermes, both ways) and Hermes's dashboard session token (ADR-0291). Empty passes, so an
+    # The agent login (Nocheh and Hermes, both ways) and Hermes's dashboard session token (ADR-0295). Empty passes, so an
     # older .env still loads before init, up or make dev fills them; Compose and the services refuse to run without them.
     keys={name:values.get(name) or '' for name in KEYS}
     for name in ('AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN'):
@@ -258,7 +258,7 @@ def validate(values):
 
 GENERATED = ('POSTGRES_PASSWORD','SERVICE_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD',
              'AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN')
-# The bearer and signing keys; no two may be equal (ADR-0291).
+# The bearer and signing keys; no two may be equal (ADR-0295).
 KEYS = ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN')
 # What rotate-keys renews, and what a cutover makes anew.
 ROTATED = ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN')
@@ -275,7 +275,7 @@ def generate(values, names=GENERATED):
 
 def cut_over(values):
     """Once, on the first run without an agent login: Hermes knew SERVICE_TOKEN until then, so it is made anew with the
-    agent login and the session token (ADR-0291). True when an existing key was dropped; a fresh .env has none."""
+    agent login and the session token (ADR-0295). True when an existing key was dropped; a fresh .env has none."""
     if values.get('AGENT_KEY'): return False
     had = bool(values.get('SERVICE_TOKEN'))
     values['SERVICE_TOKEN'] = ''

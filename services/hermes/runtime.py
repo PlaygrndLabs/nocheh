@@ -21,7 +21,7 @@ from .subscription import resolve_credentials, detect_literals, DetectorContract
 MODEL = os.environ.get("NOCHEH_MODEL", "claude-sonnet-5-5")
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_HOME = Path(os.environ["HERMES_HOME"])
-# The agent login: Nocheh's calls here carry it, and Hermes's calls to Nocheh too (ADR-0291). main() refuses to start
+# The agent login: Nocheh's calls here carry it, and Hermes's calls to Nocheh too (ADR-0295). main() refuses to start
 # without it, with a plain reason; a missing one refuses every call here.
 TOKEN = environment_secret('AGENT_KEY', False)
 CALL_LOCK = threading.RLock()

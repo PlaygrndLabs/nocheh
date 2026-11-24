@@ -139,7 +139,7 @@ console.log(JSON.stringify({status:response.status,body:text?JSON.parse(text):nu
         return self.http(path, body, service='nocheh-app', port=8780, allow_error=allow_error)
 
     def session(self):
-        """What `docker compose exec` passes Hermes's dashboard session token with (ADR-0291): by name only, its value in
+        """What `docker compose exec` passes Hermes's dashboard session token with (ADR-0295): by name only, its value in
         this process's environment, never on a command line. nocheh-app itself does not hold it."""
         token = self.manifest['services']['hermes']['environment'].get('NOCHEH_HERMES_SESSION_TOKEN')
         if not token: raise Failed('native_session_token_missing: make a fresh fixture')
@@ -988,7 +988,8 @@ class Scenarios:
     def voice_is_transcribed(self):
         # A voice note keeps its original bytes, is transcribed by Hermes's
         # transcriber through the Voice notes route, and its reply waits for it.
-        _, event_id = self.voice(b'OggS\x00\x02synthetic voice note\n\xff'*4)
+        # A real recording: the file reader decodes it before it is transcribed (ADR-0285).
+        _, event_id = self.voice(synthetic_wav(2))
         row = self.finished(event_id, seconds=300)
         self.gate('voice_dispatch_closed', row['state'] in ('done', 'suppressed'), state=row['state'], error=row['error'])
         transcript = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id='"+event_id+"'"
@@ -1075,7 +1076,7 @@ class Scenarios:
         self.gate('memory_tmp', '/tmp' in (host.get('Tmpfs') or {}) or mounts.get('/tmp', {}).get('Type') == 'tmpfs', tmpfs=host.get('Tmpfs'))
         self.gate('memory_home', environment.get('HOME') == '/tmp/home',
                   home=environment.get('HOME'))
-        # The agent login, never Nocheh's master key (ADR-0291), and it reaches only the agent's own routes.
+        # The agent login, never Nocheh's master key (ADR-0295), and it reaches only the agent's own routes.
         self.gate('no_master_key', 'SERVICE_TOKEN' not in environment and 'SERVICE_TOKEN_FILE' not in environment)
         self.gate('agent_login_present', bool(environment.get('AGENT_KEY')))
         script = """const answers=[];for(const [method,path] of [['GET','/v1/status'],['POST','/v1/agent/manage']]){
@@ -1134,7 +1135,7 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         self.gate('upload_deleted', not found['left'])
 
     def profiles_round_trip(self):
-        # Hermes's Profiles page lists profiles and refuses changes (ADR-0291, the owner's pending answer): the agent
+        # Hermes's Profiles page lists profiles and refuses changes (ADR-0295, the owner's pending answer): the agent
         # login cannot save a profile in Nocheh.
         before = self.f.native('/api/profiles')['profiles']
         default = next((row['name'] for row in before if row.get('is_default')), None)
@@ -1270,7 +1271,24 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         self.gate('one_reply_after_recovery', len(self.replies(before, OWNER)) >= 1 and
                   len({json.loads(r['parameters'].get('reply_parameters', '{}')).get('message_id') for r in self.replies(before, OWNER)}) == 1)
 
+    def sends_quiet(self, seconds=15, limit=240):
+        """Wait until Nocheh has sent nothing for `seconds`, so a late notice of an earlier scenario (an import's
+        "ready" message) is not counted as the next turn's reply."""
+        state = {'count': len(self.f.sent()), 'since': time.monotonic()}
+
+        def quiet():
+            count = len(self.f.sent())
+            if count != state['count']:
+                state.update(count=count, since=time.monotonic())
+            return time.monotonic()-state['since'] >= seconds
+        self.wait('sends_quiet', quiet, limit, interval=3)
+
     def restart_preserves_receipts(self):
+        # A mark said in the private chat and in a group topic before the restart, which each chat's next turn must
+        # still have in its own history, not only in memory.
+        self.sends_quiet()
+        self.turn(self.f.message(OWNER, 'یادت باشد: HISTMARK-PRIVATE-31'), OWNER)
+        self.turn(self.f.message(GROUP, 'یادت باشد: HISTMARK-GROUP-31', topic=11), GROUP, 11)
         sent = len(self.f.sent())
         self.wait('updates_acknowledged', lambda: not self.f.telegram()['updates'], 120)
         # The whole runtime restarts: the Telegram service with its delivery receipts, and the agent.
@@ -1279,7 +1297,19 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected')
         time.sleep(10)
         self.gate('restart_sends_nothing', len(self.f.sent()) == sent)
-        self.turn(self.f.message(OWNER, 'بعد از راه‌اندازی دوباره'), OWNER)
+        self.history_kept('after_restart')
+
+    def upgraded_copy_keeps_history(self):
+        # full_test --upgrade: every container was made again on the new images.
+        wait_telegram_connected(self.wait, self.f.command, 'polling_after_upgrade', 300)
+        self.history_kept('after_upgrade')
+
+    def history_kept(self, when):
+        """The private chat and the group topic each still have their mark in the agent's session history."""
+        _, text = self.turn(self.f.message(OWNER, 'قبلا چه گفتم؟ [[history:HISTMARK-PRIVATE-31]]'), OWNER)
+        self.gate('private_history_kept_'+when, 'present' in text, answer=text)
+        _, text = self.turn(self.f.message(GROUP, 'قبلا چه گفتم؟ [[history:HISTMARK-GROUP-31]]', topic=11), GROUP, 11)
+        self.gate('group_history_kept_'+when, 'present' in text, answer=text)
 
     def granted_participant(self):
         # The owner makes someone a member by their Telegram user ID, with only OTHER_GROUP ticked, through the dashboard's

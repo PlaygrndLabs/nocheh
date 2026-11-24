@@ -31,11 +31,12 @@ export async function turnPages(control:Pick<pg.Pool,'query'>,derived:Pick<pg.Po
   return pages;
 }
 
-/** How many more reads a message may open without a card, in all and from links on its pages. Call it inside the
- *  proposal's transaction: the lock orders the message's proposals, so two at once cannot both take the last one. */
+/** How many more reads a message may open without a card, in all and from links on its pages. A group's tools permission
+ *  counts too (ADR-0291). Call it inside the proposal's transaction: the lock orders the message's proposals, so two at
+ *  once cannot both take the last one. */
 export async function freeReadsLeft(db:Pick<pg.PoolClient,'query'>,event:string):Promise<{all:number;pages:number}> {
   await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,263))',['free-reads:'+event]);
-  const row=(await db.query(`SELECT count(*) FILTER (WHERE free_read IS NOT NULL) AS total,count(*) FILTER (WHERE free_read='page') AS pages
+  const row=(await db.query(`SELECT count(*) FILTER (WHERE free_read IS NOT NULL OR authority='group_tools') AS total,count(*) FILTER (WHERE free_read='page') AS pages
     FROM controlled_actions WHERE event_id=$1`,[event])).rows[0];
   return {all:freeReadLimit-Number(row.total),pages:pageLinkLimit-Number(row.pages)};
 }

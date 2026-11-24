@@ -67,7 +67,7 @@ def serve(state):
     base='http://nocheh-app:8780' if os.environ.get('NOCHEH_CONTAINER')=='1' else 'http://127.0.0.1:'+port
     env.update(INNGEST_BASE_URL=base,INNGEST_CONNECT_GATEWAY_URL=base.replace('http://','ws://')+'/v0/connect',NOCHEH_PYTHON=sys.executable)
     if os.environ.get('NOCHEH_CONTAINER')=='1':env['NOCHEH_NODE']='node'
-    # host.js needs only SERVICE_TOKEN: the agent login and Hermes's session token stay out of it (ADR-0291).
+    # host.js needs only SERVICE_TOKEN: the agent login and Hermes's session token stay out of it (ADR-0295).
     for name in ('AGENT_KEY','AGENT_KEY_FILE','NOCHEH_HERMES_SESSION_TOKEN'):env.pop(name,None)
     node=executable(env)
     with (directory/'worker.lock').open('a') as lock,ThreadPoolExecutor(max_workers=1) as recovery:

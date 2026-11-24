@@ -288,7 +288,8 @@ guard epoch.
 - **Talk to Nocheh in groups they joined**, on by default. Under it, each on by
   default and each off while talk is off: **Small jobs (no daily limit)**, **Post
   to their other groups** (they confirm each post with their own card) and **Web
-  pages and outside tools (no approval)**.
+  pages and outside tools (no approval)**. Under it, a request the model built
+  that could carry data still asks with your card (see below).
 - **Tasks**: **Read and write**, or **Read only**, where they list and read the
   task list of their group's project and change nothing. It counts in groups and in the
   [members' app](#members-app) alike; write includes the trash. Under it,
@@ -351,7 +352,13 @@ left does not use up the day: their next message that day gets it. A post in a
 chat's own name, such as an anonymous admin's, gets nothing.
 
 A member's web page read or outside tool in a live group turn runs without a
-card while their permission is on, and so does your own request in a group. Deny
+card while their permission is on, and so does your own request in a group, but
+only when the model put no data in it: a web read of a link typed, pasted or
+forwarded (at most two links) in the asking message or shown on a page opened for
+it, or else a request of at most 200 characters in all (site name, address and an
+outside tool's name and input) with no other web address in it. At most ten a
+message run this way; anything else waits for your card
+([ADR-0291](adr/0291-group-tools-run-only-what-carries-no-data.md)). Deny
 rules and the chat's tool switches come first, a command still waits for your
 card, and a member with the permission off is refused. Jobs, schedules and
 follow-ups still ask. Changing `let ownerGroupTools=true` to `false` in
@@ -825,7 +832,7 @@ answer could read and what became of it
 provenance and retry behavior, immutable action requests and owner-only approval.
 It and the tester cover the native memory rehearsal; Hermes holds no key that
 could sign a pass itself
-([ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md)).
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)).
 
 Before release, verify actual owner DM replies, selected-group replies and silence,
 group-private retrieval boundaries, voice note persistence, approved action

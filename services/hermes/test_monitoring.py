@@ -300,7 +300,7 @@ class MonitoringTests(unittest.TestCase):
             keys={row['name']:row for row in result['keys']}
             self.assertEqual((keys['SERVICE_TOKEN']['service'],keys['SERVICE_TOKEN']['present']),('Nocheh services',True))
             self.assertFalse(keys['INNGEST_SIGNING_KEY']['present'])
-            # The agent login and Hermes's session token are listed by holder, never by value (ADR-0291).
+            # The agent login and Hermes's session token are listed by holder, never by value (ADR-0295).
             self.assertEqual((keys['AGENT_KEY']['service'],keys['AGENT_KEY']['present']),('Agent (Hermes)',True))
             self.assertEqual((keys['NOCHEH_HERMES_SESSION_TOKEN']['service'],keys['NOCHEH_HERMES_SESSION_TOKEN']['present']),('Hermes dashboard',False))
             self.assertIn('never given to the agent',keys['SERVICE_TOKEN']['usage'])

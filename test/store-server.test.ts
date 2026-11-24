@@ -178,7 +178,7 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/runtime/profiles',undefined,403,credential);
     const profiles=await request('/v1/runtime/profiles');assert.ok(profiles.profiles.some((p:any)=>p.is_default));
     assert.equal((await request('/v1/runtime/profiles/resolve',{profile:'default'})).space,'123');
-    // Hermes's own calls take the agent login, its own kind of caller (ADR-0291): it reads profiles and the chat list and
+    // Hermes's own calls take the agent login, its own kind of caller (ADR-0295): it reads profiles and the chat list and
     // runs schedules and background runs (below), and nothing else. The owner's admin bearer still reaches every one.
     const agentKey=settings.agentKey,refused=(error:any)=>assert.equal(error.error,'agent_route_not_allowed');
     assert.deepEqual(await request('/v1/runtime/profiles',undefined,200,agentKey),profiles);

@@ -64,7 +64,7 @@ class PortableTests(unittest.TestCase):
         self.assertIn('--network=none',test_command);self.assertIn('--read-only',test_command)
         self.assertNotIn('--mount',test_command);self.assertNotIn('-v',test_command)
         # A fixed fixture agent login permits module initialization without inheriting
-        # any real installation key or mounting credentials; Hermes never gets the master key (ADR-0291).
+        # any real installation key or mounting credentials; Hermes never gets the master key (ADR-0295).
         self.assertIn('AGENT_KEY='+'1'*64,test_command)
         self.assertFalse(any('SERVICE_TOKEN' in part for part in test_command))
         self.assertEqual(dashboard,runtime)

@@ -96,7 +96,7 @@ class SettingsTests(unittest.TestCase):
                     self.assertEqual(load(state)[key], value)
 
     def test_generated_keys_never_ask_for_apply(self):
-        # A cutover or rotate-keys applies them itself (ADR-0291); Settings neither lists nor counts them.
+        # A cutover or rotate-keys applies them itself (ADR-0295); Settings neither lists nor counts them.
         from tools.operations.installation.configuration import GENERATED
         with tempfile.TemporaryDirectory() as folder:
             state = Path(folder); values = initialize(state)

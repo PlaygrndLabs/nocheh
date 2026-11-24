@@ -8,7 +8,7 @@ from tools.operations.installation.configuration import load, native_endpoint
 
 
 def session_token(state):
-    """Hermes's own dashboard session token (ADR-0291): never the agent login or the master key, and never sent empty."""
+    """Hermes's own dashboard session token (ADR-0295): never the agent login or the master key, and never sent empty."""
     token = load(state).get('NOCHEH_HERMES_SESSION_TOKEN', '')
     if not token: raise ValueError('native_session_unavailable')
     return token

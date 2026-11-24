@@ -27,7 +27,7 @@ export function settings() {
   if (!['off', 'on'].includes(mode)) throw new Error('Invalid guard mode');
   guardChecks(); // An invalid Settings value stops startup instead of the first preparation.
   groupReplies(process.env); // So does a malformed group reply setting, instead of the first group message.
-  // The agent login (ADR-0291): Hermes holds it instead of SERVICE_TOKEN, so the two must never be the same key.
+  // The agent login (ADR-0295): Hermes holds it instead of SERVICE_TOKEN, so the two must never be the same key.
   const token=secret('SERVICE_TOKEN'),agentKey=secret('AGENT_KEY');
   if(agentKey.length<32||agentKey===token)throw new Error('AGENT_KEY must contain at least 32 characters and differ from SERVICE_TOKEN');
   return {

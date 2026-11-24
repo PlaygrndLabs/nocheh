@@ -1,4 +1,4 @@
-"""Who holds which key (ADR-0291): Nocheh's master key stays in Nocheh's own services, Hermes and the launcher hold the
+"""Who holds which key (ADR-0295): Nocheh's master key stays in Nocheh's own services, Hermes and the launcher hold the
 agent login, and only Hermes holds its dashboard's session token.
 
 This checks Compose environments only. hermes-agent-sb runs as root with the Docker socket and can read other containers'

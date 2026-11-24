@@ -54,7 +54,7 @@ try{
   }else if(action==='runtime'){
     const receiptDirectory=join(root,'runtime-receipts');await mkdir(receiptDirectory,{recursive:true,mode:0o700});
     const server=createServer((req,res)=>{void(async()=>{
-      // Hermes's routes take the agent login and the bot's the master key, as in production (ADR-0291).
+      // Hermes's routes take the agent login and the bot's the master key, as in production (ADR-0295).
       authorize(req,req.url?.startsWith('/internal/telegram/')?process.env.SERVICE_TOKEN!:process.env.AGENT_KEY!);const body=object(await readJson(req)),path=req.url;
       if(path==='/internal/telegram/file')return json(res,200,{bytes_base64:Buffer.from('Synthetic Ogg bytes').toString('base64')});
       if(path==='/internal/detect')return json(res,200,{literals:[]});

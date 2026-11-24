@@ -32,7 +32,7 @@ export interface BrokerStorage {
   /** An answer reader's read set from its record (ADR-0249); a reader without an answer comes back as it is. */
   bindReads?(principal:Reader):Promise<Reader>;
 }
-/** `agentKey` is the agent login (ADR-0291): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
+/** `agentKey` is the agent login (ADR-0295): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
  * no agent login is accepted and no transport call is sent. */
 export interface BrokerOptions {pool:pg.Pool; token:string; agentKey?:string; archive:string; prepare:(principal:Reader|AgentLogin,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
 /** Why Nocheh did not save a schedule a turn set (ADR-0290); any other refusal stays opaque. */
@@ -138,7 +138,7 @@ export function brokerServer(options:BrokerOptions) {
   const box=options.storage instanceof RuntimeTurnRepository?new JobBoxRepository(options.storage.access):null;
   // So do machine jobs (ADR-0231). This service holds no machine token: storage refuses each command without one.
   const machines=options.storage instanceof RuntimeTurnRepository?new MachineRepository(options.storage.access):null;
-  // Hermes takes the agent login, never the master key (ADR-0291); without one nothing is sent.
+  // Hermes takes the agent login, never the master key (ADR-0295); without one nothing is sent.
   const hermesLogin=()=>{if(!options.agentKey)throw new HttpError(503,'agent_key_unconfigured');return 'Bearer '+options.agentKey;};
   // A job's run goes on across reaction and learning epochs; each of its checks waits out a publication still pending (ADR-0208).
   const assertCurrent=(principal:Reader)=>afterPending(jobRun(principal),async()=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal));
@@ -159,7 +159,7 @@ export function brokerServer(options:BrokerOptions) {
       if(!box||!authorization.startsWith('Bearer ')||!boxTokenValid(authorization.slice(7)))throw new HttpError(403,'box_token_required');
       await options.assertReady?.();return json(res,200,await box.live());
     }
-    // The agent's own model calls without a pass get the system guard, and nothing else here (ADR-0291).
+    // The agent's own model calls without a pass get the system guard, and nothing else here (ADR-0295).
     const login=agentLogin(req,options.agentKey);
     if(login){
       if(req.method!=='POST'||path!=='/v1/guard'||url.search)throw new HttpError(403,'agent_route_not_allowed');

@@ -416,7 +416,7 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class AgentKeyTests(unittest.TestCase):
-    """The agent login and Hermes's session token (ADR-0291): generated, distinct, cut over once, rotated on request."""
+    """The agent login and Hermes's session token (ADR-0295): generated, distinct, cut over once, rotated on request."""
     KEYS=('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN')
 
     def test_init_generates_every_key_distinct_and_keeps_them(self):

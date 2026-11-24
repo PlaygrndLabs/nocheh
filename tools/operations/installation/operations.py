@@ -513,7 +513,7 @@ def restore(snapshot,state,project,port):
     auth=state/'hermes/auth.json'
     if auth.exists(): auth.rename(state/'hermes/auth.restore-pending.json')
     config=initialize(state) if manifest['version']==1 else load(state)
-    # A backup from before the agent login (ADR-0291) gets it, the session token and a new SERVICE_TOKEN, as an upgrade does.
+    # A backup from before the agent login (ADR-0295) gets it, the session token and a new SERVICE_TOKEN, as an upgrade does.
     if manifest['version']>1 and not config.get('AGENT_KEY'):cut_over(config);generate(config,ROTATED)
     write_env(state/'restored.env',config)
     config.update(TELEGRAM_ENABLED='false',NOCHEH_HONCHO_ENABLED='false',NOCHEH_HONCHO_STATE_DIR=str(state/'honcho'),

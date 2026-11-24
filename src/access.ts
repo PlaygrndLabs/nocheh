@@ -173,7 +173,7 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
 }
 export function admin(principal:Reader):void { if (!principal.admin) throw new HttpError(403,'owner_required'); }
 /**
- * The agent login (ADR-0291): the agent's own processes hold AGENT_KEY instead of SERVICE_TOKEN. It is its own kind of
+ * The agent login (ADR-0295): the agent's own processes hold AGENT_KEY instead of SERVICE_TOKEN. It is its own kind of
  * caller, never a Reader, so no owner check that keys on scope===null or admin can take it; it reaches only the routes
  * the agent calls, each listed by the server that answers it.
  */

@@ -12,7 +12,7 @@ test('container dashboard reaches internal services and survives application out
   {skip:process.env.NOCHEH_CONTAINER_TEST!=='1',timeout:30000},async()=>{
   const state=await mkdtemp(join(tmpdir(),'nocheh-container-dashboard-'));
   const token='synthetic-owner-token-'.repeat(3);
-  // Hermes's dashboard gets its own session token (ADR-0291), never the master key or the agent login.
+  // Hermes's dashboard gets its own session token (ADR-0295), never the master key or the agent login.
   const session='synthetic-hermes-session-'.repeat(3),agentKey='synthetic-agent-login-'.repeat(3);
   const app=createServer((req,res)=>{
     assert.equal(req.headers.authorization,'Bearer '+token);

@@ -745,7 +745,7 @@ class HandlerTests(unittest.TestCase):
             patcher=patch.object(launcher,name,value);patcher.start();self.addCleanup(patcher.stop)
         environment=patch.dict(os.environ,{'NOCHEH_UID':'1000','NOCHEH_GID':'1000','NOCHEH_SECURITY_URL':self.security.url()})
         environment.start();self.addCleanup(environment.stop);os.environ.pop('NOCHEH_DEV_TURN_SOURCE',None)
-        # The agent login main() reads once (ADR-0291).
+        # The agent login main() reads once (ADR-0295).
         key=patch.object(launcher,'AGENT_KEY','s'*32);key.start();self.addCleanup(key.stop)
 
     def bind(self,credential,profile=None,entry=None,machine=None):
@@ -784,7 +784,7 @@ class HandlerTests(unittest.TestCase):
     def plain(self):return launcher.container_spec(self.PROFILE,'/owned/profiles',self.IMAGE,'nocheh-agent',1000,1000)
 
     def test_only_the_agent_login_starts_a_turn(self):
-        # The agent login, never Nocheh's master key (ADR-0291); unset, nothing is accepted.
+        # The agent login, never Nocheh's master key (ADR-0295); unset, nothing is accepted.
         self.bind('first')
         def call(bearer):
             connection=http.client.HTTPConnection('127.0.0.1',self.server.server_address[1],timeout=10)

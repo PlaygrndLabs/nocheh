@@ -1,4 +1,4 @@
-# ADR-0291: The agent login replaces the master key in Hermes
+# ADR-0295: The agent login replaces the master key in Hermes
 
 <status>
 Accepted on 2026-11-24 as step 1 of the owner-approved key design ("Approve, start step 1"). Amends

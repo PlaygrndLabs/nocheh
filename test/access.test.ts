@@ -109,7 +109,7 @@ test('a pass for a topic another process recorded a moment ago is read once the 
   } finally {setChatLoader(null);restore();}
 });
 
-test('the agent login is no reader and signs no pass; only the few calls the agent makes take it (ADR-0291)',async()=>{
+test('the agent login is no reader and signs no pass; only the few calls the agent makes take it (ADR-0295)',async()=>{
   const agentKey='synthetic-agent-login-only-for-tests-0001',login=agentLogin(request(agentKey),agentKey);
   assert.deepEqual(login,{kind:'agent',agent:'hermes'});assert.ok(isAgentLogin(login));
   // The master key's readers never take it: it is no admin bearer and no pass.

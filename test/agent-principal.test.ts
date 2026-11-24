@@ -10,7 +10,7 @@ import {agentRoute,agentRoutes,serveAgent} from '../src/stores/agent-routes.js';
 import type {StorageServices} from '../src/stores/services.js';
 import type {Settings} from '../src/config.js';
 
-// What Hermes calls on nocheh-app with the agent login (ADR-0291), and nothing more.
+// What Hermes calls on nocheh-app with the agent login (ADR-0295), and nothing more.
 const expected=[
   'GET /internal/chats','POST /internal/notes/sources','POST /internal/sources/retired',
   'GET /v1/runtime/profiles','POST /v1/runtime/profiles/resolve',

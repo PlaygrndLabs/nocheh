@@ -359,7 +359,8 @@ test('only the owner\'s own request in their private chat or an active project\'
     // Before its first command, once: the login is still not admin, as the card said, and its start-up files are read.
     assert.deepEqual(probes.slice(-1),[{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey}]);
     assert.deepEqual([(await job(asked.id)).machine_check,(await job(asked.id)).machine_files],['pending',probe.files]);
-    assert.deepEqual((await rows("job_id=$1 AND kind='test'",[asked.id])).map(row=>[row.command,row.state]),[['check admin rights and start-up files before the job','done']]);
+    assert.deepEqual((await rows("job_id=$1 AND kind='test'",[asked.id])).map(row=>[row.command,row.state,row.run_event_id]),
+      [['check admin rights and start-up files before the job','done',a.step]],'the check belongs to the run whose first command it came before');
     const probed=probes.length;
     await exec(brokerBase,a.credential,execBody({timeout:3600}));
     assert.equal(probes.length,probed,'only before the first command');
@@ -617,6 +618,8 @@ test('only the owner\'s own request in their private chat or an active project\'
     await s.machines.cleanupTick();
     await until(async()=>(await job(planted.id)).machine_check==='changed','the job\'s start-up files are checked after it ends');
     assert.deepEqual((await job(planted.id)).machine_changed,['.bashrc']);
+    assert.deepEqual((await rows("job_id=$1 AND kind='test'",[planted.id])).map(row=>row.run_event_id),[plantedRun.step,plantedRun.step],
+      'both checks belong to the job\'s run');
     await until(()=>approvals.some(input=>input.kind==='settle'&&input.id===planted.id&&
       String(input.text).endsWith("\n⚠️ It changed start-up files or tools: ~/.bashrc. Check them: Stop can't be trusted while they may hold something it left.")),'the settled card names the changed file');
     const warned=await ask('123',123);

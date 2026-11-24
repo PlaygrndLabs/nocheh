@@ -33,7 +33,7 @@ def build_image(name, env=None, images=None):
 
 def development_box_token():
     """make dev runs on the operating .env without initialize(), so one from before boxes, machines or the agent login
-    gets its tokens here; the first run without an agent login also makes SERVICE_TOKEN anew (ADR-0291). Returns the
+    gets its tokens here; the first run without an agent login also makes SERVICE_TOKEN anew (ADR-0295). Returns the
     operating workspace's image prefix."""
     from tools.development.live_dev import operating_root, operating_config
     from tools.operations.installation.workspaces import images
@@ -96,7 +96,7 @@ def run_isolated_tests(rest):
                     result = subprocess.call(['docker', 'run', '--rm', '--network', 'none', '--read-only',
                         '--tmpfs', '/tmp:rw,exec,nosuid,nodev,mode=1777', '--entrypoint', 'python',
                         '-e', 'HERMES_HOME=/tmp/nocheh-tests',
-                        # Hermes holds the agent login and never the master key (ADR-0291); the bot keeps SERVICE_TOKEN.
+                        # Hermes holds the agent login and never the master key (ADR-0295); the bot keeps SERVICE_TOKEN.
                         *(('-e', 'AGENT_KEY=test-agent-key-' + 'a' * 26) if tests == 'services/hermes' else ('-e', 'SERVICE_TOKEN=test-service-token')),
                         env['NOCHEH_IMAGES'] + '-hermes:local', '-m', 'unittest', 'discover', '-s', tests,
                         '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
@@ -402,7 +402,7 @@ def main():
         from tools.operations.installation.database_viewer import refresh as refresh_viewer
         refresh_viewer(STATE, command, ROOT)
         if (STATE / RESTART_MARKER).exists():
-            # The dashboard and executor keep keys they read once; up does not recreate them (ADR-0291).
+            # The dashboard and executor keep keys they read once; up does not recreate them (ADR-0295).
             from tools.operations.installation.settings import restart_cached
             restart_cached(STATE)
 

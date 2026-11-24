@@ -50,11 +50,16 @@ workspace search, fact lists, peer cards and context, and on other scopes.
    a second layer.
 5. **Keeping walls whole.** `memory_walls(workspace, wall, chats, members, ready)` records
    each wall. Opening one adds any learned session (a write done and not retired) it
-   lacks, then waits up to 20 s for Honcho to copy what those sessions already learned
-   (`GET /scopes/{id}/status`). The copy needs no model. A wall not ready in time refuses
-   the read (`memory_wall_syncing`); a failed copy says so (`memory_wall_copy_failed`).
-   A new session joins every wall holding its chat when it is opened, before its first
-   write, so what it learns reaches those walls as it is learned.
+   lacks, then waits up to 5 s for Honcho to copy what those sessions already learned
+   (`GET /scopes/{id}/status`). The copy needs no model, but it is a task on Honcho's
+   learning queue, so it waits behind learning. A wall not ready in time is read as it is
+   (it only ever holds its own chats) and checked again on the next read; a failed copy
+   refuses the read (`memory_wall_copy_failed`). A session joins every wall holding its
+   chat when it is opened, before its first write, so what it learns reaches those walls
+   as it is learned. It is named on a wall only once, and recorded as a member: Honcho
+   queues a copy each time a session with messages is added to a scope, so adding it
+   again on every write or read would flood the learning queue (amended 2026-11-24 after
+   the full test run).
 6. **Auth is on.** Honcho runs with `AUTH_USE_AUTH=true` and `AUTH_JWT_SECRET` set to the
    installation's internal token, which Nocheh already holds as `NOCHEH_MEMORY_TOKEN`.
    Nocheh's main key and the CLI's key are admin JWTs signed with it.

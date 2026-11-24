@@ -11,7 +11,7 @@ const listen=async(server:Server)=>{server.listen(0,'127.0.0.1');await once(serv
 const close=(server:Server)=>new Promise<void>(r=>server.close(()=>r()));
 test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',{timeout:30000},async()=>{
   const state=await mkdtemp(join(tmpdir(),'nocheh-dashboard-boundary-')),secret='private-backend-token-'.repeat(3),asked:string[]=[];
-  // Hermes's dashboard takes its own session token (ADR-0291): never the agent login or the master key.
+  // Hermes's dashboard takes its own session token (ADR-0295): never the agent login or the master key.
   const master='private-master-token-'.repeat(3),agentKey='private-agent-login-'.repeat(3),sent:string[]=[];
   const native=createServer((req,res)=>{
     asked.push(req.url!);sent.push(JSON.stringify(req.headers)+req.url);

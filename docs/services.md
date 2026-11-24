@@ -45,7 +45,7 @@ reaches only the agent's own routes. `NOCHEH_HERMES_SESSION_TOKEN`, which opens
 Hermes's own dashboard pages, reaches only `hermes`. The dashboard and executor
 get none of them from Compose, but read `.env`; `nocheh-machines` holds only `NOCHEH_MACHINE_TOKEN`. Hermes and the
 launcher refuse to start with `SERVICE_TOKEN` in their environment; see
-[ADR-0291](adr/0291-agent-login-replaces-the-master-key-in-hermes.md).
+[ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md).
 
 `./bin/nocheh status` and Monitoring show each service's tool, purpose,
 location, observed state and expected state. The Honcho metrics probe establishes

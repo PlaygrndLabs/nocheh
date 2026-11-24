@@ -125,7 +125,7 @@ export class ScheduleRepository {
     }catch{return null;}
   }
   /**
-   * Hermes's own definition post (the agent login, ADR-0291; or the owner's admin bearer): a checkpoint of a schedule
+   * Hermes's own definition post (the agent login, ADR-0295; or the owner's admin bearer): a checkpoint of a schedule
    * Nocheh already has, with the same execution version and never turning it back on; or a change a person's press asked
    * for, with that press's unused edit grant, which may only pause, resume or delete. Anything else, a schedule Nocheh
    * never recorded included, is refused.

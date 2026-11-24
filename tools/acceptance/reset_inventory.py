@@ -101,7 +101,7 @@ def files(state, memory, config_path, blockers):
                            # How the last backup ended: it describes the backups a reset erases (ADR-0251).
                            'backup-health.json': ('erase', 'installation_content_and_receipts'),
                            'settings.lock': ('preserve', 'configuration_advisory_lock'),
-                           # Left by a key change (ADR-0291): the next up restarts the dashboard and executor.
+                           # Left by a key change (ADR-0295): the next up restarts the dashboard and executor.
                            'restart-cached': ('preserve', 'key_change_restart_pending'),
                            'reset': ('preserve', 'reset_coordinator_journal'), 'restores': ('review_restore', 'separate_restore_ownership_required')})
     native = state / 'hermes'

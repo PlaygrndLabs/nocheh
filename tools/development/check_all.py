@@ -9,6 +9,10 @@ Sections, in this order:
   browser  the dashboard page tests in Chromium, against the same Postgres
   python   the Python unit tests of services/hermes, services/telegram, services/reader, services/honcho and test/
 
+One more section runs only when asked for with --only, before an upgrade of Hermes or Honcho goes live:
+  upstream Hermes's and Honcho's own tests at the pinned revisions (tools/development/upstream_tests.py). It needs
+           NOCHEH_CHECK_VECTOR_PGPORT: a synthetic Postgres 18 with pgvector on PGHOST. --files honcho or hermes picks one.
+
 What it needs:
   Node 26 after `npm ci`.
   A synthetic UTF8 Postgres 18 reached through PGHOST, PGPORT, PGUSER and PGPASSWORD, started with
@@ -36,7 +40,11 @@ import tempfile
 import threading
 import time
 
+from tools.development import upstream_tests
+
 SECTIONS = ('load', 'node', 'browser', 'python')
+# Sections left out of the default run.
+ON_REQUEST = ('upstream',)
 KNOWN = ROOT / 'test/known-failures.json'
 ENVIRONMENTS = ROOT / 'data/test-env'
 HERMES = ENVIRONMENTS / 'hermes-agent'
@@ -50,7 +58,7 @@ FILE_SECONDS = 900
 BROWSER_SECONDS = 2700
 # Synthetic credentials only: these tests never see an installation's .env.
 SERVICE_TOKEN = 'check-all-token-not-a-real-credential'
-# The agent login (ADR-0291): Hermes's suite gets it instead of SERVICE_TOKEN; Nocheh's node tests get both.
+# The agent login (ADR-0295): Hermes's suite gets it instead of SERVICE_TOKEN; Nocheh's node tests get both.
 AGENT_KEY = 'check-all-agent-key-not-a-real-credential'
 
 
@@ -62,16 +70,22 @@ def run(command, **options):
     return subprocess.run(command, cwd=ROOT, **options)
 
 
-def setup():
-    """Make the two Python environments the Python section uses."""
+def checkout(folder, repository, revision):
+    """A shallow checkout of one revision, made again when the pin moves."""
+    if (folder / '.git').exists() and run(['git', '-C', str(folder), 'rev-parse', 'HEAD'], capture_output=True,
+                                          text=True).stdout.strip() == revision:
+        return
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True)
+    for command in (['init', '-q'], ['remote', 'add', 'origin', repository],
+                    ['fetch', '-q', '--depth', '1', 'origin', revision], ['checkout', '-q', 'FETCH_HEAD']):
+        run(['git', '-C', str(folder)] + command, check=True)
+
+
+def setup(sections=SECTIONS):
+    """Make the two Python environments the Python section uses, and the upstream ones when that section runs."""
     lock = json.loads((ROOT / 'deploy/upstreams.lock.json').read_text())['hermes']
-    if not (HERMES / '.git').exists() or run(['git', '-C', str(HERMES), 'rev-parse', 'HEAD'], capture_output=True,
-                                              text=True).stdout.strip() != lock['revision']:
-        shutil.rmtree(HERMES, ignore_errors=True)
-        HERMES.mkdir(parents=True)
-        for command in (['init', '-q'], ['remote', 'add', 'origin', lock['repository']],
-                        ['fetch', '-q', '--depth', '1', 'origin', lock['revision']], ['checkout', '-q', 'FETCH_HEAD']):
-            run(['git', '-C', str(HERMES)] + command, check=True)
+    checkout(HERMES, lock['repository'], lock['revision'])
     # The same extras as deploy/hermes.Dockerfile.
     environment = {**os.environ, 'UV_PROJECT_ENVIRONMENT': str(HERMES_PYTHON.parents[1])}
     run(['uv', 'sync', '--quiet', '--project', str(HERMES), '--frozen', '--no-dev', '--no-install-project', '--extra', 'messaging',
@@ -82,6 +96,8 @@ def setup():
         run(['uv', 'venv', '--quiet', '--python', '3.14', str(HONCHO_PYTHON.parents[1])], check=True)
     run(['uv', 'pip', 'install', '--quiet', '--python', str(HONCHO_PYTHON), '-r', 'services/honcho/cli/requirements.txt',
          HONCHO_EXTRA], check=True)
+    if 'upstream' in sections:
+        upstream_tests.setup()
 
 
 def ports():
@@ -231,6 +247,10 @@ def python(results, only=None):
     return {'ran': ran, 'skipped': skipped, 'failed': failed}
 
 
+def upstream(results, only=None):
+    return upstream_tests.upstream(results, only)
+
+
 def compare(section, row, known):
     listed = known.get(section, {})
     names = {item['test'] for item in row['failed']}
@@ -244,15 +264,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0], epilog=__doc__.split('\n\n', 2)[2],
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--setup', action='store_true', help='Make or update the Python environments first')
-    parser.add_argument('--only', nargs='+', choices=SECTIONS, help='Run only these sections')
+    parser.add_argument('--only', nargs='+', choices=SECTIONS + ON_REQUEST, help='Run only these sections')
     parser.add_argument('--skip', nargs='+', choices=SECTIONS, default=[], help='Leave out these sections')
     parser.add_argument('--no-build', action='store_true', help='Use the compiled Node tests already in dist/')
-    parser.add_argument('--files', nargs='+', help='Only Node test files whose path has one of these parts, and Python '
-                        'suites with these names (hermes, telegram, reader, honcho, tools)')
+    parser.add_argument('--files', nargs='+', help='Only Node test files whose path has one of these parts, Python '
+                        'suites with these names (hermes, telegram, reader, honcho, tools), and upstream suites (honcho, hermes)')
     args = parser.parse_args()
-    if args.setup:
-        setup()
     sections = [name for name in (args.only or SECTIONS) if name not in args.skip]
+    if args.setup:
+        setup(sections)
     known = json.loads(KNOWN.read_text())
     results = ROOT / 'data/test-results' / time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
     results.mkdir(parents=True)
