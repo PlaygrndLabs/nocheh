@@ -16,6 +16,7 @@ import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {workflowDetail} from '../src/workflows/owner.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {grantMembers} from './fixture-member-grants.js';
+import {recordTurnReads} from '../src/stores/turn-reads.js';
 
 test('an approved operation\'s answer comes back to the chat that asked, after its first reply',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -56,7 +57,10 @@ test('an approved operation\'s answer comes back to the chat that asked, after i
     message:{message_id:5,date:1700000000,chat:{id:123,type:'private'}}}},'123');
   const actor=async(source:SourceReference,scope:string|null):Promise<Reader>=>{
     const binding=await s.guards.state(),space=(await s.access.space(source))!;
-    return {admin:false,scope,space,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    const turn:Reader={admin:false,scope,space,turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    // The agent's runtime reports a conversation with nothing outside in it (ADR-0293).
+    if(scope===null)await recordTurnReads(stores.control,turn,'conversation',[]);
+    return turn;
   };
   const operation=async(source:SourceReference,command:string,scope:string|null=group)=>
     s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(source,scope),{kind:'shell',arguments:{command}}));

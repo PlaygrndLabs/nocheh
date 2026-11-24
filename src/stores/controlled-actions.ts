@@ -14,6 +14,7 @@ import {canonical,digest} from '../archive.js';
 import {actionArguments,ruleKey} from '../action-arguments.js';
 import {freeRead,sameAddress,type FreeRead} from '../link-check.js';
 import {freeReadsLeft,turnMessageLinks,turnPages} from './free-reads.js';
+import {outsideReads} from './turn-reads.js';
 import {HttpError,object,string} from '../http.js';
 import {decide,validatePolicy,type Effect} from '../security/contract.js';
 import {evaluate,policySnapshot,recordEffect} from '../security/store.js';
@@ -223,7 +224,13 @@ export class ControlledActionRepository {
       // tools, runs only when no model built its address: a link the owner gave, one on a page opened for this message, or
       // a site the owner named with nothing after it but their words. Everything else asks, and a tool call always does
       // unless a rule covers it (ADR-0263).
-      const own=row.state==='proposed'&&decision.outcome==='ask'&&!connected&&live?await ownerAutonomyGrant(db,principal,turn):null;
+      const freedom=row.state==='proposed'&&decision.outcome==='ask'&&!connected&&live?await ownerAutonomyGrant(db,principal,turn):null;
+      // A command runs under it only when nothing but the owner's typed words reached the turn: no forward, file, quoted
+      // reply or voice note in the message, nothing outside earlier in the agent's conversation, and nothing read in the
+      // turn before it was asked for. Otherwise it gets its card, which says why (ADR-0293).
+      const outside=freedom&&body.kind==='shell'?await outsideReads(db,this.access.stores.archive,source.id,this.access.policy().owner_id):[];
+      if(outside.length)await db.query("UPDATE controlled_actions SET outside_reads=$2 WHERE id=$1 AND state='proposed'",[id,outside]);
+      const own=outside.length?null:freedom;
       const free=own&&outward&&left&&left.all>0?await this.freeRead(body.kind as string,args,source.id,left.pages>0):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:own&&(!outward||free)?own:null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);

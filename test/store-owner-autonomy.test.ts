@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {fixtureServices} from './fixture-agent.js';
 import {savePolicy} from '../src/security/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {recordTurnReads} from '../src/stores/turn-reads.js';
 
 test('owner freedom lets only the owner\'s live private requests approve themselves, never for a group, defaults to approval and keeps deny rules',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -27,7 +28,10 @@ test('owner freedom lets only the owner\'s live private requests approve themsel
     const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
   };
   const actor=async(source:string,scope:string|null,space:string):Promise<Reader>=>{
-    const binding=await s.guards.state();return {admin:false,scope,space,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    const binding=await s.guards.state(),turn:Reader={admin:false,scope,space,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    // The agent's runtime reports a conversation with nothing outside in it (ADR-0293).
+    if(scope===null)await recordTurnReads(stores.control,turn,'conversation',[]);
+    return turn;
   };
   const state=async(id:string)=>(await stores.control.query('SELECT state FROM telegram_action_requests WHERE id=$1',[id])).rows[0].state;
   const queued=async(id:string)=>Number((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='actions' AND job_id=$1",[id])).rows[0].count);

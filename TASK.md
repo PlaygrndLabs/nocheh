@@ -50,7 +50,9 @@ Nocheh is in development mode and not yet released. Everything below is built an
   account's name and email, from Notion's notion-get-self tool.
 - Approvals: cards with scopes once, here and always this site; approved answers return to the
   asking chat ([ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md), [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md), [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)); only addresses no model built open without a
-  card ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
+  card ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)); "Do what I ask" runs a
+  command with no card only from the owner's own typed words, with nothing outside in the message, the day's
+  conversation or the turn's reads before it ([ADR-0293](docs/adr/0293-do-what-i-ask-runs-commands-only-from-the-owners-typed-words.md)).
 - Security: the 2026-11 security review's fixes parts 1 to 5 are merged; machine jobs read only their
   card's chat, period and named Notion pages ([ADR-0283](docs/adr/0283-machine-jobs-read-only-their-card.md)), and
   watch start-up files and admin rights ([ADR-0284](docs/adr/0284-machine-jobs-watch-start-up-files-and-admin.md)); files are
@@ -79,6 +81,9 @@ Checks and follow-ups:
   for `hermes_page_script_reports` (none) and a passing tester run, then switch the Hermes page
   script policy from Report-Only to enforced in one commit. Later: one shared name cleaner for
   cards, forwards and recall labels, and a notice when an off-site restore check fails.
+- "Do what I ask" asks first after outside content ([ADR-0293](docs/adr/0293-do-what-i-ask-runs-commands-only-from-the-owners-typed-words.md)):
+  one live check on the owner's install with the setting on: a typed command runs, and the same command after a
+  forward in that day's conversation shows its card with the reason line.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,

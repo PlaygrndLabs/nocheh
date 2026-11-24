@@ -66,6 +66,14 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             # does a member's private chat (step 4).
             from . import note_sources
             watch=None if scope.answer or scope.member or scope.member_read else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile), body.get('event_id'))
+            # What the conversation holds besides the owner's typed words, reported before the model starts, so "Do what
+            # I ask" knows whether a command in this turn may run with no card (ADR-0293). An owner's live turn only; one
+            # left unreported asks first.
+            if scope.owner and not scope.answer and not scope.member_read and body.get('channel','telegram') in ('telegram','browser'):
+                reads=await asyncio.to_thread(note_sources.conversation_reads, database_path(profile), session_id, body, profile)
+                if reads is not None:
+                    from .assistant_gateway import report_conversation_reads
+                    await asyncio.to_thread(report_conversation_reads, body['archive_credential'], reads)
             result=None
             try:
                 result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'])
