@@ -132,9 +132,9 @@ export function LongTerm() {
       <SubPanel id="facts" current={tab}>
         {memory.data && <LongTermFacts />}
       </SubPanel>
-      {/* Both ways long-term memory hides facts, beside the hidden facts they made (ADR-0298, ADR-0299). */}
+      {/* Honcho's clean-up on top, the hidden facts from either clean-up below it at full width (ADR-0298, ADR-0299). */}
       <SubPanel id="cleanup" current={tab}>
-        <div className="grid items-start gap-5 lg:grid-cols-[2fr_3fr]">
+        <div className="grid gap-5">
           <RetireOldFactsCard />
           {memory.data && <HiddenFacts />}
         </div>
